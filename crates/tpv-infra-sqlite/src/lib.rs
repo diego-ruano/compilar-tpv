@@ -10,6 +10,9 @@
 // Helpers de mapeo libsql::Value <-> tipos Rust:
 pub mod mapping;
 
+// Utilidades compartidas por repositorios (next_table_id, now_ms, …):
+pub mod util;
+
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 // pub mod connection;
 
