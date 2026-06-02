@@ -9,7 +9,6 @@ mod login;
 mod mesas;
 mod sync_manager;
 mod pairing;
-mod tareas;
 mod trabajadores;
 mod venta_rapida;
 
@@ -475,21 +474,16 @@ pub fn run() {
             commands::inventario::inventario_create_lote,
             commands::inventario::inventario_ajustar_lote,
             // tareas
-            tareas::tareas_get_trabajadores,
-            tareas::tareas_create_tarea,
-            tareas::tareas_get_tareas_admin,
-            tareas::tareas_get_tarea_by_id,
-            tareas::tareas_update_tarea,
-            tareas::tareas_get_tarea_asignados,
-            tareas::tareas_set_asignaciones_tarea,
-            tareas::tareas_delete_tarea,
-            tareas::tareas_get_mis_tareas,
-            tareas::tareas_marcar_tarea_finalizada,
-            tareas::tareas_create_tarea_after_remote_ok,
-            tareas::tareas_update_tarea_after_remote_ok,
-            tareas::tareas_set_asignaciones_tarea_after_remote_ok,
-            tareas::tareas_delete_tarea_after_remote_ok,
-            tareas::tareas_marcar_tarea_finalizada_after_remote_ok,
+            commands::tareas::tareas_get_trabajadores,
+            commands::tareas::tareas_create_tarea,
+            commands::tareas::tareas_get_tareas_admin,
+            commands::tareas::tareas_get_tarea_by_id,
+            commands::tareas::tareas_update_tarea,
+            commands::tareas::tareas_get_tarea_asignados,
+            commands::tareas::tareas_set_asignaciones_tarea,
+            commands::tareas::tareas_delete_tarea,
+            commands::tareas::tareas_get_mis_tareas,
+            commands::tareas::tareas_marcar_tarea_finalizada,
             // trabajadores
             trabajadores::trabajadores_get_roles,
             trabajadores::trabajadores_get_all,

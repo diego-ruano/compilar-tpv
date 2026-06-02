@@ -14,6 +14,7 @@ pub mod cuentas;
 pub mod inventario;
 pub mod proveedores;
 pub mod reservas;
+pub mod tareas;
 
 // Los submódulos de dominio se irán añadiendo módulo por módulo:
 // pub mod mesas;

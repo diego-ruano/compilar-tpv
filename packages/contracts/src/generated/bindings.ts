@@ -54,6 +54,8 @@ export type CreateGastoInput = { id_gasto?: number, fecha: string, tipo_gasto: s
 
 export type CreateLoteInput = { id_lote?: number, id_producto: number, codigo_lote: string, caducidad?: string, cantidad_inicial: number, stock_disponible?: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: number, notas?: string, };
 
+export type CreateTareaInput = { titulo: string, descripcion?: string, fecha_limite?: string, ids_trabajadores: Array<number>, };
+
 export type CuentasRangoArgs = { del?: string, al?: string, };
 
 export type DeleteGastoInput = { id_gasto: number, };
@@ -64,6 +66,8 @@ export type DeletePagoInput = { id_pago: number, };
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
  */
 export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
+
+export type FinalizarTareaInput = { id_tarea: number, id_trabajador: number, };
 
 export type IdCategoriaArgs = { id_categoria: number, };
 
@@ -80,6 +84,13 @@ export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
 export type MesasStatsResponse = { total_mesas: number, ocupadas: number, ticket_medio_por_mesa: number, mesa_top_comandas: MesasTopComandas | null, servicios: ChartSeriesI64, top_mesas_ingresos: Array<MesaIngresoRow>, };
 
 export type MesasTopComandas = { mesa: string, zona: string, comandas: number, };
+
+/**
+ * Argumento con sólo el id de trabajador (mis tareas).
+ */
+export type MisTareasArgs = { id_trabajador: number, };
+
+export type MisTareasRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Limite: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
@@ -149,6 +160,8 @@ export type ReservasStatsResponse = { total_reservas: number, cancelaciones: num
  */
 export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: number | null, };
 
+export type SetAsignacionesTareaInput = { id_tarea: number, ids_trabajadores: Array<number>, };
+
 export type SetProductoAlergenosInput = { id_producto: number, ids_alergenos: Array<number>, };
 
 export type StatsCategoriaRow = { ID_Categoria: number, Nombre: string, };
@@ -159,9 +172,22 @@ export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
 
 export type SummaryArgs = { limit?: number, };
 
+export type TareaAdminRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, Total_Asignados: number, Total_Finalizadas: number, };
+
+export type TareaAsignadoRow = { ID_Trabajador: number, Nombre: string, Apellido: string | null, Puesto: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
+
+/**
+ * Argumento con sólo el id de tarea (get por id, asignados, borrar).
+ */
+export type TareaIdArgs = { id_tarea: number, };
+
+export type TareaRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, };
+
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, };
 
 export type TrabajadorCardStats = { id_trabajador: number, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
+
+export type TrabajadorUI = { ID_Trabajador: number, ID_Usuario: number, Nombre: string, Apellido: string | null, Puesto: string | null, Email: string, };
 
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 
@@ -177,6 +203,8 @@ export type UpdateClienteInput = { id_cliente: number, nombre: string, email?: s
 export type UpdateGastoInput = { id_gasto: number, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: number, };
 
 export type UpdatePagoInput = { id_pago: number, fecha_hora: string, metodo: string, importe: number, };
+
+export type UpdateTareaInput = { id_tarea: number, titulo: string, descripcion?: string, fecha_limite?: string, };
 
 export type UpsertCategoriaInput = { id_categoria?: number, nombre: string, nombre_imagen: string, ruta_imagen: string, vendible: boolean, pasa_cocina: boolean, };
 
