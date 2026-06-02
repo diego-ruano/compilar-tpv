@@ -1,0 +1,5 @@
+# Workspace JS/TS del monorepo TPV.
+# Las crates Rust se gestionan aparte en el Cargo workspace de la raíz (./Cargo.toml).
+packages:
+  - "apps/*"
+  - "packages/*"

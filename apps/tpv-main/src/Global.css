@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+@theme {
+    --color-gris: #f1f5f9;
+    --color-blanco: #ffffff;
+    --color-negro: #313131;
+    --color-morado: #745cd8;
+    --color-verde: #0fc066;
+    --color-rojo: #ff3838;
+    --color-azul: #007bff;
+
+    --breakpoint-xs: 370px;
+    --breakpoint-sm: 640px;
+    --breakpoint-md: 768px;
+    --breakpoint-lg: 1024px;
+    --breakpoint-xl: 1280px;
+    --breakpoint-2xl: 1536px;
+}
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100vw;
+    height: 100vh;
+    box-sizing: border-box;
+    overflow-x: hidden;
+}

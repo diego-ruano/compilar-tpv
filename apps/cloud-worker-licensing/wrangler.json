@@ -1,0 +1,13 @@
+{
+	"name": "tpv-licensing",
+	"main": "src/server/index.ts",
+	"compatibility_date": "2025-10-08",
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	"vars": {
+		"TURSO_DATABASE_URL": "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io",
+		"TURSO_ORG_SLUG": "altarialights"
+	}
+}

@@ -1,0 +1,13 @@
+[package]
+name = "tpv-application"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Capa de aplicación TPV: puertos (traits) y casos de uso. Orquesta el dominio a través de interfaces, sin conocer la implementación concreta de infraestructura."
+
+[dependencies]
+tpv-domain = { workspace = true }
+serde = { workspace = true }
+chrono = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }

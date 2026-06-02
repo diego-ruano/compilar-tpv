@@ -1,0 +1,40 @@
+{
+	"compatibility_date": "2025-10-08",
+	"main": "src/server/index.ts",
+	"name": "tpv-server",
+	"migrations": [
+		{
+			"new_sqlite_classes": [
+				"Chat"
+			],
+			"tag": "v1"
+		},
+		{
+			"tag": "v2",
+			"renamed_classes": [
+				{
+					"from": "Chat",
+					"to": "TenantHub"
+				}
+			]
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "TenantHub",
+				"name": "TenantHub"
+			}
+		]
+	},
+	"services": [
+		{
+			"binding": "TPV_LICENSING",
+			"service": "tpv-licensing"
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true
+}

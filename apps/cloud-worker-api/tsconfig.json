@@ -1,0 +1,22 @@
+{
+	"compilerOptions": {
+		"target": "esnext",
+		"lib": [
+			"esnext",
+			"ES2022",
+			"DOM",
+			"DOM.Iterable",
+			"WebWorker"
+		],
+		"module": "esnext",
+		"moduleResolution": "bundler",
+		"noEmit": true,
+		"isolatedModules": true,
+		"forceConsistentCasingInFileNames": true,
+		"skipLibCheck": true,
+		"strict": true
+	},
+	"include": [
+		"src/**/*"
+	]
+}

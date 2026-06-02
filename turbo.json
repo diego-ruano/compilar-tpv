@@ -1,0 +1,21 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "stream",
+  "tasks": {
+    "generate-types": {
+      "//": "Genera packages/contracts/src/generated/bindings.ts desde crates/tpv-contracts (ts-rs). cache:false para regenerar siempre tras cambios en Rust.",
+      "cache": false,
+      "outputs": ["src/generated/**"]
+    },
+    "build": {
+      "//": "El build del frontend depende de que los tipos estén generados por sus dependencias (^generate-types).",
+      "dependsOn": ["^generate-types", "^build"],
+      "outputs": ["dist/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {}
+  }
+}

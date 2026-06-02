@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Cargo workspace virtual del monorepo TPV.
+# Miembros: las crates hexagonales en crates/* y la app Tauri en apps/tpv-main/src-tauri.
+# Las versiones de dependencias compartidas se centralizan en [workspace.dependencies]
+# para que cada crate use `dep = { workspace = true }`.
+# ─────────────────────────────────────────────────────────────────────────────
+[workspace]
+resolver = "2"
+members = [
+  "crates/tpv-domain",
+  "crates/tpv-application",
+  "crates/tpv-infra-sqlite",
+  "crates/tpv-infra-backup",
+  "crates/tpv-infra-licensing",
+  "crates/tpv-contracts",
+  "apps/tpv-main/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Altaria Lights"]
+
+[workspace.dependencies]
+# ── Crates internas (rutas relativas a la raíz del workspace) ──
+tpv-domain = { path = "crates/tpv-domain" }
+tpv-application = { path = "crates/tpv-application" }
+tpv-infra-sqlite = { path = "crates/tpv-infra-sqlite" }
+tpv-infra-backup = { path = "crates/tpv-infra-backup" }
+tpv-infra-licensing = { path = "crates/tpv-infra-licensing" }
+tpv-contracts = { path = "crates/tpv-contracts" }
+
+# ── Async / Runtime ──
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# ── Serde / JSON ──
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ── Fechas ──
+chrono = { version = "0.4", features = ["serde"] }
+
+# ── DB ──
+libsql = "0.3"
+
+# ── HTTP ──
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# ── Errores ──
+thiserror = "1"
+anyhow = "1"
+
+# ── Utils / Cripto / Auth ──
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+pbkdf2 = "0.12"
+password-hash = "0.5"
+rand = "0.8"
+keyring = "2"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+
+# NOTA: ts-rs se añade en el paso de cableado de contratos (tras verificar versión/features
+# exactas en docs). Se declarará aquí como workspace dependency para tpv-contracts.

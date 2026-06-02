@@ -1,0 +1,158 @@
+import type { Client } from "@libsql/client/web";
+
+import { buildTenantContext } from "../../../../middleware/withTenant";
+import { createDbClient } from "../../../../db/clients";
+import { json, unauthorized, serverError } from "../../../../utils/response";
+import {
+    applyTenantHubTransaction,
+    getDeviceIdFromContext,
+    getTenantIdFromContext,
+    readWriteRequest,
+} from "../../../../utils/tenantHubWrites";
+
+type TareaUpdateInput = {
+    op_id?: string;
+    opId?: string;
+
+    idTarea?: number;
+    id_tarea?: number;
+
+    titulo?: string;
+    descripcion?: string | null;
+
+    fechaLimite?: string | null;
+    fecha_limite?: string | null;
+};
+
+const COMMAND_NAME = "tareas.updateTarea";
+const COMMAND_ALIASES = [
+    COMMAND_NAME,
+    "tasks.updateTarea",
+    "tareas_update_tarea",
+];
+
+function s(v: unknown): string {
+    return String(v ?? "").trim();
+}
+
+function trimOrNull(v: unknown): string | null {
+    const out = s(v);
+    return out ? out : null;
+}
+
+function num(v: unknown): number {
+    const n = Number(v ?? 0);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function resolveOpId(req: Request, input: any, opIdFromBody: string): string {
+    const fromBody = s(opIdFromBody || input?.op_id || input?.opId);
+    if (fromBody) return fromBody;
+
+    const fromHeader = s(req.headers.get("X-Idempotency-Key"));
+    if (fromHeader) return fromHeader;
+
+    return "";
+}
+
+function validateCommandName(req: Request): Response | null {
+    const raw = s(req.headers.get("X-Command-Name"));
+    if (!raw) return null;
+
+    if (!COMMAND_ALIASES.includes(raw)) {
+        return json(
+            {
+                ok: false,
+                error: "bad_command_name",
+                expected: COMMAND_NAME,
+                got: raw,
+            },
+            409,
+            req,
+        );
+    }
+
+    return null;
+}
+
+export async function handleTareasUpdateTarea(
+    req: Request,
+    env: any,
+    dbCentral: Client,
+): Promise<Response> {
+    try {
+        const commandError = validateCommandName(req);
+        if (commandError) return commandError;
+
+        const ctx: any = await buildTenantContext(
+            req,
+            env,
+            dbCentral,
+            createDbClient,
+        );
+
+        const tenantId = getTenantIdFromContext(ctx);
+        if (!tenantId) {
+            return unauthorized(req, "invalid_token_claims");
+        }
+
+        const { input: payload, opId: bodyOpId } =
+            await readWriteRequest<TareaUpdateInput>(
+                req,
+                {} as TareaUpdateInput,
+            );
+
+        const opId = resolveOpId(req, payload, bodyOpId);
+        if (!opId) {
+            return json({ ok: false, error: "missing_op_id" }, 400, req);
+        }
+
+        const idTarea = num(payload?.idTarea ?? payload?.id_tarea);
+        const titulo = s(payload?.titulo);
+        const descripcion = trimOrNull(payload?.descripcion);
+        const fechaLimite = trimOrNull(
+            payload?.fechaLimite ?? payload?.fecha_limite,
+        );
+
+        if (!(idTarea > 0)) {
+            return json({ ok: false, error: "id_tarea_required" }, 400, req);
+        }
+
+        if (!titulo) {
+            return json({ ok: false, error: "titulo_required" }, 400, req);
+        }
+
+        const rowsAffected = await applyTenantHubTransaction<number>({
+            env,
+            tenantId,
+            opId,
+            commandName: COMMAND_NAME,
+            deviceId: getDeviceIdFromContext(ctx),
+            beginMode: "immediate",
+            steps: [
+                {
+                    kind: "execute",
+                    saveAs: "rows_affected",
+                    sql: `
+                        UPDATE Tareas
+                        SET
+                            Titulo = ?2,
+                            Descripcion = ?3,
+                            Fecha_Limite = ?4
+                        WHERE ID_Tarea = ?1;
+                    `,
+                    args: [idTarea, titulo, descripcion, fechaLimite],
+                },
+            ],
+            resultKey: "rows_affected",
+        });
+
+        return json(Number(rowsAffected ?? 0) > 0, 200, req);
+    } catch (e: any) {
+        return serverError(req, "internal_error", {
+            message: String(e?.message || e),
+            name: e?.name,
+            stack: e?.stack,
+        });
+    }
+}

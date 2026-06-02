@@ -1,0 +1,12 @@
+[package]
+name = "tpv-contracts"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Contratos de la frontera UI<->Rust: DTOs serializables que se exportan a TypeScript con ts-rs (packages/contracts/src/generated/bindings.ts)."
+
+[dependencies]
+serde = { workspace = true }
+chrono = { workspace = true }
+# ts-rs se añade en el paso de cableado de contratos (tras verificar versión/features exactas).
+# ts-rs = { workspace = true }

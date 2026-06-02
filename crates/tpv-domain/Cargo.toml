@@ -1,0 +1,12 @@
+[package]
+name = "tpv-domain"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Núcleo de dominio TPV: entidades puras, value objects y reglas de negocio. No conoce DB, red ni Tauri."
+
+[dependencies]
+serde = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
