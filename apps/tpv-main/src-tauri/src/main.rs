@@ -4,7 +4,6 @@
 mod cloud_sync;
 mod commands;
 mod fallback_local;
-mod inventario;
 mod licensing;
 mod login;
 mod mesas;
@@ -459,23 +458,23 @@ pub fn run() {
             mesas::cobrar_detalles,
             mesas::kitchen_list_today_pending,
             mesas::kitchen_set_line_state,
-            // inventario
-            inventario::inventario_list_categorias,
-            inventario::inventario_create_categoria,
-            inventario::inventario_list_proveedores_mini,
-            inventario::inventario_list_productos_by_categoria,
-            inventario::inventario_get_resumen,
-            inventario::inventario_list_alergenos,
-            inventario::inventario_get_alergenos_producto,
-            inventario::inventario_set_alergenos_producto,
-            inventario::inventario_get_producto,
-            inventario::inventario_get_product_detail,
-            inventario::inventario_get_producto_detalle,
-            inventario::inventario_delete_producto,
-            inventario::inventario_upsert_producto,
-            inventario::inventario_list_lotes_by_producto,
-            inventario::inventario_create_lote,
-            inventario::inventario_ajustar_lote,
+            // inventario (migrado a arquitectura hexagonal — commands/inventario.rs)
+            commands::inventario::inventario_list_categorias,
+            commands::inventario::inventario_create_categoria,
+            commands::inventario::inventario_list_proveedores_mini,
+            commands::inventario::inventario_list_productos_by_categoria,
+            commands::inventario::inventario_get_resumen,
+            commands::inventario::inventario_list_alergenos,
+            commands::inventario::inventario_get_alergenos_producto,
+            commands::inventario::inventario_set_alergenos_producto,
+            commands::inventario::inventario_get_producto,
+            commands::inventario::inventario_get_product_detail,
+            commands::inventario::inventario_get_producto_detalle,
+            commands::inventario::inventario_delete_producto,
+            commands::inventario::inventario_upsert_producto,
+            commands::inventario::inventario_list_lotes_by_producto,
+            commands::inventario::inventario_create_lote,
+            commands::inventario::inventario_ajustar_lote,
             // tareas
             tareas::tareas_get_trabajadores,
             tareas::tareas_create_tarea,
