@@ -10,6 +10,8 @@
 //! Regla: el dominio (`tpv-domain`) permanece puro; los tipos que se exponen a la UI
 //! se definen o se re-exportan aquí con la macro `#[derive(TS)]`.
 
+pub mod clientes;
+
 // Los módulos de contratos por dominio se añaden durante la migración:
 // pub mod mesas;
 // pub mod venta_rapida;

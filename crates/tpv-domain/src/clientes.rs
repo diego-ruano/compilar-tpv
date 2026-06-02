@@ -1,0 +1,98 @@
+//! Dominio de **clientes**: entidad de negocio, value objects y validaciones puras.
+//! No conoce SQLite, ni Tauri, ni la frontera de la UI.
+
+use serde::{Deserialize, Serialize};
+
+/// Criterio de ordenación del overview de clientes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClienteRanking {
+    PorReservas,
+    PorGasto,
+    Reciente,
+}
+
+impl ClienteRanking {
+    /// Mapea el argumento que envía la UI (compatibilidad con el front actual).
+    pub fn from_arg(s: &str) -> Self {
+        match s.trim() {
+            "reservas" => ClienteRanking::PorReservas,
+            "gasto" => ClienteRanking::PorGasto,
+            _ => ClienteRanking::Reciente,
+        }
+    }
+}
+
+/// Entidad de negocio Cliente (campos editables/persistibles).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Cliente {
+    pub id: i64,
+    pub nombre: String,
+    pub email: Option<String>,
+    pub telefono: Option<String>,
+    pub notas: Option<String>,
+}
+
+/// Datos para dar de alta un cliente. `id` es opcional: si falta, lo asigna la
+/// persistencia (siguiente ID libre).
+#[derive(Debug, Clone)]
+pub struct NuevoCliente {
+    pub id: Option<i64>,
+    pub nombre: String,
+    pub email: Option<String>,
+    pub telefono: Option<String>,
+    pub notas: Option<String>,
+}
+
+/// Limpia un opcional de texto: trim + descarta vacíos.
+fn limpia_opcional(v: Option<String>) -> Option<String> {
+    v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+impl NuevoCliente {
+    /// Normaliza y valida. `nombre` es obligatorio.
+    pub fn validar(
+        id: Option<i64>,
+        nombre: String,
+        email: Option<String>,
+        telefono: Option<String>,
+        notas: Option<String>,
+    ) -> Result<Self, String> {
+        let nombre = nombre.trim().to_string();
+        if nombre.is_empty() {
+            return Err("nombre required".to_string());
+        }
+        Ok(NuevoCliente {
+            id: id.filter(|n| *n > 0),
+            nombre,
+            email: limpia_opcional(email),
+            telefono: limpia_opcional(telefono),
+            notas: limpia_opcional(notas),
+        })
+    }
+}
+
+impl Cliente {
+    /// Normaliza y valida una edición. `id` debe ser válido y `nombre` obligatorio.
+    pub fn validar_edicion(
+        id: i64,
+        nombre: String,
+        email: Option<String>,
+        telefono: Option<String>,
+        notas: Option<String>,
+    ) -> Result<Self, String> {
+        if id <= 0 {
+            return Err("ID_Cliente inválido.".to_string());
+        }
+        let nombre = nombre.trim().to_string();
+        if nombre.is_empty() {
+            return Err("nombre required".to_string());
+        }
+        Ok(Cliente {
+            id,
+            nombre,
+            email: limpia_opcional(email),
+            telefono: limpia_opcional(telefono),
+            notas: limpia_opcional(notas),
+        })
+    }
+}

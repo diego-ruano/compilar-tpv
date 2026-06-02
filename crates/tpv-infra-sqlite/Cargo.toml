@@ -8,6 +8,7 @@ description = "Adaptador de persistencia TPV: implementa los puertos de reposito
 [dependencies]
 tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
+tpv-contracts = { workspace = true }
 libsql = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }

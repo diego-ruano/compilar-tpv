@@ -9,7 +9,7 @@
 pub mod error;
 
 // Puertos (interfaces que implementan las crates de infraestructura):
-// pub mod ports;
+pub mod ports;
 
 // Casos de uso (lógica de orquestación):
-// pub mod use_cases;
+pub mod use_cases;

@@ -8,6 +8,8 @@
 //! Durante la migración, cada módulo de negocio (mesas, venta_rapida, inventario,
 //! caja, etc.) irá publicando aquí sus structs y validaciones puras.
 
+pub mod clientes;
+
 // Los submódulos de dominio se irán añadiendo módulo por módulo:
 // pub mod mesas;
 // pub mod venta_rapida;

@@ -7,13 +7,14 @@
 //! sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se reubica
 //! aquí, dentro de repositorios que reciben la `Connection` de libsql.
 
+// Helpers de mapeo libsql::Value <-> tipos Rust:
+pub mod mapping;
+
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 // pub mod connection;
 
-// Helpers de mapeo libsql::Value <-> tipos de dominio:
-// pub mod mapping;
-
 // Repositorios concretos (uno por agregado/módulo):
+pub mod clientes;
 // pub mod mesas;
 // pub mod inventario;
 // ...

@@ -8,5 +8,4 @@ description = "Contratos de la frontera UI<->Rust: DTOs serializables que se exp
 [dependencies]
 serde = { workspace = true }
 chrono = { workspace = true }
-# ts-rs se añade en el paso de cableado de contratos (tras verificar versión/features exactas).
-# ts-rs = { workspace = true }
+ts-rs = { workspace = true }

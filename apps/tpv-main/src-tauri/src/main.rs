@@ -1,8 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod clientes;
 mod cloud_sync;
+mod commands;
 mod configuracion;
 mod cuentas;
 mod fallback_local;
@@ -521,11 +521,11 @@ pub fn run() {
             cuentas::cuentas_delete_gasto,
             cuentas::cuentas_update_pago,
             cuentas::cuentas_delete_pago,
-            // clientes
-            clientes::clientes_get_overview,
-            clientes::clientes_get_cliente_form,
-            clientes::clientes_create_cliente,
-            clientes::clientes_update_cliente,
+            // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
+            commands::clientes::clientes_get_overview,
+            commands::clientes::clientes_get_cliente_form,
+            commands::clientes::clientes_create_cliente,
+            commands::clientes::clientes_update_cliente,
             // reservas
             reservas::reservas_get_meta,
             reservas::reservas_get_mes,

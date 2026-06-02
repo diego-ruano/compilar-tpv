@@ -101,14 +101,25 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 - **`apps/tpv-main/src-tauri/src/commands/`** ← comandos `#[tauri::command]` **finos**: inyectan estado
   (`AppState`), invocan el caso de uso de `tpv-application` y devuelven el resultado. Nada de SQL ni lógica aquí.
 
-### 4.3 Automatización de tipos con `ts-rs`
-- En `crates/tpv-contracts`, los DTOs expuestos a la UI llevan
-  `#[derive(TS)]` + `#[ts(export, export_to = "../../packages/contracts/src/generated/bindings.ts")]`.
-- `packages/contracts` expone esos tipos vía un index limpio: `@tpv/contracts`.
-- ts-rs **v12.0.1**. Features relevantes: `chrono-impl` (tipos chrono), `serde-compat` (compat serde, activa por defecto).
-  ⚠️ El export a **un único fichero** (varios tipos → mismo `export_to`) es delicado en ts-rs; **verificar
-  empíricamente** (spike con `cargo test`) antes de fijar el patrón definitivo (single-file vs un-fichero-por-tipo + barrel).
-  Disparador de generación: tests generados por ts-rs (`cargo test -p tpv-contracts`).
+### 4.3 Automatización de tipos con `ts-rs` (VERIFICADO empíricamente)
+- ts-rs **v12.0.1**, feature `chrono-impl` (declarada en `[workspace.dependencies]`); `serde-compat` activa por defecto.
+- En `crates/tpv-contracts`, cada DTO expuesto a la UI lleva:
+  ```rust
+  #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+  #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+  ```
+  ⚠️ **Ojo con la ruta**: ts-rs v12 resuelve `export_to` relativo a `<crate>/bindings/`, así que desde
+  `crates/tpv-contracts` hacen falta **tres** `../` para llegar a `packages/contracts/...`. (Con `../../` cae
+  por error en `crates/packages/...`.)
+- **Fichero único confirmado**: aunque haya muchos DTOs repartidos en varios `.rs`, todos apuntando al mismo
+  `bindings.ts` se **fusionan** en ese único fichero (orden alfabético, referencias cruzadas resueltas sin imports).
+- `packages/contracts/src/index.ts` re-exporta `./generated/bindings` → el frontend importa de `@tpv/contracts`.
+- **Disparador**: `cargo test -p tpv-contracts` ejecuta los tests `export_bindings_*` que genera ts-rs. La tarea
+  pnpm `generate-types` (en `packages/contracts`) hace exactamente eso.
+- **Mapeos**: `i32`/`u32`/`f64`→`number`; `i64`/`u64`→`bigint`; `String`→`string`; `NaiveDate`/`DateTime`→`string`;
+  `Vec<T>`→`Array<T>`; `Option<T>` + `#[ts(optional)]`→`campo?: T`.
+  ⚠️ **IDs**: los ID `i64` se mapean a `bigint`. Como los ID de SQLite del TPV no superan 2^53, en los DTOs se
+  anota `#[ts(type = "number")]` en los campos ID/contadores para mantener compatibilidad con el frontend (que usa `number`).
 
 ### 4.4 Frontend Local-First y limpieza
 - **Eliminado** el patrón `dualCall.ts` (y toda la capa de red/sync que lo acompañaba).

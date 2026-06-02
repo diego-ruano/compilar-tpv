@@ -61,5 +61,6 @@ keyring = "2"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha2 = "0.10"
 
-# NOTA: ts-rs se añade en el paso de cableado de contratos (tras verificar versión/features
-# exactas en docs). Se declarará aquí como workspace dependency para tpv-contracts.
+# ── Generación de tipos TS (ts-rs) ──
+# serde-compat va activo por defecto; chrono-impl añade soporte para tipos chrono.
+ts-rs = { version = "12", features = ["chrono-impl"] }
