@@ -13,7 +13,6 @@ mod mesas;
 mod sync_manager;
 mod pairing;
 mod proveedores;
-mod reservas;
 mod stats;
 mod tareas;
 mod trabajadores;
@@ -526,13 +525,11 @@ pub fn run() {
             commands::clientes::clientes_get_cliente_form,
             commands::clientes::clientes_create_cliente,
             commands::clientes::clientes_update_cliente,
-            // reservas
-            reservas::reservas_get_meta,
-            reservas::reservas_get_mes,
-            reservas::reservas_save,
-            reservas::reservas_delete,
-            reservas::reservas_save_after_remote_ok,
-            reservas::reservas_delete_after_remote_ok,
+            // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
+            commands::reservas::reservas_get_meta,
+            commands::reservas::reservas_get_mes,
+            commands::reservas::reservas_save,
+            commands::reservas::reservas_delete,
             // proveedores
             proveedores::proveedores_get_all,
             proveedores::proveedores_save,

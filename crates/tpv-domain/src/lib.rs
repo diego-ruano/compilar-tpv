@@ -9,6 +9,7 @@
 //! caja, etc.) irá publicando aquí sus structs y validaciones puras.
 
 pub mod clientes;
+pub mod reservas;
 
 // Los submódulos de dominio se irán añadiendo módulo por módulo:
 // pub mod mesas;

@@ -25,7 +25,30 @@ export type ClientesOverviewArgs = { ranking: string, };
  */
 export type CreateClienteInput = { id_cliente?: number, nombre: string, email?: string, telefono?: string, notas?: string, };
 
+export type MesaDto = { id_mesa: number, id_zona: number, numero_mesa: string, capacidad: number, };
+
+/**
+ * Entrada de borrado de reserva.
+ */
+export type ReservaDeleteInput = { id_reserva: number, };
+
+export type ReservaDto = { id_reserva: number, id_mesa: number, dia_ymd: string, hora: string, turno: string | null, comensales: number, nota: string | null, estado: string, nombre_cliente: string, telefono_cliente: string | null, email_cliente: string | null, id_zona: number, numero_mesa: string, capacidad: number, nombre_zona: string, };
+
+/**
+ * Entrada de guardado de reserva (Local-First: sin op_id/outbox/remote_id).
+ */
+export type ReservaSaveInput = { id_reserva?: number, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa: number, nombre_cliente: string, telefono?: string, email?: string, notas_cliente?: string, };
+
+/**
+ * Argumentos del rango mensual.
+ */
+export type ReservasGetMesArgs = { desde: string, hasta: string, };
+
+export type ReservasMetaDto = { zonas: Array<ZonaDto>, mesas: Array<MesaDto>, };
+
 /**
  * Entrada para actualizar un cliente (Local-First: sin op_id ni outbox).
  */
 export type UpdateClienteInput = { id_cliente: number, nombre: string, email?: string, telefono?: string, notas?: string, };
+
+export type ZonaDto = { id_zona: number, nombre_zona: string, };

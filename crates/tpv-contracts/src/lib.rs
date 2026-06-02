@@ -11,6 +11,7 @@
 //! se definen o se re-exportan aquí con la macro `#[derive(TS)]`.
 
 pub mod clientes;
+pub mod reservas;
 
 // Los módulos de contratos por dominio se añaden durante la migración:
 // pub mod mesas;
