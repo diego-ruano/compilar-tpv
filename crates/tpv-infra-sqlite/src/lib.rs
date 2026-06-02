@@ -18,6 +18,7 @@ pub mod util;
 
 // Repositorios concretos (uno por agregado/módulo):
 pub mod clientes;
+pub mod proveedores;
 pub mod reservas;
 // pub mod mesas;
 // pub mod inventario;

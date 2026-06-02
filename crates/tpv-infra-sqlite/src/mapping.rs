@@ -49,3 +49,11 @@ pub fn opt_text(o: Option<String>) -> Value {
         None => Value::Null,
     }
 }
+
+/// `Option<f64>` -> `Value` (Real o Null) para parámetros de escritura.
+pub fn opt_real(o: Option<f64>) -> Value {
+    match o {
+        Some(n) => Value::Real(n),
+        None => Value::Null,
+    }
+}

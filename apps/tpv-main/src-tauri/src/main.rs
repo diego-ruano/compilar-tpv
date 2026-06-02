@@ -12,7 +12,6 @@ mod login;
 mod mesas;
 mod sync_manager;
 mod pairing;
-mod proveedores;
 mod stats;
 mod tareas;
 mod trabajadores;
@@ -530,15 +529,15 @@ pub fn run() {
             commands::reservas::reservas_get_mes,
             commands::reservas::reservas_save,
             commands::reservas::reservas_delete,
-            // proveedores
-            proveedores::proveedores_get_all,
-            proveedores::proveedores_save,
-            proveedores::proveedores_delete,
-            proveedores::proveedores_get_productos,
-            proveedores::proveedores_get_categorias,
-            proveedores::proveedores_get_productos_all,
-            proveedores::proveedores_set_vinculos,
-            proveedores::proveedores_create_producto,
+            // proveedores (migrado a arquitectura hexagonal — commands/proveedores.rs)
+            commands::proveedores::proveedores_get_all,
+            commands::proveedores::proveedores_save,
+            commands::proveedores::proveedores_delete,
+            commands::proveedores::proveedores_get_productos,
+            commands::proveedores::proveedores_get_categorias,
+            commands::proveedores::proveedores_get_productos_all,
+            commands::proveedores::proveedores_set_vinculos,
+            commands::proveedores::proveedores_create_producto,
             // venta rápida
             venta_rapida::vr_list_categorias_vendibles,
             venta_rapida::vr_list_productos_by_categoria,
