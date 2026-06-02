@@ -8,3 +8,4 @@ pub mod cuentas;
 pub mod inventario;
 pub mod proveedores;
 pub mod reservas;
+pub mod stats;

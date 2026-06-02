@@ -9,7 +9,6 @@ mod login;
 mod mesas;
 mod sync_manager;
 mod pairing;
-mod stats;
 mod tareas;
 mod trabajadores;
 mod venta_rapida;
@@ -552,13 +551,13 @@ pub fn run() {
             venta_rapida::vr_get_index_rows,
             venta_rapida::vr_get_detalles_ver_ticket,
             // stats
-            stats::stats_mesas_get,
-            stats::stats_productos_list_categorias,
-            stats::stats_productos_resumen,
-            stats::stats_reservas_resumen,
-            stats::stats_trabajadores_resumen,
-            stats::stats_clientes_resumen,
-            stats::stats_proveedores_resumen,
+            commands::stats::stats_mesas_get,
+            commands::stats::stats_productos_list_categorias,
+            commands::stats::stats_productos_resumen,
+            commands::stats::stats_reservas_resumen,
+            commands::stats::stats_trabajadores_resumen,
+            commands::stats::stats_clientes_resumen,
+            commands::stats::stats_proveedores_resumen,
             // licensing
             licensing::license_get_state,
             licensing::license_activate,

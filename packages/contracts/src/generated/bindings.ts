@@ -12,6 +12,10 @@ export type CategoriaInvDto = { ID_Categoria: number, Nombre: string, Nombre_Ima
 
 export type CategoriaProveedorDto = { id_categoria: number, nombre: string, nombre_imagen: string | null, ruta_imagen: string | null, };
 
+export type ChartSeriesF64Out = { labels: Array<string>, values: Array<number>, };
+
+export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
+
 /**
  * Datos del formulario de edición de un cliente.
  */
@@ -31,6 +35,10 @@ export type ClienteOverview = { id_cliente: number, nombre: string, email: strin
  * Argumentos del overview.
  */
 export type ClientesOverviewArgs = { ranking: string, };
+
+export type ClientesStatsArgs = { range: StatsRange, };
+
+export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: number, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSeriesF64Out, };
 
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
@@ -67,6 +75,12 @@ export type LoteDto = { ID_Lote: number, ID_Producto: number, Codigo_Lote: strin
 
 export type MesaDto = { id_mesa: number, id_zona: number, numero_mesa: string, capacidad: number, };
 
+export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
+
+export type MesasStatsResponse = { total_mesas: number, ocupadas: number, ticket_medio_por_mesa: number, mesa_top_comandas: MesasTopComandas | null, servicios: ChartSeriesI64, top_mesas_ingresos: Array<MesaIngresoRow>, };
+
+export type MesasTopComandas = { mesa: string, zona: string, comandas: number, };
+
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
 export type ProductoBaseDto = { ID_Producto: number, ID_Categoria: number, ID_Proveedor: number | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };
@@ -79,11 +93,17 @@ export type ProductoProveedorDto = { id_producto: number, id_categoria: number |
 
 export type ProductoResumenDto = { Nombre: string, Stock_Actual: number | null, Unidad_Medida: string | null, Caducidad_Proxima: string | null, Lote: string | null, Precio_Venta: number | null, };
 
+export type ProductosStatsArgs = { range: StatsRange, categoria_top_id: number | null, categoria_worst_id: number | null, };
+
+export type ProductosStatsResponse = { mejor_producto: string | null, peor_producto_vendible: string | null, top10_mejores: ChartSeriesI64, top10_peores: ChartSeriesI64, };
+
 export type ProveedorDto = { id_proveedor: number, nombre_empresa: string, contacto: string | null, telefono: string | null, email: string | null, cif: string | null, informacion_adicional: string | null, nombre_imagen: string | null, ruta_imagen: string | null, };
 
 export type ProveedorMiniDto = { ID_Proveedor: number, Nombre_Empresa: string, Email: string | null, };
 
 export type ProveedorSaveInput = { id_proveedor?: number, nombre_empresa: string, contacto?: string, telefono?: string, email?: string, cif?: string, informacion_adicional?: string, nombre_imagen?: string, ruta_imagen?: string, };
+
+export type ProveedorTop = { nombre: string, total: number, };
 
 export type ProveedoresCreateProductoInput = { id_producto?: number, id_categoria: number, id_proveedor: number, nombre: string, precio_venta?: number, stock_actual?: number, stock_minimo?: number, unidad_medida?: string, };
 
@@ -92,6 +112,12 @@ export type ProveedoresDeleteInput = { id_proveedor: number, };
 export type ProveedoresGetProductosArgs = { id_proveedor: number, };
 
 export type ProveedoresSetVinculosInput = { id_proveedor: number, producto_ids: Array<number>, };
+
+export type ProveedoresStatsArgs = { range: StatsRange, };
+
+export type ProveedoresStatsResponse = { total_gasto: number, num_gastos: number, gasto_medio: number, porcentaje_sobre_total_gastos: number, proveedor_top: ProveedorTop | null, gastos_evolucion: ChartSeriesF64Out, gasto_por_proveedor: ChartSeriesF64Out, ultimos_gastos: Array<UltimoGastoProveedor>, };
+
+export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: string, minutos_retraso: number, };
 
 /**
  * Entrada de borrado de reserva.
@@ -110,7 +136,13 @@ export type ReservaSaveInput = { id_reserva?: number, dia_ymd: string, hora: str
  */
 export type ReservasGetMesArgs = { desde: string, hasta: string, };
 
+export type ReservasMesasTurno = { turno: StatsTurno, mesas_reservadas: number, mesas_no_reservadas: number, };
+
 export type ReservasMetaDto = { zonas: Array<ZonaDto>, mesas: Array<MesaDto>, };
+
+export type ReservasStatsArgs = { range: StatsRange, turno: StatsTurno, };
+
+export type ReservasStatsResponse = { total_reservas: number, cancelaciones: number, mesas_turno: ReservasMesasTurno, reservas_por_bucket: ChartSeriesI64, estado: ChartSeriesI64, franjas: ChartSeriesI64, };
 
 /**
  * Fila de salidas (gastos).
@@ -119,9 +151,23 @@ export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, co
 
 export type SetProductoAlergenosInput = { id_producto: number, ids_alergenos: Array<number>, };
 
+export type StatsCategoriaRow = { ID_Categoria: number, Nombre: string, };
+
+export type StatsRange = "hoy" | "semana" | "mes" | "anio";
+
+export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
+
 export type SummaryArgs = { limit?: number, };
 
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, };
+
+export type TrabajadorCardStats = { id_trabajador: number, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
+
+export type TrabajadoresStatsArgs = { range: StatsRange, };
+
+export type TrabajadoresStatsResponse = { cocineros: Array<TrabajadorCardStats>, camareros: Array<TrabajadorCardStats>, limpieza: Array<TrabajadorCardStats>, ranking_ventas: ChartSeriesF64Out, };
+
+export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto: string, importe: number, };
 
 /**
  * Entrada para actualizar un cliente (Local-First: sin op_id ni outbox).
