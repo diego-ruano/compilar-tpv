@@ -3,6 +3,7 @@
 //! `tpv-application`. No contienen SQL ni reglas de negocio.
 
 pub mod clientes;
+pub mod configuracion;
 pub mod cuentas;
 pub mod proveedores;
 pub mod reservas;

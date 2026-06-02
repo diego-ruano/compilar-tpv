@@ -3,7 +3,6 @@
 
 mod cloud_sync;
 mod commands;
-mod configuracion;
 mod fallback_local;
 mod inventario;
 mod licensing;
@@ -577,13 +576,11 @@ pub fn run() {
             pairing::device_get_identity,
             pairing::device_sign_b64,
             pairing::tpv_server_post_json,
-            // configuración
-            configuracion::config_get_business_settings,
-            configuracion::config_patch_business_settings,
-            configuracion::config_get_ticket_settings,
-            configuracion::config_patch_ticket_settings,
-            configuracion::config_patch_business_settings_after_remote_ok,
-            configuracion::config_patch_ticket_settings_after_remote_ok,
+            // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
+            commands::configuracion::config_get_business_settings,
+            commands::configuracion::config_patch_business_settings,
+            commands::configuracion::config_get_ticket_settings,
+            commands::configuracion::config_patch_ticket_settings,
             // fallback_local
             fallback_local::fallback_local_outbox_enqueue,
             fallback_local::fallback_local_outbox_get_pending,

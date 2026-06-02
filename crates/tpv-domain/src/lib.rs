@@ -9,6 +9,7 @@
 //! caja, etc.) irá publicando aquí sus structs y validaciones puras.
 
 pub mod clientes;
+pub mod configuracion;
 pub mod cuentas;
 pub mod proveedores;
 pub mod reservas;
