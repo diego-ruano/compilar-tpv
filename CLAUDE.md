@@ -189,20 +189,31 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ Configs raíz: `package.json`, `pnpm-workspace.yaml`, `Cargo.toml` (workspace), `turbo.json`, `.gitignore`.
 - ✅ Esqueleto de las 6 crates (`tpv-domain`, `tpv-application`, `tpv-infra-sqlite`, `tpv-infra-backup`, `tpv-infra-licensing`, `tpv-contracts`).
 - ✅ Esqueleto de los 3 packages (`@tpv/database`, `@tpv/contracts`, `@tpv/client` con `invokeClient.ts`).
-- 🟡 `git init` en la raíz.
-- ⬜ Cableado definitivo de `ts-rs` (verificación empírica single-file vs barrel) y tarea `generate-types`.
-- ⬜ Migración de infra compartida Rust (`AppState`, conexión/seed de la BD, mapeos, scaffolding de puertos).
-- ⬜ Migración hexagonal por dominio (domain → ports → repos sqlite → use cases).
-- ⬜ DTOs `#[derive(TS)]` en `tpv-contracts` + comandos Tauri finos en `apps/tpv-main/src-tauri/src/commands/`.
+- ✅ `git init` en la raíz (+ commit base `757f0b9`).
+- ✅ `ts-rs` verificado y cableado (fichero único `bindings.ts`, ruta `../../../packages/...`, `cargo test -p tpv-contracts`). Ver §4.3.
+- ✅ Patrón hexagonal compartido establecido: `tpv-infra-sqlite::mapping`, `tpv-application::{ports,use_cases}`, `AppError`→`String`.
+- ✅ **Módulo `clientes` migrado (PILOTO/REFERENCIA)** end-to-end: domain → ports → repo sqlite → use cases → contracts (DTOs ts-rs) → comando Tauri fino + **rewire frontend a `@tpv/client`** (sin dualCall). Verificado: `cargo check -p tpv` ✅, `cargo test -p tpv-contracts` ✅, `tsc` frontend ✅.
+- 🟡 `pnpm install` ejecutado (workspace enlazado). ⚠️ `lucide-react` falta en `package.json` (dependencia fantasma preexistente usada en `Carousel.tsx`) — pendiente de añadir para que el frontend compile del todo.
+- ⬜ Migrar el resto de dominios siguiendo el patrón de `clientes` (estrangulando el monolito): `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `tareas`, `trabajadores`, `login`, `configuracion`, `stats`; y `licensing`/`pairing` (a `tpv-infra-licensing`).
 - ⬜ Eliminación de la capa `dualCall` + sync (frontend `net/*`, `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + comandos `*_after_remote_ok`).
-- ⬜ Reestructuración del frontend a `app/ · features/ · shared/` consumiendo `@tpv/client` y `@tpv/contracts`.
+- ⬜ Mover conexión/seed de la BD a `tpv-infra-sqlite::connection` y adelgazar el shell (`AppState`).
+- ⬜ Reestructuración del frontend a `app/ · features/ · shared/`.
 - ⬜ Verificación final: `cargo build` + `tsc` + generación de tipos OK.
+
+### Patrón de referencia para migrar un módulo (seguir `clientes`)
+1. `tpv-domain/src/<m>.rs`: entidades + validación pura. Registrar en `domain/src/lib.rs`.
+2. `tpv-contracts/src/<m>.rs`: DTOs con `#[derive(TS)]` + `#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]`. IDs `i64` con `#[ts(type = "number")]`. **Campos snake_case idénticos al struct antiguo** (compat frontend). Registrar en `contracts/src/lib.rs`.
+3. `tpv-application/src/ports/<m>.rs`: trait `…Repository` (async). Registrar en `ports/mod.rs`.
+4. `tpv-application/src/use_cases/<m>.rs`: orquestación + validación de dominio. Registrar en `use_cases/mod.rs`.
+5. `tpv-infra-sqlite/src/<m>.rs`: `Sqlite…Repository` con el SQL (sin outbox/Applied_Operations — Local-First). Usa `crate::mapping`. Registrar en `infra-sqlite/src/lib.rs`.
+6. `apps/tpv-main/src-tauri/src/commands/<m>.rs`: comandos finos (mismos nombres). Registrar en `commands/mod.rs` y reapuntar `main.rs` (quitar `mod <m>;` viejo + registrar `commands::<m>::…`). Borrar el `<m>.rs` monolítico.
+7. Frontend `…Apis.ts`: cambiar `dualCall` por `invokeClient` de `@tpv/client`, tipos de `@tpv/contracts`, sin `op_id`/outbox.
 
 ### Backend monolítico de origen (a desmontar)
 `apps/tpv-main/src-tauri/src/` contiene aún el backend monolítico previo (`mesas.rs` ~136 KB,
-`cloud_sync.rs` ~99 KB, `venta_rapida.rs`, `stats.rs`, etc.) y `main.rs` con TODO el registro de
-comandos. Es la fuente de la migración; se irá vaciando hacia las crates. `lib.rs` actual es
-boilerplate de Tauri (`greet`) — el `run()` real está en `main.rs`.
+`cloud_sync.rs` ~99 KB, `venta_rapida.rs`, `stats.rs`, etc.) y `main.rs` con el registro de
+comandos restantes. Es la fuente de la migración; se irá vaciando hacia las crates. `lib.rs`
+actual es boilerplate de Tauri (`greet`) — el `run()` real está en `main.rs`.
 
 ---
 
