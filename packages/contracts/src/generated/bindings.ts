@@ -27,6 +27,19 @@ export type ClientesOverviewArgs = { ranking: string, };
  */
 export type CreateClienteInput = { id_cliente?: number, nombre: string, email?: string, telefono?: string, notas?: string, };
 
+export type CreateGastoInput = { id_gasto?: number, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: number, };
+
+export type CuentasRangoArgs = { del?: string, al?: string, };
+
+export type DeleteGastoInput = { id_gasto: number, };
+
+export type DeletePagoInput = { id_pago: number, };
+
+/**
+ * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+ */
+export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
+
 export type MesaDto = { id_mesa: number, id_zona: number, numero_mesa: string, capacidad: number, };
 
 export type ProductoProveedorDto = { id_producto: number, id_categoria: number | null, id_proveedor: number | null, nombre: string, precio_venta: number | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
@@ -63,8 +76,17 @@ export type ReservasGetMesArgs = { desde: string, hasta: string, };
 export type ReservasMetaDto = { zonas: Array<ZonaDto>, mesas: Array<MesaDto>, };
 
 /**
+ * Fila de salidas (gastos).
+ */
+export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: number | null, };
+
+/**
  * Entrada para actualizar un cliente (Local-First: sin op_id ni outbox).
  */
 export type UpdateClienteInput = { id_cliente: number, nombre: string, email?: string, telefono?: string, notas?: string, };
+
+export type UpdateGastoInput = { id_gasto: number, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: number, };
+
+export type UpdatePagoInput = { id_pago: number, fecha_hora: string, metodo: string, importe: number, };
 
 export type ZonaDto = { id_zona: number, nombre_zona: string, };

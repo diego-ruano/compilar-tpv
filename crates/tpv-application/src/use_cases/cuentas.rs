@@ -1,0 +1,105 @@
+//! Casos de uso de cuentas (caja). Local-First.
+//!
+//! Nota de compatibilidad: importes/ids inválidos devuelven `Ok(false)` (no error),
+//! igual que el backend antiguo; los campos de texto vacíos sí son error de validación.
+
+use tpv_contracts::cuentas::{
+    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto, SalidaDto,
+    UpdateGastoInput, UpdatePagoInput,
+};
+use tpv_domain::cuentas::{normalize_metodo, requerido, GastoData, PagoData};
+
+use crate::error::{AppError, AppResult};
+use crate::ports::cuentas::CuentasRepository;
+
+pub async fn get_entradas(
+    repo: &dyn CuentasRepository,
+    args: CuentasRangoArgs,
+) -> AppResult<Vec<EntradaDto>> {
+    repo.entradas(args.del, args.al).await
+}
+
+pub async fn get_salidas(
+    repo: &dyn CuentasRepository,
+    args: CuentasRangoArgs,
+) -> AppResult<Vec<SalidaDto>> {
+    repo.salidas(args.del, args.al).await
+}
+
+fn proveedor_para(tipo_gasto: &str, proveedor_id: Option<i64>) -> Option<i64> {
+    if tipo_gasto == "Proveedor" {
+        proveedor_id.filter(|n| *n > 0)
+    } else {
+        None
+    }
+}
+
+pub async fn create_gasto(repo: &dyn CuentasRepository, input: CreateGastoInput) -> AppResult<bool> {
+    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
+    let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
+    let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
+
+    if !input.importe.is_finite() || input.importe <= 0.0 {
+        return Ok(false);
+    }
+
+    let proveedor_id = proveedor_para(&tipo_gasto, input.proveedor_id);
+    let gasto = GastoData {
+        fecha,
+        tipo_gasto,
+        concepto,
+        importe: input.importe,
+        proveedor_id,
+    };
+    repo.crear_gasto(input.id_gasto.filter(|n| *n > 0), gasto).await
+}
+
+pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput) -> AppResult<bool> {
+    let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
+    let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
+    let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
+
+    if input.id_gasto <= 0 || !input.importe.is_finite() || input.importe <= 0.0 {
+        return Ok(false);
+    }
+
+    let proveedor_id = proveedor_para(&tipo_gasto, input.proveedor_id);
+    let gasto = GastoData {
+        fecha,
+        tipo_gasto,
+        concepto,
+        importe: input.importe,
+        proveedor_id,
+    };
+    repo.actualizar_gasto(input.id_gasto, gasto).await
+}
+
+pub async fn delete_gasto(repo: &dyn CuentasRepository, input: DeleteGastoInput) -> AppResult<bool> {
+    if input.id_gasto <= 0 {
+        return Ok(false);
+    }
+    repo.eliminar_gasto(input.id_gasto).await
+}
+
+pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -> AppResult<bool> {
+    let fecha_hora = requerido(&input.fecha_hora, "fecha_hora").map_err(AppError::validation)?;
+    let metodo = normalize_metodo(&input.metodo);
+
+    if input.id_pago <= 0 || !input.importe.is_finite() || input.importe <= 0.0 {
+        return Ok(false);
+    }
+
+    let pago = PagoData {
+        fecha_hora,
+        metodo,
+        importe: input.importe,
+    };
+    repo.actualizar_pago(input.id_pago, pago).await
+}
+
+pub async fn delete_pago(repo: &dyn CuentasRepository, input: DeletePagoInput) -> AppResult<bool> {
+    if input.id_pago <= 0 {
+        return Ok(false);
+    }
+    repo.eliminar_pago(input.id_pago).await
+}

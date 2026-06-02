@@ -4,7 +4,6 @@
 mod cloud_sync;
 mod commands;
 mod configuracion;
-mod cuentas;
 mod fallback_local;
 mod inventario;
 mod licensing;
@@ -511,14 +510,14 @@ pub fn run() {
             trabajadores::horarios_delete_asignacion_after_remote_ok,
             trabajadores::horarios_copy_semana_asignaciones_after_remote_ok,
             trabajadores::horarios_set_predeterminado_desde_semana_after_remote_ok,
-            // cuentas
-            cuentas::cuentas_get_entradas,
-            cuentas::cuentas_get_salidas,
-            cuentas::cuentas_create_gasto,
-            cuentas::cuentas_update_gasto,
-            cuentas::cuentas_delete_gasto,
-            cuentas::cuentas_update_pago,
-            cuentas::cuentas_delete_pago,
+            // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
+            commands::cuentas::cuentas_get_entradas,
+            commands::cuentas::cuentas_get_salidas,
+            commands::cuentas::cuentas_create_gasto,
+            commands::cuentas::cuentas_update_gasto,
+            commands::cuentas::cuentas_delete_gasto,
+            commands::cuentas::cuentas_update_pago,
+            commands::cuentas::cuentas_delete_pago,
             // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
             commands::clientes::clientes_get_overview,
             commands::clientes::clientes_get_cliente_form,

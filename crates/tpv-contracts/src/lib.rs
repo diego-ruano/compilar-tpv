@@ -11,6 +11,7 @@
 //! se definen o se re-exportan aquí con la macro `#[derive(TS)]`.
 
 pub mod clientes;
+pub mod cuentas;
 pub mod proveedores;
 pub mod reservas;
 
