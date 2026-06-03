@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import Modal from "../ui/Modal";
-import { useToast } from "../../toast";
+import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 
 import { convertirABase64 } from "../utils/inventarioFormat";

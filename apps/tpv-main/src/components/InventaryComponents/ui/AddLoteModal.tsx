@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import Modal from "../ui/Modal";
-import { useToast } from "../../toast";
+import { useToast } from "../../../shared/toast";
 import { inventarioAPI } from "../api/inventarioAPI";
 
 type Props = {

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useToast } from "../../toast";
+import { useToast } from "../../../shared/toast";
 import Modal from "../ui/Modal";
 import { cn } from "../utils";
 import {

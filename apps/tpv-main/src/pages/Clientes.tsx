@@ -5,7 +5,7 @@ import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
 import Modal from "../components/proveedores/Modal";
 import Campo from "../components/proveedores/Campo";
 import ClienteCard from "../components/ClientsComponents/ClientesCard";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 
 import {
   clientesCreateCliente,

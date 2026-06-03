@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
 
 import Product from "../components/InventaryComponents/Product";

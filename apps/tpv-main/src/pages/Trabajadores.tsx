@@ -18,7 +18,7 @@ import {
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../shared/stores/useAuth";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";

@@ -1,6 +1,6 @@
 // src/components/configuracion/sections/Ticket.tsx
 import React, { useMemo, useState } from "react";
-import TicketPreviewModal from "../../../components/ticket/PreviewModal";
+import TicketPreviewModal from "../../../shared/ticket/PreviewModal";
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { TextArea, TextInput } from "../ui/Inputs";

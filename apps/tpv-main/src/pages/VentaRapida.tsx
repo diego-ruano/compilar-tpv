@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../shared/stores/useAuth";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 
 import AddProductModal from "../components/ventaRapida/ui/AddProductModal";
 import CatalogGrid from "../components/ventaRapida/ui/CatalogGrid";

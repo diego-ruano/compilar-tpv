@@ -6,7 +6,7 @@ import MinimizarVentana from "../assets/svg/MinimizarVentana.svg";
 import PantallaCompleta from "../assets/svg/PantallaCompleta.svg";
 import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 import { useAuth } from "../shared/stores/useAuth";
 
 import {

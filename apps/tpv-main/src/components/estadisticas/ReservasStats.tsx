@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
-import { useToast } from "../toast";
+import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
 import {

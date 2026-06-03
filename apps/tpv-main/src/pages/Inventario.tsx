@@ -1,6 +1,6 @@
 // src/pages/Inventario.tsx
 import React, { useState } from "react";
-import { useToast } from "../components/toast";
+import { useToast } from "../shared/toast";
 
 import { useInventario } from "../components/InventaryComponents/hooks/useInventario";
 
