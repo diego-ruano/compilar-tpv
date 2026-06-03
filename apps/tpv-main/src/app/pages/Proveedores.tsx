@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
-import { useToast } from "../shared/toast";
-import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
+import { useToast } from "../../shared/toast";
+import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
-import Product from "../features/InventaryComponents/Product";
-import Modal from "../features/proveedores/Modal";
-import Campo from "../features/proveedores/Campo";
-import ProveedorCard from "../features/proveedores/ProveedorCard";
-import ProductDetailModal from "../features/InventaryComponents/ProductDetailModal";
-import { AddProductModal } from "../features/InventaryComponents/ui/AddProductModal";
+import Product from "../../features/InventaryComponents/Product";
+import Modal from "../../features/proveedores/Modal";
+import Campo from "../../features/proveedores/Campo";
+import ProveedorCard from "../../features/proveedores/ProveedorCard";
+import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
+import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
 
 import {
   proveedoresGetAll,
@@ -23,7 +23,7 @@ import {
   type ProveedorRow,
   type ProductoRow,
   type Categoria,
-} from "../features/proveedores/proveedoresApis";
+} from "../../features/proveedores/proveedoresApis";
 
 type ProveedorUI = ProveedorRow & { urlImagen: string };
 type ProductoUI = ProductoRow & { urlImagen: string };

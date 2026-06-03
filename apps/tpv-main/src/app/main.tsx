@@ -1,6 +1,6 @@
 import React, { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
-import AppErrorBoundary from "../pages/errorPages/AppErrorBoundary";
+import AppErrorBoundary from "./pages/errorPages/AppErrorBoundary";
 
 import AppBoot from "./AppBoot";
 import { appRouter } from "./Router";

@@ -4,29 +4,29 @@
 // MANEJABA UN ARCHIVO LEGACY QUE NO TENÍA MÁS UTILIDAD QUE ESA, SE QUEDAN LAS COSAS
 // SE QUEDA COMENTADA LA PARTE QUE HAY QUE ARREGLAR PARA QUE COMPILE, PERO NO FUNCIONA AHORA MISMO ESTE ARCHIVO
 import React, { useEffect, useMemo, useState } from "react";
-import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
-import { useTicketSettings } from "../shared/stores/useTicketSettings";
-import { useMode } from "../shared/stores/useMode";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../../shared/stores/useTicketSettings";
+import { useMode } from "../../shared/stores/useMode";
 
-import { cn } from "../features/configuracion/utils";
+import { cn } from "../../features/configuracion/utils";
 import type {
     LicenseInfo,
     NavItem,
     SectionKey,
-} from "../features/configuracion/types";
-import { useBusinessDraft } from "../features/configuracion/hooks/useBusinessDraft";
+} from "../../features/configuracion/types";
+import { useBusinessDraft } from "../../features/configuracion/hooks/useBusinessDraft";
 
 // UI
-import { Badge } from "../features/configuracion/ui/Badge";
-import { TextInput } from "../features/configuracion/ui/Inputs";
+import { Badge } from "../../features/configuracion/ui/Badge";
+import { TextInput } from "../../features/configuracion/ui/Inputs";
 
 // Sections
-import { Negocio } from "../features/configuracion/sections/Negocio";
-import { Contacto } from "../features/configuracion/sections/Contacto";
-import { Ticket } from "../features/configuracion/sections/Ticket";
-import { Licencia } from "../features/configuracion/sections/Licencia";
-import { Apariencia } from "../features/configuracion/sections/Apariencia";
-import { VincularHandy } from "../features/configuracion/sections/VincularHandy";
+import { Negocio } from "../../features/configuracion/sections/Negocio";
+import { Contacto } from "../../features/configuracion/sections/Contacto";
+import { Ticket } from "../../features/configuracion/sections/Ticket";
+import { Licencia } from "../../features/configuracion/sections/Licencia";
+import { Apariencia } from "../../features/configuracion/sections/Apariencia";
+import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 
 
 export default function Configuracion() {

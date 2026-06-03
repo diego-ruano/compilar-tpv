@@ -2,12 +2,12 @@
 import React, { useMemo, useState } from "react";
 
 // ✅ Ajusta estas rutas a tu estructura real
-import MesasStats from "../features/estadisticas/MesasStats";
-import ProductosStats from "../features/estadisticas/ProductosStats";
-import ReservasStats from "../features/estadisticas/ReservasStats";
-import ProveedoresStats from "../features/estadisticas/ProveedoresStats";
-import TrabajadoresStats from "../features/estadisticas/TrabajadoresStats";
-import ClientesStats from "../features/estadisticas/ClientesStats";
+import MesasStats from "../../features/estadisticas/MesasStats";
+import ProductosStats from "../../features/estadisticas/ProductosStats";
+import ReservasStats from "../../features/estadisticas/ReservasStats";
+import ProveedoresStats from "../../features/estadisticas/ProveedoresStats";
+import TrabajadoresStats from "../../features/estadisticas/TrabajadoresStats";
+import ClientesStats from "../../features/estadisticas/ClientesStats";
 
 type StatsRange = "hoy" | "semana" | "mes" | "anio";
 type StatsKey =

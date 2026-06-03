@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
+import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
 import {
   trabajadoresGetAll,
@@ -14,11 +14,11 @@ import {
   type TrabajadorRow,
   type Turno,
   type Asignacion,
-} from "../features/trabajadores/trabajadoresApis";
+} from "../../features/trabajadores/trabajadoresApis";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuth } from "../shared/stores/useAuth";
-import { useToast } from "../shared/toast";
+import { useAuth } from "../../shared/stores/useAuth";
+import { useToast } from "../../shared/toast";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";

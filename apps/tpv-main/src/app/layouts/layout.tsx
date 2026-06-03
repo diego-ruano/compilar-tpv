@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
-import NavBar from "../../features/layoutComponent/NavBar";
-import Account from "../../features/layoutComponent/Account";
+import NavBar from "../layoutComponent/NavBar";
+import Account from "../layoutComponent/Account";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import LogoAltaria from "../../assets/img/logo.png";
 import CerrarVentana from "../../assets/svg/CerrarVentana.svg";

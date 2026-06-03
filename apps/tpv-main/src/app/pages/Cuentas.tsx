@@ -21,7 +21,7 @@ import {
     resetCash,
     type Denom,
     type CashCount,
-} from "../features/cuentas/cuentasApis";
+} from "../../features/cuentas/cuentasApis";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";

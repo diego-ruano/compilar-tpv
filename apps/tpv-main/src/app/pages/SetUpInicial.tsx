@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { completeInitialSetup } from "../features/login/loginApi";
-import { useAuth } from "../shared/stores/useAuth";
-import { useMode } from "../shared/stores/useMode";
+import { completeInitialSetup } from "../../features/login/loginApi";
+import { useAuth } from "../../shared/stores/useAuth";
+import { useMode } from "../../shared/stores/useMode";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");

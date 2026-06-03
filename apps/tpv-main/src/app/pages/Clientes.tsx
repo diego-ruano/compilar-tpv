@@ -1,11 +1,11 @@
 // pages/Clientes.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
+import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
-import Modal from "../features/proveedores/Modal";
-import Campo from "../features/proveedores/Campo";
-import ClienteCard from "../features/ClientsComponents/ClientesCard";
-import { useToast } from "../shared/toast";
+import Modal from "../../features/proveedores/Modal";
+import Campo from "../../features/proveedores/Campo";
+import ClienteCard from "../../features/ClientsComponents/ClientesCard";
+import { useToast } from "../../shared/toast";
 
 import {
   clientesCreateCliente,
@@ -14,7 +14,7 @@ import {
   clientesUpdateCliente,
   type FiltroRanking,
   type ClienteRow,
-} from "../features/ClientsComponents/clientesApis";
+} from "../../features/ClientsComponents/clientesApis";
 
 type Vista = "list" | "detail";
 

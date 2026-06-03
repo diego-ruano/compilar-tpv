@@ -2,23 +2,23 @@ import React from "react";
 import { createBrowserRouter } from "react-router-dom";
 
 import App from "./App";
-import SetupInicial from "../pages/SetUpInicial";
-import VentaRapida from "../pages/VentaRapida";
-import Mesas from "../pages/Mesas";
-import EditTables from "../pages/mesasPages/EditTables";
-import Inventario from "../pages/Inventario";
-import Reservas from "../pages/Reservas";
-import Trabajadores from "../pages/Trabajadores";
-import AddTrabajador from "../pages/trabajadoresPages/AddTrabajador";
-import EditTrabajador from "../pages/trabajadoresPages/EditTrabajador";
-import Proveedores from "../pages/Proveedores";
-import Clientes from "../pages/Clientes";
-import Estadisticas from "../pages/Estadisticas";
-import Configuracion from "../pages/Configuracion";
-import Cuentas from "../pages/Cuentas";
-import Tareas from "../pages/Tareas";
-import Logout from "../pages/Logout";
-import NotFound from "../pages/errorPages/NotFound";
+import SetupInicial from "./pages/SetUpInicial";
+import VentaRapida from "./pages/VentaRapida";
+import Mesas from "./pages/Mesas";
+import EditTables from "./pages/mesasPages/EditTables";
+import Inventario from "./pages/Inventario";
+import Reservas from "./pages/Reservas";
+import Trabajadores from "./pages/Trabajadores";
+import AddTrabajador from "./pages/trabajadoresPages/AddTrabajador";
+import EditTrabajador from "./pages/trabajadoresPages/EditTrabajador";
+import Proveedores from "./pages/Proveedores";
+import Clientes from "./pages/Clientes";
+import Estadisticas from "./pages/Estadisticas";
+import Configuracion from "./pages/Configuracion";
+import Cuentas from "./pages/Cuentas";
+import Tareas from "./pages/Tareas";
+import Logout from "./pages/Logout";
+import NotFound from "./pages/errorPages/NotFound";
 
 export const appRouter = createBrowserRouter([
     {

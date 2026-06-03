@@ -2,16 +2,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useAuth } from "../shared/stores/useAuth";
-import { useToast } from "../shared/toast";
+import { useAuth } from "../../shared/stores/useAuth";
+import { useToast } from "../../shared/toast";
 
-import AddProductModal from "../features/ventaRapida/ui/AddProductModal";
-import CatalogGrid from "../features/ventaRapida/ui/CatalogGrid";
-import CashPanel from "../features/ventaRapida/ui/CashPanel";
-import TicketPanel from "../features/ventaRapida/ui/TicketPanel";
-import VerTicketsModal from "../features/ventaRapida/ui/VerTicketsModal";
+import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
+import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
+import CashPanel from "../../features/ventaRapida/ui/CashPanel";
+import TicketPanel from "../../features/ventaRapida/ui/TicketPanel";
+import VerTicketsModal from "../../features/ventaRapida/ui/VerTicketsModal";
 
-import ProductDetailModal from "../features/InventaryComponents/ProductDetailModal";
+import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 
 import {
   Categoria,
@@ -21,8 +21,8 @@ import {
   Paso,
   TicketItem,
   DENOMS,
-} from "../features/ventaRapida/types";
-import { cn, eur } from "../features/ventaRapida/utils";
+} from "../../features/ventaRapida/types";
+import { cn, eur } from "../../features/ventaRapida/utils";
 
 import {
   vrBootstrap,
@@ -41,7 +41,7 @@ import {
   vrDeleteComandaIfSafe,
   type ComandaBarraRow as ApiComandaBarraRow,
   type LineaComandaRow as ApiLineaComandaRow,
-} from "../features/ventaRapida/ventaRapidaAPI";
+} from "../../features/ventaRapida/ventaRapidaAPI";
 
 /* =========================
    EVENTO GLOBAL

@@ -1,8 +1,8 @@
 // src/pages/Tareas.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { tareasApi } from "../features/tareas/tareasApis";
-import { useAuth } from "../shared/stores/useAuth";
-import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
+import { tareasApi } from "../../features/tareas/tareasApis";
+import { useAuth } from "../../shared/stores/useAuth";
+import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
 type TareaUI = {
   ID_Tarea: number;
