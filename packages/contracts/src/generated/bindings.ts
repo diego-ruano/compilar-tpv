@@ -6,6 +6,18 @@ export type AlergenoInvDto = { ID_Alergeno: number, Nombre: string, Nombre_Image
 
 export type AlergenoMiniDto = { ID_Alergeno: number, Nombre: string, Ruta_Imagen: string | null, };
 
+/**
+ * Cabeceras de auth para el worker de licencias (campos snake_case).
+ */
+export type ApiAuthHeaders = { token: string, device_ts: number, device_sig: string, };
+
+export type ApiGetAuthHeadersArgs = { method: string, path: string, };
+
+/**
+ * Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
+ */
+export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };
+
 export type AsignacionCreateInput = { id_trabajador: number, fecha: string, id_turno: number, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
 export type AsignacionDeleteInput = { id_asignacion: number, };
@@ -86,12 +98,18 @@ export type DeleteGastoInput = { id_gasto: number, };
 
 export type DeletePagoInput = { id_pago: number, };
 
+export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
+
+export type DeviceSignB64Args = { payload: string, };
+
 /**
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
  */
 export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
 
 export type FinalizarTareaInput = { id_tarea: number, id_trabajador: number, };
+
+export type HandySetTokenArgs = { token: string, tenant_id: string, };
 
 export type HorariosSemanaArgs = { fecha_lunes: string, };
 
@@ -104,6 +122,12 @@ export type IndexRow = { ID_Comanda: number, Productos: string | null, NumLineas
 export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumenDto>, menosCantidad: Array<ProductoResumenDto>, };
 
 export type KitchenRow = { ID_Comanda: number, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: number, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
+
+export type LicenseActivateInput = { activation_key: string, restaurant_name?: string, business_name?: string, legal_name?: string, display_name?: string, email?: string, phone?: string, country?: string, };
+
+export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, };
+
+export type LicenseLocalState = { tenant_id: string, device_id: string, token: string, status: string | null, expires_at: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
 export type LineaComandaRow = { ID_Detalle: number, ID_Comanda: number, ID_Producto: number, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 
@@ -277,6 +301,8 @@ export type SetProductoAlergenosInput = { id_producto: number, ids_alergenos: Ar
 
 export type SetTurnoPartidoInput = { id_usuario: number, turno_partido: boolean, fecha?: string, };
 
+export type SigB64 = { sigB64: string, };
+
 export type StatsCategoriaRow = { ID_Categoria: number, Nombre: string, };
 
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
@@ -303,6 +329,10 @@ export type TareaIdArgs = { id_tarea: number, };
 export type TareaRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, };
 
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, };
+
+export type TpvServerPostJsonArgs = { mode: string, path: string, body: unknown, };
+
+export type TpvServerSignedHeadersArgs = { mode: string, method: string, path: string, };
 
 export type TrabajadorCardStats = { id_trabajador: number, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
 

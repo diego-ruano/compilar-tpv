@@ -5656,6 +5656,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "tpv-infra-licensing",
  "tpv-infra-sqlite",
  "uuid",
 ]
@@ -5728,7 +5729,9 @@ dependencies = [
  "sha2",
  "thiserror 1.0.69",
  "tpv-application",
+ "tpv-contracts",
  "tpv-domain",
+ "uuid",
 ]
 
 [[package]]

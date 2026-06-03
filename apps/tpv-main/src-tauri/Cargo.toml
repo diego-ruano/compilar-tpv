@@ -58,4 +58,5 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
 tpv-infra-sqlite = { workspace = true }
+tpv-infra-licensing = { workspace = true }
 tpv-contracts = { workspace = true }

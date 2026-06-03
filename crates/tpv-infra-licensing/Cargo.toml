@@ -8,7 +8,9 @@ description = "Adaptador de licenciamiento e identidad de dispositivo TPV: cript
 [dependencies]
 tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
+tpv-contracts = { workspace = true }
 reqwest = { workspace = true }
+uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

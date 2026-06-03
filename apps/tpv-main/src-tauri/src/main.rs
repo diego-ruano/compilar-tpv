@@ -4,9 +4,7 @@
 mod cloud_sync;
 mod commands;
 mod fallback_local;
-mod licensing;
 mod sync_manager;
-mod pairing;
 
 use base64::prelude::*;
 use libsql::{Builder, Connection, Value};
@@ -543,22 +541,22 @@ pub fn run() {
             commands::stats::stats_trabajadores_resumen,
             commands::stats::stats_clientes_resumen,
             commands::stats::stats_proveedores_resumen,
-            // licensing
-            licensing::license_get_state,
-            licensing::license_activate,
-            licensing::license_clear_state,
-            licensing::license_gate,
-            licensing::license_check_now,
-            licensing::api_get_auth_headers,
-            // pairing
-            pairing::tpv_server_signed_headers,
-            pairing::license_read_state_for_ui,
-            pairing::handy_set_token,
-            pairing::handy_clear_token,
-            pairing::handy_get_tenant,
-            pairing::device_get_identity,
-            pairing::device_sign_b64,
-            pairing::tpv_server_post_json,
+            // licensing (migrado a arquitectura hexagonal — commands/licensing.rs)
+            commands::licensing::license_get_state,
+            commands::licensing::license_activate,
+            commands::licensing::license_clear_state,
+            commands::licensing::license_gate,
+            commands::licensing::license_check_now,
+            commands::licensing::api_get_auth_headers,
+            // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
+            commands::pairing::tpv_server_signed_headers,
+            commands::pairing::license_read_state_for_ui,
+            commands::pairing::handy_set_token,
+            commands::pairing::handy_clear_token,
+            commands::pairing::handy_get_tenant,
+            commands::pairing::device_get_identity,
+            commands::pairing::device_sign_b64,
+            commands::pairing::tpv_server_post_json,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,
