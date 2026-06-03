@@ -22,6 +22,8 @@ export type CategoriaProveedorDto = { id_categoria: number, nombre: string, nomb
 
 export type CategoriaRow = { ID_Categoria: number, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, };
 
+export type CategoriaVendibleOut = { ID_Categoria: number, Nombre: string, Ruta_Imagen: string | null, Pasa_Cocina: number, };
+
 export type ChartSeriesF64Out = { labels: Array<string>, values: Array<number>, };
 
 export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
@@ -50,7 +52,13 @@ export type ClientesStatsArgs = { range: StatsRange, };
 
 export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: number, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSeriesF64Out, };
 
+export type CobroVRItem = { producto_id: number, precio: number, };
+
+export type ComandaBarraListItem = { id_comanda: number, fecha_hora_apertura: string, estado: string, total_pendiente: number, total_comanda: number, pendientes_cocina: number, pendientes_pago: number, };
+
 export type ComandaBarraRow = { ID_Comanda: number, Fecha_Hora_Apertura: string, Estado: string, Total_Pendiente: number, Total_Comanda: number, Pendientes_Cocina: number, Pendientes_Pago: number, };
+
+export type ComandaRow = { id_comanda: number, id_mesa: number, id_trabajador: number | null, id_reserva: number | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: number, estado: string, };
 
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
@@ -93,6 +101,8 @@ export type IndexRow = { ID_Comanda: number, Productos: string | null, NumLineas
 
 export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumenDto>, menosCantidad: Array<ProductoResumenDto>, };
 
+export type KitchenRow = { ID_Comanda: number, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: number, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
+
 export type LineaComandaRow = { ID_Detalle: number, ID_Comanda: number, ID_Producto: number, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 
 export type LoteDto = { ID_Lote: number, ID_Producto: number, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Cantidad_Inicial: number, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: number | null, Notas: string | null, };
@@ -101,9 +111,60 @@ export type MesaDto = { id_mesa: number, id_zona: number, numero_mesa: string, c
 
 export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
 
+/**
+ * Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
+ */
+export type MesaLineaComandaRow = { ID_Detalle: number, ID_Comanda: number, ID_Producto: number, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Nombre: string, Pasa_Cocina: number, Pagado: number, };
+
+export type MesaMetaOut = { ocupada: boolean, id_comanda: number, idComanda: number, totalPendiente: number, pendientesPago: number, pendientesCocina: number, estado: string, reserva?: ReservaMesaOut, };
+
+export type MesasAbrirComandaInput = { id_mesa: number, id_trabajador?: number, id_usuario?: number, id_reserva?: number, };
+
+export type MesasAddLineaComandaInput = { id_comanda: number, id_producto: number, cantidad: number, precio: number, id_usuario?: number, id_trabajador?: number, };
+
+export type MesasCerrarComandaInput = { id_comanda: number, total: number, };
+
+export type MesasCobrarDetallesInput = { id_comanda: number, metodo: string, tipo: string, detalle_ids: Array<number>, id_usuario?: number, };
+
+export type MesasCobrarVentaRapidaInput = { metodo: string, items: Array<CobroVRItem>, id_usuario_cobrador?: number, id_trabajador_cobrador?: number, 
+/**
+ * Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
+ */
+id_comanda?: number, };
+
+export type MesasComandaSetTrabajadorInput = { id_comanda: number, id_usuario?: number, id_trabajador?: number, };
+
+export type MesasCreateComandaBarraInput = { id_trabajador?: number, };
+
+export type MesasDeleteComandaBarraIfSafeInput = { id_comanda: number, };
+
+export type MesasDeleteDetalleInput = { id_detalle: number, };
+
+export type MesasGetOrCreateComandaBarraInput = { id_trabajador?: number, };
+
+export type MesasIdCategoriaArgs = { id_categoria: number, };
+
+export type MesasIdComandaArgs = { id_comanda: number, };
+
+export type MesasIdMesaArgs = { id_mesa: number, };
+
+export type MesasKitchenSetLineStateInput = { id_detalle: number, id_usuario_cocinero: number, estado: string, };
+
+export type MesasListComandasBarraArgs = { include_pagadas?: boolean, limit?: number, };
+
+export type MesasRemoveOnePendingDetalleInput = { id_comanda: number, id_producto: number, };
+
+export type MesasSaveLayoutInput = { salons: Array<SalonInput>, };
+
+export type MesasSearchProductosArgs = { q?: string, query?: string, texto?: string, };
+
+export type MesasSetReservaEstadoInput = { id_reserva: number, estado: string, };
+
 export type MesasStatsResponse = { total_mesas: number, ocupadas: number, ticket_medio_por_mesa: number, mesa_top_comandas: MesasTopComandas | null, servicios: ChartSeriesI64, top_mesas_ingresos: Array<MesaIngresoRow>, };
 
 export type MesasTopComandas = { mesa: string, zona: string, comandas: number, };
+
+export type MesasUpdateDetalleNotaInput = { id_detalle: number, nota?: string, };
 
 /**
  * Argumento con sólo el id de trabajador (mis tareas).
@@ -125,6 +186,8 @@ export type ProductoProveedorDto = { id_producto: number, id_categoria: number |
 export type ProductoResumenDto = { Nombre: string, Stock_Actual: number | null, Unidad_Medida: string | null, Caducidad_Proxima: string | null, Lote: string | null, Precio_Venta: number | null, };
 
 export type ProductoRow = { ID_Producto: number, ID_Categoria: number, Nombre: string, Precio_Venta: number, Stock_Actual: number, Stock_Minimo: number, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, };
+
+export type ProductoVendibleOut = { ID_Producto: number, ID_Categoria: number, Nombre: string, Precio_Venta: number, Ruta_Imagen: string | null, };
 
 export type ProductosStatsArgs = { range: StatsRange, categoria_top_id: number | null, categoria_worst_id: number | null, };
 
@@ -159,6 +222,8 @@ export type ReservaDeleteInput = { id_reserva: number, };
 
 export type ReservaDto = { id_reserva: number, id_mesa: number, dia_ymd: string, hora: string, turno: string | null, comensales: number, nota: string | null, estado: string, nombre_cliente: string, telefono_cliente: string | null, email_cliente: string | null, id_zona: number, numero_mesa: string, capacidad: number, nombre_zona: string, };
 
+export type ReservaMesaOut = { idReserva: number, clienteNombre: string, diaYMD: string, hora: string, estado: string, minutosPara: number, };
+
 /**
  * Entrada de guardado de reserva (Local-First: sin op_id/outbox/remote_id).
  */
@@ -179,10 +244,16 @@ export type ReservasStatsResponse = { total_reservas: number, cancelaciones: num
 
 export type RolRow = { ID_Rol: number, Nombre_Rol: string, };
 
+export type RoomPoly = { type: string, points: Array<number>, };
+
 /**
  * Fila de salidas (gastos).
  */
 export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: number | null, };
+
+export type SalonInput = { id: string, name: string, room: RoomPoly, tables: Array<TableInput>, };
+
+export type SalonOut = { id: string, name: string, room: RoomPoly, tables: Array<TableOut>, };
 
 export type SetAsignacionesTareaInput = { id_tarea: number, ids_trabajadores: Array<number>, };
 
@@ -199,6 +270,10 @@ export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
 export type StockLinea = { producto_id: number, cantidad: number, };
 
 export type SummaryArgs = { limit?: number, };
+
+export type TableInput = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
+
+export type TableOut = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
 
 export type TareaAdminRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, Total_Asignados: number, Total_Finalizadas: number, };
 
