@@ -306,7 +306,9 @@ pub async fn kitchen_set_line_state(
     if input.id_usuario_cocinero <= 0 {
         return Err(AppError::validation("ID_Usuario_Cocinero inválido"));
     }
-    let estado = normalize_estado_cocina(&input.estado);
+    // Fidelidad con el monolito: estado vacío/espacios es error (no se normaliza a PENDIENTE).
+    let estado_raw = requerido(&input.estado, "estado").map_err(AppError::validation)?;
+    let estado = normalize_estado_cocina(&estado_raw);
     repo.kitchen_set_line_state(input.id_detalle, input.id_usuario_cocinero, estado)
         .await
 }
