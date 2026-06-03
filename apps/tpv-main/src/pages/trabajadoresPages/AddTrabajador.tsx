@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { dualCall } from "../../net/dualCall";
+import { invokeClient } from "@tpv/client";
 
 type Rol = {
   ID_Rol: number;
@@ -109,9 +109,8 @@ function getErrorMessage(e: unknown) {
 }
 
 /**
- * Temporalmente online-only:
- * todavía no existen commands locales create/update trabajador
- * en Rust, así que este alta no pasa aún por outbox local.
+ * Local-First: alta de trabajador contra el comando Tauri `trabajadores_create`
+ * (crea Usuario + Trabajador en el SQLite local de forma atómica).
  */
 async function createTrabajadorRemote(payload: {
   idRol: number;
@@ -155,30 +154,29 @@ async function createTrabajadorRemote(payload: {
     fecha_fin_contrato: payload.fechaFinContrato ?? null,
   };
 
-  const raw = await dualCall<unknown>(
-    {
-      path: "/v1/trabajadores/create",
-      method: "POST",
-      body,
-      unwrapOkEnvelope: false,
+  const ok = await invokeClient<boolean>("trabajadores_create", {
+    args: {
+      id_rol: body.id_rol,
+      email: body.email,
+      password_hash: body.password_hash,
+      nombre: body.nombre,
+      apellido: body.apellido,
+      estado: body.estado,
+      dni: body.dni,
+      telefono: body.telefono,
+      puesto: body.puesto,
+      iban: body.iban,
+      numero_seguridad_social: body.numero_seguridad_social,
+      fecha_inicio_contrato: body.fecha_inicio_contrato,
+      fecha_fin_contrato: body.fecha_fin_contrato,
     },
-    async () => {
-      throw new Error("local_disabled");
-    },
-    {
-      kind: "write",
-      debugTag: "trabajadores:create",
-      fallbackToLocalOnAvailabilityError: false,
-    },
-  );
+  });
 
-  const data = unwrapMaybeOkEnvelope<any>(raw);
-
-  if (typeof data !== "boolean") {
+  if (typeof ok !== "boolean") {
     throw new Error("invalid_remote_response");
   }
 
-  return data;
+  return ok;
 }
 
 function AddTrabajador() {

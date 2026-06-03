@@ -13,7 +13,9 @@ use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
 };
-use tpv_domain::trabajadores::{limpiar_opcional, AsignacionCambios, AsignacionNueva};
+use tpv_domain::trabajadores::{
+    limpiar_opcional, AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
+};
 
 use crate::mapping::{v_i64, v_string};
 
@@ -51,6 +53,14 @@ fn hhmm_opt(t: &Option<String>) -> String {
 
 fn opt_text(o: Option<String>) -> Value {
     o.map(Value::Text).unwrap_or(Value::Null)
+}
+
+async fn select_one_i64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
+    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
+    if let Some(row) = rows.next().await.map_err(db_err)? {
+        return Ok(v_i64(row.get_value(0).map_err(db_err)?));
+    }
+    Ok(None)
 }
 
 #[async_trait]
@@ -391,6 +401,161 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }
 
         Ok(out)
+    }
+
+    async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool> {
+        let db = &self.conn;
+
+        db.execute_batch("BEGIN;").await.map_err(db_err)?;
+
+        let res: AppResult<bool> = async {
+            db.execute(
+                r#"
+                INSERT INTO Usuarios (
+                  ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+                "#,
+                vec![
+                    Value::Integer(data.id_rol),
+                    Value::Text(data.email.clone()),
+                    Value::Text(data.password_hash.clone()),
+                    Value::Text(data.nombre.clone()),
+                    opt_text(data.apellido.clone()),
+                    Value::Text(data.estado.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            let id_usuario = select_one_i64(db, "SELECT last_insert_rowid();", vec![])
+                .await?
+                .ok_or_else(|| AppError::repository("No se pudo obtener last_insert_rowid() de Usuario"))?;
+
+            db.execute(
+                r#"
+                INSERT INTO Trabajadores (
+                  ID_Usuario, DNI, Telefono, Puesto, IBAN,
+                  Numero_Seguridad_Social, Fecha_Inicio_Contrato, Fecha_Fin_Contrato
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+                "#,
+                vec![
+                    Value::Integer(id_usuario),
+                    opt_text(data.dni.clone()),
+                    opt_text(data.telefono.clone()),
+                    opt_text(data.puesto.clone()),
+                    opt_text(data.iban.clone()),
+                    opt_text(data.numero_seguridad_social.clone()),
+                    opt_text(data.fecha_inicio_contrato.clone()),
+                    opt_text(data.fecha_fin_contrato.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            Ok(true)
+        }
+        .await;
+
+        match res {
+            Ok(v) => {
+                db.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = db.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn update_trabajador(
+        &self,
+        id_trabajador: i64,
+        cambios: TrabajadorCambios,
+    ) -> AppResult<bool> {
+        let db = &self.conn;
+
+        db.execute_batch("BEGIN;").await.map_err(db_err)?;
+
+        let res: AppResult<bool> = async {
+            // Datos de cuenta (Usuarios). El PIN sólo se actualiza si llega un hash nuevo.
+            if let Some(hash) = cambios.password_hash.clone() {
+                db.execute(
+                    r#"
+                    UPDATE Usuarios
+                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4,
+                           Estado = ?5, Password_Hash = ?6
+                     WHERE ID_Usuario = ?7;
+                    "#,
+                    vec![
+                        Value::Integer(cambios.id_rol),
+                        Value::Text(cambios.email.clone()),
+                        Value::Text(cambios.nombre.clone()),
+                        opt_text(cambios.apellido.clone()),
+                        Value::Text(cambios.estado.clone()),
+                        Value::Text(hash),
+                        Value::Integer(cambios.id_usuario),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            } else {
+                db.execute(
+                    r#"
+                    UPDATE Usuarios
+                       SET ID_Rol = ?1, Email = ?2, Nombre = ?3, Apellido = ?4, Estado = ?5
+                     WHERE ID_Usuario = ?6;
+                    "#,
+                    vec![
+                        Value::Integer(cambios.id_rol),
+                        Value::Text(cambios.email.clone()),
+                        Value::Text(cambios.nombre.clone()),
+                        opt_text(cambios.apellido.clone()),
+                        Value::Text(cambios.estado.clone()),
+                        Value::Integer(cambios.id_usuario),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // Datos laborales (Trabajadores).
+            db.execute(
+                r#"
+                UPDATE Trabajadores
+                   SET DNI = ?1, Telefono = ?2, Puesto = ?3, IBAN = ?4,
+                       Numero_Seguridad_Social = ?5,
+                       Fecha_Inicio_Contrato = ?6, Fecha_Fin_Contrato = ?7
+                 WHERE ID_Trabajador = ?8;
+                "#,
+                vec![
+                    opt_text(cambios.dni.clone()),
+                    opt_text(cambios.telefono.clone()),
+                    opt_text(cambios.puesto.clone()),
+                    opt_text(cambios.iban.clone()),
+                    opt_text(cambios.numero_seguridad_social.clone()),
+                    opt_text(cambios.fecha_inicio_contrato.clone()),
+                    opt_text(cambios.fecha_fin_contrato.clone()),
+                    Value::Integer(id_trabajador),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            Ok(true)
+        }
+        .await;
+
+        match res {
+            Ok(v) => {
+                db.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = db.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
     }
 
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {

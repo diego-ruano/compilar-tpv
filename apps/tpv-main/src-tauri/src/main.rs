@@ -1,10 +1,7 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod cloud_sync;
 mod commands;
-mod fallback_local;
-mod sync_manager;
 
 use base64::prelude::*;
 use libsql::{Builder, Connection, Value};
@@ -307,8 +304,6 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     let conn = init_main_db(&app_data_dir).await?;
     let db = Arc::new(conn);
 
-    sync_manager::start_sync_manager_loop(db.clone());
-
     let mut guard = state.db.lock().await;
     *guard = Some(db);
 
@@ -389,10 +384,6 @@ pub fn run() {
                 None
             };
 
-            if let Some(db) = db_opt.as_ref().cloned() {
-                sync_manager::start_sync_manager_loop(db);
-            }
-
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db_opt)),
                 mode: Arc::new(Mutex::new(mode)),
@@ -408,13 +399,6 @@ pub fn run() {
             // genéricos
             save_image,
             get_app_data_path,
-            // sync
-            cloud_sync::sync_get_last_cloud_change_id,
-            cloud_sync::sync_apply_cloud_changes,
-            cloud_sync::sync_mark_local_operation_applied,
-            sync_manager::sync_enqueue_pending_local_apply,
-            sync_manager::sync_manager_kick,
-            sync_manager::sync_pending_local_apply_count,
             // auth / login
             commands::login::list_login_users,
             commands::login::login_user,
@@ -483,6 +467,8 @@ pub fn run() {
             commands::trabajadores::trabajadores_get_all,
             commands::trabajadores::trabajadores_get_detail,
             commands::trabajadores::trabajadores_get_trabajador_id_by_usuario,
+            commands::trabajadores::trabajadores_create,
+            commands::trabajadores::trabajadores_update,
             commands::trabajadores::turnos_get_all,
             commands::trabajadores::horarios_get_asignaciones_semana,
             commands::trabajadores::horarios_create_asignacion,
@@ -562,17 +548,6 @@ pub fn run() {
             commands::configuracion::config_patch_business_settings,
             commands::configuracion::config_get_ticket_settings,
             commands::configuracion::config_patch_ticket_settings,
-            // fallback_local
-            fallback_local::fallback_local_outbox_enqueue,
-            fallback_local::fallback_local_outbox_get_pending,
-            fallback_local::fallback_local_outbox_pending_count,
-            fallback_local::fallback_local_outbox_mark_syncing,
-            fallback_local::fallback_local_outbox_mark_applied,
-            fallback_local::fallback_local_outbox_mark_failed,
-            fallback_local::fallback_local_outbox_requeue_syncing,
-            fallback_local::fallback_local_outbox_get_by_op_id,
-            fallback_local::fallback_local_outbox_delete_applied,
-            fallback_local::fallback_local_outbox_claim_next,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

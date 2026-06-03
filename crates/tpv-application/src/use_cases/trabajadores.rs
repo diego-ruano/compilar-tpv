@@ -3,10 +3,14 @@
 
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorDetailArgs,
-    TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow, TurnoRow,
+    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
+    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
+    TrabajadorUpdateInput, TurnoRow,
 };
-use tpv_domain::trabajadores::{limpiar_opcional, requerido, AsignacionCambios, AsignacionNueva};
+use tpv_domain::trabajadores::{
+    limpiar_opcional, normalizar_estado, requerido, AsignacionCambios, AsignacionNueva,
+    TrabajadorCambios, TrabajadorNuevo,
+};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::trabajadores::TrabajadoresRepository;
@@ -127,4 +131,71 @@ pub async fn set_predeterminado_desde_semana(
 ) -> AppResult<bool> {
     let fecha_lunes = requerido(&input.fecha_lunes, "fecha_lunes").map_err(AppError::validation)?;
     repo.set_predeterminado_desde_semana(fecha_lunes).await
+}
+
+/* Alta / edición de trabajador */
+
+pub async fn create_trabajador(
+    repo: &dyn TrabajadoresRepository,
+    input: TrabajadorCreateInput,
+) -> AppResult<bool> {
+    if input.id_rol <= 0 {
+        return Err(AppError::validation("id_rol required"));
+    }
+
+    let email = requerido(&input.email, "email").map_err(AppError::validation)?;
+    let password_hash =
+        requerido(&input.password_hash, "password_hash").map_err(AppError::validation)?;
+    let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
+
+    let data = TrabajadorNuevo {
+        id_rol: input.id_rol,
+        email,
+        password_hash,
+        nombre,
+        apellido: limpiar_opcional(input.apellido),
+        estado: normalizar_estado(&input.estado),
+        dni: limpiar_opcional(input.dni),
+        telefono: limpiar_opcional(input.telefono),
+        puesto: limpiar_opcional(input.puesto),
+        iban: limpiar_opcional(input.iban),
+        numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
+        fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
+        fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
+    };
+
+    repo.create_trabajador(data).await
+}
+
+pub async fn update_trabajador(
+    repo: &dyn TrabajadoresRepository,
+    input: TrabajadorUpdateInput,
+) -> AppResult<bool> {
+    if input.id_trabajador <= 0 || input.id_usuario <= 0 || input.id_rol <= 0 {
+        return Err(AppError::validation(
+            "id_trabajador/id_usuario/id_rol required",
+        ));
+    }
+
+    let email = requerido(&input.email, "email").map_err(AppError::validation)?;
+    let nombre = requerido(&input.nombre, "nombre").map_err(AppError::validation)?;
+
+    let cambios = TrabajadorCambios {
+        id_usuario: input.id_usuario,
+        id_rol: input.id_rol,
+        email,
+        nombre,
+        apellido: limpiar_opcional(input.apellido),
+        estado: normalizar_estado(&input.estado),
+        dni: limpiar_opcional(input.dni),
+        telefono: limpiar_opcional(input.telefono),
+        puesto: limpiar_opcional(input.puesto),
+        iban: limpiar_opcional(input.iban),
+        numero_seguridad_social: limpiar_opcional(input.numero_seguridad_social),
+        fecha_inicio_contrato: limpiar_opcional(input.fecha_inicio_contrato),
+        fecha_fin_contrato: limpiar_opcional(input.fecha_fin_contrato),
+        password_hash: limpiar_opcional(input.password_hash),
+    };
+
+    repo.update_trabajador(input.id_trabajador, cambios).await
 }

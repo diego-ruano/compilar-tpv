@@ -9,8 +9,9 @@ use tauri::State;
 use tpv_application::use_cases::trabajadores as uc;
 use tpv_contracts::trabajadores::{
     AsignacionCreateInput, AsignacionDeleteInput, AsignacionRow, AsignacionUpdateInput,
-    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorDetailArgs,
-    TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow, TurnoRow,
+    CopySemanaInput, HorariosSemanaArgs, RolRow, SetPredeterminadoInput, TrabajadorCreateInput,
+    TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
+    TrabajadorUpdateInput, TurnoRow,
 };
 use tpv_infra_sqlite::trabajadores::SqliteTrabajadoresRepository;
 
@@ -67,6 +68,26 @@ pub async fn horarios_get_asignaciones_semana(
 ) -> Result<Vec<AsignacionRow>, String> {
     let conn = get_db(&state).await?;
     Ok(uc::get_asignaciones_semana(&repo(conn), args).await?)
+}
+
+/* Alta / edición de trabajador */
+
+#[tauri::command]
+pub async fn trabajadores_create(
+    state: State<'_, AppState>,
+    args: TrabajadorCreateInput,
+) -> Result<bool, String> {
+    let conn = get_db(&state).await?;
+    Ok(uc::create_trabajador(&repo(conn), args).await?)
+}
+
+#[tauri::command]
+pub async fn trabajadores_update(
+    state: State<'_, AppState>,
+    args: TrabajadorUpdateInput,
+) -> Result<bool, String> {
+    let conn = get_db(&state).await?;
+    Ok(uc::update_trabajador(&repo(conn), args).await?)
 }
 
 /* Escrituras */

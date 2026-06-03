@@ -336,6 +336,11 @@ export type TpvServerSignedHeadersArgs = { mode: string, method: string, path: s
 
 export type TrabajadorCardStats = { id_trabajador: number, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
 
+/**
+ * Alta de trabajador (crea Usuario + Trabajador en local). Local-First.
+ */
+export type TrabajadorCreateInput = { id_rol: number, email: string, password_hash: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, };
+
 export type TrabajadorDetailArgs = { id_trabajador: number, };
 
 export type TrabajadorDetailRow = { ID_Trabajador: number, ID_Usuario: number, ID_Rol: number, Email: string, Nombre: string, Apellido: string | null, Estado: string, DNI: string | null, Telefono: string | null, Puesto: string | null, IBAN: string | null, Numero_Seguridad_Social: string | null, Fecha_Inicio_Contrato: string | null, Fecha_Fin_Contrato: string | null, };
@@ -345,6 +350,12 @@ export type TrabajadorIdByUsuarioArgs = { id_usuario: number, };
 export type TrabajadorRow = { ID_Trabajador: number, ID_Usuario: number, Nombre: string, Apellido: string | null, Email: string, Estado: string, Nombre_Rol: string, Telefono: string | null, Puesto: string | null, };
 
 export type TrabajadorUI = { ID_Trabajador: number, ID_Usuario: number, Nombre: string, Apellido: string | null, Puesto: string | null, Email: string, };
+
+/**
+ * Edición de trabajador (actualiza Usuario + Trabajador). `password_hash` opcional:
+ * si viene, cambia el PIN; si no, se mantiene el actual. Local-First.
+ */
+export type TrabajadorUpdateInput = { id_trabajador: number, id_usuario: number, id_rol: number, email: string, nombre: string, apellido?: string, estado: string, dni?: string, telefono?: string, puesto?: string, iban?: string, numero_seguridad_social?: string, fecha_inicio_contrato?: string, fecha_fin_contrato?: string, password_hash?: string, };
 
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 

@@ -201,3 +201,82 @@ pub struct CopySemanaInput {
 pub struct SetPredeterminadoInput {
     pub fecha_lunes: String,
 }
+
+/// Alta de trabajador (crea Usuario + Trabajador en local). Local-First.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TrabajadorCreateInput {
+    #[ts(type = "number")]
+    pub id_rol: i64,
+    pub email: String,
+    pub password_hash: String,
+    pub nombre: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub apellido: Option<String>,
+    pub estado: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub dni: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub telefono: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub puesto: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub iban: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub numero_seguridad_social: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fecha_inicio_contrato: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fecha_fin_contrato: Option<String>,
+}
+
+/// Edición de trabajador (actualiza Usuario + Trabajador). `password_hash` opcional:
+/// si viene, cambia el PIN; si no, se mantiene el actual. Local-First.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TrabajadorUpdateInput {
+    #[ts(type = "number")]
+    pub id_trabajador: i64,
+    #[ts(type = "number")]
+    pub id_usuario: i64,
+    #[ts(type = "number")]
+    pub id_rol: i64,
+    pub email: String,
+    pub nombre: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub apellido: Option<String>,
+    pub estado: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub dni: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub telefono: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub puesto: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub iban: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub numero_seguridad_social: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fecha_inicio_contrato: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fecha_fin_contrato: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub password_hash: Option<String>,
+}

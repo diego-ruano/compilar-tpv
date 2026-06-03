@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
 };
-use tpv_domain::trabajadores::{AsignacionCambios, AsignacionNueva};
+use tpv_domain::trabajadores::{
+    AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
+};
 
 use crate::error::AppResult;
 
@@ -17,6 +19,14 @@ pub trait TrabajadoresRepository: Send + Sync {
     async fn get_detail(&self, id_trabajador: i64) -> AppResult<Option<TrabajadorDetailRow>>;
     async fn get_id_by_usuario(&self, id_usuario: i64) -> AppResult<Option<i64>>;
     async fn turnos_get_all(&self) -> AppResult<Vec<TurnoRow>>;
+
+    /* Alta / edición de trabajador (crea/actualiza Usuario + Trabajador) */
+    async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool>;
+    async fn update_trabajador(
+        &self,
+        id_trabajador: i64,
+        cambios: TrabajadorCambios,
+    ) -> AppResult<bool>;
     /// Asignaciones de la semana del lunes dado, rellenando con el horario
     /// predeterminado para semanas presentes/futuras (filas con `id_asignacion = 0`).
     async fn get_asignaciones_semana(&self, fecha_lunes: String) -> AppResult<Vec<AsignacionRow>>;

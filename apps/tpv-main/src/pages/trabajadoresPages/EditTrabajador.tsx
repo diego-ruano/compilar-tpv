@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { dualCall } from "../../net/dualCall";
+import { invokeClient } from "@tpv/client";
 
 type Rol = {
   ID_Rol: number;
@@ -150,9 +150,8 @@ function getErrorMessage(e: unknown) {
 }
 
 /**
- * Temporalmente online-only:
- * todavía no existen commands locales create/update trabajador
- * en Rust, así que esta edición no pasa aún por outbox local.
+ * Local-First: edición de trabajador contra el comando Tauri `trabajadores_update`
+ * (actualiza Usuario + Trabajador de forma atómica). El PIN sólo se cambia si llega hash.
  */
 async function updateTrabajadorRemote(payload: {
   idTrabajador: number;
@@ -205,30 +204,31 @@ async function updateTrabajadorRemote(payload: {
     body.password_hash = payload.passwordHash;
   }
 
-  const raw = await dualCall<unknown>(
-    {
-      path: "/v1/trabajadores/update",
-      method: "POST",
-      body,
-      unwrapOkEnvelope: false,
+  const ok = await invokeClient<boolean>("trabajadores_update", {
+    args: {
+      id_trabajador: body.id_trabajador,
+      id_usuario: body.id_usuario,
+      id_rol: body.id_rol,
+      email: body.email,
+      nombre: body.nombre,
+      apellido: body.apellido,
+      estado: body.estado,
+      dni: body.dni,
+      telefono: body.telefono,
+      puesto: body.puesto,
+      iban: body.iban,
+      numero_seguridad_social: body.numero_seguridad_social,
+      fecha_inicio_contrato: body.fecha_inicio_contrato,
+      fecha_fin_contrato: body.fecha_fin_contrato,
+      password_hash: body.password_hash,
     },
-    async () => {
-      throw new Error("local_disabled");
-    },
-    {
-      kind: "write",
-      debugTag: "trabajadores:update",
-      fallbackToLocalOnAvailabilityError: false,
-    },
-  );
+  });
 
-  const data = unwrapMaybeOkEnvelope<any>(raw);
-
-  if (typeof data !== "boolean") {
+  if (typeof ok !== "boolean") {
     throw new Error("invalid_remote_response");
   }
 
-  return data;
+  return ok;
 }
 
 function EditTrabajador() {

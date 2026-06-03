@@ -7,20 +7,6 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useMode, type DeviceMode } from "./zustand/useMode";
 import { useBusinessSettings } from "./zustand/useBusinessSettings";
 import { useTicketSettings } from "./zustand/useTicketSettings";
-import { startHealthcheck } from "./net/healthCheck";
-import {
-    registerDefaultOutboxSyncRoutes,
-    startOutboxAutoSync,
-    stopOutboxAutoSync,
-} from "./net/outboxSync";
-import {
-    initCloudSyncCoordinator,
-    stopCloudSyncCoordinator,
-} from "./net/cloudSync";
-import {
-    initRealtimeSocket,
-    stopRealtimeSocket,
-} from "./net/realtimeSocket";
 
 import LogoAltaria from "./assets/img/logo.png";
 import CerrarVentana from "./assets/svg/CerrarVentana.svg";
@@ -313,12 +299,6 @@ export default function AppBoot({ router }: { router: any }) {
     );
     const [gate, setGate] = useState<GateResult | "loading">("loading");
 
-    const stopHealthRef = useRef<null | (() => void)>(null);
-    const stopOutboxRef = useRef<null | (() => void)>(null);
-    const outboxRoutesRegisteredRef = useRef(false);
-    const cloudSyncStartedRef = useRef(false);
-    const realtimeStartedRef = useRef(false);
-
     const [act, setAct] = useState({
         licenseKey: "",
         businessName: "",
@@ -502,115 +482,8 @@ export default function AppBoot({ router }: { router: any }) {
         }
     }
 
-    useEffect(() => {
-        if (outboxRoutesRegisteredRef.current) return;
-
-        registerDefaultOutboxSyncRoutes();
-        outboxRoutesRegisteredRef.current = true;
-    }, []);
-
-    useEffect(() => {
-        if (stopHealthRef.current) {
-            stopHealthRef.current();
-            stopHealthRef.current = null;
-        }
-
-        if (mode === "tpv") {
-            stopHealthRef.current = startHealthcheck();
-        }
-
-        return () => {
-            if (stopHealthRef.current) {
-                stopHealthRef.current();
-                stopHealthRef.current = null;
-            }
-        };
-    }, [mode]);
-
-    useEffect(() => {
-        if (stopOutboxRef.current) {
-            stopOutboxRef.current();
-            stopOutboxRef.current = null;
-        }
-
-        stopOutboxAutoSync();
-
-        const canStartOutbox =
-            mode === "tpv" &&
-            gate !== "loading" &&
-            !!gate.allowed;
-
-        if (canStartOutbox) {
-            stopOutboxRef.current = startOutboxAutoSync();
-        }
-
-        return () => {
-            if (stopOutboxRef.current) {
-                stopOutboxRef.current();
-                stopOutboxRef.current = null;
-            }
-
-            stopOutboxAutoSync();
-        };
-    }, [mode, gate]);
-
-    useEffect(() => {
-        const canStartCloudSync =
-            mode === "tpv" &&
-            gate !== "loading" &&
-            !!gate.allowed;
-
-        if (canStartCloudSync) {
-            if (!cloudSyncStartedRef.current) {
-                initCloudSyncCoordinator({
-                    debug: false,
-                });
-
-                cloudSyncStartedRef.current = true;
-            }
-
-            return;
-        }
-
-        if (cloudSyncStartedRef.current) {
-            stopCloudSyncCoordinator();
-            cloudSyncStartedRef.current = false;
-        }
-    }, [mode, gate]);
-
-    useEffect(() => {
-        const canStartRealtime =
-            (mode === "tpv" &&
-                gate !== "loading" &&
-                !!gate.allowed) ||
-            (mode === "handy" && handyPair.step === "paired");
-
-        if (canStartRealtime) {
-            if (!realtimeStartedRef.current) {
-                initRealtimeSocket({
-                    debug: false,
-                });
-
-                realtimeStartedRef.current = true;
-            }
-
-            return;
-        }
-
-        if (realtimeStartedRef.current) {
-            stopRealtimeSocket();
-            realtimeStartedRef.current = false;
-        }
-    }, [mode, gate, handyPair.step]);
-
-    useEffect(() => {
-        return () => {
-            stopRealtimeSocket();
-            stopCloudSyncCoordinator();
-            cloudSyncStartedRef.current = false;
-            realtimeStartedRef.current = false;
-        };
-    }, []);
+    // Local-First puro: se elimina toda la capa de sync (outbox / healthcheck /
+    // cloudSync / realtime). El emparejamiento Handy se conserva (no usa net/*).
 
     useEffect(() => {
         (async () => {
