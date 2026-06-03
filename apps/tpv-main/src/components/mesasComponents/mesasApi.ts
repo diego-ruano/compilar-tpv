@@ -1,5 +1,11 @@
-import { invoke } from "@tauri-apps/api/core";
-import { dualCall } from "../../net/dualCall";
+// src/components/mesasComponents/mesasApi.ts
+//
+// API de mesas / comandas / ticket / cocina — Local-First puro. Sustituye dualCall
+// (remoto + local + outbox + op_id + afterRemoteOk) por invocación directa del comando
+// Tauri vía @tpv/client. Las firmas exportadas y los tipos NO cambian; los 5 componentes
+// consumidores siguen igual. Se conservan los nombres de comando del backend hexagonal.
+
+import { invokeClient } from "@tpv/client";
 import type { Salon, MesaMeta } from "./types";
 
 /* =========================
@@ -32,38 +38,6 @@ export type KitchenRow = {
     Fecha_Hora_Apertura: string | null;
 };
 
-type CommandBody<TArgs extends Record<string, any>> = {
-    op_id: string;
-    command_name: string;
-    args: TArgs;
-};
-
-type LocalWriteArgs<TArgs extends Record<string, any>> = TArgs & {
-    op_id: string;
-    enqueue_outbox?: boolean;
-};
-
-/* =========================
-   Constantes
-========================= */
-
-const COMMANDS = {
-    mesasSaveLayout: "mesas.saveLayout",
-
-    reservasSetEstado: "reservas.setEstado",
-
-    comandasAbrir: "comandas.abrir",
-    comandasAddLinea: "comandas.addLinea",
-    comandasSetTrabajadorIfNull: "comandas.setTrabajadorIfNull",
-
-    ticketRemoveOnePending: "ticket.removeOnePending",
-    ticketDeleteDetalle: "ticket.deleteDetalle",
-    ticketUpdateDetalleNota: "ticket.updateDetalleNota",
-    ticketCobrarDetalles: "ticket.cobrarDetalles",
-
-    kitchenSetLineaEstado: "kitchen.setLineaEstado",
-} as const;
-
 /* =========================
    Helpers
 ========================= */
@@ -72,7 +46,6 @@ function pick(obj: any, keys: string[]): any {
     for (const k of keys) {
         if (obj && obj[k] != null) return obj[k];
     }
-
     return undefined;
 }
 
@@ -88,123 +61,8 @@ function toStr(v: any, fallback = ""): string {
 
 function toNullableStr(v: any): string | null {
     if (v == null) return null;
-
     const s = String(v).trim();
     return s ? s : null;
-}
-
-function makeOpId(scope: string): string {
-    const prefix = String(scope || "op").replace(/[^a-zA-Z0-9_-]/g, "_");
-
-    if (
-        typeof crypto !== "undefined" &&
-        typeof crypto.randomUUID === "function"
-    ) {
-        return `${prefix}-${crypto.randomUUID()}`;
-    }
-
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function commandBody<TArgs extends Record<string, any>>(
-    opId: string,
-    commandName: string,
-    args: TArgs,
-): CommandBody<TArgs> {
-    return {
-        op_id: opId,
-        command_name: commandName,
-        args,
-    };
-}
-
-function localWriteArgs<TArgs extends Record<string, any>>(
-    opId: string,
-    args: TArgs,
-    enqueueOutbox = true,
-): LocalWriteArgs<TArgs> {
-    return {
-        op_id: opId,
-        ...args,
-        enqueue_outbox: enqueueOutbox,
-    };
-}
-
-function unwrapMaybeOkEnvelope<T>(x: any): T {
-    if (!x || typeof x !== "object") return x as T;
-    if (!("ok" in x)) return x as T;
-
-    if (!x.ok) {
-        const msg = String(x.error ?? x.message ?? "remote_ok_false");
-        throw new Error(msg);
-    }
-
-    if ("result" in x) return x.result as T;
-    if ("user" in x) return x.user as T;
-    if ("status" in x) return x.status as T;
-    if ("data" in x) return x.data as T;
-
-    return x as T;
-}
-
-function extractIdComanda(x: any): number | null {
-    const data = unwrapMaybeOkEnvelope<any>(x);
-
-    if (typeof data === "number" && Number.isFinite(data) && data > 0) {
-        return Math.trunc(data);
-    }
-
-    const id = toNum(
-        pick(data, [
-            "id_comanda",
-            "idComanda",
-            "ID_Comanda",
-            "idComandaAbierta",
-            "comandaId",
-            "ID",
-            "id",
-        ]),
-        0,
-    );
-
-    return id > 0 ? id : null;
-}
-
-function extractIdDetalle(x: any): number | null {
-    const data = unwrapMaybeOkEnvelope<any>(x);
-
-    if (typeof data === "number" && Number.isFinite(data) && data > 0) {
-        return Math.trunc(data);
-    }
-
-    const id = toNum(
-        pick(data, [
-            "id_detalle",
-            "idDetalle",
-            "ID_Detalle",
-            "detalleId",
-            "ID",
-            "id",
-        ]),
-        0,
-    );
-
-    return id > 0 ? id : null;
-}
-
-function extractIdPago(x: any): number | null {
-    const data = unwrapMaybeOkEnvelope<any>(x);
-
-    if (typeof data === "number" && Number.isFinite(data) && data > 0) {
-        return Math.trunc(data);
-    }
-
-    const id = toNum(
-        pick(data, ["id_pago", "idPago", "ID_Pago", "pagoId", "ID", "id"]),
-        0,
-    );
-
-    return id > 0 ? id : null;
 }
 
 function parseAnyMesaId(k: string): number | null {
@@ -218,28 +76,6 @@ function parseAnyMesaId(k: string): number | null {
     if (m2) return Number(m2[1]);
 
     return null;
-}
-
-/* =========================
-   Helpers Tauri local
-========================= */
-
-async function invokeLocalRead<T>(
-    command: string,
-    args?: Record<string, any>,
-): Promise<T> {
-    if (args === undefined) {
-        return await invoke<T>(command);
-    }
-
-    return await invoke<T>(command, { args });
-}
-
-async function invokeLocalWrite<T>(
-    command: string,
-    args: Record<string, any>,
-): Promise<T> {
-    return await invoke<T>(command, { args });
 }
 
 /* =========================
@@ -274,12 +110,7 @@ function normalizeProducto(r: any): ProductoDTO {
             0,
         ),
         ID_Categoria: toNum(
-            pick(r, [
-                "ID_Categoria",
-                "id_categoria",
-                "idCategoria",
-                "IdCategoria",
-            ]),
+            pick(r, ["ID_Categoria", "id_categoria", "idCategoria", "IdCategoria"]),
             0,
         ),
         Nombre: toStr(pick(r, ["Nombre", "nombre"]), ""),
@@ -298,70 +129,19 @@ function normalizeProducto(r: any): ProductoDTO {
 ========================= */
 
 export async function mesasLoadLayout(): Promise<Salon[]> {
-    const raw = await dualCall<Salon[]>(
-        {
-            path: "/v1/mesas/layout/load",
-            method: "GET",
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalRead<Salon[]>("load_layout"),
-        {
-            kind: "read",
-            debugTag: "mesas:layoutLoad",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<Salon[]>(raw);
+    const rows = await invokeClient<Salon[]>("load_layout");
+    return rows ?? [];
 }
 
 export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
-    const opId = makeOpId("mesas_save_layout");
-
-    const args = {
-        salons: Array.isArray(salons) ? salons : [],
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/mesas/layout/save",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.mesasSaveLayout, args),
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalWrite<void>("save_layout", localWriteArgs(opId, args, true)),
-        {
-            kind: "write",
-            commandName: COMMANDS.mesasSaveLayout,
-            debugTag: "mesas:layoutSave",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "save_layout",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    await invokeClient<string>("save_layout", {
+        args: { salons: Array.isArray(salons) ? salons : [] },
+    });
 }
 
 export async function mesasLoadMesaMeta(): Promise<Record<any, MesaMeta>> {
     try {
-        const raw0 = await dualCall<Record<string, any>>(
-            {
-                path: "/v1/mesas/meta/all",
-                method: "GET",
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<Record<string, any>>("mesas_meta_all"),
-            {
-                kind: "read",
-                debugTag: "mesas:metaAll",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const raw = unwrapMaybeOkEnvelope<Record<string, any>>(raw0);
+        const raw = await invokeClient<Record<string, any>>("mesas_meta_all");
         const out: Record<any, any> = {};
 
         for (const [k, v] of Object.entries(raw ?? {})) {
@@ -407,21 +187,9 @@ export async function mesasLoadMesaMeta(): Promise<Record<any, MesaMeta>> {
 
         return out as any;
     } catch {
-        const ocupadas0 = await dualCall<Record<string, boolean>>(
-            {
-                path: "/v1/mesas/ocupadas",
-                method: "GET",
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<Record<string, boolean>>("get_mesas_ocupadas"),
-            {
-                kind: "read",
-                debugTag: "mesas:ocupadasFallback",
-                fallbackToLocalOnAvailabilityError: true,
-            },
+        const ocupadas = await invokeClient<Record<string, boolean>>(
+            "get_mesas_ocupadas",
         );
-
-        const ocupadas = unwrapMaybeOkEnvelope<Record<string, boolean>>(ocupadas0);
         const out: Record<any, any> = {};
 
         for (const [k, v] of Object.entries(ocupadas ?? {})) {
@@ -453,38 +221,9 @@ async function reservaSetEstado(
     const id = toNum(idReserva, 0);
     if (!id) throw new Error("id_reserva inválido");
 
-    const opId = makeOpId("reservas_set_estado");
-
-    const args = {
-        id_reserva: id,
-        estado,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/reservas/set-estado",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.reservasSetEstado, args),
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalWrite<void>(
-                "set_reserva_estado",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.reservasSetEstado,
-            debugTag: `reservas:setEstado:${estado}`,
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "set_reserva_estado",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    await invokeClient<string>("set_reserva_estado", {
+        args: { id_reserva: id, estado },
+    });
 }
 
 export async function reservaMarcarActivaAhora(
@@ -512,25 +251,9 @@ export async function mesasEnsureOpenComanda(params: {
     const idUsuario =
         params.idUsuario != null ? toNum(params.idUsuario, 0) : null;
 
-    const abierta0 = await dualCall<any>(
-        {
-            path: "/v1/comandas/get-abierta-by-mesa",
-            method: "POST",
-            body: { id_mesa: idMesa },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalRead<any>("get_comanda_abierta_by_mesa", {
-                id_mesa: idMesa,
-            }),
-        {
-            kind: "read",
-            debugTag: "comandas:getAbiertaByMesa",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    const abierta = unwrapMaybeOkEnvelope<any>(abierta0);
+    const abierta = await invokeClient<any>("get_comanda_abierta_by_mesa", {
+        args: { id_mesa: idMesa },
+    });
 
     const idAbierta = toNum(
         pick(abierta, ["id_comanda", "ID_Comanda", "idComanda", "id"]),
@@ -539,44 +262,14 @@ export async function mesasEnsureOpenComanda(params: {
 
     if (idAbierta > 0) {
         if (idUsuario && idUsuario > 0) {
-            const opId = makeOpId("comandas_set_trabajador_if_null");
-
-            const args = {
-                id_comanda: idAbierta,
-                id_usuario: idUsuario,
-                id_trabajador: null,
-            };
-
             try {
-                await dualCall<void>(
-                    {
-                        path: "/v1/comandas/set-trabajador-if-null",
-                        method: "POST",
-                        body: commandBody(
-                            opId,
-                            COMMANDS.comandasSetTrabajadorIfNull,
-                            args,
-                        ),
-                        unwrapOkEnvelope: true,
+                await invokeClient<boolean>("comanda_set_trabajador_if_null", {
+                    args: {
+                        id_comanda: idAbierta,
+                        id_usuario: idUsuario,
+                        id_trabajador: null,
                     },
-                    () =>
-                        invokeLocalWrite<void>(
-                            "comanda_set_trabajador_if_null",
-                            localWriteArgs(opId, args, true),
-                        ),
-                    {
-                        kind: "write",
-                        commandName: COMMANDS.comandasSetTrabajadorIfNull,
-                        debugTag: "comandas:setTrabajadorIfNull",
-                        fallbackToLocalOnAvailabilityError: true,
-                        afterRemoteOk: async () => {
-                            await invokeLocalWrite<void>(
-                                "comanda_set_trabajador_if_null",
-                                localWriteArgs(opId, args, false),
-                            );
-                        },
-                    },
-                );
+                });
             } catch {
                 // No bloqueamos cargar/abrir la comanda por esto.
             }
@@ -588,51 +281,17 @@ export async function mesasEnsureOpenComanda(params: {
     const idReserva =
         params.idReserva != null ? toNum(params.idReserva, 0) : null;
 
-    const opId = makeOpId("comandas_abrir");
-
-    const args = {
-        id_mesa: idMesa,
-        id_usuario: idUsuario,
-        id_trabajador: null,
-        id_reserva: idReserva,
-        id_comanda: null,
-    };
-
-    const creada = await dualCall<any>(
-        {
-            path: "/v1/comandas/abrir",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.comandasAbrir, args),
-            unwrapOkEnvelope: true,
+    const creada = await invokeClient<any>("abrir_comanda", {
+        args: {
+            id_mesa: idMesa,
+            id_usuario: idUsuario,
+            id_trabajador: null,
+            id_reserva: idReserva,
         },
-        () => invokeLocalWrite<any>("abrir_comanda", localWriteArgs(opId, args, true)),
-        {
-            kind: "write",
-            commandName: COMMANDS.comandasAbrir,
-            debugTag: "comandas:abrir",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async (remoteResult: any) => {
-                const remoteId = extractIdComanda(remoteResult);
-
-                await invokeLocalWrite<any>(
-                    "abrir_comanda",
-                    localWriteArgs(
-                        opId,
-                        {
-                            ...args,
-                            id_comanda: remoteId,
-                        },
-                        false,
-                    ),
-                );
-            },
-        },
-    );
-
-    const creadaData = unwrapMaybeOkEnvelope<any>(creada);
+    });
 
     const idCreada = toNum(
-        pick(creadaData, ["id_comanda", "ID_Comanda", "idComanda", "id"]),
+        pick(creada, ["id_comanda", "ID_Comanda", "idComanda", "id"]),
         0,
     );
 
@@ -644,25 +303,10 @@ export async function mesasLoadTicket(idComanda: number): Promise<any[]> {
     const id = toNum(idComanda, 0);
     if (!id) return [];
 
-    const raw = await dualCall<any[]>(
-        {
-            path: "/v1/comandas/get-lineas",
-            method: "POST",
-            body: { id_comanda: id },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalRead<any[]>("get_lineas_comanda", {
-                id_comanda: id,
-            }),
-        {
-            kind: "read",
-            debugTag: "comandas:getLineas",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<any[]>(raw) ?? [];
+    const rows = await invokeClient<any[]>("get_lineas_comanda", {
+        args: { id_comanda: id },
+    });
+    return rows ?? [];
 }
 
 export async function mesasAddDetalle(params: {
@@ -683,52 +327,16 @@ export async function mesasAddDetalle(params: {
     if (!idProducto) throw new Error("id_producto inválido");
     if (!Number.isFinite(precio)) throw new Error("precio inválido");
 
-    const opId = makeOpId("comandas_add_linea");
-
-    const args = {
-        id_comanda: idComanda,
-        id_producto: idProducto,
-        cantidad,
-        precio,
-        id_usuario: idUsuario,
-        id_trabajador: null,
-        id_detalle: null,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/comandas/add-linea",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.comandasAddLinea, args),
-            unwrapOkEnvelope: true,
+    await invokeClient<string>("add_linea_comanda", {
+        args: {
+            id_comanda: idComanda,
+            id_producto: idProducto,
+            cantidad,
+            precio,
+            id_usuario: idUsuario,
+            id_trabajador: null,
         },
-        () =>
-            invokeLocalWrite<void>(
-                "add_linea_comanda",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.comandasAddLinea,
-            debugTag: "comandas:addLinea",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async (remoteResult: any) => {
-                const remoteIdDetalle = extractIdDetalle(remoteResult);
-
-                await invokeLocalWrite<void>(
-                    "add_linea_comanda",
-                    localWriteArgs(
-                        opId,
-                        {
-                            ...args,
-                            id_detalle: remoteIdDetalle,
-                        },
-                        false,
-                    ),
-                );
-            },
-        },
-    );
+    });
 }
 
 /* =========================
@@ -738,22 +346,7 @@ export async function mesasAddDetalle(params: {
 export async function productosListCategoriasVendibles(): Promise<
     CategoriaDTO[]
 > {
-    const raw = await dualCall<any[]>(
-        {
-            path: "/v1/catalogo/categorias",
-            method: "GET",
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalRead<any[]>("list_categorias_vendibles"),
-        {
-            kind: "read",
-            debugTag: "catalogo:listCategorias",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    const rows = unwrapMaybeOkEnvelope<any[]>(raw);
-
+    const rows = await invokeClient<any[]>("list_categorias_vendibles");
     return (rows ?? [])
         .map(normalizeCategoria)
         .filter((c) => c.ID_Categoria > 0);
@@ -765,25 +358,9 @@ export async function productosListByCategoria(
     const idCat = toNum(idCategoria, 0);
     if (!idCat) throw new Error("id_categoria inválido");
 
-    const args = { id_categoria: idCat };
-
-    const raw = await dualCall<any[]>(
-        {
-            path: "/v1/catalogo/productos/by-categoria",
-            method: "POST",
-            body: args,
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalRead<any[]>("list_productos_by_categoria", args),
-        {
-            kind: "read",
-            debugTag: "catalogo:listByCategoria",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    const rows = unwrapMaybeOkEnvelope<any[]>(raw);
-
+    const rows = await invokeClient<any[]>("list_productos_by_categoria", {
+        args: { id_categoria: idCat },
+    });
     return (rows ?? [])
         .map(normalizeProducto)
         .filter((p) => p.ID_Producto > 0);
@@ -795,25 +372,9 @@ export async function productosSearchByNombre(
     const query = String(q ?? "").trim();
     if (!query) return [];
 
-    const args = { query };
-
-    const raw = await dualCall<any[]>(
-        {
-            path: "/v1/catalogo/productos/search",
-            method: "POST",
-            body: args,
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalRead<any[]>("search_productos_by_nombre", args),
-        {
-            kind: "read",
-            debugTag: "catalogo:search",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    const rows = unwrapMaybeOkEnvelope<any[]>(raw);
-
+    const rows = await invokeClient<any[]>("search_productos_by_nombre", {
+        args: { query },
+    });
     return (rows ?? [])
         .map(normalizeProducto)
         .filter((p) => p.ID_Producto > 0);
@@ -831,75 +392,18 @@ export async function mesasRemoveOnePendingDetalle(params: {
     const idProducto = toNum(params.idProducto, 0);
     if (!idComanda || !idProducto) return;
 
-    const opId = makeOpId("ticket_remove_one_pending");
-
-    const args = {
-        id_comanda: idComanda,
-        id_producto: idProducto,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/ticket/remove-one-pending",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.ticketRemoveOnePending, args),
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalWrite<void>(
-                "remove_one_pending_detalle",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.ticketRemoveOnePending,
-            debugTag: "ticket:removeOnePending",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "remove_one_pending_detalle",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    await invokeClient<string>("remove_one_pending_detalle", {
+        args: { id_comanda: idComanda, id_producto: idProducto },
+    });
 }
 
 export async function mesasDeleteDetalle(idDetalle: number): Promise<void> {
     const id = toNum(idDetalle, 0);
     if (!id) return;
 
-    const opId = makeOpId("ticket_delete_detalle");
-
-    const args = {
-        id_detalle: id,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/ticket/delete-detalle",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.ticketDeleteDetalle, args),
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalWrite<void>(
-                "delete_detalle",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.ticketDeleteDetalle,
-            debugTag: "ticket:deleteDetalle",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "delete_detalle",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    await invokeClient<string>("delete_detalle", {
+        args: { id_detalle: id },
+    });
 }
 
 export async function mesasUpdateDetalleNota(params: {
@@ -909,38 +413,9 @@ export async function mesasUpdateDetalleNota(params: {
     const id = toNum(params.idDetalle, 0);
     if (!id) return;
 
-    const opId = makeOpId("ticket_update_detalle_nota");
-
-    const args = {
-        id_detalle: id,
-        nota: params.nota,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/ticket/update-detalle-notas",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.ticketUpdateDetalleNota, args),
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invokeLocalWrite<void>(
-                "update_detalle_nota",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.ticketUpdateDetalleNota,
-            debugTag: "ticket:updateDetalleNota",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "update_detalle_nota",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    await invokeClient<string>("update_detalle_nota", {
+        args: { id_detalle: id, nota: params.nota },
+    });
 }
 
 export async function mesasCobrarDetalles(params: {
@@ -960,51 +435,15 @@ export async function mesasCobrarDetalles(params: {
 
     if (!idComanda || !detalleIds.length) return;
 
-    const opId = makeOpId("ticket_cobrar_detalles");
-
-    const args = {
-        id_comanda: idComanda,
-        metodo: params.metodo,
-        tipo: params.tipo,
-        detalle_ids: detalleIds,
-        id_usuario: idUsuario,
-        id_pago: null,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/ticket/cobrar-detalles",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.ticketCobrarDetalles, args),
-            unwrapOkEnvelope: true,
+    await invokeClient<string>("cobrar_detalles", {
+        args: {
+            id_comanda: idComanda,
+            metodo: params.metodo,
+            tipo: params.tipo,
+            detalle_ids: detalleIds,
+            id_usuario: idUsuario,
         },
-        () =>
-            invokeLocalWrite<void>(
-                "cobrar_detalles",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.ticketCobrarDetalles,
-            debugTag: "ticket:cobrarDetalles",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async (remoteResult: any) => {
-                const remoteIdPago = extractIdPago(remoteResult);
-
-                await invokeLocalWrite<void>(
-                    "cobrar_detalles",
-                    localWriteArgs(
-                        opId,
-                        {
-                            ...args,
-                            id_pago: remoteIdPago,
-                        },
-                        false,
-                    ),
-                );
-            },
-        },
-    );
+    });
 }
 
 /* =========================
@@ -1012,31 +451,11 @@ export async function mesasCobrarDetalles(params: {
 ========================= */
 
 export async function cocinaListHoyPendientes(): Promise<KitchenRow[]> {
-    const raw = await dualCall<any[]>(
-        {
-            path: "/v1/kitchen/today/pending",
-            method: "GET",
-            unwrapOkEnvelope: true,
-        },
-        () => invokeLocalRead<any[]>("cocina_list_hoy_pendientes"),
-        {
-            kind: "read",
-            debugTag: "kitchen:listTodayPending",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    const rows = unwrapMaybeOkEnvelope<any[]>(raw);
+    const rows = await invokeClient<any[]>("kitchen_list_today_pending");
 
     return (rows ?? []).map((r: any) => ({
-        ID_Comanda: toNum(
-            pick(r, ["ID_Comanda", "id_comanda", "idComanda"]),
-            0,
-        ),
-        ID_Detalle: toNum(
-            pick(r, ["ID_Detalle", "id_detalle", "idDetalle"]),
-            0,
-        ),
+        ID_Comanda: toNum(pick(r, ["ID_Comanda", "id_comanda", "idComanda"]), 0),
+        ID_Detalle: toNum(pick(r, ["ID_Detalle", "id_detalle", "idDetalle"]), 0),
         Cantidad: toNum(pick(r, ["Cantidad", "cantidad"]), 1),
         Nombre_Producto: toStr(
             pick(r, ["Nombre_Producto", "productoNombre", "Nombre", "nombre"]),
@@ -1075,37 +494,11 @@ export async function cocinaSetLineaEstado(params: {
 
     if (!idDetalle || !idUsuarioCocinero) return;
 
-    const opId = makeOpId("kitchen_set_line_state");
-
-    const args = {
-        id_detalle: idDetalle,
-        estado: params.estado,
-        id_usuario_cocinero: idUsuarioCocinero,
-    };
-
-    await dualCall<void>(
-        {
-            path: "/v1/kitchen/set-line-state",
-            method: "POST",
-            body: commandBody(opId, COMMANDS.kitchenSetLineaEstado, args),
-            unwrapOkEnvelope: true,
+    await invokeClient<string>("kitchen_set_line_state", {
+        args: {
+            id_detalle: idDetalle,
+            estado: params.estado,
+            id_usuario_cocinero: idUsuarioCocinero,
         },
-        () =>
-            invokeLocalWrite<void>(
-                "cocina_set_linea_estado",
-                localWriteArgs(opId, args, true),
-            ),
-        {
-            kind: "write",
-            commandName: COMMANDS.kitchenSetLineaEstado,
-            debugTag: "kitchen:setLineaEstado",
-            fallbackToLocalOnAvailabilityError: true,
-            afterRemoteOk: async () => {
-                await invokeLocalWrite<void>(
-                    "cocina_set_linea_estado",
-                    localWriteArgs(opId, args, false),
-                );
-            },
-        },
-    );
+    });
 }
