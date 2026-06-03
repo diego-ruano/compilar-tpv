@@ -14,6 +14,7 @@ pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
 pub mod inventario;
+pub mod login;
 pub mod mesas;
 pub mod proveedores;
 pub mod reservas;

@@ -5,7 +5,6 @@ mod cloud_sync;
 mod commands;
 mod fallback_local;
 mod licensing;
-mod login;
 mod sync_manager;
 mod pairing;
 
@@ -180,7 +179,7 @@ async fn seed_admin_if_empty(conn: &Connection) -> Result<(), String> {
         return Err("No se pudo resolver ID_Rol de Administrador".to_string());
     }
 
-    let hash = login::hash_password("1234".to_string())?;
+    let hash = commands::login::hash_password("1234".to_string())?;
 
     conn.execute(
         r#"
@@ -419,13 +418,13 @@ pub fn run() {
             sync_manager::sync_manager_kick,
             sync_manager::sync_pending_local_apply_count,
             // auth / login
-            login::list_login_users,
-            login::login_user,
-            login::hash_password,
-            login::get_today_punch_status,
-            login::punch,
-            login::complete_initial_setup,
-            login::set_turno_partido_hoy,
+            commands::login::list_login_users,
+            commands::login::login_user,
+            commands::login::hash_password,
+            commands::login::get_today_punch_status,
+            commands::login::punch,
+            commands::login::complete_initial_setup,
+            commands::login::set_turno_partido_hoy,
             // mesass
             commands::mesas::save_layout,
             commands::mesas::load_layout,

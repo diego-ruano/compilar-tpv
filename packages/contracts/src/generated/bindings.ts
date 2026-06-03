@@ -60,6 +60,8 @@ export type ComandaBarraRow = { ID_Comanda: number, Fecha_Hora_Apertura: string,
 
 export type ComandaRow = { id_comanda: number, id_mesa: number, id_trabajador: number | null, id_reserva: number | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: number, estado: string, };
 
+export type CompleteInitialSetupInput = { id_usuario: number, pin_actual: string, pin_nuevo: string, email_nuevo: string, };
+
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
  */
@@ -104,6 +106,10 @@ export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumen
 export type KitchenRow = { ID_Comanda: number, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: number, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
 
 export type LineaComandaRow = { ID_Detalle: number, ID_Comanda: number, ID_Producto: number, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
+
+export type LoginOk = { id_usuario: number, id_trabajador: number | null, nombre: string, apellido: string | null, rol: string, email: string, requiere_setup: number, };
+
+export type LoginUserArgs = { id_usuario: number, pin: string, };
 
 export type LoteDto = { ID_Lote: number, ID_Producto: number, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Cantidad_Inicial: number, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: number | null, Notas: string | null, };
 
@@ -213,6 +219,14 @@ export type ProveedoresStatsArgs = { range: StatsRange, };
 
 export type ProveedoresStatsResponse = { total_gasto: number, num_gastos: number, gasto_medio: number, porcentaje_sobre_total_gastos: number, proveedor_top: ProveedorTop | null, gastos_evolucion: ChartSeriesF64Out, gasto_por_proveedor: ChartSeriesF64Out, ultimos_gastos: Array<UltimoGastoProveedor>, };
 
+export type PunchInput = { id_usuario: number, pin: string, tipo: string, fecha?: string, hora_evento?: string, };
+
+export type PunchParte = { parte: number, entrada: string | null, salida: string | null, estado: string, };
+
+export type PunchStatus = { fecha: string, turno_partido: number, partes: Array<PunchParte>, };
+
+export type PunchStatusArgs = { id_usuario: number, };
+
 export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: string, minutos_retraso: number, };
 
 /**
@@ -260,6 +274,8 @@ export type SetAsignacionesTareaInput = { id_tarea: number, ids_trabajadores: Ar
 export type SetPredeterminadoInput = { fecha_lunes: string, };
 
 export type SetProductoAlergenosInput = { id_producto: number, ids_alergenos: Array<number>, };
+
+export type SetTurnoPartidoInput = { id_usuario: number, turno_partido: boolean, fecha?: string, };
 
 export type StatsCategoriaRow = { ID_Categoria: number, Nombre: string, };
 
@@ -324,6 +340,8 @@ export type UpsertCategoriaInput = { id_categoria?: number, nombre: string, nomb
 export type UpsertProductoInput = { id_producto?: number, id_categoria: number, id_proveedor?: number, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, ids_alergenos: Array<number>, };
 
 export type UpsertProductoResult = { id_producto: number, };
+
+export type UserListItem = { id_usuario: number, nombre: string, apellido: string | null, nombre_rol: string, };
 
 export type VerTicketsDetalleRow = { ID_Detalle: number, ID_Producto: number, Nombre: string, Cantidad: number, Precio_Unitario: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
 
