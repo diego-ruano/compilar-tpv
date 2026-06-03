@@ -1,15 +1,15 @@
 import React, { useMemo, useState } from "react";
-import NavBar from "../components/layoutComponent/NavBar";
-import Account from "../components/layoutComponent/Account";
+import NavBar from "../../components/layoutComponent/NavBar";
+import Account from "../../components/layoutComponent/Account";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import LogoAltaria from "../assets/img/logo.png";
-import CerrarVentana from "../assets/svg/CerrarVentana.svg";
-import MinimizarVentana from "../assets/svg/MinimizarVentana.svg";
-import PantallaCompleta from "../assets/svg/PantallaCompleta.svg";
-import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import LogoAltaria from "../../assets/img/logo.png";
+import CerrarVentana from "../../assets/svg/CerrarVentana.svg";
+import MinimizarVentana from "../../assets/svg/MinimizarVentana.svg";
+import PantallaCompleta from "../../assets/svg/PantallaCompleta.svg";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 
 // ✅ Reutilizamos el icono que ya tienes
-import { ReactComponent as MenuOpen } from "../assets/svg/MenuOpen.svg";
+import { ReactComponent as MenuOpen } from "../../assets/svg/MenuOpen.svg";
 
 function layout({ children }: { children: React.ReactNode }) {
   const ventana = getCurrentWindow();

@@ -4,14 +4,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { RouterProvider } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { useMode, type DeviceMode } from "./shared/stores/useMode";
-import { useBusinessSettings } from "./shared/stores/useBusinessSettings";
-import { useTicketSettings } from "./shared/stores/useTicketSettings";
+import { useMode, type DeviceMode } from "../shared/stores/useMode";
+import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../shared/stores/useTicketSettings";
 
-import LogoAltaria from "./assets/img/logo.png";
-import CerrarVentana from "./assets/svg/CerrarVentana.svg";
-import MinimizarVentana from "./assets/svg/MinimizarVentana.svg";
-import PantallaCompleta from "./assets/svg/PantallaCompleta.svg";
+import LogoAltaria from "../assets/img/logo.png";
+import CerrarVentana from "../assets/svg/CerrarVentana.svg";
+import MinimizarVentana from "../assets/svg/MinimizarVentana.svg";
+import PantallaCompleta from "../assets/svg/PantallaCompleta.svg";
 
 /* =========================
    API helper (Rust proxy)
