@@ -1,18 +1,16 @@
-// src/components/inventario/api/inventarioApi.ts
-import { invoke } from "@tauri-apps/api/core";
-import { dualCall } from "../../../net/dualCall";
+// src/components/InventaryComponents/api/inventarioAPI.ts
+//
+// API de inventario — Local-First puro (invokeClient vía @tpv/client). Sustituye dualCall/
+// op_id/outbox/afterRemoteOk/remote-id. Se conservan tipos, normalizadores y la superficie
+// del objeto exportado `inventarioAPI` (mismos métodos, firmas y tipos de retorno).
+
+import { invokeClient } from "@tpv/client";
 
 /** =========================
  *  Tipos frontend
- *  =========================
- *  - Producto = ficha estable
- *  - Lote = stock real
- */
+ *  ========================= */
 
-// ─────────────────────────────────────────────────────────────
-// Categorías
-// ─────────────────────────────────────────────────────────────
-
+// ─── Categorías ───
 export type CategoriaRow = {
     ID_Categoria: number;
     Nombre: string;
@@ -28,10 +26,7 @@ export type ProveedorMiniRow = {
     Email: string | null;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Productos
-// ─────────────────────────────────────────────────────────────
-
+// ─── Productos ───
 export type ProductoRow = {
     ID_Producto: number;
     ID_Categoria: number;
@@ -55,10 +50,7 @@ export type ProductoListRow = ProductoRow & {
     Lote_Proximo: string | null;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Lotes
-// ─────────────────────────────────────────────────────────────
-
+// ─── Lotes ───
 export type LoteRow = {
     ID_Lote: number;
     ID_Producto: number;
@@ -77,10 +69,7 @@ export type LoteRow = {
     Notas: string | null;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Resumen
-// ─────────────────────────────────────────────────────────────
-
+// ─── Resumen ───
 export type ProductoResumen = {
     Nombre: string;
     Stock_Actual: number | null;
@@ -92,10 +81,7 @@ export type ProductoResumen = {
     Precio_Venta: number | null;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Alérgenos
-// ─────────────────────────────────────────────────────────────
-
+// ─── Alérgenos ───
 export type AlergenoRow = {
     ID_Alergeno: number;
     Nombre: string;
@@ -107,10 +93,7 @@ export type ProductoDetalle = ProductoRow & {
     alergs: Array<Pick<AlergenoRow, "ID_Alergeno" | "Nombre" | "Ruta_Imagen">>;
 };
 
-// ─────────────────────────────────────────────────────────────
-// Inputs frontend
-// ─────────────────────────────────────────────────────────────
-
+// ─── Inputs frontend ───
 export type CreateCategoriaArgs = {
     nombre: string;
     nombre_imagen: string;
@@ -161,89 +144,6 @@ export type AjusteLoteArgs = {
     notas?: string | null;
 };
 
-type CommandBody<TArgs extends Record<string, any>> = {
-    op_id: string;
-    command_name: string;
-    args: TArgs;
-};
-
-type LocalWriteArgs<TArgs extends Record<string, any>> = TArgs & {
-    op_id: string;
-    enqueue_outbox?: boolean;
-};
-
-/** =========================
- * Constantes
- * ========================= */
-
-const COMMANDS = {
-    createCategoria: "inventario.createCategoria",
-    deleteProducto: "inventario.deleteProducto",
-    upsertProducto: "inventario.upsertProducto",
-    setAlergenosProducto: "inventario.setAlergenosProducto",
-    createLote: "inventario.createLote",
-    ajustarLote: "inventario.ajustarLote",
-} as const;
-
-const INVENTARIO_REMOTE = {
-    listCategorias: {
-        path: "/v1/inventario/categorias",
-        method: "GET" as const,
-    },
-    createCategoria: {
-        path: "/v1/inventario/categoria/create",
-        method: "POST" as const,
-    },
-    listProveedoresMini: {
-        path: "/v1/inventario/proveedores-mini",
-        method: "GET" as const,
-    },
-    listProductosByCategoria: {
-        path: "/v1/inventario/productos/by-categoria",
-        method: "POST" as const,
-    },
-    deleteProducto: {
-        path: "/v1/inventario/producto/delete",
-        method: "POST" as const,
-    },
-    upsertProducto: {
-        path: "/v1/inventario/producto/upsert",
-        method: "POST" as const,
-    },
-    getResumen: {
-        path: "/v1/inventario/resumen",
-        method: "POST" as const,
-    },
-    listAlergenos: {
-        path: "/v1/inventario/alergenos",
-        method: "GET" as const,
-    },
-    getAlergenosProducto: {
-        path: "/v1/inventario/alergenos/by-producto",
-        method: "POST" as const,
-    },
-    setAlergenosProducto: {
-        path: "/v1/inventario/alergenos/set-producto",
-        method: "POST" as const,
-    },
-    getProductoDetalle: {
-        path: "/v1/inventario/producto/detail",
-        method: "POST" as const,
-    },
-    listLotesByProducto: {
-        path: "/v1/inventario/lotes/by-producto",
-        method: "POST" as const,
-    },
-    createLote: {
-        path: "/v1/inventario/lote/create",
-        method: "POST" as const,
-    },
-    ajustarLote: {
-        path: "/v1/inventario/lote/ajustar",
-        method: "POST" as const,
-    },
-} as const;
-
 /** =========================
  * Helpers normalización
  * ========================= */
@@ -279,100 +179,16 @@ function pick<T = any>(obj: any, keys: string[], fallback?: any): T {
             return obj[k] as T;
         }
     }
-
     return fallback as T;
 }
 
 function normalizeIdList(values: any[]): number[] {
     const ids = (values ?? []).map(toNum).filter((n) => n > 0);
     ids.sort((a, b) => a - b);
-
     return Array.from(new Set(ids));
 }
 
-function makeOpId(scope: string): string {
-    const prefix = scope.replace(/[^a-zA-Z0-9_-]/g, "_");
-
-    if (
-        typeof crypto !== "undefined" &&
-        typeof crypto.randomUUID === "function"
-    ) {
-        return `${prefix}-${crypto.randomUUID()}`;
-    }
-
-    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function commandBody<TArgs extends Record<string, any>>(
-    opId: string,
-    commandName: string,
-    args: TArgs,
-): CommandBody<TArgs> {
-    return {
-        op_id: opId,
-        command_name: commandName,
-        args,
-    };
-}
-
-function localWriteArgs<TArgs extends Record<string, any>>(
-    opId: string,
-    args: TArgs,
-    enqueueOutbox = true,
-): LocalWriteArgs<TArgs> {
-    return {
-        op_id: opId,
-        ...args,
-        enqueue_outbox: enqueueOutbox,
-    };
-}
-
-function unwrapMaybeOkEnvelope<T>(x: any): T {
-    if (!x || typeof x !== "object") return x as T;
-    if (!("ok" in x)) return x as T;
-
-    if (!x.ok) {
-        const msg = String(x.error ?? x.message ?? "remote_ok_false");
-        throw new Error(msg);
-    }
-
-    if ("result" in x) return x.result as T;
-    if ("user" in x) return x.user as T;
-    if ("status" in x) return x.status as T;
-    if ("data" in x) return x.data as T;
-
-    return x as T;
-}
-
-/** =========================
- * Helpers Tauri local
- * ========================= */
-
-async function invokeLocalRead<T>(
-    command: string,
-    args?: Record<string, any>,
-): Promise<T> {
-    if (args === undefined) {
-        return await invoke<T>(command);
-    }
-
-    return await invoke<T>(command, { args });
-}
-
-async function invokeLocalWrite<T>(
-    command: string,
-    args: Record<string, any>,
-): Promise<T> {
-    return await invoke<T>(command, { args });
-}
-
-/** =========================
- * Helpers respuesta remota
- * ========================= */
-
-function extractRemoteNumber(raw: any, keys: string[]): number | null {
-    const data = unwrapMaybeOkEnvelope<any>(raw);
-
+function extractRemoteNumber(data: any, keys: string[]): number | null {
     if (typeof data === "number" && Number.isFinite(data) && data > 0) {
         return Math.trunc(data);
     }
@@ -392,10 +208,8 @@ function extractRemoteNumber(raw: any, keys: string[]): number | null {
 
     for (const candidate of candidates) {
         if (!candidate || typeof candidate !== "object") continue;
-
         const value = pick<any>(candidate, keys, undefined);
         const n = Number(value);
-
         if (Number.isFinite(n) && n > 0) {
             return Math.trunc(n);
         }
@@ -404,28 +218,12 @@ function extractRemoteNumber(raw: any, keys: string[]): number | null {
     return null;
 }
 
-function extractCategoriaId(raw: any): number | null {
-    return extractRemoteNumber(raw, [
-        "id_categoria",
-        "idCategoria",
-        "ID_Categoria",
-    ]);
-}
-
 function extractProductoId(raw: any): number | null {
-    return extractRemoteNumber(raw, [
-        "id_producto",
-        "idProducto",
-        "ID_Producto",
-    ]);
-}
-
-function extractLoteId(raw: any): number | null {
-    return extractRemoteNumber(raw, ["id_lote", "idLote", "ID_Lote"]);
+    return extractRemoteNumber(raw, ["id_producto", "idProducto", "ID_Producto"]);
 }
 
 /** =========================
- * Normalizadores backend/local -> frontend
+ * Normalizadores backend -> frontend
  * ========================= */
 
 function normalizeCategoria(row: any): CategoriaRow {
@@ -548,13 +346,7 @@ function normalizeResumen(row: any): ProductoResumen {
             ]),
         ),
         Lote: toStrOrNull(
-            pick(row, [
-                "Lote",
-                "lote",
-                "Codigo_Lote",
-                "codigo_lote",
-                "codigoLote",
-            ]),
+            pick(row, ["Lote", "lote", "Codigo_Lote", "codigo_lote", "codigoLote"]),
         ),
         Precio_Venta: toNumOrNull(
             pick(row, ["Precio_Venta", "precio_venta", "precioVenta"]),
@@ -595,19 +387,11 @@ function normalizeLote(row: any): LoteRow {
         ),
         Caducidad: toStrOrNull(pick(row, ["Caducidad", "caducidad"])),
         Cantidad_Inicial: toNum(
-            pick(row, [
-                "Cantidad_Inicial",
-                "cantidad_inicial",
-                "cantidadInicial",
-            ]),
+            pick(row, ["Cantidad_Inicial", "cantidad_inicial", "cantidadInicial"]),
             0,
         ),
         Stock_Disponible: toNum(
-            pick(row, [
-                "Stock_Disponible",
-                "stock_disponible",
-                "stockDisponible",
-            ]),
+            pick(row, ["Stock_Disponible", "stock_disponible", "stockDisponible"]),
             0,
         ),
         Coste_Unitario: toNumOrNull(
@@ -626,146 +410,44 @@ function normalizeLote(row: any): LoteRow {
 
 export const inventarioAPI = {
     async listCategorias(): Promise<CategoriaRow[]> {
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.listCategorias,
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<any[]>("inventario_list_categorias"),
-            {
-                kind: "read",
-                debugTag: "inventario:listCategorias",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const rows = unwrapMaybeOkEnvelope<any[]>(raw);
+        const rows = await invokeClient<any[]>("inventario_list_categorias");
         return (rows ?? []).map(normalizeCategoria);
     },
 
     async createCategoria(args: CreateCategoriaArgs): Promise<void> {
-        const opId = makeOpId("inventario_create_categoria");
-
-        const domainArgs = {
-            nombre: toStr(args.nombre),
-            nombre_imagen: toStr(args.nombre_imagen),
-            ruta_imagen: toStr(args.ruta_imagen),
-            vendible: !!args.vendible,
-            pasa_cocina: !!args.pasa_cocina,
-        };
-
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.createCategoria,
-                body: commandBody(opId, COMMANDS.createCategoria, domainArgs),
-                unwrapOkEnvelope: true,
+        await invokeClient("inventario_create_categoria", {
+            args: {
+                nombre: toStr(args.nombre),
+                nombre_imagen: toStr(args.nombre_imagen),
+                ruta_imagen: toStr(args.ruta_imagen),
+                vendible: !!args.vendible,
+                pasa_cocina: !!args.pasa_cocina,
             },
-            () => invokeLocalWrite("inventario_create_categoria", localArgs),
-            {
-                kind: "write",
-                commandName: COMMANDS.createCategoria,
-                debugTag: "inventario:createCategoria",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async (remoteResult) => {
-                    const idCategoria = extractCategoriaId(remoteResult);
-
-                    if (!idCategoria) {
-                        throw new Error("remote_id_categoria_missing");
-                    }
-
-                    await invokeLocalWrite("inventario_create_categoria", {
-                        ...localArgs,
-                        id_categoria: idCategoria,
-                        enqueue_outbox: false,
-                    });
-                },
-            },
-        );
+        });
     },
 
     async listProveedoresMini(): Promise<ProveedorMiniRow[]> {
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.listProveedoresMini,
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<any[]>("inventario_list_proveedores_mini"),
-            {
-                kind: "read",
-                debugTag: "inventario:listProveedoresMini",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const rows = unwrapMaybeOkEnvelope<any[]>(raw);
+        const rows = await invokeClient<any[]>("inventario_list_proveedores_mini");
         return (rows ?? []).map(normalizeProveedorMini);
     },
 
     async listProductosByCategoria(
         id_categoria: number,
     ): Promise<ProductoListRow[]> {
-        const args = {
-            id_categoria: toNum(id_categoria),
-        };
-
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.listProductosByCategoria,
-                body: args,
-                unwrapOkEnvelope: true,
-            },
-            () =>
-                invokeLocalRead<any[]>(
-                    "inventario_list_productos_by_categoria",
-                    args,
-                ),
-            {
-                kind: "read",
-                debugTag: "inventario:listProductosByCategoria",
-                fallbackToLocalOnAvailabilityError: true,
-            },
+        const rows = await invokeClient<any[]>(
+            "inventario_list_productos_by_categoria",
+            { args: { id_categoria: toNum(id_categoria) } },
         );
-
-        const rows = unwrapMaybeOkEnvelope<any[]>(raw);
         return (rows ?? []).map(normalizeProductoList);
     },
 
     async deleteProducto(id_producto: number): Promise<void> {
-        const opId = makeOpId("inventario_delete_producto");
-
-        const domainArgs = {
-            id_producto: toNum(id_producto),
-        };
-
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.deleteProducto,
-                body: commandBody(opId, COMMANDS.deleteProducto, domainArgs),
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalWrite("inventario_delete_producto", localArgs),
-            {
-                kind: "write",
-                commandName: COMMANDS.deleteProducto,
-                debugTag: "inventario:deleteProducto",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async () => {
-                    await invokeLocalWrite("inventario_delete_producto", {
-                        ...localArgs,
-                        enqueue_outbox: false,
-                    });
-                },
-            },
-        );
+        await invokeClient("inventario_delete_producto", {
+            args: { id_producto: toNum(id_producto) },
+        });
     },
 
     async upsertProducto(args: UpsertProductoArgs): Promise<number | null> {
-        const opId = makeOpId("inventario_upsert_producto");
-
         const domainArgs = {
             ...(args.id_producto == null
                 ? {}
@@ -778,14 +460,10 @@ export const inventarioAPI = {
             nombre: toStr(args.nombre),
 
             precio_venta:
-                args.precio_venta == null
-                    ? null
-                    : toNumOrNull(args.precio_venta),
+                args.precio_venta == null ? null : toNumOrNull(args.precio_venta),
 
             stock_minimo:
-                args.stock_minimo == null
-                    ? null
-                    : toNumOrNull(args.stock_minimo),
+                args.stock_minimo == null ? null : toNumOrNull(args.stock_minimo),
 
             unidad_medida: toStrOrNull(args.unidad_medida),
 
@@ -800,82 +478,25 @@ export const inventarioAPI = {
             ids_alergenos: normalizeIdList(args.ids_alergenos ?? []),
         };
 
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        let localAfterRemoteProductoId: number | null = null;
-
-        const raw = await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.upsertProducto,
-                body: commandBody(opId, COMMANDS.upsertProducto, domainArgs),
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalWrite<any>("inventario_upsert_producto", localArgs),
-            {
-                kind: "write",
-                commandName: COMMANDS.upsertProducto,
-                debugTag: "inventario:upsertProducto",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async (remoteResult) => {
-                    const remoteId = extractProductoId(remoteResult);
-                    const finalId =
-                        remoteId ?? toPositiveIntOrNull(domainArgs.id_producto);
-
-                    if (!finalId) {
-                        throw new Error("remote_id_producto_missing");
-                    }
-
-                    const localRaw = await invokeLocalWrite<any>(
-                        "inventario_upsert_producto",
-                        {
-                            ...localArgs,
-                            id_producto: finalId,
-                            enqueue_outbox: false,
-                        },
-                    );
-
-                    const localData = unwrapMaybeOkEnvelope<any>(localRaw);
-
-                    localAfterRemoteProductoId = toPositiveIntOrNull(
-                        pick(
-                            localData,
-                            ["id_producto", "idProducto", "ID_Producto"],
-                            null,
-                        ),
-                    );
-                },
-            },
-        );
-
-        return extractProductoId(raw) ?? localAfterRemoteProductoId;
+        const raw = await invokeClient<any>("inventario_upsert_producto", {
+            args: domainArgs,
+        });
+        return extractProductoId(raw);
     },
 
     async getResumen(): Promise<{
         proximos: ProductoResumen[];
         menos: ProductoResumen[];
     }> {
-        const raw = await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.getResumen,
-                body: {},
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<any>("inventario_get_resumen", {}),
-            {
-                kind: "read",
-                debugTag: "inventario:getResumen",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const data = unwrapMaybeOkEnvelope<any>(raw);
+        const data = await invokeClient<any>("inventario_get_resumen", {
+            args: {},
+        });
 
         const proximosRaw = pick<any[]>(
             data,
             ["proximos", "proximosCaducar", "proximos_caducar"],
             [],
         );
-
         const menosRaw = pick<any[]>(
             data,
             ["menos", "menosCantidad", "menos_cantidad"],
@@ -889,47 +510,15 @@ export const inventarioAPI = {
     },
 
     async listAlergenos(): Promise<AlergenoRow[]> {
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.listAlergenos,
-                unwrapOkEnvelope: true,
-            },
-            () => invokeLocalRead<any[]>("inventario_list_alergenos"),
-            {
-                kind: "read",
-                debugTag: "inventario:listAlergenos",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const rows = unwrapMaybeOkEnvelope<any[]>(raw);
+        const rows = await invokeClient<any[]>("inventario_list_alergenos");
         return (rows ?? []).map(normalizeAlergeno);
     },
 
     async getAlergenosProducto(id_producto: number): Promise<number[]> {
-        const args = {
-            id_producto: toNum(id_producto),
-        };
-
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.getAlergenosProducto,
-                body: args,
-                unwrapOkEnvelope: true,
-            },
-            () =>
-                invokeLocalRead<any[]>(
-                    "inventario_get_alergenos_producto",
-                    args,
-                ),
-            {
-                kind: "read",
-                debugTag: "inventario:getAlergenosProducto",
-                fallbackToLocalOnAvailabilityError: true,
-            },
+        const data = await invokeClient<any[]>(
+            "inventario_get_alergenos_producto",
+            { args: { id_producto: toNum(id_producto) } },
         );
-
-        const data = unwrapMaybeOkEnvelope<any[]>(raw);
 
         if (Array.isArray(data) && typeof data[0] === "number") {
             return normalizeIdList(data);
@@ -946,72 +535,18 @@ export const inventarioAPI = {
         id_producto: number,
         ids_alergenos: number[],
     ): Promise<void> {
-        const opId = makeOpId("inventario_set_alergenos_producto");
-
-        const domainArgs = {
-            id_producto: toNum(id_producto),
-            ids_alergenos: normalizeIdList(ids_alergenos ?? []),
-        };
-
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.setAlergenosProducto,
-                body: commandBody(
-                    opId,
-                    COMMANDS.setAlergenosProducto,
-                    domainArgs,
-                ),
-                unwrapOkEnvelope: true,
+        await invokeClient("inventario_set_alergenos_producto", {
+            args: {
+                id_producto: toNum(id_producto),
+                ids_alergenos: normalizeIdList(ids_alergenos ?? []),
             },
-            () =>
-                invokeLocalWrite(
-                    "inventario_set_alergenos_producto",
-                    localArgs,
-                ),
-            {
-                kind: "write",
-                commandName: COMMANDS.setAlergenosProducto,
-                debugTag: "inventario:setAlergenosProducto",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async () => {
-                    await invokeLocalWrite(
-                        "inventario_set_alergenos_producto",
-                        {
-                            ...localArgs,
-                            enqueue_outbox: false,
-                        },
-                    );
-                },
-            },
-        );
+        });
     },
 
     async getProductoDetalle(id_producto: number): Promise<ProductoDetalle> {
-        const args = {
-            id_producto: toNum(id_producto),
-        };
-
-        const raw = await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.getProductoDetalle,
-                body: args,
-                unwrapOkEnvelope: true,
-            },
-            () =>
-                invokeLocalRead<any>(
-                    "inventario_get_product_detail",
-                    args,
-                ),
-            {
-                kind: "read",
-                debugTag: "inventario:getProductoDetalle",
-                fallbackToLocalOnAvailabilityError: true,
-            },
-        );
-
-        const data = unwrapMaybeOkEnvelope<any>(raw);
+        const data = await invokeClient<any>("inventario_get_product_detail", {
+            args: { id_producto: toNum(id_producto) },
+        });
 
         const prodRaw = pick<any>(data, ["producto"], null);
         if (!prodRaw) {
@@ -1032,117 +567,45 @@ export const inventarioAPI = {
     },
 
     async listLotesByProducto(id_producto: number): Promise<LoteRow[]> {
-        const args = {
-            id_producto: toNum(id_producto),
-        };
-
-        const raw = await dualCall<any[]>(
-            {
-                ...INVENTARIO_REMOTE.listLotesByProducto,
-                body: args,
-                unwrapOkEnvelope: true,
-            },
-            () =>
-                invokeLocalRead<any[]>(
-                    "inventario_list_lotes_by_producto",
-                    args,
-                ),
-            {
-                kind: "read",
-                debugTag: "inventario:listLotesByProducto",
-                fallbackToLocalOnAvailabilityError: true,
-            },
+        const rows = await invokeClient<any[]>(
+            "inventario_list_lotes_by_producto",
+            { args: { id_producto: toNum(id_producto) } },
         );
-
-        const rows = unwrapMaybeOkEnvelope<any[]>(raw);
         return (rows ?? []).map(normalizeLote);
     },
 
     async createLote(args: CreateLoteArgs): Promise<void> {
-        const opId = makeOpId("inventario_create_lote");
+        await invokeClient("inventario_create_lote", {
+            args: {
+                id_producto: toNum(args.id_producto),
+                codigo_lote: toStr(args.codigo_lote),
 
-        const domainArgs = {
-            id_producto: toNum(args.id_producto),
-            codigo_lote: toStr(args.codigo_lote),
+                caducidad: toStrOrNull(args.caducidad),
+                cantidad_inicial: toNum(args.cantidad_inicial),
 
-            caducidad: toStrOrNull(args.caducidad),
-            cantidad_inicial: toNum(args.cantidad_inicial),
+                ...(args.stock_disponible == null
+                    ? {}
+                    : { stock_disponible: toNum(args.stock_disponible) }),
 
-            ...(args.stock_disponible == null
-                ? {}
-                : { stock_disponible: toNum(args.stock_disponible) }),
-
-            fecha_entrada: toStrOrNull(args.fecha_entrada),
-            coste_unitario:
-                args.coste_unitario == null
-                    ? null
-                    : toNumOrNull(args.coste_unitario),
-            id_proveedor:
-                args.id_proveedor == null ? null : toNum(args.id_proveedor),
-            notas: toStrOrNull(args.notas),
-        };
-
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.createLote,
-                body: commandBody(opId, COMMANDS.createLote, domainArgs),
-                unwrapOkEnvelope: true,
+                fecha_entrada: toStrOrNull(args.fecha_entrada),
+                coste_unitario:
+                    args.coste_unitario == null
+                        ? null
+                        : toNumOrNull(args.coste_unitario),
+                id_proveedor:
+                    args.id_proveedor == null ? null : toNum(args.id_proveedor),
+                notas: toStrOrNull(args.notas),
             },
-            () => invokeLocalWrite("inventario_create_lote", localArgs),
-            {
-                kind: "write",
-                commandName: COMMANDS.createLote,
-                debugTag: "inventario:createLote",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async (remoteResult) => {
-                    const idLote = extractLoteId(remoteResult);
-
-                    if (!idLote) {
-                        throw new Error("remote_id_lote_missing");
-                    }
-
-                    await invokeLocalWrite("inventario_create_lote", {
-                        ...localArgs,
-                        id_lote: idLote,
-                        enqueue_outbox: false,
-                    });
-                },
-            },
-        );
+        });
     },
 
     async ajustarLote(args: AjusteLoteArgs): Promise<void> {
-        const opId = makeOpId("inventario_ajustar_lote");
-
-        const domainArgs = {
-            id_lote: toNum(args.id_lote),
-            stock_disponible: toNum(args.stock_disponible),
-            notas: toStrOrNull(args.notas),
-        };
-
-        const localArgs = localWriteArgs(opId, domainArgs, true);
-
-        await dualCall<any>(
-            {
-                ...INVENTARIO_REMOTE.ajustarLote,
-                body: commandBody(opId, COMMANDS.ajustarLote, domainArgs),
-                unwrapOkEnvelope: true,
+        await invokeClient("inventario_ajustar_lote", {
+            args: {
+                id_lote: toNum(args.id_lote),
+                stock_disponible: toNum(args.stock_disponible),
+                notas: toStrOrNull(args.notas),
             },
-            () => invokeLocalWrite("inventario_ajustar_lote", localArgs),
-            {
-                kind: "write",
-                commandName: COMMANDS.ajustarLote,
-                debugTag: "inventario:ajustarLote",
-                fallbackToLocalOnAvailabilityError: true,
-                afterRemoteOk: async () => {
-                    await invokeLocalWrite("inventario_ajustar_lote", {
-                        ...localArgs,
-                        enqueue_outbox: false,
-                    });
-                },
-            },
-        );
+        });
     },
 };
