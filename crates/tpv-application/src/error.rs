@@ -33,6 +33,13 @@ pub enum AppError {
     /// Cualquier otro error inesperado.
     #[error("interno: {0}")]
     Internal(String),
+
+    /// Error que debe llegar al frontend **verbatim, sin prefijo**. Se reserva para
+    /// códigos de error de negocio devueltos por servicios externos cuyo string exacto
+    /// es load-bearing en el frontend (p. ej. `not_approved` en el polling de pairing
+    /// Handy, comparado por igualdad estricta en AppBoot).
+    #[error("{0}")]
+    Raw(String),
 }
 
 impl AppError {
@@ -53,6 +60,10 @@ impl AppError {
     }
     pub fn internal(msg: impl Into<String>) -> Self {
         AppError::Internal(msg.into())
+    }
+    /// Error sin prefijo (verbatim) para códigos de negocio de servicios externos.
+    pub fn raw(msg: impl Into<String>) -> Self {
+        AppError::Raw(msg.into())
     }
 }
 

@@ -591,18 +591,21 @@ impl PairingService for PairingAdapter {
         let parsed: JsonValue =
             serde_json::from_str(&text).unwrap_or(JsonValue::Object(Default::default()));
 
+        // Fidelidad con el monolito: los códigos de error de negocio del worker se
+        // propagan VERBATIM (sin prefijo de AppError), porque el frontend los compara
+        // por igualdad estricta (p. ej. `not_approved` en el polling de pairing Handy).
         if !(200..300).contains(&status) {
             if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::external(err.to_string()));
+                return Err(AppError::raw(err.to_string()));
             }
-            return Err(AppError::external(format!("http_{}", status)));
+            return Err(AppError::raw(format!("http_{}", status)));
         }
 
         if parsed.get("ok").and_then(|v| v.as_bool()) == Some(false) {
             if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::external(err.to_string()));
+                return Err(AppError::raw(err.to_string()));
             }
-            return Err(AppError::external("api_error"));
+            return Err(AppError::raw("api_error"));
         }
 
         Ok(parsed)
