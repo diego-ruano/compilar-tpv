@@ -1,12 +1,13 @@
-# TPV — Monorepo (⚠️ REFACTORIZACIÓN ESTRUCTURAL EN CURSO)
+# TPV — Monorepo (✅ REFACTORIZACIÓN ESTRUCTURAL COMPLETADA)
 
-> **Estado:** este repositorio está **en mitad de una refactorización profunda**. Se está
-> migrando un TPV (Terminal Punto de Venta) de tres repos sueltos a un **monorepo híbrido
-> JS/Rust** con **arquitectura hexagonal** en Rust, **generación automática de tipos** a
-> TypeScript con `ts-rs`, y un frontend **Local-First puro de un solo dispositivo**.
+> **Estado:** la refactorización profunda está **completada**. El TPV (Terminal Punto de Venta) es
+> ahora un **monorepo híbrido JS/Rust** con **arquitectura hexagonal** en Rust, **generación
+> automática de tipos** a TypeScript con `ts-rs`, y un frontend **Local-First puro de un solo
+> dispositivo** reestructurado en `app/ · features/ · shared/`.
 >
-> No todo está migrado todavía. Antes de tocar un módulo, mira la sección
-> [**Estado de la migración**](#estado-de-la-migración) para saber qué capa ya existe y cuál no.
+> Todos los dominios están migrados (monolito desmontado), la capa `dualCall`/sync eliminada y la
+> verificación final (`cargo build` + `tsc` + `pnpm generate-types`) pasa. Para el detalle por capa
+> y el patrón de referencia, mira [**Estado de la migración**](#estado-de-la-migración).
 
 ---
 
@@ -193,12 +194,13 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ `ts-rs` verificado y cableado (fichero único `bindings.ts`, ruta `../../../packages/...`, `cargo test -p tpv-contracts`). Ver §4.3.
 - ✅ Patrón hexagonal compartido establecido: `tpv-infra-sqlite::mapping`, `tpv-application::{ports,use_cases}`, `AppError`→`String`.
 - ✅ **Módulo `clientes` migrado (PILOTO/REFERENCIA)** end-to-end: domain → ports → repo sqlite → use cases → contracts (DTOs ts-rs) → comando Tauri fino + **rewire frontend a `@tpv/client`** (sin dualCall). Verificado: `cargo check -p tpv` ✅, `cargo test -p tpv-contracts` ✅, `tsc` frontend ✅.
-- 🟡 `pnpm install` ejecutado (workspace enlazado). ⚠️ `lucide-react` falta en `package.json` (dependencia fantasma preexistente usada en `Carousel.tsx`) — pendiente de añadir para que el frontend compile del todo.
-- ⬜ Migrar el resto de dominios siguiendo el patrón de `clientes` (estrangulando el monolito): `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `tareas`, `trabajadores`, `login`, `configuracion`, `stats`; y `licensing`/`pairing` (a `tpv-infra-licensing`).
-- ⬜ Eliminación de la capa `dualCall` + sync (frontend `net/*`, `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + comandos `*_after_remote_ok`).
-- ⬜ Mover conexión/seed de la BD a `tpv-infra-sqlite::connection` y adelgazar el shell (`AppState`).
-- ⬜ Reestructuración del frontend a `app/ · features/ · shared/`.
-- ⬜ Verificación final: `cargo build` + `tsc` + generación de tipos OK.
+- ✅ `pnpm install` ejecutado (workspace enlazado). Frontend pasa `tsc` (la antigua duda de `lucide-react` en `Carousel.tsx` ya no bloquea: el componente quedó sin uso y el type-check es verde).
+- ✅ **Todos los dominios migrados** siguiendo el patrón de `clientes` (monolito estrangulado por completo): `clientes`, `stats`, `tareas`, `trabajadores`, `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `configuracion`, `login`; y `licensing`/`pairing` (a `tpv-infra-licensing`). `apps/tpv-main/src-tauri/src/` ya sólo contiene `main.rs` (shell), `lib.rs` y `commands/` (capa fina). Alta/edición local de trabajador añadida (`trabajadores_create`/`trabajadores_update`).
+- ✅ Auditoría de fidelidad multi-agente de `licensing`/`pairing`; bug detectado y corregido (`AppError::Raw` para propagar verbatim los códigos de negocio del worker, p. ej. `not_approved` del pairing Handy).
+- ✅ Eliminada la capa `dualCall` + sync: frontend `net/*` (`dualCall`, `cloudSync`, `outboxSync`, `realtimeSocket`, `healthCheck`) y stores `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + wiring y comandos `*_after_remote_ok`. (Pairing Handy se conserva, latente.)
+- ✅ Conexión/seed de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db(app_data_dir, schema)`); el shell `main.rs` sólo aporta ruta AppData + `schema.sql`.
+- ✅ Reestructuración del frontend a `app/ · features/ · shared/` (+ `assets/`). `pages/` y `layoutComponent` viven bajo `app/`; los dominios bajo `features/`; stores/ui/toast/ticket/lib bajo `shared/`. Entry `index.html` → `/src/app/main.tsx`.
+- ✅ Verificación final: `cargo build` (workspace completo) + `cargo test -p tpv-contracts` (176 ok) + `tsc` frontend + `pnpm generate-types` (turbo) OK. Reparado el pipeline turbo (claves `"//"` inline y `packageManager` ausente).
 
 ### Patrón de referencia para migrar un módulo (seguir `clientes`)
 1. `tpv-domain/src/<m>.rs`: entidades + validación pura. Registrar en `domain/src/lib.rs`.
@@ -209,11 +211,11 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 6. `apps/tpv-main/src-tauri/src/commands/<m>.rs`: comandos finos (mismos nombres). Registrar en `commands/mod.rs` y reapuntar `main.rs` (quitar `mod <m>;` viejo + registrar `commands::<m>::…`). Borrar el `<m>.rs` monolítico.
 7. Frontend `…Apis.ts`: cambiar `dualCall` por `invokeClient` de `@tpv/client`, tipos de `@tpv/contracts`, sin `op_id`/outbox.
 
-### Backend monolítico de origen (a desmontar)
-`apps/tpv-main/src-tauri/src/` contiene aún el backend monolítico previo (`mesas.rs` ~136 KB,
-`cloud_sync.rs` ~99 KB, `venta_rapida.rs`, `stats.rs`, etc.) y `main.rs` con el registro de
-comandos restantes. Es la fuente de la migración; se irá vaciando hacia las crates. `lib.rs`
-actual es boilerplate de Tauri (`greet`) — el `run()` real está en `main.rs`.
+### Backend monolítico de origen (desmontado ✅)
+El backend monolítico previo (`mesas.rs`, `cloud_sync.rs`, `venta_rapida.rs`, `stats.rs`, …) se ha
+vaciado por completo hacia las crates hexagonales. `apps/tpv-main/src-tauri/src/` ya sólo contiene
+`main.rs` (shell: modo device, AppData, registro de comandos, `run()`), `lib.rs` (boilerplate Tauri)
+y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates/*`.
 
 ---
 
