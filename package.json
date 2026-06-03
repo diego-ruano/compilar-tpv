@@ -2,6 +2,7 @@
   "name": "tpv-monorepo",
   "private": true,
   "version": "0.1.0",
+  "packageManager": "pnpm@10.15.1",
   "description": "Monorepo TPV — apps (Tauri desktop + Cloudflare Workers), crates Rust hexagonales y packages JS compartidos.",
   "scripts": {
     "build": "turbo run build",
