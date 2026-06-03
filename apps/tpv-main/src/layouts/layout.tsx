@@ -6,7 +6,7 @@ import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
 import MinimizarVentana from "../assets/svg/MinimizarVentana.svg";
 import PantallaCompleta from "../assets/svg/PantallaCompleta.svg";
-import { useBusinessSettings } from "../zustand/useBusinessSettings";
+import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 
 // ✅ Reutilizamos el icono que ya tienes
 import { ReactComponent as MenuOpen } from "../assets/svg/MenuOpen.svg";

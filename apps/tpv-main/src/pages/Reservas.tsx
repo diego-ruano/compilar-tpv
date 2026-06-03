@@ -8,7 +8,7 @@ import {
 } from "../components/reservas/reservasApis";
 import { mesasLoadLayout } from "../components/mesasComponents/mesasApi";
 
-import { useAuth } from "../zustand/useAuth";
+import { useAuth } from "../shared/stores/useAuth";
 import { useToast } from "../components/toast";
 
 // ✅ Modal + tipos del layout (MapCanvas)

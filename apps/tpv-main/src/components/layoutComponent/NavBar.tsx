@@ -16,7 +16,7 @@ import { ReactComponent as CuentasSVG } from "../../assets/svg/CuentasSVG.svg";
 import { ReactComponent as VentaRapidaSVG } from "../../assets/svg/VentaRapidaSVG.svg";
 import { ReactComponent as TareasSVG } from "../../assets/svg/TareasSVG.svg";
 import Logo from "../../assets/img/logo-morado-cuadrado.png";
-import { useAuth } from "../../zustand/useAuth";
+import { useAuth } from "../../shared/stores/useAuth";
 
 type Props = {
   open?: boolean;

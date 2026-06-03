@@ -17,7 +17,7 @@ import {
 } from "../components/trabajadores/trabajadoresApis";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useAuth } from "../zustand/useAuth";
+import { useAuth } from "../shared/stores/useAuth";
 import { useToast } from "../components/toast";
 
 // PDF

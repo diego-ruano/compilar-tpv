@@ -2,7 +2,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useAuth } from "../zustand/useAuth";
+import { useAuth } from "../shared/stores/useAuth";
 import { useToast } from "../components/toast";
 
 import AddProductModal from "../components/ventaRapida/ui/AddProductModal";

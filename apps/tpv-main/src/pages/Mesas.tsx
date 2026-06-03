@@ -12,7 +12,7 @@ import KitchenBoard from "../components/mesasComponents/KitchenBoard";
 import { fitTransform } from "../components/mesasComponents/geometry";
 import { useElementSize } from "../components/mesasComponents/useElementSize";
 import type { Salon, MesaMeta } from "../components/mesasComponents/types";
-import { useAuth } from "../zustand/useAuth";
+import { useAuth } from "../shared/stores/useAuth";
 
 import {
     mesasLoadLayout,

@@ -1,7 +1,7 @@
 import "./Global.css";
 import Layout from "./layouts/layout";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
-import { useAuth } from "./zustand/useAuth";
+import { useAuth } from "./shared/stores/useAuth";
 import Login from "./pages/Login";
 
 // ✅ importa tu provider

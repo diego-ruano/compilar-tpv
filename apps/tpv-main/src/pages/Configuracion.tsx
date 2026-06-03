@@ -4,9 +4,9 @@
 // MANEJABA UN ARCHIVO LEGACY QUE NO TENÍA MÁS UTILIDAD QUE ESA, SE QUEDAN LAS COSAS
 // SE QUEDA COMENTADA LA PARTE QUE HAY QUE ARREGLAR PARA QUE COMPILE, PERO NO FUNCIONA AHORA MISMO ESTE ARCHIVO
 import React, { useEffect, useMemo, useState } from "react";
-import { useBusinessSettings } from "../zustand/useBusinessSettings";
-import { useTicketSettings } from "../zustand/useTicketSettings";
-import { useMode } from "../zustand/useMode";
+import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../shared/stores/useTicketSettings";
+import { useMode } from "../shared/stores/useMode";
 
 import { cn } from "../components/configuracion/utils";
 import type {

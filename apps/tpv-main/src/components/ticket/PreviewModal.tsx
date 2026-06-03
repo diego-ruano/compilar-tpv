@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
-import { useBusinessSettings } from "../../zustand/useBusinessSettings";
-import { useTicketSettings } from "../../zustand/useTicketSettings";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 
 type TicketItemLike = {
 	id: string;

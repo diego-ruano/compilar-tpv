@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { useAuth } from "../../zustand/useAuth";
+import { useAuth } from "../../shared/stores/useAuth";
 import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
