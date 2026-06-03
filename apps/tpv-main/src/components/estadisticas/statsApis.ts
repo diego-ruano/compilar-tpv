@@ -1,29 +1,12 @@
-// src/components/stats/statsApi.ts
-import { invoke } from "@tauri-apps/api/core";
-import { dualCall } from "../../net/dualCall";
+// src/components/estadisticas/statsApis.ts
+//
+// API de estadísticas — Local-First puro. Sustituye dualCall por invocación directa del
+// comando Tauri vía @tpv/client. Solo lecturas. Las firmas exportadas y los tipos NO cambian.
+// Nota: stats_mesas_get recibe `range` directo (no envuelto en `args`); el resto usa `{ args }`.
+
+import { invokeClient } from "@tpv/client";
 
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
-
-/* =========================
-   Helpers
-========================= */
-
-function unwrapMaybeOkEnvelope<T>(x: any): T {
-    if (!x || typeof x !== "object") return x as T;
-    if (!("ok" in x)) return x as T;
-
-    if (!x.ok) {
-        const msg = String(x.error ?? x.message ?? "remote_ok_false");
-        throw new Error(msg);
-    }
-
-    if ("result" in x) return x.result as T;
-    if ("user" in x) return x.user as T;
-    if ("status" in x) return x.status as T;
-    if ("data" in x) return x.data as T;
-
-    return x as T;
-}
 
 /* =========================
    MESAS
@@ -52,24 +35,7 @@ export type MesasStatsResponse = {
 export async function mesasStatsGet(
     range: StatsRange,
 ): Promise<MesasStatsResponse> {
-    const args = { range };
-
-    const raw = await dualCall<MesasStatsResponse>(
-        {
-            path: "/v1/stats/mesas/get",
-            method: "POST",
-            body: { args },
-            unwrapOkEnvelope: true,
-        },
-        () => invoke<MesasStatsResponse>("stats_mesas_get", args),
-        {
-            kind: "read",
-            debugTag: "stats:mesasGet",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<MesasStatsResponse>(raw);
+    return await invokeClient<MesasStatsResponse>("stats_mesas_get", { range });
 }
 
 /* =========================
@@ -98,21 +64,9 @@ export type ProductosStatsResumen = ProductosStatsResponse;
 export async function productosStatsListCategorias(): Promise<
     StatsCategoriaRow[]
 > {
-    const raw = await dualCall<StatsCategoriaRow[]>(
-        {
-            path: "/v1/stats/productos/categorias",
-            method: "GET",
-            unwrapOkEnvelope: true,
-        },
-        () => invoke<StatsCategoriaRow[]>("stats_productos_list_categorias"),
-        {
-            kind: "read",
-            debugTag: "stats:productosListCategorias",
-            fallbackToLocalOnAvailabilityError: true,
-        },
+    return await invokeClient<StatsCategoriaRow[]>(
+        "stats_productos_list_categorias",
     );
-
-    return unwrapMaybeOkEnvelope<StatsCategoriaRow[]>(raw);
 }
 
 export async function productosStatsResumen(args: {
@@ -120,31 +74,13 @@ export async function productosStatsResumen(args: {
     categoriaTopId: number | null;
     categoriaWorstId: number | null;
 }): Promise<ProductosStatsResponse> {
-    const localArgs = {
-        range: args.range,
-        categoria_top_id: args.categoriaTopId,
-        categoria_worst_id: args.categoriaWorstId,
-    };
-
-    const raw = await dualCall<ProductosStatsResponse>(
-        {
-            path: "/v1/stats/productos/resumen",
-            method: "POST",
-            body: { args: localArgs },
-            unwrapOkEnvelope: true,
+    return await invokeClient<ProductosStatsResponse>("stats_productos_resumen", {
+        args: {
+            range: args.range,
+            categoria_top_id: args.categoriaTopId,
+            categoria_worst_id: args.categoriaWorstId,
         },
-        () =>
-            invoke<ProductosStatsResponse>("stats_productos_resumen", {
-                args: localArgs,
-            }),
-        {
-            kind: "read",
-            debugTag: "stats:productosResumen",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<ProductosStatsResponse>(raw);
+    });
 }
 
 export const statsProductosListCategorias = productosStatsListCategorias;
@@ -182,30 +118,9 @@ export async function reservasStatsResumen(args: {
     range: StatsRange;
     turno: StatsTurno;
 }): Promise<ReservasStatsResponse> {
-    const localArgs = {
-        range: args.range,
-        turno: args.turno,
-    };
-
-    const raw = await dualCall<ReservasStatsResponse>(
-        {
-            path: "/v1/stats/reservas/resumen",
-            method: "POST",
-            body: { args: localArgs },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invoke<ReservasStatsResponse>("stats_reservas_resumen", {
-                args: localArgs,
-            }),
-        {
-            kind: "read",
-            debugTag: "stats:reservasResumen",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<ReservasStatsResponse>(raw);
+    return await invokeClient<ReservasStatsResponse>("stats_reservas_resumen", {
+        args: { range: args.range, turno: args.turno },
+    });
 }
 
 export const statsReservasResumen = reservasStatsResumen;
@@ -251,29 +166,10 @@ export type TrabajadoresStatsResponse = {
 export async function trabajadoresStatsResumen(args: {
     range: StatsRange;
 }): Promise<TrabajadoresStatsResponse> {
-    const localArgs = {
-        range: args.range,
-    };
-
-    const raw = await dualCall<TrabajadoresStatsResponse>(
-        {
-            path: "/v1/stats/trabajadores/resumen",
-            method: "POST",
-            body: { args: localArgs },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invoke<TrabajadoresStatsResponse>("stats_trabajadores_resumen", {
-                args: localArgs,
-            }),
-        {
-            kind: "read",
-            debugTag: "stats:trabajadoresResumen",
-            fallbackToLocalOnAvailabilityError: true,
-        },
+    return await invokeClient<TrabajadoresStatsResponse>(
+        "stats_trabajadores_resumen",
+        { args: { range: args.range } },
     );
-
-    return unwrapMaybeOkEnvelope<TrabajadoresStatsResponse>(raw);
 }
 
 export const statsTrabajadoresResumen = trabajadoresStatsResumen;
@@ -300,29 +196,9 @@ export type ClientesStatsResponse = {
 export async function clientesStatsResumen(args: {
     range: StatsRange;
 }): Promise<ClientesStatsResponse> {
-    const localArgs = {
-        range: args.range,
-    };
-
-    const raw = await dualCall<ClientesStatsResponse>(
-        {
-            path: "/v1/stats/clientes/resumen",
-            method: "POST",
-            body: { args: localArgs },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invoke<ClientesStatsResponse>("stats_clientes_resumen", {
-                args: localArgs,
-            }),
-        {
-            kind: "read",
-            debugTag: "stats:clientesResumen",
-            fallbackToLocalOnAvailabilityError: true,
-        },
-    );
-
-    return unwrapMaybeOkEnvelope<ClientesStatsResponse>(raw);
+    return await invokeClient<ClientesStatsResponse>("stats_clientes_resumen", {
+        args: { range: args.range },
+    });
 }
 
 export const statsClientesResumen = clientesStatsResumen;
@@ -363,29 +239,10 @@ export type ProveedoresStatsResponse = {
 export async function proveedoresStatsResumen(args: {
     range: StatsRange;
 }): Promise<ProveedoresStatsResponse> {
-    const localArgs = {
-        range: args.range,
-    };
-
-    const raw = await dualCall<ProveedoresStatsResponse>(
-        {
-            path: "/v1/stats/proveedores/resumen",
-            method: "POST",
-            body: { args: localArgs },
-            unwrapOkEnvelope: true,
-        },
-        () =>
-            invoke<ProveedoresStatsResponse>("stats_proveedores_resumen", {
-                args: localArgs,
-            }),
-        {
-            kind: "read",
-            debugTag: "stats:proveedoresResumen",
-            fallbackToLocalOnAvailabilityError: true,
-        },
+    return await invokeClient<ProveedoresStatsResponse>(
+        "stats_proveedores_resumen",
+        { args: { range: args.range } },
     );
-
-    return unwrapMaybeOkEnvelope<ProveedoresStatsResponse>(raw);
 }
 
 export const statsProveedoresResumen = proveedoresStatsResumen;
