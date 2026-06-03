@@ -14,7 +14,7 @@ pub mod mapping;
 pub mod util;
 
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
-// pub mod connection;
+pub mod connection;
 
 // Repositorios concretos (uno por agregado/módulo):
 pub mod clientes;

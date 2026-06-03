@@ -4,7 +4,7 @@
 mod commands;
 
 use base64::prelude::*;
-use libsql::{Builder, Connection, Value};
+use libsql::Connection;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -117,128 +117,6 @@ pub(crate) async fn get_db(state: &State<'_, AppState>) -> Result<Arc<Connection
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Inicialización TPV MAIN (DB local)
-// ──────────────────────────────────────────────────────────────────────────────
-
-fn value_to_i64(v: Value) -> Option<i64> {
-    match v {
-        Value::Integer(n) => Some(n),
-        Value::Real(n) => Some(n as i64),
-        Value::Text(s) => s.parse::<i64>().ok(),
-        _ => None,
-    }
-}
-
-async fn query_single_i64(conn: &Connection, sql: &str) -> Result<i64, String> {
-    let mut rows = conn
-        .query(sql, Vec::<Value>::new())
-        .await
-        .map_err(|e| format!("DB query error: {e}"))?;
-
-    let Some(row) = rows
-        .next()
-        .await
-        .map_err(|e| format!("DB row error: {e}"))?
-    else {
-        return Ok(0);
-    };
-
-    let v = row
-        .get_value(0)
-        .map_err(|e| format!("DB get_value error: {e}"))?;
-
-    Ok(value_to_i64(v).unwrap_or(0))
-}
-
-async fn seed_admin_if_empty(conn: &Connection) -> Result<(), String> {
-    conn.execute(
-        "INSERT OR IGNORE INTO Roles (Nombre_Rol) VALUES ('Administrador');",
-        Vec::<Value>::new(),
-    )
-    .await
-    .map_err(|e| format!("Error creando rol Administrador: {e}"))?;
-
-    let users_count = query_single_i64(conn, "SELECT COUNT(*) FROM Usuarios;").await?;
-
-    if users_count > 0 {
-        return Ok(());
-    }
-
-    let id_admin = query_single_i64(
-        conn,
-        "SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador' LIMIT 1;",
-    )
-    .await?;
-
-    if id_admin <= 0 {
-        return Err("No se pudo resolver ID_Rol de Administrador".to_string());
-    }
-
-    let hash = commands::login::hash_password("1234".to_string())?;
-
-    conn.execute(
-        r#"
-        INSERT INTO Usuarios (
-            ID_Rol,
-            Email,
-            Password_Hash,
-            Nombre,
-            Apellido,
-            Estado,
-            Requiere_Setup
-        )
-        VALUES (
-            ?1,
-            ?2,
-            ?3,
-            ?4,
-            ?5,
-            'Activo',
-            1
-        );
-        "#,
-        vec![
-            Value::Integer(id_admin),
-            Value::Text("admin@local".to_string()),
-            Value::Text(hash),
-            Value::Text("Admin".to_string()),
-            Value::Text("TPV".to_string()),
-        ],
-    )
-    .await
-    .map_err(|e| format!("Error creando usuario admin inicial: {e}"))?;
-
-    Ok(())
-}
-
-async fn init_main_db(app_data_dir: &Path) -> Result<Connection, String> {
-    let db_path = app_data_dir.join("data.db");
-
-    let db_path_str = db_path
-        .to_str()
-        .ok_or_else(|| "Ruta de BD inválida".to_string())?;
-
-    let db = Builder::new_local(db_path_str)
-        .build()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let c = db.connect().map_err(|e| e.to_string())?;
-
-    let schema = include_str!("../schema.sql");
-
-    c.execute_batch(schema)
-        .await
-        .map_err(|e| format!("Error ejecutando schema.sql: {e}"))?;
-
-    seed_admin_if_empty(&c)
-        .await
-        .map_err(|e| format!("Error haciendo seed_admin_if_empty: {e}"))?;
-
-    Ok(c)
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
 // Comandos: modo device + init main
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -301,7 +179,9 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     ensure_folders(&app_data_dir)?;
 
-    let conn = init_main_db(&app_data_dir).await?;
+    let conn = tpv_infra_sqlite::connection::init_main_db(&app_data_dir, include_str!("../schema.sql"))
+        .await
+        .map_err(String::from)?;
     let db = Arc::new(conn);
 
     let mut guard = state.db.lock().await;
@@ -376,9 +256,12 @@ pub fn run() {
 
             let db_opt: Option<Arc<Connection>> = if mode == Some(DeviceMode::Tpv) {
                 Some(Arc::new(tauri::async_runtime::block_on(async {
-                    init_main_db(&app_data_dir)
-                        .await
-                        .expect("Error init_main_db")
+                    tpv_infra_sqlite::connection::init_main_db(
+                        &app_data_dir,
+                        include_str!("../schema.sql"),
+                    )
+                    .await
+                    .expect("Error init_main_db")
                 })))
             } else {
                 None
