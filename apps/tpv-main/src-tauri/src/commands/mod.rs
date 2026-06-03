@@ -10,3 +10,4 @@ pub mod proveedores;
 pub mod reservas;
 pub mod stats;
 pub mod tareas;
+pub mod trabajadores;

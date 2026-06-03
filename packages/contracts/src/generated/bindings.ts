@@ -6,6 +6,14 @@ export type AlergenoInvDto = { ID_Alergeno: number, Nombre: string, Nombre_Image
 
 export type AlergenoMiniDto = { ID_Alergeno: number, Nombre: string, Ruta_Imagen: string | null, };
 
+export type AsignacionCreateInput = { id_trabajador: number, fecha: string, id_turno: number, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
+
+export type AsignacionDeleteInput = { id_asignacion: number, };
+
+export type AsignacionRow = { ID_Asignacion: number, ID_Trabajador: number, Fecha: string, ID_Turno: number, Area: string, Hora_Inicio: string | null, Hora_Fin: string | null, Notas: string | null, Nombre_Turno: string, };
+
+export type AsignacionUpdateInput = { id_asignacion: number, id_turno: number, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
+
 export type BusinessSettings = { business_name: string, logo_data_url: string | null, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, };
 
 export type CategoriaInvDto = { ID_Categoria: number, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
@@ -45,6 +53,8 @@ export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_re
  */
 export type ConfigPatchInput = { patch: Record<string, unknown>, };
 
+export type CopySemanaInput = { from_monday: string, to_monday: string, overwrite?: boolean, };
+
 /**
  * Entrada para crear un cliente (Local-First: sin op_id ni outbox).
  */
@@ -68,6 +78,8 @@ export type DeletePagoInput = { id_pago: number, };
 export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
 
 export type FinalizarTareaInput = { id_tarea: number, id_trabajador: number, };
+
+export type HorariosSemanaArgs = { fecha_lunes: string, };
 
 export type IdCategoriaArgs = { id_categoria: number, };
 
@@ -155,12 +167,16 @@ export type ReservasStatsArgs = { range: StatsRange, turno: StatsTurno, };
 
 export type ReservasStatsResponse = { total_reservas: number, cancelaciones: number, mesas_turno: ReservasMesasTurno, reservas_por_bucket: ChartSeriesI64, estado: ChartSeriesI64, franjas: ChartSeriesI64, };
 
+export type RolRow = { ID_Rol: number, Nombre_Rol: string, };
+
 /**
  * Fila de salidas (gastos).
  */
 export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: number | null, };
 
 export type SetAsignacionesTareaInput = { id_tarea: number, ids_trabajadores: Array<number>, };
+
+export type SetPredeterminadoInput = { fecha_lunes: string, };
 
 export type SetProductoAlergenosInput = { id_producto: number, ids_alergenos: Array<number>, };
 
@@ -187,11 +203,21 @@ export type TicketSettings = { show_logo: boolean, show_business_name: boolean, 
 
 export type TrabajadorCardStats = { id_trabajador: number, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
 
+export type TrabajadorDetailArgs = { id_trabajador: number, };
+
+export type TrabajadorDetailRow = { ID_Trabajador: number, ID_Usuario: number, ID_Rol: number, Email: string, Nombre: string, Apellido: string | null, Estado: string, DNI: string | null, Telefono: string | null, Puesto: string | null, IBAN: string | null, Numero_Seguridad_Social: string | null, Fecha_Inicio_Contrato: string | null, Fecha_Fin_Contrato: string | null, };
+
+export type TrabajadorIdByUsuarioArgs = { id_usuario: number, };
+
+export type TrabajadorRow = { ID_Trabajador: number, ID_Usuario: number, Nombre: string, Apellido: string | null, Email: string, Estado: string, Nombre_Rol: string, Telefono: string | null, Puesto: string | null, };
+
 export type TrabajadorUI = { ID_Trabajador: number, ID_Usuario: number, Nombre: string, Apellido: string | null, Puesto: string | null, Email: string, };
 
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 
 export type TrabajadoresStatsResponse = { cocineros: Array<TrabajadorCardStats>, camareros: Array<TrabajadorCardStats>, limpieza: Array<TrabajadorCardStats>, ranking_ventas: ChartSeriesF64Out, };
+
+export type TurnoRow = { ID_Turno: number, Nombre_Turno: string, };
 
 export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto: string, importe: number, };
 

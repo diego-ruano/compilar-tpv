@@ -18,6 +18,7 @@ pub mod proveedores;
 pub mod reservas;
 pub mod stats;
 pub mod tareas;
+pub mod trabajadores;
 
 // Los módulos de contratos por dominio se añaden durante la migración:
 // pub mod mesas;

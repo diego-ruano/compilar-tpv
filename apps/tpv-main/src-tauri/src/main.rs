@@ -9,7 +9,6 @@ mod login;
 mod mesas;
 mod sync_manager;
 mod pairing;
-mod trabajadores;
 mod venta_rapida;
 
 use base64::prelude::*;
@@ -485,22 +484,17 @@ pub fn run() {
             commands::tareas::tareas_get_mis_tareas,
             commands::tareas::tareas_marcar_tarea_finalizada,
             // trabajadores
-            trabajadores::trabajadores_get_roles,
-            trabajadores::trabajadores_get_all,
-            trabajadores::trabajadores_get_detail,
-            trabajadores::trabajadores_get_trabajador_id_by_usuario,
-            trabajadores::turnos_get_all,
-            trabajadores::horarios_get_asignaciones_semana,
-            trabajadores::horarios_create_asignacion,
-            trabajadores::horarios_update_asignacion,
-            trabajadores::horarios_delete_asignacion,
-            trabajadores::horarios_copy_semana_asignaciones,
-            trabajadores::horarios_set_predeterminado_desde_semana,
-            trabajadores::horarios_create_asignacion_after_remote_ok,
-            trabajadores::horarios_update_asignacion_after_remote_ok,
-            trabajadores::horarios_delete_asignacion_after_remote_ok,
-            trabajadores::horarios_copy_semana_asignaciones_after_remote_ok,
-            trabajadores::horarios_set_predeterminado_desde_semana_after_remote_ok,
+            commands::trabajadores::trabajadores_get_roles,
+            commands::trabajadores::trabajadores_get_all,
+            commands::trabajadores::trabajadores_get_detail,
+            commands::trabajadores::trabajadores_get_trabajador_id_by_usuario,
+            commands::trabajadores::turnos_get_all,
+            commands::trabajadores::horarios_get_asignaciones_semana,
+            commands::trabajadores::horarios_create_asignacion,
+            commands::trabajadores::horarios_update_asignacion,
+            commands::trabajadores::horarios_delete_asignacion,
+            commands::trabajadores::horarios_copy_semana_asignaciones,
+            commands::trabajadores::horarios_set_predeterminado_desde_semana,
             // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
             commands::cuentas::cuentas_get_entradas,
             commands::cuentas::cuentas_get_salidas,
