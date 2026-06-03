@@ -9,7 +9,6 @@ mod login;
 mod mesas;
 mod sync_manager;
 mod pairing;
-mod venta_rapida;
 
 use base64::prelude::*;
 use libsql::{Builder, Connection, Value};
@@ -523,21 +522,21 @@ pub fn run() {
             commands::proveedores::proveedores_set_vinculos,
             commands::proveedores::proveedores_create_producto,
             // venta rápida
-            venta_rapida::vr_list_categorias_vendibles,
-            venta_rapida::vr_list_productos_by_categoria,
-            venta_rapida::vr_search_productos,
-            venta_rapida::vr_create_comanda_barra,
-            venta_rapida::vr_list_comandas_barra,
-            venta_rapida::vr_get_lineas_comanda,
-            venta_rapida::vr_add_linea_comanda,
-            venta_rapida::vr_remove_last_unpaid_linea,
-            venta_rapida::vr_delete_linea_if_unpaid,
-            venta_rapida::vr_update_nota_detalle,
-            venta_rapida::vr_cobrar_fraccionado,
-            venta_rapida::vr_restar_stock,
-            venta_rapida::vr_delete_comanda_if_safe,
-            venta_rapida::vr_get_index_rows,
-            venta_rapida::vr_get_detalles_ver_ticket,
+            commands::venta_rapida::vr_list_categorias_vendibles,
+            commands::venta_rapida::vr_list_productos_by_categoria,
+            commands::venta_rapida::vr_search_productos,
+            commands::venta_rapida::vr_create_comanda_barra,
+            commands::venta_rapida::vr_list_comandas_barra,
+            commands::venta_rapida::vr_get_lineas_comanda,
+            commands::venta_rapida::vr_add_linea_comanda,
+            commands::venta_rapida::vr_remove_last_unpaid_linea,
+            commands::venta_rapida::vr_delete_linea_if_unpaid,
+            commands::venta_rapida::vr_update_nota_detalle,
+            commands::venta_rapida::vr_cobrar_fraccionado,
+            commands::venta_rapida::vr_restar_stock,
+            commands::venta_rapida::vr_delete_comanda_if_safe,
+            commands::venta_rapida::vr_get_index_rows,
+            commands::venta_rapida::vr_get_detalles_ver_ticket,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,

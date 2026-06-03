@@ -20,6 +20,8 @@ export type CategoriaInvDto = { ID_Categoria: number, Nombre: string, Nombre_Ima
 
 export type CategoriaProveedorDto = { id_categoria: number, nombre: string, nombre_imagen: string | null, ruta_imagen: string | null, };
 
+export type CategoriaRow = { ID_Categoria: number, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, };
+
 export type ChartSeriesF64Out = { labels: Array<string>, values: Array<number>, };
 
 export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
@@ -47,6 +49,8 @@ export type ClientesOverviewArgs = { ranking: string, };
 export type ClientesStatsArgs = { range: StatsRange, };
 
 export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: number, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSeriesF64Out, };
+
+export type ComandaBarraRow = { ID_Comanda: number, Fecha_Hora_Apertura: string, Estado: string, Total_Pendiente: number, Total_Comanda: number, Pendientes_Cocina: number, Pendientes_Pago: number, };
 
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
@@ -85,7 +89,11 @@ export type IdCategoriaArgs = { id_categoria: number, };
 
 export type IdProductoArgs = { id_producto: number, };
 
+export type IndexRow = { ID_Comanda: number, Productos: string | null, NumLineas: number, Unidades: number, };
+
 export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumenDto>, menosCantidad: Array<ProductoResumenDto>, };
+
+export type LineaComandaRow = { ID_Detalle: number, ID_Comanda: number, ID_Producto: number, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 
 export type LoteDto = { ID_Lote: number, ID_Producto: number, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Cantidad_Inicial: number, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: number | null, Notas: string | null, };
 
@@ -115,6 +123,8 @@ export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: 
 export type ProductoProveedorDto = { id_producto: number, id_categoria: number | null, id_proveedor: number | null, nombre: string, precio_venta: number | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
 
 export type ProductoResumenDto = { Nombre: string, Stock_Actual: number | null, Unidad_Medida: string | null, Caducidad_Proxima: string | null, Lote: string | null, Precio_Venta: number | null, };
+
+export type ProductoRow = { ID_Producto: number, ID_Categoria: number, Nombre: string, Precio_Venta: number, Stock_Actual: number, Stock_Minimo: number, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, };
 
 export type ProductosStatsArgs = { range: StatsRange, categoria_top_id: number | null, categoria_worst_id: number | null, };
 
@@ -186,6 +196,8 @@ export type StatsRange = "hoy" | "semana" | "mes" | "anio";
 
 export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
 
+export type StockLinea = { producto_id: number, cantidad: number, };
+
 export type SummaryArgs = { limit?: number, };
 
 export type TareaAdminRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, Total_Asignados: number, Total_Finalizadas: number, };
@@ -237,5 +249,37 @@ export type UpsertCategoriaInput = { id_categoria?: number, nombre: string, nomb
 export type UpsertProductoInput = { id_producto?: number, id_categoria: number, id_proveedor?: number, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, ids_alergenos: Array<number>, };
 
 export type UpsertProductoResult = { id_producto: number, };
+
+export type VerTicketsDetalleRow = { ID_Detalle: number, ID_Producto: number, Nombre: string, Cantidad: number, Precio_Unitario: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
+
+export type VrAddLineaComandaInput = { id_comanda: number, id_producto: number, cantidad: number, precio_unitario: number, };
+
+export type VrCobrarFraccionadoInput = { id_comanda: number, metodo: string, importe_total: number, id_usuario_cobrador?: number, id_trabajador_cobrador?: number, detalles: Array<number>, };
+
+export type VrCreateComandaBarraInput = { id_trabajador?: number, 
+/**
+ * Si es `true`, reutiliza la comanda de barra abierta si existe (get-or-create).
+ */
+get_or_create?: boolean, };
+
+export type VrDeleteComandaIfSafeInput = { id_comanda: number, };
+
+export type VrDeleteLineaIfUnpaidInput = { id_comanda: number, id_detalle: number, };
+
+export type VrIdCategoriaArgs = { id_categoria: number, };
+
+export type VrIdComandaArgs = { id_comanda: number, };
+
+export type VrIdsArgs = { ids: Array<number>, };
+
+export type VrListComandasArgs = { include_pagadas: boolean, limit?: number, };
+
+export type VrRemoveLastUnpaidLineaInput = { id_comanda: number, id_producto: number, };
+
+export type VrRestarStockInput = { lineas: Array<StockLinea>, };
+
+export type VrSearchProductosArgs = { query: string, limit: number, };
+
+export type VrUpdateNotaDetalleInput = { id_detalle: number, nota?: string, };
 
 export type ZonaDto = { id_zona: number, nombre_zona: string, };

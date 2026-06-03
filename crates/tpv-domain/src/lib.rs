@@ -16,6 +16,7 @@ pub mod proveedores;
 pub mod reservas;
 pub mod tareas;
 pub mod trabajadores;
+pub mod venta_rapida;
 
 // Los submódulos de dominio se irán añadiendo módulo por módulo:
 // pub mod mesas;

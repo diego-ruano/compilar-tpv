@@ -9,3 +9,4 @@ pub mod reservas;
 pub mod stats;
 pub mod tareas;
 pub mod trabajadores;
+pub mod venta_rapida;
