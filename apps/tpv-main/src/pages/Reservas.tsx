@@ -5,15 +5,15 @@ import {
   reservasSave,
   reservasDelete,
   type Turno as TurnoApi,
-} from "../components/reservas/reservasApis";
-import { mesasLoadLayout } from "../components/mesasComponents/mesasApi";
+} from "../features/reservas/reservasApis";
+import { mesasLoadLayout } from "../features/mesasComponents/mesasApi";
 
 import { useAuth } from "../shared/stores/useAuth";
 import { useToast } from "../shared/toast";
 
 // ✅ Modal + tipos del layout (MapCanvas)
-import ReservaMesaMapModal from "../components/reservas/ReservaMesaMapModal";
-import type { Salon, MesaMeta } from "../components/mesasComponents/types";
+import ReservaMesaMapModal from "../features/reservas/ReservaMesaMapModal";
+import type { Salon, MesaMeta } from "../features/mesasComponents/types";
 
 /* =========================
    Tipos

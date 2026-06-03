@@ -3,7 +3,7 @@ import { Stage, Layer, Rect, Line, Group, Text, Circle } from "react-konva";
 import {
     mesasLoadLayout,
     mesasSaveLayout,
-} from "../../components/mesasComponents/mesasApi";
+} from "../../features/mesasComponents/mesasApi";
 import { useLocation, useNavigate } from "react-router-dom";
 
 /**

@@ -4,12 +4,12 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { useToast } from "../shared/toast";
 import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
 
-import Product from "../components/InventaryComponents/Product";
-import Modal from "../components/proveedores/Modal";
-import Campo from "../components/proveedores/Campo";
-import ProveedorCard from "../components/proveedores/ProveedorCard";
-import ProductDetailModal from "../components/InventaryComponents/ProductDetailModal";
-import { AddProductModal } from "../components/InventaryComponents/ui/AddProductModal";
+import Product from "../features/InventaryComponents/Product";
+import Modal from "../features/proveedores/Modal";
+import Campo from "../features/proveedores/Campo";
+import ProveedorCard from "../features/proveedores/ProveedorCard";
+import ProductDetailModal from "../features/InventaryComponents/ProductDetailModal";
+import { AddProductModal } from "../features/InventaryComponents/ui/AddProductModal";
 
 import {
   proveedoresGetAll,
@@ -23,7 +23,7 @@ import {
   type ProveedorRow,
   type ProductoRow,
   type Categoria,
-} from "../components/proveedores/proveedoresApis";
+} from "../features/proveedores/proveedoresApis";
 
 type ProveedorUI = ProveedorRow & { urlImagen: string };
 type ProductoUI = ProductoRow & { urlImagen: string };

@@ -14,7 +14,7 @@ import {
   type TrabajadorRow,
   type Turno,
   type Asignacion,
-} from "../components/trabajadores/trabajadoresApis";
+} from "../features/trabajadores/trabajadoresApis";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../shared/stores/useAuth";

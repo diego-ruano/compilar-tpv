@@ -5,13 +5,13 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../shared/stores/useAuth";
 import { useToast } from "../shared/toast";
 
-import AddProductModal from "../components/ventaRapida/ui/AddProductModal";
-import CatalogGrid from "../components/ventaRapida/ui/CatalogGrid";
-import CashPanel from "../components/ventaRapida/ui/CashPanel";
-import TicketPanel from "../components/ventaRapida/ui/TicketPanel";
-import VerTicketsModal from "../components/ventaRapida/ui/VerTicketsModal";
+import AddProductModal from "../features/ventaRapida/ui/AddProductModal";
+import CatalogGrid from "../features/ventaRapida/ui/CatalogGrid";
+import CashPanel from "../features/ventaRapida/ui/CashPanel";
+import TicketPanel from "../features/ventaRapida/ui/TicketPanel";
+import VerTicketsModal from "../features/ventaRapida/ui/VerTicketsModal";
 
-import ProductDetailModal from "../components/InventaryComponents/ProductDetailModal";
+import ProductDetailModal from "../features/InventaryComponents/ProductDetailModal";
 
 import {
   Categoria,
@@ -21,8 +21,8 @@ import {
   Paso,
   TicketItem,
   DENOMS,
-} from "../components/ventaRapida/types";
-import { cn, eur } from "../components/ventaRapida/utils";
+} from "../features/ventaRapida/types";
+import { cn, eur } from "../features/ventaRapida/utils";
 
 import {
   vrBootstrap,
@@ -41,7 +41,7 @@ import {
   vrDeleteComandaIfSafe,
   type ComandaBarraRow as ApiComandaBarraRow,
   type LineaComandaRow as ApiLineaComandaRow,
-} from "../components/ventaRapida/ventaRapidaAPI";
+} from "../features/ventaRapida/ventaRapidaAPI";
 
 /* =========================
    EVENTO GLOBAL

@@ -8,25 +8,25 @@ import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { useMode } from "../shared/stores/useMode";
 
-import { cn } from "../components/configuracion/utils";
+import { cn } from "../features/configuracion/utils";
 import type {
     LicenseInfo,
     NavItem,
     SectionKey,
-} from "../components/configuracion/types";
-import { useBusinessDraft } from "../components/configuracion/hooks/useBusinessDraft";
+} from "../features/configuracion/types";
+import { useBusinessDraft } from "../features/configuracion/hooks/useBusinessDraft";
 
 // UI
-import { Badge } from "../components/configuracion/ui/Badge";
-import { TextInput } from "../components/configuracion/ui/Inputs";
+import { Badge } from "../features/configuracion/ui/Badge";
+import { TextInput } from "../features/configuracion/ui/Inputs";
 
 // Sections
-import { Negocio } from "../components/configuracion/sections/Negocio";
-import { Contacto } from "../components/configuracion/sections/Contacto";
-import { Ticket } from "../components/configuracion/sections/Ticket";
-import { Licencia } from "../components/configuracion/sections/Licencia";
-import { Apariencia } from "../components/configuracion/sections/Apariencia";
-import { VincularHandy } from "../components/configuracion/sections/VincularHandy";
+import { Negocio } from "../features/configuracion/sections/Negocio";
+import { Contacto } from "../features/configuracion/sections/Contacto";
+import { Ticket } from "../features/configuracion/sections/Ticket";
+import { Licencia } from "../features/configuracion/sections/Licencia";
+import { Apariencia } from "../features/configuracion/sections/Apariencia";
+import { VincularHandy } from "../features/configuracion/sections/VincularHandy";
 
 
 export default function Configuracion() {

@@ -17,7 +17,7 @@ import {
     setTurnoPartidoHoy,
     type DbUser,
     type PunchStatus,
-} from "../components/login/loginApi";
+} from "../features/login/loginApi";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");

@@ -2,18 +2,18 @@
 import React, { useState } from "react";
 import { useToast } from "../shared/toast";
 
-import { useInventario } from "../components/InventaryComponents/hooks/useInventario";
+import { useInventario } from "../features/InventaryComponents/hooks/useInventario";
 
-import InventoryHeader from "../components/InventaryComponents/ui/InventoryHeader";
-import CategoriesSection from "../components/InventaryComponents/ui/CategoriesSection";
-import SummarySection from "../components/InventaryComponents/ui/SummarySection";
-import ProductsSection from "../components/InventaryComponents/ui/ProductsSection";
+import InventoryHeader from "../features/InventaryComponents/ui/InventoryHeader";
+import CategoriesSection from "../features/InventaryComponents/ui/CategoriesSection";
+import SummarySection from "../features/InventaryComponents/ui/SummarySection";
+import ProductsSection from "../features/InventaryComponents/ui/ProductsSection";
 
-import AddCategoryModal from "../components/InventaryComponents/ui/AddCategoryModal";
-import { AddProductModal } from "../components/InventaryComponents/ui/AddProductModal";
-import ProductDetailModal from "../components/InventaryComponents/ProductDetailModal";
+import AddCategoryModal from "../features/InventaryComponents/ui/AddCategoryModal";
+import { AddProductModal } from "../features/InventaryComponents/ui/AddProductModal";
+import ProductDetailModal from "../features/InventaryComponents/ProductDetailModal";
 
-import { inventarioAPI } from "../components/InventaryComponents/api/inventarioAPI";
+import { inventarioAPI } from "../features/InventaryComponents/api/inventarioAPI";
 
 export default function Inventario() {
     const toast = useToast();

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { completeInitialSetup } from "../components/login/loginApi";
+import { completeInitialSetup } from "../features/login/loginApi";
 import { useAuth } from "../shared/stores/useAuth";
 import { useMode } from "../shared/stores/useMode";
 

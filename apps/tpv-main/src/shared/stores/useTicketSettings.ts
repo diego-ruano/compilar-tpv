@@ -4,7 +4,7 @@ import {
     configGetTicketSettings,
     configPatchTicketSettings,
     type TicketSettings,
-} from "../../components/configuracion/api/configApis";
+} from "../../features/configuracion/api/configApis";
 
 const DEFAULTS: TicketSettings = {
     showLogo: true,

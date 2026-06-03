@@ -1,23 +1,23 @@
 // Mesas.tsx
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import MesaComandaModal from "../components/mesasComponents/MesaComandaModal";
+import MesaComandaModal from "../features/mesasComponents/MesaComandaModal";
 
-import TopBar from "../components/mesasComponents/TopBar";
-import SalonTabs from "../components/mesasComponents/SalonTabs";
-import MapCanvas from "../components/mesasComponents/MapCanvas";
-import Legend from "../components/mesasComponents/Legend";
-import KitchenBoard from "../components/mesasComponents/KitchenBoard";
+import TopBar from "../features/mesasComponents/TopBar";
+import SalonTabs from "../features/mesasComponents/SalonTabs";
+import MapCanvas from "../features/mesasComponents/MapCanvas";
+import Legend from "../features/mesasComponents/Legend";
+import KitchenBoard from "../features/mesasComponents/KitchenBoard";
 
-import { fitTransform } from "../components/mesasComponents/geometry";
-import { useElementSize } from "../components/mesasComponents/useElementSize";
-import type { Salon, MesaMeta } from "../components/mesasComponents/types";
+import { fitTransform } from "../features/mesasComponents/geometry";
+import { useElementSize } from "../features/mesasComponents/useElementSize";
+import type { Salon, MesaMeta } from "../features/mesasComponents/types";
 import { useAuth } from "../shared/stores/useAuth";
 
 import {
     mesasLoadLayout,
     mesasLoadMesaMeta,
-} from "../components/mesasComponents/mesasApi";
+} from "../features/mesasComponents/mesasApi";
 
 type MesaMetaMap = Record<number, MesaMeta> & Record<string, MesaMeta>;
 

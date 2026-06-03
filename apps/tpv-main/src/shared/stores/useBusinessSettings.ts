@@ -4,7 +4,7 @@ import {
     configGetBusinessSettings,
     configPatchBusinessSettings,
     type BusinessSettings,
-} from "../../components/configuracion/api/configApis";
+} from "../../features/configuracion/api/configApis";
 
 const DEFAULTS: BusinessSettings = {
     businessName: "TPV",

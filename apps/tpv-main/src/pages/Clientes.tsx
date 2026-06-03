@@ -2,9 +2,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { ReactComponent as LapizSVG } from "../assets/svg/LapizSVG.svg";
 
-import Modal from "../components/proveedores/Modal";
-import Campo from "../components/proveedores/Campo";
-import ClienteCard from "../components/ClientsComponents/ClientesCard";
+import Modal from "../features/proveedores/Modal";
+import Campo from "../features/proveedores/Campo";
+import ClienteCard from "../features/ClientsComponents/ClientesCard";
 import { useToast } from "../shared/toast";
 
 import {
@@ -14,7 +14,7 @@ import {
   clientesUpdateCliente,
   type FiltroRanking,
   type ClienteRow,
-} from "../components/ClientsComponents/clientesApis";
+} from "../features/ClientsComponents/clientesApis";
 
 type Vista = "list" | "detail";
 
