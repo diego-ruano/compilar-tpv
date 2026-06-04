@@ -8,13 +8,15 @@ import ClienteCard from "../../features/ClientsComponents/ClientesCard";
 import { useToast } from "../../shared/toast";
 
 import {
-  clientesCreateCliente,
   clientesGetClienteForm,
-  clientesGetOverview,
-  clientesUpdateCliente,
   type FiltroRanking,
   type ClienteRow,
 } from "../../features/ClientsComponents/clientesApis";
+import {
+  useClientesOverview,
+  useCreateCliente,
+  useUpdateCliente,
+} from "../../features/ClientsComponents/clientesQueries";
 
 type Vista = "list" | "detail";
 
@@ -45,11 +47,18 @@ export default function Clientes() {
   const [ranking, setRanking] = useState<FiltroRanking>("todos");
 
   const [busqueda, setBusqueda] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  const [clientes, setClientes] = useState<ClienteUI[]>([]);
   const [clienteActivo, setClienteActivo] = useState<ClienteUI | null>(null);
   const toast = useToast();
+
+  // Datos vía TanStack Query (caché): la lista se recachea por `ranking` y las
+  // mutaciones (crear/editar) invalidan la clave para refrescarla automáticamente.
+  const overview = useClientesOverview(ranking);
+  const createCliente = useCreateCliente();
+  const updateCliente = useUpdateCliente();
+
+  const loading =
+    overview.isFetching || createCliente.isPending || updateCliente.isPending;
 
   // Modal (nuevo/editar)
   const [modalClienteOpen, setModalClienteOpen] = useState(false);
@@ -91,35 +100,35 @@ export default function Clientes() {
     };
   }
 
-  async function recargarSegunFiltroManteniendoSeleccion() {
-    setLoading(true);
-    try {
-      const rows = await clientesGetOverview({ ranking });
-      const ui = (rows ?? []).map(mapRowToUI);
+  const clientes = useMemo<ClienteUI[]>(
+    () => (overview.data ?? []).map(mapRowToUI),
+    [overview.data],
+  );
 
-      setClientes(ui);
+  /** Recarga manual (botones de UI): fuerza un refetch de la query cacheada. */
+  function recargarSegunFiltroManteniendoSeleccion() {
+    return overview.refetch();
+  }
 
-      // Mantener selección si estamos en detail
-      if (clienteActivo) {
-        const id = Number(clienteActivo.ID_Cliente);
-        const updated = ui.find((x) => Number(x.ID_Cliente) === id);
-        if (updated) setClienteActivo(updated);
-      }
-    } catch (e) {
-      console.error("Error cargando clientes", e);
-      setClientes([]);
+  // Mantener la selección de detalle sincronizada con la lista recacheada.
+  useEffect(() => {
+    if (!clienteActivo) return;
+    const id = Number(clienteActivo.ID_Cliente);
+    const updated = clientes.find((x) => Number(x.ID_Cliente) === id);
+    if (updated && updated !== clienteActivo) setClienteActivo(updated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientes]);
+
+  // Aviso + reset si falla la carga (equivale al catch del fetch anterior).
+  useEffect(() => {
+    if (overview.isError) {
+      console.error("Error cargando clientes", overview.error);
       setClienteActivo(null);
       setVista("list");
       toast.error("Error", "No se pudieron cargar los clientes.");
-    } finally {
-      setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    recargarSegunFiltroManteniendoSeleccion();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ranking]);
+  }, [overview.isError]);
 
   const clientesFiltrados = useMemo(() => {
     const s = busqueda.trim().toLowerCase();
@@ -182,10 +191,9 @@ export default function Clientes() {
     const telefono = fTelefono.trim();
     const notas = fNotas.trim();
 
-    setLoading(true);
     try {
       if (modalClienteModo === "nuevo") {
-        const ok = await clientesCreateCliente({
+        const ok = await createCliente.mutateAsync({
           nombre,
           email: email || null,
           telefono: telefono || null,
@@ -198,13 +206,12 @@ export default function Clientes() {
         }
 
         setModalClienteOpen(false);
-        await recargarSegunFiltroManteniendoSeleccion();
         return;
       }
 
       if (!clienteActivo) return;
 
-      const ok = await clientesUpdateCliente({
+      const ok = await updateCliente.mutateAsync({
         idCliente: Number(clienteActivo.ID_Cliente),
         nombre,
         email: email || null,
@@ -218,14 +225,12 @@ export default function Clientes() {
       }
 
       setModalClienteOpen(false);
-      await recargarSegunFiltroManteniendoSeleccion();
     } catch (e) {
       console.error("Error guardando cliente", e);
       toast.error("Error", "No se pudo guardar el cliente.");
-    } finally {
-      setLoading(false);
     }
   }
+  // La invalidación en las mutaciones recachea la lista automáticamente.
 
   const titulo = useMemo(() => {
     if (vista === "list") return "CLIENTES";
