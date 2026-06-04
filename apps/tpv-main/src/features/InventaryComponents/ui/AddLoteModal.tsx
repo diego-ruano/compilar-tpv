@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
-import { inventarioAPI } from "../api/inventarioAPI";
+import { useCreateLote } from "../inventarioQueries";
 
 type Props = {
     open: boolean;
@@ -17,6 +17,8 @@ function toNum(v: string) {
 
 export default function AddLoteModal({ open, onClose, productId, onSaved }: Props) {
     const toast = useToast();
+
+    const createLote = useCreateLote();
 
     const [codigoLote, setCodigoLote] = useState("");
     const [caducidad, setCaducidad] = useState("");
@@ -68,7 +70,7 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
             const sd = stockDisponible.trim() ? toNum(stockDisponible) : ci;
             const cu = costeUnitario.trim() ? toNum(costeUnitario) : null;
 
-            await inventarioAPI.createLote({
+            await createLote.mutateAsync({
                 id_producto: productId,
                 codigo_lote: codigoLote.trim(),
                 caducidad: caducidad.trim() ? caducidad : null,

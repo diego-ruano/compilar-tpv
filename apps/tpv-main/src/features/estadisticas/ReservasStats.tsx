@@ -10,33 +10,25 @@ import {
     type StatsRange,
     type StatsTurno,
     type ReservasStatsResponse,
-    statsReservasResumen,
 } from "./statsApis";
+import { useReservasStats } from "./statsQueries";
 
 export default function ReservasStats({ range }: { range: StatsRange }) {
     const toast = useToast();
 
-    const [loading, setLoading] = useState(false);
     const [turno, setTurno] = useState<StatsTurno>("TODOS");
-    const [data, setData] = useState<ReservasStatsResponse | null>(null);
 
-    const cargar = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await statsReservasResumen({ range, turno });
-            setData(res);
-        } catch (e) {
-            console.error(e);
-            setData(null);
-            toast.error("Error", "No se pudieron cargar las estadísticas de reservas.");
-        } finally {
-            setLoading(false);
-        }
-    }, [range, turno, toast]);
+    const query = useReservasStats(range, turno);
+
+    const data: ReservasStatsResponse | null = query.data ?? null;
+    const loading = query.isFetching;
 
     useEffect(() => {
-        void cargar();
-    }, [cargar]);
+        if (query.isError) {
+            console.error(query.error);
+            toast.error("Error", "No se pudieron cargar las estadísticas de reservas.");
+        }
+    }, [query.isError, query.error, toast]);
 
     const totalReservas = data?.total_reservas ?? 0;
     const cancelaciones = data?.cancelaciones ?? 0;

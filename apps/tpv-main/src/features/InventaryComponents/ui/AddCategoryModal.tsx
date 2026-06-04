@@ -3,7 +3,7 @@ import Modal from "./Modal";
 import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { convertirABase64 } from "../utils/inventarioFormat";
-import { inventarioAPI } from "../api/inventarioAPI";
+import { useCreateCategoria } from "../inventarioQueries";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -28,6 +28,8 @@ export default function AddCategoryModal({
     const [touched, setTouched] = useState(false);
     const toast = useToast();
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+    const createCategoria = useCreateCategoria();
 
     const nameError = useMemo(() => {
         if (!touched) return "";
@@ -109,7 +111,7 @@ export default function AddCategoryModal({
                 });
             }
 
-            await inventarioAPI.createCategoria({
+            await createCategoria.mutateAsync({
                 nombre: name.trim(),
                 nombre_imagen: nombreArchivo,
                 ruta_imagen: rutaParaBD,

@@ -12,18 +12,20 @@ import ProductDetailModal from "../../features/InventaryComponents/ProductDetail
 import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
 
 import {
-  proveedoresGetAll,
-  proveedoresSave,
-  proveedoresDelete,
-  proveedoresGetProductos,
-  proveedoresGetCategorias,
   proveedoresGetProductosAll,
-  proveedoresSetVinculos,
-  proveedoresCreateProducto,
   type ProveedorRow,
   type ProductoRow,
   type Categoria,
 } from "../../features/proveedores/proveedoresApis";
+import {
+  useProveedoresAll,
+  useProveedoresCategorias,
+  useProveedoresProductos,
+  useSaveProveedor,
+  useDeleteProveedor,
+  useSetVinculos,
+  useCreateProducto,
+} from "../../features/proveedores/proveedoresQueries";
 
 type ProveedorUI = ProveedorRow & { urlImagen: string };
 type ProductoUI = ProductoRow & { urlImagen: string };
@@ -65,10 +67,30 @@ export default function Proveedores() {
   const [vista, setVista] = useState<Vista>("list");
   const [busqueda, setBusqueda] = useState("");
 
-  const [loading, setLoading] = useState(false);
+  const [loadingLocal, setLoadingLocal] = useState(false);
   const [proveedores, setProveedores] = useState<ProveedorUI[]>([]);
   const [proveedorActivo, setProveedorActivo] = useState<ProveedorUI | null>(null);
   const toast = useToast();
+
+  // ---- TanStack Query: lecturas cacheadas + mutaciones (invalidan la feature) ----
+  const proveedoresQuery = useProveedoresAll();
+  const categoriasQuery = useProveedoresCategorias();
+  const productosProveedorQuery = useProveedoresProductos(proveedorActivo?.ID_Proveedor ?? null);
+
+  const saveProveedor = useSaveProveedor();
+  const deleteProveedor = useDeleteProveedor();
+  const setVinculos = useSetVinculos();
+  const createProducto = useCreateProducto();
+
+  // 'loading' derivado: fetch de listas + mutaciones en curso + trabajo local (subida de imagen, etc.)
+  const loading =
+    loadingLocal ||
+    proveedoresQuery.isFetching ||
+    productosProveedorQuery.isFetching ||
+    saveProveedor.isPending ||
+    deleteProveedor.isPending ||
+    setVinculos.isPending ||
+    createProducto.isPending;
 
   const [confirmAccion, setConfirmAccion] = useState<
     | { tipo: "proveedor"; proveedor: ProveedorUI }
@@ -78,7 +100,9 @@ export default function Proveedores() {
   const [confirmando, setConfirmando] = useState(false);
 
   const [productosProveedor, setProductosProveedor] = useState<ProductoUI[]>([]);
-  const [categorias, setCategorias] = useState<Categoria[]>([]);
+
+  // Categorías: derivadas directamente de la query (no requieren mapeo async de imágenes).
+  const categorias: Categoria[] = categoriasQuery.data ?? [];
 
   const [modalProveedorOpen, setModalProveedorOpen] = useState(false);
   const [modalProveedorModo, setModalProveedorModo] = useState<"nuevo" | "editar">("nuevo");
@@ -143,10 +167,30 @@ export default function Proveedores() {
     );
   }
 
-  async function recargarProveedoresManteniendoSeleccion() {
-    try {
-      const rows = await proveedoresGetAll();
+  // Recarga manteniendo la selección: la query cachea, así que sólo hay que refrescarla.
+  // El efecto de mapeo de abajo re-deriva la lista UI y re-sincroniza el proveedor activo.
+  function recargarProveedoresManteniendoSeleccion() {
+    return proveedoresQuery.refetch();
+  }
+
+  // Refresca los productos del proveedor activo (query cacheada por id).
+  function recargarProductosProveedor() {
+    if (!proveedorActivo) return Promise.resolve();
+    return productosProveedorQuery.refetch();
+  }
+
+  // Mapea las filas de la query de proveedores a UI (resuelve URLs de imagen, async)
+  // y re-sincroniza el proveedor activo cuando cambia la lista.
+  useEffect(() => {
+    let cancelado = false;
+    const rows = proveedoresQuery.data;
+    if (!rows) {
+      if (proveedoresQuery.isError) setProveedores([]);
+      return;
+    }
+    (async () => {
       const ui = await mapProveedoresUI(rows);
+      if (cancelado) return;
       setProveedores(ui);
 
       if (proveedorActivo) {
@@ -154,67 +198,41 @@ export default function Proveedores() {
         const updated = ui.find((x) => Number(x.ID_Proveedor) === id);
         if (updated) setProveedorActivo(updated);
       }
-    } catch (e) {
-      console.error("Error recargando proveedores", e);
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proveedoresQuery.data, proveedoresQuery.isError]);
+
+  // Toast de error si falla la carga de proveedores (preserva el aviso al usuario).
+  useEffect(() => {
+    if (proveedoresQuery.isError) {
+      console.error("Error cargando proveedores", proveedoresQuery.error);
     }
-  }
+  }, [proveedoresQuery.isError, proveedoresQuery.error]);
 
-  async function recargarProductosProveedor() {
-    if (!proveedorActivo) return;
-
-    setLoading(true);
-    try {
-      const idProv = Number(proveedorActivo.ID_Proveedor);
-      const rows = await proveedoresGetProductos({ idProveedor: idProv });
+  // Mapea las filas de la query de productos del proveedor activo a UI (async).
+  useEffect(() => {
+    let cancelado = false;
+    if (vista !== "detail" || !proveedorActivo) {
+      setProductosProveedor([]);
+      return;
+    }
+    const rows = productosProveedorQuery.data;
+    if (!rows) {
+      if (productosProveedorQuery.isError) setProductosProveedor([]);
+      return;
+    }
+    (async () => {
       const ui = await mapProductosUI(rows);
-      setProductosProveedor(ui);
-    } catch (e) {
-      console.error("Error recargando productos del proveedor", e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    const loadProveedores = async () => {
-      setLoading(true);
-      try {
-        const rows = await proveedoresGetAll();
-        const ui = await mapProveedoresUI(rows);
-        setProveedores(ui);
-      } catch (e) {
-        console.error("Error cargando proveedores", e);
-        setProveedores([]);
-      } finally {
-        setLoading(false);
-      }
+      if (!cancelado) setProductosProveedor(ui);
+    })();
+    return () => {
+      cancelado = true;
     };
-
-    loadProveedores();
-  }, []);
-
-  useEffect(() => {
-    const loadCategorias = async () => {
-      try {
-        const rows = await proveedoresGetCategorias();
-        setCategorias(rows);
-      } catch (e) {
-        console.warn("No se pudieron cargar categorías", e);
-        setCategorias([]);
-      }
-    };
-
-    loadCategorias();
-  }, []);
-
-  useEffect(() => {
-    const loadProductosProveedor = async () => {
-      if (vista !== "detail" || !proveedorActivo) return;
-      await recargarProductosProveedor();
-    };
-
-    loadProductosProveedor();
-  }, [vista, proveedorActivo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, proveedorActivo, productosProveedorQuery.data, productosProveedorQuery.isError]);
 
   const proveedoresFiltrados = useMemo(() => {
     const s = busqueda.trim().toLowerCase();
@@ -308,7 +326,7 @@ export default function Proveedores() {
     const cif = fCif.trim();
     const otros = fOtros.trim();
 
-    setLoading(true);
+    setLoadingLocal(true);
     try {
       let nombreImagen: string | null = null;
       let rutaImagen: string | null = null;
@@ -341,7 +359,7 @@ export default function Proveedores() {
         }
       }
 
-      const ok = await proveedoresSave({
+      const ok = await saveProveedor.mutateAsync({
         idProveedor: modalProveedorModo === "editar" ? Number(proveedorActivo?.ID_Proveedor ?? 0) : null,
         nombreEmpresa: nombre,
         contacto: contacto || null,
@@ -358,13 +376,13 @@ export default function Proveedores() {
         return;
       }
 
+      // La invalidación en onSuccess recachea la lista; el efecto re-deriva y re-sincroniza el activo.
       setModalProveedorOpen(false);
-      await recargarProveedoresManteniendoSeleccion();
     } catch (e: any) {
       console.error("Error guardando proveedor", e);
       toast.error("Error", "No se pudo guardar. Revisa si el Email o el CIF ya existen.");
     } finally {
-      setLoading(false);
+      setLoadingLocal(false);
     }
   }
 
@@ -391,28 +409,25 @@ export default function Proveedores() {
     setConfirmando(true);
     try {
       if (confirmAccion.tipo === "proveedor") {
-        setLoading(true);
         try {
           const id = Number(confirmAccion.proveedor.ID_Proveedor);
-          const deleted = await proveedoresDelete({ idProveedor: id });
+          const deleted = await deleteProveedor.mutateAsync({ idProveedor: id });
           if (!deleted) {
             toast.error("Error", "No se pudo eliminar el proveedor.");
             return;
           }
 
+          // La invalidación recachea la lista; refrescamos antes de navegar.
           await recargarProveedoresManteniendoSeleccion();
           volverALista();
           setConfirmAccion(null);
         } catch (e) {
           console.error("Error eliminando proveedor", e);
           toast.error("Error", "No se pudo eliminar el proveedor.");
-        } finally {
-          setLoading(false);
         }
       }
 
       if (confirmAccion.tipo === "producto") {
-        setLoading(true);
         try {
           const idProv = Number(proveedorActivo.ID_Proveedor);
 
@@ -420,7 +435,7 @@ export default function Proveedores() {
             .filter((x) => x.ID_Producto !== confirmAccion.idProducto)
             .map((x) => Number(x.ID_Producto));
 
-          const ok = await proveedoresSetVinculos({
+          const ok = await setVinculos.mutateAsync({
             idProveedor: idProv,
             productoIds: next,
           });
@@ -441,8 +456,6 @@ export default function Proveedores() {
         } catch (e) {
           console.error("Error desvinculando producto", e);
           toast.error("Error", "No se pudo desvincular el producto.");
-        } finally {
-          setLoading(false);
         }
       }
     } finally {
@@ -495,9 +508,8 @@ export default function Proveedores() {
     const idProv = Number(proveedorActivo.ID_Proveedor);
     const idsSeleccionados = Array.from(seleccionProductoIds);
 
-    setLoading(true);
     try {
-      const ok = await proveedoresSetVinculos({
+      const ok = await setVinculos.mutateAsync({
         idProveedor: idProv,
         productoIds: idsSeleccionados.map(Number),
       });
@@ -506,13 +518,12 @@ export default function Proveedores() {
         return;
       }
 
+      // La invalidación recachea; refrescamos los productos del proveedor antes de cerrar.
       await recargarProductosProveedor();
       setModalVincularOpen(false);
     } catch (e) {
       console.error("Error guardando vínculos", e);
       toast.error("Error", "No se pudieron guardar los vínculos.");
-    } finally {
-      setLoading(false);
     }
   }
 
@@ -546,9 +557,8 @@ export default function Proveedores() {
     const stockM = toNumOrNull(pStockMin);
     const unidad = pUnidad.trim();
 
-    setLoading(true);
     try {
-      const idNuevo = await proveedoresCreateProducto({
+      const idNuevo = await createProducto.mutateAsync({
         idCategoria: idCat,
         idProveedor: idProv,
         nombre,
@@ -568,8 +578,6 @@ export default function Proveedores() {
     } catch (e) {
       console.error("Error creando producto", e);
       toast.error("Error", "No se pudo crear el producto.");
-    } finally {
-      setLoading(false);
     }
   }
 

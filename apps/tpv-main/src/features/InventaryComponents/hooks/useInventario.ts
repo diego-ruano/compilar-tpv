@@ -1,12 +1,18 @@
 // src/features/InventaryComponents/hooks/useInventario.ts
+//
+// Carga de datos vía TanStack Query (ver ../inventarioQueries.ts). El estado de selección
+// (categoriaSeleccionada) sigue siendo local; las listas se derivan de las queries cacheadas.
+// La superficie pública del hook se conserva idéntica para no tocar el consumidor.
 import { useEffect, useMemo, useState } from "react";
-import { fileUrlFromAppData } from "../utils/inventarioImages";
 import {
-  inventarioAPI,
   type CategoriaRow,
   type ProductoListRow,
-  type ProductoResumen,
 } from "../api/inventarioAPI";
+import {
+  useCategorias,
+  useProductosByCategoria,
+  useResumenInventario,
+} from "../inventarioQueries";
 
 export interface CategoriaDisplay extends CategoriaRow {
   urlImagen: string;
@@ -17,110 +23,61 @@ export interface ProductoDisplay extends ProductoListRow {
 }
 
 export function useInventario() {
-  const [categorias, setCategorias] = useState<CategoriaDisplay[]>([]);
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState<CategoriaDisplay | null>(null);
 
-  const [productos, setProductos] = useState<ProductoDisplay[]>([]);
-  const [loadingProductos, setLoadingProductos] = useState(false);
+  const categoriasQuery = useCategorias();
+  const resumenQuery = useResumenInventario();
+  const productosQuery = useProductosByCategoria(
+    categoriaSeleccionada ? Number(categoriaSeleccionada.ID_Categoria) : null,
+  );
 
-  const [proximosCaducar, setProximosCaducar] = useState<ProductoResumen[]>([]);
-  const [menosCantidad, setMenosCantidad] = useState<ProductoResumen[]>([]);
+  const categorias = useMemo(() => categoriasQuery.data ?? [], [categoriasQuery.data]);
+  const productos = useMemo(() => productosQuery.data ?? [], [productosQuery.data]);
+
+  const proximosCaducar = useMemo(
+    () => resumenQuery.data?.proximos ?? [],
+    [resumenQuery.data],
+  );
+  const menosCantidad = useMemo(
+    () => resumenQuery.data?.menos ?? [],
+    [resumenQuery.data],
+  );
+
+  const loadingProductos = productosQuery.isFetching;
 
   const titulo = useMemo(() => {
     if (categoriaSeleccionada) return `INVENTARIO · ${categoriaSeleccionada.Nombre}`;
     return "INVENTARIO";
   }, [categoriaSeleccionada]);
 
-  const cargarCategorias = async () => {
-    const rows = await inventarioAPI.listCategorias();
-
-    const procesadas = await Promise.all(
-      (rows ?? [])
-        .filter((c) => Number.isFinite(c.ID_Categoria) && c.ID_Categoria > 0)
-        .map(async (cat) => {
-          const ruta = (cat.Ruta_Imagen ?? "").trim();
-
-          // ✅ si no hay ruta, no intentamos resolver fileUrl
-          if (!ruta) return { ...cat, urlImagen: "" };
-
-          const urlImagen =
-            ruta.startsWith("http://") ||
-            ruta.startsWith("https://") ||
-            ruta.startsWith("asset://") ||
-            ruta.startsWith("tauri://")
-              ? ruta
-              : await fileUrlFromAppData(ruta);
-
-          return { ...cat, urlImagen };
-        }),
+  // Re-sincroniza la categoría seleccionada con la lista cacheada (p.ej. tras editar/recargar).
+  useEffect(() => {
+    if (!categoriaSeleccionada) return;
+    const actualizada = categorias.find(
+      (c) => Number(c.ID_Categoria) === Number(categoriaSeleccionada.ID_Categoria),
     );
+    if (actualizada && actualizada !== categoriaSeleccionada) {
+      setCategoriaSeleccionada(actualizada);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categorias]);
 
-    setCategorias(procesadas);
+  // Wrappers de recarga (conservan la firma usada por el consumidor).
+  const cargarCategorias = async () => {
+    await categoriasQuery.refetch();
   };
 
-  const cargarProductos = async (idCat: number) => {
-    setLoadingProductos(true);
-    try {
-      const rows = await inventarioAPI.listProductosByCategoria(Number(idCat));
-
-      const procesados = await Promise.all(
-        (rows ?? [])
-          .filter((p) => Number.isFinite(p.ID_Producto) && p.ID_Producto > 0)
-          .map(async (p) => {
-            const ruta = (p.Ruta_Imagen ?? "").trim();
-
-            let urlImagen = "";
-            if (ruta) {
-              urlImagen =
-                ruta.startsWith("http://") ||
-                ruta.startsWith("https://") ||
-                ruta.startsWith("asset://") ||
-                ruta.startsWith("tauri://")
-                  ? ruta
-                  : await fileUrlFromAppData(ruta);
-            }
-
-            return { ...p, urlImagen };
-          }),
-      );
-
-      setProductos(procesados);
-    } catch (e) {
-      console.error("Fallo al cargar productos", e);
-      setProductos([]);
-    } finally {
-      setLoadingProductos(false);
-    }
+  const cargarProductos = async (_idCat: number) => {
+    await productosQuery.refetch();
   };
 
   const cargarResumenInventario = async () => {
-    try {
-      const r = await inventarioAPI.getResumen();
-      setProximosCaducar(r.proximos ?? []);
-      setMenosCantidad(r.menos ?? []);
-    } catch (e) {
-      console.error("Fallo al cargar resumen inventario:", e);
-      setProximosCaducar([]);
-      setMenosCantidad([]);
-    }
+    await resumenQuery.refetch();
   };
 
-  useEffect(() => {
-    (async () => {
-      await cargarCategorias();
-      await cargarResumenInventario();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    if (!categoriaSeleccionada) {
-      cargarResumenInventario();
-      return;
-    }
-    cargarProductos(Number(categoriaSeleccionada.ID_Categoria));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoriaSeleccionada?.ID_Categoria]);
+  // Compat: el consumidor sigue pudiendo "limpiar" productos al volver atrás.
+  // Con caché, la lista se deriva de la query; este setter es un no-op intencionado.
+  const setProductos = (_: ProductoDisplay[] | ((prev: ProductoDisplay[]) => ProductoDisplay[])) => {};
 
   return {
     categorias,

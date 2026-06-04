@@ -1,6 +1,16 @@
 // src/pages/Tareas.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { tareasApi } from "../../features/tareas/tareasApis";
+import {
+  useCreateTarea,
+  useDeleteTarea,
+  useMarcarTareaFinalizada,
+  useMisTareas,
+  useSetAsignacionesTarea,
+  useTareasAdmin,
+  useTrabajadores,
+  useUpdateTarea,
+} from "../../features/tareas/tareasQueries";
 import { useAuth } from "../../shared/stores/useAuth";
 import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
@@ -149,10 +159,42 @@ export default function Tareas() {
   const { role, idTrabajador } = useAuth();
   const isAdmin = role === "Administrador";
 
-  const [loading, setLoading] = useState(true);
-  const [trabajadores, setTrabajadores] = useState<TrabajadorUI[]>([]);
-  const [tareasAdmin, setTareasAdmin] = useState<TareaUI[]>([]);
-  const [misTareas, setMisTareas] = useState<TareaUI[]>([]);
+  // Lecturas cacheadas (TanStack Query). El admin necesita trabajadores + tareas de admin;
+  // el no-admin sólo sus tareas. Cada query se habilita según el rol.
+  const trabajadoresQuery = useTrabajadores(isAdmin);
+  const tareasAdminQuery = useTareasAdmin(isAdmin);
+  const misTareasQuery = useMisTareas(idTrabajador, !isAdmin);
+
+  // Escrituras como mutaciones (invalidan la caché de "tareas" en onSuccess).
+  const createTareaM = useCreateTarea();
+  const updateTareaM = useUpdateTarea();
+  const setAsignacionesM = useSetAsignacionesTarea();
+  const deleteTareaM = useDeleteTarea();
+  const marcarFinalizadaM = useMarcarTareaFinalizada();
+
+  const trabajadores = useMemo<TrabajadorUI[]>(
+    () => (trabajadoresQuery.data ?? []) as TrabajadorUI[],
+    [trabajadoresQuery.data],
+  );
+  const tareasAdmin = useMemo<TareaUI[]>(
+    () => (tareasAdminQuery.data ?? []) as TareaUI[],
+    [tareasAdminQuery.data],
+  );
+  const misTareas = useMemo<TareaUI[]>(
+    () => (misTareasQuery.data ?? []) as TareaUI[],
+    [misTareasQuery.data],
+  );
+
+  // `loading` derivado: refetch de la(s) query(s) activa(s) + cualquier escritura en curso.
+  const loading = isAdmin
+    ? trabajadoresQuery.isFetching ||
+      tareasAdminQuery.isFetching ||
+      createTareaM.isPending ||
+      updateTareaM.isPending ||
+      setAsignacionesM.isPending ||
+      deleteTareaM.isPending
+    : misTareasQuery.isFetching || marcarFinalizadaM.isPending;
+
   const [modalNueva, setModalNueva] = useState(false);
   const [modalDetalle, setModalDetalle] = useState(false);
   const [selected, setSelected] = useState<TareaUI | null>(null);
@@ -190,35 +232,6 @@ export default function Tareas() {
   const [adminSaving, setAdminSaving] = useState(false);
   const [adminDeleting, setAdminDeleting] = useState(false);
 
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      if (isAdmin) {
-        const [trs, ts] = await Promise.all([
-          tareasApi.getTrabajadores(),
-          tareasApi.getTareasAdmin(),
-        ]);
-
-        setTrabajadores(trs as any);
-        setTareasAdmin(ts as any);
-      } else {
-        if (!idTrabajador) {
-          setMisTareas([]);
-        } else {
-          const t = await tareasApi.getMisTareas(idTrabajador);
-          setMisTareas(t as any);
-        }
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [role, idTrabajador]);
-
   const tareasPendientes = useMemo(() => {
     const src = isAdmin ? tareasAdmin : misTareas;
     if (isAdmin) {
@@ -247,6 +260,18 @@ export default function Tareas() {
     );
   }, [isAdmin, tareasAdmin, misTareas]);
 
+  // Re-sincroniza la tarea seleccionada (modal de detalle) cuando la lista cacheada cambia
+  // tras una invalidación/refetch, para que progreso/estado mostrados queden frescos.
+  useEffect(() => {
+    if (!selected) return;
+    const src = isAdmin ? tareasAdmin : misTareas;
+    const fresh = src.find((t) => t.ID_Tarea === selected.ID_Tarea);
+    if (fresh && fresh !== selected) {
+      setSelected({ ...selected, ...fresh });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tareasAdmin, misTareas]);
+
   const toggleAsignado = (id: number) => {
     setIdsAsignados((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
@@ -259,7 +284,7 @@ export default function Tareas() {
 
     setSaving(true);
     try {
-      const ok = await tareasApi.createTarea({
+      const ok = await createTareaM.mutateAsync({
         titulo: titulo.trim(),
         descripcion: descripcion.trim() || null,
         fechaLimite: fechaLimite?.trim() || null,
@@ -272,7 +297,7 @@ export default function Tareas() {
         setFechaLimite("");
         setIdsAsignados([]);
         setModalNueva(false);
-        await refresh();
+        // La invalidación en onSuccess recachea la lista sola.
       }
     } finally {
       setSaving(false);
@@ -283,14 +308,14 @@ export default function Tareas() {
     if (!selected) return;
     if (!idTrabajador) return;
 
-    await tareasApi.marcarTareaFinalizada({
+    await marcarFinalizadaM.mutateAsync({
       idTarea: selected.ID_Tarea,
       idTrabajador,
     });
 
     setModalDetalle(false);
     setSelected(null);
-    await refresh();
+    // La invalidación en onSuccess recachea la lista sola.
   };
 
   const openDetalle = async (t: TareaUI) => {
@@ -301,13 +326,15 @@ export default function Tareas() {
     if (!isAdmin) return;
 
     try {
-      const [tarea, trs, asigs] = await Promise.all([
+      // `getTareaById` y `getTareaAsignados` son lecturas puntuales para el formulario de
+      // detalle (no cacheadas): se dejan como llamada directa. La lista de trabajadores ya
+      // está cacheada, así que sólo refrescamos esa query.
+      const [tarea, , asigs] = await Promise.all([
         tareasApi.getTareaById(t.ID_Tarea),
-        tareasApi.getTrabajadores(),
+        trabajadoresQuery.refetch(),
         tareasApi.getTareaAsignados(t.ID_Tarea),
       ]);
 
-      setTrabajadores(trs as any);
       setAdminDetalleAsignados(asigs as any);
 
       const finalTitulo = (tarea as any)?.Titulo ?? t.Titulo ?? "";
@@ -344,21 +371,21 @@ export default function Tareas() {
 
     setAdminSaving(true);
     try {
-      await tareasApi.updateTarea({
+      await updateTareaM.mutateAsync({
         idTarea: selected.ID_Tarea,
         titulo: adminEditTitulo.trim(),
         descripcion: adminEditDescripcion.trim() || null,
         fechaLimite: adminEditFechaLimite?.trim() || null,
       });
 
-      await tareasApi.setAsignacionesTarea({
+      await setAsignacionesM.mutateAsync({
         idTarea: selected.ID_Tarea,
         idsTrabajadores: adminEditIdsAsignados,
       });
 
       setModalDetalle(false);
       setSelected(null);
-      await refresh();
+      // La invalidación en onSuccess recachea la lista sola.
     } finally {
       setAdminSaving(false);
     }
@@ -375,13 +402,12 @@ export default function Tareas() {
     setConfirmando(true);
     setAdminDeleting(true);
     try {
-      await tareasApi.deleteTarea(confirmAccion.tarea.ID_Tarea);
+      await deleteTareaM.mutateAsync(confirmAccion.tarea.ID_Tarea);
 
       setConfirmAccion(null);
       setModalDetalle(false);
       setSelected(null);
-
-      await refresh();
+      // La invalidación en onSuccess recachea la lista sola.
     } finally {
       setAdminDeleting(false);
       setConfirmando(false);

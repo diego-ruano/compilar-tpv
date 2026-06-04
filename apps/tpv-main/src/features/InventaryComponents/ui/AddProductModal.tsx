@@ -11,6 +11,13 @@ import {
     type AlergenoRow,
     type ProveedorMiniRow,
 } from "../api/inventarioAPI";
+import {
+    useAlergenos,
+    useCategorias,
+    useCreateLote,
+    useProveedoresMini,
+    useUpsertProducto,
+} from "../inventarioQueries";
 
 type CategoriaMini = { ID_Categoria: number; Nombre: string };
 
@@ -52,10 +59,26 @@ export function AddProductModal({
 }) {
     const isEdit = !!productIdToEdit;
 
-    const [categorias, setCategorias] = useState<CategoriaMini[]>([]);
-    const [idCategoria, setIdCategoria] = useState<number | "">("");
+    // Datos de referencia del formulario, cacheados (sólo se cargan con el modal abierto).
+    const categoriasQuery = useCategorias();
+    const proveedoresQuery = useProveedoresMini();
+    const alergenosQuery = useAlergenos();
 
-    const [proveedores, setProveedores] = useState<ProveedorMiniRow[]>([]);
+    const upsertProducto = useUpsertProducto();
+    const createLote = useCreateLote();
+
+    const categorias: CategoriaMini[] = useMemo(
+        () =>
+            (categoriasQuery.data ?? []).map((c) => ({
+                ID_Categoria: Number(c.ID_Categoria),
+                Nombre: c.Nombre,
+            })),
+        [categoriasQuery.data],
+    );
+    const proveedores: ProveedorMiniRow[] = proveedoresQuery.data ?? [];
+    const alergenos: AlergenoRow[] = alergenosQuery.data ?? [];
+
+    const [idCategoria, setIdCategoria] = useState<number | "">("");
     const [idProveedor, setIdProveedor] = useState<number | "">("");
 
     const [nombre, setNombre] = useState("");
@@ -75,7 +98,6 @@ export function AddProductModal({
     const [caducidadLoteInicial, setCaducidadLoteInicial] = useState("");
     const [cantidadInicialLote, setCantidadInicialLote] = useState("");
 
-    const [alergenos, setAlergenos] = useState<AlergenoRow[]>([]);
     const [alergenosOpen, setAlergenosOpen] = useState(false);
     const [selectedAlergenos, setSelectedAlergenos] = useState<Set<number>>(new Set());
     const [alergenoImgUrl, setAlergenoImgUrl] = useState<Record<number, string>>({});
@@ -113,6 +135,30 @@ export function AddProductModal({
         };
     }, [previewUrl]);
 
+    // Resuelve las URLs de imagen de alérgenos a partir de la lista cacheada.
+    useEffect(() => {
+        if (!open) return;
+
+        let cancelled = false;
+
+        (async () => {
+            const urlMap: Record<number, string> = {};
+            await Promise.all(
+                (alergenos ?? []).map(async (a) => {
+                    const id = toNum((a as any).ID_Alergeno, 0);
+                    const url = await toImageUrlMaybe((a as any).Ruta_Imagen);
+                    if (id > 0 && url) urlMap[id] = url;
+                }),
+            );
+            if (cancelled) return;
+            setAlergenoImgUrl(urlMap);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [open, alergenos]);
+
     useEffect(() => {
         if (!open) return;
 
@@ -122,34 +168,6 @@ export function AddProductModal({
         setImage(null);
 
         (async () => {
-            const [catsRaw, provsRaw, als] = await Promise.all([
-                inventarioAPI.listCategorias(),
-                inventarioAPI.listProveedoresMini(),
-                inventarioAPI.listAlergenos(),
-            ]);
-
-            if (cancelled) return;
-
-            const cats: CategoriaMini[] = (catsRaw ?? []).map((c) => ({
-                ID_Categoria: Number(c.ID_Categoria),
-                Nombre: c.Nombre,
-            }));
-            setCategorias(cats);
-            setProveedores(provsRaw ?? []);
-            setAlergenos(als ?? []);
-
-            const urlMap: Record<number, string> = {};
-            await Promise.all(
-                (als ?? []).map(async (a) => {
-                    const id = toNum((a as any).ID_Alergeno, 0);
-                    const url = await toImageUrlMaybe((a as any).Ruta_Imagen);
-                    if (id > 0 && url) urlMap[id] = url;
-                }),
-            );
-
-            if (cancelled) return;
-            setAlergenoImgUrl(urlMap);
-
             if (!productIdToEdit) {
                 setNombre("");
                 setPrecioVenta("");
@@ -176,6 +194,7 @@ export function AddProductModal({
                 return;
             }
 
+            // Prefill on-demand del producto a editar (no se cachea: depende del id puntual).
             const detalle = await inventarioAPI.getProductoDetalle(Number(productIdToEdit));
             if (cancelled) return;
 
@@ -284,7 +303,7 @@ export function AddProductModal({
                 .filter((n) => Number.isFinite(n) && n > 0);
 
             const finalProductId =
-                (await inventarioAPI.upsertProducto({
+                (await upsertProducto.mutateAsync({
                     id_producto: isEdit ? Number(productIdToEdit) : undefined,
                     id_categoria: Number(idCategoria),
                     id_proveedor:
@@ -317,7 +336,7 @@ export function AddProductModal({
             if (!isEdit && crearLoteInicial) {
                 const ci = Number(cantidadInicialLote.replace(",", "."));
 
-                await inventarioAPI.createLote({
+                await createLote.mutateAsync({
                     id_producto: finalProductId,
                     codigo_lote: codigoLoteInicial.trim(),
                     caducidad: caducidadLoteInicial.trim() ? caducidadLoteInicial : null,

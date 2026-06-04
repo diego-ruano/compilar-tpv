@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { inventarioAPI, type ProductoDetalle, type LoteRow } from "./api/inventarioAPI";
+import { type ProductoDetalle, type LoteRow } from "./api/inventarioAPI";
 import { fileUrlFromAppData } from "./utils/inventarioImages";
 import AddLoteModal from "./ui/AddLoteModal";
+import {
+  useAjustarLote,
+  useLotesByProducto,
+  useProductoDetalle,
+} from "./inventarioQueries";
 
 type Props = {
   open: boolean;
@@ -53,16 +58,12 @@ async function toImageUrlMaybe(ruta: string | null | undefined): Promise<string>
 }
 
 export default function ProductDetailModal({ open, onClose, productId, onEdit, onDeleted }: Props) {
-  const [loading, setLoading] = useState(false);
-  const [p, setP] = useState<ProductoDetalle | null>(null);
-
   const [imgUrl, setImgUrl] = useState<string>("");
 
   const [alergOpen, setAlergOpen] = useState(false);
   const [alergImgUrl, setAlergImgUrl] = useState<Record<number, string>>({});
 
   // ✅ lotes
-  const [lotes, setLotes] = useState<LoteRow[]>([]);
   const [lotesOpen, setLotesOpen] = useState(false);
   const [addLoteOpen, setAddLoteOpen] = useState(false);
 
@@ -74,58 +75,65 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const cargar = async (pid: number) => {
-    setLoading(true);
-    try {
-      const row = await inventarioAPI.getProductoDetalle(pid);
-      setP(row);
+  // Carga de detalle y lotes vía TanStack Query (sólo activa con el modal abierto).
+  const activeId = open ? productId : null;
+  const detalleQuery = useProductoDetalle(activeId);
+  const lotesQuery = useLotesByProducto(activeId);
+  const ajustarLote = useAjustarLote();
 
-      if ((row as any)?.Ruta_Imagen) setImgUrl(await toImageUrlMaybe((row as any).Ruta_Imagen));
-      else setImgUrl("");
+  const p: ProductoDetalle | null = detalleQuery.data ?? null;
+  const lotes: LoteRow[] = lotesQuery.data ?? [];
+  const loading = detalleQuery.isFetching || lotesQuery.isFetching;
 
-      const map: Record<number, string> = {};
-      if ((row as any)?.alergs?.length) {
-        await Promise.all(
-          (row as any).alergs.map(async (a: any) => {
-            const id = Number(a.ID_Alergeno);
-            if (!Number.isFinite(id) || id <= 0) return;
-            const url = await toImageUrlMaybe(a.Ruta_Imagen);
-            if (url) map[id] = url;
-          }),
-        );
-      }
-      setAlergImgUrl(map);
-      setAlergOpen(false);
-
-      const ls = await inventarioAPI.listLotesByProducto(pid);
-      setLotes(ls ?? []);
-    } catch (e) {
-      console.error("Error cargando detalle producto:", e);
-      setP(null);
-      setImgUrl("");
-      setAlergOpen(false);
-      setAlergImgUrl({});
-      setLotes([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Resuelve URLs de imagen (producto + alérgenos) cuando llega el detalle cacheado.
   useEffect(() => {
-    if (!open) return;
+    let cancelled = false;
 
-    if (!productId) {
-      setP(null);
+    if (!open || !productId || !p) {
       setImgUrl("");
-      setAlergOpen(false);
       setAlergImgUrl({});
-      setLotes([]);
-      setLotesOpen(false);
+      setAlergOpen(false);
       return;
     }
 
-    cargar(productId);
-  }, [open, productId]);
+    (async () => {
+      const url = (p as any)?.Ruta_Imagen ? await toImageUrlMaybe((p as any).Ruta_Imagen) : "";
+
+      const map: Record<number, string> = {};
+      if ((p as any)?.alergs?.length) {
+        await Promise.all(
+          (p as any).alergs.map(async (a: any) => {
+            const id = Number(a.ID_Alergeno);
+            if (!Number.isFinite(id) || id <= 0) return;
+            const u = await toImageUrlMaybe(a.Ruta_Imagen);
+            if (u) map[id] = u;
+          }),
+        );
+      }
+
+      if (cancelled) return;
+      setImgUrl(url);
+      setAlergImgUrl(map);
+      setAlergOpen(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, productId, p]);
+
+  // Muestra el toast/limpieza cuando falla la carga (paridad con el catch anterior).
+  useEffect(() => {
+    if (detalleQuery.isError || lotesQuery.isError) {
+      console.error(
+        "Error cargando detalle producto:",
+        detalleQuery.error ?? lotesQuery.error,
+      );
+      setImgUrl("");
+      setAlergOpen(false);
+      setAlergImgUrl({});
+    }
+  }, [detalleQuery.isError, lotesQuery.isError, detalleQuery.error, lotesQuery.error]);
 
   const title = useMemo(() => "Acciones del producto", []);
 
@@ -389,9 +397,8 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 onClose={() => setAddLoteOpen(false)}
                 productId={productId}
                 onSaved={async () => {
-                  if (!productId) return;
-                  const ls = await inventarioAPI.listLotesByProducto(productId);
-                  setLotes(ls ?? []);
+                  // La mutación de creación de lote ya invalida la caché; refrescamos por si acaso.
+                  await lotesQuery.refetch();
                 }}
               />
 
@@ -441,16 +448,13 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                             setAjustando(true);
                             try {
-                              await inventarioAPI.ajustarLote({
+                              // La invalidación de onSuccess recachea los lotes automáticamente.
+                              await ajustarLote.mutateAsync({
                                 id_lote: (ajustar as any).ID_Lote,
                                 stock_disponible: n,
                                 notas: null,
                               });
 
-                              if (productId) {
-                                const ls = await inventarioAPI.listLotesByProducto(productId);
-                                setLotes(ls ?? []);
-                              }
                               setAjustar(null);
                             } finally {
                               setAjustando(false);

@@ -1,9 +1,9 @@
 // src/features/estadisticas/MesasStats.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import Chart from "react-apexcharts";
 
-// ✅ esto lo vamos a crear en statsApis.ts en el siguiente paso
-import { mesasStatsGet, type MesasStatsResponse } from "./statsApis";
+import type { MesasStatsResponse } from "./statsApis";
+import { useMesasStats } from "./statsQueries";
 
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
 
@@ -21,33 +21,13 @@ function cn(...classes: Array<string | false | null | undefined>) {
 }
 
 export default function MesasStats({ range }: { range: StatsRange }) {
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [data, setData] = useState<MesasStatsResponse | null>(null);
+    const query = useMesasStats(range);
 
-    useEffect(() => {
-        let alive = true;
-        (async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                const res = await mesasStatsGet(range);
-                if (!alive) return;
-                setData(res);
-            } catch (e) {
-                console.error(e);
-                if (!alive) return;
-                setError("No se pudieron cargar las estadísticas de mesas.");
-                setData(null);
-            } finally {
-                if (alive) setLoading(false);
-            }
-        })();
-
-        return () => {
-            alive = false;
-        };
-    }, [range]);
+    const data: MesasStatsResponse | null = query.data ?? null;
+    const loading = query.isFetching;
+    const error = query.isError
+        ? "No se pudieron cargar las estadísticas de mesas."
+        : null;
 
     const ocupadas = data?.ocupadas ?? 0;
     const totalMesas = data?.total_mesas ?? 0;

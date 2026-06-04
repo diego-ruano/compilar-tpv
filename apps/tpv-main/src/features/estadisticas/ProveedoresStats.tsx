@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
 import {
-  statsProveedoresResumen,
   type ProveedoresStatsResponse,
   type StatsRange,
 } from "./statsApis";
+import { useProveedoresStats } from "./statsQueries";
 
 /* =========================
    Helpers
@@ -98,30 +98,17 @@ function KPICard({
    Componente
 ========================= */
 export default function ProveedoresStats({ range }: { range: StatsRange }) {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<ProveedoresStatsResponse | null>(null);
+  const query = useProveedoresStats(range);
+
+  const data: ProveedoresStatsResponse | null = query.data ?? null;
+  const loading = query.isFetching;
+  const error = query.isError
+    ? (query.error as any)?.message || String(query.error)
+    : null;
+
+  const cargar = () => query.refetch();
 
   const BLUE = "#0ea5e9";
-
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await statsProveedoresResumen({ range });
-      setData(res);
-    } catch (e: any) {
-      console.error(e);
-      setData(null);
-      setError(e?.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [range]);
-
-  useEffect(() => {
-    void cargar();
-  }, [cargar]);
 
   const total = data?.total_gasto ?? 0;
   const numGastos = data?.num_gastos ?? 0;

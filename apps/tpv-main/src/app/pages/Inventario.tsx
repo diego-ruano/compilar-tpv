@@ -13,7 +13,7 @@ import AddCategoryModal from "../../features/InventaryComponents/ui/AddCategoryM
 import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 
-import { inventarioAPI } from "../../features/InventaryComponents/api/inventarioAPI";
+import { useDeleteProducto } from "../../features/InventaryComponents/inventarioQueries";
 
 export default function Inventario() {
     const toast = useToast();
@@ -33,6 +33,8 @@ export default function Inventario() {
         cargarResumenInventario,
     } = useInventario();
 
+    const deleteProducto = useDeleteProducto();
+
     const [openAddCategory, setOpenAddCategory] = useState(false);
     const [openAddProduct, setOpenAddProduct] = useState(false);
 
@@ -43,13 +45,8 @@ export default function Inventario() {
 
     const deleteProduct = async (id: number) => {
         try {
-            await inventarioAPI.deleteProducto(id);
-
-            if (categoriaSeleccionada) {
-                await cargarProductos(Number(categoriaSeleccionada.ID_Categoria));
-            } else {
-                await cargarResumenInventario();
-            }
+            // La invalidación de onSuccess recachea productos y resumen automáticamente.
+            await deleteProducto.mutateAsync(id);
         } catch (e) {
             console.error("Error eliminando producto:", e);
             toast.error("Error", "No se pudo eliminar el producto.");

@@ -6,65 +6,40 @@ import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
 import {
-  statsProductosListCategorias,
-  statsProductosResumen,
   type StatsRange,
   type StatsCategoriaRow,
   type ProductosStatsResumen,
 } from "./statsApis";
+import { useProductosCategorias, useProductosResumen } from "./statsQueries";
 
 export default function ProductosStats({ range }: { range: StatsRange }) {
   const toast = useToast();
 
-  const [loading, setLoading] = useState(false);
-  const [loadingCats, setLoadingCats] = useState(false);
-
-  const [categorias, setCategorias] = useState<StatsCategoriaRow[]>([]);
-
   const [catTopId, setCatTopId] = useState<number | null>(null);
   const [catWorstId, setCatWorstId] = useState<number | null>(null);
 
-  const [resumen, setResumen] = useState<ProductosStatsResumen | null>(null);
+  const categoriasQuery = useProductosCategorias();
+  const resumenQuery = useProductosResumen(range, catTopId, catWorstId);
 
-  const cargarCategorias = useCallback(async () => {
-    setLoadingCats(true);
-    try {
-      const rows = await statsProductosListCategorias();
-      setCategorias(rows);
-    } catch (e) {
-      console.error(e);
-      setCategorias([]);
+  const categorias: StatsCategoriaRow[] = categoriasQuery.data ?? [];
+  const resumen: ProductosStatsResumen | null = resumenQuery.data ?? null;
+
+  const loadingCats = categoriasQuery.isFetching;
+  const loading = resumenQuery.isFetching;
+
+  useEffect(() => {
+    if (categoriasQuery.isError) {
+      console.error(categoriasQuery.error);
       toast.error("Error", "No se pudieron cargar las categorías.");
-    } finally {
-      setLoadingCats(false);
     }
-  }, [toast]);
+  }, [categoriasQuery.isError, categoriasQuery.error, toast]);
 
-  const cargarResumen = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await statsProductosResumen({
-        range,
-        categoriaTopId: catTopId,
-        categoriaWorstId: catWorstId,
-      });
-      setResumen(data);
-    } catch (e) {
-      console.error(e);
-      setResumen(null);
+  useEffect(() => {
+    if (resumenQuery.isError) {
+      console.error(resumenQuery.error);
       toast.error("Error", "No se pudieron cargar las estadísticas de productos.");
-    } finally {
-      setLoading(false);
     }
-  }, [range, catTopId, catWorstId, toast]);
-
-  useEffect(() => {
-    void cargarCategorias();
-  }, [cargarCategorias]);
-
-  useEffect(() => {
-    void cargarResumen();
-  }, [cargarResumen]);
+  }, [resumenQuery.isError, resumenQuery.error, toast]);
 
   const bestName = resumen?.mejor_producto ?? null;
   const worstName = resumen?.peor_producto_vendible ?? null;

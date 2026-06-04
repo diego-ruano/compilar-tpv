@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
@@ -9,8 +9,8 @@ import {
     type StatsRange,
     type TrabajadoresStatsResponse,
     type TrabajadorCardStats,
-    statsTrabajadoresResumen,
 } from "./statsApis";
+import { useTrabajadoresStats } from "./statsQueries";
 
 /**
  * ✅ NUEVO (frontend):
@@ -263,29 +263,20 @@ function HorasBarChart({
 export default function TrabajadoresStats({ range }: { range: StatsRange }) {
     const toast = useToast();
 
-    const [loading, setLoading] = useState(false);
-    const [data, setData] = useState<TrabajadoresStatsResponse | null>(null);
+    const query = useTrabajadoresStats(range);
 
-    const cargar = useCallback(async () => {
-        setLoading(true);
-        try {
-            const res = await statsTrabajadoresResumen({ range });
-            setData(res);
-        } catch (e) {
-            console.error(e);
-            setData(null);
+    const data: TrabajadoresStatsResponse | null = query.data ?? null;
+    const loading = query.isFetching;
+
+    useEffect(() => {
+        if (query.isError) {
+            console.error(query.error);
             toast.error(
                 "Error",
                 "No se pudieron cargar estadísticas de trabajadores.",
             );
-        } finally {
-            setLoading(false);
         }
-    }, [range, toast]);
-
-    useEffect(() => {
-        void cargar();
-    }, [cargar]);
+    }, [query.isError, query.error, toast]);
 
     const cocineros = (data?.cocineros ?? []) as TrabajadorCardStatsExt[];
     const camareros = (data?.camareros ?? []) as TrabajadorCardStatsExt[];

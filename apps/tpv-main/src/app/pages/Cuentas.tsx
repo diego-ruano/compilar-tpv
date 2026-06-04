@@ -2,12 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
     cuentasGetEntradas,
     cuentasGetSalidas,
-    cuentasCreateGasto,
-    cuentasUpdateGasto,
-    cuentasDeleteGasto,
-    cuentasUpdatePago,
-    cuentasDeletePago,
-    cuentasListProveedoresMini,
     type ProveedorMini,
     type Entrada,
     type Salida,
@@ -22,6 +16,16 @@ import {
     type Denom,
     type CashCount,
 } from "../../features/cuentas/cuentasApis";
+import {
+    useCuentasEntradas,
+    useCuentasSalidas,
+    useCuentasProveedoresMini,
+    useCreateGasto,
+    useUpdateGasto,
+    useDeleteGasto,
+    useUpdatePago,
+    useDeletePago,
+} from "../../features/cuentas/cuentasQueries";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -266,15 +270,29 @@ export default function Cuentas() {
     const [del, setDel] = useState(() => todayYMD());
     const [al, setAl] = useState(() => todayYMD());
 
-    const [entradasDB, setEntradasDB] = useState<Entrada[]>([]);
-    const [loadingEntradas, setLoadingEntradas] = useState(false);
+    // Lecturas cacheadas (TanStack Query). El rango (del/al) forma parte de la queryKey.
+    const entradasQuery = useCuentasEntradas({ del, al });
+    const salidasQuery = useCuentasSalidas({ del, al });
+    const proveedoresQuery = useCuentasProveedoresMini();
 
-    const [salidasDB, setSalidasDB] = useState<SalidaExt[]>([]);
-    const [loadingSalidas, setLoadingSalidas] = useState(false);
+    // Escrituras (mutaciones con invalidación en onSuccess).
+    const createGasto = useCreateGasto();
+    const updateGasto = useUpdateGasto();
+    const deleteGasto = useDeleteGasto();
+    const updatePago = useUpdatePago();
+    const deletePago = useDeletePago();
 
-    const [proveedores, setProveedores] = useState<ProveedorMini[]>([]);
-    const [loadingProveedores, setLoadingProveedores] = useState(false);
-    const [errProveedores, setErrProveedores] = useState<string | null>(null);
+    const proveedores: ProveedorMini[] = useMemo(
+        () => proveedoresQuery.data ?? [],
+        [proveedoresQuery.data],
+    );
+    const loadingProveedores = proveedoresQuery.isFetching;
+    const errProveedores = proveedoresQuery.isError
+        ? String(
+              (proveedoresQuery.error as any)?.message ??
+                  "Error cargando proveedores",
+          )
+        : null;
 
     const proveedoresMap = useMemo(() => {
         const m = new Map<number, string>();
@@ -282,22 +300,22 @@ export default function Cuentas() {
         return m;
     }, [proveedores]);
 
-    const ensureProveedores = async () => {
-        try {
-            if (loadingProveedores) return;
-            if (proveedores.length > 0) return;
+    // Datos derivados de las queries (mismos mappers que antes).
+    const entradasDB = useMemo<Entrada[]>(
+        () => (entradasQuery.data ?? []).map(mapEntradaUI),
+        [entradasQuery.data],
+    );
+    const loadingEntradas = entradasQuery.isFetching;
 
-            setErrProveedores(null);
-            setLoadingProveedores(true);
-            const rows = await cuentasListProveedoresMini();
-            setProveedores(rows ?? []);
-        } catch (e: any) {
-            console.error("Error cargando proveedores:", e);
-            setErrProveedores(String(e?.message ?? "Error cargando proveedores"));
-            setProveedores([]);
-        } finally {
-            setLoadingProveedores(false);
-        }
+    const salidasDB = useMemo<SalidaExt[]>(
+        () => (salidasQuery.data ?? []).map((r) => mapSalidaUI(r, proveedoresMap)),
+        [salidasQuery.data, proveedoresMap],
+    );
+    const loadingSalidas = salidasQuery.isFetching;
+
+    // Wrapper que conserva el nombre/uso previo: refresca proveedores bajo demanda.
+    const ensureProveedores = async () => {
+        await proveedoresQuery.refetch();
     };
 
     const [confirmAccion, setConfirmAccion] = useState<
@@ -387,54 +405,19 @@ export default function Cuentas() {
         setTimeout(() => setXSavedToast(null), 1800);
     };
 
+    // Mostrar errores de carga como antes (los logs/efectos previos se sustituyen por
+    // los estados de error de las queries).
     useEffect(() => {
-        void ensureProveedores();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    useEffect(() => {
-        let cancelled = false;
-
-        (async () => {
-            try {
-                setLoadingEntradas(true);
-                const rows = await cuentasGetEntradas({ del, al });
-                if (!cancelled) setEntradasDB((rows ?? []).map(mapEntradaUI));
-            } catch (e) {
-                console.error("Error cargando ingresos:", e);
-                if (!cancelled) setEntradasDB([]);
-            } finally {
-                if (!cancelled) setLoadingEntradas(false);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [del, al]);
+        if (entradasQuery.isError) {
+            console.error("Error cargando ingresos:", entradasQuery.error);
+        }
+    }, [entradasQuery.isError, entradasQuery.error]);
 
     useEffect(() => {
-        let cancelled = false;
-
-        (async () => {
-            try {
-                setLoadingSalidas(true);
-                const rows = await cuentasGetSalidas({ del, al });
-                if (!cancelled) {
-                    setSalidasDB((rows ?? []).map((r) => mapSalidaUI(r, proveedoresMap)));
-                }
-            } catch (e) {
-                console.error("Error cargando salidas:", e);
-                if (!cancelled) setSalidasDB([]);
-            } finally {
-                if (!cancelled) setLoadingSalidas(false);
-            }
-        })();
-
-        return () => {
-            cancelled = true;
-        };
-    }, [del, al, proveedoresMap]);
+        if (salidasQuery.isError) {
+            console.error("Error cargando salidas:", salidasQuery.error);
+        }
+    }, [salidasQuery.isError, salidasQuery.error]);
 
     const q = busqueda.trim().toLowerCase();
 
@@ -474,16 +457,6 @@ export default function Cuentas() {
         setGProveedorId("");
         await ensureProveedores();
         setOpenAddGasto(true);
-    };
-
-    const refrescarGastos = async () => {
-        const rows = await cuentasGetSalidas({ del, al });
-        setSalidasDB((rows ?? []).map((r) => mapSalidaUI(r, proveedoresMap)));
-    };
-
-    const refrescarEntradas = async () => {
-        const rows = await cuentasGetEntradas({ del, al });
-        setEntradasDB((rows ?? []).map(mapEntradaUI));
     };
 
     const abrirEditarGasto = async (s: SalidaExt) => {
@@ -530,7 +503,7 @@ export default function Cuentas() {
 
             setSavingEditGasto(true);
 
-            const ok = await cuentasUpdateGasto({
+            const ok = await updateGasto.mutateAsync({
                 idGasto: editGastoId,
                 fecha,
                 tipoGasto: tipo,
@@ -541,7 +514,6 @@ export default function Cuentas() {
 
             if (!ok) throw new Error("No se pudo actualizar el gasto.");
 
-            await refrescarGastos();
             setOpenEditGasto(false);
         } catch (e: any) {
             console.error(e);
@@ -580,7 +552,7 @@ export default function Cuentas() {
 
             setSavingEditPago(true);
 
-            const ok = await cuentasUpdatePago({
+            const ok = await updatePago.mutateAsync({
                 idPago: editPagoId,
                 fechaHora,
                 metodo: epMetodo,
@@ -589,7 +561,6 @@ export default function Cuentas() {
 
             if (!ok) throw new Error("No se pudo actualizar la entrada.");
 
-            await refrescarEntradas();
             setOpenEditPago(false);
         } catch (e: any) {
             console.error(e);
@@ -612,11 +583,9 @@ export default function Cuentas() {
 
         try {
             if (confirmAccion.tipo === "gasto") {
-                await cuentasDeleteGasto(Number(confirmAccion.gasto.id));
-                await refrescarGastos();
+                await deleteGasto.mutateAsync(Number(confirmAccion.gasto.id));
             } else {
-                await cuentasDeletePago(Number(confirmAccion.entrada.id));
-                await refrescarEntradas();
+                await deletePago.mutateAsync(Number(confirmAccion.entrada.id));
             }
 
             setConfirmAccion(null);
@@ -655,7 +624,7 @@ export default function Cuentas() {
 
             setSavingGasto(true);
 
-            const ok = await cuentasCreateGasto({
+            const ok = await createGasto.mutateAsync({
                 fecha,
                 tipoGasto: tipo,
                 concepto,
@@ -665,7 +634,6 @@ export default function Cuentas() {
 
             if (!ok) throw new Error("No se pudo guardar el gasto.");
 
-            await refrescarGastos();
             setOpenAddGasto(false);
         } catch (e: any) {
             console.error(e);

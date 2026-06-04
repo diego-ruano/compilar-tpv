@@ -2,21 +2,23 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
 
 import {
-  trabajadoresGetAll,
-  trabajadoresGetTrabajadorIdByUsuario,
-  turnosGetAll,
-  horariosGetAsignacionesSemana,
-  horariosCreateAsignacion,
-  horariosUpdateAsignacion,
-  horariosDeleteAsignacion,
-  horariosCopySemanaAsignaciones,
-  horariosSetPredeterminadoDesdeSemana,
   type TrabajadorRow,
   type Turno,
   type Asignacion,
 } from "../../features/trabajadores/trabajadoresApis";
+import {
+  useTrabajadores,
+  useTurnos,
+  useTrabajadorIdByUsuario,
+  useAsignacionesSemana,
+  useCreateAsignacion,
+  useUpdateAsignacion,
+  useDeleteAsignacion,
+  useCopySemanaAsignaciones,
+  useSetPredeterminadoDesdeSemana,
+} from "../../features/trabajadores/trabajadoresQueries";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useToast } from "../../shared/toast";
 
@@ -327,14 +329,47 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const auth = useAuth();
   const isAdmin = auth.role === "Administrador";
 
-  const [turnos, setTurnos] = useState<Turno[]>([]);
-  const [asignaciones, setAsignaciones] = useState<Asignacion[]>([]);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [weekStart, setWeekStart] = useState<Date>(() => startOfWeekMonday(new Date()));
 
-  const [myTrabajadorId, setMyTrabajadorId] = useState<number | null>(null);
+  // Datos vía TanStack Query (caché): turnos, id de trabajador del usuario (no-admin) y
+  // las asignaciones de la semana visible. Las mutaciones de escritura invalidan la
+  // feature y recachean estas listas solas.
+  const lunesYMD = useMemo(() => toYMD(weekStart), [weekStart]);
+
+  const turnosQuery = useTurnos();
+  const trabajadorIdQuery = useTrabajadorIdByUsuario(
+    auth.idUsuario,
+    !isAdmin && !!auth.idUsuario,
+  );
+  const asignacionesQuery = useAsignacionesSemana(lunesYMD);
+
+  const createAsignacion = useCreateAsignacion();
+  const updateAsignacion = useUpdateAsignacion();
+  const deleteAsignacion = useDeleteAsignacion();
+  const copySemana = useCopySemanaAsignaciones();
+  const setPredeterminado = useSetPredeterminadoDesdeSemana();
+
+  const turnos = useMemo<Turno[]>(
+    () => asArray<Turno>(turnosQuery.data ?? []),
+    [turnosQuery.data],
+  );
+  const asignaciones = useMemo<Asignacion[]>(
+    () => asArray<Asignacion>(asignacionesQuery.data ?? []),
+    [asignacionesQuery.data],
+  );
+  const myTrabajadorId = trabajadorIdQuery.data ?? null;
+
+  const loading =
+    turnosQuery.isFetching ||
+    asignacionesQuery.isFetching ||
+    trabajadorIdQuery.isFetching ||
+    createAsignacion.isPending ||
+    updateAsignacion.isPending ||
+    deleteAsignacion.isPending ||
+    copySemana.isPending ||
+    setPredeterminado.isPending;
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
@@ -392,37 +427,14 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     return map;
   }, [asignaciones]);
 
-  const cargar = async () => {
-    setError(null);
-    setLoading(true);
-
-    try {
-      const lunes = toYMD(weekStart);
-
-      const rawTurnos = await turnosGetAll();
-      setTurnos(asArray<Turno>(rawTurnos));
-
-      if (!isAdmin && auth.idUsuario) {
-        const idT = await trabajadoresGetTrabajadorIdByUsuario(auth.idUsuario);
-        setMyTrabajadorId(idT);
-      }
-
-      const rawAsignaciones = await horariosGetAsignacionesSemana(lunes);
-      setAsignaciones(asArray<Asignacion>(rawAsignaciones));
-    } catch (e) {
-      console.error(e);
-      setError("No se pudo cargar el horario semanal.");
-      setTurnos([]);
-      setAsignaciones([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // Aviso si falla la carga de turnos/asignaciones (equivale al catch del fetch anterior).
   useEffect(() => {
-    void cargar();
+    if (turnosQuery.isError || asignacionesQuery.isError) {
+      console.error(turnosQuery.error ?? asignacionesQuery.error);
+      setError("No se pudo cargar el horario semanal.");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart, auth.role, auth.idUsuario]);
+  }, [turnosQuery.isError, asignacionesQuery.isError]);
 
   const copiarSemanaAnterior = async () => {
     if (!isAdmin) return;
@@ -436,15 +448,11 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     if (!ok) return;
 
     setError(null);
-    setLoading(true);
     try {
-      await horariosCopySemanaAsignaciones({ fromMonday, toMonday, overwrite: true });
-      await cargar();
+      await copySemana.mutateAsync({ fromMonday, toMonday, overwrite: true });
     } catch (e) {
       console.error(e);
       setError("No se pudo copiar la semana anterior.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -459,27 +467,22 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     if (!ok) return;
 
     setError(null);
-    setLoading(true);
     try {
-      const done = await horariosSetPredeterminadoDesdeSemana(lunes);
+      const done = await setPredeterminado.mutateAsync(lunes);
       if (!done) {
         toast.error("No se pudo", "Esa semana no tiene asignaciones para guardar como predeterminado.");
         return;
       }
       toast.success("Listo", "Horario predeterminado guardado.");
-      await cargar();
     } catch (e) {
       console.error(e);
       setError("No se pudo establecer el horario predeterminado.");
-    } finally {
-      setLoading(false);
     }
   };
 
   const guardarPDF = async () => {
     if (!isAdmin) return;
     setError(null);
-    setLoading(true);
 
     try {
       const weekStartYMD = toYMD(weekStart);
@@ -507,8 +510,6 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     } catch (e) {
       console.error(e);
       setError("No se pudo generar el PDF del horario.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -584,10 +585,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
 
     try {
-      setLoading(true);
-
       if (modalMode === "create") {
-        await horariosCreateAsignacion({
+        await createAsignacion.mutateAsync({
           idTrabajador: selectedTrabajadorId,
           fecha: selectedFecha,
           idTurno: Number(idTurno),
@@ -598,7 +597,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         });
 
         if (turnoPartido) {
-          await horariosCreateAsignacion({
+          await createAsignacion.mutateAsync({
             idTrabajador: selectedTrabajadorId,
             fecha: selectedFecha,
             idTurno: Number(idTurno),
@@ -610,7 +609,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         }
       } else {
         if (!editIdAsignacion) return;
-        await horariosUpdateAsignacion({
+        await updateAsignacion.mutateAsync({
           idAsignacion: editIdAsignacion,
           idTurno: Number(idTurno),
           area,
@@ -620,13 +619,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         });
       }
 
-      await cargar();
       closeModal();
     } catch (e) {
       console.error(e);
       setError("No se pudo guardar la asignacion.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -639,14 +635,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
 
     try {
-      setLoading(true);
-      await horariosDeleteAsignacion(idAsignacion);
-      await cargar();
+      await deleteAsignacion.mutateAsync(idAsignacion);
     } catch (e) {
       console.error(e);
       setError("No se pudo borrar la asignacion.");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -1134,27 +1126,32 @@ function Trabajadores() {
   const isAdmin = auth.role === "Administrador";
   const toast = useToast();
 
-  const [trabajadores, setTrabajadores] = useState<TrabajadorRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // Lista de trabajadores vía TanStack Query (caché). Las mutaciones de horarios y el
+  // alta/edición invalidan la feature; aquí además refrescamos al navegar a la página.
+  const trabajadoresQuery = useTrabajadores();
 
-  const trabajadoresSafe = useMemo(() => asArray<TrabajadorRow>(trabajadores), [trabajadores]);
+  const trabajadoresSafe = useMemo(
+    () => asArray<TrabajadorRow>(trabajadoresQuery.data ?? []),
+    [trabajadoresQuery.data],
+  );
 
-  const cargarTrabajadores = useCallback(async () => {
-    try {
-      setError(null);
-      const raw = await trabajadoresGetAll();
-      const rows = asArray<TrabajadorRow>(raw);
-      setTrabajadores(rows);
-    } catch (e) {
-      console.error("Fallo al cargar trabajadores", e);
-      setError("No se pudieron cargar los trabajadores.");
-      setTrabajadores([]);
-    }
-  }, []);
+  const error = trabajadoresQuery.isError
+    ? "No se pudieron cargar los trabajadores."
+    : null;
 
   useEffect(() => {
-    void cargarTrabajadores();
-  }, [cargarTrabajadores, location.key]);
+    if (trabajadoresQuery.isError) {
+      console.error("Fallo al cargar trabajadores", trabajadoresQuery.error);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trabajadoresQuery.isError]);
+
+  // Refrescar la lista cada vez que se navega a la página (equivale al efecto previo
+  // keyed por location.key, que recargaba al volver desde alta/edición de trabajador).
+  useEffect(() => {
+    void trabajadoresQuery.refetch();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.key]);
 
   return (
     <div className="w-full min-h-full bg-gris flex flex-col p-4 sm:p-6 lg:p-10 pt-5 gap-4 items-center">

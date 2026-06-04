@@ -1,8 +1,8 @@
 // src/features/estadisticas/ClientesStats.tsx
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
-import { clientesStatsResumen } from "./statsApis";
+import { useClientesStats } from "./statsQueries";
 
 /* =========================
    Tipos
@@ -149,28 +149,16 @@ function KPICard({
 export default function ClientesStats({ range }: { range: StatsRange }) {
     const legendClean = useLegendClean();
 
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [data, setData] = useState<ClientesStatsResponse | null>(null);
+    const query = useClientesStats(range);
 
-    const cargar = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const res = await clientesStatsResumen({ range });
-            setData(res);
-        } catch (e: any) {
-            console.error(e);
-            setData(null);
-            setError(e?.message || String(e));
-        } finally {
-            setLoading(false);
-        }
-    }, [range]);
+    const data: ClientesStatsResponse | null =
+        (query.data as ClientesStatsResponse | undefined) ?? null;
+    const loading = query.isFetching;
+    const error = query.isError
+        ? (query.error as any)?.message || String(query.error)
+        : null;
 
-    useEffect(() => {
-        void cargar();
-    }, [cargar]);
+    const cargar = () => query.refetch();
 
     const nuevos = data?.nuevos ?? 0;
     const recurrentes = data?.recurrentes ?? 0;

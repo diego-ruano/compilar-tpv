@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  reservasGetMeta,
-  reservasGetMes,
-  reservasSave,
-  reservasDelete,
   type Turno as TurnoApi,
 } from "../../features/reservas/reservasApis";
+import {
+  useReservasMeta,
+  useReservasMes,
+  useSaveReserva,
+  useDeleteReserva,
+} from "../../features/reservas/reservasQueries";
 import { mesasLoadLayout } from "../../features/mesasComponents/mesasApi";
 
 import { useAuth } from "../../shared/stores/useAuth";
@@ -188,9 +190,58 @@ export default function Reservas() {
   const [mesActual, setMesActual] = useState<Date>(() => inicioMesLocal(hoy));
   const [diaSeleccionado, setDiaSeleccionado] = useState<Date>(() => hoy);
 
-  const [zonas, setZonas] = useState<Zona[]>([]);
-  const [mesas, setMesas] = useState<Mesa[]>([]);
-  const [reservasMes, setReservasMes] = useState<ReservaUI[]>([]);
+  // Rango del mes para la query de reservas (cacheada por desde/hasta).
+  const rangoMes = useMemo(
+    () => ({
+      desde: ymdLocal(inicioMesLocal(mesActual)),
+      hasta: ymdLocal(finMesLocal(mesActual)),
+    }),
+    [mesActual],
+  );
+
+  // Lecturas vía TanStack Query (cacheadas).
+  const metaQuery = useReservasMeta();
+  const reservasMesQuery = useReservasMes(rangoMes.desde, rangoMes.hasta);
+
+  // Escrituras vía mutaciones (la invalidación en onSuccess recachea las listas).
+  const saveReserva = useSaveReserva();
+  const deleteReserva = useDeleteReserva();
+
+  // Zonas + mesas derivadas de la meta cacheada.
+  const zonas = useMemo<Zona[]>(() => metaQuery.data?.zonas ?? [], [metaQuery.data]);
+  const mesas = useMemo<Mesa[]>(() => metaQuery.data?.mesas ?? [], [metaQuery.data]);
+
+  // Reservas del mes derivadas de la query (mismo mapeo que antes).
+  const reservasMes = useMemo<ReservaUI[]>(() => {
+    const rows = reservasMesQuery.data ?? [];
+    return rows.map((r: any) => {
+      const hora = normalizarHora(String(r?.Hora ?? "00:00"));
+      const turno: Turno = turnoPorHora(hora);
+
+      return {
+        id: Number(r?.ID_Reserva ?? 0),
+        diaYMD: String(r?.Dia_YMD ?? ""),
+        hora,
+
+        nombre: String(r?.Nombre_Cliente ?? ""),
+        telefono: String(r?.Telefono_Cliente ?? ""),
+        email: String(r?.Email_Cliente ?? ""),
+
+        comensales: Number(r?.Comensales ?? 1),
+        nota: String(r?.Nota ?? ""),
+        turno,
+
+        idZona: Number(r?.ID_Zona ?? 0),
+        zonaNombre: String(r?.Nombre_Zona ?? ""),
+
+        idMesa: Number(r?.ID_Mesa ?? 0),
+        mesaNombre: String(r?.Numero_Mesa ?? ""),
+        capacidadMesa: Number(r?.Capacidad ?? 0),
+
+        estado: String(r?.Estado ?? "ACTIVA"),
+      };
+    });
+  }, [reservasMesQuery.data]);
 
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [reservaEditandoId, setReservaEditandoId] = useState<number | null>(null);
@@ -257,74 +308,33 @@ export default function Reservas() {
   }, []);
 
   /* =========================================================
-     Cargar zonas + mesas (API)
+     Seed del salón por defecto cuando llega la meta (zonas)
   ========================================================= */
   useEffect(() => {
-    let cancelado = false;
-
-    async function cargarZonasYMesas() {
-      const meta = await reservasGetMeta();
-      if (cancelado) return;
-
-      setZonas(meta.zonas ?? []);
-      setMesas(meta.mesas ?? []);
-
-      if ((meta.zonas?.length ?? 0) > 0 && (!form.idZona || form.idZona === 0)) {
-        setForm((p) => ({ ...p, idZona: meta.zonas[0].idZona, idMesa: 0 }));
-      }
+    if (zonas.length > 0 && (!form.idZona || form.idZona === 0)) {
+      setForm((p) => ({ ...p, idZona: zonas[0].idZona, idMesa: 0 }));
     }
-
-    cargarZonasYMesas().catch(console.error);
-    return () => {
-      cancelado = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [zonas]);
 
   /* =========================================================
-     Cargar reservas del mes (API)
+     Errores de carga -> toast
   ========================================================= */
-  async function cargarReservasDelMes(fechaMes: Date) {
-    const desde = ymdLocal(inicioMesLocal(fechaMes));
-    const hasta = ymdLocal(finMesLocal(fechaMes));
-
-    const rows = await reservasGetMes({ desde, hasta });
-
-    const data: ReservaUI[] = (rows ?? []).map((r: any) => {
-      const hora = normalizarHora(String(r?.Hora ?? "00:00"));
-      const turno: Turno = turnoPorHora(hora);
-
-      return {
-        id: Number(r?.ID_Reserva ?? 0),
-        diaYMD: String(r?.Dia_YMD ?? ""),
-        hora,
-
-        nombre: String(r?.Nombre_Cliente ?? ""),
-        telefono: String(r?.Telefono_Cliente ?? ""),
-        email: String(r?.Email_Cliente ?? ""),
-
-        comensales: Number(r?.Comensales ?? 1),
-        nota: String(r?.Nota ?? ""),
-        turno,
-
-        idZona: Number(r?.ID_Zona ?? 0),
-        zonaNombre: String(r?.Nombre_Zona ?? ""),
-
-        idMesa: Number(r?.ID_Mesa ?? 0),
-        mesaNombre: String(r?.Numero_Mesa ?? ""),
-        capacidadMesa: Number(r?.Capacidad ?? 0),
-
-        estado: String(r?.Estado ?? "ACTIVA"),
-      };
-    });
-
-    setReservasMes(data);
-  }
+  useEffect(() => {
+    if (metaQuery.isError) {
+      console.error(metaQuery.error);
+      toast.error("Error", "Error al cargar zonas y mesas.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [metaQuery.isError]);
 
   useEffect(() => {
-    cargarReservasDelMes(mesActual).catch(console.error);
+    if (reservasMesQuery.isError) {
+      console.error(reservasMesQuery.error);
+      toast.error("Error", "Error al cargar las reservas.");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mesActual]);
+  }, [reservasMesQuery.isError]);
 
   /* =========================================================
      Reservas del día + badges
@@ -460,7 +470,7 @@ export default function Reservas() {
       const notaTrim = form.nota?.trim() || "";
       const horaSql = normalizarHora(form.hora);
 
-      const ok = await reservasSave({
+      const ok = await saveReserva.mutateAsync({
         idReserva: reservaEditandoId,
         diaYMD: seleccionadoClave,
         hora: horaSql,
@@ -479,7 +489,6 @@ export default function Reservas() {
 
       if (!ok) return toast.error("Error", "No se pudo guardar la reserva.");
 
-      await cargarReservasDelMes(mesActual);
       setReservaEditandoId(null);
       setMostrarFormulario(false);
       setMostrarMapaMesas(false);
@@ -492,10 +501,9 @@ export default function Reservas() {
 
   async function borrarReserva(idReserva: number) {
     try {
-      const ok = await reservasDelete({ idReserva: Number(idReserva) });
+      const ok = await deleteReserva.mutateAsync({ idReserva: Number(idReserva) });
       if (!ok) return toast.error("Error", "No se pudo borrar.");
 
-      await cargarReservasDelMes(mesActual);
       toast.success?.("OK", "Reserva borrada.");
     } catch (err) {
       console.error(err);

@@ -4,10 +4,14 @@ import { useToast } from "../../../shared/toast";
 import Modal from "../ui/Modal";
 import { cn } from "../utils";
 import {
-  inventarioAPI,
-  type CategoriaRow,
   type ProveedorMiniRow,
 } from "../../InventaryComponents/api/inventarioAPI";
+import {
+  useCategorias,
+  useCreateLote,
+  useProveedoresMini,
+  useUpsertProducto,
+} from "../../InventaryComponents/inventarioQueries";
 
 type CategoriaMini = { ID_Categoria: number; Nombre: string };
 type ProveedorMini = {
@@ -57,11 +61,34 @@ export default function AddProductModal({
   onSaved: () => void;
   categoriaPreseleccionadaId: number | null;
 }) {
-  const [categorias, setCategorias] = useState<CategoriaMini[]>([]);
-  const [idCategoria, setIdCategoria] = useState<number | "">("");
   const toast = useToast();
 
-  const [proveedores, setProveedores] = useState<ProveedorMini[]>([]);
+  // Datos de referencia del formulario, cacheados (sólo se cargan con el modal abierto).
+  const categoriasQuery = useCategorias();
+  const proveedoresQuery = useProveedoresMini();
+
+  const upsertProducto = useUpsertProducto();
+  const createLote = useCreateLote();
+
+  const categorias: CategoriaMini[] = useMemo(
+    () =>
+      (categoriasQuery.data ?? []).map((c) => ({
+        ID_Categoria: Number(c.ID_Categoria),
+        Nombre: String(c.Nombre ?? ""),
+      })),
+    [categoriasQuery.data],
+  );
+  const proveedores: ProveedorMini[] = useMemo(
+    () =>
+      (proveedoresQuery.data ?? []).map((p: ProveedorMiniRow) => ({
+        ID_Proveedor: Number(p.ID_Proveedor),
+        Nombre_Empresa: String(p.Nombre_Empresa ?? ""),
+        Email: p.Email ?? null,
+      })),
+    [proveedoresQuery.data],
+  );
+
+  const [idCategoria, setIdCategoria] = useState<number | "">("");
   const [idProveedor, setIdProveedor] = useState<number | "">("");
 
   const [nombre, setNombre] = useState("");
@@ -123,35 +150,9 @@ export default function AddProductModal({
     setCaducidadProxima("");
     setIdProveedor("");
 
-    (async () => {
-      const [catsRaw, provsRaw] = await Promise.all([
-        inventarioAPI.listCategorias(),
-        inventarioAPI.listProveedoresMini(),
-      ]);
-
-      const cats: CategoriaMini[] = (catsRaw ?? []).map((c: CategoriaRow) => ({
-        ID_Categoria: Number(c.ID_Categoria),
-        Nombre: String(c.Nombre ?? ""),
-      }));
-
-      const provs: ProveedorMini[] = (provsRaw ?? []).map(
-        (p: ProveedorMiniRow) => ({
-          ID_Proveedor: Number(p.ID_Proveedor),
-          Nombre_Empresa: String(p.Nombre_Empresa ?? ""),
-          Email: p.Email ?? null,
-        }),
-      );
-
-      setCategorias(cats);
-      setProveedores(provs);
-
-      if (categoriaPreseleccionadaId) setIdCategoria(categoriaPreseleccionadaId);
-      else setIdCategoria("");
-    })().catch((e) => {
-      console.error("Error cargando cats/provs:", e);
-      toast.error("Error", "No se pudieron cargar categorías y proveedores.");
-    });
-  }, [open, categoriaPreseleccionadaId, toast]);
+    if (categoriaPreseleccionadaId) setIdCategoria(categoriaPreseleccionadaId);
+    else setIdCategoria("");
+  }, [open, categoriaPreseleccionadaId]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -179,7 +180,7 @@ export default function AddProductModal({
         base64Data,
       });
 
-      const nuevoProductoId = await inventarioAPI.upsertProducto({
+      const nuevoProductoId = await upsertProducto.mutateAsync({
         id_categoria: Number(idCategoria),
         id_proveedor: idProveedor === "" ? null : Number(idProveedor),
         nombre: nombre.trim(),
@@ -199,7 +200,7 @@ export default function AddProductModal({
       const stockInicial = parseNullableNumber(stockActual) ?? 0;
 
       if (stockInicial > 0) {
-        await inventarioAPI.createLote({
+        await createLote.mutateAsync({
           id_producto: nuevoProductoId,
           codigo_lote: buildInitialLoteCode(nuevoProductoId),
           caducidad: trimOrNull(caducidadProxima),
