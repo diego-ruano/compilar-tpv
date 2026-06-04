@@ -10,7 +10,6 @@ members = [
   "crates/tpv-domain",
   "crates/tpv-application",
   "crates/tpv-infra-sqlite",
-  "crates/tpv-infra-backup",
   "crates/tpv-infra-licensing",
   "crates/tpv-contracts",
   "apps/tpv-main/src-tauri",
@@ -26,7 +25,6 @@ authors = ["Altaria Lights"]
 tpv-domain = { path = "crates/tpv-domain" }
 tpv-application = { path = "crates/tpv-application" }
 tpv-infra-sqlite = { path = "crates/tpv-infra-sqlite" }
-tpv-infra-backup = { path = "crates/tpv-infra-backup" }
 tpv-infra-licensing = { path = "crates/tpv-infra-licensing" }
 tpv-contracts = { path = "crates/tpv-contracts" }
 

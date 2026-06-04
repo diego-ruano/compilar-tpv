@@ -70,7 +70,6 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │   ├── tpv-domain/            # Entidades puras + validaciones (no sabe de DB ni Tauri)
 │   ├── tpv-application/       # Puertos (traits) en ports/ + casos de uso en use_cases/
 │   ├── tpv-infra-sqlite/      # Adaptador de persistencia (implementa puertos con libsql)
-│   ├── tpv-infra-backup/      # Adaptador de FS + red para Backups
 │   ├── tpv-infra-licensing/   # Adaptador cripto ed25519 + HTTP del worker de licencias
 │   └── tpv-contracts/         # DTOs con #[derive(TS)] → exportan a packages/contracts
 │
@@ -97,7 +96,6 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 - **`tpv-application/src/ports/`** ← todos los **traits** (interfaces de repositorio y de servicios).
 - **`tpv-application/src/use_cases/`** ← lógica de orquestación (ej. `abrir_comanda.rs`).
 - **`tpv-infra-sqlite`** ← todas las ejecuciones SQL / interacción con libsql, implementando los puertos.
-- **`tpv-infra-backup`** ← FS + red para backups (sustituye a la antigua sync en tiempo real).
 - **`tpv-infra-licensing`** ← cripto ed25519, keyring y HTTP al worker de licencias, implementando puertos.
 - **`apps/tpv-main/src-tauri/src/commands/`** ← comandos `#[tauri::command]` **finos**: inyectan estado
   (`AppState`), invocan el caso de uso de `tpv-application` y devuelven el resultado. Nada de SQL ni lógica aquí.
@@ -188,7 +186,7 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ Respaldo de los `.git` antiguos fuera del monorepo.
 - ✅ Reubicación de los 3 proyectos a `apps/` (+ borrado de `.git` anidados).
 - ✅ Configs raíz: `package.json`, `pnpm-workspace.yaml`, `Cargo.toml` (workspace), `turbo.json`, `.gitignore`.
-- ✅ Esqueleto de las 6 crates (`tpv-domain`, `tpv-application`, `tpv-infra-sqlite`, `tpv-infra-backup`, `tpv-infra-licensing`, `tpv-contracts`).
+- ✅ Las 5 crates hexagonales (`tpv-domain`, `tpv-application`, `tpv-infra-sqlite`, `tpv-infra-licensing`, `tpv-contracts`). (El esqueleto `tpv-infra-backup` se eliminó por no aplicar: los backups dependían de la sync antigua, ya retirada.)
 - ✅ Esqueleto de los 3 packages (`@tpv/database`, `@tpv/contracts`, `@tpv/client` con `invokeClient.ts`).
 - ✅ `git init` en la raíz (+ commit base `757f0b9`).
 - ✅ `ts-rs` verificado y cableado (fichero único `bindings.ts`, ruta `../../../packages/...`, `cargo test -p tpv-contracts`). Ver §4.3.
