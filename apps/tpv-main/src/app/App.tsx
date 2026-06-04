@@ -1,4 +1,4 @@
-import "./Global.css";
+import "../Global.css";
 import Layout from "./layouts/layout";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
