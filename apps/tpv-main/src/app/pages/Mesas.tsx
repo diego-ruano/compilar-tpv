@@ -15,18 +15,14 @@ import type { Salon, MesaMeta } from "../../features/mesasComponents/types";
 import { useAuth } from "../../shared/stores/useAuth";
 
 import {
-    mesasLoadLayout,
-    mesasLoadMesaMeta,
-} from "../../features/mesasComponents/mesasApi";
+    useMesasLayout,
+    useMesasMesaMeta,
+} from "../../features/mesasComponents/mesasQueries";
 
 type MesaMetaMap = Record<number, MesaMeta> & Record<string, MesaMeta>;
 
 export default function Mesas() {
-    const [loading, setLoading] = useState(true);
-    const [salons, setSalons] = useState<Salon[]>([]);
     const [activeSalonId, setActiveSalonId] = useState<string>("");
-
-    const [mesaMetaById, setMesaMetaById] = useState<MesaMetaMap>({} as any);
 
     const [modalOpen, setModalOpen] = useState(false);
     const [mesaSel, setMesaSel] = useState<{
@@ -40,42 +36,39 @@ export default function Mesas() {
     const esCocinero = role === "Cocinero";
     const canEditMesas = !(role === "Cocinero" || role === "Camarero");
 
-    const loadLayout = useCallback(async () => {
-        setLoading(true);
-        try {
-            const cast = await mesasLoadLayout();
-            setSalons(cast);
-            setActiveSalonId((prev) => {
-                if (!cast.length) return "";
-                if (prev && cast.some((s) => s.id === prev)) return prev;
-                return cast[0].id;
-            });
-        } catch (e) {
-            console.error("Error cargando layout:", e);
-            setSalons([]);
-            setActiveSalonId("");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
+    // Layout/meta cacheados con TanStack Query (se recargan vía refetch).
+    const layoutQuery = useMesasLayout();
+    const metaQuery = useMesasMesaMeta();
 
-    const loadMesaMeta = useCallback(async () => {
-        try {
-            const map = (await mesasLoadMesaMeta()) as any as MesaMetaMap;
-            setMesaMetaById(map);
-        } catch (e) {
-            console.error("Error cargando meta mesas:", e);
-            setMesaMetaById({} as any);
-        }
-    }, []);
+    const salons = useMemo<Salon[]>(
+        () => layoutQuery.data ?? [],
+        [layoutQuery.data],
+    );
+    const mesaMetaById = useMemo<MesaMetaMap>(
+        () => (metaQuery.data ?? ({} as any)) as MesaMetaMap,
+        [metaQuery.data],
+    );
+    const loading = layoutQuery.isFetching;
 
+    const loadMesaMeta = () => metaQuery.refetch();
+
+    // Mantener un salón activo válido cuando cambia el layout (equivale al
+    // setActiveSalonId(prev => ...) del loader anterior).
     useEffect(() => {
-        (async () => {
-            await loadLayout();
-            await loadMesaMeta();
-        })();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+        setActiveSalonId((prev) => {
+            if (!salons.length) return "";
+            if (prev && salons.some((s) => s.id === prev)) return prev;
+            return salons[0].id;
+        });
+    }, [salons]);
+
+    // Log de errores de carga (equivale a los catch de los loaders anteriores).
+    useEffect(() => {
+        if (layoutQuery.isError)
+            console.error("Error cargando layout:", layoutQuery.error);
+        if (metaQuery.isError)
+            console.error("Error cargando meta mesas:", metaQuery.error);
+    }, [layoutQuery.isError, metaQuery.isError, layoutQuery.error, metaQuery.error]);
 
     const activeSalon = useMemo(
         () => salons.find((s) => s.id === activeSalonId) ?? null,
@@ -92,10 +85,10 @@ export default function Mesas() {
         setModalOpen(true);
     }, []);
 
-    const handleReloadAll = useCallback(async () => {
-        await loadLayout();
-        await loadMesaMeta();
-    }, [loadLayout, loadMesaMeta]);
+    const handleReloadAll = () => {
+        layoutQuery.refetch();
+        metaQuery.refetch();
+    };
 
     return (
         <div className="w-full min-h-full bg-gris flex flex-col p-10 pt-5 gap-4 items-center">
