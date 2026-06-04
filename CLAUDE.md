@@ -223,3 +223,20 @@ y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a `String` en la frontera Tauri.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
 - El frontend NUNCA hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`.
+
+### Capa de datos del frontend (TanStack Query)
+
+- `QueryClient` único en `shared/lib/queryClient.ts` (staleTime 30s, sin `refetchOnWindowFocus`,
+  pensado para Local-First: el dato sólo cambia por mutaciones de esta app que invalidan la clave).
+  Provider en `app/main.tsx`.
+- **Patrón**: cada feature expone hooks co-locados en `features/<x>/<x>Queries.ts` —
+  `useQuery` para lecturas (con `queryKey` prefijada por el nombre de la feature; rangos/ids van en
+  la clave) y `useMutation` para escrituras (en `onSuccess` invalidan la clave de la feature para
+  recachear las listas). Los hooks envuelven las funciones de `*Apis.ts` sin cambiar su firma.
+  Referencia: `features/ClientsComponents/clientesQueries.ts`.
+- **Migradas a React Query**: clientes, proveedores, cuentas, reservas, tareas, trabajadores,
+  estadísticas, inventario y el **catálogo de salones de mesas** (layout/meta de solo-lectura).
+- **A propósito NO migradas** (siguen con `invokeClient` directo): la lógica **transaccional del POS**
+  (comanda/cobro/cocina de `mesas` y todo `venta_rapida`, cuyo `vrBootstrap` entrelaza el catálogo con
+  el estado de la comanda), `configuracion` (se carga una vez en stores Zustand) y `login` (flujo de
+  arranque/auth). Cachearlas aportaba poco y arriesgaba el núcleo de ventas.

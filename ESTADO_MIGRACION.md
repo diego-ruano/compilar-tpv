@@ -71,7 +71,10 @@ esta sesión modifica su código, `wrangler.json` ni endpoints.
   dependía de la antigua sync, ya retirada.
 - **Pairing/Handy**: conservado pero **latente** (no reimplementado), por decisión de diseño.
 - **`packages/database`** (`@tpv/database`): reservado para el esquema cloud futuro; sin uso.
-- **Caché con TanStack Query**: planificado para después de estabilizar la migración (pendiente).
+- **Caché con TanStack Query**: ✅ aplicada. 9 features sobre React Query (clientes, proveedores,
+  cuentas, reservas, tareas, trabajadores, estadísticas, inventario y el catálogo de salones de mesas).
+  El POS transaccional (cobro/comanda/cocina, `venta_rapida`), `configuracion` (stores Zustand) y
+  `login` (arranque) se dejan con `invokeClient` directo a propósito. Ver CLAUDE.md §8.
 - **Refinamiento opcional del frontend**: las `pages/` viven bajo `app/`; si se quisiera, podrían
   distribuirse dentro de cada `features/<dominio>` (puramente cosmético).
 - **Bugs funcionales**: existen y no se han abordado aquí (fuera del alcance de este resumen).
