@@ -7,11 +7,18 @@
 
 ---
 
-## Workers de Cloudflare — INTACTOS ✅
+## Workers de Cloudflare — FUSIONADOS EN UNO (`tpv-api`) ✅
 
-Los dos workers (`apps/cloud-worker-api`, `apps/cloud-worker-licensing`) **no se han tocado**.
-Verificado en git: sólo aparecen en el commit inicial del monorepo (`757f0b9`); ningún commit de
-esta sesión modifica su código, `wrangler.json` ni endpoints.
+Los dos workers se han **unificado en uno solo**: `apps/cloud-worker-licensing/` (desplegado como
+`tpv-api`). El antiguo `apps/cloud-worker-api/` (`tpv-server`) se **eliminó**.
+
+- `tpv-api` reúne: API Hono (enrutador + subenrutadores), el DO **TenantHub** (movido desde el
+  worker viejo, ahora resuelve credenciales de Turso en local con caché TTL en vez de la llamada
+  HTTP cruzada entre workers), **pairing** (`/v1/pair/*`), revoke, WS y el licensing legacy
+  (`/v1/license/*`, webhook Lemon) vía fallthrough mientras se migra a Hono.
+- **Schema único**: `packages/database/schema.sql` lo consumen la app (Rust, `include_str!`) y el
+  worker (módulo Text de wrangler). Limpiadas las tablas muertas de la antigua capa `dualCall`.
+- El cliente Rust (`tpv-infra-licensing`) apunta a `https://tpv-api.altarialights.workers.dev`.
 
 ---
 

@@ -31,8 +31,10 @@ use device::{
     sign_payload_b64,
 };
 
-const LICENSE_API_BASE: &str = "https://tpv-licensing.altarialights.workers.dev";
-const TPV_SERVER_BASE: &str = "https://tpv-server.altarialights.workers.dev";
+// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`).
+// Sirve licencia (/v1/license/*), pairing (/v1/pair/*), revoke, WS y el DO TenantHub.
+const LICENSE_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
+const TPV_SERVER_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 
 const OFFLINE_GRACE_MS: i64 = 48 * 60 * 60 * 1000;
 const HTTP_TIMEOUT_SECS: u64 = 20;

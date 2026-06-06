@@ -57,14 +57,14 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │   │   │   ├── features/      # mesas, venta-rapida, caja… + hooks  (objetivo de migración)
 │   │   │   └── shared/        # UI genérica, dinero/fechas, stores Zustand (objetivo)
 │   │   └── src-tauri/         # Backend local (invocador/orquestador de las crates)
-│   │       ├── tauri.conf.json · Cargo.toml · build.rs · schema.sql
+│   │       ├── tauri.conf.json · Cargo.toml · build.rs   (schema en packages/database)
 │   │       └── src/
 │   │           ├── main.rs    # entrada Tauri
 │   │           ├── lib.rs     # registro de comandos + estado (AppState)
 │   │           └── commands/  # mapeadores finos → llaman a tpv-application (objetivo)
 │   │
-│   ├── cloud-worker-api/         # Worker API actual (antes tpv-server) — INTACTO
-│   └── cloud-worker-licensing/   # Worker licencias actual (antes tpv-licensing) — INTACTO
+│   └── cloud-worker-licensing/   # Worker ÚNICO `tpv-api` (fusión de tpv-server + tpv-licensing):
+│                                  #   Hono + DO TenantHub + pairing + licencia. (Carpeta sin renombrar.)
 │
 ├── crates/                    # CEREBRO RUST (multi-crate hexagonal)
 │   ├── tpv-domain/            # Entidades puras + validaciones (no sabe de DB ni Tauri)
@@ -74,7 +74,7 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │   └── tpv-contracts/         # DTOs con #[derive(TS)] → exportan a packages/contracts
 │
 └── packages/                  # CÓDIGO JS COMPARTIDO
-    ├── database/              # Esquema cloud (Turso/Drizzle) — reservado para el futuro
+    ├── database/              # schema.sql ÚNICO (app SQLite vía include_str! + worker vía módulo Text)
     ├── contracts/             # @tpv/contracts — tipos autogenerados (src/generated/bindings.ts)
     └── client/                # @tpv/client — invokeClient.ts (envoltura de invoke de Tauri)
 ```
@@ -126,11 +126,15 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   `@tauri-apps/api/core`. Sin red, sin outbox, sin fallback. El frontend lee/muta directamente contra Tauri.
 - Hooks y componentes de `apps/tpv-main/src/features/` consumen `@tpv/client`.
 
-### 4.5 Restricción absoluta de los Workers
-- Los dos Cloudflare Workers se han movido a `apps/cloud-worker-api/` y `apps/cloud-worker-licensing/`.
-- **PROHIBIDO alterar su código interno, su `wrangler.json` ni la lógica de endpoints.** Sólo se han
-  reubicado para unificarlos bajo pnpm. (Mantienen sus nombres internos `tpv-server` / `tpv-licensing`
-  en su `package.json`.)
+### 4.5 Worker único `tpv-api`
+- Los dos Cloudflare Workers se **fusionaron en uno solo**: `apps/cloud-worker-licensing/` (nombre
+  desplegado `tpv-api`; la carpeta conserva el nombre `cloud-worker-licensing`). El antiguo
+  `cloud-worker-api` (`tpv-server`) se **eliminó**.
+- `tpv-api` sirve: API Hono (`src/index.ts` → enrutador + subenrutadores en `src/routes/`), el DO
+  **TenantHub** (`src/durableObjects/`), **pairing** (`/v1/pair/*`), revoke, WS (`/ws`) y el
+  licensing legacy (`/v1/license/*`, `/v1/webhooks/lemon`) vía `app.all("*")` mientras se migra a Hono.
+- El cliente Rust (`tpv-infra-licensing`) apunta a `https://tpv-api.altarialights.workers.dev`
+  (constantes `LICENSE_API_BASE` y `TPV_SERVER_BASE`, ambas al mismo host).
 
 ---
 
