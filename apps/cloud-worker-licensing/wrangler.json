@@ -1,11 +1,25 @@
 {
-	"name": "tpv-licensing",
-	"main": "src/server/index.ts",
+	"name": "tpv-api",
+	"main": "src/index.ts",
 	"compatibility_date": "2025-10-08",
 	"observability": {
 		"enabled": true
 	},
 	"upload_source_maps": true,
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": ["TenantHub"]
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"class_name": "TenantHub",
+				"name": "TenantHub"
+			}
+		]
+	},
 	"vars": {
 		"TURSO_DATABASE_URL": "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io",
 		"TURSO_ORG_SLUG": "altarialights"
