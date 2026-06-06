@@ -1,13 +1,17 @@
 /* =========================================================
-   TPV SCHEMA (Inventario con LOTES + FEFO)
-   - Sin migraciones: pensado para borrar DB y recrear
-   - Cambios clave:
-     ✅ Productos = ficha (catálogo)
-     ✅ Lotes_Producto = existencias por lote (caducidad/cantidad)
-     ✅ Lote_Consumos = trazabilidad (qué lote se consumió en cada línea)
-     ✅ Cuentas_Gastos.ID_Proveedor para gastos tipo "Proveedor"
-     ✅ Applied_Operations para replay seguro por Op_Id
-     ✅ Cloud_Changes + Sync_State para sync nube/local
+   TPV SCHEMA — ÚNICO Y COMPARTIDO (app local + nube Turso)
+   - Fuente de verdad unica del esquema. Lo consumen:
+       * App de escritorio (Rust): include_str! en
+         apps/tpv-main/src-tauri/src/main.rs
+       * Worker tpv-api: import como modulo Text en
+         apps/cloud-worker-licensing/src/server/index.ts
+   - Sin migraciones: pensado para borrar DB y recrear.
+   - Inventario con LOTES + FEFO.
+   - Idempotencia/atomicidad: Applied_Operations.
+   - Catch-up tras caida del WebSocket: Cloud_Changes + Sync_State
+     (registro de cambios + cursor para descargarlos al reconectar).
+   - No pasa nada si alguna de estas tablas queda vacia en un lado u
+     otro: es un unico esquema para ambos.
 ========================================================= */
 
 PRAGMA foreign_keys = ON;
@@ -21,6 +25,7 @@ CREATE TABLE IF NOT EXISTS Roles (
 );
 
 INSERT OR IGNORE INTO Roles (Nombre_Rol) VALUES
+  ('Administrador'),
   ('Camarero'),
   ('Cocinero'),
   ('Limpieza');
@@ -428,7 +433,10 @@ CREATE TABLE IF NOT EXISTS Pago_Detalles (
 );
 
 /* =========================================================
-   10. Idempotencia / Replay seguro
+   10. Idempotencia / Atomicidad
+   Registro de operaciones ya aplicadas (por Op_Id) para evitar
+   duplicados y dar atomicidad al aplicar cambios (en la nube al
+   recibir ops de las Handy; en local al aplicar cambios entrantes).
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Applied_Operations (
   ID_Applied_Operation INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -455,55 +463,15 @@ ON Applied_Operations(Created_At_Ms);
 CREATE INDEX IF NOT EXISTS idx_applied_ops_command
 ON Applied_Operations(Command_Name);
 
-CREATE TABLE IF NOT EXISTS Outbox_Operations (
-  ID_Outbox INTEGER PRIMARY KEY AUTOINCREMENT,
-  Op_Id TEXT NOT NULL UNIQUE,
-  Command_Name TEXT NOT NULL,
-  Payload_Json TEXT NOT NULL,
-  Status TEXT NOT NULL DEFAULT 'PENDING',
-  Attempt_Count INTEGER NOT NULL DEFAULT 0,
-  Last_Error TEXT,
-  Created_At_Ms INTEGER NOT NULL,
-  Updated_At_Ms INTEGER NOT NULL,
-  Last_Attempt_At_Ms INTEGER,
-  Next_Retry_At_Ms INTEGER,
-  CHECK (Status IN ('PENDING', 'SYNCING', 'APPLIED', 'FAILED'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_outbox_retry
-ON Outbox_Operations(Status, Next_Retry_At_Ms, Created_At_Ms);
-
-CREATE INDEX IF NOT EXISTS idx_outbox_status
-ON Outbox_Operations(Status);
-
-CREATE INDEX IF NOT EXISTS idx_outbox_created
-ON Outbox_Operations(Created_At_Ms);
-
 /* =========================================================
-   11. Sync cloud/local
+   11. Catch-up / Sincronizacion
+   Cloud_Changes: log de cambios (lo escribe la nube cuando aplica una
+   operacion). Si el WebSocket con la Main se cae, la Main no recibe el
+   broadcast en tiempo real; al reconectar descarga lo que falta leyendo
+   Cloud_Changes a partir de su cursor.
+   Sync_State: cursor local (last_cloud_change_id) para saber desde que
+   cambio descargar al reconectar.
 ========================================================= */
-CREATE TABLE IF NOT EXISTS Pending_Local_Applies (
-  ID_Pending INTEGER PRIMARY KEY AUTOINCREMENT,
-  Op_Id TEXT NOT NULL UNIQUE,
-  Command_Name TEXT NOT NULL,
-  Payload_Json TEXT NOT NULL,
-  Result_Json TEXT,
-  Status TEXT NOT NULL DEFAULT 'PENDING',
-  Attempt_Count INTEGER NOT NULL DEFAULT 0,
-  Last_Error TEXT,
-  Created_At_Ms INTEGER NOT NULL,
-  Updated_At_Ms INTEGER NOT NULL,
-  Last_Attempt_At_Ms INTEGER,
-  Next_Retry_At_Ms INTEGER,
-  CHECK (Status IN ('PENDING', 'PROCESSING', 'APPLIED', 'FAILED'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_pending_local_applies_status
-ON Pending_Local_Applies(Status, Next_Retry_At_Ms, Created_At_Ms);
-
-CREATE INDEX IF NOT EXISTS idx_pending_local_applies_command
-ON Pending_Local_Applies(Command_Name);
-
 CREATE TABLE IF NOT EXISTS Schema_Meta (
   Key TEXT PRIMARY KEY,
   Value TEXT NOT NULL,
@@ -542,55 +510,6 @@ CREATE TABLE IF NOT EXISTS Sync_State (
 
 INSERT OR IGNORE INTO Sync_State (Key, Value, Updated_At_Ms)
 VALUES ('last_cloud_change_id', '0', 0);
-
-CREATE TABLE IF NOT EXISTS Cloud_Applied_Changes (
-  ID_Change INTEGER PRIMARY KEY,
-  Op_Id TEXT NOT NULL,
-  Command_Name TEXT NOT NULL,
-  Device_Id TEXT,
-  Applied_At_Ms INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_applied_ops
-ON Cloud_Applied_Changes(Op_Id, Command_Name);
-
-CREATE TABLE IF NOT EXISTS Local_Applied_Operations (
-  Op_Id TEXT NOT NULL,
-  Command_Name TEXT NOT NULL,
-  Source TEXT NOT NULL,
-  Applied_At_Ms INTEGER NOT NULL,
-  PRIMARY KEY (Op_Id, Command_Name),
-  CHECK (Source IN ('afterRemoteOk', 'cloudSync', 'outbox'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_local_applied_source
-ON Local_Applied_Operations(Source, Applied_At_Ms);
-
-/* ---------------------------------------------------------
-   Cloud_Apply_Failures
-   Registro local de cambios remotos que NO se pudieron
-   aplicar (BUG-009 / RM-P0-02). Permite avanzar el cursor
-   sin perder la trazabilidad del fallo.
---------------------------------------------------------- */
-CREATE TABLE IF NOT EXISTS Cloud_Apply_Failures (
-  ID_Change INTEGER PRIMARY KEY,
-  Op_Id TEXT NOT NULL,
-  Command_Name TEXT NOT NULL,
-  Device_Id TEXT,
-  Error TEXT NOT NULL,
-  Attempts INTEGER NOT NULL DEFAULT 1,
-  Created_At_Ms INTEGER NOT NULL,
-  Updated_At_Ms INTEGER NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_apply_failures_op
-ON Cloud_Apply_Failures(Op_Id, Command_Name);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_apply_failures_command
-ON Cloud_Apply_Failures(Command_Name);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_apply_failures_created
-ON Cloud_Apply_Failures(Created_At_Ms);
 
 /* =========================================================
    12. Configuración
@@ -721,4 +640,3 @@ INSERT OR IGNORE INTO Mesas (
   datetime('now'),
   1
 );
-

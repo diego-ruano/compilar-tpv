@@ -179,7 +179,7 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     ensure_folders(&app_data_dir)?;
 
-    let conn = tpv_infra_sqlite::connection::init_main_db(&app_data_dir, include_str!("../schema.sql"))
+    let conn = tpv_infra_sqlite::connection::init_main_db(&app_data_dir, include_str!("../../../../packages/database/schema.sql"))
         .await
         .map_err(String::from)?;
     let db = Arc::new(conn);
@@ -258,7 +258,7 @@ pub fn run() {
                 Some(Arc::new(tauri::async_runtime::block_on(async {
                     tpv_infra_sqlite::connection::init_main_db(
                         &app_data_dir,
-                        include_str!("../schema.sql"),
+                        include_str!("../../../../packages/database/schema.sql"),
                     )
                     .await
                     .expect("Error init_main_db")
