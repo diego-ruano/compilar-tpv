@@ -8,10 +8,11 @@
    - Sin migraciones: pensado para borrar DB y recrear.
    - Inventario con LOTES + FEFO.
    - Idempotencia/atomicidad: Applied_Operations.
-   - Catch-up tras caida del WebSocket: Cloud_Changes + Sync_State
-     (registro de cambios + cursor para descargarlos al reconectar).
-   - No pasa nada si alguna de estas tablas queda vacia en un lado u
-     otro: es un unico esquema para ambos.
+   - Sin tablas de catch-up: si se cae el WebSocket de la Main, el sistema
+     se congela (presencia en el DO TenantHub), asi que no hay nada que
+     recuperar al reconectar.
+   - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
+     unico esquema para ambos.
 ========================================================= */
 
 PRAGMA foreign_keys = ON;
@@ -464,13 +465,7 @@ CREATE INDEX IF NOT EXISTS idx_applied_ops_command
 ON Applied_Operations(Command_Name);
 
 /* =========================================================
-   11. Catch-up / Sincronizacion
-   Cloud_Changes: log de cambios (lo escribe la nube cuando aplica una
-   operacion). Si el WebSocket con la Main se cae, la Main no recibe el
-   broadcast en tiempo real; al reconectar descarga lo que falta leyendo
-   Cloud_Changes a partir de su cursor.
-   Sync_State: cursor local (last_cloud_change_id) para saber desde que
-   cambio descargar al reconectar.
+   11. Metadatos de esquema
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Schema_Meta (
   Key TEXT PRIMARY KEY,
@@ -480,36 +475,6 @@ CREATE TABLE IF NOT EXISTS Schema_Meta (
 
 INSERT OR IGNORE INTO Schema_Meta (Key, Value, Updated_At_Ms)
 VALUES ('schema_version', '1', 0);
-
-CREATE TABLE IF NOT EXISTS Cloud_Changes (
-  ID_Change INTEGER PRIMARY KEY AUTOINCREMENT,
-  Op_Id TEXT NOT NULL,
-  Command_Name TEXT NOT NULL,
-  Command_Version INTEGER NOT NULL DEFAULT 1,
-  Device_Id TEXT,
-  Payload_Json TEXT NOT NULL,
-  Result_Json TEXT,
-  Created_At_Ms INTEGER NOT NULL,
-  UNIQUE (Op_Id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_changes_id
-ON Cloud_Changes(ID_Change);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_changes_created
-ON Cloud_Changes(Created_At_Ms);
-
-CREATE INDEX IF NOT EXISTS idx_cloud_changes_command
-ON Cloud_Changes(Command_Name);
-
-CREATE TABLE IF NOT EXISTS Sync_State (
-  Key TEXT PRIMARY KEY,
-  Value TEXT NOT NULL,
-  Updated_At_Ms INTEGER NOT NULL
-);
-
-INSERT OR IGNORE INTO Sync_State (Key, Value, Updated_At_Ms)
-VALUES ('last_cloud_change_id', '0', 0);
 
 /* =========================================================
    12. Configuración

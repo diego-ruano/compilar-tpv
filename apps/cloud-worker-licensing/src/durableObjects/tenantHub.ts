@@ -18,7 +18,24 @@ type HelloSignedMsg = {
 
 type EventMsg = { type: "event"; name: string; payload?: any };
 
-type AnyMsg = PingMsg | HelloSignedMsg | EventMsg;
+// Escritura de la Main por WS: lleva el comando interno (mismo envelope que
+// `/internal/apply`) para aplicarse en el motor idempotente del DO.
+type ApplyMsg = {
+	type: "apply";
+	opId?: string;
+	op_id?: string;
+	commandName?: string;
+	command_name?: string;
+	command?: { type: string; payload?: any };
+	cloud_payload?: any;
+	cloudPayload?: any;
+	cloud_payload_json?: string;
+	cloudPayloadJson?: string;
+	request_payload?: any;
+	requestPayload?: any;
+};
+
+type AnyMsg = PingMsg | HelloSignedMsg | EventMsg | ApplyMsg;
 
 type SqlScalar = string | number | boolean | null;
 type SqlRef = { $ref: string };
@@ -75,9 +92,6 @@ type InternalApplyCommand =
 	| { type: "tenantDb.transaction"; payload: TransactionPayload };
 
 type LibsqlTxMode = "write" | "deferred";
-
-const CLOUD_CHANGES_NOTIFY_MIN_INTERVAL_MS = 10_000;
-const CLOUD_CHANGES_NOTIFY_DEBOUNCE_MS = 750;
 
 // Caché en memoria (por instancia de DO) de las credenciales de la DB del
 // tenant. El token de Turso es válido 7 días y se rota proactivamente cada 24h
@@ -422,11 +436,6 @@ function isTursoAuthError(err: unknown): boolean {
 	);
 }
 
-function isNoSuchCloudChangesTableError(err: unknown): boolean {
-	const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
-	return msg.includes("no such table") && msg.includes("cloud_changes");
-}
-
 function readEnvelopeMetadata(body: any, req: Request) {
 	const opId = String(
 		body?.opId ??
@@ -473,10 +482,6 @@ export class TenantHub {
 	private tenantDbDbName: string | null = null;
 	private tenantDbRotatedAtMs: number | null = null;
 	private tenantDbResolvedAtMs: number | null = null;
-
-	private cloudChangesNotifyTimer: any = null;
-	private cloudChangesNotifyPending = false;
-	private cloudChangesNotifyLastSentAtMs = 0;
 
 	constructor(private state: DurableObjectState, private env: any) { }
 
@@ -876,12 +881,18 @@ export class TenantHub {
 			throw new Error("missing_command_name");
 		}
 
+		// Freeze global: si no hay una Main (tpv) autenticada conectada, NO se
+		// aplica nada. Vale tanto para escrituras REST de la Handy como para el
+		// WS-write de la propia Main (que cuenta como presente al estar conectada).
+		if (!this.isMainConnected()) {
+			throw new Error("main_offline");
+		}
+
 		const requestHash = await sha256Hex(requestPayloadJson);
 		const createdAtMs = nowMs();
 
 		return await this.withTenantDbRetry(tenantId, async (db) => {
 			const tx = await db.transaction("write");
-			let cloudChangeInserted = false;
 
 			try {
 				const existing = await tx.execute({
@@ -997,41 +1008,22 @@ export class TenantHub {
 					args: [op, command, resultJson, appliedAtMs, appliedAtMs],
 				});
 
-				try {
-					await tx.execute({
-						sql: `
-							INSERT INTO Cloud_Changes (
-							  Op_Id,
-							  Command_Name,
-							  Device_Id,
-							  Payload_Json,
-							  Result_Json,
-							  Created_At_Ms
-							)
-							VALUES (?1, ?2, ?3, ?4, ?5, ?6);
-						`,
-						args: [
-							op,
-							command,
-							deviceId || null,
-							cloudPayloadJson,
-							resultJson,
-							appliedAtMs,
-						],
-					});
-
-					cloudChangeInserted = true;
-				} catch (e) {
-					if (!isNoSuchCloudChangesTableError(e)) {
-						throw e;
-					}
-				}
-
 				await tx.commit();
 
-				if (cloudChangeInserted) {
-					this.scheduleCloudChangesAvailable(tenantId);
-				}
+				// Tras confirmar en Turso, propagamos el cambio (payload + resultado)
+				// al resto de dispositivos autenticados. El originador queda excluido
+				// (ya tiene su resultado por el 200 REST o el apply_ack del WS). Nadie
+				// hace refetch: la Main aplica el payload directo a su SQLite local.
+				this.broadcastChange(
+					{
+						command,
+						opId: op,
+						deviceId: deviceId || null,
+						payloadJson: cloudPayloadJson,
+						result,
+					},
+					deviceId || undefined,
+				);
 
 				return result;
 			} catch (e) {
@@ -1072,43 +1064,39 @@ export class TenantHub {
 		}
 	}
 
-	private scheduleCloudChangesAvailable(tenantId: string) {
-		this.cloudChangesNotifyPending = true;
-
-		if (this.cloudChangesNotifyTimer) return;
-
-		const now = nowMs();
-		const elapsed = this.cloudChangesNotifyLastSentAtMs
-			? now - this.cloudChangesNotifyLastSentAtMs
-			: Number.POSITIVE_INFINITY;
-
-		const delay =
-			elapsed >= CLOUD_CHANGES_NOTIFY_MIN_INTERVAL_MS
-				? CLOUD_CHANGES_NOTIFY_DEBOUNCE_MS
-				: Math.max(
-					CLOUD_CHANGES_NOTIFY_DEBOUNCE_MS,
-					CLOUD_CHANGES_NOTIFY_MIN_INTERVAL_MS - elapsed,
-				);
-
-		this.cloudChangesNotifyTimer = setTimeout(() => {
-			this.cloudChangesNotifyTimer = null;
-			this.flushCloudChangesAvailable(tenantId);
-		}, delay);
+	// ¿Hay alguna Main (rol tpv) autenticada y conectada ahora mismo?
+	private isMainConnected(): boolean {
+		for (const did of this.authed) {
+			if (this.roles.get(did) === "tpv") return true;
+		}
+		return false;
 	}
 
-	private flushCloudChangesAvailable(tenantId: string) {
-		if (!this.cloudChangesNotifyPending) return;
-
-		this.cloudChangesNotifyPending = false;
-
-		const ts = nowMs();
-		this.cloudChangesNotifyLastSentAtMs = ts;
-
-		this.broadcastAuthed({
-			type: "cloud_changes_available",
-			tenantId,
-			ts,
-		});
+	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
+	// autenticados, excluyendo al originador. Reemplaza la antigua señal
+	// `cloud_changes_available` (modelo de refetch) por el envío directo del JSON.
+	private broadcastChange(
+		params: {
+			command: string;
+			opId: string;
+			deviceId: string | null;
+			payloadJson: string;
+			result: any;
+		},
+		exceptDeviceId?: string,
+	) {
+		this.broadcastAuthed(
+			{
+				type: "change",
+				command: params.command,
+				opId: params.opId,
+				deviceId: params.deviceId,
+				payload: safeJsonParse(params.payloadJson),
+				result: params.result ?? null,
+				ts: nowMs(),
+			},
+			exceptDeviceId,
+		);
 	}
 
 	private issueChallenge(deviceId: string) {
@@ -1382,6 +1370,20 @@ export class TenantHub {
 								},
 								deviceId,
 							);
+
+							// Freeze por presencia de Main: informamos a este
+							// dispositivo de si hay Main conectada (una Handy recién
+							// autenticada necesita saberlo para bloquear/desbloquear su
+							// UI). Y si quien se autentica ES la Main, avisamos a las
+							// Handy de que ya pueden operar.
+							this.send(server, {
+								type: "main_status",
+								online: this.isMainConnected(),
+							});
+
+							if (roleFinal === "tpv") {
+								this.broadcast({ type: "main_online", deviceId }, deviceId);
+							}
 						} catch (e: any) {
 							const err = String(e?.message || e);
 							this.send(server, {
@@ -1400,6 +1402,72 @@ export class TenantHub {
 
 			if (!this.authed.has(deviceId)) {
 				this.send(server, { type: "error", error: "not_authenticated" });
+				return;
+			}
+
+			// Escritura de la Main por WS: se aplica al MISMO motor idempotente que
+			// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
+			// al resto). La Main no se bloquea esperando; recibe un `apply_ack`
+			// asíncrono solo para reconciliar/revertir si algo falla.
+			if (msg.type === "apply") {
+				const m = msg as ApplyMsg;
+				const inner = m.command;
+				const cmdType = String(inner?.type || "").trim();
+				const opId = String(m.opId ?? m.op_id ?? "").trim();
+				const commandName = String(m.commandName ?? m.command_name ?? "").trim();
+
+				if (!cmdType || !opId || !commandName) {
+					this.send(server, {
+						type: "apply_ack",
+						opId,
+						ok: false,
+						error: "missing_apply_fields",
+					});
+					return;
+				}
+
+				const cmd = {
+					type: inner!.type,
+					payload: inner!.payload,
+				} as InternalApplyCommand;
+
+				const fallback = buildInternalPayloadForHash(cmd);
+				const requestPayloadJson = readRequestPayloadJson(m, fallback);
+				const cloudPayloadJson = readCloudPayloadJson({
+					body: m,
+					opId,
+					commandName,
+					fallbackPayloadForHash: fallback,
+				});
+
+				this.state.waitUntil(
+					(async () => {
+						try {
+							const result = await this.applyInternalCommandIdempotent({
+								tenantId,
+								cmd,
+								opId,
+								commandName,
+								deviceId,
+								requestPayloadJson,
+								cloudPayloadJson,
+							});
+							this.send(server, {
+								type: "apply_ack",
+								opId,
+								ok: true,
+								result,
+							});
+						} catch (e: any) {
+							this.send(server, {
+								type: "apply_ack",
+								opId,
+								ok: false,
+								error: String(e?.message || e),
+							});
+						}
+					})(),
+				);
 				return;
 			}
 
@@ -1455,11 +1523,23 @@ export class TenantHub {
 		});
 
 		server.addEventListener("close", () => {
+			// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no toques el
+			// estado nuevo ni dispares main_offline en falso.
+			if (this.sockets.get(deviceId) !== server) return;
+
+			const wasMain = this.roles.get(deviceId) === "tpv";
+
 			this.sockets.delete(deviceId);
 			this.roles.delete(deviceId);
 			this.authed.delete(deviceId);
 			this.challengeByDevice.delete(deviceId);
 			this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
+
+			// Si se va la Main y no queda ninguna conectada, congelamos todo: las
+			// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.
+			if (wasMain && !this.isMainConnected()) {
+				this.broadcast({ type: "main_offline", deviceId }, deviceId);
+			}
 		});
 
 		server.addEventListener("error", () => {
