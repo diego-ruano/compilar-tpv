@@ -29,6 +29,7 @@ import {
 import { verifyJwtHs256 } from "./server/middleware/jwtHs256";
 
 import { pairingRoutes } from "./routes/pairing";
+import { inventarioRoutes } from "./domains/inventario/inventario.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
 
 import legacyLicensing from "./server/index";
@@ -120,6 +121,9 @@ app.get("/ws", async (c) => {
 // ---------------- Pairing (Main + Handy) ----------------
 app.route("/v1/pair", pairingRoutes);
 
+// ---------------- Negocio (Handy) ----------------
+app.route("/v1/inventario", inventarioRoutes);
+
 // ---------------- Gestión de dispositivos ----------------
 app.post("/v1/device/revoke", (c) =>
 	handleRevokeDevice(c.req.raw, c.env, getDb(c.env), c.env.TenantHub),
@@ -129,5 +133,20 @@ app.post("/v1/device/revoke", (c) =>
 // Activación de licencia, webhook de Lemon, status/validate, e internos.
 // Se mantiene tal cual hasta migrarlo a Hono.
 app.all("*", (c) => legacyLicensing.fetch(c.req.raw, c.env as any));
+
+// Traduce los errores con status (p. ej. HubError del DO: main_offline,
+// idempotency_*) a JSON; el resto cae a un 500 con detalle.
+app.onError((err, c) => {
+	const status = (err as any)?.status;
+	if (typeof status === "number") {
+		return c.json(
+			{ error: (err as any)?.code || err.message || "error" },
+			status as any,
+		);
+	}
+	return serverError(c.req.raw, "internal_error", {
+		message: String((err as any)?.message || err),
+	});
+});
 
 export default app;

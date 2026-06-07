@@ -1,0 +1,242 @@
+// src/domains/inventario/inventario.commands.ts
+//
+// ESCRITURAS de inventario expresadas como comandos para el motor del DO
+// (`tenantDb.transaction` / `tenantDb.exec`). El SQL es el mismo que el de la app
+// local (tpv-infra-sqlite/inventario.rs). El DO los ejecuta en transacción, con
+// idempotencia por Op_Id, y hace broadcast del cambio al confirmar.
+//
+// Patrón de ID: como la app usa `MAX(id)+1` explícito (no AUTOINCREMENT), aquí se
+// calcula igual con un paso `value` + `$ref`, para que el ID quede en el resultado
+// y viaje en el broadcast (la Main lo aplica con ese mismo ID).
+
+import type { ApplyCommand } from "../../lib/hub";
+import type {
+	UpsertCategoriaInput,
+	UpsertProductoInput,
+	SetAlergenosInput,
+	CreateLoteInput,
+	AjusteLoteInput,
+} from "./inventario.schemas";
+
+export type BuiltCommand = {
+	commandName: string;
+	command: ApplyCommand;
+	cloudPayload: any;
+};
+
+const REF_ID = { $ref: "id" } as const;
+
+function cleanOrNull(s: unknown): string | null {
+	const t = (s ?? "").toString().trim();
+	return t.length ? t : null;
+}
+
+function numOrNull(v: unknown): number | null {
+	if (v == null) return null;
+	const n = Number(v);
+	return Number.isFinite(n) ? n : null;
+}
+
+function posOrNull(v: unknown): number | null {
+	const n = numOrNull(v);
+	return n != null && n > 0 ? Math.trunc(n) : null;
+}
+
+function normalizeIds(ids: number[]): number[] {
+	const set = new Set(
+		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+	);
+	return Array.from(set).sort((a, b) => a - b);
+}
+
+const SQL_UPSERT_PRODUCTO = `
+	INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+	ON CONFLICT(ID_Producto) DO UPDATE SET
+		ID_Categoria = excluded.ID_Categoria,
+		ID_Proveedor = excluded.ID_Proveedor,
+		Nombre = excluded.Nombre,
+		Precio_Venta = excluded.Precio_Venta,
+		Stock_Minimo = excluded.Stock_Minimo,
+		Unidad_Medida = excluded.Unidad_Medida,
+		Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
+		Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
+		Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada;
+`;
+
+const SQL_UPSERT_CATEGORIA = `
+	INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+	ON CONFLICT(ID_Categoria) DO UPDATE SET
+		Nombre = excluded.Nombre,
+		Nombre_Imagen = excluded.Nombre_Imagen,
+		Ruta_Imagen = excluded.Ruta_Imagen,
+		Vendible = excluded.Vendible,
+		Pasa_Cocina = excluded.Pasa_Cocina;
+`;
+
+const SQL_INSERT_LOTE = `
+	INSERT INTO Lotes_Producto
+		(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+	VALUES
+		(?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9, ?10)
+	ON CONFLICT(ID_Lote) DO UPDATE SET
+		ID_Producto = excluded.ID_Producto,
+		Codigo_Lote = excluded.Codigo_Lote,
+		Fecha_Entrada = excluded.Fecha_Entrada,
+		Caducidad = excluded.Caducidad,
+		Cantidad_Inicial = excluded.Cantidad_Inicial,
+		Stock_Disponible = excluded.Stock_Disponible,
+		Coste_Unitario = excluded.Coste_Unitario,
+		ID_Proveedor = excluded.ID_Proveedor,
+		Notas = excluded.Notas;
+`;
+
+// Paso que deja en `id` el ID efectivo: el provisto (si >0) o MAX(col)+1.
+function nextIdStep(table: string, column: string, provided?: number) {
+	return provided && provided > 0
+		? { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [provided] }
+		: { kind: "value", saveAs: "id", sql: `SELECT COALESCE(MAX(${column}), 0) + 1 FROM ${table};` };
+}
+
+export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
+	const steps: any[] = [
+		nextIdStep("Categorias_Producto", "ID_Categoria", input.id_categoria),
+		{
+			kind: "execute",
+			sql: SQL_UPSERT_CATEGORIA,
+			args: [
+				REF_ID,
+				input.nombre.trim(),
+				(input.nombre_imagen ?? "").trim(),
+				(input.ruta_imagen ?? "").trim(),
+				input.vendible ? 1 : 0,
+				input.pasa_cocina ? 1 : 0,
+			],
+		},
+	];
+	return {
+		commandName: "inventario_create_categoria",
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "id" } },
+		cloudPayload: input,
+	};
+}
+
+export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
+	const steps: any[] = [
+		nextIdStep("Productos", "ID_Producto", input.id_producto),
+		{
+			kind: "execute",
+			sql: SQL_UPSERT_PRODUCTO,
+			args: [
+				REF_ID,
+				input.id_categoria,
+				posOrNull(input.id_proveedor),
+				input.nombre.trim(),
+				numOrNull(input.precio_venta),
+				numOrNull(input.stock_minimo),
+				cleanOrNull(input.unidad_medida),
+				cleanOrNull(input.nombre_imagen),
+				cleanOrNull(input.ruta_imagen),
+				numOrNull(input.cantidad_pedido_esperada),
+			],
+		},
+		{
+			kind: "execute",
+			sql: "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
+			args: [REF_ID],
+		},
+		...normalizeIds(input.ids_alergenos).map((idA) => ({
+			kind: "execute",
+			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
+			args: [REF_ID, idA],
+		})),
+	];
+	return {
+		commandName: "inventario_upsert_producto",
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "id" } },
+		cloudPayload: input,
+	};
+}
+
+export function deleteProducto(idProducto: number): BuiltCommand {
+	const steps = [
+		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
+		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
+		"DELETE FROM Productos WHERE ID_Producto=?1;",
+	].map((sql) => ({ kind: "execute", sql, args: [idProducto] }));
+
+	return {
+		commandName: "inventario_delete_producto",
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { id_producto: idProducto },
+	};
+}
+
+export function setAlergenosProducto(
+	idProducto: number,
+	input: SetAlergenosInput,
+): BuiltCommand {
+	const ids = normalizeIds(input.ids_alergenos);
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
+			args: [idProducto],
+		},
+		...ids.map((idA) => ({
+			kind: "execute",
+			sql: "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
+			args: [idProducto, idA],
+		})),
+	];
+	return {
+		commandName: "inventario_set_alergenos_producto",
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { id_producto: idProducto, ids_alergenos: ids },
+	};
+}
+
+export function createLote(input: CreateLoteInput): BuiltCommand {
+	const stock =
+		input.stock_disponible == null ? input.cantidad_inicial : input.stock_disponible;
+
+	const steps: any[] = [
+		nextIdStep("Lotes_Producto", "ID_Lote", input.id_lote),
+		{
+			kind: "execute",
+			sql: SQL_INSERT_LOTE,
+			args: [
+				REF_ID,
+				input.id_producto,
+				input.codigo_lote.trim(),
+				cleanOrNull(input.fecha_entrada),
+				cleanOrNull(input.caducidad),
+				input.cantidad_inicial,
+				stock,
+				numOrNull(input.coste_unitario),
+				posOrNull(input.id_proveedor),
+				cleanOrNull(input.notas),
+			],
+		},
+	];
+	return {
+		commandName: "inventario_create_lote",
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "id" } },
+		cloudPayload: input,
+	};
+}
+
+export function ajustarLote(idLote: number, input: AjusteLoteInput): BuiltCommand {
+	return {
+		commandName: "inventario_ajustar_lote",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
+				args: [input.stock_disponible, cleanOrNull(input.notas), idLote],
+			},
+		},
+		cloudPayload: { id_lote: idLote, ...input },
+	};
+}
