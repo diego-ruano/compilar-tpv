@@ -443,35 +443,6 @@ async function ensureTenantInitialAdminByCredentials(
 }
 
 
-// Splitter simple (evita partir dentro de comillas)
-function splitSqlStatements(sql: string): string[] {
-	const out: string[] = [];
-	let cur = "";
-	let inSingle = false;
-	let inDouble = false;
-
-	for (let i = 0; i < sql.length; i++) {
-		const ch = sql[i];
-		const prev = i > 0 ? sql[i - 1] : "";
-
-		if (ch === "'" && !inDouble && prev !== "\\") inSingle = !inSingle;
-		if (ch === `"` && !inSingle && prev !== "\\") inDouble = !inDouble;
-
-		if (ch === ";" && !inSingle && !inDouble) {
-			const stmt = cur.trim();
-			if (stmt) out.push(stmt);
-			cur = "";
-			continue;
-		}
-
-		cur += ch;
-	}
-
-	const last = cur.trim();
-	if (last) out.push(last);
-	return out;
-}
-
 // Sanitiza nombre db: minúsculas, números y guiones; max 64
 function makeDbNameFromTenant(tenantId: string): string {
 	const base = `tpv-${tenantId}`.toLowerCase();
@@ -705,11 +676,12 @@ async function applyTenantSchemaOnce(tursoUrl: string, token: string): Promise<v
 		authToken: token,
 	});
 
-	const stmts = splitSqlStatements(TPV_SCHEMA_SQL)
-		.map((s) => s.trim())
-		.filter(Boolean);
-
-	await client.batch(stmts, "write");
+	// El parser de Turso (sqld) rechaza los comentarios de bloque `/* */` del schema
+	// ("non-terminated block comment at (1,1)"), pase por `batch` o por `executeMultiple`.
+	// Los quitamos y ejecutamos el SQL completo como un único script multi-statement.
+	// El schema no usa `/*` dentro de literales, así que el strip es seguro.
+	const sql = TPV_SCHEMA_SQL.replace(/\/\*[\s\S]*?\*\//g, "");
+	await client.executeMultiple(sql);
 
 	await ensureTenantInitialAdmin(client);
 }

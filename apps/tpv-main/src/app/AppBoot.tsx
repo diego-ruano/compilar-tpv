@@ -588,7 +588,7 @@ export default function AppBoot({ router }: { router: any }) {
         setErr(null);
 
         try {
-            await invoke("set_device_mode", { mode: m });
+            await invoke("set_device_mode", { args: { mode: m } });
 
             if (m === "tpv") {
                 await invoke("init_main");
