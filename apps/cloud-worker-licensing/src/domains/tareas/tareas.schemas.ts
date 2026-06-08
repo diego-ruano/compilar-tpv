@@ -5,6 +5,12 @@
 // al menos un trabajador asignado.
 
 import { z } from "zod";
+import type {
+	CreateTareaInput as ContractCreateTareaInput,
+	FinalizarTareaInput as ContractFinalizarTareaInput,
+	SetAsignacionesTareaInput as ContractSetAsignacionesTareaInput,
+	UpdateTareaInput as ContractUpdateTareaInput,
+} from "@tpv/contracts";
 
 const posInt = z.number().int().positive();
 
@@ -46,7 +52,25 @@ export const finalizarTareaSchema = z.object({
 	id_trabajador: posInt,
 });
 
-export type CreateTareaInput = z.infer<typeof createTareaSchema>;
-export type UpdateTareaInput = z.infer<typeof updateTareaSchema>;
-export type SetAsignacionesTareaInput = z.infer<typeof setAsignacionesTareaSchema>;
-export type FinalizarTareaInput = z.infer<typeof finalizarTareaSchema>;
+type NullableTareaFields = "descripcion" | "fecha_limite";
+
+export type CreateTareaInput = Omit<
+	ContractCreateTareaInput,
+	NullableTareaFields
+> & {
+	[K in NullableTareaFields]?: ContractCreateTareaInput[K] | null;
+};
+
+export type UpdateTareaInput = Omit<
+	ContractUpdateTareaInput,
+	"id_tarea" | NullableTareaFields
+> & {
+	[K in NullableTareaFields]?: ContractUpdateTareaInput[K] | null;
+};
+
+export type SetAsignacionesTareaInput = Omit<
+	ContractSetAsignacionesTareaInput,
+	"id_tarea"
+>;
+
+export type FinalizarTareaInput = Omit<ContractFinalizarTareaInput, "id_tarea">;

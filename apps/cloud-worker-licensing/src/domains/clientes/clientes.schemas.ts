@@ -1,6 +1,10 @@
 // src/domains/clientes/clientes.schemas.ts
 
 import { z } from "zod";
+import type {
+	CreateClienteInput as ContractCreateClienteInput,
+	UpdateClienteInput as ContractUpdateClienteInput,
+} from "@tpv/contracts";
 
 const posInt = z.number().int().positive();
 
@@ -26,5 +30,18 @@ export const updateClienteSchema = z.object({
 	notas: optStr,
 });
 
-export type CreateClienteInput = z.infer<typeof createClienteSchema>;
-export type UpdateClienteInput = z.infer<typeof updateClienteSchema>;
+type NullableClienteFields = "email" | "telefono" | "notas";
+
+export type CreateClienteInput = Omit<
+	ContractCreateClienteInput,
+	NullableClienteFields
+> & {
+	[K in NullableClienteFields]?: ContractCreateClienteInput[K] | null;
+};
+
+export type UpdateClienteInput = Omit<
+	ContractUpdateClienteInput,
+	"id_cliente" | NullableClienteFields
+> & {
+	[K in NullableClienteFields]?: ContractUpdateClienteInput[K] | null;
+};

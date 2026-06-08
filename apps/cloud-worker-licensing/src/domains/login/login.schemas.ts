@@ -1,6 +1,12 @@
 // src/domains/login/login.schemas.ts
 
 import { z } from "zod";
+import type {
+	CompleteInitialSetupInput,
+	LoginUserArgs,
+	PunchInput as ContractPunchInput,
+	SetTurnoPartidoInput as ContractSetTurnoPartidoInput,
+} from "@tpv/contracts";
 
 const posInt = z.number().int().positive();
 
@@ -35,7 +41,21 @@ export const punchSchema = z.object({
 	hora_evento: z.string().nullish().transform(cleanOptional),
 });
 
-export type LoginUserInput = z.infer<typeof loginUserSchema>;
-export type SetTurnoPartidoInput = z.infer<typeof setTurnoPartidoSchema>;
-export type CompleteInitialSetupInput = z.infer<typeof completeInitialSetupSchema>;
-export type PunchInput = z.infer<typeof punchSchema>;
+export type LoginUserInput = LoginUserArgs;
+
+export type SetTurnoPartidoInput = Omit<
+	ContractSetTurnoPartidoInput,
+	"fecha"
+> & {
+	fecha?: string | null;
+};
+
+export type { CompleteInitialSetupInput };
+
+export type PunchInput = Omit<
+	ContractPunchInput,
+	"fecha" | "hora_evento"
+> & {
+	fecha?: string | null;
+	hora_evento?: string | null;
+};

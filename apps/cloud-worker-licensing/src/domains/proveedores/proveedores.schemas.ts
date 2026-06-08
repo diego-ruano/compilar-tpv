@@ -1,6 +1,11 @@
 // src/domains/proveedores/proveedores.schemas.ts
 
 import { z } from "zod";
+import type {
+	ProveedorSaveInput as ContractProveedorSaveInput,
+	ProveedoresCreateProductoInput,
+	ProveedoresSetVinculosInput,
+} from "@tpv/contracts";
 
 const posInt = z.number().int().positive();
 const optNum = z.number().finite().min(0).nullish();
@@ -46,6 +51,33 @@ export const createProductoSchema = z.object({
 	unidad_medida: optStr,
 });
 
-export type ProveedorSaveInput = z.infer<typeof proveedorSaveSchema>;
-export type SetVinculosInput = z.infer<typeof setVinculosSchema>;
-export type CreateProductoInput = z.infer<typeof createProductoSchema>;
+type NullableProveedorFields =
+	| "contacto"
+	| "telefono"
+	| "email"
+	| "cif"
+	| "informacion_adicional"
+	| "nombre_imagen"
+	| "ruta_imagen";
+
+export type ProveedorSaveInput = Omit<
+	ContractProveedorSaveInput,
+	"id_proveedor" | NullableProveedorFields
+> & {
+	id_proveedor?: number | null;
+} & {
+	[K in NullableProveedorFields]?: ContractProveedorSaveInput[K] | null;
+};
+
+export type SetVinculosInput = Omit<ProveedoresSetVinculosInput, "id_proveedor">;
+
+export type CreateProductoInput = Omit<
+	ProveedoresCreateProductoInput,
+	"id_producto" | "precio_venta" | "stock_actual" | "stock_minimo" | "unidad_medida"
+> & {
+	id_producto?: number | null;
+	precio_venta?: number | null;
+	stock_actual?: number | null;
+	stock_minimo?: number | null;
+	unidad_medida?: string | null;
+};

@@ -1,6 +1,11 @@
 // src/domains/cuentas/cuentas.schemas.ts
 
 import { z } from "zod";
+import type {
+	CreateGastoInput as ContractCreateGastoInput,
+	UpdateGastoInput as ContractUpdateGastoInput,
+	UpdatePagoInput as ContractUpdatePagoInput,
+} from "@tpv/contracts";
 
 const posInt = z.number().int().positive();
 const money = z.number().finite().min(0);
@@ -36,6 +41,19 @@ export const rangoSchema = z.object({
 	al: z.string().nullish().transform(cleanOptional),
 });
 
-export type CreateGastoInput = z.infer<typeof createGastoSchema>;
-export type UpdateGastoInput = z.infer<typeof updateGastoSchema>;
-export type UpdatePagoInput = z.infer<typeof updatePagoSchema>;
+export type CreateGastoInput = Omit<
+	ContractCreateGastoInput,
+	"id_gasto" | "proveedor_id"
+> & {
+	id_gasto?: number | null;
+	proveedor_id?: number | null;
+};
+
+export type UpdateGastoInput = Omit<
+	ContractUpdateGastoInput,
+	"id_gasto" | "proveedor_id"
+> & {
+	proveedor_id?: number | null;
+};
+
+export type UpdatePagoInput = Omit<ContractUpdatePagoInput, "id_pago">;

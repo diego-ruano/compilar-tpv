@@ -1,6 +1,13 @@
 // src/domains/trabajadores/trabajadores.schemas.ts
 
 import { z } from "zod";
+import type {
+	AsignacionCreateInput as ContractAsignacionCreateInput,
+	AsignacionUpdateInput as ContractAsignacionUpdateInput,
+	CopySemanaInput as ContractCopySemanaInput,
+	TrabajadorCreateInput as ContractTrabajadorCreateInput,
+	TrabajadorUpdateInput as ContractTrabajadorUpdateInput,
+} from "@tpv/contracts";
 
 function cleanOrNull(v: unknown): string | null {
 	const s = String(v ?? "").trim();
@@ -145,8 +152,48 @@ export const fechaLunesSchema = z.object({
 	fecha_lunes: z.any().transform((v) => normalizeYmd(v)),
 });
 
-export type TrabajadorCreateInput = z.infer<typeof trabajadorCreateSchema>;
-export type TrabajadorUpdateInput = z.infer<typeof trabajadorUpdateSchema>;
-export type AsignacionCreateInput = z.infer<typeof asignacionCreateSchema>;
-export type AsignacionUpdateInput = z.infer<typeof asignacionUpdateSchema>;
-export type CopySemanaInput = z.infer<typeof copySemanaSchema>;
+type NullableTrabajadorCreateFields =
+	| "apellido"
+	| "dni"
+	| "telefono"
+	| "puesto"
+	| "iban"
+	| "numero_seguridad_social"
+	| "fecha_inicio_contrato"
+	| "fecha_fin_contrato";
+
+type NullableTrabajadorUpdateFields =
+	| NullableTrabajadorCreateFields
+	| "password_hash";
+
+type NullableAsignacionFields = "hora_inicio" | "hora_fin" | "notas";
+
+export type TrabajadorCreateInput = Omit<
+	ContractTrabajadorCreateInput,
+	NullableTrabajadorCreateFields
+> & {
+	[K in NullableTrabajadorCreateFields]?: ContractTrabajadorCreateInput[K] | null;
+};
+
+export type TrabajadorUpdateInput = Omit<
+	ContractTrabajadorUpdateInput,
+	NullableTrabajadorUpdateFields
+> & {
+	[K in NullableTrabajadorUpdateFields]?: ContractTrabajadorUpdateInput[K] | null;
+};
+
+export type AsignacionCreateInput = Omit<
+	ContractAsignacionCreateInput,
+	NullableAsignacionFields
+> & {
+	[K in NullableAsignacionFields]?: ContractAsignacionCreateInput[K] | null;
+};
+
+export type AsignacionUpdateInput = Omit<
+	ContractAsignacionUpdateInput,
+	NullableAsignacionFields
+> & {
+	[K in NullableAsignacionFields]?: ContractAsignacionUpdateInput[K] | null;
+};
+
+export type CopySemanaInput = Required<ContractCopySemanaInput>;

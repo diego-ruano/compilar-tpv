@@ -1,6 +1,13 @@
 // src/domains/mesas/mesas.schemas.ts
 
 import { z } from "zod";
+import type {
+	MesasAbrirComandaInput,
+	MesasAddLineaComandaInput,
+	MesasCobrarDetallesInput as ContractMesasCobrarDetallesInput,
+	MesasComandaSetTrabajadorInput,
+	MesasSaveLayoutInput,
+} from "@tpv/contracts";
 
 function positiveInt(field: string) {
 	return z.coerce.number().int(`${field} invalido`).positive(`${field} invalido`);
@@ -52,7 +59,7 @@ const tableSchema = z.object({
 	y: z.coerce.number().int().default(0),
 	width: z.coerce.number().int().default(120),
 	height: z.coerce.number().int().default(70),
-	radius: z.coerce.number().int().nullable().optional(),
+	radius: z.coerce.number().int().nullable().optional().default(null),
 	seats: z.coerce.number().int().default(4),
 	shape: z.string().default("rounded"),
 });
@@ -174,8 +181,30 @@ export const searchSchema = z.object({
 	query: String(v.query ?? v.q ?? v.texto ?? "").trim(),
 }));
 
-export type SaveLayoutInput = z.infer<typeof saveLayoutSchema>;
-export type AbrirComandaInput = z.infer<typeof abrirComandaSchema>;
-export type SetTrabajadorInput = z.infer<typeof setTrabajadorSchema>;
-export type AddLineaInput = z.infer<typeof addLineaSchema>;
-export type CobrarDetallesInput = z.infer<typeof cobrarDetallesSchema>;
+export type SaveLayoutInput = MesasSaveLayoutInput;
+
+export type AbrirComandaInput = Pick<MesasAbrirComandaInput, "id_mesa"> & {
+	id_trabajador_o_usuario: number | null;
+	id_reserva: number | null;
+};
+
+export type SetTrabajadorInput = Pick<
+	MesasComandaSetTrabajadorInput,
+	"id_comanda"
+> & {
+	id_trabajador_o_usuario: number | null;
+};
+
+export type AddLineaInput = Pick<
+	MesasAddLineaComandaInput,
+	"id_comanda" | "id_producto" | "cantidad" | "precio"
+> & {
+	id_trabajador_o_usuario: number | null;
+};
+
+export type CobrarDetallesInput = Omit<
+	ContractMesasCobrarDetallesInput,
+	"id_usuario"
+> & {
+	id_usuario: number | null;
+};

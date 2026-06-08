@@ -1,6 +1,7 @@
 // src/domains/reservas/reservas.schemas.ts
 
 import { z } from "zod";
+import type { ReservaSaveInput as ContractReservaSaveInput } from "@tpv/contracts";
 
 const ESTADOS = new Set([
 	"PROXIMA",
@@ -138,4 +139,18 @@ export const mesQuerySchema = z.object({
 	hasta: z.any().transform((v) => normalizeDia(v)),
 });
 
-export type ReservaSaveInput = z.infer<typeof reservaSaveSchema>;
+type NullableReservaFields =
+	| "id_reserva"
+	| "turno"
+	| "nota"
+	| "estado"
+	| "telefono"
+	| "email"
+	| "notas_cliente";
+
+export type ReservaSaveInput = Omit<
+	ContractReservaSaveInput,
+	NullableReservaFields
+> & {
+	[K in NullableReservaFields]?: ContractReservaSaveInput[K] | null;
+};

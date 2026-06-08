@@ -1,6 +1,15 @@
 // src/domains/venta_rapida/venta_rapida.schemas.ts
 
 import { z } from "zod";
+import type {
+	VrAddLineaComandaInput,
+	VrCobrarFraccionadoInput as ContractVrCobrarFraccionadoInput,
+	VrCreateComandaBarraInput,
+	VrDeleteLineaIfUnpaidInput,
+	VrRemoveLastUnpaidLineaInput,
+	VrRestarStockInput,
+	VrUpdateNotaDetalleInput,
+} from "@tpv/contracts";
 
 function positiveInt(field: string) {
 	return z.coerce.number().int(`${field} invalido`).positive(`${field} invalido`);
@@ -133,10 +142,28 @@ export const restarStockSchema = z
 			: [],
 	}));
 
-export type CreateComandaBarraInput = z.infer<typeof createComandaBarraSchema>;
-export type AddLineaInput = z.infer<typeof addLineaSchema>;
-export type RemoveLastLineaInput = z.infer<typeof removeLastLineaSchema>;
-export type DeleteLineaInput = z.infer<typeof deleteLineaSchema>;
-export type UpdateNotaInput = z.infer<typeof updateNotaSchema>;
-export type CobrarFraccionadoInput = z.infer<typeof cobrarFraccionadoSchema>;
-export type RestarStockInput = z.infer<typeof restarStockSchema>;
+export type CreateComandaBarraInput = Omit<
+	VrCreateComandaBarraInput,
+	"id_trabajador" | "get_or_create"
+> & {
+	id_trabajador: number | null;
+	get_or_create: boolean;
+};
+
+export type AddLineaInput = VrAddLineaComandaInput;
+export type RemoveLastLineaInput = VrRemoveLastUnpaidLineaInput;
+export type DeleteLineaInput = VrDeleteLineaIfUnpaidInput;
+
+export type UpdateNotaInput = Omit<VrUpdateNotaDetalleInput, "nota"> & {
+	nota?: string | null;
+};
+
+export type CobrarFraccionadoInput = Omit<
+	ContractVrCobrarFraccionadoInput,
+	"id_usuario_cobrador" | "id_trabajador_cobrador"
+> & {
+	id_usuario_cobrador: number | null;
+	id_trabajador_cobrador: number | null;
+};
+
+export type RestarStockInput = VrRestarStockInput;

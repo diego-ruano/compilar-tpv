@@ -6,6 +6,13 @@
 // ids, default de stock) la hace el constructor de comandos.
 
 import { z } from "zod";
+import type {
+	AjusteLoteInput as ContractAjusteLoteInput,
+	CreateLoteInput as ContractCreateLoteInput,
+	SetProductoAlergenosInput,
+	UpsertCategoriaInput as ContractUpsertCategoriaInput,
+	UpsertProductoInput as ContractUpsertProductoInput,
+} from "@tpv/contracts";
 
 const optNum = z.number().finite().nullish();
 const optStr = z.string().nullish();
@@ -57,8 +64,46 @@ export const ajusteLoteSchema = z.object({
 	notas: optStr,
 });
 
-export type UpsertCategoriaInput = z.infer<typeof upsertCategoriaSchema>;
-export type UpsertProductoInput = z.infer<typeof upsertProductoSchema>;
-export type SetAlergenosInput = z.infer<typeof setAlergenosSchema>;
-export type CreateLoteInput = z.infer<typeof createLoteSchema>;
-export type AjusteLoteInput = z.infer<typeof ajusteLoteSchema>;
+export type UpsertCategoriaInput = ContractUpsertCategoriaInput;
+
+export type UpsertProductoInput = Omit<
+	ContractUpsertProductoInput,
+	| "id_proveedor"
+	| "precio_venta"
+	| "stock_minimo"
+	| "unidad_medida"
+	| "nombre_imagen"
+	| "ruta_imagen"
+	| "cantidad_pedido_esperada"
+> & {
+	id_proveedor?: number | null;
+	precio_venta?: number | null;
+	stock_minimo?: number | null;
+	unidad_medida?: string | null;
+	nombre_imagen?: string | null;
+	ruta_imagen?: string | null;
+	cantidad_pedido_esperada?: number | null;
+};
+
+export type SetAlergenosInput = Omit<SetProductoAlergenosInput, "id_producto">;
+
+export type CreateLoteInput = Omit<
+	ContractCreateLoteInput,
+	| "caducidad"
+	| "stock_disponible"
+	| "fecha_entrada"
+	| "coste_unitario"
+	| "id_proveedor"
+	| "notas"
+> & {
+	caducidad?: string | null;
+	stock_disponible?: number | null;
+	fecha_entrada?: string | null;
+	coste_unitario?: number | null;
+	id_proveedor?: number | null;
+	notas?: string | null;
+};
+
+export type AjusteLoteInput = Omit<ContractAjusteLoteInput, "id_lote" | "notas"> & {
+	notas?: string | null;
+};
