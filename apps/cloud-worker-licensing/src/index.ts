@@ -34,6 +34,7 @@ import { configuracionRoutes } from "./domains/configuracion/configuracion.route
 import { cuentasRoutes } from "./domains/cuentas/cuentas.routes";
 import { inventarioRoutes } from "./domains/inventario/inventario.routes";
 import { loginRoutes } from "./domains/login/login.routes";
+import { mesasRoutes } from "./domains/mesas/mesas.routes";
 import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
@@ -137,6 +138,7 @@ app.route("/v1/configuracion", configuracionRoutes);
 app.route("/v1/cuentas", cuentasRoutes);
 app.route("/v1/inventario", inventarioRoutes);
 app.route("/v1/login", loginRoutes);
+app.route("/v1/mesas", mesasRoutes);
 app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/reservas", reservasRoutes);
 app.route("/v1/stats", statsRoutes);
