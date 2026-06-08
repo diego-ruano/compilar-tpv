@@ -1,5 +1,6 @@
 // src/features/ventaRapida/ui/ProductCard.tsx
 import React, { useCallback } from "react";
+import { Info, Minus, Plus, ImageOff } from "lucide-react";
 import { ProductoDisplay } from "../types";
 import { cn } from "../utils";
 
@@ -17,8 +18,15 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
   const handleRemove = useCallback(() => onRemove(p.ID_Producto), [onRemove, p.ID_Producto]);
   const handleInfo = useCallback(() => onInfo(p.ID_Producto), [onInfo, p.ID_Producto]);
 
+  const hasQty = qty > 0;
+
   return (
-    <div className="rounded-xl border border-black/10 bg-white p-2.5 sm:p-3 text-left">
+    <div
+      className={cn(
+        "rounded-2xl border bg-surface p-2.5 text-left shadow-sm transition sm:p-3",
+        hasQty ? "border-accent ring-1 ring-accent/30" : "border-border",
+      )}
+    >
       <div
         role="button"
         tabIndex={0}
@@ -29,16 +37,28 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
             handleAdd();
           }
         }}
-        className="w-full text-left hover:opacity-95 transition cursor-pointer select-none"
+        className="w-full cursor-pointer select-none text-left transition hover:opacity-95"
       >
         <div className="relative">
-          <img
-            src={p.urlImagen}
-            alt={p.Nombre}
-            loading="lazy"
-            className="w-full h-24 sm:h-28 object-cover rounded-lg border border-black/5"
-            draggable={false}
-          />
+          {p.urlImagen ? (
+            <img
+              src={p.urlImagen}
+              alt={p.Nombre}
+              loading="lazy"
+              className="h-24 w-full rounded-xl border border-border object-cover sm:h-28"
+              draggable={false}
+            />
+          ) : (
+            <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
+              <ImageOff className="size-6" aria-hidden />
+            </div>
+          )}
+
+          {hasQty && (
+            <span className="absolute left-2 top-2 grid min-w-6 place-items-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-bold text-accent-fg shadow-sm">
+              {qty}
+            </span>
+          )}
 
           <button
             type="button"
@@ -47,19 +67,19 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
               e.stopPropagation();
               handleInfo();
             }}
-            className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white/90 border border-black/10 shadow-sm flex items-center justify-center text-black/70 hover:bg-white transition"
+            className="absolute right-2 top-2 grid size-8 place-items-center rounded-full border border-border bg-surface/90 text-fg-muted shadow-sm backdrop-blur transition hover:bg-surface hover:text-fg cursor-pointer"
             title="Info"
             aria-label="Información del producto"
           >
-            ℹ️
+            <Info className="size-4" aria-hidden />
           </button>
         </div>
 
-        <div className="mt-2 flex items-start justify-between gap-2 min-w-0">
-          <p className="font-semibold leading-tight text-sm sm:text-base min-w-0 truncate">
+        <div className="mt-2 flex min-w-0 items-start justify-between gap-2">
+          <p className="min-w-0 truncate text-sm font-semibold leading-tight text-fg sm:text-base">
             {p.Nombre}
           </p>
-          <span className="text-xs sm:text-sm font-bold whitespace-nowrap">
+          <span className="whitespace-nowrap text-xs font-bold text-fg sm:text-sm">
             {formatPrice(Number(p.Precio_Venta || 0))}
           </span>
         </div>
@@ -73,17 +93,18 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
             handleRemove();
           }}
           className={cn(
-            "w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold",
-            qty === 0 && "opacity-40 cursor-not-allowed",
+            "grid size-10 place-items-center rounded-xl border border-border bg-surface text-fg transition hover:bg-surface-2 sm:size-11 cursor-pointer",
+            qty === 0 && "cursor-not-allowed opacity-40",
           )}
           disabled={qty === 0}
+          aria-label="Quitar uno"
         >
-          −
+          <Minus className="size-4" aria-hidden />
         </button>
 
-        <div className="flex-1 text-center rounded-xl border border-black/10 bg-black/5 py-2">
-          <p className="text-xs text-black/60">Cantidad</p>
-          <p className="text-base sm:text-lg font-bold">{qty}</p>
+        <div className="flex-1 rounded-xl border border-border bg-surface-2 py-1.5 text-center">
+          <p className="text-[11px] text-fg-subtle">Cantidad</p>
+          <p className="text-base font-bold text-fg sm:text-lg">{qty}</p>
         </div>
 
         <button
@@ -92,9 +113,10 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
             e.stopPropagation();
             handleAdd();
           }}
-          className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold"
+          className="grid size-10 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover sm:size-11 cursor-pointer"
+          aria-label="Añadir uno"
         >
-          +
+          <Plus className="size-4" aria-hidden />
         </button>
       </div>
     </div>

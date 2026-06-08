@@ -111,7 +111,7 @@ function CatalogGrid({
     if (loading) {
       return (
         <Wrapper>
-          <p className="text-sm text-black/60">Buscando…</p>
+          <p className="text-sm text-fg-muted">Buscando…</p>
         </Wrapper>
       );
     }
@@ -154,7 +154,7 @@ function CatalogGrid({
   if (loading) {
     return (
       <Wrapper>
-        <p className="text-sm text-black/60">Cargando productos…</p>
+        <p className="text-sm text-fg-muted">Cargando productos…</p>
       </Wrapper>
     );
   }
@@ -165,7 +165,7 @@ function CatalogGrid({
         <div className={gridClass}>
           <AddProductoCard onClick={onOpenAddProduct} />
 
-          <div className="rounded-xl border border-black/10 bg-white p-4 text-sm text-black/60">
+          <div className="flex items-center rounded-2xl border border-border bg-surface p-4 text-sm text-fg-muted">
             No hay productos en esta categoría.
           </div>
         </div>

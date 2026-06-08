@@ -1,5 +1,6 @@
 // src/features/ventaRapida/ui/CategoryCard.tsx
 import React, { useEffect, useState } from "react";
+import { ImageOff } from "lucide-react";
 import { CategoriaDisplay } from "../types";
 
 export type CategoryCardProps = {
@@ -18,29 +19,32 @@ function CategoryCard({ c, onSelect }: CategoryCardProps) {
     <button
       onClick={() => onSelect(c)}
       className="
-        rounded-xl border border-black/10 bg-white hover:bg-black/5 transition
-        p-2.5 sm:p-3
-        text-left
+        group rounded-2xl border border-border bg-surface p-2.5 text-left shadow-sm
+        transition hover:border-border-strong hover:bg-surface-2 active:scale-[0.99]
+        cursor-pointer sm:p-3
       "
       type="button"
       title={c.Nombre}
     >
-      <div className="w-full h-24 sm:h-28 rounded-lg border border-black/5 bg-black/[0.03] overflow-hidden flex items-center justify-center">
+      <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-28">
         {imgOk ? (
           <img
             src={c.urlImagen}
             alt={c.Nombre}
             loading="lazy"
-            className="w-full h-full object-cover"
+            className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
             onError={() => setImgOk(false)}
             draggable={false}
           />
         ) : (
-          <div className="text-xs text-black/50 font-semibold px-2 text-center">Sin imagen</div>
+          <div className="flex flex-col items-center gap-1 text-fg-subtle">
+            <ImageOff className="size-6" aria-hidden />
+            <span className="text-xs font-semibold">Sin imagen</span>
+          </div>
         )}
       </div>
 
-      <p className="mt-2 font-bold truncate text-sm sm:text-base">{c.Nombre}</p>
+      <p className="mt-2 truncate text-sm font-bold text-fg sm:text-base">{c.Nombre}</p>
     </button>
   );
 }

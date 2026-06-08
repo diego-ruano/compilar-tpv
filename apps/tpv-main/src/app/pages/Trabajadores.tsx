@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
+import { Users, Plus } from "lucide-react";
 
 import {
   type TrabajadorRow,
@@ -646,11 +646,11 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     "border-2 rounded-xl font-medium transition-all duration-300 whitespace-nowrap shrink-0 px-2 py-2 text-[11px] sm:px-3 sm:py-2 sm:text-sm";
 
   return (
-    <div className="w-full bg-blanco rounded-xl p-3 sm:p-4 shadow-xs flex flex-col gap-3">
+    <div className="w-full bg-surface rounded-xl p-3 sm:p-4 shadow-xs flex flex-col gap-3">
       <div className="w-full flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         <div className="flex flex-col">
           <h3 className="text-lg sm:text-xl font-bold">HORARIO SEMANAL</h3>
-          <p className="text-sm text-negro/60">
+          <p className="text-sm text-fg-muted">
             {isAdmin
               ? "Arriba tienes trabajadores. Aqui puedes asignar turnos por semana."
               : "Tu horario de esta semana (solo lectura)."}
@@ -670,7 +670,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <button
                   type="button"
                   onClick={guardarPDF}
-                  className={`${btnBase} border-negro/30 text-negro hover:bg-negro hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
+                  className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                 >
                   Guardar PDF
@@ -679,7 +679,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <button
                   type="button"
                   onClick={copiarSemanaAnterior}
-                  className={`${btnBase} border-verde text-verde hover:bg-verde hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
+                  className={`${btnBase} border-accent text-accent hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                 >
                   Copiar semana anterior
@@ -688,7 +688,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <button
                   type="button"
                   onClick={establecerPredeterminado}
-                  className={`${btnBase} border-negro/30 text-negro hover:bg-negro hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
+                  className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                   title="Guarda como predeterminado la semana visible"
                 >
@@ -700,7 +700,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
             <button
               type="button"
               onClick={() => setWeekStart(addDays(weekStart, -7))}
-              className={`${btnBase} border-negro/30 text-negro hover:bg-negro hover:text-white w-full sm:w-auto`}
+              className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white w-full sm:w-auto`}
             >
               Semana -
             </button>
@@ -708,7 +708,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
             <button
               type="button"
               onClick={() => setWeekStart(startOfWeekMonday(new Date()))}
-              className={`${btnBase} border-negro/30 text-negro hover:bg-negro hover:text-white w-full sm:w-auto`}
+              className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white w-full sm:w-auto`}
             >
               Hoy
             </button>
@@ -716,20 +716,20 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
             <button
               type="button"
               onClick={() => setWeekStart(addDays(weekStart, 7))}
-              className={`${btnBase} border-negro/30 text-negro hover:bg-negro hover:text-white w-full sm:w-auto col-span-2 sm:col-span-1`}
+              className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white w-full sm:w-auto col-span-2 sm:col-span-1`}
             >
               Semana +
             </button>
           </div>
 
-          <p className="mt-2 text-[11px] text-negro/45 sm:hidden">
+          <p className="mt-2 text-[11px] text-fg-subtle sm:hidden">
             En pantallas pequeñas los botones se ordenan en filas.
           </p>
         </div>
       </div>
 
       {error && (
-        <div className="w-full rounded-xl border border-rojo/30 bg-rojo/10 p-3 text-sm text-rojo">
+        <div className="w-full rounded-xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
           {error}
         </div>
       )}
@@ -738,13 +738,13 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         {trabajadoresVisibles.map((t) => (
           <div
             key={t.ID_Trabajador}
-            className="rounded-xl border border-negro/10 bg-white p-3 flex flex-col gap-3"
+            className="rounded-xl border border-border bg-surface p-3 flex flex-col gap-3"
           >
             <div className="flex flex-col gap-1">
               <div className="font-semibold text-base">
                 {t.Nombre} {t.Apellido ?? ""}
               </div>
-              <div className="text-xs text-negro/60">
+              <div className="text-xs text-fg-muted">
                 {t.Puesto ?? "—"} • {t.Telefono ?? "—"}
               </div>
             </div>
@@ -755,18 +755,18 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 const list = asignacionesByCell.get(key) ?? [];
 
                 return (
-                  <div key={d.ymd} className="rounded-xl border border-negro/10 p-2 bg-blanco">
+                  <div key={d.ymd} className="rounded-xl border border-border p-2 bg-surface">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex flex-col min-w-0">
                         <div className="font-semibold text-sm">{d.label}</div>
-                        <div className="text-[11px] text-negro/60 truncate">{d.ymd}</div>
+                        <div className="text-[11px] text-fg-muted truncate">{d.ymd}</div>
                       </div>
 
                       {isAdmin && (
                         <button
                           type="button"
                           onClick={() => openCreate(t.ID_Trabajador, d.ymd)}
-                          className="border border-negro/20 rounded-lg px-2 py-1 text-[11px] text-negro/70 hover:bg-negro hover:text-white transition-all whitespace-nowrap shrink-0"
+                          className="border border-border rounded-lg px-2 py-1 text-[11px] text-fg-muted hover:bg-accent hover:text-white transition-all whitespace-nowrap shrink-0"
                           title="Añadir asignación"
                         >
                           <span className="sm:hidden">+</span>
@@ -777,7 +777,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
                     <div className="mt-2 flex flex-col gap-2">
                       {list.length === 0 ? (
-                        <div className="text-[11px] text-negro/45">
+                        <div className="text-[11px] text-fg-subtle">
                           {isAdmin ? "Sin asignación" : "—"}
                         </div>
                       ) : (
@@ -794,20 +794,20 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                           return (
                             <div
                               key={`${a.ID_Asignacion}-${a.ID_Turno}-${a.Hora_Inicio ?? ""}-${a.Hora_Fin ?? ""}-${a.Area ?? ""}-${a.Notas ?? ""}`}
-                              className="rounded-xl border border-negro/10 bg-white px-2 py-2 flex flex-col gap-1"
+                              className="rounded-xl border border-border bg-surface px-2 py-2 flex flex-col gap-1"
                             >
                               <div className="flex items-start justify-between gap-2">
                                 <div className="min-w-0 flex-1">
                                   <div className="text-sm font-semibold truncate">
                                     {a.Nombre_Turno}
                                   </div>
-                                  <div className="text-[11px] text-negro/60">
+                                  <div className="text-[11px] text-fg-muted">
                                     {a.Area}
                                     {showTime ? ` • ${showTime}` : ""}
                                   </div>
 
                                   {isVirtual && (
-                                    <div className="mt-1 text-[11px] text-negro/45">
+                                    <div className="mt-1 text-[11px] text-fg-subtle">
                                       Predeterminado
                                     </div>
                                   )}
@@ -819,14 +819,14 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                       <button
                                         type="button"
                                         onClick={() => openEdit(a)}
-                                        className="text-[11px] border border-verde text-verde rounded-lg px-2 py-1 hover:bg-verde hover:text-white transition-all"
+                                        className="text-[11px] border border-accent text-accent rounded-lg px-2 py-1 hover:bg-accent hover:text-white transition-all"
                                       >
                                         Editar
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => borrarAsignacion(a.ID_Asignacion)}
-                                        className="text-[11px] border border-rojo text-rojo rounded-lg px-2 py-1 hover:bg-rojo hover:text-white transition-all"
+                                        className="text-[11px] border border-danger text-danger rounded-lg px-2 py-1 hover:bg-danger hover:text-white transition-all"
                                         title="Borrar"
                                       >
                                         X
@@ -836,7 +836,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                 )}
                               </div>
 
-                              {a.Notas ? <div className="text-[11px] text-negro/60">{a.Notas}</div> : null}
+                              {a.Notas ? <div className="text-[11px] text-fg-muted">{a.Notas}</div> : null}
                             </div>
                           );
                         })
@@ -851,14 +851,14 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       </div>
 
       <div className="hidden md:block">
-        <div className="w-full overflow-x-auto border border-negro/10 rounded-xl">
+        <div className="w-full overflow-x-auto border border-border rounded-xl">
           <div className="min-w-[900px]">
-            <div className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-negro/10 bg-negro/5">
+            <div className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-border bg-surface-2">
               <div className="p-3 font-semibold">Trabajador</div>
               {weekDays.map((d) => (
                 <div key={d.ymd} className="p-3 font-semibold text-center">
                   <div>{d.label}</div>
-                  <div className="text-xs text-negro/60">{d.ymd}</div>
+                  <div className="text-xs text-fg-muted">{d.ymd}</div>
                 </div>
               ))}
             </div>
@@ -866,13 +866,13 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
             {trabajadoresVisibles.map((t) => (
               <div
                 key={t.ID_Trabajador}
-                className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-negro/10"
+                className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-border"
               >
                 <div className="p-3">
                   <div className="font-semibold">
                     {t.Nombre} {t.Apellido ?? ""}
                   </div>
-                  <div className="text-xs text-negro/60">
+                  <div className="text-xs text-fg-muted">
                     {t.Puesto ?? "—"} • {t.Telefono ?? "—"}
                   </div>
                 </div>
@@ -882,10 +882,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                   const list = asignacionesByCell.get(key) ?? [];
 
                   return (
-                    <div key={d.ymd} className="p-2 border-l border-negro/10">
+                    <div key={d.ymd} className="p-2 border-l border-border">
                       <div className="flex flex-col gap-2">
                         {list.length === 0 ? (
-                          <div className="text-xs text-negro/40">{isAdmin ? "Sin asignacion" : "—"}</div>
+                          <div className="text-xs text-fg-subtle">{isAdmin ? "Sin asignacion" : "—"}</div>
                         ) : (
                           list.map((a) => {
                             const effIni = hhmm(a.Hora_Inicio);
@@ -900,18 +900,18 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                             return (
                               <div
                                 key={`${a.ID_Asignacion}-${a.ID_Turno}-${a.Hora_Inicio ?? ""}-${a.Hora_Fin ?? ""}-${a.Area ?? ""}-${a.Notas ?? ""}`}
-                                className="rounded-xl border border-negro/10 bg-blanco px-2 py-2 flex flex-col gap-1"
+                                className="rounded-xl border border-border bg-surface px-2 py-2 flex flex-col gap-1"
                               >
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex flex-col">
                                     <div className="text-sm font-semibold">{a.Nombre_Turno}</div>
-                                    <div className="text-xs text-negro/60">
+                                    <div className="text-xs text-fg-muted">
                                       {a.Area}
                                       {showTime ? ` • ${showTime}` : ""}
                                     </div>
 
                                     {isVirtual && (
-                                      <div className="mt-1 text-[11px] text-negro/45">
+                                      <div className="mt-1 text-[11px] text-fg-subtle">
                                         Predeterminado
                                       </div>
                                     )}
@@ -922,14 +922,14 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                       <button
                                         type="button"
                                         onClick={() => openEdit(a)}
-                                        className="text-xs border border-verde text-verde rounded-lg px-2 py-1 hover:bg-verde hover:text-white transition-all"
+                                        className="text-xs border border-accent text-accent rounded-lg px-2 py-1 hover:bg-accent hover:text-white transition-all"
                                       >
                                         Editar
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => borrarAsignacion(a.ID_Asignacion)}
-                                        className="text-xs border border-rojo text-rojo rounded-lg px-2 py-1 hover:bg-rojo hover:text-white transition-all"
+                                        className="text-xs border border-danger text-danger rounded-lg px-2 py-1 hover:bg-danger hover:text-white transition-all"
                                       >
                                         X
                                       </button>
@@ -937,7 +937,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                   )}
                                 </div>
 
-                                {a.Notas ? <div className="text-xs text-negro/60">{a.Notas}</div> : null}
+                                {a.Notas ? <div className="text-xs text-fg-muted">{a.Notas}</div> : null}
                               </div>
                             );
                           })
@@ -947,7 +947,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                           <button
                             type="button"
                             onClick={() => openCreate(t.ID_Trabajador, d.ymd)}
-                            className="border border-negro/20 rounded-xl px-3 py-2 text-xs text-negro/70 hover:bg-negro hover:text-white transition-all"
+                            className="border border-border rounded-xl px-3 py-2 text-xs text-fg-muted hover:bg-accent hover:text-white transition-all"
                           >
                             + Anadir
                           </button>
@@ -963,17 +963,17 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       </div>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-negro/40 p-4">
-          <div className="w-full max-w-xl bg-blanco rounded-2xl shadow-lg border border-negro/10 p-5 flex flex-col gap-4">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl bg-surface rounded-2xl shadow-lg border border-border p-5 flex flex-col gap-4">
             <div className="flex items-start justify-between gap-4">
               <div className="flex flex-col">
                 <h4 className="text-lg font-bold">
                   {modalMode === "create" ? "Nueva asignacion" : "Editar asignacion"}
                 </h4>
-                <p className="text-sm text-negro/60">
+                <p className="text-sm text-fg-muted">
                   Fecha: <span className="font-medium">{selectedFecha}</span>
                 </p>
-                <p className="text-xs text-negro/50">
+                <p className="text-xs text-fg-subtle">
                   Si FIN es menor que INICIO, se interpreta como turno nocturno (acaba al dia siguiente +1).
                 </p>
               </div>
@@ -981,14 +981,14 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <button
                 type="button"
                 onClick={closeModal}
-                className="border-2 border-negro/30 text-negro rounded-xl px-3 py-2 font-medium hover:bg-negro hover:text-white transition-all"
+                className="border-2 border-border-strong text-fg rounded-xl px-3 py-2 font-medium hover:bg-accent hover:text-white transition-all"
               >
                 Cerrar
               </button>
             </div>
 
             {error && (
-              <div className="w-full rounded-xl border border-rojo/30 bg-rojo/10 p-3 text-sm text-rojo">
+              <div className="w-full rounded-xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
                 {error}
               </div>
             )}
@@ -999,7 +999,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <select
                   value={idTurno}
                   onChange={(e) => setIdTurno(e.target.value ? Number(e.target.value) : "")}
-                  className="border border-negro/15 rounded-xl px-3 py-2 bg-blanco outline-none focus:border-negro/30"
+                  className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
                 >
                   <option value="">Selecciona un turno</option>
                   {turnos.map((t) => (
@@ -1015,7 +1015,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <select
                   value={area}
                   onChange={(e) => setArea(e.target.value)}
-                  className="border border-negro/15 rounded-xl px-3 py-2 bg-blanco outline-none focus:border-negro/30"
+                  className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
                 >
                   <option value="Sala">Sala</option>
                   <option value="Cocina">Cocina</option>
@@ -1042,7 +1042,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                   type="time"
                   value={horaInicio1}
                   onChange={(e) => setHoraInicio1(e.target.value)}
-                  className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                  className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 />
               </div>
 
@@ -1052,7 +1052,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                   type="time"
                   value={horaFin1}
                   onChange={(e) => setHoraFin1(e.target.value)}
-                  className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                  className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 />
               </div>
 
@@ -1064,7 +1064,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                       type="time"
                       value={horaInicio2}
                       onChange={(e) => setHoraInicio2(e.target.value)}
-                      className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                      className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                     />
                   </div>
 
@@ -1074,7 +1074,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                       type="time"
                       value={horaFin2}
                       onChange={(e) => setHoraFin2(e.target.value)}
-                      className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                      className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                     />
                   </div>
                 </>
@@ -1085,7 +1085,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <input
                   value={notas}
                   onChange={(e) => setNotas(e.target.value)}
-                  className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                  className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                   placeholder="Ej: cubrir a X, turno partido, etc."
                 />
               </div>
@@ -1095,7 +1095,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <button
                 type="button"
                 onClick={closeModal}
-                className="border-2 border-negro rounded-xl px-4 py-2 text-negro transition-all duration-300 hover:bg-negro hover:text-white"
+                className="border-2 border-border rounded-xl px-4 py-2 text-fg transition-all duration-300 hover:bg-accent hover:text-white"
               >
                 Cancelar
               </button>
@@ -1104,7 +1104,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 type="button"
                 disabled={loading}
                 onClick={guardarModal}
-                className="border-2 border-verde text-verde rounded-xl px-4 py-2 font-medium transition-all duration-300 hover:bg-verde hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                className="border-2 border-accent text-accent rounded-xl px-4 py-2 font-medium transition-all duration-300 hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loading ? "Guardando..." : "Guardar"}
               </button>
@@ -1154,45 +1154,44 @@ function Trabajadores() {
   }, [location.key]);
 
   return (
-    <div className="w-full min-h-full bg-gris flex flex-col p-4 sm:p-6 lg:p-10 pt-5 gap-4 items-center">
-      <div className="flex flex-col gap-4 bg-blanco w-full p-4 rounded-xl shadow-xs justify-center items-center">
-        <div className="w-full flex flex-col items-center gap-3">
-          <h2 className="text-2xl font-bold text-center">TRABAJADORES</h2>
+    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+      <div className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+              <Users className="size-6" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-fg sm:text-2xl">Trabajadores</h2>
+              <p className="text-sm text-fg-muted">
+                {trabajadoresSafe.length}{" "}
+                {trabajadoresSafe.length === 1 ? "trabajador" : "trabajadores"}
+              </p>
+            </div>
+          </div>
 
           {isAdmin && (
-            <Link to="/Trabajadores/nuevo-trabajador" className="w-fit">
-              <div
-                className="
-                  group flex gap-2 w-fit items-center justify-center
-                  cursor-pointer border-2 border-verde rounded-xl
-                  text-verde transition-all duration-300 ease-out
-                  hover:bg-verde hover:text-white hover:shadow-md
-                  px-3 py-2 text-sm
-                  sm:px-3 sm:py-1 sm:text-base
-                "
-              >
-                <LapizSVG
-                  width={18}
-                  height={18}
-                  className="transition-transform duration-300 group-hover:-translate-y-1 group-hover:rotate-6"
-                />
-                <p className="font-medium">Añadir Nuevo Trabajador</p>
-              </div>
+            <Link
+              to="/Trabajadores/nuevo-trabajador"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+            >
+              <Plus className="size-4" aria-hidden />
+              <span className="hidden xs:inline">Nuevo trabajador</span>
             </Link>
           )}
         </div>
 
-        {error && <p className="text-rojo text-sm">{error}</p>}
+        {error && <p className="text-sm text-danger">{error}</p>}
       </div>
 
-      <div className="w-full bg-blanco rounded-xl p-4 shadow-xs flex flex-col gap-2">
+      <div className="w-full bg-surface rounded-xl p-4 shadow-xs flex flex-col gap-2">
         {trabajadoresSafe.length === 0 ? (
-          <p className="text-negro/60">No hay trabajadores todavía.</p>
+          <p className="text-fg-muted">No hay trabajadores todavía.</p>
         ) : (
           trabajadoresSafe.map((t) => (
             <div
               key={t.ID_Trabajador}
-              className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-negro/10 rounded-xl px-3 py-3"
+              className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-border rounded-xl px-3 py-3"
             >
               <div className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1200,27 +1199,27 @@ function Trabajadores() {
                     {t.Nombre} {t.Apellido ?? ""}
                   </span>
 
-                  <span className="text-xs px-2 py-1 rounded-lg border border-negro/10">
+                  <span className="text-xs px-2 py-1 rounded-lg border border-border">
                     {t.Nombre_Rol}
                   </span>
 
                   <span
                     className={`text-xs px-2 py-1 rounded-lg border ${t.Estado === "Activo"
-                      ? "border-verde/30 text-verde bg-verde/10"
-                      : "border-rojo/30 text-rojo bg-rojo/10"
+                      ? "border-accent/30 text-accent bg-accent-soft"
+                      : "border-danger/30 text-danger bg-danger-soft"
                       }`}
                   >
                     {t.Estado}
                   </span>
                 </div>
 
-                <div className="flex flex-wrap gap-4 text-sm text-negro/70">
+                <div className="flex flex-wrap gap-4 text-sm text-fg-muted">
                   <span>
-                    <span className="text-negro/50">Teléfono:</span>{" "}
+                    <span className="text-fg-subtle">Teléfono:</span>{" "}
                     {t.Telefono ?? "—"}
                   </span>
                   <span>
-                    <span className="text-negro/50">Puesto:</span>{" "}
+                    <span className="text-fg-subtle">Puesto:</span>{" "}
                     {t.Puesto ?? "—"}
                   </span>
                 </div>
@@ -1233,8 +1232,8 @@ function Trabajadores() {
                       type="button"
                       onClick={() => navigate(`/Trabajadores/editar/${t.ID_Trabajador}`)}
                       className="
-                        border-2 border-verde text-verde rounded-xl
-                        font-medium transition-all duration-300 hover:bg-verde hover:text-white
+                        border-2 border-accent text-accent rounded-xl
+                        font-medium transition-all duration-300 hover:bg-accent hover:text-white
                         px-3 py-1.5 text-xs
                         sm:px-4 sm:py-2 sm:text-sm
                       "
@@ -1246,8 +1245,8 @@ function Trabajadores() {
                       type="button"
                       onClick={() => toast.info("Por implementar", "Estadísticas (pendiente)")}
                       className="
-                        border-2 border-negro/30 text-negro rounded-xl
-                        font-medium transition-all duration-300 hover:bg-negro hover:text-white
+                        border-2 border-border-strong text-fg rounded-xl
+                        font-medium transition-all duration-300 hover:bg-accent hover:text-white
                         px-3 py-1.5 text-xs
                         sm:px-4 sm:py-2 sm:text-sm
                       "
@@ -1259,8 +1258,8 @@ function Trabajadores() {
                       type="button"
                       onClick={() => toast.info("Por implementar", "Dar de baja (pendiente)")}
                       className="
-                        border-2 border-rojo text-rojo rounded-xl
-                        font-medium transition-all duration-300 hover:bg-rojo hover:text-white
+                        border-2 border-danger text-danger rounded-xl
+                        font-medium transition-all duration-300 hover:bg-danger hover:text-white
                         px-3 py-1.5 text-xs
                         sm:px-4 sm:py-2 sm:text-sm
                       "

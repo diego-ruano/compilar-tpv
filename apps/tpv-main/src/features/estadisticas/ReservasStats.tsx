@@ -263,8 +263,8 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
     }) => (
         <select
             className={cn(
-                "rounded-xl border border-black/10 bg-white px-3 py-2 text-sm font-semibold outline-none",
-                "focus:ring-2 focus:ring-black/10",
+                "rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold outline-none",
+                "focus:ring-2 focus:ring-ring",
                 disabled && "opacity-60 cursor-not-allowed",
             )}
             disabled={disabled}
@@ -280,54 +280,54 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
     return (
         <div className="w-full h-full flex flex-col gap-4 min-h-0">
             {/* Header */}
-            <div className="bg-white rounded-xl border border-black/10 p-4 flex items-center justify-between">
+            <div className="bg-surface rounded-xl border border-border p-4 flex items-center justify-between">
                 <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-negro">Reservas</h3>
-                    <p className="text-sm text-negro/60">
+                    <h3 className="text-lg font-bold text-fg">Reservas</h3>
+                    <p className="text-sm text-fg-muted">
                         Volumen, estados, distribución por rango y comportamiento por turnos.
                     </p>
                 </div>
-                <div className="text-xs text-negro/50">{loading ? "Cargando…" : "Actualizado"}</div>
+                <div className="text-xs text-fg-subtle">{loading ? "Cargando…" : "Actualizado"}</div>
             </div>
 
             {/* KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded-xl border border-black/10 p-4">
-                    <p className="text-sm text-negro/60">Reservas</p>
-                    <p className="text-2xl font-extrabold text-negro mt-1">{totalReservas}</p>
-                    <p className="text-xs text-negro/50 mt-1">Total de reservas en el rango.</p>
+                <div className="bg-surface rounded-xl border border-border p-4">
+                    <p className="text-sm text-fg-muted">Reservas</p>
+                    <p className="text-2xl font-extrabold text-fg mt-1">{totalReservas}</p>
+                    <p className="text-xs text-fg-subtle mt-1">Total de reservas en el rango.</p>
                 </div>
 
-                <div className="bg-white rounded-xl border border-black/10 p-4">
-                    <p className="text-sm text-negro/60">Cancelaciones</p>
-                    <p className="text-2xl font-extrabold text-negro mt-1">{cancelaciones}</p>
-                    <p className="text-xs text-negro/50 mt-1">Reservas canceladas en el rango.</p>
+                <div className="bg-surface rounded-xl border border-border p-4">
+                    <p className="text-sm text-fg-muted">Cancelaciones</p>
+                    <p className="text-2xl font-extrabold text-fg mt-1">{cancelaciones}</p>
+                    <p className="text-xs text-fg-subtle mt-1">Reservas canceladas en el rango.</p>
                 </div>
 
-                <div className="bg-white rounded-xl border border-black/10 p-4">
-                    <p className="text-sm text-negro/60">% mesas reservadas (turno)</p>
-                    <p className="text-2xl font-extrabold text-negro mt-1">
+                <div className="bg-surface rounded-xl border border-border p-4">
+                    <p className="text-sm text-fg-muted">% mesas reservadas (turno)</p>
+                    <p className="text-2xl font-extrabold text-fg mt-1">
                         {totalMesasTurno > 0 ? `${pctReservadas}%` : "—"}
                     </p>
-                    <p className="text-xs text-negro/50 mt-1">Según el turno seleccionado.</p>
+                    <p className="text-xs text-fg-subtle mt-1">Según el turno seleccionado.</p>
                 </div>
             </div>
 
             {/* Charts */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
                 {/* Donut turno */}
-                <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+                <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
                     <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                            <h4 className="text-base font-bold text-negro truncate">Mesas reservadas vs no reservadas</h4>
-                            <p className="text-sm text-negro/60 truncate">Comparativa por turno (porcentaje).</p>
+                            <h4 className="text-base font-bold text-fg truncate">Mesas reservadas vs no reservadas</h4>
+                            <p className="text-sm text-fg-muted truncate">Comparativa por turno (porcentaje).</p>
                         </div>
                         <SelectTurno value={turno} onChange={setTurno} disabled={loading} />
                     </div>
 
                     <div className="mt-4 flex-1 min-h-0 flex items-center justify-center">
                         {totalMesasTurno <= 0 ? (
-                            <div className="text-sm text-negro/50">No hay datos para este rango/turno.</div>
+                            <div className="text-sm text-fg-subtle">No hay datos para este rango/turno.</div>
                         ) : (
                             <ReactApexChart
                                 type="donut"
@@ -340,15 +340,15 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                 </div>
 
                 {/* Barras */}
-                <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+                <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
                     <div className="min-w-0">
-                        <h4 className="text-base font-bold text-negro truncate">Reservas por periodo</h4>
-                        <p className="text-sm text-negro/60 truncate">Distribución por {range}.</p>
+                        <h4 className="text-base font-bold text-fg truncate">Reservas por periodo</h4>
+                        <p className="text-sm text-fg-muted truncate">Distribución por {range}.</p>
                     </div>
 
                     <div className="mt-4 flex-1 min-h-0">
                         {barLabels.length === 0 ? (
-                            <div className="h-full flex items-center justify-center text-sm text-negro/50">No hay datos para este rango.</div>
+                            <div className="h-full flex items-center justify-center text-sm text-fg-subtle">No hay datos para este rango.</div>
                         ) : (
                             <ReactApexChart type="bar" height={barHeight} options={barOptions} series={barSeries as any} />
                         )}
@@ -356,15 +356,15 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                 </div>
 
                 {/* Donut estados */}
-                <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+                <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
                     <div className="min-w-0">
-                        <h4 className="text-base font-bold text-negro truncate">Estado de las reservas</h4>
-                        <p className="text-sm text-negro/60 truncate">Activas · Finalizadas · Canceladas</p>
+                        <h4 className="text-base font-bold text-fg truncate">Estado de las reservas</h4>
+                        <p className="text-sm text-fg-muted truncate">Activas · Finalizadas · Canceladas</p>
                     </div>
 
                     <div className="mt-4 flex-1 min-h-0 flex items-center justify-center">
                         {estadoLabels.length === 0 ? (
-                            <div className="text-sm text-negro/50">No hay datos.</div>
+                            <div className="text-sm text-fg-subtle">No hay datos.</div>
                         ) : (
                             <ReactApexChart type="donut" height={360} options={estadoOptions} series={estadoValues} />
                         )}
@@ -372,16 +372,16 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                 </div>
 
                 {/* Donut franjas + desglose */}
-                <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+                <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
                     <div className="min-w-0">
-                        <h4 className="text-base font-bold text-negro truncate">Reservas por franja horaria</h4>
-                        <p className="text-sm text-negro/60 truncate">Distribución por franjas (con desglose).</p>
+                        <h4 className="text-base font-bold text-fg truncate">Reservas por franja horaria</h4>
+                        <p className="text-sm text-fg-muted truncate">Distribución por franjas (con desglose).</p>
                     </div>
 
                     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
                         <div className="flex items-center justify-center min-h-[320px]">
                             {franjaLabels.length === 0 ? (
-                                <div className="text-sm text-negro/50">No hay datos.</div>
+                                <div className="text-sm text-fg-subtle">No hay datos.</div>
                             ) : (
                                 <ReactApexChart type="donut" height={330} options={franjasOptions} series={franjaValues} />
                             )}
@@ -389,10 +389,10 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
 
                         <div className="flex flex-col justify-center gap-2 min-h-0">
                             {franjaLabels.length === 0 ? (
-                                <div className="text-sm text-negro/50">Sin desglose disponible.</div>
+                                <div className="text-sm text-fg-subtle">Sin desglose disponible.</div>
                             ) : (
-                                <div className="bg-white rounded-xl border border-black/10 p-3">
-                                    <p className="text-xs font-semibold text-negro/60">Desglose</p>
+                                <div className="bg-surface rounded-xl border border-border p-3">
+                                    <p className="text-xs font-semibold text-fg-muted">Desglose</p>
 
                                     <div className="mt-2 flex flex-col gap-2">
                                         {franjaLabels.map((lbl, i) => {
@@ -402,11 +402,11 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
                                             return (
                                                 <div key={`${lbl}-${i}`} className="flex items-center justify-between gap-3">
                                                     <div className="min-w-0">
-                                                        <p className="text-sm font-semibold text-negro truncate">{lbl}</p>
-                                                        <p className="text-xs text-negro/50">{pct}% del total</p>
+                                                        <p className="text-sm font-semibold text-fg truncate">{lbl}</p>
+                                                        <p className="text-xs text-fg-subtle">{pct}% del total</p>
                                                     </div>
 
-                                                    <div className="text-sm font-extrabold text-negro">{v}</div>
+                                                    <div className="text-sm font-extrabold text-fg">{v}</div>
                                                 </div>
                                             );
                                         })}

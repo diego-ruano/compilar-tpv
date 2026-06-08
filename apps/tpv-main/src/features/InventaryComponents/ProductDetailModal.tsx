@@ -1,4 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  X,
+  Plus,
+  Pencil,
+  Trash2,
+  Boxes,
+  TriangleAlert,
+  Tag,
+  ShoppingCart,
+  CalendarClock,
+  Clock,
+  ChevronDown,
+  ShieldAlert,
+  Layers,
+  ImageOff,
+} from "lucide-react";
 import { type ProductoDetalle, type LoteRow } from "./api/inventarioAPI";
 import { fileUrlFromAppData } from "./utils/inventarioImages";
 import AddLoteModal from "./ui/AddLoteModal";
@@ -169,87 +185,130 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
     return arr[0] ?? null;
   }, [lotes]);
 
+  const minimo = Number((p as any)?.Stock_Minimo);
+  const bajoStock = Number.isFinite(minimo) && minimo > 0 && stockTotal <= minimo;
+
   if (!open) return null;
   if (!productId) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-3"
+      className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-3"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-blanco w-full max-w-[820px] rounded-2xl shadow-xl border border-black/10 relative overflow-hidden max-h-[88vh] flex flex-col">
+      <div className="bg-surface text-fg w-full max-w-[820px] rounded-2xl shadow-xl border border-border relative overflow-hidden max-h-[88vh] flex flex-col">
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-3 right-3 w-10 h-10 rounded-2xl border border-negro/20 hover:bg-gris transition flex items-center justify-center"
+          aria-label="Cerrar"
+          className="absolute top-3 right-3 grid size-9 place-items-center rounded-xl border border-border text-fg-muted hover:bg-surface-2 hover:text-fg transition cursor-pointer"
         >
-          ✕
+          <X className="size-4" aria-hidden />
         </button>
 
-        <div className="px-6 pt-6 pb-4 border-b border-black/10">
-          <h2 className="text-xl font-extrabold text-center">{title}</h2>
+        <div className="px-6 pt-6 pb-4 border-b border-border">
+          <h2 className="text-xl font-extrabold text-center text-fg">{title}</h2>
         </div>
 
         <div className="p-6 overflow-y-auto">
           {loading ? (
-            <p className="text-center text-negro/70">Cargando...</p>
+            <p className="text-center text-fg-muted">Cargando...</p>
           ) : !p ? (
-            <p className="text-center text-negro/70">No se encontró el producto.</p>
+            <p className="text-center text-fg-muted">No se encontró el producto.</p>
           ) : (
             <>
-              <div className="flex gap-4 items-center">
-                <div className="w-[84px] h-[84px] rounded-2xl border border-negro/10 bg-gris overflow-hidden flex items-center justify-center shrink-0">
+              <div className="flex items-center gap-4">
+                <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2">
                   {imgUrl ? (
-                    <img src={imgUrl} alt={(p as any).Nombre} className="w-full h-full object-cover" draggable={false} />
+                    <img src={imgUrl} alt={(p as any).Nombre} className="h-full w-full object-cover" draggable={false} />
                   ) : (
-                    <span className="text-negro/40 text-xs font-semibold">IMG</span>
+                    <ImageOff className="size-7 text-fg-subtle" aria-hidden />
                   )}
                 </div>
 
                 <div className="min-w-0">
-                  <p className="text-negro/50 font-extrabold text-sm uppercase">PRODUCTO</p>
-                  <p className="text-2xl font-extrabold text-negro truncate">{(p as any).Nombre || "—"}</p>
+                  <p className="text-xs font-extrabold uppercase tracking-wide text-fg-subtle">Producto</p>
+                  <p className="truncate text-2xl font-extrabold text-fg">{(p as any).Nombre || "—"}</p>
+
+                  <span
+                    className={
+                      "mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-bold " +
+                      (bajoStock
+                        ? "border border-danger/30 bg-danger-soft text-danger"
+                        : "border border-success/30 bg-success-soft text-success")
+                    }
+                  >
+                    {bajoStock ? (
+                      <>
+                        <TriangleAlert className="size-3.5" aria-hidden />
+                        Stock bajo · {String(stockTotal)}
+                      </>
+                    ) : (
+                      <>
+                        <Boxes className="size-3.5" aria-hidden />
+                        En stock · {String(stockTotal)}
+                      </>
+                    )}
+                  </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mt-5">
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">Stock total</p>
-                  <p className="text-xl font-extrabold text-negro">{String(stockTotal)}</p>
+              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <Boxes className="size-4 text-accent" aria-hidden />
+                    Stock total
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{String(stockTotal)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">Mínimo</p>
-                  <p className="text-xl font-extrabold text-negro">{numOrDash((p as any).Stock_Minimo)}</p>
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <TriangleAlert className="size-4 text-accent" aria-hidden />
+                    Mínimo
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{numOrDash((p as any).Stock_Minimo)}</p>
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">Precio</p>
-                  <p className="text-xl font-extrabold text-negro">
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <Tag className="size-4 text-accent" aria-hidden />
+                    Precio
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">
                     {(p as any).Precio_Venta == null ? "—" : String((p as any).Precio_Venta)}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">Pedido esp.</p>
-                  <p className="text-xl font-extrabold text-negro">
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <ShoppingCart className="size-4 text-accent" aria-hidden />
+                    Pedido esp.
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">
                     {(p as any).Cantidad_Pedido_Esperada == null ? "—" : String((p as any).Cantidad_Pedido_Esperada)}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">FEFO (caducidad)</p>
-                  <p className="text-xl font-extrabold text-negro">{formatDateES((fefo as any)?.Caducidad ?? null)}</p>
-                  <p className="text-xs text-negro/60 mt-1">
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <CalendarClock className="size-4 text-accent" aria-hidden />
+                    FEFO (caducidad)
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateES((fefo as any)?.Caducidad ?? null)}</p>
+                  <p className="mt-1 text-xs text-fg-muted">
                     Lote: {(fefo as any)?.Codigo_Lote ?? "—"}
                   </p>
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
-                  <p className="text-sm font-semibold text-negro/60">Última entrada</p>
-                  <p className="text-xl font-extrabold text-negro">{formatDateTimeES((ultimaEntrada as any)?.Fecha_Entrada ?? null)}</p>
+                <div className="rounded-2xl border border-border bg-surface-2 p-4">
+                  <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
+                    <Clock className="size-4 text-accent" aria-hidden />
+                    Última entrada
+                  </p>
+                  <p className="mt-1 text-xl font-extrabold text-fg">{formatDateTimeES((ultimaEntrada as any)?.Fecha_Entrada ?? null)}</p>
                 </div>
               </div>
 
@@ -258,31 +317,40 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <button
                   type="button"
                   onClick={() => setAlergOpen((v) => !v)}
-                  className="w-full border border-negro/20 rounded-2xl py-3 font-extrabold hover:bg-gris transition flex items-center justify-between px-4"
+                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-4 py-3 font-extrabold text-fg transition hover:bg-surface-2"
                 >
-                  <span>Alérgenos</span>
-                  <span className="text-negro/60 text-sm font-semibold">{(p as any).alergs?.length ? `${(p as any).alergs.length}` : "—"}</span>
+                  <span className="flex items-center gap-2">
+                    <ShieldAlert className="size-5 text-accent" aria-hidden />
+                    Alérgenos
+                  </span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-fg-muted">
+                    {(p as any).alergs?.length ? `${(p as any).alergs.length}` : "—"}
+                    <ChevronDown
+                      className={"size-4 transition-transform " + (alergOpen ? "rotate-180" : "")}
+                      aria-hidden
+                    />
+                  </span>
                 </button>
 
                 <div className={["overflow-hidden transition-all duration-300", alergOpen ? "max-h-[420px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"].join(" ")}>
-                  <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
+                  <div className="rounded-2xl border border-border bg-surface-2 p-4">
                     {!(p as any).alergs?.length ? (
-                      <p className="text-sm text-negro/60">Este producto no tiene alérgenos marcados.</p>
+                      <p className="text-sm text-fg-muted">Este producto no tiene alérgenos marcados.</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {(p as any).alergs.map((a: any) => {
                           const id = Number(a.ID_Alergeno);
                           const url = alergImgUrl[id] ?? "";
                           return (
-                            <div key={a.ID_Alergeno} className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-negro/10 bg-blanco">
-                              <div className="w-7 h-7 rounded-xl border border-negro/10 bg-gris overflow-hidden flex items-center justify-center">
+                            <div key={a.ID_Alergeno} className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-border bg-surface">
+                              <div className="w-7 h-7 rounded-xl border border-border bg-surface-2 overflow-hidden flex items-center justify-center">
                                 {url ? (
                                   <img src={url} alt={a.Nombre} className="w-full h-full object-cover" draggable={false} />
                                 ) : (
-                                  <span className="text-[10px] text-negro/40 font-bold">IMG</span>
+                                  <span className="text-[10px] text-fg-subtle font-bold">IMG</span>
                                 )}
                               </div>
-                              <span className="text-sm font-extrabold text-negro">{a.Nombre}</span>
+                              <span className="text-sm font-extrabold text-fg">{a.Nombre}</span>
                             </div>
                           );
                         })}
@@ -297,33 +365,43 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <button
                   type="button"
                   onClick={() => setLotesOpen((v) => !v)}
-                  className="w-full border border-negro/20 rounded-2xl py-3 font-extrabold hover:bg-gris transition flex items-center justify-between px-4"
+                  className="flex w-full cursor-pointer items-center justify-between rounded-2xl border border-border px-4 py-3 font-extrabold text-fg transition hover:bg-surface-2"
                 >
-                  <span>Lotes</span>
-                  <span className="text-negro/60 text-sm font-semibold">{lotes?.length ? `${lotes.length}` : "—"}</span>
+                  <span className="flex items-center gap-2">
+                    <Layers className="size-5 text-accent" aria-hidden />
+                    Lotes
+                  </span>
+                  <span className="flex items-center gap-2 text-sm font-semibold text-fg-muted">
+                    {lotes?.length ? `${lotes.length}` : "—"}
+                    <ChevronDown
+                      className={"size-4 transition-transform " + (lotesOpen ? "rotate-180" : "")}
+                      aria-hidden
+                    />
+                  </span>
                 </button>
 
                 <div className={["overflow-hidden transition-all duration-300", lotesOpen ? "max-h-[560px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"].join(" ")}>
-                  <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
+                  <div className="rounded-2xl border border-border bg-surface-2 p-4">
                     <div className="flex items-center justify-between gap-2 mb-3">
-                      <p className="text-sm font-semibold text-negro/70">
+                      <p className="text-sm font-semibold text-fg-muted">
                         Gestiona entradas de almacén (FEFO sale de aquí)
                       </p>
 
                       <button
                         type="button"
                         onClick={() => setAddLoteOpen(true)}
-                        className="px-4 py-2 rounded-xl bg-verde text-white font-extrabold hover:opacity-90 transition"
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
                       >
-                        + Añadir lote
+                        <Plus className="size-4" aria-hidden />
+                        Añadir lote
                       </button>
                     </div>
 
                     {!lotes?.length ? (
-                      <p className="text-sm text-negro/60 text-center py-4">No hay lotes para este producto.</p>
+                      <p className="text-sm text-fg-muted text-center py-4">No hay lotes para este producto.</p>
                     ) : (
-                      <div className="rounded-2xl border border-negro/10 bg-blanco overflow-hidden">
-                        <div className="grid grid-cols-12 gap-2 px-4 py-3 bg-gris/40 text-xs font-extrabold text-negro/70">
+                      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
+                        <div className="grid grid-cols-12 gap-2 px-4 py-3 bg-surface-2 text-xs font-extrabold text-fg-muted">
                           <div className="col-span-4">Lote</div>
                           <div className="col-span-3">Caducidad</div>
                           <div className="col-span-2 text-right">Stock</div>
@@ -334,18 +412,18 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                           {lotes.map((l: any) => {
                             const isFefo = (fefo as any)?.ID_Lote === l.ID_Lote;
                             return (
-                              <div key={l.ID_Lote} className={`grid grid-cols-12 gap-2 px-4 py-3 border-t border-negro/10 text-sm items-center ${isFefo ? "bg-verde/5" : ""}`}>
-                                <div className="col-span-4 font-extrabold text-negro truncate">
+                              <div key={l.ID_Lote} className={`grid grid-cols-12 gap-2 px-4 py-3 border-t border-border text-sm items-center ${isFefo ? "bg-accent-soft" : ""}`}>
+                                <div className="col-span-4 font-extrabold text-fg truncate">
                                   {l.Codigo_Lote}
-                                  {isFefo && <span className="ml-2 text-xs font-extrabold text-verde">FEFO</span>}
+                                  {isFefo && <span className="ml-2 text-xs font-extrabold text-accent">FEFO</span>}
                                 </div>
-                                <div className="col-span-3 text-negro/80">{formatDateES(l.Caducidad)}</div>
+                                <div className="col-span-3 text-fg-muted">{formatDateES(l.Caducidad)}</div>
                                 <div className="col-span-2 text-right font-extrabold">{String(l.Stock_Disponible ?? 0)}</div>
                                 <div className="col-span-3 flex items-center justify-between gap-2">
-                                  <span className="text-negro/70">{formatDateTimeES(l.Fecha_Entrada)}</span>
+                                  <span className="text-fg-muted">{formatDateTimeES(l.Fecha_Entrada)}</span>
                                   <button
                                     type="button"
-                                    className="px-3 py-1.5 rounded-xl border border-negro/20 hover:bg-gris transition text-xs font-extrabold"
+                                    className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
                                     onClick={() => {
                                       setAjustar(l);
                                       setNuevoStock(String(l.Stock_Disponible ?? 0));
@@ -369,24 +447,27 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <button
                   type="button"
                   onClick={() => onEdit?.((p as any).ID_Producto)}
-                  className="w-full border border-negro/20 rounded-2xl py-3 font-extrabold hover:bg-gris transition"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-accent py-3 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                 >
+                  <Pencil className="size-4" aria-hidden />
                   Editar
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setAddLoteOpen(true)}
-                  className="w-full border border-negro/20 rounded-2xl py-3 font-extrabold hover:bg-gris transition"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface py-3 font-extrabold text-fg transition hover:bg-surface-2 cursor-pointer"
                 >
+                  <Plus className="size-4" aria-hidden />
                   Añadir lote
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setConfirmDelete(true)}
-                  className="w-full border border-rojo text-rojo rounded-2xl py-3 font-extrabold hover:bg-rojo hover:text-white transition col-span-2"
+                  className="col-span-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer"
                 >
+                  <Trash2 className="size-4" aria-hidden />
                   Eliminar producto
                 </button>
               </div>
@@ -410,22 +491,22 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     if (e.target === e.currentTarget && !ajustando) setAjustar(null);
                   }}
                 >
-                  <div className="bg-blanco w-full max-w-[520px] rounded-2xl shadow-xl border border-black/10 overflow-hidden">
-                    <div className="p-5 border-b border-black/10">
+                  <div className="bg-surface w-full max-w-[520px] rounded-2xl shadow-xl border border-border overflow-hidden">
+                    <div className="p-5 border-b border-border">
                       <h3 className="text-lg font-extrabold text-center">Ajustar stock del lote</h3>
-                      <p className="text-center text-sm text-negro/60 mt-1">
+                      <p className="text-center text-sm text-fg-muted mt-1">
                         {ajustar.Codigo_Lote}
                       </p>
                     </div>
 
                     <div className="p-5">
-                      <label className="font-semibold">Nuevo stock disponible</label>
+                      <label className="text-sm font-semibold text-fg">Nuevo stock disponible</label>
                       <input
                         type="number"
                         step="0.01"
                         value={nuevoStock}
                         onChange={(e) => setNuevoStock(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full mt-2"
+                        className="mt-2 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={ajustando}
                       />
 
@@ -434,7 +515,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                           type="button"
                           onClick={() => setAjustar(null)}
                           disabled={ajustando}
-                          className="w-full px-4 py-2 rounded-xl border border-negro/20 hover:bg-gris transition font-semibold disabled:opacity-60"
+                          className="w-full px-4 py-2 rounded-xl border border-border hover:bg-surface-2 transition font-semibold disabled:opacity-60"
                         >
                           Cancelar
                         </button>
@@ -460,7 +541,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                               setAjustando(false);
                             }
                           }}
-                          className="w-full px-4 py-2 rounded-xl font-extrabold transition disabled:opacity-60 bg-verde text-white hover:opacity-90"
+                          className="w-full cursor-pointer rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover disabled:opacity-60"
                         >
                           {ajustando ? "Guardando..." : "Guardar"}
                         </button>
@@ -481,20 +562,20 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               if (e.target === e.currentTarget) setConfirmDelete(false);
             }}
           >
-            <div className="bg-blanco w-full max-w-[520px] rounded-2xl shadow-xl border border-black/10 overflow-hidden">
-              <div className="p-5 border-b border-black/10">
+            <div className="bg-surface w-full max-w-[520px] rounded-2xl shadow-xl border border-border overflow-hidden">
+              <div className="p-5 border-b border-border">
                 <h3 className="text-lg font-extrabold text-center">Confirmar</h3>
               </div>
 
               <div className="p-5">
-                <p className="text-negro/80 text-center">¿Seguro que quieres eliminar este producto?</p>
+                <p className="text-fg-muted text-center">¿Seguro que quieres eliminar este producto?</p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">
                   <button
                     type="button"
                     onClick={() => setConfirmDelete(false)}
                     disabled={deleting}
-                    className="w-full px-4 py-2 rounded-xl border border-negro/20 hover:bg-gris transition font-semibold disabled:opacity-60"
+                    className="w-full px-4 py-2 rounded-xl border border-border hover:bg-surface-2 transition font-semibold disabled:opacity-60"
                   >
                     Cancelar
                   </button>
@@ -513,7 +594,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                         setDeleting(false);
                       }
                     }}
-                    className="w-full px-4 py-2 rounded-xl font-extrabold transition disabled:opacity-60 border border-rojo text-white bg-rojo hover:opacity-90"
+                    className="w-full cursor-pointer rounded-xl bg-danger px-4 py-2 font-extrabold text-danger-fg shadow-sm transition hover:opacity-90 disabled:opacity-60"
                   >
                     {deleting ? "Eliminando..." : "Eliminar"}
                   </button>

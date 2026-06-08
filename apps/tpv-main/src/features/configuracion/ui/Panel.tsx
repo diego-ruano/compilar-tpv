@@ -15,12 +15,12 @@ export function Panel({
 	id?: string;
 }) {
 	return (
-		<section id={id} className="rounded-2xl border border-slate-200 bg-white scroll-mt-24">
-			<div className="px-5 py-4 border-b border-slate-200">
+		<section id={id} className="rounded-2xl border border-border bg-surface scroll-mt-24">
+			<div className="px-5 py-4 border-b border-border">
 				<div className="flex items-start justify-between gap-3">
 					<div className="min-w-0">
-						<h2 className="text-base font-semibold text-slate-900 truncate">{title}</h2>
-						{subtitle ? <p className="text-sm text-slate-600 mt-0.5">{subtitle}</p> : null}
+						<h2 className="text-base font-semibold text-fg truncate">{title}</h2>
+						{subtitle ? <p className="text-sm text-fg-muted mt-0.5">{subtitle}</p> : null}
 					</div>
 					{right ? <div className="shrink-0">{right}</div> : null}
 				</div>

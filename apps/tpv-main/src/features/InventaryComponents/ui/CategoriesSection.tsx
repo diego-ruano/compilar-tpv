@@ -11,8 +11,8 @@ export default function CategoriesSection({
     onSelect: (c: CategoriaDisplay) => void;
 }) {
     return (
-        <div className="bg-blanco rounded-2xl p-3 sm:p-4 shadow-xs border border-black/5">
-            <div className="grid gap-4 sm:gap-5 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 place-items-start">
+        <div className="rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
+            <div className="grid grid-cols-2 place-items-start gap-4 sm:grid-cols-3 sm:gap-5 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
                 {categorias.map((item) => (
                     <Category
                         key={item.ID_Categoria}
@@ -24,7 +24,7 @@ export default function CategoriesSection({
             </div>
 
             {categorias.length === 0 && (
-                <p className="text-center text-negro/60 py-8">
+                <p className="py-8 text-center text-fg-muted">
                     Aún no hay categorías. Crea la primera.
                 </p>
             )}

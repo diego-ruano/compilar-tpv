@@ -1,11 +1,26 @@
 // pages/Clientes.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
+import {
+  ArrowLeft,
+  Plus,
+  RefreshCw,
+  Mail,
+  Phone,
+  Megaphone,
+  Pencil,
+  Users,
+  CalendarDays,
+  Wallet,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
 
 import Modal from "../../features/proveedores/Modal";
 import Campo from "../../features/proveedores/Campo";
-import ClienteCard from "../../features/ClientsComponents/ClientesCard";
 import { useToast } from "../../shared/toast";
+import { SearchInput } from "../../shared/ui";
+import { cn } from "../../shared/lib/cn";
 
 import {
   clientesGetClienteForm,
@@ -40,6 +55,33 @@ function euro(n: number) {
     style: "currency",
     currency: "EUR",
   });
+}
+
+const RANKINGS: { key: FiltroRanking; label: string }[] = [
+  { key: "todos", label: "Todos" },
+  { key: "reservas", label: "Mejor por reservas" },
+  { key: "gasto", label: "Mejor por gasto" },
+];
+
+// Colores suaves deterministas para los avatares (claro/oscuro).
+const AVATAR_PALETTE = [
+  "bg-violet-500/15 text-violet-500",
+  "bg-sky-500/15 text-sky-500",
+  "bg-emerald-500/15 text-emerald-500",
+  "bg-amber-500/15 text-amber-500",
+  "bg-rose-500/15 text-rose-500",
+  "bg-cyan-500/15 text-cyan-500",
+  "bg-fuchsia-500/15 text-fuchsia-500",
+  "bg-indigo-500/15 text-indigo-500",
+];
+
+function avatarColor(seed: number): string {
+  const idx = Math.abs(Math.trunc(seed)) % AVATAR_PALETTE.length;
+  return AVATAR_PALETTE[idx];
+}
+
+function inicial(nombre: string): string {
+  return (nombre?.trim()?.[0] ?? "?").toUpperCase();
 }
 
 export default function Clientes() {
@@ -139,6 +181,51 @@ export default function Clientes() {
     });
   }, [clientes, busqueda]);
 
+  // Navegación anterior/siguiente en la vista de detalle.
+  const idxActivo = useMemo(() => {
+    if (!clienteActivo) return -1;
+    return clientesFiltrados.findIndex(
+      (c) => Number(c.ID_Cliente) === Number(clienteActivo.ID_Cliente),
+    );
+  }, [clientesFiltrados, clienteActivo]);
+
+  const prevCliente = idxActivo > 0 ? clientesFiltrados[idxActivo - 1] : null;
+  const nextCliente =
+    idxActivo >= 0 && idxActivo < clientesFiltrados.length - 1
+      ? clientesFiltrados[idxActivo + 1]
+      : null;
+
+  function irAnterior() {
+    if (prevCliente) setClienteActivo(prevCliente);
+  }
+  function irSiguiente() {
+    if (nextCliente) setClienteActivo(nextCliente);
+  }
+
+  // Atajos de teclado ←/→ para moverse entre clientes en el detalle.
+  useEffect(() => {
+    if (vista !== "detail") return;
+
+    const onKey = (e: KeyboardEvent) => {
+      if (modalClienteOpen) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || el?.isContentEditable) return;
+
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        irAnterior();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        irSiguiente();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, modalClienteOpen, prevCliente, nextCliente]);
+
   function volverALista() {
     setVista("list");
     setClienteActivo(null);
@@ -232,393 +319,258 @@ export default function Clientes() {
   }
   // La invalidación en las mutaciones recachea la lista automáticamente.
 
-  const titulo = useMemo(() => {
-    if (vista === "list") return "CLIENTES";
-    return `CLIENTE · ${clienteActivo ? `${clienteActivo.Nombre}`.trim() : ""}`;
-  }, [vista, clienteActivo]);
-
   return (
-    <div className="w-full min-h-full bg-gris flex flex-col items-center gap-4 p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-      {/* HEADER */}
-      <div className="w-full bg-blanco p-3 sm:p-4 rounded-xl shadow-xs flex flex-col gap-3 sm:gap-4 justify-center items-center">
-        {/* TÍTULO */}
-        <div className="w-full flex items-center justify-between gap-2">
-          {vista === "detail" ? (
+    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+      {/* ================= LISTA ================= */}
+      {vista === "list" && (
+        <>
+          {/* HEADER */}
+          <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                  <Users className="size-6" aria-hidden />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-fg sm:text-2xl">Clientes</h2>
+                  <p className="text-sm text-fg-muted">
+                    {clientes.length} {clientes.length === 1 ? "cliente" : "clientes"} en total
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={abrirNuevoClienteModal}
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+              >
+                <Plus className="size-4" aria-hidden />
+                <span className="hidden xs:inline">Nuevo cliente</span>
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-wrap items-center gap-2">
+                {RANKINGS.map((r) => (
+                  <button
+                    key={r.key}
+                    type="button"
+                    onClick={() => setRanking(r.key)}
+                    className={cn(
+                      "cursor-pointer rounded-xl border px-3 py-2 text-sm font-semibold transition",
+                      ranking === r.key
+                        ? "border-accent bg-accent text-accent-fg shadow-sm"
+                        : "border-border bg-surface text-fg-muted hover:bg-surface-2 hover:text-fg",
+                    )}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => recargarSegunFiltroManteniendoSeleccion()}
+                  className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+                >
+                  <RefreshCw className={cn("size-4", loading && "animate-spin")} aria-hidden />
+                  Recargar
+                </button>
+              </div>
+
+              <SearchInput
+                value={busqueda}
+                onValueChange={setBusqueda}
+                placeholder="Buscar cliente..."
+                className="lg:w-80"
+              />
+            </div>
+          </div>
+
+          {/* CARDS */}
+          <div className="w-full">
+            {loading ? (
+              <p className="text-fg-muted">Cargando clientes...</p>
+            ) : clientesFiltrados.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
+                <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+                  <Users className="size-6" aria-hidden />
+                </div>
+                <p className="text-sm font-medium text-fg">Sin clientes</p>
+                <p className="text-xs text-fg-muted">No hay clientes con ese filtro.</p>
+              </div>
+            ) : (
+              <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]">
+                {clientesFiltrados.map((c) => {
+                  return (
+                    <button
+                      key={c.ID_Cliente}
+                      type="button"
+                      onClick={() => abrirDetalleCliente(c)}
+                      className="group relative flex cursor-pointer flex-col rounded-2xl border border-border bg-surface p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md active:translate-y-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {c.ReservasPendientes > 0 && (
+                        <span className="absolute -right-2 -top-2 z-10 rounded-full bg-accent px-2 py-1 text-xs font-bold text-accent-fg shadow-sm">
+                          {c.ReservasPendientes} pendiente
+                          {c.ReservasPendientes === 1 ? "" : "s"}
+                        </span>
+                      )}
+
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={cn(
+                            "grid size-12 shrink-0 place-items-center rounded-full text-base font-bold",
+                            avatarColor(Number(c.ID_Cliente)),
+                          )}
+                        >
+                          {inicial(c.Nombre)}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-bold text-fg">{c.Nombre || "—"}</p>
+                          <p className="flex items-center gap-1.5 truncate text-xs text-fg-muted">
+                            {c.Email ? (
+                              <>
+                                <Mail className="size-3 shrink-0" aria-hidden />
+                                {c.Email}
+                              </>
+                            ) : c.Telefono ? (
+                              <>
+                                <Phone className="size-3 shrink-0" aria-hidden />
+                                {c.Telefono}
+                              </>
+                            ) : (
+                              "Sin contacto"
+                            )}
+                          </p>
+                        </div>
+
+                        <ChevronRight
+                          className="size-4 shrink-0 text-fg-subtle transition group-hover:translate-x-0.5 group-hover:text-accent"
+                          aria-hidden
+                        />
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-2">
+                        <div className="rounded-xl border border-border bg-surface-2 p-2.5">
+                          <div className="flex items-center gap-1.5 text-fg-subtle">
+                            <CalendarDays className="size-3.5" aria-hidden />
+                            <span className="text-[11px] font-medium">Reservas</span>
+                          </div>
+                          <p className="mt-0.5 text-base font-bold text-fg">{c.TotalReservas}</p>
+                        </div>
+
+                        <div className="rounded-xl border border-border bg-surface-2 p-2.5">
+                          <div className="flex items-center gap-1.5 text-fg-subtle">
+                            <Wallet className="size-3.5" aria-hidden />
+                            <span className="text-[11px] font-medium">Gastado</span>
+                          </div>
+                          <p className="mt-0.5 truncate text-base font-bold text-fg">
+                            {euro(c.TotalGastado)}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ================= DETALLE ================= */}
+      {vista === "detail" && clienteActivo && (
+        <>
+          {/* Barra superior: volver + navegación anterior/siguiente */}
+          <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm">
             <button
               type="button"
               onClick={volverALista}
-              className="flex cursor-pointer items-center gap-2 text-negro font-semibold hover:opacity-80 transition shrink-0"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                className="w-5 h-5"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15 19l-7-7 7-7"
-                />
-              </svg>
+              <ArrowLeft className="size-4" aria-hidden />
               <span className="hidden xs:inline">Volver</span>
             </button>
-          ) : (
-            <div className="w-8 sm:w-auto" />
-          )}
 
-          <h2 className="text-xl sm:text-2xl font-bold text-center flex-1">
-            {titulo}
-          </h2>
-
-          <div className="w-8 sm:w-auto" />
-        </div>
-
-        {/* FILTROS SOLO EN LIST */}
-        {vista === "list" && (
-          <div className="w-full sticky sm:static top-14 z-10">
-            <div
-              className="
-                mx-auto w-fit max-w-full
-                rounded-2xl
-                bg-blanco/95 backdrop-blur
-                border border-negro/10
-                shadow-sm
-                px-2 py-2
-                sm:bg-transparent sm:border-0 sm:shadow-none sm:p-0
-              "
-            >
-              {/* MÓVIL MUY ESTRECHO → COLUMNA */}
-              <div className="flex flex-col items-center gap-2 xs:hidden">
-                <button
-                  type="button"
-                  onClick={() => setRanking("todos")}
-                  className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold w-full whitespace-nowrap ${
-                    ranking === "todos"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Todos
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRanking("reservas")}
-                  className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold w-full whitespace-nowrap ${
-                    ranking === "reservas"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Mejor por reservas
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRanking("gasto")}
-                  className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold w-full whitespace-nowrap ${
-                    ranking === "gasto"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Mejor por gasto
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => recargarSegunFiltroManteniendoSeleccion()}
-                  className="border-2 rounded-xl px-3 py-1 text-[11px] font-semibold w-full whitespace-nowrap border-negro hover:bg-negro hover:text-white transition"
-                >
-                  Recargar
-                </button>
-
-                <button
-                  type="button"
-                  onClick={abrirNuevoClienteModal}
-                  className="group flex items-center justify-center gap-2 border-2 border-verde rounded-xl px-3 py-1 text-[11px] font-medium text-verde hover:bg-verde hover:text-white transition w-full whitespace-nowrap"
-                >
-                  <LapizSVG width={16} height={16} />
-                  Añadir Nuevo Cliente
-                </button>
-              </div>
-
-              {/* MÓVIL NORMAL → 2 FILAS */}
-              <div className="hidden xs:grid sm:hidden gap-2">
-                <div className="flex justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRanking("todos")}
-                    className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold whitespace-nowrap ${
-                      ranking === "todos"
-                        ? "border-verde bg-verde text-white"
-                        : "border-negro hover:bg-negro hover:text-white"
-                    }`}
-                  >
-                    Todos
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRanking("reservas")}
-                    className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold whitespace-nowrap ${
-                      ranking === "reservas"
-                        ? "border-verde bg-verde text-white"
-                        : "border-negro hover:bg-negro hover:text-white"
-                    }`}
-                  >
-                    Mejor por reservas
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setRanking("gasto")}
-                    className={`border-2 rounded-xl px-3 py-1 text-[11px] font-semibold whitespace-nowrap ${
-                      ranking === "gasto"
-                        ? "border-verde bg-verde text-white"
-                        : "border-negro hover:bg-negro hover:text-white"
-                    }`}
-                  >
-                    Mejor por gasto
-                  </button>
-                </div>
-
-                <div className="flex justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => recargarSegunFiltroManteniendoSeleccion()}
-                    className="border-2 rounded-xl px-3 py-1 text-[11px] font-semibold whitespace-nowrap border-negro hover:bg-negro hover:text-white transition"
-                  >
-                    Recargar
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={abrirNuevoClienteModal}
-                    className="group flex items-center gap-2 border-2 border-verde rounded-xl px-3 py-1 text-[11px] font-medium whitespace-nowrap text-verde hover:bg-verde hover:text-white transition"
-                  >
-                    <LapizSVG width={16} height={16} />
-                    Añadir Nuevo Cliente
-                  </button>
-                </div>
-              </div>
-
-              {/* SM+ → UNA SOLA FILA */}
-              <div className="hidden sm:flex sm:flex-wrap sm:items-center sm:justify-center sm:gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRanking("todos")}
-                  className={`border-2 rounded-xl px-4 py-2 sm:py-1 transition font-semibold ${
-                    ranking === "todos"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Todos
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRanking("reservas")}
-                  className={`border-2 rounded-xl px-4 py-2 sm:py-1 transition font-semibold ${
-                    ranking === "reservas"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Mejor por reservas
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRanking("gasto")}
-                  className={`border-2 rounded-xl px-4 py-2 sm:py-1 transition font-semibold ${
-                    ranking === "gasto"
-                      ? "border-verde bg-verde text-white"
-                      : "border-negro hover:bg-negro hover:text-white"
-                  }`}
-                >
-                  Mejor por gasto
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => recargarSegunFiltroManteniendoSeleccion()}
-                  className="border-2 rounded-xl px-4 py-2 sm:py-1 transition font-semibold border-negro hover:bg-negro hover:text-white"
-                >
-                  Recargar
-                </button>
-
-                <button
-                  type="button"
-                  onClick={abrirNuevoClienteModal}
-                  className="group flex gap-2 items-center justify-center cursor-pointer border-2 border-verde rounded-xl px-4 py-2 sm:py-1 text-verde transition-all duration-300 ease-out hover:bg-verde hover:text-white hover:shadow-md whitespace-nowrap"
-                >
-                  <LapizSVG width={20} height={20} />
-                  <p className="font-medium">Añadir Nuevo Cliente</p>
-                </button>
-              </div>
+            <div className="flex items-center gap-2">
+              <span className="hidden text-sm font-medium text-fg-muted sm:inline">
+                {idxActivo + 1} / {clientesFiltrados.length}
+              </span>
+              <button
+                type="button"
+                onClick={irAnterior}
+                disabled={!prevCliente}
+                aria-label="Cliente anterior"
+                title="Cliente anterior (←)"
+                className={cn(
+                  "grid size-9 place-items-center rounded-xl border border-border bg-surface text-fg transition",
+                  prevCliente
+                    ? "cursor-pointer hover:bg-surface-2 hover:text-accent"
+                    : "cursor-not-allowed opacity-40",
+                )}
+              >
+                <ChevronLeft className="size-5" aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={irSiguiente}
+                disabled={!nextCliente}
+                aria-label="Cliente siguiente"
+                title="Cliente siguiente (→)"
+                className={cn(
+                  "grid size-9 place-items-center rounded-xl border border-border bg-surface text-fg transition",
+                  nextCliente
+                    ? "cursor-pointer hover:bg-surface-2 hover:text-accent"
+                    : "cursor-not-allowed opacity-40",
+                )}
+              >
+                <ChevronRight className="size-5" aria-hidden />
+              </button>
             </div>
           </div>
-        )}
 
-        {/* SEARCH SOLO EN LIST */}
-        {vista === "list" && (
-          <div className="w-full max-w-[820px]">
-            <div className="w-full flex items-center gap-3 border-2 border-negro/20 rounded-xl px-4 py-2 bg-white">
-              <span className="text-negro/70 select-none">🔎</span>
-              <input
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar cliente..."
-                className="w-full outline-none bg-transparent text-negro"
-              />
-              {loading && (
-                <span className="text-negro/60 text-sm">Cargando...</span>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* LISTA (CARDS) */}
-      {vista === "list" && (
-        <div className="w-full bg-blanco rounded-xl p-3 sm:p-4 shadow-xs">
-          {loading ? (
-            <p className="text-negro/70">Cargando clientes...</p>
-          ) : clientesFiltrados.length === 0 ? (
-            <p className="text-negro/70">No hay clientes con ese filtro.</p>
-          ) : (
-            <div
-              className="
-                grid w-full gap-3 sm:gap-4
-                grid-cols-1
-                sm:grid-cols-2
-                lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]
-              "
-            >
-              {clientesFiltrados.map((c) => (
+          {/* Tarjeta de detalle */}
+          <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-6">
+            {/* Hero */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-4">
                 <div
-                  key={c.ID_Cliente}
-                  className="
-                    relative
-                    rounded-2xl
-                    border border-negro/10
-                    bg-white
-                    p-3
-                    shadow-sm
-                    transition
-                    hover:shadow-md hover:-translate-y-[1px]
-                    active:translate-y-0
-                  "
-                >
-                  {c.ReservasPendientes > 0 && (
-                    <div className="absolute -top-2 -right-2 z-10 bg-verde text-white text-xs font-bold px-2 py-1 rounded-full shadow-sm">
-                      {c.ReservasPendientes} pendiente
-                      {c.ReservasPendientes === 1 ? "" : "s"}
-                    </div>
+                  className={cn(
+                    "grid size-16 shrink-0 place-items-center rounded-2xl text-2xl font-bold",
+                    avatarColor(Number(clienteActivo.ID_Cliente)),
                   )}
-
-                  <div
-                    className="cursor-pointer"
-                    onClick={() => abrirDetalleCliente(c)}
-                  >
-                    <ClienteCard
-                      nombre={c.Nombre}
-                      apellido={""}
-                      onClick={() => abrirDetalleCliente(c)}
-                    />
-
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <div className="px-2 py-1 rounded-full border border-negro/10 text-xs text-negro/80 bg-gris/30">
-                        Reservas: <b className="text-negro">{c.TotalReservas}</b>
-                      </div>
-                      <div className="px-2 py-1 rounded-full border border-negro/10 text-xs text-negro/80 bg-gris/30">
-                        Gastado: <b className="text-negro">{euro(c.TotalGastado)}</b>
-                      </div>
-                    </div>
-
-                    {(c.Email || c.Telefono) && (
-                      <div className="mt-2 text-[12px] text-negro/60 flex flex-col gap-1">
-                        {c.Email && <span className="truncate">✉️ {c.Email}</span>}
-                        {c.Telefono && <span className="truncate">📞 {c.Telefono}</span>}
-                      </div>
-                    )}
-                  </div>
+                >
+                  {inicial(clienteActivo.Nombre)}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
-      {/* DETALLE */}
-      {vista === "detail" && clienteActivo && (
-        <div className="w-full bg-blanco rounded-xl p-3 sm:p-6 shadow-xs flex flex-col gap-4 sm:gap-5">
-          <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-lg sm:text-2xl font-bold text-negro break-words">
-                {clienteActivo.Nombre}
-              </h3>
-
-              <div className="mt-2 text-sm text-negro flex flex-col gap-2">
-                <p className="break-words">
-                  <span className="font-semibold">Email:</span>{" "}
-                  {clienteActivo.Email || "—"}
-                </p>
-                <p className="break-words">
-                  <span className="font-semibold">Teléfono:</span>{" "}
-                  {clienteActivo.Telefono || "—"}
-                </p>
-
-                <div className="mt-3 pt-3 border-t border-negro/10 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
-                  <div className="border-2 border-negro/10 rounded-xl p-3">
-                    <p className="text-xs text-negro/60">Total reservas</p>
-                    <p className="text-lg font-bold">{clienteActivo.TotalReservas}</p>
-                  </div>
-
-                  <div className="border-2 border-negro/10 rounded-xl p-3">
-                    <p className="text-xs text-negro/60">Total gastado</p>
-                    <p className="text-lg font-bold">{euro(clienteActivo.TotalGastado)}</p>
-                  </div>
-
-                  <div className="border-2 border-negro/10 rounded-xl p-3">
-                    <p className="text-xs text-negro/60">Reservas pendientes</p>
-                    <p className="text-lg font-bold">
-                      {clienteActivo.ReservasPendientes > 0
-                        ? `Sí (${clienteActivo.ReservasPendientes})`
-                        : "No"}
-                    </p>
-                  </div>
-
-                  <div className="border-2 border-negro/10 rounded-xl p-3">
-                    <p className="text-xs text-negro/60">Última reserva</p>
-                    <p className="font-semibold break-words">
-                      {clienteActivo.UltimaReservaTexto}
-                    </p>
-                    <p className="text-sm text-negro/70 break-words">
-                      Mesa: <b>{clienteActivo.Mesa}</b> · Comensales:{" "}
-                      <b>{clienteActivo.Comensales}</b>
-                    </p>
+                <div className="min-w-0">
+                  <h3 className="truncate text-xl font-bold text-fg sm:text-2xl">
+                    {clienteActivo.Nombre}
+                  </h3>
+                  <div className="mt-1 flex flex-col gap-1 text-sm text-fg-muted">
+                    <span className="flex items-center gap-1.5 break-all">
+                      <Mail className="size-3.5 shrink-0" aria-hidden />
+                      {clienteActivo.Email || "—"}
+                    </span>
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="size-3.5 shrink-0" aria-hidden />
+                      {clienteActivo.Telefono || "—"}
+                    </span>
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="w-full lg:w-auto lg:min-w-[260px]">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                 <button
-                  className="w-full border-2 border-verde text-verde rounded-xl py-2.5 sm:py-2 hover:bg-verde hover:text-white transition font-semibold"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer sm:py-2"
                   onClick={abrirEditarClienteModal}
                 >
-                  Editar cliente
+                  <Pencil className="size-4" aria-hidden />
+                  Editar
                 </button>
 
                 <button
-                  className="w-full border-2 border-azul text-azul rounded-xl py-2.5 sm:py-2 hover:bg-azul hover:text-white transition font-semibold"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer sm:py-2"
                   onClick={() =>
                     toast.info(
                       "Pendiente",
@@ -626,12 +578,59 @@ export default function Clientes() {
                     )
                   }
                 >
-                  Enviar Publicidad
+                  <Megaphone className="size-4" aria-hidden />
+                  <span className="hidden sm:inline">Publicidad</span>
                 </button>
               </div>
             </div>
+
+            {/* Stats */}
+            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-border bg-surface-2 p-4">
+                <div className="flex items-center gap-2 text-fg-muted">
+                  <CalendarDays className="size-4 text-accent" aria-hidden />
+                  <span className="text-xs font-medium">Total reservas</span>
+                </div>
+                <p className="mt-1 text-2xl font-bold text-fg">{clienteActivo.TotalReservas}</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-surface-2 p-4">
+                <div className="flex items-center gap-2 text-fg-muted">
+                  <Wallet className="size-4 text-accent" aria-hidden />
+                  <span className="text-xs font-medium">Total gastado</span>
+                </div>
+                <p className="mt-1 text-2xl font-bold text-fg">{euro(clienteActivo.TotalGastado)}</p>
+              </div>
+
+              <div className="rounded-xl border border-border bg-surface-2 p-4">
+                <div className="flex items-center gap-2 text-fg-muted">
+                  <Clock className="size-4 text-accent" aria-hidden />
+                  <span className="text-xs font-medium">Reservas pendientes</span>
+                </div>
+                <p className="mt-1 text-2xl font-bold text-fg">
+                  {clienteActivo.ReservasPendientes > 0
+                    ? clienteActivo.ReservasPendientes
+                    : "0"}
+                </p>
+              </div>
+            </div>
+
+            {/* Última reserva */}
+            <div className="mt-3 rounded-xl border border-border bg-surface-2 p-4">
+              <div className="flex items-center gap-2 text-fg-muted">
+                <CalendarDays className="size-4" aria-hidden />
+                <span className="text-xs font-medium">Última reserva</span>
+              </div>
+              <p className="mt-1 break-words font-semibold text-fg">
+                {clienteActivo.UltimaReservaTexto}
+              </p>
+              <p className="mt-0.5 break-words text-sm text-fg-muted">
+                Mesa: <b className="text-fg">{clienteActivo.Mesa}</b> · Comensales:{" "}
+                <b className="text-fg">{clienteActivo.Comensales}</b>
+              </p>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* MODAL NUEVO/EDITAR */}
@@ -643,7 +642,7 @@ export default function Clientes() {
         widthClass="max-w-[780px]"
       >
         <div className="max-h-[75vh] overflow-y-auto pr-1">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Campo
               label="Nombre *"
               value={fNombre}
@@ -667,22 +666,22 @@ export default function Clientes() {
             />
 
             <div className="sm:col-span-2">
-              <label className="font-semibold text-negro">Notas</label>
+              <label className="text-sm font-semibold text-fg">Notas</label>
               <textarea
                 value={fNotas}
                 onChange={(e) => setFNotas(e.target.value)}
                 rows={4}
-                className="mt-1 w-full border border-negro rounded-lg px-3 py-2 text-negro outline-none bg-white resize-none"
+                className="mt-1 w-full resize-none rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                 placeholder="Ej: Cliente VIP, alergias, preferencias..."
               />
             </div>
           </div>
 
-          <div className="mt-6 flex flex-col-reverse sm:flex-row gap-3 justify-end">
+          <div className="mt-6 flex flex-col-reverse justify-end gap-3 sm:flex-row">
             <button
               type="button"
               onClick={() => setModalClienteOpen(false)}
-              className="border-2 border-negro rounded-xl px-4 py-2 hover:bg-negro hover:text-white transition font-semibold w-full sm:w-auto"
+              className="w-full rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 sm:w-auto cursor-pointer"
             >
               Cancelar
             </button>
@@ -691,11 +690,12 @@ export default function Clientes() {
               type="button"
               onClick={guardarCliente}
               disabled={loading}
-              className={`border-2 rounded-xl px-4 py-2 font-semibold transition w-full sm:w-auto ${
+              className={cn(
+                "w-full rounded-xl px-4 py-2 font-semibold transition sm:w-auto",
                 loading
-                  ? "border-gray-300 text-gray-400 cursor-not-allowed"
-                  : "border-verde text-verde hover:bg-verde hover:text-white"
-              }`}
+                  ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
+                  : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
+              )}
             >
               {loading ? "Guardando..." : "Guardar"}
             </button>

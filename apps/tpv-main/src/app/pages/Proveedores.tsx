@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
+import {
+  Truck,
+  Plus,
+  ArrowLeft,
+  Link2,
+  Trash2,
+  ImageOff,
+  Pencil,
+} from "lucide-react";
 import { useToast } from "../../shared/toast";
-import { ReactComponent as LapizSVG } from "../../assets/svg/LapizSVG.svg";
+import { SearchInput } from "../../shared/ui";
+import { cn } from "../../shared/lib/cn";
 
 import Product from "../../features/InventaryComponents/Product";
 import Modal from "../../features/proveedores/Modal";
@@ -581,11 +591,6 @@ export default function Proveedores() {
     }
   }
 
-  const titulo = useMemo(() => {
-    if (vista === "list") return "PROVEEDORES";
-    return `PROVEEDOR · ${proveedorActivo?.Nombre_Empresa ?? ""}`;
-  }, [vista, proveedorActivo]);
-
   const categoriaActivaNombre = useMemo(() => {
     if (categoriaActivaId === null) return "Todas";
     const c = categorias.find((x) => Number(x.ID_Categoria) === Number(categoriaActivaId));
@@ -593,77 +598,74 @@ export default function Proveedores() {
   }, [categoriaActivaId, categorias]);
 
   return (
-    <div className="w-full min-h-full bg-gris flex flex-col p-10 pt-5 gap-4 items-center">
-      <div className="flex flex-col gap-4 bg-blanco w-full p-4 rounded-xl shadow-xs justify-center items-center">
-        <div className="w-full relative flex items-center justify-center">
-          {vista === "detail" && (
+    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+      <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-3">
+          {vista === "list" ? (
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Truck className="size-6" aria-hidden />
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xl font-bold text-fg sm:text-2xl">Proveedores</h2>
+                <p className="text-sm text-fg-muted">
+                  {proveedoresFiltrados.length}{" "}
+                  {proveedoresFiltrados.length === 1 ? "proveedor" : "proveedores"}
+                </p>
+              </div>
+            </div>
+          ) : (
             <button
               type="button"
               onClick={volverALista}
-              className="absolute left-0 flex cursor-pointer items-center gap-2 text-negro font-semibold hover:opacity-80 transition"
+              className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={2}
-                className="w-5 h-5"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-              <span>Volver</span>
+              <ArrowLeft className="size-4 shrink-0" aria-hidden />
+              <span className="truncate">{proveedorActivo?.Nombre_Empresa ?? "Volver"}</span>
             </button>
           )}
-
-          <h2 className="text-2xl font-bold text-center">{titulo}</h2>
 
           {vista === "list" ? (
             <button
               type="button"
               onClick={abrirNuevoProveedorModal}
-              className="absolute right-0 group flex gap-2 w-fit items-center cursor-pointer border-2 border-verde rounded-xl px-3 py-1 text-verde transition-all duration-300 ease-out hover:bg-verde hover:text-white hover:shadow-md"
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
             >
-              <LapizSVG
-                width={18}
-                height={18}
-                className="transition-transform duration-300 group-hover:-translate-y-1 group-hover:rotate-6"
-              />
-              <p className="font-medium">Añadir Nuevo Proveedor</p>
+              <Plus className="size-4" aria-hidden />
+              <span className="hidden xs:inline">Nuevo proveedor</span>
             </button>
           ) : (
             <button
               type="button"
               onClick={() => setBusqueda("")}
-              className="absolute right-0 border-2 border-negro rounded-xl px-3 py-1 hover:bg-negro hover:text-white transition"
+              className="inline-flex shrink-0 cursor-pointer items-center rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
             >
               Limpiar búsqueda
             </button>
           )}
         </div>
 
-        <div className="w-full max-w-[820px]">
-          <div className="w-full flex items-center gap-3 border-2 border-negro/20 rounded-xl px-4 py-2 bg-white">
-            <span className="text-negro/70 select-none">🔎</span>
-            <input
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder={vista === "list" ? "Buscar proveedor..." : "Buscar producto vinculado..."}
-              className="w-full outline-none bg-transparent text-negro"
-            />
-            {loading && <span className="text-negro/60 text-sm">Cargando...</span>}
-          </div>
-        </div>
+        <SearchInput
+          value={busqueda}
+          onValueChange={setBusqueda}
+          placeholder={vista === "list" ? "Buscar proveedor..." : "Buscar producto vinculado..."}
+        />
       </div>
 
       {vista === "list" && (
-        <div className="w-full bg-blanco rounded-xl p-4 shadow-xs">
+        <div className="w-full">
           {loading ? (
-            <p className="text-negro/70">Cargando proveedores...</p>
+            <p className="text-fg-muted">Cargando proveedores...</p>
           ) : proveedoresFiltrados.length === 0 ? (
-            <p className="text-negro/70">No hay proveedores con ese filtro.</p>
+            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
+              <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+                <Truck className="size-6" aria-hidden />
+              </div>
+              <p className="text-sm font-medium text-fg">Sin proveedores</p>
+              <p className="text-xs text-fg-muted">No hay proveedores con ese filtro.</p>
+            </div>
           ) : (
-            <div className="grid w-full gap-4 grid-cols-[repeat(auto-fill,minmax(200px,max-content))] self-center justify-between">
+            <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
               {proveedoresFiltrados.map((p) => (
                 <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
               ))}
@@ -674,87 +676,96 @@ export default function Proveedores() {
 
       {vista === "detail" && proveedorActivo && (
         <>
-          <div className="w-full bg-blanco rounded-xl p-4 shadow-xs flex gap-6">
-            <div className="w-[280px] h-[280px] border-2 border-negro rounded-xl bg-gris flex items-center justify-center overflow-hidden">
+          <div className="flex w-full flex-col gap-6 rounded-2xl border border-border bg-surface p-4 shadow-sm sm:flex-row">
+            <div className="flex h-[240px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-[280px] sm:w-[280px] sm:shrink-0">
               {proveedorActivo.urlImagen ? (
                 <img
                   src={proveedorActivo.urlImagen}
                   alt={proveedorActivo.Nombre_Empresa}
-                  className="w-full h-full object-cover"
+                  className="h-full w-full object-cover"
                   draggable={false}
                 />
               ) : (
-                <div className="text-negro/50 font-bold text-xl text-center px-4">
-                  {proveedorActivo.Nombre_Empresa}
+                <div className="flex flex-col items-center gap-1 px-4 text-center text-fg-subtle">
+                  <ImageOff className="size-8" aria-hidden />
+                  <span className="text-sm font-bold">{proveedorActivo.Nombre_Empresa}</span>
                 </div>
               )}
             </div>
 
-            <div className="flex-1 flex flex-col gap-3 text-negro">
-              <h3 className="text-2xl font-bold">{proveedorActivo.Nombre_Empresa}</h3>
+            <div className="flex flex-1 flex-col gap-3 text-fg">
+              <h3 className="text-2xl font-bold text-fg">{proveedorActivo.Nombre_Empresa}</h3>
 
-              <div className="text-sm flex flex-col gap-1">
+              <div className="flex flex-col gap-1 text-sm text-fg-muted">
                 <p>
-                  <span className="font-semibold">Contacto:</span> {proveedorActivo.Contacto ?? "—"}
+                  <span className="font-semibold text-fg">Contacto:</span>{" "}
+                  {proveedorActivo.Contacto ?? "—"}
                 </p>
                 <p>
-                  <span className="font-semibold">Teléfono:</span> {proveedorActivo.Telefono ?? "—"}
+                  <span className="font-semibold text-fg">Teléfono:</span>{" "}
+                  {proveedorActivo.Telefono ?? "—"}
                 </p>
                 <p>
-                  <span className="font-semibold">Email:</span> {proveedorActivo.Email ?? "—"}
+                  <span className="font-semibold text-fg">Email:</span>{" "}
+                  {proveedorActivo.Email ?? "—"}
                 </p>
                 <p>
-                  <span className="font-semibold">CIF:</span> {proveedorActivo.CIF ?? "—"}
+                  <span className="font-semibold text-fg">CIF:</span> {proveedorActivo.CIF ?? "—"}
                 </p>
                 <p>
-                  <span className="font-semibold">Otros:</span> {proveedorActivo.Informacion_adicional ?? "—"}
+                  <span className="font-semibold text-fg">Otros:</span>{" "}
+                  {proveedorActivo.Informacion_adicional ?? "—"}
                 </p>
               </div>
 
-              <div className="mt-2 grid grid-cols-2 gap-3 max-w-[560px]">
+              <div className="mt-2 grid max-w-[560px] grid-cols-2 gap-3">
                 <button
-                  className="border-2 border-verde text-verde rounded-xl py-2 hover:bg-verde hover:text-white transition font-semibold"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                   onClick={abrirEditarProveedorModal}
                 >
+                  <Pencil className="size-4" aria-hidden />
                   Editar perfil
                 </button>
 
                 <button
-                  className="border-2 border-verde text-verde rounded-xl py-2 hover:bg-verde hover:text-white transition font-semibold"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
                   onClick={abrirVincularProductos}
                 >
+                  <Link2 className="size-4" aria-hidden />
                   Vincular productos
                 </button>
 
                 <button
-                  className="border-2 border-rojo text-rojo rounded-xl py-2 hover:bg-rojo hover:text-blanco transition font-semibold col-span-2"
+                  className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
                   onClick={eliminarProveedor}
                 >
+                  <Trash2 className="size-4" aria-hidden />
                   Eliminar proveedor
                 </button>
               </div>
             </div>
           </div>
 
-          <div className="w-full bg-blanco rounded-xl p-4 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <h4 className="text-xl font-bold text-negro">Productos vinculados</h4>
+          <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h4 className="text-xl font-bold text-fg">Productos vinculados</h4>
 
               <button
                 type="button"
                 onClick={abrirVincularProductos}
-                className="border-2 border-verde rounded-xl px-3 py-1 text-verde cursor-pointer transition-all duration-300 ease-in-out hover:bg-verde hover:text-white"
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
               >
+                <Link2 className="size-4" aria-hidden />
                 Gestionar vínculos
               </button>
             </div>
 
             {productosProveedorFiltrados.length === 0 ? (
-              <p className="text-negro/70">No hay productos vinculados.</p>
+              <p className="text-fg-muted">No hay productos vinculados.</p>
             ) : (
-              <div className="grid w-full gap-4 grid-cols-[repeat(auto-fill,minmax(200px,max-content))]">
+              <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
                 {productosProveedorFiltrados.map((p) => (
-                  <div key={p.ID_Producto} className="w-[200px]">
+                  <div key={p.ID_Producto} className="w-full">
                     <Product
                       img={p.urlImagen}
                       name={p.Nombre}
@@ -767,8 +778,9 @@ export default function Proveedores() {
                     <button
                       type="button"
                       onClick={() => eliminarProductoDelProveedor(p.ID_Producto)}
-                      className="mt-2 w-full border-2 border-rojo text-rojo rounded-xl py-2 hover:bg-rojo hover:text-blanco transition font-semibold"
+                      className="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
                     >
+                      <Trash2 className="size-4" aria-hidden />
                       Quitar del proveedor
                     </button>
                   </div>
@@ -786,22 +798,22 @@ export default function Proveedores() {
         zIndex={60}
         widthClass="max-w-[780px]"
       >
-        <div className="mb-4 flex gap-4 items-start">
-          <div className="w-[140px] h-[140px] rounded-xl border-2 border-negro bg-gris overflow-hidden flex items-center justify-center shrink-0">
+        <div className="mb-4 flex items-start gap-4">
+          <div className="flex h-[140px] w-[140px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
             {fotoNuevaPreview ? (
-              <img src={fotoNuevaPreview} className="w-full h-full object-cover" draggable={false} />
+              <img src={fotoNuevaPreview} className="h-full w-full object-cover" draggable={false} />
             ) : proveedorActivo?.urlImagen && modalProveedorModo === "editar" && !fotoEliminar ? (
-              <img src={proveedorActivo.urlImagen} className="w-full h-full object-cover" draggable={false} />
+              <img src={proveedorActivo.urlImagen} className="h-full w-full object-cover" draggable={false} />
             ) : (
-              <span className="text-negro/50 font-semibold text-sm">Sin foto</span>
+              <span className="text-sm font-semibold text-fg-subtle">Sin foto</span>
             )}
           </div>
 
           <div className="flex-1">
-            <label className="font-semibold text-negro">Foto del proveedor</label>
+            <label className="text-sm font-semibold text-fg">Foto del proveedor</label>
 
-            <div className="mt-1 border-2 border-negro rounded-xl px-4 py-3 bg-white flex items-center justify-between gap-3">
-              <div className="text-sm text-negro/70">
+            <div className="mt-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 px-4 py-3">
+              <div className="text-sm text-fg-muted">
                 {fotoEliminar
                   ? "Se eliminará la foto"
                   : fotoNuevaFile
@@ -812,7 +824,7 @@ export default function Proveedores() {
               </div>
 
               <div className="flex gap-2">
-                <label className="cursor-pointer border-2 border-verde text-verde rounded-xl px-3 py-1 hover:bg-verde hover:text-white transition font-semibold">
+                <label className="cursor-pointer rounded-xl bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover">
                   {fotoNuevaFile || (modalProveedorModo === "editar" && proveedorActivo?.Ruta_Imagen && !fotoEliminar)
                     ? "Cambiar"
                     : "Subir"}
@@ -851,7 +863,7 @@ export default function Proveedores() {
 
                         resetFotoInput();
                       }}
-                      className="border-2 border-rojo text-rojo rounded-xl px-3 py-1 hover:bg-rojo hover:text-white transition font-semibold"
+                      className="cursor-pointer rounded-xl border border-danger/30 bg-danger-soft px-3 py-1.5 text-sm font-semibold text-danger transition hover:opacity-90"
                     >
                       Eliminar
                     </button>
@@ -861,7 +873,7 @@ export default function Proveedores() {
             </div>
 
             {fotoEliminar && (
-              <p className="mt-2 text-xs text-rojo/80">
+              <p className="mt-2 text-xs text-danger">
                 Se eliminará la foto al guardar. Si quieres otra, sube una nueva.
               </p>
             )}
@@ -878,12 +890,12 @@ export default function Proveedores() {
           <Campo label="CIF" value={fCif} onChange={setFCif} placeholder="Ej: B12345678" />
 
           <div className="col-span-2">
-            <label className="font-semibold text-negro">Otros datos</label>
+            <label className="text-sm font-semibold text-fg">Otros datos</label>
             <textarea
               value={fOtros}
               onChange={(e) => setFOtros(e.target.value)}
               placeholder="Notas, condiciones, observaciones…"
-              className="mt-1 w-full border border-negro rounded-lg px-3 py-2 text-negro outline-none bg-white min-h-[110px] resize-none"
+              className="mt-1 min-h-[110px] w-full resize-none rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>
@@ -899,7 +911,7 @@ export default function Proveedores() {
               resetFotoInput();
               setModalProveedorOpen(false);
             }}
-            className="border-2 border-negro rounded-xl px-4 py-2 hover:bg-negro hover:text-white transition font-semibold"
+            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
           >
             Cancelar
           </button>
@@ -908,10 +920,12 @@ export default function Proveedores() {
             type="button"
             onClick={guardarProveedor}
             disabled={loading}
-            className={`border-2 rounded-xl px-4 py-2 font-semibold transition ${loading
-                ? "border-gray-300 text-gray-400 cursor-not-allowed"
-                : "border-verde text-verde hover:bg-verde hover:text-white"
-              }`}
+            className={cn(
+              "rounded-xl px-4 py-2 font-semibold transition",
+              loading
+                ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
+                : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
+            )}
           >
             {loading ? "Guardando..." : "Guardar"}
           </button>
@@ -925,53 +939,54 @@ export default function Proveedores() {
         zIndex={70}
         widthClass="max-w-[1100px]"
       >
-        <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex-1">
-            <div className="w-full flex items-center gap-3 border-2 border-negro/20 rounded-xl px-4 py-2 bg-white">
-              <span className="text-negro/70 select-none">🔎</span>
-              <input
-                value={busquedaProductos}
-                onChange={(e) => setBusquedaProductos(e.target.value)}
-                placeholder={`Buscar producto en "${categoriaActivaNombre}"...`}
-                className="w-full outline-none bg-transparent text-negro"
-              />
-            </div>
+            <SearchInput
+              value={busquedaProductos}
+              onValueChange={setBusquedaProductos}
+              placeholder={`Buscar producto en "${categoriaActivaNombre}"...`}
+            />
           </div>
 
           <button
             type="button"
             onClick={abrirCrearProductoEnModal}
-            className="border-2 border-verde rounded-xl px-3 py-2 text-verde cursor-pointer transition-all duration-300 ease-in-out hover:bg-verde hover:text-white font-semibold"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
           >
-            + Crear producto
+            <Plus className="size-4" aria-hidden />
+            Crear producto
           </button>
         </div>
 
-        <div className="text-sm text-negro/70 mb-3">
+        <div className="mb-3 text-sm text-fg-muted">
           Selecciona una categoría y marca los productos que quieras vincular. (Los desmarcados se desvinculan)
         </div>
 
         {loadingVincular ? (
-          <p className="text-negro/70">Cargando...</p>
+          <p className="text-fg-muted">Cargando...</p>
         ) : (
           <div className="flex gap-4">
             <div className="w-[280px] shrink-0">
-              <div className="border border-negro/10 rounded-xl overflow-hidden bg-white">
-                <div className="px-3 py-2 border-b border-negro/10 font-semibold text-negro">Categorías</div>
+              <div className="overflow-hidden rounded-2xl border border-border bg-surface">
+                <div className="border-b border-border px-3 py-2 font-semibold text-fg">Categorías</div>
 
                 <div className="max-h-[55vh] overflow-auto">
                   <button
                     type="button"
                     onClick={() => setCategoriaActivaId(null)}
-                    className={`w-full text-left px-3 py-2 border-b border-negro/10 transition ${categoriaActivaId === null ? "bg-verde/10 border-l-4 border-l-verde" : "hover:bg-gris/40"
-                      }`}
+                    className={cn(
+                      "w-full cursor-pointer border-b border-border px-3 py-2 text-left transition",
+                      categoriaActivaId === null
+                        ? "border-l-4 border-l-accent bg-accent-soft"
+                        : "hover:bg-surface-2",
+                    )}
                   >
-                    <div className="font-semibold text-negro">Todas</div>
-                    <div className="text-xs text-negro/60">{productosDisponibles.length} productos</div>
+                    <div className="font-semibold text-fg">Todas</div>
+                    <div className="text-xs text-fg-muted">{productosDisponibles.length} productos</div>
                   </button>
 
                   {categorias.length === 0 ? (
-                    <div className="p-3 text-sm text-negro/60">No hay categorías creadas.</div>
+                    <div className="p-3 text-sm text-fg-muted">No hay categorías creadas.</div>
                   ) : (
                     categorias.map((c) => {
                       const count = productosDisponibles.filter(
@@ -984,11 +999,15 @@ export default function Proveedores() {
                           key={c.ID_Categoria}
                           type="button"
                           onClick={() => setCategoriaActivaId(Number(c.ID_Categoria))}
-                          className={`w-full text-left px-3 py-2 border-b border-negro/10 transition ${active ? "bg-verde/10 border-l-4 border-l-verde" : "hover:bg-gris/40"
-                            }`}
+                          className={cn(
+                            "w-full cursor-pointer border-b border-border px-3 py-2 text-left transition",
+                            active
+                              ? "border-l-4 border-l-accent bg-accent-soft"
+                              : "hover:bg-surface-2",
+                          )}
                         >
-                          <div className="font-semibold text-negro truncate">{c.Nombre}</div>
-                          <div className="text-xs text-negro/60">{count} productos</div>
+                          <div className="truncate font-semibold text-fg">{c.Nombre}</div>
+                          <div className="text-xs text-fg-muted">{count} productos</div>
                         </button>
                       );
                     })
@@ -997,16 +1016,16 @@ export default function Proveedores() {
               </div>
             </div>
 
-            <div className="flex-1 min-w-0">
+            <div className="min-w-0 flex-1">
               {productosDisponiblesFiltrados.length === 0 ? (
-                <div className="text-negro/70">
+                <div className="text-fg-muted">
                   {categorias.length > 0 && categoriaActivaId !== null
                     ? "No hay productos en esta categoría con ese filtro."
                     : "No hay productos para mostrar."}
                 </div>
               ) : (
                 <div className="max-h-[55vh] overflow-auto pr-1">
-                  <div className="grid w-full gap-3 grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+                  <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
                     {productosDisponiblesFiltrados.map((p) => {
                       const checked = seleccionProductoIds.has(p.ID_Producto);
                       return (
@@ -1014,22 +1033,26 @@ export default function Proveedores() {
                           key={p.ID_Producto}
                           type="button"
                           onClick={() => toggleSeleccion(p.ID_Producto)}
-                          className={`text-left border rounded-xl p-3 transition ${checked ? "border-verde bg-verde/5" : "border-negro/10 hover:border-negro/30"
-                            }`}
+                          className={cn(
+                            "cursor-pointer rounded-xl border p-3 text-left transition",
+                            checked
+                              ? "border-accent bg-accent-soft"
+                              : "border-border hover:border-border-strong hover:bg-surface-2",
+                          )}
                         >
                           <div className="flex items-center gap-3">
-                            <div className="w-[54px] h-[54px] bg-gris rounded-lg overflow-hidden border border-negro/10 flex items-center justify-center shrink-0">
+                            <div className="flex h-[54px] w-[54px] shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-surface-2">
                               {p.urlImagen ? (
-                                <img src={p.urlImagen} alt={p.Nombre} className="w-full h-full object-cover" draggable={false} />
+                                <img src={p.urlImagen} alt={p.Nombre} className="h-full w-full object-cover" draggable={false} />
                               ) : (
-                                <span className="text-negro/40 text-xs font-semibold">IMG</span>
+                                <ImageOff className="size-5 text-fg-subtle" aria-hidden />
                               )}
                             </div>
 
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center justify-between gap-2">
-                                <p className="font-semibold text-negro truncate">{p.Nombre}</p>
-                                <input type="checkbox" checked={checked} readOnly className="w-4 h-4 accent-verde" />
+                                <p className="truncate font-semibold text-fg">{p.Nombre}</p>
+                                <input type="checkbox" checked={checked} readOnly className="size-4 accent-accent" />
                               </div>
                             </div>
                           </div>
@@ -1047,7 +1070,7 @@ export default function Proveedores() {
           <button
             type="button"
             onClick={() => setModalVincularOpen(false)}
-            className="border-2 border-negro rounded-xl px-4 py-2 hover:bg-negro hover:text-white transition font-semibold"
+            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
           >
             Cancelar
           </button>
@@ -1056,10 +1079,12 @@ export default function Proveedores() {
             type="button"
             onClick={guardarVinculos}
             disabled={loading}
-            className={`border-2 rounded-xl px-4 py-2 font-semibold transition ${loading
-                ? "border-gray-300 text-gray-400 cursor-not-allowed"
-                : "border-verde text-verde hover:bg-verde hover:text-white"
-              }`}
+            className={cn(
+              "rounded-xl px-4 py-2 font-semibold transition",
+              loading
+                ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
+                : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
+            )}
           >
             {loading ? "Guardando..." : "Guardar vínculos"}
           </button>
@@ -1078,11 +1103,11 @@ export default function Proveedores() {
           <Campo label="Precio venta" value={pPrecio} onChange={setPPrecio} placeholder="Ej: 1.80" />
 
           <div>
-            <label className="font-semibold text-negro">Categoría *</label>
+            <label className="text-sm font-semibold text-fg">Categoría *</label>
             <select
               value={pCategoriaId}
               onChange={(e) => setPCategoriaId(e.target.value ? Number(e.target.value) : "")}
-              className="mt-1 w-full border border-negro rounded-lg px-3 py-2 text-negro outline-none bg-white"
+              className="mt-1 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
             >
               {categorias.length === 0 ? (
                 <option value="">No hay categorías</option>
@@ -1108,7 +1133,7 @@ export default function Proveedores() {
           <button
             type="button"
             onClick={() => setModalCrearProductoOpen(false)}
-            className="border-2 border-negro rounded-xl px-4 py-2 hover:bg-negro hover:text-white transition font-semibold"
+            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
           >
             Cancelar
           </button>
@@ -1117,16 +1142,18 @@ export default function Proveedores() {
             type="button"
             onClick={crearProductoYSeleccionar}
             disabled={loading}
-            className={`border-2 rounded-xl px-4 py-2 font-semibold transition ${loading
-                ? "border-gray-300 text-gray-400 cursor-not-allowed"
-                : "border-verde text-verde hover:bg-verde hover:text-white"
-              }`}
+            className={cn(
+              "rounded-xl px-4 py-2 font-semibold transition",
+              loading
+                ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
+                : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98] cursor-pointer",
+            )}
           >
             {loading ? "Creando..." : "Crear producto"}
           </button>
         </div>
 
-        <p className="mt-3 text-sm text-negro/60">Este producto se crea ya vinculado al proveedor actual.</p>
+        <p className="mt-3 text-sm text-fg-muted">Este producto se crea ya vinculado al proveedor actual.</p>
       </Modal>
 
       <ProductDetailModal
@@ -1166,32 +1193,32 @@ export default function Proveedores() {
         zIndex={95}
         widthClass="max-w-[520px]"
       >
-        <div className="text-negro/80">
+        <div className="text-fg-muted">
           {confirmAccion?.tipo === "proveedor" ? (
             <p>
               ¿Seguro que quieres eliminar el proveedor{" "}
-              <span className="font-semibold text-negro">"{confirmAccion.proveedor.Nombre_Empresa}"</span>?
+              <span className="font-semibold text-fg">"{confirmAccion.proveedor.Nombre_Empresa}"</span>?
             </p>
           ) : (
             <p>
               ¿Quitar este producto del proveedor?{" "}
-              <span className="text-negro/70">(No se borra el producto)</span>
+              <span className="text-fg-muted">(No se borra el producto)</span>
               {confirmAccion?.nombreProducto ? (
                 <>
                   <br />
-                  <span className="font-semibold text-negro">"{confirmAccion.nombreProducto}"</span>
+                  <span className="font-semibold text-fg">"{confirmAccion.nombreProducto}"</span>
                 </>
               ) : null}
             </p>
           )}
         </div>
 
-        <div className="mt-6 flex gap-3 justify-end">
+        <div className="mt-6 flex justify-end gap-3">
           <button
             type="button"
             disabled={confirmando}
             onClick={() => setConfirmAccion(null)}
-            className="border-2 border-negro rounded-xl px-4 py-2 hover:bg-negro hover:text-white transition font-semibold disabled:opacity-60"
+            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 disabled:opacity-60"
           >
             Cancelar
           </button>
@@ -1200,8 +1227,9 @@ export default function Proveedores() {
             type="button"
             disabled={confirmando}
             onClick={confirmarAccionModal}
-            className="border-2 border-rojo text-rojo rounded-xl px-4 py-2 hover:bg-rojo hover:text-blanco transition font-semibold disabled:opacity-60"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-2 font-semibold text-danger transition hover:opacity-90 disabled:opacity-60"
           >
+            <Trash2 className="size-4" aria-hidden />
             {confirmando ? "Confirmando..." : "Confirmar"}
           </button>
         </div>

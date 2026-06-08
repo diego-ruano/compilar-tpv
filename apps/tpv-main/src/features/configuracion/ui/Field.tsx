@@ -13,8 +13,8 @@ export function Field({
 	return (
 		<label className="block">
 			<div className="flex items-center justify-between gap-3">
-				<span className="text-sm font-semibold text-slate-900">{label}</span>
-				{hint ? <span className="text-xs font-medium text-slate-400">{hint}</span> : null}
+				<span className="text-sm font-semibold text-fg">{label}</span>
+				{hint ? <span className="text-xs font-medium text-fg-subtle">{hint}</span> : null}
 			</div>
 			<div className="mt-2">{children}</div>
 		</label>

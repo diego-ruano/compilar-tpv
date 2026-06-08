@@ -125,8 +125,8 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
   }) => (
     <select
       className={cn(
-        "rounded-xl border border-black/10 bg-white px-3 py-2 text-sm font-semibold outline-none",
-        "focus:ring-2 focus:ring-black/10",
+        "rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold outline-none",
+        "focus:ring-2 focus:ring-ring",
         disabled && "opacity-60 cursor-not-allowed",
       )}
       disabled={disabled}
@@ -148,42 +148,42 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
   return (
     <div className="w-full h-full flex flex-col gap-4 min-h-0">
       {/* Header */}
-      <div className="bg-white rounded-xl border border-black/10 p-4 flex items-center justify-between">
+      <div className="bg-surface rounded-xl border border-border p-4 flex items-center justify-between">
         <div className="min-w-0">
-          <h3 className="text-lg font-bold text-negro">Productos</h3>
-          <p className="text-sm text-negro/60">
+          <h3 className="text-lg font-bold text-fg">Productos</h3>
+          <p className="text-sm text-fg-muted">
             Mejores/peores productos y rankings por unidades vendidas (según rango).
           </p>
         </div>
 
-        <div className="text-xs text-negro/50">
+        <div className="text-xs text-fg-subtle">
           {loading || loadingCats ? "Cargando…" : "Actualizado"}
         </div>
       </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-black/10 p-4">
-          <p className="text-sm text-negro/60">Mejor producto</p>
-          <p className="text-2xl font-extrabold text-negro mt-1 truncate">{bestName ?? "—"}</p>
-          <p className="text-xs text-negro/50 mt-1">Producto con más unidades vendidas.</p>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-sm text-fg-muted">Mejor producto</p>
+          <p className="text-2xl font-extrabold text-fg mt-1 truncate">{bestName ?? "—"}</p>
+          <p className="text-xs text-fg-subtle mt-1">Producto con más unidades vendidas.</p>
         </div>
 
-        <div className="bg-white rounded-xl border border-black/10 p-4">
-          <p className="text-sm text-negro/60">Peor producto (vendible)</p>
-          <p className="text-2xl font-extrabold text-negro mt-1 truncate">{worstName ?? "—"}</p>
-          <p className="text-xs text-negro/50 mt-1">Producto vendible con menos unidades vendidas.</p>
+        <div className="bg-surface rounded-xl border border-border p-4">
+          <p className="text-sm text-fg-muted">Peor producto (vendible)</p>
+          <p className="text-2xl font-extrabold text-fg mt-1 truncate">{worstName ?? "—"}</p>
+          <p className="text-xs text-fg-subtle mt-1">Producto vendible con menos unidades vendidas.</p>
         </div>
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
         {/* Top 10 mejores */}
-        <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+        <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h4 className="text-base font-bold text-negro truncate">Top 10 mejores productos</h4>
-              <p className="text-sm text-negro/60 truncate">
+              <h4 className="text-base font-bold text-fg truncate">Top 10 mejores productos</h4>
+              <p className="text-sm text-fg-muted truncate">
                 Más vendidos (unidades) {catTopId ? "· filtrado" : "· todas"}
               </p>
             </div>
@@ -193,7 +193,7 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
 
           <div className={cn("mt-4 flex-1 min-h-0", loading && "opacity-60", "[&_.apexcharts-tooltip-marker]:!rounded-full")}>
             {topLabels.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-sm text-negro/50">
+              <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                 No hay datos para este rango/filtro.
               </div>
             ) : (
@@ -208,11 +208,11 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
         </div>
 
         {/* Top 10 peores */}
-        <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-[460px]">
+        <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-[460px]">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <h4 className="text-base font-bold text-negro truncate">Top 10 peores productos</h4>
-              <p className="text-sm text-negro/60 truncate">
+              <h4 className="text-base font-bold text-fg truncate">Top 10 peores productos</h4>
+              <p className="text-sm text-fg-muted truncate">
                 Menos vendidos (unidades) {catWorstId ? "· filtrado" : "· todas"}
               </p>
             </div>
@@ -222,7 +222,7 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
 
           <div className={cn("mt-4 flex-1 min-h-0", loading && "opacity-60", "[&_.apexcharts-tooltip-marker]:!rounded-full")}>
             {worstLabels.length === 0 ? (
-              <div className="h-full flex items-center justify-center text-sm text-negro/50">
+              <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                 No hay datos para este rango/filtro.
               </div>
             ) : (

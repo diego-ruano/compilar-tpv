@@ -185,15 +185,15 @@ export default function KitchenBoard({
     );
 
     return (
-        <div className="w-full h-full bg-blanco rounded-xl p-10 shadow-xs">
+        <div className="h-full w-full rounded-2xl border border-border bg-surface p-6 shadow-sm">
             <div className="flex items-end justify-between gap-4">
                 <div>
                     <h2 className="text-xl font-bold">COCINA</h2>
-                    <p className="text-sm text-negro/60">
+                    <p className="text-sm text-fg-muted">
                         Click en una línea para marcarla como preparada.
                     </p>
                     {!idUsuarioCocinero ? (
-                        <p className="text-xs text-rose-600 mt-1">
+                        <p className="text-xs text-danger mt-1">
                             ⚠️ No hay usuario cocinero logueado.
                         </p>
                     ) : null}
@@ -205,7 +205,7 @@ export default function KitchenBoard({
                         rememberScroll();
                         setRefreshTick((x) => x + 1);
                     }}
-                    className="h-9 px-3 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                    className="h-9 px-3 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                 >
                     Recargar
                 </button>
@@ -214,11 +214,11 @@ export default function KitchenBoard({
             {/* ✅ si el scroll real lo hace un contenedor interno, este ref lo preserva */}
             <div ref={scrollRef} className="mt-6">
                 {loading ? (
-                    <div className="w-full grid place-items-center text-negro/60 py-20">
+                    <div className="w-full grid place-items-center text-fg-muted py-20">
                         Cargando…
                     </div>
                 ) : comandas.length === 0 ? (
-                    <div className="w-full grid place-items-center text-negro/60 py-20">
+                    <div className="w-full grid place-items-center text-fg-muted py-20">
                         No hay comandas pendientes de cocina.
                     </div>
                 ) : (
@@ -231,7 +231,7 @@ export default function KitchenBoard({
                             return (
                                 <div
                                     key={c.idComanda}
-                                    className="rounded-2xl border border-black/10 bg-white p-4"
+                                    className="rounded-2xl border border-border bg-surface p-4"
                                 >
                                     <div className="flex items-center justify-between gap-3">
                                         <div className="min-w-0">
@@ -239,7 +239,7 @@ export default function KitchenBoard({
                                                 Mesa {c.mesa} · Comanda #
                                                 {c.idComanda}
                                             </p>
-                                            <p className="text-sm text-black/60">
+                                            <p className="text-sm text-fg-muted">
                                                 Apertura:{" "}
                                                 {formatFecha(c.apertura)}
                                             </p>
@@ -249,7 +249,7 @@ export default function KitchenBoard({
                                             className={cn(
                                                 "px-3 py-1 rounded-xl text-sm font-bold border",
                                                 pendientes > 0
-                                                    ? "bg-amber-50 text-amber-800 border-amber-200"
+                                                    ? "bg-amber-50 text-warning border-amber-200"
                                                     : "bg-emerald-50 text-emerald-800 border-emerald-200",
                                             )}
                                         >
@@ -267,7 +267,7 @@ export default function KitchenBoard({
                                             const pillPago =
                                                 l.pagado === 1
                                                     ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                                    : "border-black/10 bg-white text-black/60";
+                                                    : "border-border bg-surface text-fg-muted";
 
                                             return (
                                                 <button
@@ -286,7 +286,7 @@ export default function KitchenBoard({
                                                     }
                                                     className={cn(
                                                         "w-full rounded-xl border p-3 text-left transition flex items-center justify-between gap-3",
-                                                        "border-black/10 hover:bg-black/5",
+                                                        "border-border hover:bg-surface-2",
                                                         !idUsuarioCocinero &&
                                                             "opacity-50 cursor-not-allowed",
                                                     )}
@@ -296,12 +296,12 @@ export default function KitchenBoard({
                                                             className={cn(
                                                                 "mt-0.5 w-6 h-6 rounded-full border flex items-center justify-center shrink-0",
                                                                 preparado
-                                                                    ? "border-emerald-500 bg-emerald-500"
-                                                                    : "border-black/20 bg-white",
+                                                                    ? "border-success bg-emerald-500"
+                                                                    : "border-border bg-surface",
                                                             )}
                                                         >
                                                             {preparado ? (
-                                                                <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                                                                <div className="w-2.5 h-2.5 rounded-full bg-surface" />
                                                             ) : null}
                                                         </div>
 
@@ -310,7 +310,7 @@ export default function KitchenBoard({
                                                                 className={cn(
                                                                     "font-semibold truncate",
                                                                     preparado &&
-                                                                        "line-through text-black/50",
+                                                                        "line-through text-fg-subtle",
                                                                 )}
                                                             >
                                                                 {l.cantidad}×{" "}
@@ -337,8 +337,8 @@ export default function KitchenBoard({
                                                                     className={cn(
                                                                         "text-xs font-semibold",
                                                                         preparado
-                                                                            ? "text-emerald-700"
-                                                                            : "text-black/50",
+                                                                            ? "text-success"
+                                                                            : "text-fg-subtle",
                                                                     )}
                                                                 >
                                                                     {preparado
@@ -365,8 +365,8 @@ export default function KitchenBoard({
                                                         className={cn(
                                                             "text-xs font-semibold px-2 py-1 rounded-lg border",
                                                             preparado
-                                                                ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                                                : "border-black/10 bg-white text-black/60",
+                                                                ? "border-emerald-200 bg-emerald-50 text-success"
+                                                                : "border-border bg-surface text-fg-muted",
                                                         )}
                                                     >
                                                         #{l.idDetalle}

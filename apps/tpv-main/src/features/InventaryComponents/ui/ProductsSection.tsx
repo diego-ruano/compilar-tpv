@@ -13,15 +13,15 @@ export default function ProductsSection({
     onOpenDetail: (id: number) => void;
 }) {
     return (
-        <div className="w-full bg-blanco rounded-2xl p-3 sm:p-4 shadow-xs border border-black/5">
+        <div className="w-full rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
             {loading ? (
-                <p className="text-center py-6">Cargando productos...</p>
+                <p className="py-6 text-center text-fg-muted">Cargando productos...</p>
             ) : productos.length === 0 ? (
-                <p className="text-center py-6 text-negro/60">
+                <p className="py-6 text-center text-fg-muted">
                     No hay productos en esta categoría.
                 </p>
             ) : (
-                <div className="grid gap-2 [grid-template-columns:repeat(auto-fit,minmax(160px,220px))] items-start justify-start">
+                <div className="grid items-start justify-start gap-3 [grid-template-columns:repeat(auto-fit,minmax(160px,220px))]">
                     {productos.map((p) => (
                         <Product
                             key={p.ID_Producto}

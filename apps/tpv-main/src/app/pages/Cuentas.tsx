@@ -1,5 +1,23 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+    Wallet,
+    Pencil,
+    Trash2,
+    X,
+    FileDown,
+    BarChart3,
+    Send,
+    Calculator,
+    ReceiptText,
+    Save,
+    Coins,
+    ArrowRightLeft,
+    Plus,
+    Minus,
+} from "lucide-react";
+import { SearchInput } from "../../shared/ui";
+import { cn } from "../../shared/lib/cn";
+import {
     cuentasGetEntradas,
     cuentasGetSalidas,
     type ProveedorMini,
@@ -57,7 +75,7 @@ function asciiSafe(s: string) {
 
 function Badge({ children }: { children: React.ReactNode }) {
     return (
-        <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs font-medium text-slate-700">
+        <span className="inline-flex items-center rounded-full border border-border bg-surface px-2.5 py-0.5 text-xs font-medium text-fg-muted">
             {children}
         </span>
     );
@@ -80,8 +98,8 @@ function PrimaryButton({
             onClick={onClick}
             disabled={disabled}
             className={[
-                "h-9 px-3 rounded-xl border border-slate-900 bg-slate-900 text-xs font-bold text-white shadow-sm",
-                "hover:bg-slate-800 active:scale-[0.98] transition",
+                "h-9 px-3 rounded-xl border border-accent bg-accent text-xs font-bold text-white shadow-sm",
+                "hover:bg-accent-hover active:scale-[0.98] transition",
                 disabled ? "opacity-60 cursor-not-allowed" : "",
                 className,
             ].join(" ")}
@@ -111,8 +129,8 @@ function MiniIconButton({
                 "h-9 w-9 rounded-xl border shadow-sm transition active:scale-[0.98]",
                 "grid place-items-center",
                 variant === "danger"
-                    ? "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                    ? "border-danger/30 bg-danger-soft text-danger hover:bg-danger-soft"
+                    : "border-border bg-surface text-fg-muted hover:bg-surface-2",
             ].join(" ")}
         >
             {children}
@@ -145,69 +163,84 @@ function DenomsGrid({
     total: number;
 }) {
     return (
-        <div className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="rounded-3xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                        <h3 className="text-base sm:text-lg font-semibold text-slate-900">
+                        <h3 className="text-base sm:text-lg font-semibold text-fg">
                             {title}
                         </h3>
                         <Badge>Total: {euro(total)}</Badge>
                     </div>
                     {subtitle ? (
-                        <p className="mt-1 text-sm text-slate-600">{subtitle}</p>
+                        <p className="mt-1 text-sm text-fg-muted">{subtitle}</p>
                     ) : null}
                 </div>
 
                 <button
                     type="button"
                     onClick={onReset}
-                    className="h-9 px-3 rounded-xl border border-slate-200 bg-white text-xs font-semibold text-slate-800 shadow-sm hover:bg-slate-50 active:scale-[0.98] transition"
+                    className="h-9 px-3 rounded-xl border border-border bg-surface text-xs font-semibold text-fg shadow-sm hover:bg-surface-2 active:scale-[0.98] transition"
                 >
                     Reset
                 </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 {denoms.map((d) => {
                     const c = count[d.label] || 0;
+                    const active = c > 0;
+                    const subtotal = Math.round(c * d.value * 100) / 100;
                     return (
                         <div
                             key={d.label}
-                            className="rounded-2xl border border-slate-200 bg-slate-50/40 p-3"
+                            className={cn(
+                                "rounded-2xl border p-3 transition",
+                                active
+                                    ? "border-accent bg-accent-soft ring-1 ring-accent/30"
+                                    : "border-border bg-surface-2",
+                            )}
                         >
-                            <div className="flex items-center justify-between">
-                                <p className="font-extrabold text-slate-900">{d.label}</p>
-                                <span className="text-xs text-slate-500">
-                                    {moneyLabel(d.value)}
-                                </span>
+                            <div className="flex items-center justify-between gap-2">
+                                <p className="text-base font-extrabold text-fg">{d.label}</p>
+                                {active ? (
+                                    <span className="grid min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-accent-fg">
+                                        {c}
+                                    </span>
+                                ) : (
+                                    <span className="text-xs text-fg-subtle">{moneyLabel(d.value)}</span>
+                                )}
                             </div>
 
-                            <div className="mt-2 flex items-center justify-between gap-2">
+                            <p className="mt-0.5 truncate text-[11px] text-fg-muted">
+                                {active ? `Subtotal ${euro(subtotal)}` : moneyLabel(d.value)}
+                            </p>
+
+                            <div className="mt-2 flex items-center gap-2">
                                 <button
                                     type="button"
                                     onClick={() => onRemove(d.label)}
                                     disabled={c === 0}
-                                    className={[
-                                        "w-10 h-10 rounded-xl border border-slate-200 bg-white font-bold",
-                                        "hover:bg-slate-50 active:scale-[0.98] transition",
-                                        c === 0 ? "opacity-40 cursor-not-allowed" : "",
-                                    ].join(" ")}
+                                    aria-label={`Quitar ${d.label}`}
+                                    className={cn(
+                                        "grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-surface text-fg transition hover:bg-surface-2 active:scale-[0.95] cursor-pointer",
+                                        c === 0 && "cursor-not-allowed opacity-40",
+                                    )}
                                 >
-                                    −
+                                    <Minus className="size-4" aria-hidden />
                                 </button>
 
                                 <div className="flex-1 text-center">
-                                    <p className="text-[11px] text-slate-500">Cantidad</p>
-                                    <p className="text-lg font-extrabold text-slate-900">{c}</p>
+                                    <p className="text-xl font-extrabold leading-none text-fg">{c}</p>
                                 </div>
 
                                 <button
                                     type="button"
                                     onClick={() => onAdd(d.label)}
-                                    className="w-10 h-10 rounded-xl border border-slate-200 bg-white font-bold hover:bg-slate-50 active:scale-[0.98] transition"
+                                    aria-label={`Añadir ${d.label}`}
+                                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.95] cursor-pointer"
                                 >
-                                    +
+                                    <Plus className="size-4" aria-hidden />
                                 </button>
                             </div>
                         </div>
@@ -1140,165 +1173,148 @@ export default function Cuentas() {
     };
 
     return (
-        <div className="w-full min-h-dvh sm:h-dvh bg-transparent sm:overflow-hidden">
-            <div className="min-h-dvh sm:h-dvh px-3 sm:px-6 py-4 sm:py-0 flex items-start sm:items-center justify-center">
-                <div
-                    className={[
-                        "w-full max-w-[1280px]",
-                        "rounded-3xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white shadow-sm",
-                        "flex flex-col",
-                        "h-auto",
-                        "sm:h-[720px] sm:overflow-hidden",
-                    ].join(" ")}
-                >
-                    <div className="flex flex-col gap-3 p-4 sm:p-6 md:flex-row md:items-center md:justify-between flex-none">
+        <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
+            {/* HEADER */}
+            <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                            <Wallet className="size-6" aria-hidden />
+                        </div>
                         <div className="min-w-0">
-                            <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-slate-900">
-                                Cuentas
-                            </h1>
-                            <p className="text-sm text-slate-600">
+                            <h1 className="text-xl font-bold text-fg sm:text-2xl">Cuentas</h1>
+                            <p className="text-sm text-fg-muted">
                                 Filtra ingresos y gastos por fecha o búsqueda.
                             </p>
                         </div>
-
-                        <div className="flex flex-wrap items-center gap-2">
-                            <Badge>Entradas: {euro(totalEntradas)}</Badge>
-                            <Badge>Salidas: {euro(totalSalidas)}</Badge>
-                            <Badge>
-                                Balance:{" "}
-                                <span className={balance >= 0 ? "text-emerald-700" : "text-rose-700"}>
-                                    {euro(balance)}
-                                </span>
-                            </Badge>
-                        </div>
                     </div>
 
-                    <div className="px-4 sm:px-6 pb-4 flex-none">
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-                            <div className="md:col-span-7">
-                                <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                                    <span className="text-slate-400">🔎</span>
-                                    <input
-                                        value={busqueda}
-                                        onChange={(e) => setBusqueda(e.target.value)}
-                                        placeholder="Buscar (cliente, concepto, método, importe...)"
-                                        className="w-full bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
-                                    />
-                                </div>
-                            </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Badge>Entradas: {euro(totalEntradas)}</Badge>
+                        <Badge>Salidas: {euro(totalSalidas)}</Badge>
+                        <Badge>
+                            Balance:{" "}
+                            <span className={balance >= 0 ? "text-success" : "text-danger"}>
+                                {euro(balance)}
+                            </span>
+                        </Badge>
+                    </div>
+                </div>
 
-                            <div className="md:col-span-5">
-                                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                        <label className="flex items-center gap-2">
-                                            <span className="text-xs font-medium text-slate-500 w-8">Del</span>
-                                            <input
-                                                type="date"
-                                                value={del}
-                                                onChange={(e) => setDel(e.target.value)}
-                                                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
-                                            />
-                                        </label>
-                                        <label className="flex items-center gap-2">
-                                            <span className="text-xs font-medium text-slate-500 w-8">Al</span>
-                                            <input
-                                                type="date"
-                                                value={al}
-                                                onChange={(e) => setAl(e.target.value)}
-                                                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-2 py-1 text-xs"
-                                            />
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {pdfError && (
-                            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
-                                {pdfError}
-                            </div>
-                        )}
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                    <div className="md:col-span-7">
+                        <SearchInput
+                            value={busqueda}
+                            onValueChange={setBusqueda}
+                            placeholder="Buscar (cliente, concepto, método, importe...)"
+                        />
                     </div>
 
-                    <div
-                        className={[
-                            "grid grid-cols-1 gap-4 px-4 sm:px-6 pb-4",
-                            "lg:grid-cols-2",
-                            "sm:flex-1 sm:min-h-0 sm:overflow-hidden",
-                        ].join(" ")}
-                    >
-                        <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm flex flex-col">
+                    <div className="md:col-span-5">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                            <label className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-1.5">
+                                <span className="w-8 text-xs font-medium text-fg-muted">Del</span>
+                                <input
+                                    type="date"
+                                    value={del}
+                                    onChange={(e) => setDel(e.target.value)}
+                                    className="w-full bg-transparent text-xs text-fg outline-none"
+                                />
+                            </label>
+                            <label className="flex items-center gap-2 rounded-xl border border-border bg-surface-2 px-3 py-1.5">
+                                <span className="w-8 text-xs font-medium text-fg-muted">Al</span>
+                                <input
+                                    type="date"
+                                    value={al}
+                                    onChange={(e) => setAl(e.target.value)}
+                                    className="w-full bg-transparent text-xs text-fg outline-none"
+                                />
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                {pdfError && (
+                    <div className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger">
+                        {pdfError}
+                    </div>
+                )}
+            </div>
+
+            {/* PANELES */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
+                        <section className="flex min-h-0 flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
-                                    <h2 className="text-lg font-semibold text-slate-900">Entradas</h2>
-                                    <p className="text-sm text-slate-600">
+                                    <h2 className="text-lg font-semibold text-fg">Entradas</h2>
+                                    <p className="text-sm text-fg-muted">
                                         Pagos de clientes (tarjeta o efectivo).
                                     </p>
                                 </div>
                                 <Badge>Total: {euro(totalEntradas)}</Badge>
                             </div>
 
-                            <div className="mt-4 rounded-2xl border border-slate-200 overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
-                                <div className="hidden sm:grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
-                                    <div className="col-span-4">Fecha/Hora</div>
-                                    <div className="col-span-5">Cliente / Método</div>
-                                    <div className="col-span-2 text-right">EUR</div>
-                                    <div className="col-span-1 text-right">⋯</div>
+                            <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
+                                <div className="hidden sm:grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-semibold text-fg-muted">
+                                    <div className="col-span-3">Fecha/Hora</div>
+                                    <div className="col-span-4">Cliente / Método</div>
+                                    <div className="col-span-2">EUR</div>
+                                    <div className="col-span-3"></div>
                                 </div>
 
-                                <div className="sm:flex-1 sm:overflow-auto">
+                                <div className="min-h-0 flex-1 overflow-y-auto">
                                     {loadingEntradas ? (
-                                        <div className="p-4 text-sm text-slate-500">Cargando entradas…</div>
+                                        <div className="p-4 text-sm text-fg-muted">Cargando entradas…</div>
                                     ) : entradasFiltradas.length ? (
-                                        <div className="divide-y divide-slate-100">
+                                        <div className="divide-y divide-border">
                                             {entradasFiltradas.map((e) => (
                                                 <div key={e.id} className="p-4 sm:p-0">
                                                     <div className="sm:hidden flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
-                                                            <div className="text-xs text-slate-500">{e.fechaHora}</div>
-                                                            <div className="font-semibold text-slate-900 truncate">
+                                                            <div className="text-xs text-fg-muted">{e.fechaHora}</div>
+                                                            <div className="font-semibold text-fg truncate">
                                                                 {e.cliente}
                                                             </div>
-                                                            <div className="text-xs text-slate-500">{e.metodo}</div>
+                                                            <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                         </div>
                                                         <div className="flex flex-col items-end gap-2">
-                                                            <div className="font-extrabold text-slate-900">
+                                                            <div className="font-extrabold text-fg">
                                                                 {euro(e.importe)}
                                                             </div>
                                                             <div className="flex gap-2">
                                                                 <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                    ✎
+                                                                    <Pencil className="size-4" aria-hidden />
                                                                 </MiniIconButton>
                                                                 <MiniIconButton
                                                                     title="Borrar"
                                                                     variant="danger"
                                                                     onClick={() => borrarPago(e)}
                                                                 >
-                                                                    🗑
+                                                                    <Trash2 className="size-4" aria-hidden />
                                                                 </MiniIconButton>
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-slate-50">
-                                                        <div className="col-span-4">{e.fechaHora}</div>
-                                                        <div className="col-span-5 min-w-0">
+                                                    <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-surface-2">
+                                                        <div className="col-span-3">{e.fechaHora}</div>
+                                                        <div className="col-span-4 min-w-0">
                                                             <div className="font-medium truncate">{e.cliente}</div>
-                                                            <div className="text-xs text-slate-500">{e.metodo}</div>
+                                                            <div className="text-xs text-fg-muted">{e.metodo}</div>
                                                         </div>
-                                                        <div className="col-span-2 text-right font-semibold">
+                                                        <div className="col-span-2 font-semibold">
                                                             {euro(e.importe)}
                                                         </div>
-                                                        <div className="col-span-1 flex justify-end gap-2">
+                                                        <div className="col-span-3 flex justify-end gap-2">
                                                             <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                ✎
+                                                                <Pencil className="size-4" aria-hidden />
                                                             </MiniIconButton>
                                                             <MiniIconButton
                                                                 title="Borrar"
                                                                 variant="danger"
                                                                 onClick={() => borrarPago(e)}
                                                             >
-                                                                🗑
+                                                                <Trash2 className="size-4" aria-hidden />
                                                             </MiniIconButton>
                                                         </div>
                                                     </div>
@@ -1306,37 +1322,37 @@ export default function Cuentas() {
                                             ))}
                                         </div>
                                     ) : (
-                                        <div className="p-4 text-sm text-slate-500">Sin entradas.</div>
+                                        <div className="p-4 text-sm text-fg-muted">Sin entradas.</div>
                                     )}
                                 </div>
                             </div>
                         </section>
 
-                        <section className="rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm flex flex-col">
+                        <section className="flex min-h-0 flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
-                                    <h2 className="text-lg font-semibold text-slate-900">Salidas</h2>
-                                    <p className="text-sm text-slate-600">Gastos del negocio.</p>
+                                    <h2 className="text-lg font-semibold text-fg">Salidas</h2>
+                                    <p className="text-sm text-fg-muted">Gastos del negocio.</p>
                                 </div>
                                 <PrimaryButton onClick={abrirModalGasto} className="shrink-0">
                                     Agregar gasto
                                 </PrimaryButton>
                             </div>
 
-                            <div className="mt-4 rounded-2xl border border-slate-200 overflow-hidden flex flex-col sm:flex-1 sm:min-h-0">
-                                <div className="hidden sm:grid grid-cols-12 gap-2 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+                            <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
+                                <div className="hidden sm:grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-semibold text-fg-muted">
                                     <div className="col-span-2">Fecha</div>
-                                    <div className="col-span-3">Tipo</div>
-                                    <div className="col-span-4">Concepto</div>
-                                    <div className="col-span-2 text-right">EUR</div>
-                                    <div className="col-span-1 text-right">⋯</div>
+                                    <div className="col-span-2">Tipo</div>
+                                    <div className="col-span-3">Concepto</div>
+                                    <div className="col-span-2">EUR</div>
+                                    <div className="col-span-3"></div>
                                 </div>
 
-                                <div className="sm:flex-1 sm:overflow-auto">
+                                <div className="min-h-0 flex-1 overflow-y-auto">
                                     {loadingSalidas ? (
-                                        <div className="p-4 text-sm text-slate-500">Cargando salidas…</div>
+                                        <div className="p-4 text-sm text-fg-muted">Cargando salidas…</div>
                                     ) : salidasFiltradas.length ? (
-                                        <div className="divide-y divide-slate-100">
+                                        <div className="divide-y divide-border">
                                             {salidasFiltradas.map((s) => {
                                                 const provText =
                                                     s.tipoGasto === "Proveedor" && s.proveedorId
@@ -1347,58 +1363,58 @@ export default function Cuentas() {
                                                     <div key={s.id} className="p-4 sm:p-0">
                                                         <div className="sm:hidden flex items-start justify-between gap-3">
                                                             <div className="min-w-0">
-                                                                <div className="text-xs text-slate-500">{s.fechaHora}</div>
-                                                                <div className="font-semibold text-slate-900 truncate">
+                                                                <div className="text-xs text-fg-muted">{s.fechaHora}</div>
+                                                                <div className="font-semibold text-fg truncate">
                                                                     {s.concepto}
                                                                 </div>
-                                                                <div className="text-xs text-slate-500">
+                                                                <div className="text-xs text-fg-muted">
                                                                     {s.tipoGasto}
                                                                     {provText ? <> · {provText}</> : null}
                                                                 </div>
                                                             </div>
                                                             <div className="flex flex-col items-end gap-2">
-                                                                <div className="font-extrabold text-slate-900">
+                                                                <div className="font-extrabold text-fg">
                                                                     {euro(s.importe)}
                                                                 </div>
                                                                 <div className="flex gap-2">
                                                                     <MiniIconButton title="Editar" onClick={() => abrirEditarGasto(s)}>
-                                                                        ✎
+                                                                        <Pencil className="size-4" aria-hidden />
                                                                     </MiniIconButton>
                                                                     <MiniIconButton
                                                                         title="Borrar"
                                                                         variant="danger"
                                                                         onClick={() => borrarGasto(s)}
                                                                     >
-                                                                        🗑
+                                                                        <Trash2 className="size-4" aria-hidden />
                                                                     </MiniIconButton>
                                                                 </div>
                                                             </div>
                                                         </div>
 
-                                                        <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-slate-50">
+                                                        <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-surface-2">
                                                             <div className="col-span-2">{s.fechaHora}</div>
-                                                            <div className="col-span-3">
+                                                            <div className="col-span-2 truncate">
                                                                 {s.tipoGasto}
                                                                 {provText ? (
-                                                                    <span className="ml-2 text-xs text-slate-500">
+                                                                    <span className="ml-1 text-xs text-fg-muted">
                                                                         ({provText})
                                                                     </span>
                                                                 ) : null}
                                                             </div>
-                                                            <div className="col-span-4 truncate">{s.concepto}</div>
-                                                            <div className="col-span-2 text-right font-semibold">
+                                                            <div className="col-span-3 truncate">{s.concepto}</div>
+                                                            <div className="col-span-2 font-semibold">
                                                                 {euro(s.importe)}
                                                             </div>
-                                                            <div className="col-span-1 flex justify-end gap-2">
+                                                            <div className="col-span-3 flex justify-end gap-2">
                                                                 <MiniIconButton title="Editar" onClick={() => abrirEditarGasto(s)}>
-                                                                    ✎
+                                                                    <Pencil className="size-4" aria-hidden />
                                                                 </MiniIconButton>
                                                                 <MiniIconButton
                                                                     title="Borrar"
                                                                     variant="danger"
                                                                     onClick={() => borrarGasto(s)}
                                                                 >
-                                                                    🗑
+                                                                    <Trash2 className="size-4" aria-hidden />
                                                                 </MiniIconButton>
                                                             </div>
                                                         </div>
@@ -1407,79 +1423,66 @@ export default function Cuentas() {
                                             })}
                                         </div>
                                     ) : (
-                                        <div className="p-4 text-sm text-slate-500">Sin salidas.</div>
+                                        <div className="p-4 text-sm text-fg-muted">Sin salidas.</div>
                                     )}
                                 </div>
                             </div>
                         </section>
                     </div>
 
-                    <div className="px-4 sm:px-6 pb-4 sm:pb-6 flex-none">
-                        <div className="grid grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
-                            <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2">
-                                <button
-                                    onClick={guardarPdf}
-                                    disabled={savingPdf}
-                                    className={[
-                                        "h-10 px-4 rounded-2xl text-sm font-semibold shadow-sm transition active:scale-[0.98]",
-                                        "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
-                                        "focus:outline-none focus:ring-2 focus:ring-slate-300",
-                                        savingPdf ? "opacity-60 cursor-not-allowed" : "",
-                                    ].join(" ")}
-                                >
-                                    {savingPdf ? "Generando…" : "📄 Guardar PDF"}
-                                </button>
+            {/* FOOTER */}
+            <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                <div className="grid grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
+                    <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
+                        <button
+                            onClick={guardarPdf}
+                            disabled={savingPdf}
+                            className={cn(
+                                "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
+                                savingPdf && "opacity-60 cursor-not-allowed",
+                            )}
+                        >
+                            <FileDown className="size-4" aria-hidden />
+                            {savingPdf ? "Generando…" : "Guardar PDF"}
+                        </button>
 
-                                <button
-                                    type="button"
-                                    className={[
-                                        "h-10 px-4 rounded-2xl text-sm font-semibold shadow-sm transition active:scale-[0.98]",
-                                        "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
-                                        "focus:outline-none focus:ring-2 focus:ring-slate-300",
-                                    ].join(" ")}
-                                >
-                                    📊 Ver estadísticas
-                                </button>
+                        <button
+                            type="button"
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
+                        >
+                            <BarChart3 className="size-4" aria-hidden />
+                            Ver estadísticas
+                        </button>
 
-                                <button
-                                    type="button"
-                                    className={[
-                                        "h-10 px-4 rounded-2xl text-sm font-semibold shadow-sm transition active:scale-[0.98]",
-                                        "border border-slate-200 bg-white text-slate-900 hover:bg-slate-50",
-                                        "focus:outline-none focus:ring-2 focus:ring-slate-300",
-                                    ].join(" ")}
-                                >
-                                    ✉️ Enviar a gestoría
-                                </button>
+                        <button
+                            type="button"
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
+                        >
+                            <Send className="size-4" aria-hidden />
+                            Enviar a gestoría
+                        </button>
 
-                                <button
-                                    type="button"
-                                    onClick={abrirModalX}
-                                    className={[
-                                        "h-10 px-4 rounded-2xl text-sm font-extrabold shadow-sm transition active:scale-[0.98]",
-                                        "border border-slate-900 bg-slate-900 text-white hover:bg-slate-800",
-                                        "focus:outline-none focus:ring-2 focus:ring-slate-300",
-                                    ].join(" ")}
-                                >
-                                    🧮 Entrada de Caja
-                                </button>
-                            </div>
-
-                            <button
-                                onClick={sacarCuentaDelDia}
-                                disabled={savingPdf}
-                                className={[
-                                    "h-10 px-5 rounded-2xl text-sm font-extrabold shadow-sm transition active:scale-[0.98]",
-                                    "bg-slate-900 text-white hover:bg-slate-800",
-                                    "focus:outline-none focus:ring-2 focus:ring-slate-300",
-                                    "w-full sm:w-auto",
-                                    savingPdf ? "opacity-60 cursor-not-allowed" : "",
-                                ].join(" ")}
-                            >
-                                🧾 Sacar cuenta del día
-                            </button>
-                        </div>
+                        <button
+                            type="button"
+                            onClick={abrirModalX}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-accent bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
+                        >
+                            <Calculator className="size-4" aria-hidden />
+                            Entrada de Caja
+                        </button>
                     </div>
+
+                    <button
+                        onClick={sacarCuentaDelDia}
+                        disabled={savingPdf}
+                        className={cn(
+                            "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] sm:w-auto cursor-pointer",
+                            savingPdf && "opacity-60 cursor-not-allowed",
+                        )}
+                    >
+                        <ReceiptText className="size-4" aria-hidden />
+                        Sacar cuenta del día
+                    </button>
                 </div>
             </div>
 
@@ -1489,37 +1492,37 @@ export default function Cuentas() {
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingGasto ? null : setOpenAddGasto(false))}
                     />
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-slate-200 bg-white shadow-xl p-6">
+                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-semibold text-slate-900">Agregar gasto</h3>
-                                <p className="text-sm text-slate-600">
+                                <h3 className="text-lg font-semibold text-fg">Agregar gasto</h3>
+                                <p className="text-sm text-fg-muted">
                                     Registra luz, agua, pedidos, alquiler, etc.
                                 </p>
                             </div>
 
                             <button
                                 type="button"
-                                className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                                 onClick={() => (savingGasto ? null : setOpenAddGasto(false))}
                                 title="Cerrar"
                             >
-                                ✕
+                                <X className="size-4" aria-hidden />
                             </button>
                         </div>
 
                         <div className="mt-5 grid grid-cols-1 gap-3">
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Fecha
                                 <input
                                     type="date"
                                     value={gFecha}
                                     onChange={(e) => setGFecha(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Tipo
                                 <select
                                     value={gTipo}
@@ -1528,7 +1531,7 @@ export default function Cuentas() {
                                         setGTipo(v);
                                         if (v !== "Proveedor") setGProveedorId("");
                                     }}
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
                                 >
                                     <option value="Suministros">Suministros</option>
                                     <option value="Luz">Luz</option>
@@ -1542,12 +1545,12 @@ export default function Cuentas() {
                             </label>
 
                             {gTipo === "Proveedor" ? (
-                                <label className="text-xs font-semibold text-slate-600">
+                                <label className="text-xs font-semibold text-fg-muted">
                                     Proveedor
                                     <select
                                         value={gProveedorId}
                                         onChange={(e) => setGProveedorId(e.target.value)}
-                                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                        className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                     >
                                         <option value="">
                                             {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
@@ -1560,38 +1563,38 @@ export default function Cuentas() {
                                     </select>
 
                                     {errProveedores ? (
-                                        <p className="mt-1 text-[11px] text-rose-700">{errProveedores}</p>
+                                        <p className="mt-1 text-[11px] text-danger">{errProveedores}</p>
                                     ) : (
-                                        <p className="mt-1 text-[11px] text-slate-500">
+                                        <p className="mt-1 text-[11px] text-fg-muted">
                                             Se vinculará el gasto con el proveedor seleccionado.
                                         </p>
                                     )}
                                 </label>
                             ) : null}
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Concepto
                                 <input
                                     value={gConcepto}
                                     onChange={(e) => setGConcepto(e.target.value)}
                                     placeholder="Ej: Pedido cocacolas, Luz enero, Agua..."
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
                                 />
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
                                 <input
                                     value={gImporte}
                                     onChange={(e) => setGImporte(e.target.value)}
                                     inputMode="decimal"
                                     placeholder="Ej: 120.50"
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
                                 />
                             </label>
 
                             {errGasto ? (
-                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                <div className="rounded-2xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
                                     {errGasto}
                                 </div>
                             ) : null}
@@ -1603,8 +1606,8 @@ export default function Cuentas() {
                                 disabled={savingGasto}
                                 onClick={() => setOpenAddGasto(false)}
                                 className={[
-                                    "h-10 px-4 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm",
-                                    "hover:bg-slate-50 active:scale-[0.97]",
+                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
+                                    "hover:bg-surface-2 active:scale-[0.97]",
                                     savingGasto ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1616,8 +1619,8 @@ export default function Cuentas() {
                                 disabled={savingGasto}
                                 onClick={guardarGasto}
                                 className={[
-                                    "h-10 px-5 rounded-xl border border-slate-900 bg-slate-900 text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-slate-800 active:scale-[0.97]",
+                                    "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
+                                    "hover:bg-accent-hover active:scale-[0.97]",
                                     savingGasto ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1634,37 +1637,37 @@ export default function Cuentas() {
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingEditGasto ? null : setOpenEditGasto(false))}
                     />
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-slate-200 bg-white shadow-xl p-6">
+                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-semibold text-slate-900">Editar gasto</h3>
-                                <p className="text-sm text-slate-600">
+                                <h3 className="text-lg font-semibold text-fg">Editar gasto</h3>
+                                <p className="text-sm text-fg-muted">
                                     Modifica fecha, tipo, concepto e importe.
                                 </p>
                             </div>
 
                             <button
                                 type="button"
-                                className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                                 onClick={() => (savingEditGasto ? null : setOpenEditGasto(false))}
                                 title="Cerrar"
                             >
-                                ✕
+                                <X className="size-4" aria-hidden />
                             </button>
                         </div>
 
                         <div className="mt-5 grid grid-cols-1 gap-3">
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Fecha
                                 <input
                                     type="date"
                                     value={egFecha}
                                     onChange={(e) => setEgFecha(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Tipo
                                 <select
                                     value={egTipo}
@@ -1673,7 +1676,7 @@ export default function Cuentas() {
                                         setEgTipo(v);
                                         if (v !== "Proveedor") setEgProveedorId("");
                                     }}
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
                                 >
                                     <option value="Suministros">Suministros</option>
                                     <option value="Luz">Luz</option>
@@ -1687,12 +1690,12 @@ export default function Cuentas() {
                             </label>
 
                             {egTipo === "Proveedor" ? (
-                                <label className="text-xs font-semibold text-slate-600">
+                                <label className="text-xs font-semibold text-fg-muted">
                                     Proveedor
                                     <select
                                         value={egProveedorId}
                                         onChange={(e) => setEgProveedorId(e.target.value)}
-                                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                        className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                     >
                                         <option value="">
                                             {loadingProveedores ? "Cargando..." : "Selecciona proveedor"}
@@ -1705,32 +1708,32 @@ export default function Cuentas() {
                                     </select>
 
                                     {errProveedores ? (
-                                        <p className="mt-1 text-[11px] text-rose-700">{errProveedores}</p>
+                                        <p className="mt-1 text-[11px] text-danger">{errProveedores}</p>
                                     ) : null}
                                 </label>
                             ) : null}
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Concepto
                                 <input
                                     value={egConcepto}
                                     onChange={(e) => setEgConcepto(e.target.value)}
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
                                 <input
                                     value={egImporte}
                                     onChange={(e) => setEgImporte(e.target.value)}
                                     inputMode="decimal"
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
                             {errEditGasto ? (
-                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                <div className="rounded-2xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
                                     {errEditGasto}
                                 </div>
                             ) : null}
@@ -1742,8 +1745,8 @@ export default function Cuentas() {
                                 disabled={savingEditGasto}
                                 onClick={() => setOpenEditGasto(false)}
                                 className={[
-                                    "h-10 px-4 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm",
-                                    "hover:bg-slate-50 active:scale-[0.97]",
+                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
+                                    "hover:bg-surface-2 active:scale-[0.97]",
                                     savingEditGasto ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1755,8 +1758,8 @@ export default function Cuentas() {
                                 disabled={savingEditGasto}
                                 onClick={guardarEditarGasto}
                                 className={[
-                                    "h-10 px-5 rounded-xl border border-slate-900 bg-slate-900 text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-slate-800 active:scale-[0.97]",
+                                    "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
+                                    "hover:bg-accent-hover active:scale-[0.97]",
                                     savingEditGasto ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1773,62 +1776,62 @@ export default function Cuentas() {
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingEditPago ? null : setOpenEditPago(false))}
                     />
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-slate-200 bg-white shadow-xl p-6">
+                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-semibold text-slate-900">Editar entrada</h3>
-                                <p className="text-sm text-slate-600">
+                                <h3 className="text-lg font-semibold text-fg">Editar entrada</h3>
+                                <p className="text-sm text-fg-muted">
                                     Modifica fecha/hora, método e importe.
                                 </p>
                             </div>
 
                             <button
                                 type="button"
-                                className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                                 onClick={() => (savingEditPago ? null : setOpenEditPago(false))}
                                 title="Cerrar"
                             >
-                                ✕
+                                <X className="size-4" aria-hidden />
                             </button>
                         </div>
 
                         <div className="mt-5 grid grid-cols-1 gap-3">
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Fecha/Hora (YYYY-MM-DD HH:mm)
                                 <input
                                     value={epFechaHora}
                                     onChange={(e) => setEpFechaHora(e.target.value)}
                                     placeholder="2026-01-29 12:30"
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Método
                                 <select
                                     value={epMetodo}
                                     onChange={(e) =>
                                         setEpMetodo(e.target.value === "Tarjeta" ? "Tarjeta" : "Efectivo")
                                     }
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg outline-none"
                                 >
                                     <option value="Efectivo">Efectivo</option>
                                     <option value="Tarjeta">Tarjeta</option>
                                 </select>
                             </label>
 
-                            <label className="text-xs font-semibold text-slate-600">
+                            <label className="text-xs font-semibold text-fg-muted">
                                 Importe (EUR)
                                 <input
                                     value={epImporte}
                                     onChange={(e) => setEpImporte(e.target.value)}
                                     inputMode="decimal"
-                                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none"
+                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
                             </label>
 
                             {errEditPago ? (
-                                <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                                <div className="rounded-2xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm text-danger">
                                     {errEditPago}
                                 </div>
                             ) : null}
@@ -1840,8 +1843,8 @@ export default function Cuentas() {
                                 disabled={savingEditPago}
                                 onClick={() => setOpenEditPago(false)}
                                 className={[
-                                    "h-10 px-4 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm",
-                                    "hover:bg-slate-50 active:scale-[0.97]",
+                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
+                                    "hover:bg-surface-2 active:scale-[0.97]",
                                     savingEditPago ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1853,8 +1856,8 @@ export default function Cuentas() {
                                 disabled={savingEditPago}
                                 onClick={guardarEditarPago}
                                 className={[
-                                    "h-10 px-5 rounded-xl border border-slate-900 bg-slate-900 text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-slate-800 active:scale-[0.97]",
+                                    "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
+                                    "hover:bg-accent-hover active:scale-[0.97]",
                                     savingEditPago ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -1869,76 +1872,102 @@ export default function Cuentas() {
                 <div className="fixed inset-0 z-50 flex items-center justify-center">
                     <div className="absolute inset-0 bg-black/40" onClick={() => setOpenX(false)} />
 
-                    <div className="relative w-[1100px] max-w-[94vw] max-h-[88vh] overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white shadow-2xl">
-                        <div className="p-4 sm:p-6 border-b border-slate-200 flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                                <h3 className="text-xl font-extrabold text-slate-900">Hacer la X (Caja)</h3>
-                                <p className="mt-1 text-sm text-slate-600">
-                                    Define el <b>fondo</b> con el que quieres empezar siempre y mete el{" "}
-                                    <b>cierre</b> del día. Abajo te diremos qué <b>añadir/quitar</b> para
-                                    el siguiente servicio.
-                                </p>
+                    <div className="relative w-[1100px] max-w-[94vw] max-h-[88vh] overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
+                        <div className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-6">
+                            <div className="flex min-w-0 items-center gap-3">
+                                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                    <Calculator className="size-6" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                    <h3 className="text-xl font-extrabold text-fg">Entrada de Caja</h3>
+                                    <p className="mt-0.5 text-sm text-fg-muted">
+                                        Compara tu <b>fondo</b> con el <b>cierre</b> del día y te decimos qué{" "}
+                                        <b>añadir o quitar</b> para el próximo turno.
+                                    </p>
+                                </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
-                                <button
-                                    type="button"
-                                    onClick={() => setOpenX(false)}
-                                    className="h-10 w-10 rounded-2xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 active:scale-[0.98] transition"
-                                    title="Cerrar"
-                                >
-                                    ✕
-                                </button>
-                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setOpenX(false)}
+                                className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-2xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg active:scale-[0.98]"
+                                title="Cerrar"
+                            >
+                                <X className="size-4" aria-hidden />
+                            </button>
                         </div>
 
                         <div className="p-4 sm:p-6 overflow-auto max-h-[calc(88vh-88px)]">
                             {xSavedToast ? (
-                                <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-800">
+                                <div className="mb-4 rounded-2xl border border-success/30 bg-success-soft px-4 py-2 text-sm text-success">
                                     {xSavedToast}
                                 </div>
                             ) : null}
 
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
-                                <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                                    <p className="text-xs font-semibold text-slate-500">Fondo total</p>
-                                    <p className="mt-1 text-2xl font-extrabold text-slate-900">{euro(totalFondo)}</p>
-                                    <p className="mt-2 text-xs text-slate-500">
-                                        (Lo que quieres tener al empezar cada turno)
+                            <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
+                                <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                                    <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
+                                        <Wallet className="size-4 text-accent" aria-hidden />
+                                        Fondo total
+                                    </p>
+                                    <p className="mt-1 text-2xl font-extrabold text-fg">{euro(totalFondo)}</p>
+                                    <p className="mt-2 text-xs text-fg-muted">
+                                        Lo que quieres tener al empezar cada turno.
                                     </p>
                                 </div>
 
-                                <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                                    <p className="text-xs font-semibold text-slate-500">Cierre total</p>
-                                    <p className="mt-1 text-2xl font-extrabold text-slate-900">{euro(totalCierre)}</p>
-                                    <p className="mt-2 text-xs text-slate-500">
-                                        (Lo que tienes ahora mismo al acabar)
+                                <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                                    <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
+                                        <Coins className="size-4 text-accent" aria-hidden />
+                                        Cierre total
+                                    </p>
+                                    <p className="mt-1 text-2xl font-extrabold text-fg">{euro(totalCierre)}</p>
+                                    <p className="mt-2 text-xs text-fg-muted">
+                                        Lo que tienes ahora mismo al acabar.
                                     </p>
                                 </div>
 
-                                <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-                                    <p className="text-xs font-semibold text-slate-500">
-                                        Diferencia neta (fondo - cierre)
+                                <div
+                                    className={cn(
+                                        "rounded-2xl border p-4 shadow-sm",
+                                        deltaResumen.neto >= 0
+                                            ? "border-danger/30 bg-danger-soft"
+                                            : "border-success/30 bg-success-soft",
+                                    )}
+                                >
+                                    <p
+                                        className={cn(
+                                            "flex items-center gap-1.5 text-xs font-semibold",
+                                            deltaResumen.neto >= 0 ? "text-danger" : "text-success",
+                                        )}
+                                    >
+                                        <ArrowRightLeft className="size-4" aria-hidden />
+                                        Diferencia neta
                                     </p>
                                     <p
-                                        className={[
+                                        className={cn(
                                             "mt-1 text-2xl font-extrabold",
-                                            deltaResumen.neto >= 0 ? "text-rose-700" : "text-emerald-700",
-                                        ].join(" ")}
+                                            deltaResumen.neto >= 0 ? "text-danger" : "text-success",
+                                        )}
                                     >
                                         {deltaResumen.neto >= 0
-                                            ? `Te faltan ${euro(deltaResumen.neto)}`
-                                            : `Te sobran ${euro(Math.abs(deltaResumen.neto))}`}
+                                            ? `Faltan ${euro(deltaResumen.neto)}`
+                                            : `Sobran ${euro(Math.abs(deltaResumen.neto))}`}
                                     </p>
-                                    <p className="mt-2 text-xs text-slate-500">
-                                        Esto es el neto. Abajo verás el detalle por monedas/billetes.
+                                    <p
+                                        className={cn(
+                                            "mt-2 text-xs",
+                                            deltaResumen.neto >= 0 ? "text-danger/80" : "text-success/80",
+                                        )}
+                                    >
+                                        Detalle por monedas/billetes abajo.
                                     </p>
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                 <DenomsGrid
-                                    title="Fondo (predeterminado)"
+                                    title="1 · Fondo (predeterminado)"
                                     subtitle="Con cuánto quieres empezar siempre todos los turnos."
                                     denoms={denoms}
                                     count={xFondo}
@@ -1949,7 +1978,7 @@ export default function Cuentas() {
                                 />
 
                                 <DenomsGrid
-                                    title="Cierre (final del día)"
+                                    title="2 · Cierre (final del día)"
                                     subtitle="Lo que tienes hoy en caja al cerrar."
                                     denoms={denoms}
                                     count={xCierre}
@@ -1960,13 +1989,13 @@ export default function Cuentas() {
                                 />
                             </div>
 
-                            <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+                            <div className="mt-4 rounded-3xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
                                 <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                                     <div>
-                                        <h4 className="text-lg font-extrabold text-slate-900">
-                                            Qué añadir / quitar para el siguiente servicio
+                                        <h4 className="text-lg font-extrabold text-fg">
+                                            3 · Qué añadir / quitar para el siguiente servicio
                                         </h4>
-                                        <p className="mt-1 text-sm text-slate-600">
+                                        <p className="mt-1 text-sm text-fg-muted">
                                             Objetivo: que el cierre se convierta en tu fondo predeterminado.
                                         </p>
                                     </div>
@@ -1988,22 +2017,22 @@ export default function Cuentas() {
                                                     className={[
                                                         "rounded-2xl border p-3",
                                                         sign === "add"
-                                                            ? "border-emerald-200 bg-emerald-50"
-                                                            : "border-rose-200 bg-rose-50",
+                                                            ? "border-success/30 bg-success-soft"
+                                                            : "border-danger/30 bg-danger-soft",
                                                     ].join(" ")}
                                                 >
                                                     <div className="flex items-center justify-between">
-                                                        <p className="font-extrabold text-slate-900">{d.label}</p>
-                                                        <span className="text-xs text-slate-500">{moneyLabel(d.value)}</span>
+                                                        <p className="font-extrabold text-fg">{d.label}</p>
+                                                        <span className="text-xs text-fg-muted">{moneyLabel(d.value)}</span>
                                                     </div>
 
                                                     <div className="mt-2 flex items-end justify-between gap-2">
                                                         <div>
-                                                            <p className="text-xs text-slate-600">Acción</p>
+                                                            <p className="text-xs text-fg-muted">Acción</p>
                                                             <p
                                                                 className={[
                                                                     "text-sm font-extrabold",
-                                                                    sign === "add" ? "text-emerald-800" : "text-rose-800",
+                                                                    sign === "add" ? "text-success" : "text-danger",
                                                                 ].join(" ")}
                                                             >
                                                                 {sign === "add" ? "Añadir" : "Quitar"} {Math.abs(d.delta)}
@@ -2011,8 +2040,8 @@ export default function Cuentas() {
                                                         </div>
 
                                                         <div className="text-right">
-                                                            <p className="text-xs text-slate-600">Impacto</p>
-                                                            <p className="text-sm font-extrabold text-slate-900">
+                                                            <p className="text-xs text-fg-muted">Impacto</p>
+                                                            <p className="text-sm font-extrabold text-fg">
                                                                 {euro(Math.round(Math.abs(d.delta * d.value) * 100) / 100)}
                                                             </p>
                                                         </div>
@@ -2022,7 +2051,7 @@ export default function Cuentas() {
                                         })}
 
                                     {!deltas.some((d) => d.delta !== 0) ? (
-                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                                        <div className="rounded-2xl border border-border bg-surface-2 px-4 py-3 text-sm text-fg-muted">
                                             ✅ Perfecto: el cierre ya coincide con tu fondo predeterminado.
                                         </div>
                                     ) : null}
@@ -2037,7 +2066,7 @@ export default function Cuentas() {
                                             setXSavedToast("✅ Fondo actualizado con el cierre actual.");
                                             setTimeout(() => setXSavedToast(null), 1800);
                                         }}
-                                        className="h-10 px-4 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-900 hover:bg-slate-50 active:scale-[0.98] transition"
+                                        className="h-10 px-4 rounded-2xl border border-border bg-surface text-sm font-semibold text-fg hover:bg-surface-2 active:scale-[0.98] transition"
                                         title="Si quieres que el fondo predeterminado pase a ser lo que tienes ahora mismo"
                                     >
                                         Usar cierre como nuevo fondo
@@ -2045,9 +2074,10 @@ export default function Cuentas() {
                                     <button
                                         type="button"
                                         onClick={guardarFondoPredeterminado}
-                                        className="h-10 px-4 rounded-2xl border border-slate-900 bg-slate-900 text-white text-sm font-extrabold shadow-sm hover:bg-slate-800 active:scale-[0.98] transition"
+                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-accent bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                                     >
-                                        💾 Guardar fondo
+                                        <Save className="size-4" aria-hidden />
+                                        Guardar fondo
                                     </button>
                                 </div>
                             </div>
@@ -2063,13 +2093,13 @@ export default function Cuentas() {
                         onClick={() => (confirmando ? null : setConfirmAccion(null))}
                     />
 
-                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-slate-200 bg-white shadow-xl p-6">
+                    <div className="relative w-[520px] max-w-[92vw] rounded-3xl border border-border bg-surface shadow-xl p-6">
                         <div className="flex items-start justify-between gap-3">
                             <div>
-                                <h3 className="text-lg font-semibold text-slate-900">
+                                <h3 className="text-lg font-semibold text-fg">
                                     {confirmAccion.tipo === "gasto" ? "Borrar gasto" : "Borrar entrada"}
                                 </h3>
-                                <p className="text-sm text-slate-600">
+                                <p className="text-sm text-fg-muted">
                                     {confirmAccion.tipo === "gasto"
                                         ? "Esto eliminará el gasto de la base de datos."
                                         : "Esto eliminará también sus relaciones de pago."}
@@ -2078,15 +2108,15 @@ export default function Cuentas() {
 
                             <button
                                 type="button"
-                                className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                                 onClick={() => (confirmando ? null : setConfirmAccion(null))}
                                 title="Cerrar"
                             >
-                                ✕
+                                <X className="size-4" aria-hidden />
                             </button>
                         </div>
 
-                        <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-800">
+                        <div className="mt-4 rounded-2xl border border-border bg-surface-2 px-4 py-3 text-sm text-fg">
                             {confirmAccion.tipo === "gasto" ? (
                                 <div className="space-y-1">
                                     <div>
@@ -2132,7 +2162,7 @@ export default function Cuentas() {
                         </div>
 
                         {confirmError ? (
-                            <div className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
+                            <div className="mt-3 rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger">
                                 {confirmError}
                             </div>
                         ) : null}
@@ -2143,8 +2173,8 @@ export default function Cuentas() {
                                 disabled={confirmando}
                                 onClick={() => setConfirmAccion(null)}
                                 className={[
-                                    "h-10 px-4 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm",
-                                    "hover:bg-slate-50 active:scale-[0.97]",
+                                    "h-10 px-4 rounded-xl border border-border bg-surface text-sm font-semibold text-fg shadow-sm",
+                                    "hover:bg-surface-2 active:scale-[0.97]",
                                     confirmando ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >
@@ -2156,8 +2186,8 @@ export default function Cuentas() {
                                 disabled={confirmando}
                                 onClick={confirmarBorrado}
                                 className={[
-                                    "h-10 px-5 rounded-xl border border-rose-700 bg-rose-700 text-sm font-bold text-white shadow-sm",
-                                    "hover:bg-rose-600 active:scale-[0.97]",
+                                    "h-10 px-5 rounded-xl border border-danger bg-danger text-sm font-bold text-white shadow-sm",
+                                    "hover:opacity-90 active:scale-[0.97]",
                                     confirmando ? "opacity-60 cursor-not-allowed" : "",
                                 ].join(" ")}
                             >

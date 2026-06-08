@@ -100,71 +100,71 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
         <Modal open={open} onClose={() => { if (!loading) { reset(); onClose(); } }} title="Añadir lote" maxWidthClass="max-w-[720px]">
             <form onSubmit={guardar} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="md:col-span-2">
-                    <label className="font-semibold">Código de lote *</label>
+                    <label className="text-sm font-semibold text-fg">Código de lote *</label>
                     <input
                         value={codigoLote}
                         onChange={(e) => setCodigoLote(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                         required
                     />
                 </div>
 
                 <div>
-                    <label className="font-semibold">Caducidad</label>
+                    <label className="text-sm font-semibold text-fg">Caducidad</label>
                     <input
                         type="date"
                         value={caducidad}
                         onChange={(e) => setCaducidad(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                     />
                 </div>
 
                 <div>
-                    <label className="font-semibold">Cantidad inicial *</label>
+                    <label className="text-sm font-semibold text-fg">Cantidad inicial *</label>
                     <input
                         type="number"
                         step="0.01"
                         value={cantidadInicial}
                         onChange={(e) => setCantidadInicial(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                         required
                     />
                 </div>
 
                 <div>
-                    <label className="font-semibold">Stock disponible</label>
+                    <label className="text-sm font-semibold text-fg">Stock disponible</label>
                     <input
                         type="number"
                         step="0.01"
                         value={stockDisponible}
                         onChange={(e) => setStockDisponible(e.target.value)}
                         placeholder="Si vacío = cantidad inicial"
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                     />
                 </div>
 
                 <div>
-                    <label className="font-semibold">Coste unitario</label>
+                    <label className="text-sm font-semibold text-fg">Coste unitario</label>
                     <input
                         type="number"
                         step="0.01"
                         value={costeUnitario}
                         onChange={(e) => setCosteUnitario(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                        className="mt-1 w-full rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                     />
                 </div>
 
                 <div className="md:col-span-2">
-                    <label className="font-semibold">Notas</label>
+                    <label className="text-sm font-semibold text-fg">Notas</label>
                     <textarea
                         value={notas}
                         onChange={(e) => setNotas(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2 w-full min-h-[90px]"
+                        className="mt-1 min-h-[90px] w-full resize-none rounded-xl border border-border bg-surface-2 px-3 py-2 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
                         disabled={loading}
                     />
                 </div>
@@ -172,7 +172,7 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
                 <button
                     type="submit"
                     disabled={loading || !ok}
-                    className="md:col-span-2 bg-verde text-white py-2 rounded-xl font-extrabold mt-1 disabled:opacity-60"
+                    className="mt-1 cursor-pointer rounded-xl bg-accent py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover disabled:opacity-60 md:col-span-2"
                 >
                     {loading ? "Guardando..." : "Crear lote"}
                 </button>

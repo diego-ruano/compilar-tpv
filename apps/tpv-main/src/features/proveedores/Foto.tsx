@@ -66,28 +66,28 @@ export default function ProveedorFotoField({
 
 	return (
 		<div className="flex flex-col gap-2">
-			<label className="font-semibold text-negro">{label}</label>
+			<label className="text-sm font-semibold text-fg">{label}</label>
 
 			<div className="flex items-start gap-4">
-				<div className="w-[130px] h-[130px] rounded-xl border-2 border-negro bg-gris overflow-hidden flex items-center justify-center shrink-0">
+				<div className="flex h-[130px] w-[130px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
 					{shownUrl ? (
 						<img
 							src={shownUrl}
 							alt="Foto proveedor"
-							className="w-full h-full object-cover"
+							className="h-full w-full object-cover"
 							draggable={false}
 						/>
 					) : (
-						<span className="text-negro/50 font-semibold text-sm">Sin foto</span>
+						<span className="text-sm font-semibold text-fg-subtle">Sin foto</span>
 					)}
 				</div>
 
 				<div className="flex flex-col gap-2">
-					<div className="flex gap-2 flex-wrap">
+					<div className="flex flex-wrap gap-2">
 						<button
 							type="button"
 							onClick={pickFile}
-							className="border-2 border-verde text-verde rounded-xl px-3 py-2 hover:bg-verde hover:text-white transition font-semibold"
+							className="cursor-pointer rounded-xl bg-accent px-3 py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover"
 						>
 							{shownUrl ? "Cambiar foto" : "Añadir foto"}
 						</button>
@@ -96,14 +96,14 @@ export default function ProveedorFotoField({
 							<button
 								type="button"
 								onClick={eliminarFoto}
-								className="border-2 border-rojo text-rojo rounded-xl px-3 py-2 hover:bg-rojo hover:text-white transition font-semibold"
+								className="cursor-pointer rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 font-semibold text-danger transition hover:opacity-90"
 							>
 								Eliminar
 							</button>
 						)}
 					</div>
 
-					<p className="text-xs text-negro/60 max-w-[380px]">
+					<p className="max-w-[380px] text-xs text-fg-muted">
 						PNG/JPG. La imagen se recorta para encajar. (No es redimensionable con el ratón)
 					</p>
 

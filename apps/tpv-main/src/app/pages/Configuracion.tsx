@@ -7,7 +7,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import { useMode } from "../../shared/stores/useMode";
+import { useTheme } from "../../shared/stores/useTheme";
 
+import { Settings } from "lucide-react";
 import { cn } from "../../features/configuracion/utils";
 import type {
     LicenseInfo,
@@ -57,7 +59,10 @@ export default function Configuracion() {
     const [contactEmail, setContactEmail] = useState("soporte@altaria.dev");
     const [contactPhone, setContactPhone] = useState("+34 600 000 000");
 
-    const [darkMode, setDarkMode] = useState(false);
+    // Conectado al tema global real: el switch de Apariencia cambia toda la app.
+    const darkMode = useTheme((s) => s.theme === "dark");
+    const setDarkMode = (v: boolean) =>
+        useTheme.getState().setTheme(v ? "dark" : "light");
 
     const [license] = useState<LicenseInfo>({
         plan: "PRO",
@@ -152,7 +157,7 @@ export default function Configuracion() {
     const inputTone = useMemo(
         () =>
             darkMode
-                ? "bg-slate-950/40 border-slate-800 text-white placeholder:text-slate-500"
+                ? "bg-surface-2 border-border text-white placeholder:text-fg-muted"
                 : "",
         [darkMode],
     );
@@ -262,47 +267,37 @@ export default function Configuracion() {
     }, [isMain]);
 
     return (
-        <div className="w-full h-full overflow-hidden bg-transparent">
+        <div className="w-full h-full overflow-hidden bg-bg">
             <style>{`
         @keyframes cfgFadeSlide { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .cfg-animate { animation: cfgFadeSlide 180ms ease-out; }
         @media (prefers-reduced-motion: reduce) { .cfg-animate { animation: none; } }
       `}</style>
 
-            <div className="h-full w-full px-4 md:px-6 py-4 md:py-6">
-                <div className="h-full w-full max-w-[1320px] mx-auto rounded-3xl border border-slate-200 bg-white shadow-sm overflow-hidden flex flex-col">
+            <div className="h-full w-full p-3 sm:p-4 lg:px-10 lg:py-5">
+                <div className="flex h-full w-full flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
                     {/* Header */}
                     <div
                         className={cn(
                             "flex-none px-5 md:px-6 py-4 border-b",
                             darkMode
-                                ? "border-slate-800 bg-slate-950"
-                                : "border-slate-200 bg-white",
+                                ? "border-border bg-surface-2"
+                                : "border-border bg-surface",
                         )}
                     >
                         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                            <div className="min-w-0">
-                                <h1
-                                    className={cn(
-                                        "text-xl md:text-2xl font-semibold tracking-tight",
-                                        darkMode
-                                            ? "text-white"
-                                            : "text-slate-900",
-                                    )}
-                                >
-                                    Configuración
-                                </h1>
-                                <p
-                                    className={cn(
-                                        "text-sm mt-0.5",
-                                        darkMode
-                                            ? "text-slate-300"
-                                            : "text-slate-600",
-                                    )}
-                                >
-                                    Secciones a la izquierda + contenido a la
-                                    derecha.
-                                </p>
+                            <div className="flex min-w-0 items-center gap-3">
+                                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                    <Settings className="size-6" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                    <h1 className="text-xl font-bold tracking-tight text-fg md:text-2xl">
+                                        Configuración
+                                    </h1>
+                                    <p className="mt-0.5 text-sm text-fg-muted">
+                                        Secciones a la izquierda + contenido a la derecha.
+                                    </p>
+                                </div>
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
@@ -351,8 +346,8 @@ export default function Configuracion() {
                             className={cn(
                                 "w-[300px] shrink-0 border-r hidden md:flex flex-col min-h-0",
                                 darkMode
-                                    ? "border-slate-800 bg-slate-950"
-                                    : "border-slate-200 bg-white",
+                                    ? "border-border bg-surface-2"
+                                    : "border-border bg-surface",
                             )}
                         >
                             <div className="px-4 pt-4">
@@ -360,8 +355,8 @@ export default function Configuracion() {
                                     className={cn(
                                         "text-xs font-semibold uppercase tracking-wider",
                                         darkMode
-                                            ? "text-slate-300"
-                                            : "text-slate-600",
+                                            ? "text-fg-muted"
+                                            : "text-fg-muted",
                                     )}
                                 >
                                     Buscar
@@ -376,8 +371,8 @@ export default function Configuracion() {
                                         className={cn(
                                             inputTone,
                                             darkMode
-                                                ? "bg-slate-950/40"
-                                                : "bg-slate-50",
+                                                ? "bg-surface-2"
+                                                : "bg-surface-2",
                                         )}
                                     />
                                 </div>
@@ -388,8 +383,8 @@ export default function Configuracion() {
                                     className={cn(
                                         "text-xs font-semibold uppercase tracking-wider",
                                         darkMode
-                                            ? "text-slate-300"
-                                            : "text-slate-600",
+                                            ? "text-fg-muted"
+                                            : "text-fg-muted",
                                     )}
                                 >
                                     Secciones
@@ -411,11 +406,11 @@ export default function Configuracion() {
                                                     "w-full text-left rounded-2xl px-3 py-3 transition border",
                                                     active
                                                         ? darkMode
-                                                            ? "bg-slate-900 border-slate-800"
-                                                            : "bg-slate-50 border-slate-200"
+                                                            ? "bg-surface-2 border-border"
+                                                            : "bg-surface-2 border-border"
                                                         : darkMode
-                                                            ? "bg-transparent border-transparent hover:bg-slate-900/50"
-                                                            : "bg-transparent border-transparent hover:bg-slate-50",
+                                                            ? "bg-transparent border-transparent hover:bg-surface-2"
+                                                            : "bg-transparent border-transparent hover:bg-surface-2",
                                                 )}
                                             >
                                                 <div
@@ -423,7 +418,7 @@ export default function Configuracion() {
                                                         "text-sm font-semibold",
                                                         darkMode
                                                             ? "text-white"
-                                                            : "text-slate-900",
+                                                            : "text-fg",
                                                     )}
                                                 >
                                                     {it.title}
@@ -432,8 +427,8 @@ export default function Configuracion() {
                                                     className={cn(
                                                         "text-xs mt-0.5",
                                                         darkMode
-                                                            ? "text-slate-300"
-                                                            : "text-slate-600",
+                                                            ? "text-fg-muted"
+                                                            : "text-fg-muted",
                                                     )}
                                                 >
                                                     {it.desc}
@@ -447,8 +442,8 @@ export default function Configuracion() {
                                             className={cn(
                                                 "px-3 py-3 text-sm rounded-2xl border",
                                                 darkMode
-                                                    ? "border-slate-800 text-slate-300"
-                                                    : "border-slate-200 text-slate-600",
+                                                    ? "border-border text-fg-muted"
+                                                    : "border-border text-fg-muted",
                                             )}
                                         >
                                             No hay resultados para “{navQuery}”.
@@ -461,8 +456,8 @@ export default function Configuracion() {
                                 className={cn(
                                     "mt-auto border-t px-4 py-4",
                                     darkMode
-                                        ? "border-slate-800"
-                                        : "border-slate-200",
+                                        ? "border-border"
+                                        : "border-border",
                                 )}
                             >
                                 <div className="min-w-0">
@@ -471,7 +466,7 @@ export default function Configuracion() {
                                             "text-sm font-semibold truncate",
                                             darkMode
                                                 ? "text-white"
-                                                : "text-slate-900",
+                                                : "text-fg",
                                         )}
                                     >
                                         {draft.businessName || "TPV"}
@@ -480,8 +475,8 @@ export default function Configuracion() {
                                         className={cn(
                                             "text-xs truncate",
                                             darkMode
-                                                ? "text-slate-300"
-                                                : "text-slate-600",
+                                                ? "text-fg-muted"
+                                                : "text-fg-muted",
                                         )}
                                     >
                                         {contactEmail}
@@ -494,7 +489,7 @@ export default function Configuracion() {
                         <section
                             className={cn(
                                 "flex-1 min-w-0 min-h-0",
-                                darkMode ? "bg-slate-950" : "bg-white",
+                                darkMode ? "bg-surface-2" : "bg-surface",
                             )}
                         >
                             {/* Mobile selector */}
@@ -502,8 +497,8 @@ export default function Configuracion() {
                                 className={cn(
                                     "md:hidden border-b px-4 py-3",
                                     darkMode
-                                        ? "border-slate-800 bg-slate-950"
-                                        : "border-slate-200 bg-white",
+                                        ? "border-border bg-surface-2"
+                                        : "border-border bg-surface",
                                 )}
                             >
                                 <div
@@ -511,7 +506,7 @@ export default function Configuracion() {
                                         "text-sm font-semibold",
                                         darkMode
                                             ? "text-white"
-                                            : "text-slate-900",
+                                            : "text-fg",
                                     )}
                                 >
                                     {PageTitle}
@@ -527,8 +522,8 @@ export default function Configuracion() {
                                         className={cn(
                                             inputTone,
                                             darkMode
-                                                ? "bg-slate-950/40"
-                                                : "bg-slate-50",
+                                                ? "bg-surface-2"
+                                                : "bg-surface-2",
                                         )}
                                     />
                                 </div>
@@ -547,10 +542,10 @@ export default function Configuracion() {
                                                     className={cn(
                                                         "shrink-0 px-3 py-2 rounded-full border text-sm font-semibold",
                                                         active
-                                                            ? "bg-slate-900 border-slate-900 text-white"
+                                                            ? "bg-surface-2 border-border text-white"
                                                             : darkMode
-                                                                ? "bg-slate-950 border-slate-800 text-slate-200"
-                                                                : "bg-white border-slate-200 text-slate-800",
+                                                                ? "bg-surface-2 border-border text-fg-muted"
+                                                                : "bg-surface border-border text-fg",
                                                     )}
                                                 >
                                                     {it.title}
@@ -569,8 +564,8 @@ export default function Configuracion() {
                                             className={cn(
                                                 "text-xs font-semibold uppercase tracking-wider",
                                                 darkMode
-                                                    ? "text-slate-300"
-                                                    : "text-slate-600",
+                                                    ? "text-fg-muted"
+                                                    : "text-fg-muted",
                                             )}
                                         >
                                             Configuración / {PageTitle}
@@ -582,7 +577,7 @@ export default function Configuracion() {
                                                     "text-xl font-semibold",
                                                     darkMode
                                                         ? "text-white"
-                                                        : "text-slate-900",
+                                                        : "text-fg",
                                                 )}
                                             >
                                                 {PageTitle}
@@ -593,8 +588,8 @@ export default function Configuracion() {
                                                     className={cn(
                                                         "hidden md:flex items-center gap-2 text-xs",
                                                         darkMode
-                                                            ? "text-slate-300"
-                                                            : "text-slate-600",
+                                                            ? "text-fg-muted"
+                                                            : "text-fg-muted",
                                                     )}
                                                 >
                                                     <span className="font-semibold">
@@ -614,8 +609,8 @@ export default function Configuracion() {
                                                                     className={cn(
                                                                         "px-2 py-1 rounded-full border transition",
                                                                         darkMode
-                                                                            ? "border-slate-800 bg-slate-950/40 hover:bg-slate-900 text-slate-200"
-                                                                            : "border-slate-200 bg-white hover:bg-slate-50 text-slate-800",
+                                                                            ? "border-border bg-surface-2 hover:bg-surface-2 text-fg-muted"
+                                                                            : "border-border bg-surface hover:bg-surface-2 text-fg",
                                                                     )}
                                                                 >
                                                                     {a.label}

@@ -1,5 +1,6 @@
 // src/features/ventaRapida/ui/AddProductoCard.tsx
 import React from "react";
+import { Plus } from "lucide-react";
 
 export default function AddProductoCard({ onClick }: { onClick: () => void }) {
   return (
@@ -7,18 +8,18 @@ export default function AddProductoCard({ onClick }: { onClick: () => void }) {
       type="button"
       onClick={onClick}
       className="
-        rounded-xl border border-black/10 bg-white hover:bg-black/5 transition
-        p-2.5 sm:p-3
-        text-left flex flex-col
+        group flex flex-col rounded-2xl border border-dashed border-border bg-surface
+        p-2.5 text-left transition hover:border-accent hover:bg-accent-soft sm:p-3
+        cursor-pointer active:scale-[0.99]
       "
     >
-      <div className="w-full h-24 sm:h-28 rounded-lg border border-black/5 bg-white flex items-center justify-center">
-        <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-black/10 flex items-center justify-center">
-          <span className="text-2xl sm:text-3xl leading-none text-black/70 font-bold">+</span>
+      <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 sm:h-28">
+        <div className="grid size-12 place-items-center rounded-full bg-accent-soft text-accent transition group-hover:bg-accent group-hover:text-accent-fg sm:size-14">
+          <Plus className="size-6 sm:size-7" aria-hidden />
         </div>
       </div>
 
-      <p className="mt-2 font-bold text-negro text-sm sm:text-base">Añadir producto</p>
+      <p className="mt-2 text-sm font-bold text-fg sm:text-base">Añadir producto</p>
     </button>
   );
 }

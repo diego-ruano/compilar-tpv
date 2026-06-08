@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { X } from "lucide-react";
 
 export default function Modal({
 	open,
@@ -64,24 +65,25 @@ export default function Modal({
 				type="button"
 				aria-label="Cerrar"
 				onClick={() => onCloseRef.current()}
-				className="absolute inset-0 w-full h-full bg-black/40 cursor-pointer"
+				className="absolute inset-0 h-full w-full cursor-pointer bg-black/50"
 			/>
 
 			{/* Panel */}
 			<div
 				ref={panelRef}
 				tabIndex={-1}
-				className={`relative w-[92vw] ${widthClass} bg-blanco rounded-xl shadow-xl border border-negro/10 p-5 outline-none`}
+				className={`relative w-[92vw] ${widthClass} rounded-2xl border border-border bg-surface p-5 text-fg shadow-xl outline-none`}
 				onClick={(e) => e.stopPropagation()}
 			>
-				<div className="flex items-center justify-between gap-3 mb-4">
-					<h3 className="text-xl font-bold text-negro">{title ?? ""}</h3>
+				<div className="mb-4 flex items-center justify-between gap-3">
+					<h3 className="text-xl font-bold text-fg">{title ?? ""}</h3>
 					<button
 						type="button"
 						onClick={() => onCloseRef.current()}
-						className="border-2 border-negro rounded-xl px-3 py-1 hover:bg-negro hover:text-white transition"
+						aria-label="Cerrar"
+						className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border text-fg-muted transition hover:bg-surface-2 hover:text-fg"
 					>
-						Cerrar
+						<X className="size-4" aria-hidden />
 					</button>
 				</div>
 

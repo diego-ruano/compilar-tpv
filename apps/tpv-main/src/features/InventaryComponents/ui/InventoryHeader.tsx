@@ -1,6 +1,6 @@
 // components/inventario/InventoryHeader.tsx
 import React from "react";
-import { ReactComponent as LapizSVG } from "../../../assets/svg/LapizSVG.svg";
+import { Package, ArrowLeft, Plus, FolderPlus } from "lucide-react";
 
 export default function InventoryHeader({
     titulo,
@@ -16,69 +16,50 @@ export default function InventoryHeader({
     onNewProduct: () => void;
 }) {
     return (
-        <div className="bg-blanco w-full p-3 sm:p-4 rounded-2xl shadow-xs border border-black/5">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
-                {/* Left */}
-                <div className="flex items-center justify-start">
-                    {categoriaSeleccionada ? (
-                        <button
-                            type="button"
-                            onClick={onBack}
-                            className="flex cursor-pointer items-center gap-2 text-negro font-semibold hover:opacity-80 transition"
-                        >
-                            <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth={2}
-                                className="w-5 h-5"
-                            >
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-                            </svg>
-                            <span>Volver</span>
-                        </button>
-                    ) : (
-                        <div className="hidden sm:block" />
-                    )}
-                </div>
+        <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+                {/* Izquierda: chip + título (lista) o volver + nombre categoría (detalle) */}
+                {!categoriaSeleccionada ? (
+                    <div className="flex min-w-0 items-center gap-3">
+                        <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                            <Package className="size-6" aria-hidden />
+                        </div>
+                        <div className="min-w-0">
+                            <h2 className="truncate text-xl font-bold text-fg sm:text-2xl">{titulo}</h2>
+                            <p className="text-sm text-fg-muted">Gestiona tus categorías</p>
+                        </div>
+                    </div>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={onBack}
+                        className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
+                    >
+                        <ArrowLeft className="size-4 shrink-0" aria-hidden />
+                        <span className="truncate">{titulo}</span>
+                    </button>
+                )}
 
-                {/* Center */}
-                <div className="text-center">
-                    <h2 className="text-lg sm:text-2xl font-extrabold">{titulo}</h2>
-                    <p className="text-sm text-negro/60">
-                        {!categoriaSeleccionada
-                            ? "Gestiona tus categorías"
-                            : "Gestiona los productos de esta categoría"}
-                    </p>
-                </div>
-
-                {/* Right */}
-                <div className="flex justify-center sm:justify-end">
-                    {!categoriaSeleccionada ? (
-                        <button type="button" onClick={onNewCategory} className="w-full sm:w-auto">
-                            <div className="group flex gap-2 w-full sm:w-fit justify-center items-center cursor-pointer border-2 border-verde rounded-2xl px-4 py-2 text-verde transition-all duration-300 ease-out hover:bg-verde hover:text-white hover:shadow-md">
-                                <LapizSVG
-                                    width={22}
-                                    height={22}
-                                    className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:rotate-6"
-                                />
-                                <p className="font-bold">Nueva categoría</p>
-                            </div>
-                        </button>
-                    ) : (
-                        <button type="button" onClick={onNewProduct} className="w-full sm:w-auto">
-                            <div className="group flex gap-2 w-full sm:w-fit justify-center items-center cursor-pointer border-2 border-verde rounded-2xl px-4 py-2 text-verde transition-all duration-300 ease-out hover:bg-verde hover:text-white hover:shadow-md">
-                                <LapizSVG
-                                    width={22}
-                                    height={22}
-                                    className="transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:rotate-6"
-                                />
-                                <p className="font-bold">Nuevo producto</p>
-                            </div>
-                        </button>
-                    )}
-                </div>
+                {/* Derecha: acción */}
+                {!categoriaSeleccionada ? (
+                    <button
+                        type="button"
+                        onClick={onNewCategory}
+                        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                    >
+                        <FolderPlus className="size-4" aria-hidden />
+                        <span className="hidden xs:inline">Nueva categoría</span>
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={onNewProduct}
+                        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                    >
+                        <Plus className="size-4" aria-hidden />
+                        <span className="hidden xs:inline">Nuevo producto</span>
+                    </button>
+                )}
             </div>
         </div>
     );
