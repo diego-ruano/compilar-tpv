@@ -31,6 +31,7 @@ import { verifyJwtHs256 } from "./server/middleware/jwtHs256";
 import { pairingRoutes } from "./routes/pairing";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { inventarioRoutes } from "./domains/inventario/inventario.routes";
+import { loginRoutes } from "./domains/login/login.routes";
 import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
@@ -128,6 +129,7 @@ app.route("/v1/pair", pairingRoutes);
 // ---------------- Negocio (Handy) ----------------
 app.route("/v1/clientes", clientesRoutes);
 app.route("/v1/inventario", inventarioRoutes);
+app.route("/v1/login", loginRoutes);
 app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/stats", statsRoutes);
 app.route("/v1/tareas", tareasRoutes);

@@ -1,0 +1,105 @@
+// src/domains/login/login.commands.ts
+
+import type { ApplyCommand } from "../../lib/hub";
+
+export type BuiltCommand = {
+	commandName: string;
+	command: ApplyCommand;
+	cloudPayload: any;
+};
+
+export function setTurnoPartido(input: {
+	id_usuario: number;
+	fecha: string | null;
+	turno_partido: boolean;
+}): BuiltCommand {
+	return {
+		commandName: "set_turno_partido_hoy",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido)
+					VALUES (?1, COALESCE(?2, date('now','localtime')), ?3)
+					ON CONFLICT(ID_Usuario, Fecha) DO UPDATE SET
+						Turno_Partido = excluded.Turno_Partido;
+				`,
+				args: [input.id_usuario, input.fecha, input.turno_partido ? 1 : 0],
+			},
+		},
+		cloudPayload: input,
+	};
+}
+
+export function completeInitialSetup(input: {
+	id_usuario: number;
+	email_nuevo: string;
+	password_hash: string;
+}): BuiltCommand {
+	return {
+		commandName: "complete_initial_setup",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Usuarios
+					SET Email = ?2, Password_Hash = ?3, Requiere_Setup = 0
+					WHERE ID_Usuario = ?1;
+				`,
+				args: [input.id_usuario, input.email_nuevo, input.password_hash],
+			},
+		},
+		cloudPayload: { id_usuario: input.id_usuario, email_nuevo: input.email_nuevo },
+	};
+}
+
+export function punchEntrada(input: {
+	id_usuario: number;
+	fecha: string | null;
+	hora_evento: string | null;
+	parte: number;
+}): BuiltCommand {
+	return {
+		commandName: "punch",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					INSERT INTO Fichajes (
+						ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
+					)
+					VALUES (?1, COALESCE(?2, date('now','localtime')), ?3, COALESCE(?4, datetime('now','localtime')), NULL, 'ABIERTO', 0);
+				`,
+				args: [input.id_usuario, input.fecha, input.parte, input.hora_evento],
+			},
+		},
+		cloudPayload: { ...input, tipo: "entrada" },
+	};
+}
+
+export function punchSalida(input: {
+	id_usuario: number;
+	fecha: string | null;
+	hora_evento: string | null;
+	id_fichaje: number;
+}): BuiltCommand {
+	return {
+		commandName: "punch",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Fichajes
+					SET Hora_Salida = COALESCE(?2, datetime('now','localtime')),
+						Estado = 'CERRADO',
+						Cerrado_Automatico = 0,
+						Cierre_Motivo = NULL,
+						Incidencia = NULL
+					WHERE ID_Fichaje = ?1;
+				`,
+				args: [input.id_fichaje, input.hora_evento],
+			},
+		},
+		cloudPayload: { ...input, tipo: "salida" },
+	};
+}
