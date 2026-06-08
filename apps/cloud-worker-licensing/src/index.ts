@@ -29,6 +29,7 @@ import {
 import { verifyJwtHs256 } from "./server/middleware/jwtHs256";
 
 import { pairingRoutes } from "./routes/pairing";
+import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { inventarioRoutes } from "./domains/inventario/inventario.routes";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
@@ -123,6 +124,7 @@ app.get("/ws", async (c) => {
 app.route("/v1/pair", pairingRoutes);
 
 // ---------------- Negocio (Handy) ----------------
+app.route("/v1/clientes", clientesRoutes);
 app.route("/v1/inventario", inventarioRoutes);
 app.route("/v1/tareas", tareasRoutes);
 
