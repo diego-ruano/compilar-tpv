@@ -38,6 +38,7 @@ import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
+import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
 
 import legacyLicensing from "./server/index";
@@ -139,6 +140,7 @@ app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/reservas", reservasRoutes);
 app.route("/v1/stats", statsRoutes);
 app.route("/v1/tareas", tareasRoutes);
+app.route("/v1/trabajadores", trabajadoresRoutes);
 
 // ---------------- Gestión de dispositivos ----------------
 app.post("/v1/device/revoke", (c) =>
