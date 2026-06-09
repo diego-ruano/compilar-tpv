@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Check, Pencil, Trash2, StickyNote, ReceiptText } from "lucide-react";
 import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
 
@@ -111,29 +112,29 @@ export default function TicketPanel({
   return (
     <div
       className="
-        order-2 lg:order-none
-        w-full lg:w-[380px] xl:w-[420px]
-        lg:shrink-0
-        bg-blanco rounded-xl shadow-xs
-        p-3 sm:p-4
-        flex flex-col min-h-0
+        order-2 flex min-h-0 w-full flex-col p-3 lg:order-none lg:w-[380px]
+        xl:w-[420px] lg:shrink-0 sm:p-4
       "
     >
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h3 className="text-base sm:text-lg font-bold text-negro">Ticket</h3>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="flex items-center gap-2 text-base font-bold text-fg sm:text-lg">
+          <ReceiptText className="size-5 text-accent" aria-hidden />
+          Ticket
+        </h3>
 
-        <div className="text-xs sm:text-sm font-semibold text-black/70">
-          Total pendiente: <span className="text-black">{formatMoney(totalPendiente)}</span>
+        <div className="text-xs font-semibold text-fg-muted sm:text-sm">
+          Total pendiente:{" "}
+          <span className="text-fg">{formatMoney(totalPendiente)}</span>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-col sm:flex-row items-stretch gap-2">
+      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row">
         <button
           className={cn(
-            "flex-1 px-3 py-2.5 rounded-xl text-sm font-semibold transition",
+            "flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98]",
             canCobrarTodo
-              ? "bg-black text-white hover:bg-black/90"
-              : "bg-black/10 text-black/40 cursor-not-allowed",
+              ? "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover cursor-pointer"
+              : "bg-surface-2 text-fg-subtle cursor-not-allowed",
           )}
           disabled={!canCobrarTodo}
           onClick={onCobrarTodo}
@@ -144,10 +145,10 @@ export default function TicketPanel({
 
         <button
           className={cn(
-            "flex-1 px-3 py-2.5 rounded-xl text-sm font-semibold transition",
+            "flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98]",
             canCobrarFraccionado
-              ? "bg-white border border-black/10 hover:bg-black/5"
-              : "bg-black/10 text-black/40 cursor-not-allowed",
+              ? "border border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer"
+              : "bg-surface-2 text-fg-subtle cursor-not-allowed",
           )}
           disabled={!canCobrarFraccionado}
           onClick={onCobrarFraccionado}
@@ -157,11 +158,17 @@ export default function TicketPanel({
         </button>
       </div>
 
-      <div className="mt-4 flex-1 min-h-0 overflow-y-auto pr-1 rounded-xl border border-black/10 bg-white">
+      <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-bg">
         {ticket.length === 0 ? (
-          <div className="p-4 text-sm text-black/60">Añade productos para empezar.</div>
+          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+            <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+              <ReceiptText className="size-6" aria-hidden />
+            </div>
+            <p className="text-sm font-medium text-fg">El ticket está vacío</p>
+            <p className="text-xs text-fg-muted">Añade productos para empezar.</p>
+          </div>
         ) : (
-          <div className="p-3 flex flex-col gap-2">
+          <div className="flex flex-col gap-2 p-3">
             {ticket.map((t) => {
               const checked = t.seleccionado && !t.pagado;
               const notas = String(t.notas ?? "").trim();
@@ -186,54 +193,61 @@ export default function TicketPanel({
                     }
                   }}
                   className={cn(
-                    "w-full rounded-xl border p-3 text-left transition flex items-center justify-between gap-3",
-                    "border-black/10 hover:bg-black/5",
+                    "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
+                    checked
+                      ? "border-accent bg-accent-soft"
+                      : "border-border bg-surface hover:bg-surface-2",
                     t.pagado && "opacity-70",
                   )}
                   aria-disabled={disabledLine}
                 >
-                  <div className="flex items-center gap-3 min-w-0">
+                  <div className="flex min-w-0 items-center gap-3">
                     <div
                       className={cn(
-                        "w-6 h-6 rounded-full border flex items-center justify-center shrink-0",
-                        checked ? "border-emerald-500 bg-emerald-500" : "border-black/20 bg-white",
-                        t.pagado && "border-black/10 bg-black/5",
+                        "grid size-6 shrink-0 place-items-center rounded-full border transition",
+                        checked
+                          ? "border-accent bg-accent text-accent-fg"
+                          : "border-border-strong bg-surface",
+                        t.pagado && "border-border bg-surface-2",
                       )}
                     >
-                      {checked ? <div className="w-2.5 h-2.5 rounded-full bg-white" /> : null}
+                      {checked ? <Check className="size-3.5" aria-hidden /> : null}
                     </div>
 
                     <div className="min-w-0">
                       <p
                         className={cn(
-                          "font-semibold truncate text-sm sm:text-base",
-                          t.pagado && "line-through text-black/50",
+                          "flex items-center gap-2 truncate text-sm font-semibold text-fg sm:text-base",
+                          t.pagado && "text-fg-subtle line-through",
                         )}
                       >
-                        {t.nombre}
+                        <span className="truncate">{t.nombre}</span>
 
                         {tieneNota ? (
-                          <span className="ml-2 text-[11px] font-bold px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-900">
+                          <span className="shrink-0 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning">
                             NOTA
                           </span>
                         ) : null}
                       </p>
 
-                      <p className="text-xs text-black/50">
+                      <p className="text-xs text-fg-subtle">
                         {t.pagado ? "Cobrado" : "Pendiente"}
                       </p>
 
                       {tieneNota ? (
-                        <p className="mt-1 text-xs text-black/70 truncate">📝 {notas}</p>
+                        <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
+                          <StickyNote className="size-3 shrink-0" aria-hidden />
+                          {notas}
+                        </p>
                       ) : null}
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex shrink-0 items-center gap-2">
                     <span
                       className={cn(
-                        "font-bold text-sm sm:text-base",
-                        t.pagado && "line-through text-black/40",
+                        "text-sm font-bold text-fg sm:text-base",
+                        t.pagado && "text-fg-subtle line-through",
                       )}
                     >
                       {formatMoney(t.precio)}
@@ -247,18 +261,19 @@ export default function TicketPanel({
                       }}
                       disabled={!lineaGuardada}
                       className={cn(
-                        "w-8 h-8 flex items-center justify-center rounded-lg border transition",
+                        "grid size-8 place-items-center rounded-lg border transition",
                         !lineaGuardada
-                          ? "border-black/10 text-black/25 bg-black/5 cursor-not-allowed"
-                          : "border-black/10 text-black/55 hover:bg-black/5 hover:text-black",
+                          ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                          : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
                       )}
                       title={
                         lineaGuardada
                           ? "Añadir/editar nota"
                           : "La nota estará disponible cuando la línea esté confirmada"
                       }
+                      aria-label="Nota"
                     >
-                      ✏️
+                      <Pencil className="size-4" aria-hidden />
                     </button>
 
                     {!t.pagado && (
@@ -268,10 +283,11 @@ export default function TicketPanel({
                           e.stopPropagation();
                           onEliminarLinea(t.id);
                         }}
-                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-black/10 text-black/50 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition"
+                        className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
                         title="Eliminar producto"
+                        aria-label="Eliminar"
                       >
-                        🗑️
+                        <Trash2 className="size-4" aria-hidden />
                       </button>
                     )}
                   </div>
@@ -282,20 +298,20 @@ export default function TicketPanel({
         )}
       </div>
 
-      <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">
+      <div className="mt-4 rounded-2xl border border-border bg-surface p-3">
         <div className="flex items-center justify-between">
-          <p className="text-sm text-black/60">Seleccionado</p>
-          <p className="font-bold">{formatMoney(totalSeleccionado)}</p>
+          <p className="text-sm text-fg-muted">Seleccionado</p>
+          <p className="text-lg font-bold text-fg">{formatMoney(totalSeleccionado)}</p>
         </div>
 
         {paso === "metodo" ? (
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <button
               className={cn(
-                "px-3 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition",
+                "rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98] sm:py-3",
                 canCobrarMetodo
-                  ? "bg-black text-white hover:bg-black/90"
-                  : "bg-black/10 text-black/40 cursor-not-allowed",
+                  ? "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover cursor-pointer"
+                  : "bg-surface-2 text-fg-subtle cursor-not-allowed",
               )}
               disabled={!canCobrarMetodo}
               onClick={onCobrarTarjeta}
@@ -306,10 +322,10 @@ export default function TicketPanel({
 
             <button
               className={cn(
-                "px-3 py-2.5 sm:py-3 rounded-xl text-sm font-semibold transition",
+                "rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98] sm:py-3",
                 canCobrarMetodo
-                  ? "bg-white border border-black/10 hover:bg-black/5"
-                  : "bg-black/10 text-black/40 cursor-not-allowed",
+                  ? "border border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer"
+                  : "bg-surface-2 text-fg-subtle cursor-not-allowed",
               )}
               disabled={!canCobrarMetodo}
               onClick={onStartEfectivo}
@@ -319,7 +335,7 @@ export default function TicketPanel({
             </button>
 
             <button
-              className="sm:col-span-2 px-3 py-2.5 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+              className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer sm:col-span-2"
               onClick={onCancelarCobro}
               type="button"
             >
@@ -327,7 +343,7 @@ export default function TicketPanel({
             </button>
           </div>
         ) : (
-          <p className="mt-2 text-xs text-black/50">
+          <p className="mt-2 text-xs text-fg-subtle">
             Selecciona productos pendientes y pulsa “Cobrar fraccionado”, o pulsa “Cobrar todo”.
           </p>
         )}
@@ -337,16 +353,16 @@ export default function TicketPanel({
         <div className="fixed inset-0 z-[120]">
           <button
             type="button"
-            className="absolute inset-0 bg-black/30"
+            className="absolute inset-0 bg-black/50"
             onClick={closeNotaModal}
             aria-label="Cerrar"
           />
 
-          <div className="absolute left-1/2 top-1/2 w-[560px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-black/10 bg-white shadow-xl overflow-hidden max-h-[calc(100vh-1.5rem)]">
-            <div className="p-3 sm:p-4 border-b border-black/10 flex items-center justify-between gap-3">
+          <div className="absolute left-1/2 top-1/2 max-h-[calc(100vh-1.5rem)] w-[560px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
+            <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
               <div className="min-w-0">
-                <h3 className="text-base sm:text-lg font-bold text-negro">Nota del producto</h3>
-                <p className="text-xs sm:text-sm text-negro/60 truncate">
+                <h3 className="text-base font-bold text-fg sm:text-lg">Nota del producto</h3>
+                <p className="truncate text-xs text-fg-muted sm:text-sm">
                   {currentItem ? currentItem.nombre : "—"}
                 </p>
               </div>
@@ -355,31 +371,33 @@ export default function TicketPanel({
                 type="button"
                 onClick={closeNotaModal}
                 disabled={notaSaving}
-                className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                className="rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
               >
                 Cerrar
               </button>
             </div>
 
-            <div className="p-3 sm:p-4 overflow-y-auto max-h-[calc(100vh-9rem)]">
-              <label className="text-sm font-semibold text-negro">Escribe una nota para cocina</label>
+            <div className="max-h-[calc(100vh-9rem)] overflow-y-auto p-3 sm:p-4">
+              <label className="text-sm font-semibold text-fg">
+                Escribe una nota para cocina
+              </label>
 
               <textarea
                 value={notaValue}
                 onChange={(e) => setNotaValue(e.target.value)}
                 placeholder="Ej: sin queso, bien hecho, sin cebolla…"
-                className="mt-2 w-full min-h-[110px] sm:min-h-[120px] rounded-2xl border border-black/10 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-black/10 resize-none"
+                className="mt-2 min-h-[110px] w-full resize-none rounded-2xl border border-border bg-surface-2 px-4 py-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring sm:min-h-[120px]"
                 disabled={notaSaving}
               />
 
-              <p className="mt-2 text-xs text-black/50">Tip: Ctrl/⌘ + Enter para guardar.</p>
+              <p className="mt-2 text-xs text-fg-subtle">Tip: Ctrl/⌘ + Enter para guardar.</p>
 
-              <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={closeNotaModal}
                   disabled={notaSaving}
-                  className="w-full px-4 py-2.5 rounded-xl border border-black/20 hover:bg-gris transition font-semibold"
+                  className="w-full rounded-xl border border-border bg-surface px-4 py-2.5 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -389,10 +407,10 @@ export default function TicketPanel({
                   onClick={() => void saveNota()}
                   disabled={notaSaving}
                   className={cn(
-                    "w-full px-4 py-2.5 rounded-xl font-extrabold transition",
+                    "w-full rounded-xl px-4 py-2.5 font-extrabold transition active:scale-[0.98]",
                     notaSaving
-                      ? "bg-gray-400 cursor-not-allowed text-white"
-                      : "bg-black text-white hover:bg-black/90",
+                      ? "bg-surface-2 text-fg-subtle cursor-not-allowed"
+                      : "bg-accent text-accent-fg shadow-sm hover:bg-accent-hover cursor-pointer",
                   )}
                 >
                   {notaSaving ? "Guardando..." : "Guardar nota"}

@@ -3,6 +3,7 @@ import React from "react";
 import { Stage, Layer, Rect, Line, Group } from "react-konva";
 import type { Salon, MesaMeta } from "./types";
 import TableNode from "./TableNode";
+import { useTheme } from "../../shared/stores/useTheme";
 
 export default function MapCanvas({
     loading,
@@ -21,25 +22,31 @@ export default function MapCanvas({
     mesaMetaById: Record<number, MesaMeta>;
     onOpenMesa: (mesaId: number, mesaNombre: string) => void;
 }) {
+    const dark = useTheme((s) => s.theme === "dark");
+
+    // Colores del lienzo según el tema (Konva necesita valores literales).
+    const canvasBg = dark ? "#17191f" : "#ffffff";
+    const roomStroke = dark ? "rgba(148,163,184,0.45)" : "rgba(15,23,42,0.55)";
+
     return (
-        <div className="mt-6 w-full rounded-2xl border border-black/10 bg-white overflow-hidden">
+        <div className="mt-6 w-full overflow-hidden rounded-2xl border border-border bg-surface">
             <div
                 ref={mapBoxRef}
                 className="w-full h-[420px] md:h-[480px] lg:h-[520px]"
             >
                 {loading ? (
-                    <div className="w-full h-full grid place-items-center text-negro/60">
+                    <div className="grid h-full w-full place-items-center text-fg-muted">
                         Cargando…
                     </div>
                 ) : !activeSalon ? (
-                    <div className="w-full h-full grid place-items-center text-negro/60">
+                    <div className="grid h-full w-full place-items-center text-fg-muted">
                         No hay salones guardados.
                     </div>
                 ) : (
                     <Stage
                         width={mapSize.width}
                         height={mapSize.height}
-                        style={{ background: "#fff" }}
+                        style={{ background: canvasBg }}
                     >
                         <Layer>
                             <Rect
@@ -47,7 +54,7 @@ export default function MapCanvas({
                                 y={0}
                                 width={mapSize.width}
                                 height={mapSize.height}
-                                fill="#ffffff"
+                                fill={canvasBg}
                             />
 
                             <Group
@@ -59,7 +66,7 @@ export default function MapCanvas({
                                 <Line
                                     points={activeSalon.room.points}
                                     closed
-                                    stroke="rgba(15,23,42,0.55)"
+                                    stroke={roomStroke}
                                     strokeWidth={2}
                                     lineJoin="round"
                                 />
@@ -70,6 +77,7 @@ export default function MapCanvas({
                                         table={t}
                                         mesaMetaById={mesaMetaById}
                                         onOpenMesa={onOpenMesa}
+                                        dark={dark}
                                     />
                                 ))}
                             </Group>

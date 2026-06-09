@@ -1,22 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  Zap,
+  LayoutGrid,
+  Package,
+  CalendarDays,
+  Users,
+  Truck,
+  Contact,
+  ListChecks,
+  Wallet,
+  BarChart3,
+  Settings,
+  LogOut,
+  PanelLeft,
+  PanelLeftClose,
+  type LucideIcon,
+} from "lucide-react";
 import NavBarItem from "./NavBarItem";
-import { ReactComponent as MesaSVG } from "../../assets/svg/MesaSVG.svg";
-import { ReactComponent as MenuOpen } from "../../assets/svg/MenuOpen.svg";
-import { ReactComponent as MenuClose } from "../../assets/svg/MenuClose.svg";
-import { ReactComponent as ReservasSVG } from "../../assets/svg/ReservasSVG.svg";
-import { ReactComponent as TrabajadoresSVG } from "../../assets/svg/TrabajadoresSVG.svg";
-import { ReactComponent as ClienteSVG } from "../../assets/svg/ClienteSVG.svg";
-import { ReactComponent as ConfiguracionSVG } from "../../assets/svg/ConfiguracionSVG.svg";
-import { ReactComponent as LogoutSVG } from "../../assets/svg/LogoutSVG.svg";
-import { ReactComponent as InventarioSVG } from "../../assets/svg/InventarioSVG.svg";
-import { ReactComponent as EstadisticasSVG } from "../../assets/svg/EstadisticasSVG.svg";
-import { ReactComponent as ProveedoresSVG } from "../../assets/svg/ProveedoresSVG.svg";
-import { ReactComponent as CuentasSVG } from "../../assets/svg/CuentasSVG.svg";
-import { ReactComponent as VentaRapidaSVG } from "../../assets/svg/VentaRapidaSVG.svg";
-import { ReactComponent as TareasSVG } from "../../assets/svg/TareasSVG.svg";
 import Logo from "../../assets/img/logo-morado-cuadrado.png";
 import { useAuth } from "../../shared/stores/useAuth";
+import { cn } from "../../shared/lib/cn";
 
 type Props = {
   open?: boolean;
@@ -24,11 +28,67 @@ type Props = {
   onClose?: () => void;
 };
 
+type MenuItem = { pagina: string; nombre?: string; icon: LucideIcon };
+
+// Catálogo de entradas del menú (icono lucide coherente por dominio).
+const ITEMS = {
+  ventaRapida: { pagina: "VentaRapida", nombre: "Venta Rápida", icon: Zap },
+  mesas: { pagina: "Mesas", icon: LayoutGrid },
+  comandas: { pagina: "Mesas", nombre: "Comandas", icon: LayoutGrid },
+  inventario: { pagina: "Inventario", icon: Package },
+  reservas: { pagina: "Reservas", icon: CalendarDays },
+  trabajadores: { pagina: "Trabajadores", icon: Users },
+  proveedores: { pagina: "Proveedores", nombre: "Proveedores y Pedidos", icon: Truck },
+  clientes: { pagina: "Clientes", icon: Contact },
+  tareas: { pagina: "Tareas", icon: ListChecks },
+  cuentas: { pagina: "Cuentas", icon: Wallet },
+  estadisticas: { pagina: "Estadisticas", icon: BarChart3 },
+  configuracion: { pagina: "Configuracion", nombre: "Configuración", icon: Settings },
+} satisfies Record<string, MenuItem>;
+
+// Menú por rol (mismos accesos que la versión anterior).
+const MENU_BY_ROLE: Record<string, { top: MenuItem[]; bottom: MenuItem[] }> = {
+  Administrador: {
+    top: [
+      ITEMS.ventaRapida,
+      ITEMS.mesas,
+      ITEMS.inventario,
+      ITEMS.reservas,
+      ITEMS.trabajadores,
+      ITEMS.proveedores,
+      ITEMS.clientes,
+      ITEMS.tareas,
+      ITEMS.cuentas,
+      ITEMS.estadisticas,
+    ],
+    bottom: [ITEMS.configuracion],
+  },
+  Camarero: {
+    top: [
+      ITEMS.ventaRapida,
+      ITEMS.mesas,
+      ITEMS.inventario,
+      ITEMS.reservas,
+      ITEMS.trabajadores,
+      ITEMS.tareas,
+    ],
+    bottom: [],
+  },
+  Limpieza: {
+    top: [ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
+    bottom: [],
+  },
+  Cocinero: {
+    top: [ITEMS.comandas, ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
+    bottom: [],
+  },
+};
+
 function NavBar({ open: openProp, onToggle, onClose }: Props) {
-  const { role, logout } = useAuth();
+  const { role, nombre, logout } = useAuth();
   const navigate = useNavigate();
 
-  // ✅ Soporta: controlado por layout (responsive) o “uncontrolled” (por si lo usas en otro sitio)
+  // Soporta controlado por layout (responsive) o "uncontrolled".
   const [openLocal, setOpenLocal] = useState(false);
   const isControlled = typeof openProp === "boolean";
   const open = isControlled ? (openProp as boolean) : openLocal;
@@ -42,15 +102,13 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
     return window.matchMedia("(min-width: 1024px)").matches;
   }, []);
 
-  // ✅ Si pasamos de móvil->desktop, dejamos el sidebar abierto (más cómodo en desktop)
+  // Al pasar de móvil -> desktop, dejamos el sidebar abierto.
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const mq = window.matchMedia("(min-width: 1024px)");
     const handler = () => {
       if (mq.matches) {
-        // en desktop, por defecto abierto si venimos de overlay cerrado
-        // (pero sin forzar si ya está abierto)
         if (!open) {
           if (onToggle) onToggle();
           else setOpen(true);
@@ -69,7 +127,6 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
   };
 
   const closeIfMobile = () => {
-    // ✅ En móvil cerramos el overlay al navegar
     if (!isLgUp) {
       if (onClose) onClose();
       else setOpen(false);
@@ -82,219 +139,113 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
     closeIfMobile();
   };
 
-  const baseSectionClass = `flex flex-col h-full gap-3 transition-all duration-500 bg-blanco sticky top-0 ${
-    open ? "w-60" : "w-12"
-  }`;
+  const menu = MENU_BY_ROLE[role];
+  if (!menu) return null;
 
-  const header = (
-    <header className="flex items-center p-2 justify-between w-full">
-      <img className={` w-8 ${open ? "" : "hidden"}`} src={Logo} alt="" />
-      <MenuOpen
-        width={32}
-        height={32}
-        className={`cursor-pointer ${open ? "hidden" : ""}`}
-        onClick={actualizarApertura}
-      />
-      <MenuClose
-        width={32}
-        height={32}
-        className={`cursor-pointer ${open ? "" : "hidden"}`}
-        onClick={actualizarApertura}
-      />
-    </header>
+  const initial = (nombre?.[0] ?? "?").toUpperCase();
+
+  return (
+    <aside
+      className={cn(
+        "sticky top-0 flex h-full flex-col border-r border-border bg-surface transition-[width] duration-300",
+        open ? "w-64" : "w-16",
+      )}
+    >
+      {/* Cabecera: logo + contraer/expandir */}
+      <header className="flex h-12 shrink-0 items-center justify-between gap-2 px-2">
+        <img
+          src={Logo}
+          alt="logo"
+          className={cn("size-8 rounded-lg object-contain", open ? "" : "hidden")}
+        />
+        <button
+          type="button"
+          onClick={actualizarApertura}
+          aria-label={open ? "Contraer menú" : "Expandir menú"}
+          title={open ? "Contraer menú" : "Expandir menú"}
+          className={cn(
+            "grid size-9 place-items-center rounded-xl text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer",
+            open ? "" : "mx-auto",
+          )}
+        >
+          {open ? (
+            <PanelLeftClose className="size-5" aria-hidden />
+          ) : (
+            <PanelLeft className="size-5" aria-hidden />
+          )}
+        </button>
+      </header>
+
+      {/* Navegación principal */}
+      <nav className="flex flex-1 flex-col gap-1 overflow-y-auto overflow-x-hidden px-2 py-2">
+        {menu.top.map((item) => (
+          <NavBarItem
+            key={`${item.pagina}-${item.nombre ?? ""}`}
+            pagina={item.pagina}
+            nombre={item.nombre}
+            svg={item.icon}
+            abierto={open}
+            onClick={closeIfMobile}
+          />
+        ))}
+      </nav>
+
+      {/* Pie: accesos secundarios + usuario + cerrar sesión */}
+      <div className="flex shrink-0 flex-col gap-1 border-t border-border px-2 py-2">
+        {menu.bottom.map((item) => (
+          <NavBarItem
+            key={`${item.pagina}-${item.nombre ?? ""}`}
+            pagina={item.pagina}
+            nombre={item.nombre}
+            svg={item.icon}
+            abierto={open}
+            onClick={closeIfMobile}
+          />
+        ))}
+
+        {/* Usuario actual */}
+        <div
+          className={cn(
+            "flex items-center rounded-xl px-2 py-2",
+            open ? "gap-3" : "justify-center",
+          )}
+        >
+          <div className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-sm font-bold text-accent">
+            {initial}
+          </div>
+          {open && (
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-fg">
+                {nombre || "Usuario"}
+              </p>
+              <p className="truncate text-xs text-fg-muted">{role}</p>
+            </div>
+          )}
+        </div>
+
+        {/* Cerrar sesión */}
+        <button
+          type="button"
+          onClick={handleLogout}
+          title={!open ? "Cerrar Sesión" : undefined}
+          className={cn(
+            "flex items-center rounded-xl text-fg-muted transition hover:bg-danger-soft hover:text-danger cursor-pointer",
+            open ? "gap-3 px-3 py-2.5" : "justify-center p-2.5",
+          )}
+        >
+          <LogOut className="size-5 shrink-0" aria-hidden />
+          <span
+            className={cn(
+              "whitespace-nowrap text-sm transition-all duration-300",
+              open ? "opacity-100" : "w-0 overflow-hidden opacity-0",
+            )}
+          >
+            Cerrar Sesión
+          </span>
+        </button>
+      </div>
+    </aside>
   );
-
-  const navShell = (topItems: React.ReactNode, bottomItems: React.ReactNode) => (
-    <nav className="flex flex-col justify-between h-full w-fit p-2">
-      <div className="flex flex-col gap-3 w-fit">{topItems}</div>
-      <div className="flex flex-col gap-3 w-fit">{bottomItems}</div>
-    </nav>
-  );
-
-  if (role == "Administrador") {
-    return (
-      <section className={baseSectionClass}>
-        {header}
-
-        {navShell(
-          <>
-            <NavBarItem
-              nombre="Venta Rápida"
-              pagina="VentaRapida"
-              svg={VentaRapidaSVG}
-              abierto={open}
-              onClick={closeIfMobile}
-            />
-            <NavBarItem pagina="Mesas" svg={MesaSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Inventario" svg={InventarioSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Reservas" svg={ReservasSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Trabajadores" svg={TrabajadoresSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem
-              pagina="Proveedores"
-              nombre="Proveedores y Pedidos"
-              svg={ProveedoresSVG}
-              abierto={open}
-              onClick={closeIfMobile}
-            />
-            <NavBarItem pagina="Clientes" svg={ClienteSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Tareas" svg={TareasSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Cuentas" svg={CuentasSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Estadisticas" svg={EstadisticasSVG} abierto={open} onClick={closeIfMobile} />
-          </>,
-          <>
-            <NavBarItem
-              pagina="Configuracion"
-              nombre="Configuración"
-              svg={ConfiguracionSVG}
-              abierto={open}
-              onClick={closeIfMobile}
-            />
-            <NavBarItem
-              pagina="Logout"
-              nombre="Cerrar Sesión"
-              svg={LogoutSVG}
-              abierto={open}
-              onClick={handleLogout}
-            />
-          </>,
-        )}
-      </section>
-    );
-  }
-
-  if (role == "Camarero") {
-    return (
-      <section className={baseSectionClass}>
-        <header className="flex items-center p-2 justify-between w-full">
-          <VentaRapidaSVG
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "" : "hidden"}`}
-            onClick={() => {
-              navigate("/ventaRapida");
-              closeIfMobile();
-            }}
-          />
-          <MenuOpen
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "hidden" : ""}`}
-            onClick={actualizarApertura}
-          />
-          <MenuClose
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "" : "hidden"}`}
-            onClick={actualizarApertura}
-          />
-        </header>
-
-        {navShell(
-          <>
-            <NavBarItem pagina="Mesas" svg={MesaSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Inventario" svg={InventarioSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Reservas" svg={ReservasSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Trabajadores" svg={TrabajadoresSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Tareas" svg={TareasSVG} abierto={open} onClick={closeIfMobile} />
-          </>,
-          <>
-            <NavBarItem
-              pagina="Logout"
-              nombre="Cerrar Sesión"
-              svg={LogoutSVG}
-              abierto={open}
-              onClick={handleLogout}
-            />
-          </>,
-        )}
-      </section>
-    );
-  }
-
-  if (role == "Limpieza") {
-    return (
-      <section className={baseSectionClass}>
-        <header className="flex items-center p-2 justify-between w-full">
-          <MenuOpen
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "hidden" : ""}`}
-            onClick={actualizarApertura}
-          />
-          <MenuClose
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "" : "hidden"}`}
-            onClick={actualizarApertura}
-          />
-        </header>
-
-        {navShell(
-          <>
-            <NavBarItem pagina="Inventario" svg={InventarioSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Trabajadores" svg={TrabajadoresSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Tareas" svg={TareasSVG} abierto={open} onClick={closeIfMobile} />
-          </>,
-          <>
-            <NavBarItem
-              pagina="Logout"
-              nombre="Cerrar Sesión"
-              svg={LogoutSVG}
-              abierto={open}
-              onClick={handleLogout}
-            />
-          </>,
-        )}
-      </section>
-    );
-  }
-
-  if (role == "Cocinero") {
-    return (
-      <section className={baseSectionClass}>
-        <header className="flex items-center p-2 justify-between w-full">
-          <MenuOpen
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "hidden" : ""}`}
-            onClick={actualizarApertura}
-          />
-          <MenuClose
-            width={32}
-            height={32}
-            className={`cursor-pointer ${open ? "" : "hidden"}`}
-            onClick={actualizarApertura}
-          />
-        </header>
-
-        {navShell(
-          <>
-            <NavBarItem
-              pagina="Mesas"
-              nombre="Comandas"
-              svg={MesaSVG}
-              abierto={open}
-              onClick={closeIfMobile}
-            />
-            <NavBarItem pagina="Inventario" svg={InventarioSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Trabajadores" svg={TrabajadoresSVG} abierto={open} onClick={closeIfMobile} />
-            <NavBarItem pagina="Tareas" svg={TareasSVG} abierto={open} onClick={closeIfMobile} />
-          </>,
-          <>
-            <NavBarItem
-              pagina="Logout"
-              nombre="Cerrar Sesión"
-              svg={LogoutSVG}
-              abierto={open}
-              onClick={handleLogout}
-            />
-          </>,
-        )}
-      </section>
-    );
-  }
-
-  return null;
 }
 
 export default NavBar;

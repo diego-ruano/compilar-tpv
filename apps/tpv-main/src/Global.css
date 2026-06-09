@@ -1,5 +1,138 @@
 @import "tailwindcss";
 
+/* =========================================================================
+   Variante dark basada en clase (.dark en <html>), no en prefers-color-scheme.
+   El tema lo controla el store useTheme (persistido en localStorage).
+   ========================================================================= */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* =========================================================================
+   TOKENS SEMÁNTICOS (cambian de valor entre claro/oscuro).
+   Los componentes deben usar las utilidades derivadas (bg-surface, text-fg,
+   border-border, etc.) en lugar de colores literales, para que el dark mode
+   funcione sin salpicar `dark:` por todas partes.
+   ========================================================================= */
+:root {
+    /* Fondos */
+    --bg: #f6f7f9;        /* fondo general de la app */
+    --surface: #ffffff;   /* tarjetas / paneles */
+    --surface-2: #f1f5f9; /* hover suave / inputs */
+    --surface-3: #e9edf3; /* hover más marcado / zonas hundidas */
+
+    /* Bordes */
+    --border: rgba(15, 23, 42, 0.08);
+    --border-strong: rgba(15, 23, 42, 0.16);
+
+    /* Texto */
+    --fg: #1e2128;        /* texto principal */
+    --fg-muted: #5b6573;  /* texto secundario */
+    --fg-subtle: #8a93a2; /* texto terciario / placeholders */
+
+    /* Acento (violeta/índigo) */
+    --accent: #6d5cd8;
+    --accent-hover: #5b4bc6;
+    --accent-soft: rgba(109, 92, 216, 0.12); /* fondos suaves de acento */
+    --accent-fg: #ffffff;
+
+    /* Semáforos */
+    --success: #0fb968;
+    --success-fg: #ffffff;
+    --success-soft: rgba(15, 185, 104, 0.12);
+    --danger: #ef4444;
+    --danger-fg: #ffffff;
+    --danger-soft: rgba(239, 68, 68, 0.12);
+    --warning: #f59e0b;
+    --warning-fg: #1e2128;
+    --warning-soft: rgba(245, 158, 11, 0.14);
+
+    /* Foco */
+    --ring: rgba(109, 92, 216, 0.45);
+
+    /* Sombra (suave en claro) */
+    --shadow-color: rgba(15, 23, 42, 0.08);
+}
+
+.dark {
+    /* Fondos (graphite / charcoal) */
+    --bg: #0e0f13;
+    --surface: #17191f;
+    --surface-2: #1e2128;
+    --surface-3: #262a33;
+
+    /* Bordes (sutiles, claros sobre oscuro) */
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.16);
+
+    /* Texto */
+    --fg: #e7e9ee;
+    --fg-muted: #a3abb8;
+    --fg-subtle: #6f7886;
+
+    /* Acento (violeta eléctrico con algo más de brillo) */
+    --accent: #7c6cf0;
+    --accent-hover: #8d7ff5;
+    --accent-soft: rgba(124, 108, 240, 0.18);
+    --accent-fg: #ffffff;
+
+    /* Semáforos */
+    --success: #22c97a;
+    --success-fg: #07120c;
+    --success-soft: rgba(34, 201, 122, 0.16);
+    --danger: #f56565;
+    --danger-fg: #18090a;
+    --danger-soft: rgba(245, 101, 101, 0.16);
+    --warning: #f7b955;
+    --warning-fg: #1a1304;
+    --warning-soft: rgba(247, 185, 85, 0.18);
+
+    /* Foco (glow más visible) */
+    --ring: rgba(124, 108, 240, 0.55);
+
+    /* Sombra casi nula en oscuro (nos apoyamos en bordes/ring) */
+    --shadow-color: rgba(0, 0, 0, 0.45);
+}
+
+/* =========================================================================
+   Mapeo de tokens a utilidades Tailwind v4 (`inline` => las utilidades
+   referencian var() y heredan el cambio claro/oscuro automáticamente).
+   Genera: bg-bg, bg-surface, bg-surface-2, text-fg, text-fg-muted,
+   border-border, ring-ring, bg-accent, text-accent, etc.
+   ========================================================================= */
+@theme inline {
+    --color-bg: var(--bg);
+    --color-surface: var(--surface);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+
+    --color-border: var(--border);
+    --color-border-strong: var(--border-strong);
+
+    --color-fg: var(--fg);
+    --color-fg-muted: var(--fg-muted);
+    --color-fg-subtle: var(--fg-subtle);
+
+    --color-accent: var(--accent);
+    --color-accent-hover: var(--accent-hover);
+    --color-accent-soft: var(--accent-soft);
+    --color-accent-fg: var(--accent-fg);
+
+    --color-success: var(--success);
+    --color-success-fg: var(--success-fg);
+    --color-success-soft: var(--success-soft);
+    --color-danger: var(--danger);
+    --color-danger-fg: var(--danger-fg);
+    --color-danger-soft: var(--danger-soft);
+    --color-warning: var(--warning);
+    --color-warning-fg: var(--warning-fg);
+    --color-warning-soft: var(--warning-soft);
+
+    --color-ring: var(--ring);
+}
+
+/* =========================================================================
+   TOKENS LEGACY (se conservan tal cual para no romper el código existente:
+   bg-blanco, text-negro, bg-gris, text-morado, etc.). No usar en código nuevo.
+   ========================================================================= */
 @theme {
     --color-gris: #f1f5f9;
     --color-blanco: #ffffff;
@@ -16,6 +149,10 @@
     --breakpoint-xl: 1280px;
     --breakpoint-2xl: 1536px;
 }
+
+/* =========================================================================
+   Base global
+   ========================================================================= */
 html,
 body {
     margin: 0;
@@ -24,4 +161,123 @@ body {
     height: 100vh;
     box-sizing: border-box;
     overflow-x: hidden;
+}
+
+body {
+    background-color: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+
+/* Hereda el esquema nativo (selects, scrollbars del SO, etc.) */
+:root {
+    color-scheme: light;
+}
+.dark {
+    color-scheme: dark;
+}
+
+/* Selección de texto con el acento */
+::selection {
+    background-color: var(--accent-soft);
+    color: var(--fg);
+}
+
+/* Foco visible y consistente (accesibilidad) */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 0.5rem;
+}
+
+/* =========================================================================
+   Scrollbars finas y tematizadas
+   ========================================================================= */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background-color: var(--fg-subtle);
+    background-clip: padding-box;
+}
+
+/* =========================================================================
+   Transiciones suaves al cambiar de tema (sólo color/fondo/borde, y sólo si
+   el usuario no prefiere movimiento reducido). No anima transform ni layout.
+   ========================================================================= */
+@media (prefers-reduced-motion: no-preference) {
+    :where(body, button, a, input, select, textarea, label, section, header, nav, aside, article, div, p, h1, h2, h3, h4, span) {
+        transition-property: background-color, border-color, color, fill, stroke;
+        transition-duration: 200ms;
+        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+}
+
+/* =========================================================================
+   ApexCharts: tematizado global (claro/oscuro) sin tocar cada gráfica.
+   ========================================================================= */
+.apexcharts-text,
+.apexcharts-text tspan,
+.apexcharts-legend-text,
+.apexcharts-yaxis-label,
+.apexcharts-xaxis-label,
+.apexcharts-datalabel,
+.apexcharts-datalabels text {
+    fill: var(--fg-muted) !important;
+    color: var(--fg-muted) !important;
+}
+.apexcharts-gridline,
+.apexcharts-xaxis line,
+.apexcharts-yaxis line,
+.apexcharts-grid-borders line {
+    stroke: var(--border) !important;
+}
+.apexcharts-tooltip {
+    background: var(--surface) !important;
+    color: var(--fg) !important;
+    border: 1px solid var(--border) !important;
+    box-shadow: 0 8px 24px var(--shadow-color) !important;
+}
+.apexcharts-tooltip-title {
+    background: var(--surface-2) !important;
+    border-bottom: 1px solid var(--border) !important;
+}
+.apexcharts-tooltip-series-group {
+    background: transparent !important;
+}
+
+/* Aparición suave (p. ej. consejos rotativos del login) */
+@keyframes tipFade {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.animate-tip {
+    animation: tipFade 450ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+    .animate-tip {
+        animation: none;
+    }
 }

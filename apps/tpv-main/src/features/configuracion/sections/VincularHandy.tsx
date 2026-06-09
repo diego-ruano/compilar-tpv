@@ -112,14 +112,14 @@ export function VincularHandy({
 					className={cn(
 						"rounded-2xl border p-5",
 						darkMode
-							? "border-slate-800 bg-slate-950/40"
-							: "border-slate-200 bg-white",
+							? "border-border bg-surface-2"
+							: "border-border bg-surface",
 					)}
 				>
 					<div
 						className={cn(
 							"text-sm font-semibold",
-							darkMode ? "text-white" : "text-slate-900",
+							darkMode ? "text-white" : "text-fg",
 						)}
 					>
 						Escanea este código QR
@@ -128,7 +128,7 @@ export function VincularHandy({
 					<div
 						className={cn(
 							"text-xs mt-1",
-							darkMode ? "text-slate-300" : "text-slate-600",
+							darkMode ? "text-fg-muted" : "text-fg-muted",
 						)}
 					>
 						En el Handy entra a Configuración → “Vincular dispositivo” y
@@ -140,8 +140,8 @@ export function VincularHandy({
 							className={cn(
 								"mt-3 text-sm rounded-xl border px-3 py-2",
 								darkMode
-									? "border-red-900/50 bg-red-950/40 text-red-200"
-									: "border-red-200 bg-red-50 text-red-700",
+									? "border-danger/30 bg-danger-soft text-danger"
+									: "border-danger/30 bg-danger-soft text-danger",
 							)}
 						>
 							{error}
@@ -153,16 +153,16 @@ export function VincularHandy({
 							className={cn(
 								"rounded-2xl border p-4 grid place-items-center",
 								darkMode
-									? "border-slate-800 bg-slate-900/40"
-									: "border-slate-200 bg-slate-50",
+									? "border-border bg-surface-2"
+									: "border-border bg-surface-2",
 							)}
 						>
 							<div
 								className={cn(
 									"h-[200px] w-[200px] rounded-xl border grid place-items-center",
 									darkMode
-										? "border-slate-800 bg-slate-950"
-										: "border-slate-200 bg-white",
+										? "border-border bg-surface-2"
+										: "border-border bg-surface",
 								)}
 							>
 								{qrValue && !loading ? (
@@ -171,7 +171,7 @@ export function VincularHandy({
 									<div
 										className={cn(
 											"text-xs",
-											darkMode ? "text-slate-300" : "text-slate-600",
+											darkMode ? "text-fg-muted" : "text-fg-muted",
 										)}
 									>
 										{loading ? "Generando QR..." : "Sin código"}
@@ -182,7 +182,7 @@ export function VincularHandy({
 							<div
 								className={cn(
 									"mt-3 text-xs font-semibold",
-									darkMode ? "text-slate-200" : "text-slate-700",
+									darkMode ? "text-fg-muted" : "text-fg-muted",
 								)}
 							>
 								Código: <span className="font-mono">{pairCode || "—"}</span>
@@ -192,7 +192,7 @@ export function VincularHandy({
 								<div
 									className={cn(
 										"mt-1 text-[11px]",
-										darkMode ? "text-slate-400" : "text-slate-500",
+										darkMode ? "text-fg-subtle" : "text-fg-muted",
 									)}
 								>
 									Caduca: {expiresText}
@@ -205,14 +205,14 @@ export function VincularHandy({
 								className={cn(
 									"rounded-2xl border p-4",
 									darkMode
-										? "border-slate-800 bg-slate-950/40"
-										: "border-slate-200 bg-white",
+										? "border-border bg-surface-2"
+										: "border-border bg-surface",
 								)}
 							>
 								<div
 									className={cn(
 										"text-sm font-semibold",
-										darkMode ? "text-white" : "text-slate-900",
+										darkMode ? "text-white" : "text-fg",
 									)}
 								>
 									Pasos
@@ -221,7 +221,7 @@ export function VincularHandy({
 								<ol
 									className={cn(
 										"mt-2 text-sm space-y-1",
-										darkMode ? "text-slate-300" : "text-slate-700",
+										darkMode ? "text-fg-muted" : "text-fg-muted",
 									)}
 								>
 									<li>1) Abre la app en el Handy.</li>
@@ -232,7 +232,7 @@ export function VincularHandy({
 								<div
 									className={cn(
 										"mt-4 text-xs",
-										darkMode ? "text-slate-400" : "text-slate-500",
+										darkMode ? "text-fg-subtle" : "text-fg-muted",
 									)}
 								>
 									Si el QR no funciona, usa el botón “Mostrar código” y escribe
@@ -254,14 +254,14 @@ export function VincularHandy({
 								className={cn(
 									"mt-4 rounded-2xl border p-4",
 									darkMode
-										? "border-slate-800 bg-slate-950/40"
-										: "border-slate-200 bg-white",
+										? "border-border bg-surface-2"
+										: "border-border bg-surface",
 								)}
 							>
 								<div
 									className={cn(
 										"text-sm font-semibold",
-										darkMode ? "text-white" : "text-slate-900",
+										darkMode ? "text-white" : "text-fg",
 									)}
 								>
 									Solicitudes de emparejamiento
@@ -272,8 +272,8 @@ export function VincularHandy({
 										className={cn(
 											"mt-3 text-sm rounded-xl border px-3 py-2",
 											darkMode
-												? "border-red-900/50 bg-red-950/40 text-red-200"
-												: "border-red-200 bg-red-50 text-red-700",
+												? "border-danger/30 bg-danger-soft text-danger"
+												: "border-danger/30 bg-danger-soft text-danger",
 										)}
 									>
 										{pendingErr}
@@ -284,7 +284,7 @@ export function VincularHandy({
 									<div
 										className={cn(
 											"mt-2 text-xs",
-											darkMode ? "text-slate-400" : "text-slate-500",
+											darkMode ? "text-fg-subtle" : "text-fg-muted",
 										)}
 									>
 										No hay solicitudes pendientes.
@@ -307,8 +307,8 @@ export function VincularHandy({
 													className={cn(
 														"rounded-xl border p-3 flex flex-col gap-2",
 														darkMode
-															? "border-slate-800 bg-slate-950"
-															: "border-slate-200 bg-slate-50",
+															? "border-border bg-surface-2"
+															: "border-border bg-surface-2",
 													)}
 												>
 													<div className="flex items-start justify-between gap-3">
@@ -318,7 +318,7 @@ export function VincularHandy({
 																	"text-sm font-semibold truncate",
 																	darkMode
 																		? "text-white"
-																		: "text-slate-900",
+																		: "text-fg",
 																)}
 															>
 																{claimedName}{" "}
@@ -326,8 +326,8 @@ export function VincularHandy({
 																	className={cn(
 																		"text-xs font-mono",
 																		darkMode
-																			? "text-slate-400"
-																			: "text-slate-500",
+																			? "text-fg-subtle"
+																			: "text-fg-muted",
 																	)}
 																>
 																	({claimedId})
@@ -338,8 +338,8 @@ export function VincularHandy({
 																className={cn(
 																	"text-xs mt-0.5",
 																	darkMode
-																		? "text-slate-400"
-																		: "text-slate-600",
+																		? "text-fg-subtle"
+																		: "text-fg-muted",
 																)}
 															>
 																Código:{" "}
@@ -363,7 +363,7 @@ export function VincularHandy({
 													<div
 														className={cn(
 															"text-[11px]",
-															darkMode ? "text-slate-500" : "text-slate-500",
+															darkMode ? "text-fg-muted" : "text-fg-muted",
 														)}
 													>
 														Intentos:{" "}
@@ -378,7 +378,7 @@ export function VincularHandy({
 								<div
 									className={cn(
 										"mt-3 text-[11px]",
-										darkMode ? "text-slate-500" : "text-slate-500",
+										darkMode ? "text-fg-muted" : "text-fg-muted",
 									)}
 								>
 									Se actualiza automáticamente cada 5 segundos.

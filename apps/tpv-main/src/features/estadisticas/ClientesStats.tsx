@@ -87,23 +87,23 @@ function ChartCard({
     return (
         <section
             className={[
-                "bg-blanco rounded-xl shadow-xs border border-black/5",
+                "bg-surface rounded-xl shadow-sm border border-border",
                 "p-4 flex flex-col min-w-0",
                 heightClass,
             ].join(" ")}
         >
             <header className="min-w-0">
-                <h4 className="text-base font-extrabold text-negro truncate">
+                <h4 className="text-base font-extrabold text-fg truncate">
                     {title}
                 </h4>
                 {subtitle ? (
-                    <p className="text-sm text-negro/60 truncate">{subtitle}</p>
+                    <p className="text-sm text-fg-muted truncate">{subtitle}</p>
                 ) : null}
             </header>
 
             <div className="mt-3 flex-1 min-h-0 overflow-hidden">
                 {loading ? (
-                    <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                    <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                         Cargando…
                     </div>
                 ) : (
@@ -111,7 +111,7 @@ function ChartCard({
                 )}
 
                 {!loading && emptyText ? (
-                    <div className="mt-2 text-xs text-negro/40">{emptyText}</div>
+                    <div className="mt-2 text-xs text-fg-subtle">{emptyText}</div>
                 ) : null}
             </div>
         </section>
@@ -131,13 +131,13 @@ function KPICard({
     sub?: React.ReactNode;
 }) {
     return (
-        <div className="bg-blanco rounded-xl shadow-xs p-4 border border-black/5 min-w-0">
-            <p className="text-sm text-negro/60 truncate">{label}</p>
-            <p className="text-2xl font-extrabold text-negro mt-1 truncate">
+        <div className="bg-surface rounded-xl shadow-sm p-4 border border-border min-w-0">
+            <p className="text-sm text-fg-muted truncate">{label}</p>
+            <p className="text-2xl font-extrabold text-fg mt-1 truncate">
                 {value}
             </p>
             {sub ? (
-                <div className="text-xs text-negro/40 mt-1 min-w-0">{sub}</div>
+                <div className="text-xs text-fg-subtle mt-1 min-w-0">{sub}</div>
             ) : null}
         </div>
     );
@@ -305,26 +305,26 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
     return (
         <div className="w-full h-full min-h-0 flex flex-col gap-4">
             {/* Header */}
-            <div className="bg-blanco rounded-xl shadow-xs p-4 border border-black/5 min-w-0">
+            <div className="bg-surface rounded-xl shadow-sm p-4 border border-border min-w-0">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div className="min-w-0">
-                        <h3 className="text-lg font-bold text-negro truncate">
+                        <h3 className="text-lg font-bold text-fg truncate">
                             Clientes
                         </h3>
-                        <p className="text-sm text-negro/60 truncate">
+                        <p className="text-sm text-fg-muted truncate">
                             Nuevos, recurrentes, ticket medio por cliente y top gasto ·
                             Rango: {rangeLabel(range)}
                         </p>
                     </div>
 
                     <div className="flex items-center justify-between sm:justify-end gap-3">
-                        <span className="text-xs text-negro/50">
+                        <span className="text-xs text-fg-subtle">
                             {loading ? "Cargando…" : "Actualizado"}
                         </span>
                         <button
                             onClick={() => void cargar()}
                             disabled={loading}
-                            className="px-3 py-2 rounded-lg bg-white border border-black/10 shadow-xs text-sm font-semibold hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
+                            className="px-3 py-2 rounded-lg bg-surface border border-border shadow-sm text-sm font-semibold hover:opacity-90 disabled:opacity-60 whitespace-nowrap"
                             title="Recargar"
                         >
                             Recargar
@@ -334,7 +334,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
             </div>
 
             {error ? (
-                <div className="bg-blanco rounded-xl shadow-xs p-4 border border-rose-200 text-rose-700 min-w-0">
+                <div className="bg-surface rounded-xl shadow-sm p-4 border border-danger/30 text-danger min-w-0">
                     <p className="font-bold">Error</p>
                     <p className="text-sm break-words">{error}</p>
                 </div>
@@ -371,7 +371,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                     heightClass="min-h-[340px]"
                 >
                     {totalClientesRango <= 0 ? (
-                        <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                        <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                             No hay datos para este rango.
                         </div>
                     ) : (
@@ -393,7 +393,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                     heightClass="min-h-[340px]"
                 >
                     {bucketLabels.length === 0 ? (
-                        <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                        <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                             No hay datos para este rango.
                         </div>
                     ) : (
@@ -416,7 +416,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
                         heightClass="min-h-[360px]"
                     >
                         {topLabels.length === 0 ? (
-                            <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                            <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                                 No hay datos para este rango.
                             </div>
                         ) : (

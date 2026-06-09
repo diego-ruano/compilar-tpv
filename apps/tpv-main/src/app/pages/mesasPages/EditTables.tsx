@@ -5,6 +5,7 @@ import {
     mesasSaveLayout,
 } from "../../../features/mesasComponents/mesasApi";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useTheme } from "../../../shared/stores/useTheme";
 
 /**
  * Tipos
@@ -314,17 +315,17 @@ function IconButton({
         "h-10 px-4 rounded-xl border text-sm font-semibold shadow-sm transition inline-flex items-center gap-2 select-none";
     const variants: Record<BtnVariant, string> = {
         neutral: disabled
-            ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
-            : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50 active:scale-[0.98]",
+            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+            : "border-border bg-surface text-fg hover:bg-surface-2 active:scale-[0.98]",
         primary: disabled
-            ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
-            : "border-slate-900 bg-slate-900 text-white hover:bg-slate-800 active:scale-[0.98]",
+            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+            : "border-accent bg-accent text-white hover:bg-accent-hover active:scale-[0.98]",
         danger: disabled
-            ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
-            : "border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100 active:scale-[0.98]",
+            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+            : "border-danger/30 bg-danger-soft text-danger hover:bg-danger-soft active:scale-[0.98]",
         accent: disabled
-            ? "border-slate-200 bg-slate-100 text-slate-400 cursor-not-allowed"
-            : "border-blue-200 bg-blue-50 text-blue-900 hover:bg-blue-100 active:scale-[0.98]",
+            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+            : "border-accent/30 bg-accent-soft text-accent hover:bg-accent-soft active:scale-[0.98]",
     };
 
     return (
@@ -354,8 +355,8 @@ function Chip({
             className={cn(
                 "h-9 px-3 rounded-xl border text-sm font-semibold shadow-sm transition inline-flex items-center gap-2",
                 active
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
+                    ? "border-accent bg-accent text-white"
+                    : "border-border bg-surface text-fg-muted hover:bg-surface-2",
             )}
         >
             {children}
@@ -378,14 +379,14 @@ function Modal({
 
     return (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-            <div className="w-full max-w-[520px] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden">
-                <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100">
-                    <div className="text-base font-bold text-slate-900">
+            <div className="w-full max-w-[520px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden">
+                <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+                    <div className="text-base font-bold text-fg">
                         {title}
                     </div>
                     <button
                         onClick={onClose}
-                        className="h-9 w-9 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        className="h-9 w-9 rounded-xl border border-border bg-surface text-fg-muted hover:bg-surface-2"
                     >
                         ✕
                     </button>
@@ -510,6 +511,7 @@ function useUnsavedGuard(enabled: boolean) {
  * Componente principal
  */
 export default function EditTables() {
+    const dark = useTheme((s) => s.theme === "dark");
     const PADDING = 12;
     const WORLD_W = 4000;
     const WORLD_H = 4000;
@@ -1055,7 +1057,7 @@ export default function EditTables() {
                             x={table.radius ?? 45}
                             y={table.radius ?? 45}
                             radius={table.radius ?? 45}
-                            fill="rgba(15,23,42,0.92)"
+                            fill={dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)"}
                             stroke="rgba(148,163,184,0.95)"
                             strokeWidth={1}
                             shadowBlur={10}
@@ -1086,7 +1088,7 @@ export default function EditTables() {
                             width={table.width}
                             height={table.height}
                             cornerRadius={table.shape === "rounded" ? 14 : 2}
-                            fill="rgba(15,23,42,0.92)"
+                            fill={dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)"}
                             stroke="rgba(148,163,184,0.95)"
                             strokeWidth={1}
                             shadowBlur={10}
@@ -1124,7 +1126,7 @@ export default function EditTables() {
                     ref={roomStrokeLineRef}
                     points={draftPoints}
                     closed
-                    stroke="rgba(15,23,42,0.55)"
+                    stroke={dark ? "rgba(148,163,184,0.5)" : "rgba(15,23,42,0.55)"}
                     strokeWidth={2}
                     lineJoin="round"
                 />
@@ -1135,7 +1137,7 @@ export default function EditTables() {
                         x={v.x}
                         y={v.y}
                         radius={7}
-                        fill="rgba(15,23,42,0.9)"
+                        fill={dark ? "rgba(148,163,184,0.95)" : "rgba(15,23,42,0.9)"}
                         stroke="rgba(148,163,184,0.95)"
                         strokeWidth={2}
                         draggable={!deleteTableArmed}
@@ -1217,13 +1219,13 @@ export default function EditTables() {
     }
 
     return (
-        <div className="w-full h-full bg-slate-100 overflow-hidden">
+        <div className="w-full h-full bg-surface-2 overflow-hidden">
             <Modal
                 open={guard.open}
                 title="Cambios sin guardar"
                 onClose={guard.cancelLeave}
             >
-                <div className="text-sm text-slate-700">
+                <div className="text-sm text-fg-muted">
                     Tienes cambios sin guardar. Si sales ahora, <b>se perderán</b>.
                 </div>
 
@@ -1249,9 +1251,9 @@ export default function EditTables() {
             </Modal>
 
             <div className="h-full p-4 grid grid-cols-[360px_1fr] gap-4">
-                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 flex flex-col gap-4 overflow-hidden">
+                <div className="rounded-2xl border border-border bg-surface shadow-sm p-4 flex flex-col gap-4 overflow-hidden">
                     <div className="flex items-center justify-between">
-                        <div className="text-lg font-extrabold text-slate-900">
+                        <div className="text-lg font-extrabold text-fg">
                             Zonas
                         </div>
                         <IconButton
@@ -1265,16 +1267,16 @@ export default function EditTables() {
 
                     <div className="flex-1 overflow-auto pr-1">
                         {loadingDb ? (
-                            <div className="h-full grid place-items-center text-slate-500">
+                            <div className="h-full grid place-items-center text-fg-muted">
                                 Cargando…
                             </div>
                         ) : emptyState ? (
                             <div className="h-full grid place-items-center">
-                                <div className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-4 text-center">
-                                    <div className="text-base font-bold text-slate-900">
+                                <div className="w-full rounded-2xl border border-border bg-surface-2 p-4 text-center">
+                                    <div className="text-base font-bold text-fg">
                                         No hay zonas todavía
                                     </div>
-                                    <div className="mt-1 text-sm text-slate-600">
+                                    <div className="mt-1 text-sm text-fg-muted">
                                         Crea la primera zona para empezar.
                                     </div>
                                     <div className="mt-4 flex justify-center">
@@ -1296,8 +1298,8 @@ export default function EditTables() {
                                         className={cn(
                                             "rounded-2xl border p-3 flex flex-col gap-2",
                                             s.id === activeSalonId
-                                                ? "border-slate-900 bg-slate-50"
-                                                : "border-slate-200 bg-white",
+                                                ? "border-accent bg-accent-soft"
+                                                : "border-border bg-surface",
                                         )}
                                     >
                                         <div className="flex items-center gap-2">
@@ -1335,7 +1337,7 @@ export default function EditTables() {
                                         </div>
 
                                         <div>
-                                            <div className="text-xs font-semibold text-slate-500 mb-1">
+                                            <div className="text-xs font-semibold text-fg-muted mb-1">
                                                 Nombre zona
                                             </div>
                                             <input
@@ -1343,11 +1345,11 @@ export default function EditTables() {
                                                 onChange={(e) =>
                                                     renameSalon(s.id, e.target.value)
                                                 }
-                                                className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                                                className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                                             />
                                         </div>
 
-                                        <div className="flex items-center justify-between text-xs text-slate-500">
+                                        <div className="flex items-center justify-between text-xs text-fg-muted">
                                             <span>Mesas: {s.tables.length}</span>
                                             <span>
                                                 Polígono: {s.room.points.length / 2} puntos
@@ -1359,8 +1361,8 @@ export default function EditTables() {
                         )}
                     </div>
 
-                    <div className="border-t border-slate-100 pt-4 flex flex-col gap-2">
-                        <div className="text-sm font-bold text-slate-900">
+                    <div className="border-t border-border pt-4 flex flex-col gap-2">
+                        <div className="text-sm font-bold text-fg">
                             Herramientas
                         </div>
 
@@ -1480,7 +1482,7 @@ export default function EditTables() {
                         </div>
 
                         {placeTableByClick && (
-                            <div className="mt-2 rounded-2xl border border-slate-200 bg-blue-50 p-3 text-sm text-slate-800">
+                            <div className="mt-2 rounded-2xl border border-border bg-accent-soft p-3 text-sm text-fg">
                                 <b>🧭 Colocar mesa:</b> haz click en el mapa.
                                 <div className="mt-2">
                                     <IconButton
@@ -1498,7 +1500,7 @@ export default function EditTables() {
                         )}
 
                         {addPointArmed && (
-                            <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-800">
+                            <div className="mt-2 rounded-2xl border border-border bg-surface-2 p-3 text-sm text-fg">
                                 <b>📍 Añadir punto:</b> click donde quieras (dentro o
                                 fuera). Se inserta en el borde más cercano.
                                 <div className="mt-2">
@@ -1514,7 +1516,7 @@ export default function EditTables() {
                         )}
 
                         {deleteTableArmed && (
-                            <div className="mt-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+                            <div className="mt-2 rounded-2xl border border-danger/30 bg-danger-soft p-3 text-sm text-rose-900">
                                 <b>🗑️ Borrar mesa:</b> haz click encima de una mesa
                                 para eliminarla.
                                 <div className="mt-2">
@@ -1538,14 +1540,14 @@ export default function EditTables() {
                     </div>
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                <div className="rounded-2xl border border-border bg-surface shadow-sm overflow-hidden">
                     <div className="w-full h-full p-3">
                         <div
                             ref={canvasBoxRef}
-                            className="w-full h-full rounded-2xl border border-slate-200 overflow-hidden bg-white"
+                            className="w-full h-full rounded-2xl border border-border overflow-hidden bg-surface"
                         >
                             {!activeSalon ? (
-                                <div className="w-full h-full grid place-items-center text-slate-600">
+                                <div className="w-full h-full grid place-items-center text-fg-muted">
                                     {loadingDb
                                         ? "Cargando…"
                                         : "Crea una zona para empezar."}
@@ -1569,7 +1571,7 @@ export default function EditTables() {
                                                 : isPanningRef.current
                                                     ? "grabbing"
                                                     : "default",
-                                        background: "#ffffff",
+                                        background: dark ? "#17191f" : "#ffffff",
                                     }}
                                 >
                                     <Layer ref={layerRef}>
@@ -1584,7 +1586,7 @@ export default function EditTables() {
                                                 y={0}
                                                 width={WORLD_W}
                                                 height={WORLD_H}
-                                                fill="#ffffff"
+                                                fill={dark ? "#17191f" : "#ffffff"}
                                                 onMouseDown={onBgMouseDown}
                                             />
 
@@ -1593,7 +1595,7 @@ export default function EditTables() {
                                                 x={20}
                                                 y={16}
                                                 fontSize={20}
-                                                fill="#0f172a"
+                                                fill={dark ? "#e7e9ee" : "#0f172a"}
                                                 opacity={0.95}
                                             />
                                             <Text
@@ -1616,7 +1618,7 @@ export default function EditTables() {
                             )}
                         </div>
 
-                        <div className="mt-3 text-xs text-slate-500">
+                        <div className="mt-3 text-xs text-fg-muted">
                             • Zoom con rueda. • Mover mapa arrastrando el fondo. •
                             Deshacer revierte mesas y paredes.
                         </div>
@@ -1631,7 +1633,7 @@ export default function EditTables() {
             >
                 <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2">
-                        <div className="text-xs font-semibold text-slate-500 mb-1">
+                        <div className="text-xs font-semibold text-fg-muted mb-1">
                             Nombre / Nº mesa
                         </div>
                         <input
@@ -1639,13 +1641,13 @@ export default function EditTables() {
                             onChange={(e) =>
                                 setTableForm((p) => ({ ...p, name: e.target.value }))
                             }
-                            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                             placeholder="Ej: M12"
                         />
                     </div>
 
                     <div>
-                        <div className="text-xs font-semibold text-slate-500 mb-1">
+                        <div className="text-xs font-semibold text-fg-muted mb-1">
                             Comensales
                         </div>
                         <input
@@ -1657,13 +1659,13 @@ export default function EditTables() {
                                     seats: Number(e.target.value),
                                 }))
                             }
-                            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                             min={1}
                         />
                     </div>
 
                     <div>
-                        <div className="text-xs font-semibold text-slate-500 mb-1">
+                        <div className="text-xs font-semibold text-fg-muted mb-1">
                             Forma
                         </div>
                         <select
@@ -1674,7 +1676,7 @@ export default function EditTables() {
                                     shape: e.target.value as TableShape,
                                 }))
                             }
-                            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none focus:border-slate-400"
+                            className="h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
                         >
                             <option value="rounded">Rect redondeada</option>
                             <option value="rect">Recta</option>
@@ -1683,7 +1685,7 @@ export default function EditTables() {
                     </div>
 
                     <div className="col-span-2">
-                        <div className="text-xs font-semibold text-slate-500 mb-1">
+                        <div className="text-xs font-semibold text-fg-muted mb-1">
                             Tamaño
                         </div>
                         <div className="flex gap-2">
@@ -1713,7 +1715,7 @@ export default function EditTables() {
                             </Chip>
                         </div>
 
-                        <div className="mt-2 text-xs text-slate-500">
+                        <div className="mt-2 text-xs text-fg-muted">
                             {(() => {
                                 const d = sizeToDims(
                                     tableForm.shape,
@@ -1727,7 +1729,7 @@ export default function EditTables() {
                     </div>
 
                     <div className="col-span-2">
-                        <div className="text-xs font-semibold text-slate-500 mb-1">
+                        <div className="text-xs font-semibold text-fg-muted mb-1">
                             Colocación
                         </div>
                         <div className="flex gap-2">
@@ -1756,7 +1758,7 @@ export default function EditTables() {
                         </div>
                     </div>
 
-                    <div className="col-span-2 pt-2 flex items-center justify-end gap-2 border-t border-slate-100 mt-1">
+                    <div className="col-span-2 pt-2 flex items-center justify-end gap-2 border-t border-border mt-1">
                         <IconButton
                             icon="✕"
                             variant="danger"

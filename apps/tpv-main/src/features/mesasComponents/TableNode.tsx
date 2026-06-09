@@ -15,10 +15,12 @@ export default function TableNode({
     table,
     mesaMetaById,
     onOpenMesa,
+    dark = false,
 }: {
     table: Table;
     mesaMetaById: MesaMetaMap;
     onOpenMesa: (mesaId: number, mesaNombre: string) => void;
+    dark?: boolean;
 }) {
     const idMesa = parseMesaId(table.id);
 
@@ -66,11 +68,14 @@ export default function TableNode({
     // - reserva activa -> azul
     // - reserva próxima -> borde azul
     // - libre -> oscuro
+    // "libre": oscuro sobre lienzo claro; un slate medio sobre lienzo oscuro
+    const libreFill = dark ? "rgba(71,85,105,0.95)" : "rgba(15,23,42,0.92)";
+
     const fill = isPendiente
         ? "rgba(245,158,11,0.92)"
         : isReservaActiva
             ? "rgba(37,99,235,0.92)"
-            : "rgba(15,23,42,0.92)";
+            : libreFill;
 
     const stroke = isPendiente
         ? "rgba(245,158,11,0.92)"

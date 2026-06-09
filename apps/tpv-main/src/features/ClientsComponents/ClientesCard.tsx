@@ -21,18 +21,18 @@ export default function ClienteCard({ nombre, apellido, onClick }: ClienteCardPr
         group
         w-full
         rounded-2xl
-        border border-negro/10
-        bg-white
+        border border-border
+        bg-surface
         p-3 sm:p-4
         text-left
         shadow-sm
         transition-all duration-200
         hover:-translate-y-[1px]
+        hover:border-border-strong
         hover:shadow-md
-        hover:border-negro/20
         active:translate-y-0
         focus:outline-none
-        focus:ring-2 focus:ring-verde/40
+        focus-visible:ring-2 focus-visible:ring-ring
       "
     >
       <div className="flex items-start gap-3">
@@ -41,9 +41,9 @@ export default function ClienteCard({ nombre, apellido, onClick }: ClienteCardPr
           className="
             h-9 w-9 sm:h-11 sm:w-11
             rounded-full
-            bg-gradient-to-br from-morado/80 to-morado
+            bg-gradient-to-br from-accent to-accent-hover
             flex items-center justify-center
-            text-white font-bold
+            text-accent-fg font-bold
             text-xs sm:text-sm
             shrink-0
             shadow-sm
@@ -53,19 +53,19 @@ export default function ClienteCard({ nombre, apellido, onClick }: ClienteCardPr
         </div>
 
         <div className="min-w-0 flex-1">
-          <p className="font-bold text-[15px] sm:text-[17px] text-negro truncate">
+          <p className="font-bold text-[15px] sm:text-[17px] text-fg truncate">
             {nombre || "—"}
           </p>
-          <p className="text-negro/60 font-semibold text-xs sm:text-sm truncate">
+          <p className="text-fg-muted font-semibold text-xs sm:text-sm truncate">
             {apellido || "—"}
           </p>
 
           <div className="mt-2 sm:mt-3 flex items-center justify-between">
-            <span className="text-[11px] sm:text-xs text-negro/55">
+            <span className="text-[11px] sm:text-xs text-fg-subtle">
               Ver detalles
             </span>
 
-            <span className="text-negro/60 text-xs sm:text-sm transition-transform duration-200 group-hover:translate-x-0.5">
+            <span className="text-fg-muted text-xs sm:text-sm transition-transform duration-200 group-hover:translate-x-0.5">
               →
             </span>
           </div>

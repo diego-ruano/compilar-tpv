@@ -1,5 +1,6 @@
 // src/pages/Estadisticas.tsx
 import React, { useMemo, useState } from "react";
+import { BarChart3 } from "lucide-react";
 
 // ✅ Ajusta estas rutas a tu estructura real
 import MesasStats from "../../features/estadisticas/MesasStats";
@@ -68,84 +69,62 @@ export default function Estadisticas() {
     };
 
     return (
-        <div className="w-full h-full bg-gris p-6">
-            <div className="w-full h-full flex flex-col gap-4 min-h-0">
-                {/* TopBar */}
-                <div className="bg-blanco rounded-xl shadow-xs p-4 flex flex-col gap-3">
-                    <div className="flex items-start justify-between gap-4 flex-wrap">
-                        <div className="flex flex-col min-w-0">
-                            <h2 className="text-2xl font-bold text-negro">
-                                ESTADÍSTICAS
-                            </h2>
-                            <p className="text-sm text-negro/60">
-                                Viendo:{" "}
-                                <span className="font-semibold text-negro">
-                                    {categoriaLabel}
-                                </span>
-                            </p>
-                        </div>
-
-                        {/* Controles */}
-                        <div className="flex items-center gap-3 flex-wrap justify-end">
-                            {/* Select categoría */}
-                            <div className="flex flex-col gap-1">
-                                <span className="text-xs text-negro/60">
-                                    Categoría
-                                </span>
-                                <select
-                                    value={categoria}
-                                    onChange={(e) =>
-                                        setCategoria(e.target.value as StatsKey)
-                                    }
-                                    className="w-56 rounded-xl border border-black/10 bg-white px-3 py-2 outline-none focus:ring-2 focus:ring-black/10"
-                                >
-                                    {STATS_OPTIONS.map((o) => (
-                                        <option key={o.key} value={o.key}>
-                                            {o.label}
-                                        </option>
-                                    ))}
-                                </select>
-                            </div>
-
-                            {/* Rango */}
-                            <div className="flex flex-col gap-1">
-                                <span className="text-xs text-negro/60">
-                                    Rango
-                                </span>
-
-                                <div className="flex items-center gap-2">
-                                    {RANGE_OPTIONS.map((r) => {
-                                        const active = r.key === range;
-                                        return (
-                                            <button
-                                                key={r.key}
-                                                type="button"
-                                                onClick={() => setRange(r.key)}
-                                                className={cn(
-                                                    "px-3 py-2 rounded-xl text-sm font-semibold transition",
-                                                    active
-                                                        ? "bg-black text-white"
-                                                        : "bg-white border border-black/10 hover:bg-black/5 text-negro",
-                                                )}
-                                                title={`Ver ${r.label.toLowerCase()}`}
-                                            >
-                                                {r.label}
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
-                        </div>
+        <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
+            {/* HEADER */}
+            <div className="flex flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex min-w-0 items-center gap-3">
+                    <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                        <BarChart3 className="size-6" aria-hidden />
                     </div>
-
-                    {/* Línea separadora ligera */}
-                    <div className="h-px w-full bg-black/5" />
+                    <div className="min-w-0">
+                        <h2 className="text-xl font-bold text-fg sm:text-2xl">Estadísticas</h2>
+                        <p className="text-sm text-fg-muted">
+                            Viendo: <span className="font-semibold text-fg">{categoriaLabel}</span>
+                        </p>
+                    </div>
                 </div>
 
-                {/* Contenido */}
-                <div className="flex-1 min-h-0 bg-blanco rounded-xl shadow-xs p-4 overflow-y-auto pr-1">
-                    {renderContenido()}
+                {/* Controles */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+                    <select
+                        value={categoria}
+                        onChange={(e) => setCategoria(e.target.value as StatsKey)}
+                        className="h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-sm text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring sm:w-52"
+                    >
+                        {STATS_OPTIONS.map((o) => (
+                            <option key={o.key} value={o.key}>
+                                {o.label}
+                            </option>
+                        ))}
+                    </select>
+
+                    <div className="flex items-center gap-1 rounded-xl border border-border bg-surface-2 p-1">
+                        {RANGE_OPTIONS.map((r) => {
+                            const active = r.key === range;
+                            return (
+                                <button
+                                    key={r.key}
+                                    type="button"
+                                    onClick={() => setRange(r.key)}
+                                    className={cn(
+                                        "flex-1 cursor-pointer rounded-lg px-3 py-1.5 text-sm font-semibold transition sm:flex-none",
+                                        active
+                                            ? "bg-accent text-white shadow-sm"
+                                            : "text-fg-muted hover:bg-surface hover:text-fg",
+                                    )}
+                                    title={`Ver ${r.label.toLowerCase()}`}
+                                >
+                                    {r.label}
+                                </button>
+                            );
+                        })}
+                    </div>
                 </div>
+            </div>
+
+            {/* Contenido */}
+            <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                {renderContenido()}
             </div>
         </div>
     );

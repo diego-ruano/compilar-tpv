@@ -2,8 +2,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Plus, ReceiptText, ArrowLeft } from "lucide-react";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useToast } from "../../shared/toast";
+import { SearchInput } from "../../shared/ui";
 
 import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
 import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
@@ -1731,11 +1733,11 @@ export default function VentaRapida() {
   );
 
   return (
-    <div className="h-full min-h-0 bg-blanco text-negro flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-3 border-b border-black/10 px-3 sm:px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-bg text-fg">
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-3 py-3 sm:px-4">
         <div className="min-w-0">
-          <h1 className="text-lg sm:text-xl font-extrabold truncate">Venta rápida</h1>
-          <p className="text-xs sm:text-sm text-black/60 truncate">
+          <h1 className="truncate text-lg font-extrabold text-fg sm:text-xl">Venta rápida</h1>
+          <p className="truncate text-xs text-fg-muted sm:text-sm">
             Ticket rápido de barra · {idComandaActiva ? `#${idComandaActiva}` : "sin ticket"}
           </p>
         </div>
@@ -1744,8 +1746,9 @@ export default function VentaRapida() {
           <button
             type="button"
             onClick={nuevoTicket}
-            className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
           >
+            <Plus className="size-4" aria-hidden />
             Nuevo ticket
           </button>
 
@@ -1753,22 +1756,23 @@ export default function VentaRapida() {
             type="button"
             onClick={abrirVerTickets}
             className={cn(
-              "px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold",
+              "inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
               loadingComandas && "opacity-60",
             )}
           >
+            <ReceiptText className="size-4" aria-hidden />
             Ver tickets
           </button>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-3 p-3 overflow-hidden">
-        <div className="min-h-0 rounded-2xl border border-black/10 bg-black/[0.02] overflow-hidden flex flex-col">
-          <div className="p-3 border-b border-black/10 bg-white">
-            <div className="flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[1fr_420px]">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
+          <div className="border-b border-border bg-surface p-3">
+            <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
               <div className="min-w-0">
-                <h2 className="text-base sm:text-lg font-bold truncate">{leftTitle}</h2>
-                <p className="text-xs sm:text-sm text-black/60">{leftSubtitle}</p>
+                <h2 className="truncate text-base font-bold text-fg sm:text-lg">{leftTitle}</h2>
+                <p className="text-xs text-fg-muted sm:text-sm">{leftSubtitle}</p>
               </div>
 
               <div className="flex items-center gap-2">
@@ -1776,17 +1780,18 @@ export default function VentaRapida() {
                   <button
                     type="button"
                     onClick={() => setCategoriaSeleccionada(null)}
-                    className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
                   >
+                    <ArrowLeft className="size-4" aria-hidden />
                     Categorías
                   </button>
                 )}
 
-                <input
+                <SearchInput
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onValueChange={setQuery}
                   placeholder="Buscar producto..."
-                  className="w-48 sm:w-64 px-3 py-2 rounded-xl border border-black/10 bg-white outline-none focus:ring-2 focus:ring-black/10 text-sm"
+                  className="w-48 sm:w-64"
                 />
               </div>
             </div>
@@ -1829,7 +1834,7 @@ export default function VentaRapida() {
           </div>
         </div>
 
-        <div className="min-h-0 rounded-2xl border border-black/10 bg-white overflow-hidden flex flex-col">
+        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
           <TicketPanel
             ticket={ticketForPanel}
             paso={paso}

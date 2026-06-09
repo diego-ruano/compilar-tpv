@@ -31,24 +31,24 @@ export default function ConfirmDialog({
                 if (e.target === e.currentTarget) onCancel();
             }}
         >
-            <div className="bg-blanco w-full max-w-[520px] rounded-2xl shadow-xl border border-black/10 overflow-hidden">
-                <div className="p-5 sm:p-6 border-b border-black/10">
-                    <h3 className="text-lg sm:text-xl font-extrabold text-negro text-center">
+            <div className="w-full max-w-[520px] overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
+                <div className="border-b border-border p-5 sm:p-6">
+                    <h3 className="text-center text-lg font-extrabold text-fg sm:text-xl">
                         {title}
                     </h3>
                 </div>
 
                 <div className="p-5 sm:p-6">
-                    <p className="text-sm sm:text-base text-negro/80 text-center">
+                    <p className="text-center text-sm text-fg-muted sm:text-base">
                         {message}
                     </p>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">
+                    <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2">
                         <button
                             type="button"
                             onClick={onCancel}
                             disabled={loading}
-                            className="w-full px-4 py-2 rounded-xl border border-negro/20 hover:bg-gris transition font-semibold disabled:opacity-60"
+                            className="w-full cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 disabled:opacity-60"
                         >
                             {cancelText}
                         </button>
@@ -57,9 +57,9 @@ export default function ConfirmDialog({
                             type="button"
                             onClick={onConfirm}
                             disabled={loading}
-                            className={`w-full px-4 py-2 rounded-xl font-extrabold transition disabled:opacity-60 ${danger
-                                    ? "border border-rojo text-white bg-rojo hover:opacity-90"
-                                    : "bg-verde text-white hover:opacity-90"
+                            className={`w-full cursor-pointer rounded-xl px-4 py-2 font-extrabold shadow-sm transition hover:opacity-90 disabled:opacity-60 ${danger
+                                    ? "bg-danger text-danger-fg"
+                                    : "bg-accent text-accent-fg"
                                 }`}
                         >
                             {loading ? "Eliminando..." : confirmText}

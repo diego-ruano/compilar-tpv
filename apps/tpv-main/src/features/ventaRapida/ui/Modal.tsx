@@ -1,5 +1,6 @@
 // src/features/ventaRapida/ui/Modal.tsx
 import React from "react";
+import { X } from "lucide-react";
 
 export default function Modal({
   open,
@@ -18,34 +19,34 @@ export default function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-2 sm:p-3"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-3"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
       <div
         className={`
-          bg-blanco w-full ${maxWidthClass}
-          rounded-2xl shadow-xl border border-black/10 relative
+          relative w-full ${maxWidthClass}
+          overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl
           max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-1.5rem)]
-          overflow-hidden
         `}
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 px-3 py-1 rounded-xl border border-negro/20 hover:bg-gris transition text-sm"
+          aria-label="Cerrar"
+          className="absolute right-2.5 top-2.5 grid size-9 place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer sm:right-3 sm:top-3"
         >
-          ✕
+          <X className="size-4" aria-hidden />
         </button>
 
         {title ? (
-          <div className="px-4 sm:px-5 pt-4 sm:pt-5 pb-3 border-b border-black/10">
-            <h2 className="text-base sm:text-lg font-extrabold text-center">{title}</h2>
+          <div className="border-b border-border px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
+            <h2 className="text-center text-base font-extrabold text-fg sm:text-lg">{title}</h2>
           </div>
         ) : null}
 
-        <div className="p-4 sm:p-5 overflow-y-auto max-h-[calc(100vh-6.5rem)]">{children}</div>
+        <div className="overflow-y-auto p-4 max-h-[calc(100vh-6.5rem)] sm:p-5">{children}</div>
       </div>
     </div>
   );

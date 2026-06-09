@@ -6,6 +6,11 @@ import AppErrorBoundary from "./pages/errorPages/AppErrorBoundary";
 import AppBoot from "./AppBoot";
 import { appRouter } from "./Router";
 import { queryClient } from "../shared/lib/queryClient";
+import { initTheme } from "../shared/stores/useTheme";
+
+// Aplica el tema (claro/oscuro) al <html> antes del primer render para
+// evitar el parpadeo de tema incorrecto.
+initTheme();
 
 const container = document.getElementById("root");
 

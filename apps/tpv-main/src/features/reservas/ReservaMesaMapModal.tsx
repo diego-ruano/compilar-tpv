@@ -1,5 +1,6 @@
 // components/reservas/ReservaMesaMapModal.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
+import { X } from "lucide-react";
 import MapCanvas from "../mesasComponents/MapCanvas";
 import SalonTabs from "../mesasComponents/SalonTabs";
 import type { Salon, MesaMeta } from "../mesasComponents/types";
@@ -136,22 +137,23 @@ export default function ReservaMesaMapModal({
 
     return (
         <div
-            className="fixed inset-0 z-[999] flex items-center justify-center bg-black/40 p-4"
+            className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-4"
             onMouseDown={onClose}
         >
             <div
-                className="w-full max-w-6xl rounded-2xl bg-blanco p-4 shadow-xl"
+                className="w-full max-w-6xl rounded-2xl border border-border bg-surface p-4 text-fg shadow-xl"
                 onMouseDown={(e) => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="font-extrabold tracking-widest">{title}</div>
+                    <div className="font-extrabold tracking-widest text-fg">{title}</div>
 
                     <button
                         type="button"
                         onClick={onClose}
-                        className="rounded-lg border border-gray-200 bg-red-700 px-3 py-1 text-xs font-extrabold tracking-widest text-blanco hover:bg-red-800"
+                        className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-danger/30 bg-danger-soft px-3 py-1.5 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90"
                     >
+                        <X className="size-4" aria-hidden />
                         CERRAR
                     </button>
                 </div>
@@ -160,7 +162,7 @@ export default function ReservaMesaMapModal({
                 <SalonTabs salons={salons} activeSalonId={activeSalonId} onChangeSalon={onChangeSalon} />
 
                 {/* Canvas container */}
-                <div className="mt-3 rounded-2xl border border-black/10 bg-white overflow-hidden">
+                <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface-2">
                     {/* OJO: este div es el que MapCanvas usa para medir */}
                     <div ref={mapBoxRef} className="h-[520px] w-full">
                         <MapCanvas
@@ -178,7 +180,7 @@ export default function ReservaMesaMapModal({
                     </div>
                 </div>
 
-                <div className="mt-3 text-xs text-gray-500">
+                <div className="mt-3 text-xs text-fg-muted">
                     Pulsa una mesa en el mapa para seleccionarla.
                 </div>
             </div>

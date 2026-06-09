@@ -11,12 +11,12 @@ export function Badge({
 }) {
 	const toneCls =
 		tone === "good"
-			? "border-emerald-200 bg-emerald-50 text-emerald-800"
+			? "border-success/30 bg-success-soft text-success"
 			: tone === "warn"
-				? "border-amber-200 bg-amber-50 text-amber-900"
+				? "border-warning/30 bg-warning-soft text-warning"
 				: tone === "bad"
-					? "border-rose-200 bg-rose-50 text-rose-900"
-					: "border-slate-200 bg-white text-slate-700";
+					? "border-danger/30 bg-danger-soft text-danger"
+					: "border-border bg-surface text-fg-muted";
 
 	return (
 		<span

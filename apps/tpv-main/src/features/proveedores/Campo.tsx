@@ -13,11 +13,11 @@ export default function Campo({
 }) {
 	return (
 		<div className="flex flex-col gap-1">
-			<label className="font-semibold text-negro">{label}</label>
+			<label className="text-sm font-semibold text-fg">{label}</label>
 			<input
 				value={value}
 				onChange={(e) => onChange(e.target.value)}
-				className="border border-negro rounded-lg px-3 py-2 text-negro outline-none bg-white"
+				className="h-10 rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition placeholder:text-fg-subtle focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
 				placeholder={placeholder}
 				type={type}
 			/>

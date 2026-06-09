@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
 
@@ -282,51 +283,63 @@ function AddTrabajador() {
   };
 
   return (
-    <div className="w-full min-h-full mb-10 mt-5 bg-gris flex flex-col p-4 sm:p-6 lg:p-10 pt-5 gap-4 items-center">
-      <div className="bg-blanco w-full max-w-3xl p-4 sm:p-6 rounded-xl shadow-xs flex flex-col gap-5">
-        <div className="w-full flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="flex flex-col">
-            <h2 className="text-2xl font-bold">AÑADIR TRABAJADOR</h2>
-            <p className="text-sm text-negro/60">
-              Crea el acceso al TPV y los datos del trabajador.
-            </p>
+    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+      <div className="flex w-full flex-col gap-4">
+        {/* HEADER */}
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+              <UserPlus className="size-6" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xl font-bold text-fg sm:text-2xl">Añadir trabajador</h2>
+              <p className="text-sm text-fg-muted">
+                Crea el acceso al TPV y los datos del trabajador.
+              </p>
+            </div>
           </div>
 
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="w-full sm:w-auto border-2 border-negro rounded-xl px-3 py-2 text-negro transition-all duration-300 ease-out hover:bg-negro hover:text-white hover:shadow-md"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
           >
-            Volver
+            <ArrowLeft className="size-4" aria-hidden />
+            <span className="hidden xs:inline">Volver</span>
           </button>
         </div>
 
         {error && (
-          <div className="w-full rounded-xl border border-rojo/30 bg-rojo/10 p-3 text-sm text-rojo">
+          <div className="w-full rounded-2xl border border-danger/30 bg-danger-soft p-3 text-sm text-danger">
             {error}
           </div>
         )}
 
-        <div className="rounded-xl border border-negro/10 p-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="font-bold">Acceso TPV</p>
-            <span className="text-xs text-negro/60">
-              {loadingRoles
-                ? "Cargando roles..."
-                : rolActual
-                  ? rolActual.Nombre_Rol
-                  : "Sin rol"}
-            </span>
-          </div>
+        {/* BODY: Acceso (1 col) + Datos (2 cols) */}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm lg:col-span-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="flex items-center gap-2 font-bold text-fg">
+                <KeyRound className="size-4 text-accent" aria-hidden />
+                Acceso TPV
+              </p>
+              <span className="text-xs text-fg-muted">
+                {loadingRoles
+                  ? "Cargando roles..."
+                  : rolActual
+                    ? rolActual.Nombre_Rol
+                    : "Sin rol"}
+              </span>
+            </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Rol *</label>
               <select
                 value={idRol}
                 onChange={(e) => setIdRol(e.target.value ? Number(e.target.value) : "")}
                 disabled={loadingRoles}
-                className="border border-negro/15 rounded-xl px-3 py-2 bg-blanco outline-none focus:border-negro/30 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="">Selecciona un rol</option>
                 {roles.map((r) => (
@@ -342,7 +355,7 @@ function AddTrabajador() {
               <select
                 value={estado}
                 onChange={(e) => setEstado(e.target.value as "Activo" | "Inactivo")}
-                className="border border-negro/15 rounded-xl px-3 py-2 bg-blanco outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
               >
                 <option value="Activo">Activo</option>
                 <option value="Inactivo">Inactivo</option>
@@ -354,11 +367,11 @@ function AddTrabajador() {
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="correo@empresa.com"
                 autoComplete="off"
               />
-              <p className="text-xs text-negro/50">Debe ser único.</p>
+              <p className="text-xs text-fg-subtle">Debe ser único.</p>
             </div>
 
             <div className="flex flex-col gap-1">
@@ -368,25 +381,28 @@ function AddTrabajador() {
                 onChange={(e) => setPassword(e.target.value.replace(/\D/g, ""))}
                 inputMode="numeric"
                 pattern="[0-9]*"
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="1234"
                 autoComplete="off"
               />
-              <p className="text-xs text-negro/50">Recomendado 4–6 dígitos.</p>
+              <p className="text-xs text-fg-subtle">Recomendado 4–6 dígitos.</p>
             </div>
           </div>
-        </div>
+          </div>
 
-        <div className="rounded-xl border border-negro/10 p-4 flex flex-col gap-3">
-          <p className="font-bold">Datos del trabajador</p>
+          <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm lg:col-span-2">
+            <p className="flex items-center gap-2 font-bold text-fg">
+              <IdCard className="size-4 text-accent" aria-hidden />
+              Datos del trabajador
+            </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Nombre *</label>
               <input
                 value={nombre}
                 onChange={(e) => setNombre(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="Nombre"
               />
             </div>
@@ -396,7 +412,7 @@ function AddTrabajador() {
               <input
                 value={apellido}
                 onChange={(e) => setApellido(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="Apellido"
               />
             </div>
@@ -406,7 +422,7 @@ function AddTrabajador() {
               <input
                 value={dni}
                 onChange={(e) => setDni(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="12345678X"
               />
             </div>
@@ -416,7 +432,7 @@ function AddTrabajador() {
               <input
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="600 000 000"
               />
             </div>
@@ -426,7 +442,7 @@ function AddTrabajador() {
               <input
                 value={puesto}
                 onChange={(e) => setPuesto(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="Camarero / Limpieza / Cocina..."
               />
             </div>
@@ -436,7 +452,7 @@ function AddTrabajador() {
               <input
                 value={iban}
                 onChange={(e) => setIban(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="ES00 0000 0000 0000 0000 0000"
                 autoComplete="off"
               />
@@ -447,21 +463,26 @@ function AddTrabajador() {
               <input
                 value={numeroSS}
                 onChange={(e) => setNumeroSS(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
                 placeholder="00/0000000000"
                 autoComplete="off"
               />
             </div>
           </div>
+          </div>
         </div>
 
-        <div className="rounded-xl border border-negro/10 p-4 flex flex-col gap-3">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <p className="font-bold">Contrato</p>
+        <div className="flex flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="flex items-center gap-2 font-bold text-fg">
+              <FileText className="size-4 text-accent" aria-hidden />
+              Contrato
+            </p>
 
-            <label className="flex items-center gap-2 text-sm text-negro/70 select-none cursor-pointer">
+            <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-fg-muted">
               <input
                 type="checkbox"
+                className="accent-accent"
                 checked={indefinido}
                 onChange={(e) => setIndefinido(e.target.checked)}
               />
@@ -469,14 +490,14 @@ function AddTrabajador() {
             </label>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Fecha inicio contrato</label>
               <input
                 type="date"
                 value={fechaInicioContrato}
                 onChange={(e) => setFechaInicioContrato(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent"
               />
             </div>
 
@@ -487,18 +508,18 @@ function AddTrabajador() {
                 value={fechaFinContrato}
                 disabled={indefinido}
                 onChange={(e) => setFechaFinContrato(e.target.value)}
-                className="border border-negro/15 rounded-xl px-3 py-2 outline-none focus:border-negro/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="border border-border rounded-xl px-3 py-2 outline-none focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed"
               />
-              <p className="text-xs text-negro/50">Si es indefinido, se guarda como NULL.</p>
+              <p className="text-xs text-fg-subtle">Si es indefinido, se guarda como NULL.</p>
             </div>
           </div>
         </div>
 
-        <div className="w-full flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-3 pt-1">
+        <div className="flex w-full flex-col-reverse items-stretch justify-end gap-3 pt-1 sm:flex-row sm:items-center">
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="w-full sm:w-auto border-2 border-negro rounded-xl px-4 py-2 text-negro transition-all duration-300 hover:bg-negro hover:text-white"
+            className="w-full cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 sm:w-auto"
           >
             Cancelar
           </button>
@@ -507,8 +528,9 @@ function AddTrabajador() {
             type="button"
             disabled={saving || loadingRoles}
             onClick={guardar}
-            className="w-full sm:w-auto border-2 border-verde text-verde rounded-xl px-4 py-2 font-medium transition-all duration-300 hover:bg-verde hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
+            className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
+            <Save className="size-4" aria-hidden />
             {saving ? "Guardando..." : "Guardar trabajador"}
           </button>
         </div>

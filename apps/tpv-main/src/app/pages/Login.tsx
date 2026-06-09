@@ -1,13 +1,27 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+    Minus,
+    Square,
+    X,
+    Delete,
+    LogIn,
+    Users,
+    Lock,
+    RotateCw,
+    Eye,
+    EyeOff,
+    Check,
+    UserRound,
+    Store,
+    Lightbulb,
+} from "lucide-react";
 import LogoAltaria from "../../assets/img/logo.png";
-import CerrarVentana from "../../assets/svg/CerrarVentana.svg";
-import MinimizarVentana from "../../assets/svg/MinimizarVentana.svg";
-import PantallaCompleta from "../../assets/svg/PantallaCompleta.svg";
 import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useToast } from "../../shared/toast";
 import { useAuth } from "../../shared/stores/useAuth";
+import { Button, IconButton, ThemeToggle } from "../../shared/ui";
 
 import {
     listLoginUsers,
@@ -22,6 +36,35 @@ import {
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
 }
+
+// Paleta de colores suaves para los avatares (determinista por usuario).
+// Funcionan bien tanto en claro como en oscuro (tinte translúcido).
+const AVATAR_PALETTE = [
+    "bg-violet-500/15 text-violet-500",
+    "bg-sky-500/15 text-sky-500",
+    "bg-emerald-500/15 text-emerald-500",
+    "bg-amber-500/15 text-amber-500",
+    "bg-rose-500/15 text-rose-500",
+    "bg-cyan-500/15 text-cyan-500",
+    "bg-fuchsia-500/15 text-fuchsia-500",
+    "bg-indigo-500/15 text-indigo-500",
+];
+
+function avatarColor(seed: number): string {
+    const idx = Math.abs(Math.trunc(seed)) % AVATAR_PALETTE.length;
+    return AVATAR_PALETTE[idx];
+}
+
+// Consejos rotativos que se muestran en el panel del PIN.
+const LOGIN_TIPS = [
+    "Puedes escribir el PIN con el teclado físico y pulsar Enter para entrar.",
+    "Pulsa el icono del ojo para ver el PIN mientras lo escribes.",
+    "Recuerda fichar tu entrada antes de empezar tu jornada.",
+    "Alterna entre tema claro y oscuro desde el botón de la barra superior.",
+    "Selecciona tu usuario y se habilitará el teclado numérico.",
+    "¿Turno partido? Márcalo en el panel de fichaje para registrar dos tramos.",
+    "Usa “Cambiar usuario” si te has equivocado de cuenta.",
+];
 
 export default function Login() {
     const setSession = useAuth((s) => s.setSession);
@@ -42,6 +85,19 @@ export default function Login() {
 
     const [pin, setPin] = useState("");
     const pinRef = useRef(pin);
+
+    // Solo visual: mostrar/ocultar el PIN en el display (no afecta a la lógica).
+    const [showPin, setShowPin] = useState(false);
+
+    // Solo visual: consejo rotativo del panel del PIN.
+    const [tipIndex, setTipIndex] = useState(0);
+
+    useEffect(() => {
+        const id = window.setInterval(() => {
+            setTipIndex((i) => (i + 1) % LOGIN_TIPS.length);
+        }, 6000);
+        return () => window.clearInterval(id);
+    }, []);
 
     useEffect(() => {
         pinRef.current = pin;
@@ -436,97 +492,104 @@ export default function Login() {
     ]);
 
     return (
-        <div className="relative h-screen overflow-hidden bg-linear-to-b from-zinc-50 to-zinc-100">
-            <div className="w-full flex justify-between shrink-0 absolute top-0 left-0 right-0 z-50">
+        <div className="relative h-screen overflow-hidden bg-bg text-fg">
+            {/* Glow decorativo de fondo (sutil, más visible en oscuro) */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                <div className="absolute -left-24 -top-24 size-80 rounded-full bg-accent/10 blur-3xl" />
+                <div className="absolute -bottom-32 -right-16 size-96 rounded-full bg-accent/5 blur-3xl" />
+            </div>
+
+            {/* Barra de título (drag region + controles de ventana) */}
+            <div className="absolute top-0 left-0 right-0 z-50 flex justify-between shrink-0 border-b border-border bg-surface">
                 <div
-                    className="flex bg-white w-full p-1.5 items-center gap-2 sm:gap-3"
+                    className="flex w-full items-center gap-2 p-1.5 sm:gap-3"
                     data-tauri-drag-region
                 >
                     <img
                         src={logoDataUrl ?? LogoAltaria}
-                        className="size-5 rounded-sm object-cover"
+                        className="size-6 rounded-md object-cover"
                         data-tauri-drag-region
                         alt="logo"
                     />
-                    <p data-tauri-drag-region className="truncate max-w-[45vw] sm:max-w-60">
+                    <p
+                        data-tauri-drag-region
+                        className="truncate max-w-[45vw] text-sm font-semibold text-fg sm:max-w-60"
+                    >
                         {businessName || "TPV"}
                     </p>
                 </div>
-                <div className="flex gap-2 sm:gap-4 w-fit p-1 px-2 bg-white">
-                    <button
-                        data-tauri-drag-region
-                        className="hover:scale-140 transition-all cursor-pointer"
-                        onClick={() => ventana.minimize()}
-                        type="button"
-                    >
-                        <img src={MinimizarVentana} className="size-7 sm:size-8" alt="minimizar" />
-                    </button>
-                    <button
-                        data-tauri-drag-region
-                        className="hover:scale-140 transition-all cursor-pointer"
-                        onClick={() => ventana.toggleMaximize()}
-                        type="button"
-                    >
-                        <img src={PantallaCompleta} className="size-5" alt="maximizar" />
-                    </button>
-                    <button
-                        data-tauri-drag-region
-                        className="hover:scale-140 transition-all cursor-pointer"
+                <div className="flex w-fit items-center gap-1 p-1 px-1.5">
+                    <ThemeToggle size="sm" />
+                    <IconButton size="sm" label="Minimizar" onClick={() => ventana.minimize()}>
+                        <Minus className="size-4" aria-hidden />
+                    </IconButton>
+                    <IconButton size="sm" label="Maximizar" onClick={() => ventana.toggleMaximize()}>
+                        <Square className="size-3.5" aria-hidden />
+                    </IconButton>
+                    <IconButton
+                        size="sm"
+                        label="Cerrar"
                         onClick={() => ventana.close()}
-                        type="button"
+                        className="hover:bg-danger-soft hover:text-danger"
                     >
-                        <img src={CerrarVentana} className="size-7 sm:size-8" alt="cerrar" />
-                    </button>
+                        <X className="size-4" aria-hidden />
+                    </IconButton>
                 </div>
             </div>
 
-            <div className="pt-11 sm:pt-12 h-full">
-                <div
-                    className={cn(
-                        "mx-auto w-full max-w-6xl",
-                        "h-[calc(100vh-44px)] sm:h-[calc(100vh-48px)]",
-                        "px-2 sm:px-4 pb-2 sm:pb-4",
-                        "flex flex-col lg:grid lg:grid-cols-2",
-                        "gap-2 sm:gap-6",
-                    )}
-                >
+            <div className="h-full overflow-y-auto pt-11 sm:pt-12 lg:overflow-hidden">
+                <div className="mx-auto flex min-h-[calc(100vh-44px)] w-full max-w-6xl items-center justify-center px-2 py-3 sm:min-h-[calc(100vh-48px)] sm:px-4 sm:py-4">
+                    <div className="grid w-full grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-6">
+                    {/* ===== Columna izquierda: selección de usuario + fichaje ===== */}
                     <section
                         className={cn(
-                            "rounded-3xl border border-black/5 bg-white/60 shadow-sm backdrop-blur",
+                            "relative flex flex-col rounded-3xl border border-border bg-surface shadow-sm",
                             "p-3 sm:p-5",
                             "min-h-0",
-                            "lg:h-[calc(100vh-140px)] lg:max-h-[760px] lg:min-h-[540px]",
+                            "lg:h-[680px] lg:max-h-[calc(100vh-72px)] lg:min-h-[520px]",
                         )}
                     >
-                        <div className="flex items-start sm:items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <h1 className="text-base sm:text-xl font-semibold text-zinc-900">
-                                    Acceso
-                                </h1>
-                                <p className="mt-1 text-[11px] sm:text-sm text-zinc-600">
-                                    Selecciona usuario y mete el PIN.
-                                </p>
+                        <div className="flex items-start justify-between gap-3">
+                            <div className="flex min-w-0 items-center gap-3">
+                                <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                    <Store className="size-5" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                    <h1 className="truncate text-base font-bold text-fg sm:text-xl">
+                                        Bienvenido a{" "}
+                                        <span className="text-accent">{businessName || "TPV"}</span>
+                                    </h1>
+                                    <p className="mt-0.5 text-[11px] text-fg-muted sm:text-sm">
+                                        Selecciona tu usuario e inicia sesión para continuar.
+                                    </p>
+                                </div>
                             </div>
 
                             {selectedUser ? (
-                                <div className="rounded-2xl bg-black/5 px-2.5 py-2 text-[11px] sm:text-sm text-zinc-700 shrink-0 max-w-[62%]">
-                                    <span className="font-semibold">{selectedUser.nombre}</span>
-                                    <span className="opacity-70"> · {selectedUser.nombre_rol}</span>
+                                <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] sm:text-sm">
+                                    <span className="grid size-5 place-items-center rounded-full bg-accent/15 text-accent">
+                                        <UserRound className="size-3" aria-hidden />
+                                    </span>
+                                    <span className="max-w-[120px] truncate font-semibold text-fg">
+                                        {selectedUser.nombre}
+                                    </span>
                                 </div>
                             ) : (
-                                <div className="rounded-2xl bg-amber-50 px-2.5 py-2 text-[11px] sm:text-sm text-amber-900 border border-amber-200 shrink-0">
-                                    Ningún usuario
+                                <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-fg-muted sm:text-sm">
+                                    <UserRound className="size-3.5" aria-hidden />
+                                    Sin usuario
                                 </div>
                             )}
                         </div>
 
+                        {/* Carrusel de usuarios (móvil) */}
                         <div className="mt-2 sm:hidden">
                             {loadingUsers ? (
-                                <div className="rounded-3xl border border-black/5 bg-white/70 p-3 text-sm text-zinc-600">
+                                <div className="rounded-3xl border border-border bg-surface-2 p-3 text-sm text-fg-muted">
                                     Cargando usuarios...
                                 </div>
                             ) : users.length === 0 ? (
-                                <div className="rounded-3xl border border-black/5 bg-white/70 p-3 text-sm text-zinc-600">
+                                <div className="rounded-3xl border border-border bg-surface-2 p-3 text-sm text-fg-muted">
                                     No hay usuarios en la base de datos.
                                 </div>
                             ) : (
@@ -543,28 +606,27 @@ export default function Login() {
                                                 onClick={() => setSelectedUserId(u.id_usuario)}
                                                 className={cn(
                                                     "shrink-0 w-[118px] xs:w-[126px]",
-                                                    "rounded-xl border px-2 py-1.5 text-left shadow-sm transition active:scale-[0.99]",
-                                                    "bg-white/70 hover:bg-white cursor-pointer",
+                                                    "rounded-xl border px-2 py-1.5 text-left transition active:scale-[0.99] cursor-pointer",
                                                     active
-                                                        ? "border-black/20 ring-2 ring-black/10"
-                                                        : "border-black/5",
+                                                        ? "border-accent bg-accent-soft ring-2 ring-ring"
+                                                        : "border-border bg-surface hover:bg-surface-2",
                                                 )}
                                             >
                                                 <div className="flex items-center gap-2">
                                                     <div
                                                         className={cn(
-                                                            "grid h-7 w-7 place-items-center rounded-lg bg-black/5 text-zinc-700",
-                                                            active && "bg-black text-white",
+                                                            "grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                                                            avatarColor(Number(u.id_usuario)),
                                                         )}
                                                     >
-                                                        <span className="text-[11px] font-bold">{initial}</span>
+                                                        {initial}
                                                     </div>
 
                                                     <div className="min-w-0">
-                                                        <p className="truncate text-[11px] font-semibold text-zinc-900 leading-4">
+                                                        <p className="truncate text-[11px] font-semibold leading-4 text-fg">
                                                             {fullName}
                                                         </p>
-                                                        <p className="truncate text-[10px] text-zinc-600 leading-4">
+                                                        <p className="truncate text-[10px] leading-4 text-fg-muted">
                                                             {u.nombre_rol}
                                                         </p>
                                                     </div>
@@ -576,23 +638,31 @@ export default function Login() {
                             )}
                         </div>
 
+                        {/* Grid de usuarios (desktop) */}
                         <div
                             className={cn(
-                                "mt-5 hidden sm:block",
+                                "mt-5 hidden sm:flex sm:flex-1 sm:flex-col",
                                 "min-h-0 overflow-y-auto pr-0 lg:pr-1",
                                 showBottomBlock ? "lg:pb-[270px]" : "pb-0",
                             )}
                         >
+                            <div className="mb-1 flex shrink-0 items-center gap-2 px-1 text-fg-muted">
+                                <Users className="size-4" aria-hidden />
+                                <span className="text-xs font-semibold uppercase tracking-wide">
+                                    Usuarios
+                                </span>
+                            </div>
+
                             {loadingUsers ? (
-                                <div className="rounded-3xl border border-black/5 bg-white/70 p-4 text-sm text-zinc-600">
+                                <div className="rounded-2xl border border-border bg-surface-2 p-4 text-sm text-fg-muted">
                                     Cargando usuarios...
                                 </div>
                             ) : users.length === 0 ? (
-                                <div className="rounded-3xl border border-black/5 bg-white/70 p-4 text-sm text-zinc-600">
+                                <div className="rounded-2xl border border-border bg-surface-2 p-4 text-sm text-fg-muted">
                                     No hay usuarios en la base de datos.
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-2 p-3 sm:p-4 gap-3 sm:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-3 p-1 sm:grid-cols-2">
                                     {users.map((u) => {
                                         const active = u.id_usuario === selectedUserId;
                                         const initial = (u.nombre?.[0] ?? "?").toUpperCase();
@@ -604,27 +674,33 @@ export default function Login() {
                                                 type="button"
                                                 onClick={() => setSelectedUserId(u.id_usuario)}
                                                 className={cn(
-                                                    "group rounded-3xl border p-3 mt-2 text-left shadow-sm transition active:scale-[0.99] cursor-pointer",
-                                                    "bg-white/70 hover:bg-white",
+                                                    "group relative rounded-2xl border p-3.5 text-left transition active:scale-[0.99] cursor-pointer",
                                                     active
-                                                        ? "border-black/20 ring-2 ring-black/10"
-                                                        : "border-black/5",
+                                                        ? "border-accent bg-accent-soft ring-1 ring-accent/40 shadow-sm"
+                                                        : "border-border bg-surface hover:bg-surface-2 hover:border-border-strong",
                                                 )}
                                             >
+                                                {active && (
+                                                    <span className="absolute right-2.5 top-2.5 grid size-5 place-items-center rounded-full bg-accent text-accent-fg shadow-sm">
+                                                        <Check className="size-3" aria-hidden />
+                                                    </span>
+                                                )}
                                                 <div className="flex items-center gap-3">
                                                     <div
                                                         className={cn(
-                                                            "grid h-10 w-10 place-items-center rounded-2xl bg-black/5 text-zinc-700",
-                                                            active && "bg-black text-white",
+                                                            "grid size-11 shrink-0 place-items-center rounded-full text-base font-bold",
+                                                            avatarColor(Number(u.id_usuario)),
                                                         )}
                                                     >
-                                                        <span className="text-sm font-bold">{initial}</span>
+                                                        {initial}
                                                     </div>
                                                     <div className="min-w-0">
-                                                        <p className="truncate text-sm font-semibold text-zinc-900">
+                                                        <p className="truncate text-sm font-semibold text-fg">
                                                             {fullName}
                                                         </p>
-                                                        <p className="truncate text-xs text-zinc-600">{u.nombre_rol}</p>
+                                                        <p className="truncate text-xs text-fg-muted">
+                                                            {u.nombre_rol}
+                                                        </p>
                                                     </div>
                                                 </div>
                                             </button>
@@ -634,48 +710,42 @@ export default function Login() {
                             )}
                         </div>
 
+                        {/* Fichaje (móvil) */}
                         <div className="mt-2 sm:hidden">
-                            <div className="rounded-3xl border border-black/5 bg-white/80 p-3">
+                            <div className="rounded-3xl border border-border bg-surface-2 p-3">
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="min-w-0">
-                                        <p className="text-[10px] font-medium text-zinc-500">Fichaje</p>
-                                        <p className="truncate text-sm font-semibold text-zinc-900">
+                                        <p className="text-[10px] font-medium text-fg-subtle">Fichaje</p>
+                                        <p className="truncate text-sm font-semibold text-fg">
                                             {mobileFichajeResumen}
                                         </p>
                                     </div>
 
-                                    <label className="flex items-center gap-2 select-none shrink-0">
+                                    <label className="flex shrink-0 select-none items-center gap-2">
                                         <input
                                             type="checkbox"
-                                            className="h-4 w-4 rounded border-zinc-300"
+                                            className="h-4 w-4 rounded border-border accent-accent"
                                             checked={turnoPartido}
                                             onChange={(e) => handleTurnoPartidoToggle(e.target.checked)}
                                             disabled={!selectedUserId}
                                         />
-                                        <span className="text-xs text-zinc-700">Partido</span>
+                                        <span className="text-xs text-fg-muted">Partido</span>
                                     </label>
                                 </div>
 
-                                <button
-                                    type="button"
+                                <Button
+                                    variant={ficharTone === "action" ? "primary" : "secondary"}
+                                    fullWidth
                                     onClick={handlePunch}
                                     disabled={ficharDisabled}
-                                    className={cn(
-                                        "mt-2 h-10 w-full rounded-2xl border border-black/5 shadow-sm",
-                                        "transition active:scale-[0.98]",
-                                        ficharTone === "action"
-                                            ? "bg-black text-white hover:bg-black/90"
-                                            : "bg-white text-zinc-900 hover:bg-zinc-50",
-                                        ficharDisabled && "opacity-40 cursor-not-allowed active:scale-100",
-                                    )}
+                                    className="mt-2"
                                 >
-                                    <span className="text-sm font-semibold">
-                                        {loadingPunch ? "Cargando..." : ficharLabel}
-                                    </span>
-                                </button>
+                                    {loadingPunch ? "Cargando..." : ficharLabel}
+                                </Button>
                             </div>
                         </div>
 
+                        {/* Fichaje (desktop) */}
                         <div
                             className={cn(
                                 "hidden sm:block",
@@ -692,33 +762,33 @@ export default function Login() {
                                     showBottomBlock ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4",
                                 )}
                             >
-                                <div className="rounded-3xl border border-black/5 bg-white p-4 text-sm text-zinc-700">
-                                    <p className="font-semibold text-zinc-900">Fichaje de hoy</p>
+                                <div className="rounded-3xl border border-border bg-surface-2 p-4 text-sm text-fg-muted">
+                                    <p className="font-semibold text-fg">Fichaje de hoy</p>
 
                                     {loadingPunch ? (
-                                        <p className="mt-1 text-zinc-600">Comprobando...</p>
+                                        <p className="mt-1 text-fg-muted">Comprobando...</p>
                                     ) : (
                                         <>
-                                            <label className="mt-2 flex items-center gap-2 select-none">
+                                            <label className="mt-2 flex select-none items-center gap-2">
                                                 <input
                                                     type="checkbox"
-                                                    className="h-4 w-4 rounded border-zinc-300"
+                                                    className="h-4 w-4 rounded border-border accent-accent"
                                                     checked={turnoPartido}
                                                     onChange={(e) => handleTurnoPartidoToggle(e.target.checked)}
                                                     disabled={!selectedUserId}
                                                 />
-                                                <span className="text-sm text-zinc-700">Hoy tienes turno partido</span>
+                                                <span className="text-sm text-fg-muted">Hoy tienes turno partido</span>
                                             </label>
 
                                             <div className="mt-3 space-y-3">
                                                 <div>
-                                                    <p className="font-semibold text-zinc-900">Parte 1</p>
+                                                    <p className="font-semibold text-fg">Parte 1</p>
                                                     <p>
                                                         Entrada:{" "}
                                                         <span
                                                             className={cn(
                                                                 "font-semibold",
-                                                                hasEntrada1 ? "text-emerald-700" : "text-rose-700",
+                                                                hasEntrada1 ? "text-success" : "text-danger",
                                                             )}
                                                         >
                                                             {hasEntrada1 ? "OK" : "Pendiente"}
@@ -729,7 +799,7 @@ export default function Login() {
                                                         <span
                                                             className={cn(
                                                                 "font-semibold",
-                                                                hasSalida1 ? "text-emerald-700" : "text-zinc-600",
+                                                                hasSalida1 ? "text-success" : "text-fg-muted",
                                                             )}
                                                         >
                                                             {hasSalida1 ? "OK" : "—"}
@@ -739,13 +809,13 @@ export default function Login() {
 
                                                 {turnoPartido ? (
                                                     <div>
-                                                        <p className="font-semibold text-zinc-900">Parte 2</p>
+                                                        <p className="font-semibold text-fg">Parte 2</p>
                                                         <p>
                                                             Entrada:{" "}
                                                             <span
                                                                 className={cn(
                                                                     "font-semibold",
-                                                                    hasEntrada2 ? "text-emerald-700" : "text-rose-700",
+                                                                    hasEntrada2 ? "text-success" : "text-danger",
                                                                 )}
                                                             >
                                                                 {hasEntrada2 ? "OK" : "Pendiente"}
@@ -756,7 +826,7 @@ export default function Login() {
                                                             <span
                                                                 className={cn(
                                                                     "font-semibold",
-                                                                    hasSalida2 ? "text-emerald-700" : "text-zinc-600",
+                                                                    hasSalida2 ? "text-success" : "text-fg-muted",
                                                                 )}
                                                             >
                                                                 {hasSalida2 ? "OK" : "—"}
@@ -766,7 +836,7 @@ export default function Login() {
                                                 ) : null}
 
                                                 {!hasEntrada1 ? (
-                                                    <p className="text-amber-900">
+                                                    <p className="text-warning">
                                                         Debes fichar entrada para poder entrar.
                                                     </p>
                                                 ) : null}
@@ -776,26 +846,18 @@ export default function Login() {
                                 </div>
 
                                 <div className="mt-3">
-                                    <button
-                                        type="button"
+                                    <Button
+                                        variant={ficharTone === "action" ? "primary" : "secondary"}
+                                        size="lg"
+                                        fullWidth
                                         onClick={handlePunch}
                                         disabled={ficharDisabled}
-                                        className={cn(
-                                            "h-14 w-full rounded-2xl border border-black/5 shadow-sm",
-                                            "transition active:scale-[0.98]",
-                                            ficharTone === "action"
-                                                ? "bg-black text-white hover:bg-black/90"
-                                                : "bg-white text-zinc-900 hover:bg-zinc-50",
-                                            ficharDisabled && "opacity-40 cursor-not-allowed active:scale-100",
-                                        )}
                                     >
-                                        <span className="text-lg font-semibold">
-                                            {loadingPunch ? "Cargando..." : ficharLabel}
-                                        </span>
-                                    </button>
+                                        {loadingPunch ? "Cargando..." : ficharLabel}
+                                    </Button>
 
                                     {selectedUser && !loadingPunch ? (
-                                        <p className="mt-2 text-xs text-zinc-600">
+                                        <p className="mt-2 text-xs text-fg-muted">
                                             {!hasEntrada1
                                                 ? "Para entrar en la app, primero ficha entrada."
                                                 : "Puedes entrar. Si terminas tu jornada, ficha salida."}
@@ -806,86 +868,105 @@ export default function Login() {
                         </div>
                     </section>
 
+                    {/* ===== Columna derecha: PIN ===== */}
                     <section
                         className={cn(
-                            "rounded-3xl border border-black/5 bg-white/60 shadow-sm backdrop-blur",
+                            "flex flex-col rounded-3xl border border-border bg-surface shadow-sm",
                             "p-3 sm:p-5",
                             "min-h-0",
-                            "lg:h-[calc(100vh-140px)] lg:max-h-[760px] lg:min-h-[540px]",
+                            "lg:h-[680px] lg:max-h-[calc(100vh-72px)] lg:min-h-[520px]",
                             "overflow-hidden",
                         )}
                     >
                         <div className="flex items-start justify-between gap-3 sm:gap-4">
-                            <div className="min-w-0">
-                                <h2 className="text-base sm:text-lg font-semibold text-zinc-900">PIN</h2>
-                                <p className="mt-1 text-[11px] sm:text-sm text-zinc-600 line-clamp-2">
-                                    {selectedUser
-                                        ? isSubmitting
-                                            ? "Procesando..."
-                                            : !hasEntrada1
-                                                ? `Introduce PIN y ficha entrada (${selectedUser.nombre}).`
-                                                : `Introduce el PIN (${selectedUser.nombre}).`
-                                        : "Selecciona un usuario para habilitar el teclado."}
-                                </p>
+                            <div className="flex min-w-0 items-center gap-3">
+                                <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                    <Lock className="size-5" aria-hidden />
+                                </div>
+                                <div className="min-w-0">
+                                    <h2 className="text-base font-bold text-fg sm:text-lg">
+                                        PIN de acceso
+                                    </h2>
+                                    <p className="mt-0.5 line-clamp-2 text-[11px] text-fg-muted sm:text-sm">
+                                        {selectedUser
+                                            ? isSubmitting
+                                                ? "Procesando..."
+                                                : !hasEntrada1
+                                                    ? `Introduce PIN y ficha entrada (${selectedUser.nombre}).`
+                                                    : "Introduce tu PIN para habilitar el teclado."
+                                            : "Selecciona un usuario para habilitar el teclado."}
+                                    </p>
+                                </div>
                             </div>
 
-                            <button
-                                type="button"
+                            <Button
+                                variant="secondary"
                                 onClick={() => setSelectedUserId(null)}
-                                className={cn(
-                                    "rounded-2xl px-3 py-2 text-[11px] sm:text-sm font-semibold transition shrink-0",
-                                    selectedUser && !isSubmitting
-                                        ? "bg-black/5 text-zinc-800 hover:bg-black/10 active:scale-[0.98] cursor-pointer"
-                                        : "bg-black/5 text-zinc-400 cursor-not-allowed",
-                                )}
                                 disabled={!selectedUser || isSubmitting}
                                 title="Cambiar usuario"
+                                leftIcon={<RotateCw className="size-4" aria-hidden />}
+                                className="shrink-0"
                             >
-                                Cambiar
-                            </button>
+                                Cambiar usuario
+                            </Button>
                         </div>
 
-                        <div className="mt-2 sm:mt-5 flex items-center justify-between rounded-2xl border border-black/5 bg-white/70 px-3 py-2 sm:px-4 sm:py-4">
-                            <div className="min-w-0">
-                                <p className="text-[10px] sm:text-xs font-medium text-zinc-500">PIN</p>
-                                <p className="mt-0.5 truncate text-lg sm:text-2xl font-semibold tracking-[0.35em] text-zinc-900">
-                                    {pinMasked || "— — — —"}
-                                </p>
+                        {/* Display del PIN (puntos indicadores + mostrar/ocultar) */}
+                        <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface-2 px-3 py-3 sm:mt-5 sm:px-4 sm:py-4">
+                            <div className="flex min-h-9 flex-1 items-center gap-2.5">
+                                {Array.from({ length: Math.max(4, pin.length) }).map((_, i) => {
+                                    const filled = i < pin.length;
+
+                                    if (showPin && filled) {
+                                        return (
+                                            <span
+                                                key={i}
+                                                className="text-xl font-bold tabular-nums text-fg"
+                                            >
+                                                {pin[i]}
+                                            </span>
+                                        );
+                                    }
+
+                                    return (
+                                        <span
+                                            key={i}
+                                            className={cn(
+                                                "size-3 rounded-full transition",
+                                                filled ? "bg-accent" : "bg-fg-subtle/30",
+                                            )}
+                                        />
+                                    );
+                                })}
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                    type="button"
-                                    onClick={handleBackspace}
-                                    className={cn(
-                                        "rounded-xl px-2 py-1.5 text-[11px] sm:text-sm font-semibold transition",
-                                        canType
-                                            ? "bg-black/5 text-zinc-800 hover:bg-black/10 active:scale-[0.98] cursor-pointer"
-                                            : "bg-black/5 text-zinc-400 cursor-not-allowed",
-                                    )}
-                                    disabled={!canType}
-                                    title="Borrar último"
+                            <div className="flex shrink-0 items-center gap-1.5">
+                                <IconButton
+                                    size="sm"
+                                    variant="ghost"
+                                    label={showPin ? "Ocultar PIN" : "Mostrar PIN"}
+                                    onClick={() => setShowPin((v) => !v)}
                                 >
-                                    ⌫
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={handleClear}
-                                    className={cn(
-                                        "rounded-xl px-2 py-1.5 text-[11px] sm:text-sm font-semibold transition",
-                                        canType
-                                            ? "bg-black/5 text-zinc-800 hover:bg-black/10 active:scale-[0.98] cursor-pointer"
-                                            : "bg-black/5 text-zinc-400 cursor-not-allowed",
+                                    {showPin ? (
+                                        <EyeOff className="size-4" aria-hidden />
+                                    ) : (
+                                        <Eye className="size-4" aria-hidden />
                                     )}
+                                </IconButton>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={handleClear}
                                     disabled={!canType}
                                     title="Limpiar"
                                 >
                                     Limpiar
-                                </button>
+                                </Button>
                             </div>
                         </div>
 
-                        <div className="mt-2 sm:mt-5 grid grid-cols-3 gap-1.5 sm:gap-3">
+                        {/* Teclado numérico */}
+                        <div className="mt-2 grid grid-cols-3 gap-2 sm:mt-5 sm:gap-3">
                             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
                                 <button
                                     key={d}
@@ -893,14 +974,14 @@ export default function Login() {
                                     onClick={() => handleDigit(d)}
                                     disabled={!canType}
                                     className={cn(
-                                        "h-10 xs:h-11 sm:h-14 w-full rounded-xl sm:rounded-2xl border border-black/5 shadow-sm",
-                                        "backdrop-blur transition active:scale-[0.98]",
+                                        "h-11 w-full rounded-xl border sm:h-16 sm:rounded-2xl",
+                                        "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
                                         !canType
-                                            ? "opacity-40 cursor-not-allowed"
-                                            : "bg-white/70 text-zinc-900 hover:bg-white cursor-pointer",
+                                            ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
+                                            : "cursor-pointer border-border bg-surface text-fg shadow-sm hover:border-border-strong hover:bg-surface-2",
                                     )}
                                 >
-                                    <span className="text-base xs:text-lg font-semibold">{d}</span>
+                                    {d}
                                 </button>
                             ))}
 
@@ -909,14 +990,31 @@ export default function Login() {
                                 onClick={() => handleDigit("0")}
                                 disabled={!canType}
                                 className={cn(
-                                    "h-10 xs:h-11 sm:h-14 w-full rounded-xl sm:rounded-2xl border border-black/5 shadow-sm",
-                                    "backdrop-blur transition active:scale-[0.98]",
+                                    "h-11 w-full rounded-xl border sm:h-16 sm:rounded-2xl",
+                                    "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
                                     !canType
-                                        ? "opacity-40 cursor-not-allowed"
-                                        : "bg-white/70 text-zinc-900 hover:bg-white cursor-pointer",
+                                        ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
+                                        : "cursor-pointer border-border bg-surface text-fg shadow-sm hover:border-border-strong hover:bg-surface-2",
                                 )}
                             >
-                                <span className="text-base xs:text-lg font-semibold">0</span>
+                                0
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleBackspace}
+                                disabled={!canType}
+                                aria-label="Borrar último"
+                                title="Borrar último"
+                                className={cn(
+                                    "inline-flex h-11 w-full items-center justify-center rounded-xl border sm:h-16 sm:rounded-2xl",
+                                    "transition active:scale-[0.97]",
+                                    !canType
+                                        ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
+                                        : "cursor-pointer border-border bg-surface text-fg-muted shadow-sm hover:border-border-strong hover:bg-surface-2 hover:text-fg",
+                                )}
+                            >
+                                <Delete className="size-5 sm:size-6" aria-hidden />
                             </button>
 
                             <button
@@ -924,41 +1022,37 @@ export default function Login() {
                                 onClick={handleSubmit}
                                 disabled={!canEnter}
                                 className={cn(
-                                    "h-10 xs:h-11 sm:h-14 w-full rounded-xl sm:rounded-2xl border border-black/5 shadow-sm",
-                                    "backdrop-blur transition active:scale-[0.98]",
+                                    "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl sm:h-16 sm:rounded-2xl",
+                                    "text-base font-semibold sm:text-lg transition active:scale-[0.97]",
                                     canEnter
-                                        ? "bg-black text-white hover:bg-black/90 cursor-pointer"
-                                        : "opacity-40 cursor-not-allowed bg-white/70 text-zinc-900",
+                                        ? "cursor-pointer bg-accent text-accent-fg shadow-sm hover:bg-accent-hover"
+                                        : "cursor-not-allowed bg-surface-2 text-fg-subtle opacity-50",
                                 )}
                             >
-                                <span className="text-sm xs:text-base sm:text-lg font-semibold">
-                                    Entrar
-                                </span>
-                            </button>
-
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    if (!requireUserOrWarn()) return;
-                                    if (isSubmitting) return;
-                                    pinRef.current = "";
-                                    setPin("");
-                                }}
-                                disabled={!canType}
-                                className={cn(
-                                    "h-10 xs:h-11 sm:h-14 w-full rounded-xl sm:rounded-2xl border border-black/5 shadow-sm",
-                                    "backdrop-blur transition active:scale-[0.98]",
-                                    canType
-                                        ? "bg-rose-600 text-white hover:bg-rose-500 cursor-pointer"
-                                        : "opacity-40 cursor-not-allowed bg-white/70 text-zinc-900",
-                                )}
-                            >
-                                <span className="text-sm xs:text-base sm:text-lg font-semibold">
-                                    Cancelar
-                                </span>
+                                <LogIn className="size-5" aria-hidden />
+                                Entrar
                             </button>
                         </div>
+
+                        {/* Consejos rotativos (rellenan el espacio inferior del panel) */}
+                        <div className="mt-3 hidden flex-1 items-end sm:flex">
+                            <div className="w-full rounded-2xl border border-border bg-surface-2 p-4">
+                                <div className="flex items-center gap-2 text-accent">
+                                    <Lightbulb className="size-4" aria-hidden />
+                                    <span className="text-xs font-semibold uppercase tracking-wide">
+                                        Consejo
+                                    </span>
+                                </div>
+                                <p
+                                    key={tipIndex}
+                                    className="animate-tip mt-1.5 text-sm leading-relaxed text-fg-muted"
+                                >
+                                    {LOGIN_TIPS[tipIndex]}
+                                </p>
+                            </div>
+                        </div>
                     </section>
+                    </div>
                 </div>
             </div>
         </div>

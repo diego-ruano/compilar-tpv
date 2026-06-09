@@ -1,3 +1,5 @@
+import { ArrowRight, ImageOff } from "lucide-react";
+
 type ProveedorUI = {
 	ID_Proveedor: number;
 	Nombre_Empresa: string;
@@ -16,56 +18,46 @@ export default function ProveedorCard({
 		<button
 			type="button"
 			onClick={onClick}
-			className="w-fit text-left"
+			className="group w-full max-w-[240px] text-left"
 		>
-			<div className="bg-blanco p-6 rounded-xl shadow-md w-[200px] border border-negro/10 hover:shadow-lg transition">
-
+			<div className="rounded-2xl border border-border bg-surface p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
 				{/* IMAGEN */}
-				<div className="w-full h-[110px] rounded-base bg-gris flex items-center justify-center overflow-hidden border border-negro/10">
+				<div className="flex h-[120px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
 					{proveedor.urlImagen ? (
 						<img
 							src={proveedor.urlImagen}
 							alt={proveedor.Nombre_Empresa}
-							className="w-full h-full object-cover"
+							className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
 							draggable={false}
 						/>
 					) : (
-						<span className="text-negro/50 font-semibold text-sm text-center px-2">
-							{proveedor.Nombre_Empresa}
-						</span>
+						<div className="flex flex-col items-center gap-1 text-fg-subtle">
+							<ImageOff className="size-6" aria-hidden />
+							<span className="px-2 text-center text-xs font-semibold">
+								{proveedor.Nombre_Empresa}
+							</span>
+						</div>
 					)}
 				</div>
 
 				{/* NOMBRE */}
-				<h5 className="mt-6 mb-1 text-xl font-semibold tracking-tight text-negro truncate">
+				<h5 className="mt-4 mb-0.5 truncate text-lg font-semibold tracking-tight text-fg">
 					{proveedor.Nombre_Empresa}
 				</h5>
 
 				{/* EMAIL */}
-				<p className="text-sm text-negro/70 truncate">
+				<p className="truncate text-sm text-fg-muted">
 					{proveedor.Email ?? "Sin email"}
 				</p>
 
 				{/* CTA */}
-				<div className="flex items-center mt-3 text-negro">
-					<p className="text-sm">Ver detalle</p>
-					<svg
-						className="w-4 h-4 ms-1.5 rtl:rotate-180 -me-0.5"
-						aria-hidden="true"
-						xmlns="http://www.w3.org/2000/svg"
-						viewBox="0 0 24 24"
-						fill="none"
-					>
-						<path
-							stroke="currentColor"
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							strokeWidth="2"
-							d="M19 12H5m14 0-4 4m4-4-4-4"
-						/>
-					</svg>
+				<div className="mt-3 flex items-center gap-1.5 text-sm font-medium text-fg-muted transition group-hover:text-accent">
+					<span>Ver detalle</span>
+					<ArrowRight
+						className="size-4 transition group-hover:translate-x-0.5"
+						aria-hidden
+					/>
 				</div>
-
 			</div>
 		</button>
 	);

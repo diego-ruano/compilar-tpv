@@ -1,5 +1,6 @@
 // components/mesasComponents/MesaComandaModal.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../../shared/stores/useAuth";
@@ -93,17 +94,18 @@ function Modal({
 }) {
     if (!open) return null;
     return (
-        <div className="fixed inset-0 z-[9999] bg-black/40 p-4 grid place-items-center">
-            <div className="w-full max-w-[1200px] h-[86vh] rounded-2xl border border-slate-200 bg-white shadow-xl overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between gap-3 p-4 border-b border-slate-100">
-                    <div className="text-lg font-extrabold text-slate-900">
+        <div className="fixed inset-0 z-[9999] bg-black/50 p-4 grid place-items-center">
+            <div className="w-full max-w-[1200px] h-[86vh] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden flex flex-col">
+                <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+                    <div className="text-lg font-extrabold text-fg">
                         {title}
                     </div>
                     <button
                         onClick={onClose}
-                        className="h-10 w-10 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        aria-label="Cerrar"
+                        className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                     >
-                        ✕
+                        <X className="size-4" aria-hidden />
                     </button>
                 </div>
 
@@ -139,13 +141,13 @@ function NotaLineaModal({
 
     return (
         <div className="fixed inset-0 z-[10000] bg-black/50 p-4 grid place-items-center">
-            <div className="w-full max-w-[520px] rounded-2xl border border-black/10 bg-white shadow-xl overflow-hidden">
-                <div className="p-4 border-b border-black/10 flex items-center justify-between gap-3">
+            <div className="w-full max-w-[520px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden">
+                <div className="p-4 border-b border-border flex items-center justify-between gap-3">
                     <div className="min-w-0">
-                        <p className="text-sm text-black/50 font-semibold">
+                        <p className="text-sm text-fg-subtle font-semibold">
                             Nota de producto
                         </p>
-                        <p className="text-lg font-extrabold text-negro truncate">
+                        <p className="text-lg font-extrabold text-fg truncate">
                             {productoNombre}
                         </p>
                     </div>
@@ -153,10 +155,11 @@ function NotaLineaModal({
                     <button
                         type="button"
                         onClick={onCancel}
-                        className="h-10 w-10 rounded-xl border border-black/10 bg-white text-black/60 hover:bg-black/5"
                         title="Cerrar"
+                        aria-label="Cerrar"
+                        className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                     >
-                        ✕
+                        <X className="size-4" aria-hidden />
                     </button>
                 </div>
 
@@ -173,9 +176,9 @@ function NotaLineaModal({
                             }
                         }}
                         placeholder='Ej: "Sin queso", "Muy hecho", "Sin sal"...'
-                        className="w-full min-h-[140px] resize-none rounded-xl border border-black/10 bg-white px-3 py-3 outline-none focus:ring-2 focus:ring-black/10"
+                        className="w-full min-h-[140px] resize-none rounded-xl border border-border bg-surface px-3 py-3 outline-none focus:ring-2 focus:ring-ring"
                     />
-                    <p className="mt-2 text-xs text-black/50">
+                    <p className="mt-2 text-xs text-fg-subtle">
                         Tip: pulsa <span className="font-semibold">Ctrl + Enter</span> para
                         guardar rápidamente
                     </p>
@@ -184,7 +187,7 @@ function NotaLineaModal({
                         <button
                             type="button"
                             onClick={onCancel}
-                            className="px-4 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                            className="px-4 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                         >
                             Cancelar
                         </button>
@@ -192,7 +195,7 @@ function NotaLineaModal({
                         <button
                             type="button"
                             onClick={() => onSave(value)}
-                            className="px-4 py-2 rounded-xl bg-black text-white hover:bg-black/90 text-sm font-semibold"
+                            className="px-4 py-2 rounded-xl bg-accent text-white hover:bg-accent-hover text-sm font-semibold"
                         >
                             Guardar
                         </button>
@@ -709,7 +712,7 @@ export default function MesaComandaModal({
         const qty = countEnTicket(p.ID_Producto);
 
         return (
-            <div className="rounded-xl border border-black/10 bg-white p-3 text-left">
+            <div className="rounded-xl border border-border bg-surface p-3 text-left">
                 <div
                     role="button"
                     tabIndex={0}
@@ -726,7 +729,7 @@ export default function MesaComandaModal({
                         <img
                             src={p.urlImagen}
                             alt={p.Nombre}
-                            className="w-full h-28 object-cover rounded-lg border border-black/5"
+                            className="w-full h-28 object-cover rounded-lg border border-border"
                         />
 
                         <button
@@ -735,7 +738,7 @@ export default function MesaComandaModal({
                                 e.stopPropagation();
                                 abrirDetalleProducto(p);
                             }}
-                            className="absolute top-2 right-2 w-8 h-8 rounded-full bg-white/90 border border-black/10 shadow-sm flex items-center justify-center text-black/70 hover:bg-white transition"
+                            className="absolute top-2 right-2 w-8 h-8 rounded-full bg-surface/90 border border-border shadow-sm flex items-center justify-center text-fg-muted hover:bg-surface transition"
                             title="Info"
                             aria-label={`Info de ${p.Nombre}`}
                         >
@@ -743,7 +746,7 @@ export default function MesaComandaModal({
                         </button>
 
                         {qty > 0 ? (
-                            <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-black text-white flex items-center justify-center text-sm font-bold border-2 border-white">
+                            <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold border-2 border-border">
                                 {qty}
                             </div>
                         ) : null}
@@ -762,7 +765,7 @@ export default function MesaComandaModal({
                         type="button"
                         onClick={() => removeProductoFromTicket(p.ID_Producto)}
                         className={cn(
-                            "w-11 h-11 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold",
+                            "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
                             qty === 0 && "opacity-40 cursor-not-allowed",
                         )}
                         disabled={qty === 0}
@@ -770,15 +773,15 @@ export default function MesaComandaModal({
                         −
                     </button>
 
-                    <div className="flex-1 text-center rounded-xl border border-black/10 bg-black/5 py-2">
-                        <p className="text-xs text-black/60">Cantidad</p>
+                    <div className="flex-1 text-center rounded-xl border border-border bg-surface-2 py-2">
+                        <p className="text-xs text-fg-muted">Cantidad</p>
                         <p className="text-lg font-bold">{qty}</p>
                     </div>
 
                     <button
                         type="button"
                         onClick={() => addProductoToTicket(p)}
-                        className="w-11 h-11 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold"
+                        className="w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
                     >
                         +
                     </button>
@@ -860,7 +863,7 @@ export default function MesaComandaModal({
                         {reserva.estado === "PROXIMA" ? (
                             <button
                                 type="button"
-                                className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-blue-600 text-blue-700 bg-white hover:bg-blue-600 hover:text-white transition"
+                                className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-blue-600 text-blue-700 bg-surface hover:bg-blue-600 hover:text-white transition"
                                 onClick={async () => {
                                     try {
                                         await reservaMarcarActivaAhora(reserva.idReserva);
@@ -893,7 +896,7 @@ export default function MesaComandaModal({
                         {reserva.estado === "ACTIVA" ? (
                             <button
                                 type="button"
-                                className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-rose-600 text-rose-700 bg-white hover:bg-rose-600 hover:text-white transition"
+                                className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-danger text-danger bg-surface hover:bg-danger hover:text-white transition"
                                 onClick={async () => {
                                     try {
                                         await reservaFinalizar(reserva.idReserva);
@@ -910,7 +913,7 @@ export default function MesaComandaModal({
                 ) : null}
 
                 <div className="flex items-center justify-between gap-3 mb-4">
-                    <div className="text-sm text-slate-600">
+                    <div className="text-sm text-fg-muted">
                         {loadingTicket
                             ? "Cargando ticket…"
                             : idComanda
@@ -919,7 +922,7 @@ export default function MesaComandaModal({
                     </div>
 
                     <button
-                        className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                        className="px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                         onClick={reloadTicket}
                         type="button"
                     >
@@ -928,13 +931,13 @@ export default function MesaComandaModal({
                 </div>
 
                 <div className="flex flex-1 min-h-0 gap-4">
-                    <div className="flex-1 min-h-0 bg-white rounded-xl border border-black/10 p-4 flex flex-col">
+                    <div className="flex-1 min-h-0 bg-surface rounded-xl border border-border p-4 flex flex-col">
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
-                                <h3 className="text-lg font-bold text-negro">
+                                <h3 className="text-lg font-bold text-fg">
                                     {leftTitle}
                                 </h3>
-                                <p className="text-sm text-negro/60">
+                                <p className="text-sm text-fg-muted">
                                     {leftSubtitle}
                                 </p>
                             </div>
@@ -943,7 +946,7 @@ export default function MesaComandaModal({
                                 !showingSearch &&
                                 paso !== "efectivo" ? (
                                 <button
-                                    className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                                    className="px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                                     onClick={() => setCategoriaSeleccionada(null)}
                                     type="button"
                                 >
@@ -957,11 +960,11 @@ export default function MesaComandaModal({
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
                                 placeholder="Buscar producto por nombre…"
-                                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:ring-2 focus:ring-black/10"
+                                className="w-full rounded-xl border border-border bg-surface px-4 py-3 outline-none focus:ring-2 focus:ring-ring"
                                 disabled={paso === "efectivo"}
                             />
                             {paso === "efectivo" ? (
-                                <p className="mt-2 text-xs text-black/50">
+                                <p className="mt-2 text-xs text-fg-subtle">
                                     Estás en modo efectivo. Termina el cobro o pulsa
                                     “Cancelar”.
                                 </p>
@@ -976,37 +979,37 @@ export default function MesaComandaModal({
                         >
                             {paso === "efectivo" ? (
                                 <div className="flex flex-col gap-4">
-                                    <div className="rounded-xl border border-black/10 bg-white p-4">
+                                    <div className="rounded-xl border border-border bg-surface p-4">
                                         <div className="flex items-center justify-between">
-                                            <p className="text-sm text-black/60">Total a cobrar</p>
+                                            <p className="text-sm text-fg-muted">Total a cobrar</p>
                                             <p className="text-xl font-bold">
                                                 {eur(totalACobrar)}
                                             </p>
                                         </div>
 
                                         <div className="mt-2 flex items-center justify-between">
-                                            <p className="text-sm text-black/60">Te han dado</p>
+                                            <p className="text-sm text-fg-muted">Te han dado</p>
                                             <p className="text-xl font-bold">
                                                 {eur(totalEfectivo)}
                                             </p>
                                         </div>
 
-                                        <div className="mt-3 rounded-xl p-3 border border-black/10 bg-black/5">
+                                        <div className="mt-3 rounded-xl p-3 border border-border bg-surface-2">
                                             {diferencia >= 0 ? (
                                                 <div className="flex items-center justify-between">
-                                                    <p className="text-sm font-semibold text-emerald-700">
+                                                    <p className="text-sm font-semibold text-success">
                                                         Cambio
                                                     </p>
-                                                    <p className="text-lg font-bold text-emerald-700">
+                                                    <p className="text-lg font-bold text-success">
                                                         {eur(diferencia)}
                                                     </p>
                                                 </div>
                                             ) : (
                                                 <div className="flex items-center justify-between">
-                                                    <p className="text-sm font-semibold text-rose-700">
+                                                    <p className="text-sm font-semibold text-danger">
                                                         Falta
                                                     </p>
-                                                    <p className="text-lg font-bold text-rose-700">
+                                                    <p className="text-lg font-bold text-danger">
                                                         {eur(Math.abs(diferencia))}
                                                     </p>
                                                 </div>
@@ -1015,7 +1018,7 @@ export default function MesaComandaModal({
 
                                         <div className="mt-3 flex gap-2">
                                             <button
-                                                className="flex-1 px-3 py-3 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                                                className="flex-1 px-3 py-3 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                                                 onClick={resetCash}
                                                 type="button"
                                             >
@@ -1026,8 +1029,8 @@ export default function MesaComandaModal({
                                                 className={cn(
                                                     "flex-1 px-3 py-3 rounded-xl text-sm font-semibold transition",
                                                     diferencia >= 0
-                                                        ? "bg-black text-white hover:bg-black/90"
-                                                        : "bg-black/10 text-black/40 cursor-not-allowed",
+                                                        ? "bg-accent text-white hover:bg-accent-hover"
+                                                        : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                                 )}
                                                 disabled={diferencia < 0}
                                                 onClick={() => cobrar("efectivo")}
@@ -1042,7 +1045,7 @@ export default function MesaComandaModal({
                                             </button>
 
                                             <button
-                                                className="flex-1 px-3 py-3 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 text-sm font-semibold"
+                                                className="flex-1 px-3 py-3 rounded-xl border border-danger/30 bg-danger-soft text-danger hover:bg-danger-soft text-sm font-semibold"
                                                 onClick={() => {
                                                     setPaso("metodo");
                                                     setCashCount({});
@@ -1060,11 +1063,11 @@ export default function MesaComandaModal({
                                             return (
                                                 <div
                                                     key={d.label}
-                                                    className="rounded-xl border border-black/10 bg-white p-3 flex flex-col gap-2"
+                                                    className="rounded-xl border border-border bg-surface p-3 flex flex-col gap-2"
                                                 >
                                                     <div className="flex items-center justify-between">
                                                         <p className="font-bold">{d.label}</p>
-                                                        <span className="text-xs text-black/50">
+                                                        <span className="text-xs text-fg-subtle">
                                                             {eur(d.value)}
                                                         </span>
                                                     </div>
@@ -1072,7 +1075,7 @@ export default function MesaComandaModal({
                                                     <div className="flex items-center justify-between gap-2">
                                                         <button
                                                             className={cn(
-                                                                "w-10 h-10 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold",
+                                                                "w-10 h-10 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
                                                                 count === 0 &&
                                                                 "opacity-40 cursor-not-allowed",
                                                             )}
@@ -1084,7 +1087,7 @@ export default function MesaComandaModal({
                                                         </button>
 
                                                         <div className="flex-1 text-center">
-                                                            <p className="text-xs text-black/50">
+                                                            <p className="text-xs text-fg-subtle">
                                                                 Cantidad
                                                             </p>
                                                             <p className="text-lg font-bold">
@@ -1093,7 +1096,7 @@ export default function MesaComandaModal({
                                                         </div>
 
                                                         <button
-                                                            className="w-10 h-10 rounded-xl border border-black/10 bg-white hover:bg-black/5 font-bold"
+                                                            className="w-10 h-10 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
                                                             onClick={() => addCash(d.label)}
                                                             type="button"
                                                         >
@@ -1109,9 +1112,9 @@ export default function MesaComandaModal({
                                 <div className="h-full overflow-y-auto pr-1">
                                     {showingSearch ? (
                                         loadingBusqueda ? (
-                                            <p className="text-sm text-black/60">Buscando…</p>
+                                            <p className="text-sm text-fg-muted">Buscando…</p>
                                         ) : busqueda.length === 0 ? (
-                                            <p className="text-sm text-black/60">
+                                            <p className="text-sm text-fg-muted">
                                                 No hay resultados.
                                             </p>
                                         ) : (
@@ -1130,24 +1133,24 @@ export default function MesaComandaModal({
                                                 <button
                                                     key={c.ID_Categoria}
                                                     onClick={() => setCategoriaSeleccionada(c)}
-                                                    className="rounded-xl border border-black/10 bg-white hover:bg-black/5 p-3 text-left transition"
+                                                    className="rounded-xl border border-border bg-surface hover:bg-surface-2 p-3 text-left transition"
                                                     type="button"
                                                 >
                                                     <img
                                                         src={c.urlImagen}
                                                         alt={c.Nombre}
-                                                        className="w-full h-28 object-cover rounded-lg border border-black/5"
+                                                        className="w-full h-28 object-cover rounded-lg border border-border"
                                                     />
                                                     <p className="mt-2 font-bold">{c.Nombre}</p>
                                                 </button>
                                             ))}
                                         </div>
                                     ) : loadingProductos ? (
-                                        <p className="text-sm text-black/60">
+                                        <p className="text-sm text-fg-muted">
                                             Cargando productos…
                                         </p>
                                     ) : productos.length === 0 ? (
-                                        <p className="text-sm text-black/60">
+                                        <p className="text-sm text-fg-muted">
                                             No hay productos en esta categoría.
                                         </p>
                                     ) : (
@@ -1165,12 +1168,12 @@ export default function MesaComandaModal({
                         </div>
                     </div>
 
-                    <div className="w-[420px] shrink-0 bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-0">
+                    <div className="w-[420px] shrink-0 bg-surface rounded-xl border border-border p-4 flex flex-col min-h-0">
                         <div className="flex items-center justify-between">
-                            <h3 className="text-lg font-bold text-negro">Ticket</h3>
-                            <div className="text-sm font-semibold text-black/70">
+                            <h3 className="text-lg font-bold text-fg">Ticket</h3>
+                            <div className="text-sm font-semibold text-fg-muted">
                                 Total pendiente:{" "}
-                                <span className="text-black">{eur(totalPendiente)}</span>
+                                <span className="text-fg">{eur(totalPendiente)}</span>
                             </div>
                         </div>
 
@@ -1179,8 +1182,8 @@ export default function MesaComandaModal({
                                 className={cn(
                                     "flex-1 px-3 py-2 rounded-xl text-sm font-semibold transition",
                                     ticket.some((t) => !t.pagado)
-                                        ? "bg-black text-white hover:bg-black/90"
-                                        : "bg-black/10 text-black/40 cursor-not-allowed",
+                                        ? "bg-accent text-white hover:bg-accent-hover"
+                                        : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
                                 disabled={!ticket.some((t) => !t.pagado)}
                                 onClick={() => {
@@ -1196,8 +1199,8 @@ export default function MesaComandaModal({
                                 className={cn(
                                     "flex-1 px-3 py-2 rounded-xl text-sm font-semibold transition",
                                     haySeleccion
-                                        ? "bg-white border border-black/10 hover:bg-black/5"
-                                        : "bg-black/10 text-black/40 cursor-not-allowed",
+                                        ? "bg-surface border border-border hover:bg-surface-2"
+                                        : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
                                 disabled={!haySeleccion}
                                 onClick={() => setPaso("metodo")}
@@ -1207,11 +1210,11 @@ export default function MesaComandaModal({
                             </button>
                         </div>
 
-                        <div className="mt-4 flex-1 min-h-0 overflow-y-auto pr-1 rounded-xl border border-black/10 bg-white">
+                        <div className="mt-4 flex-1 min-h-0 overflow-y-auto pr-1 rounded-xl border border-border bg-surface">
                             {loadingTicket ? (
-                                <div className="p-4 text-sm text-black/60">Cargando…</div>
+                                <div className="p-4 text-sm text-fg-muted">Cargando…</div>
                             ) : ticket.length === 0 ? (
-                                <div className="p-4 text-sm text-black/60">
+                                <div className="p-4 text-sm text-fg-muted">
                                     Añade productos para empezar.
                                 </div>
                             ) : (
@@ -1240,7 +1243,7 @@ export default function MesaComandaModal({
                                                 }}
                                                 className={cn(
                                                     "w-full rounded-xl border p-3 text-left transition flex items-center justify-between gap-3",
-                                                    "border-black/10 hover:bg-black/5",
+                                                    "border-border hover:bg-surface-2",
                                                     t.pagado && "opacity-70",
                                                 )}
                                                 aria-disabled={t.pagado}
@@ -1250,14 +1253,14 @@ export default function MesaComandaModal({
                                                         className={cn(
                                                             "w-6 h-6 rounded-full border flex items-center justify-center shrink-0",
                                                             checked
-                                                                ? "border-emerald-500 bg-emerald-500"
-                                                                : "border-black/20 bg-white",
+                                                                ? "border-success bg-emerald-500"
+                                                                : "border-border bg-surface",
                                                             t.pagado &&
-                                                            "border-black/10 bg-black/5",
+                                                            "border-border bg-surface-2",
                                                         )}
                                                     >
                                                         {checked ? (
-                                                            <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                                                            <div className="w-2.5 h-2.5 rounded-full bg-surface" />
                                                         ) : null}
                                                     </div>
 
@@ -1266,7 +1269,7 @@ export default function MesaComandaModal({
                                                             className={cn(
                                                                 "font-semibold truncate",
                                                                 t.pagado &&
-                                                                "line-through text-black/50",
+                                                                "line-through text-fg-subtle",
                                                             )}
                                                         >
                                                             {t.nombre}
@@ -1276,13 +1279,13 @@ export default function MesaComandaModal({
                                                             className={cn(
                                                                 "text-xs",
                                                                 t.pagado
-                                                                    ? "text-black/50"
+                                                                    ? "text-fg-subtle"
                                                                     : !t.pasaCocina
-                                                                        ? "text-slate-600 font-semibold"
+                                                                        ? "text-fg-muted font-semibold"
                                                                         : t.estadoCocina ===
                                                                             "PREPARADO"
-                                                                            ? "text-emerald-700 font-semibold"
-                                                                            : "text-black/50",
+                                                                            ? "text-success font-semibold"
+                                                                            : "text-fg-subtle",
                                                             )}
                                                         >
                                                             {t.pagado
@@ -1296,7 +1299,7 @@ export default function MesaComandaModal({
                                                         </p>
 
                                                         {hasNota ? (
-                                                            <p className="mt-1 text-[11px] text-black/60 truncate">
+                                                            <p className="mt-1 text-[11px] text-fg-muted truncate">
                                                                 📝 {t.notas}
                                                             </p>
                                                         ) : null}
@@ -1308,7 +1311,7 @@ export default function MesaComandaModal({
                                                         className={cn(
                                                             "font-bold",
                                                             t.pagado &&
-                                                            "line-through text-black/40",
+                                                            "line-through text-fg-subtle",
                                                         )}
                                                     >
                                                         {eur(t.precio)}
@@ -1324,8 +1327,8 @@ export default function MesaComandaModal({
                                                             className={cn(
                                                                 "w-8 h-8 flex items-center justify-center rounded-lg border transition",
                                                                 hasNota
-                                                                    ? "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                                                                    : "border-black/10 text-black/50 hover:bg-black/5",
+                                                                    ? "border-amber-200 bg-amber-50 text-warning hover:bg-warning-soft"
+                                                                    : "border-border text-fg-subtle hover:bg-surface-2",
                                                             )}
                                                             title={
                                                                 hasNota
@@ -1344,7 +1347,7 @@ export default function MesaComandaModal({
                                                                 e.stopPropagation();
                                                                 eliminarLineaTicket(t.id);
                                                             }}
-                                                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-black/10 text-black/50 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition"
+                                                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border text-fg-subtle hover:bg-danger-soft hover:text-danger hover:border-danger/30 transition"
                                                             title="Eliminar producto"
                                                         >
                                                             🗑️
@@ -1358,9 +1361,9 @@ export default function MesaComandaModal({
                             )}
                         </div>
 
-                        <div className="mt-4 rounded-xl border border-black/10 bg-white p-3">
+                        <div className="mt-4 rounded-xl border border-border bg-surface p-3">
                             <div className="flex items-center justify-between">
-                                <p className="text-sm text-black/60">Seleccionado</p>
+                                <p className="text-sm text-fg-muted">Seleccionado</p>
                                 <p className="font-bold">{eur(totalSeleccionado)}</p>
                             </div>
 
@@ -1370,8 +1373,8 @@ export default function MesaComandaModal({
                                         className={cn(
                                             "px-3 py-3 rounded-xl text-sm font-semibold transition",
                                             haySeleccion
-                                                ? "bg-black text-white hover:bg-black/90"
-                                                : "bg-black/10 text-black/40 cursor-not-allowed",
+                                                ? "bg-accent text-white hover:bg-accent-hover"
+                                                : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
                                         disabled={!haySeleccion}
                                         onClick={() => cobrar("tarjeta")}
@@ -1384,8 +1387,8 @@ export default function MesaComandaModal({
                                         className={cn(
                                             "px-3 py-3 rounded-xl text-sm font-semibold transition",
                                             haySeleccion
-                                                ? "bg-white border border-black/10 hover:bg-black/5"
-                                                : "bg-black/10 text-black/40 cursor-not-allowed",
+                                                ? "bg-surface border border-border hover:bg-surface-2"
+                                                : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
                                         disabled={!haySeleccion}
                                         onClick={() => {
@@ -1398,7 +1401,7 @@ export default function MesaComandaModal({
                                     </button>
 
                                     <button
-                                        className="col-span-2 px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+                                        className="col-span-2 px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                                         onClick={() => {
                                             setPaso("categorias");
                                             limpiarSeleccion();
@@ -1409,7 +1412,7 @@ export default function MesaComandaModal({
                                     </button>
                                 </div>
                             ) : (
-                                <p className="mt-2 text-xs text-black/50">
+                                <p className="mt-2 text-xs text-fg-subtle">
                                     Selecciona productos pendientes y pulsa “Cobrar
                                     fraccionado”, o pulsa “Cobrar todo”.
                                 </p>

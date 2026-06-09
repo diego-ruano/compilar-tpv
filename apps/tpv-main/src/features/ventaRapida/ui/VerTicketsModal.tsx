@@ -1,5 +1,6 @@
 // src/features/ventaRapida/ui/VerTicketsModal.tsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen } from "lucide-react";
 import { cn, eur } from "../utils";
 
 import {
@@ -301,26 +302,26 @@ export default function VerTicketsModal({
 
   const pill = (active: boolean) =>
     cn(
-      "h-9 px-3 rounded-xl border text-sm font-semibold transition",
+      "h-9 px-3 rounded-xl border text-sm font-semibold transition cursor-pointer",
       active
-        ? "bg-black text-white border-black"
-        : "bg-white border-black/10 hover:bg-black/5 text-black/80",
+        ? "bg-accent text-accent-fg border-accent shadow-sm"
+        : "bg-surface border-border hover:bg-surface-2 text-fg-muted",
     );
 
   return (
     <div className="fixed inset-0 z-[80]">
       <button
         type="button"
-        className="absolute inset-0 bg-black/30"
+        className="absolute inset-0 bg-black/50"
         onClick={onClose}
         aria-label="Cerrar"
       />
 
-      <div className="absolute left-1/2 top-1/2 w-[980px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-black/10 bg-white shadow-xl overflow-hidden max-h-[calc(100vh-1.5rem)]">
-        <div className="p-3 sm:p-4 border-b border-black/10 flex items-start sm:items-center justify-between gap-3">
+      <div className="absolute left-1/2 top-1/2 max-h-[calc(100vh-1.5rem)] w-[980px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border p-3 sm:items-center sm:p-4">
           <div className="min-w-0">
-            <h3 className="text-base sm:text-lg font-bold text-negro">Tickets (Barra) · Hoy</h3>
-            <p className="text-xs sm:text-sm text-negro/60">
+            <h3 className="text-base font-bold text-fg sm:text-lg">Tickets (Barra) · Hoy</h3>
+            <p className="text-xs text-fg-muted sm:text-sm">
               Filtra, busca, despliega detalles, abre, cobra o elimina.
             </p>
           </div>
@@ -328,15 +329,15 @@ export default function VerTicketsModal({
           <button
             type="button"
             onClick={onClose}
-            className="px-3 py-2 rounded-xl border border-black/10 bg-white hover:bg-black/5 text-sm font-semibold"
+            className="rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
           >
             Cerrar
           </button>
         </div>
 
-        <div className="p-3 sm:p-4 border-b border-black/10">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-            <div className="flex items-center gap-2 flex-wrap">
+        <div className="border-b border-border p-3 sm:p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className={pill(filtro === "RECIENTES")}
@@ -367,15 +368,21 @@ export default function VerTicketsModal({
               </button>
             </div>
 
-            <div className="flex items-center gap-2 w-full lg:w-auto min-w-0">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Buscar por hora, importe, productos, etc…"
-                className="w-full lg:w-[360px] rounded-xl border border-black/10 bg-white px-4 py-2.5 outline-none focus:ring-2 focus:ring-black/10"
-              />
+            <div className="flex w-full min-w-0 items-center gap-2 lg:w-auto">
+              <div className="relative w-full lg:w-[360px]">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle"
+                  aria-hidden
+                />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Buscar por hora, importe, productos, etc…"
+                  className="w-full rounded-xl border border-border bg-surface-2 py-2.5 pl-9 pr-4 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
+                />
+              </div>
               {showIndexHint ? (
-                <span className="text-xs text-black/50 whitespace-nowrap">
+                <span className="whitespace-nowrap text-xs text-fg-subtle">
                   Indexando productos…
                 </span>
               ) : null}
@@ -385,24 +392,30 @@ export default function VerTicketsModal({
 
         <div className="p-3 sm:p-4">
           {rows.length === 0 ? (
-            <div className="rounded-xl border border-black/10 bg-white p-4 text-sm text-black/60">
-              No hay tickets que coincidan con el filtro/búsqueda (hoy).
+            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-bg p-8 text-center">
+              <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+                <FolderOpen className="size-6" aria-hidden />
+              </div>
+              <p className="text-sm font-medium text-fg">Sin tickets</p>
+              <p className="text-xs text-fg-muted">
+                No hay tickets que coincidan con el filtro/búsqueda (hoy).
+              </p>
             </div>
           ) : (
-            <div className="max-h-[70vh] lg:max-h-[72vh] overflow-y-auto pr-1">
+            <div className="max-h-[70vh] overflow-y-auto pr-1 lg:max-h-[72vh]">
               <div className="grid grid-cols-1 gap-3">
                 {rows.map(({ c, when, totalPendiente, total, est, pendientesCocina, pendientesPago }) => {
                   const badge =
                     est === "COBRADO"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      ? "border-success/30 bg-success-soft text-success"
                       : est === "PREPARADO"
-                        ? "border-sky-200 bg-sky-50 text-sky-800"
-                        : "border-amber-200 bg-amber-50 text-amber-900";
+                        ? "border-accent/30 bg-accent-soft text-accent"
+                        : "border-warning/30 bg-warning-soft text-warning";
 
                   const estadoComandaBadge =
                     String(c.Estado).toLowerCase() === "pagada"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-black/10 bg-black/5 text-black/70";
+                      ? "border-success/30 bg-success-soft text-success"
+                      : "border-border bg-surface-2 text-fg-muted";
 
                   const isExpanded = expandedId === c.ID_Comanda;
                   const detalles = detallesByComanda[c.ID_Comanda] ?? [];
@@ -411,55 +424,57 @@ export default function VerTicketsModal({
                   return (
                     <div
                       key={c.ID_Comanda}
-                      className="rounded-2xl border border-black/10 bg-white overflow-hidden"
+                      className="overflow-hidden rounded-2xl border border-border bg-surface"
                     >
-                      <div className="p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex flex-col justify-between gap-3 p-3 sm:flex-row sm:items-center sm:p-4">
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className={cn("text-xs font-bold px-2 py-1 rounded-full border", badge)}>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={cn("rounded-full border px-2 py-1 text-xs font-bold", badge)}>
                               {est}
                             </span>
                             <span
                               className={cn(
-                                "text-xs font-bold px-2 py-1 rounded-full border",
+                                "rounded-full border px-2 py-1 text-xs font-bold",
                                 estadoComandaBadge,
                               )}
                             >
                               {String(c.Estado).toUpperCase()}
                             </span>
-                            <p className="text-sm text-black/60">{when}</p>
+                            <p className="text-sm text-fg-muted">{when}</p>
                           </div>
 
-                          <p className="mt-1 font-bold text-negro truncate">
+                          <p className="mt-1 truncate font-bold text-fg">
                             Ticket #{String(c.ID_Comanda)} ·{" "}
-                            <span className="text-black/60 font-semibold">
+                            <span className="font-semibold text-fg-muted">
                               cocina {pendientesCocina} · pago {pendientesPago}
                             </span>
                           </p>
 
-                          <p className="mt-1 text-sm text-black/60">
-                            Pendiente: <span className="font-bold text-black">{eur(totalPendiente)}</span>
-                            <span className="mx-2 text-black/20">·</span>
-                            Total: <span className="font-semibold">{eur(total)}</span>
+                          <p className="mt-1 text-sm text-fg-muted">
+                            Pendiente: <span className="font-bold text-fg">{eur(totalPendiente)}</span>
+                            <span className="mx-2 text-fg-subtle">·</span>
+                            Total: <span className="font-semibold text-fg">{eur(total)}</span>
                           </p>
                         </div>
 
-                        <div className="flex flex-wrap items-center gap-2 shrink-0 justify-end">
+                        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => void toggleDetalles(c.ID_Comanda)}
-                            className={cn(
-                              "px-3 py-2 rounded-xl text-sm font-semibold transition border",
-                              "border-black/10 bg-white hover:bg-black/5",
-                            )}
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
                           >
+                            {isExpanded ? (
+                              <ChevronUp className="size-4" aria-hidden />
+                            ) : (
+                              <ChevronDown className="size-4" aria-hidden />
+                            )}
                             {isExpanded ? "Ocultar detalles" : "Más detalles"}
                           </button>
 
                           <button
                             type="button"
                             onClick={() => onOpenTicket(String(c.ID_Comanda))}
-                            className="px-3 py-2 rounded-xl bg-black text-white hover:bg-black/90 text-sm font-semibold"
+                            className="rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
                           >
                             Abrir
                           </button>
@@ -468,10 +483,10 @@ export default function VerTicketsModal({
                             type="button"
                             onClick={() => onCobrarTicket(String(c.ID_Comanda))}
                             className={cn(
-                              "px-3 py-2 rounded-xl text-sm font-semibold transition",
+                              "rounded-xl px-3 py-2 text-sm font-semibold transition",
                               totalPendiente > 0
-                                ? "bg-white border border-black/10 hover:bg-black/5"
-                                : "bg-black/10 text-black/40 cursor-not-allowed",
+                                ? "border border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer"
+                                : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                             )}
                             disabled={totalPendiente <= 0}
                           >
@@ -481,20 +496,21 @@ export default function VerTicketsModal({
                           <button
                             type="button"
                             onClick={() => onDeleteTicket(String(c.ID_Comanda))}
-                            className="px-3 py-2 rounded-xl border border-black/10 text-black/60 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200 text-sm font-semibold transition"
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
                           >
+                            <Trash2 className="size-4" aria-hidden />
                             Eliminar
                           </button>
                         </div>
                       </div>
 
                       {isExpanded ? (
-                        <div className="px-3 sm:px-4 pb-3 sm:pb-4">
-                          <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+                        <div className="px-3 pb-3 sm:px-4 sm:pb-4">
+                          <div className="rounded-xl border border-border bg-bg p-3">
                             {loadingThis ? (
-                              <p className="text-sm text-black/60">Cargando productos…</p>
+                              <p className="text-sm text-fg-muted">Cargando productos…</p>
                             ) : detalles.length === 0 ? (
-                              <p className="text-sm text-black/60">Este ticket no tiene líneas.</p>
+                              <p className="text-sm text-fg-muted">Este ticket no tiene líneas.</p>
                             ) : (
                               <div className="grid grid-cols-1 gap-2">
                                 {detalles.map((d) => {
@@ -503,10 +519,10 @@ export default function VerTicketsModal({
                                   const cocinaOk = estado === "PREPARADO";
 
                                   const badgeCocina = noCocina
-                                    ? "border-black/10 bg-white text-black/70"
+                                    ? "border-border bg-surface text-fg-muted"
                                     : cocinaOk
-                                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                      : "border-amber-200 bg-amber-50 text-amber-900";
+                                      ? "border-success/30 bg-success-soft text-success"
+                                      : "border-warning/30 bg-warning-soft text-warning";
 
                                   const labelCocina = noCocina
                                     ? "NO COCINA"
@@ -516,8 +532,8 @@ export default function VerTicketsModal({
 
                                   const badgePago =
                                     d.Pagado === 1
-                                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                      : "border-black/10 bg-white text-black/70";
+                                      ? "border-success/30 bg-success-soft text-success"
+                                      : "border-border bg-surface text-fg-muted";
 
                                   const importe =
                                     Math.round(
@@ -527,13 +543,13 @@ export default function VerTicketsModal({
                                   return (
                                     <div
                                       key={d.ID_Detalle}
-                                      className="rounded-xl border border-black/10 bg-white p-3 flex items-start justify-between gap-3"
+                                      className="flex items-start justify-between gap-3 rounded-xl border border-border bg-surface p-3"
                                     >
                                       <div className="min-w-0">
-                                        <div className="flex items-center gap-2 flex-wrap">
+                                        <div className="flex flex-wrap items-center gap-2">
                                           <span
                                             className={cn(
-                                              "text-[11px] font-bold px-2 py-1 rounded-full border",
+                                              "rounded-full border px-2 py-1 text-[11px] font-bold",
                                               badgeCocina,
                                             )}
                                           >
@@ -541,32 +557,32 @@ export default function VerTicketsModal({
                                           </span>
                                           <span
                                             className={cn(
-                                              "text-[11px] font-bold px-2 py-1 rounded-full border",
+                                              "rounded-full border px-2 py-1 text-[11px] font-bold",
                                               badgePago,
                                             )}
                                           >
                                             {d.Pagado === 1 ? "PAGADO" : "PAGO PEND."}
                                           </span>
-                                          <span className="text-xs text-black/50">#{d.ID_Detalle}</span>
+                                          <span className="text-xs text-fg-subtle">#{d.ID_Detalle}</span>
                                         </div>
 
-                                        <p className="mt-1 font-bold text-negro truncate">
+                                        <p className="mt-1 truncate font-bold text-fg">
                                           {d.Nombre}{" "}
-                                          <span className="font-semibold text-black/60">
+                                          <span className="font-semibold text-fg-muted">
                                             x{Number(d.Cantidad || 1)}
                                           </span>
                                         </p>
 
                                         {d.Notas ? (
-                                          <p className="mt-1 text-xs text-black/60">
-                                            Nota: <span className="font-semibold">{d.Notas}</span>
+                                          <p className="mt-1 text-xs text-fg-muted">
+                                            Nota: <span className="font-semibold text-fg">{d.Notas}</span>
                                           </p>
                                         ) : null}
                                       </div>
 
                                       <div className="shrink-0 text-right">
-                                        <p className="text-sm font-bold text-negro">{eur(importe)}</p>
-                                        <p className="text-xs text-black/50">
+                                        <p className="text-sm font-bold text-fg">{eur(importe)}</p>
+                                        <p className="text-xs text-fg-subtle">
                                           {eur(Number(d.Precio_Unitario || 0))} / ud
                                         </p>
                                       </div>

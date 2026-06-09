@@ -374,7 +374,7 @@ export function AddProductModal({
                             type="text"
                             value={nombre}
                             onChange={(e) => setNombre(e.target.value)}
-                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full"
                             required
                             disabled={loading}
                         />
@@ -387,7 +387,7 @@ export function AddProductModal({
                             onChange={(e) =>
                                 setIdCategoria(e.target.value ? Number(e.target.value) : "")
                             }
-                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full"
                             required
                             disabled={loading}
                         >
@@ -407,7 +407,7 @@ export function AddProductModal({
                             onChange={(e) =>
                                 setIdProveedor(e.target.value ? Number(e.target.value) : "")
                             }
-                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full"
                             disabled={loading}
                         >
                             <option value="">—</option>
@@ -425,14 +425,14 @@ export function AddProductModal({
                         placeholder="Precio venta"
                         value={precioVenta}
                         onChange={(e) => setPrecioVenta(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2"
+                        className="border border-border rounded-xl px-3 py-2"
                         disabled={loading}
                     />
 
                     <select
                         value={unidadMedida}
                         onChange={(e) => setUnidadMedida(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2"
+                        className="border border-border rounded-xl px-3 py-2"
                         disabled={loading}
                     >
                         <option value="">Unidad (selecciona)</option>
@@ -455,7 +455,7 @@ export function AddProductModal({
                         placeholder="Stock mínimo"
                         value={stockMinimo}
                         onChange={(e) => setStockMinimo(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2"
+                        className="border border-border rounded-xl px-3 py-2"
                         disabled={loading}
                     />
 
@@ -465,16 +465,16 @@ export function AddProductModal({
                         placeholder="Cantidad pedido esperada"
                         value={cantidadPedidoEsperada}
                         onChange={(e) => setCantidadPedidoEsperada(e.target.value)}
-                        className="border border-negro/20 rounded-xl px-3 py-2"
+                        className="border border-border rounded-xl px-3 py-2"
                         disabled={loading}
                     />
 
                     {!isEdit && (
-                        <div className="md:col-span-2 rounded-2xl border border-negro/10 bg-gris/30 p-4">
+                        <div className="md:col-span-2 rounded-2xl border border-border bg-surface-2 p-4">
                             <div className="flex items-center justify-between gap-3">
                                 <div>
-                                    <p className="font-extrabold text-negro">Lote inicial</p>
-                                    <p className="text-sm text-negro/60">
+                                    <p className="font-extrabold text-fg">Lote inicial</p>
+                                    <p className="text-sm text-fg-muted">
                                         Recomendado: así ya tienes stock y FEFO desde el primer día.
                                     </p>
                                 </div>
@@ -485,14 +485,14 @@ export function AddProductModal({
                                     onClick={() => setCrearLoteInicial((v) => !v)}
                                     className={[
                                         "relative inline-flex h-8 w-14 items-center rounded-full transition",
-                                        crearLoteInicial ? "bg-verde" : "bg-negro/20",
+                                        crearLoteInicial ? "bg-accent" : "bg-negro/20",
                                         loading ? "opacity-60" : "",
                                     ].join(" ")}
                                     aria-pressed={crearLoteInicial}
                                 >
                                     <span
                                         className={[
-                                            "inline-block h-7 w-7 transform rounded-full bg-white shadow transition",
+                                            "inline-block h-7 w-7 transform rounded-full bg-surface shadow transition",
                                             crearLoteInicial ? "translate-x-6" : "translate-x-1",
                                         ].join(" ")}
                                     />
@@ -506,7 +506,7 @@ export function AddProductModal({
                                         <input
                                             value={codigoLoteInicial}
                                             onChange={(e) => setCodigoLoteInicial(e.target.value)}
-                                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full"
                                             disabled={loading}
                                             required
                                         />
@@ -518,7 +518,7 @@ export function AddProductModal({
                                             type="date"
                                             value={caducidadLoteInicial}
                                             onChange={(e) => setCaducidadLoteInicial(e.target.value)}
-                                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full"
                                             disabled={loading}
                                         />
                                     </div>
@@ -530,14 +530,14 @@ export function AddProductModal({
                                             step="0.01"
                                             value={cantidadInicialLote}
                                             onChange={(e) => setCantidadInicialLote(e.target.value)}
-                                            className="border border-negro/20 rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full"
                                             disabled={loading}
                                             required
                                         />
                                     </div>
 
                                     {!loteInicialOk && (
-                                        <p className="md:col-span-3 text-xs text-rojo font-semibold">
+                                        <p className="md:col-span-3 text-xs text-danger font-semibold">
                                             Revisa el código y la cantidad del lote inicial.
                                         </p>
                                     )}
@@ -551,10 +551,10 @@ export function AddProductModal({
                             type="button"
                             onClick={() => setAlergenosOpen((v) => !v)}
                             disabled={loading}
-                            className="w-full border border-negro/20 rounded-2xl py-3 font-bold hover:bg-gris transition flex items-center justify-between px-4"
+                            className="w-full border border-border rounded-2xl py-3 font-bold hover:bg-surface-2 transition flex items-center justify-between px-4"
                         >
                             <span>Alérgenos</span>
-                            <span className="text-negro/60 text-sm font-semibold">
+                            <span className="text-fg-muted text-sm font-semibold">
                                 {selectedAlergenos.size
                                     ? `${selectedAlergenos.size} seleccionados`
                                     : "—"}
@@ -569,9 +569,9 @@ export function AddProductModal({
                                     : "max-h-0 opacity-0 mt-0",
                             ].join(" ")}
                         >
-                            <div className="rounded-2xl border border-negro/10 bg-gris/30 p-4">
+                            <div className="rounded-2xl border border-border bg-surface-2 p-4">
                                 {!alergenos.length ? (
-                                    <p className="text-sm text-negro/60">
+                                    <p className="text-sm text-fg-muted">
                                         No hay alérgenos configurados.
                                     </p>
                                 ) : (
@@ -587,8 +587,8 @@ export function AddProductModal({
                                                     className={[
                                                         "cursor-pointer select-none rounded-2xl border p-3 flex items-center gap-3 transition",
                                                         checked
-                                                            ? "border-verde bg-verde/10"
-                                                            : "border-negro/10 bg-blanco",
+                                                            ? "border-accent bg-accent/10"
+                                                            : "border-border bg-surface",
                                                     ].join(" ")}
                                                 >
                                                     <button
@@ -597,7 +597,7 @@ export function AddProductModal({
                                                         onClick={() => toggleAlergeno(id, !checked)}
                                                         className={[
                                                             "relative inline-flex h-7 w-12 items-center rounded-full transition",
-                                                            checked ? "bg-verde" : "bg-negro/20",
+                                                            checked ? "bg-accent" : "bg-negro/20",
                                                             loading ? "opacity-60" : "",
                                                         ].join(" ")}
                                                         aria-pressed={checked}
@@ -605,7 +605,7 @@ export function AddProductModal({
                                                     >
                                                         <span
                                                             className={[
-                                                                "inline-block h-6 w-6 transform rounded-full bg-white shadow transition",
+                                                                "inline-block h-6 w-6 transform rounded-full bg-surface shadow transition",
                                                                 checked
                                                                     ? "translate-x-5.5"
                                                                     : "translate-x-0.5",
@@ -613,7 +613,7 @@ export function AddProductModal({
                                                         />
                                                     </button>
 
-                                                    <div className="w-9 h-9 rounded-xl border border-negro/10 bg-gris overflow-hidden flex items-center justify-center shrink-0">
+                                                    <div className="w-9 h-9 rounded-xl border border-border bg-surface-2 overflow-hidden flex items-center justify-center shrink-0">
                                                         {imgUrl ? (
                                                             <img
                                                                 src={imgUrl}
@@ -622,14 +622,14 @@ export function AddProductModal({
                                                                 draggable={false}
                                                             />
                                                         ) : (
-                                                            <span className="text-[10px] text-negro/40 font-semibold">
+                                                            <span className="text-[10px] text-fg-subtle font-semibold">
                                                                 IMG
                                                             </span>
                                                         )}
                                                     </div>
 
                                                     <div className="min-w-0">
-                                                        <p className="text-sm font-semibold text-negro truncate">
+                                                        <p className="text-sm font-semibold text-fg truncate">
                                                             {a.Nombre}
                                                         </p>
                                                     </div>
@@ -643,8 +643,8 @@ export function AddProductModal({
                     </div>
 
                     <div className="md:col-span-2 flex flex-col gap-2">
-                        <label className="font-semibold text-negro">
-                            Imagen <span className="text-negro/60 font-medium">(opcional)</span>
+                        <label className="font-semibold text-fg">
+                            Imagen <span className="text-fg-muted font-medium">(opcional)</span>
                         </label>
 
                         <input
@@ -657,8 +657,8 @@ export function AddProductModal({
                         />
 
                         {isEdit && existingImageUrl && !image && (
-                            <div className="flex items-center gap-3 rounded-2xl border border-negro/10 bg-gris/30 p-3">
-                                <div className="w-20 h-20 rounded-2xl overflow-hidden border border-negro/10 bg-gris shrink-0">
+                            <div className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 p-3">
+                                <div className="w-20 h-20 rounded-2xl overflow-hidden border border-border bg-surface-2 shrink-0">
                                     <img
                                         src={existingImageUrl}
                                         alt="Imagen actual"
@@ -668,8 +668,8 @@ export function AddProductModal({
                                 </div>
 
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-bold text-negro">Imagen actual</p>
-                                    <p className="text-xs text-negro/60 break-words">
+                                    <p className="text-sm font-bold text-fg">Imagen actual</p>
+                                    <p className="text-xs text-fg-muted break-words">
                                         {existingImageName ?? ""}
                                     </p>
 
@@ -677,7 +677,7 @@ export function AddProductModal({
                                         type="button"
                                         onClick={pickFile}
                                         disabled={loading}
-                                        className="mt-2 inline-flex items-center justify-center px-4 py-2 rounded-xl bg-verde text-white font-bold hover:opacity-90 transition disabled:opacity-60"
+                                        className="mt-2 inline-flex items-center justify-center px-4 py-2 rounded-xl bg-accent text-white font-bold hover:opacity-90 transition disabled:opacity-60"
                                     >
                                         Elegir archivo
                                     </button>
@@ -690,14 +690,14 @@ export function AddProductModal({
                                 onClick={() => !loading && pickFile()}
                                 onDragOver={(e) => e.preventDefault()}
                                 onDrop={handleDrop}
-                                className="cursor-pointer rounded-2xl border-2 border-dashed p-4 transition border-verde/60 hover:border-verde"
+                                className="cursor-pointer rounded-2xl border-2 border-dashed p-4 transition border-accent/60 hover:border-accent"
                             >
                                 {!image ? (
                                     <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                                         <div className="flex items-center gap-3">
-                                            <div className="w-11 h-11 rounded-2xl border border-negro/10 bg-gris flex items-center justify-center">
+                                            <div className="w-11 h-11 rounded-2xl border border-border bg-surface-2 flex items-center justify-center">
                                                 <svg
-                                                    className="w-6 h-6 text-negro/70"
+                                                    className="w-6 h-6 text-fg-muted"
                                                     xmlns="http://www.w3.org/2000/svg"
                                                     fill="none"
                                                     viewBox="0 0 24 24"
@@ -717,20 +717,20 @@ export function AddProductModal({
                                                 </svg>
                                             </div>
                                             <div>
-                                                <p className="font-bold text-negro">Sube una imagen</p>
-                                                <p className="text-sm text-negro/60">
+                                                <p className="font-bold text-fg">Sube una imagen</p>
+                                                <p className="text-sm text-fg-muted">
                                                     Click o arrastra y suelta (PNG/JPG).
                                                 </p>
                                             </div>
                                         </div>
 
-                                        <div className="w-full sm:w-auto text-center px-4 py-2 rounded-xl bg-verde text-white font-bold">
+                                        <div className="w-full sm:w-auto text-center px-4 py-2 rounded-xl bg-accent text-white font-bold">
                                             Elegir archivo
                                         </div>
                                     </div>
                                 ) : (
                                     <div className="flex flex-col sm:flex-row gap-4 items-center">
-                                        <div className="w-full sm:w-[200px] aspect-[4/3] rounded-2xl overflow-hidden border border-negro/10 bg-gris">
+                                        <div className="w-full sm:w-[200px] aspect-[4/3] rounded-2xl overflow-hidden border border-border bg-surface-2">
                                             <img
                                                 src={previewUrl}
                                                 alt="preview"
@@ -739,10 +739,10 @@ export function AddProductModal({
                                         </div>
 
                                         <div className="flex-1 w-full">
-                                            <p className="font-bold text-negro break-words">
+                                            <p className="font-bold text-fg break-words">
                                                 {image.name}
                                             </p>
-                                            <p className="text-sm text-negro/60">
+                                            <p className="text-sm text-fg-muted">
                                                 {(image.size / 1024 / 1024).toFixed(2)} MB
                                             </p>
 
@@ -751,7 +751,7 @@ export function AddProductModal({
                                                     type="button"
                                                     onClick={pickFile}
                                                     disabled={loading}
-                                                    className="border border-negro/20 rounded-xl py-2 font-semibold hover:bg-gris transition"
+                                                    className="border border-border rounded-xl py-2 font-semibold hover:bg-surface-2 transition"
                                                 >
                                                     Cambiar
                                                 </button>
@@ -759,7 +759,7 @@ export function AddProductModal({
                                                     type="button"
                                                     onClick={() => setImage(null)}
                                                     disabled={loading}
-                                                    className="border border-rojo text-rojo rounded-xl py-2 font-semibold hover:bg-rojo hover:text-white transition"
+                                                    className="border border-danger text-danger rounded-xl py-2 font-semibold hover:bg-danger hover:text-white transition"
                                                 >
                                                     Quitar
                                                 </button>
@@ -774,7 +774,7 @@ export function AddProductModal({
                     <button
                         type="submit"
                         disabled={loading}
-                        className="md:col-span-2 bg-verde text-white py-2 rounded-xl font-extrabold mt-2"
+                        className="md:col-span-2 bg-accent text-white py-2 rounded-xl font-extrabold mt-2"
                     >
                         {loading ? "Guardando..." : isEdit ? "Guardar cambios" : "Guardar producto"}
                     </button>

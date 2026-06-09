@@ -19,11 +19,11 @@ export function Licencia({ darkMode, license }: { darkMode: boolean; license: Li
 							key={x.k}
 							className={cn(
 								"rounded-xl border p-4",
-								darkMode ? "border-slate-800 bg-slate-950/40" : "border-slate-200 bg-white"
+								darkMode ? "border-border bg-surface-2" : "border-border bg-surface"
 							)}
 						>
-							<div className={cn("text-xs font-semibold", darkMode ? "text-slate-300" : "text-slate-600")}>{x.k}</div>
-							<div className={cn("text-lg font-extrabold mt-1", darkMode ? "text-white" : "text-slate-900")}>{x.v}</div>
+							<div className={cn("text-xs font-semibold", darkMode ? "text-fg-muted" : "text-fg-muted")}>{x.k}</div>
+							<div className={cn("text-lg font-extrabold mt-1", darkMode ? "text-white" : "text-fg")}>{x.v}</div>
 						</div>
 					))}
 				</div>

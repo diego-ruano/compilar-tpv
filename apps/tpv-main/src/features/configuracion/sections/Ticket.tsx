@@ -36,8 +36,8 @@ function SelectInput({
             onChange={onChange}
             disabled={disabled}
             className={[
-                "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none",
-                "placeholder:text-slate-400 focus:border-slate-300",
+                "w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none",
+                "placeholder:text-fg-subtle focus:border-border",
                 disabled ? "opacity-60 cursor-not-allowed" : "",
                 className ?? "",
             ].join(" ")}
@@ -125,11 +125,11 @@ export function Ticket({
                         />
                     </Field>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div className="text-xs font-semibold text-slate-600">
+                    <div className="rounded-xl border border-border bg-surface-2 px-4 py-3">
+                        <div className="text-xs font-semibold text-fg-muted">
                             Consejo
                         </div>
-                        <div className="text-sm text-slate-700 mt-1">
+                        <div className="text-sm text-fg-muted mt-1">
                             Si desactivas “Mostrar base e IVA”, el IVA no se
                             imprime pero sigue siendo el configurado.
                         </div>
@@ -162,11 +162,11 @@ export function Ticket({
                         </SelectInput>
                     </Field>
 
-                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                        <div className="text-xs font-semibold text-slate-600">
+                    <div className="rounded-xl border border-border bg-surface-2 px-4 py-3">
+                        <div className="text-xs font-semibold text-fg-muted">
                             Info
                         </div>
-                        <div className="text-sm text-slate-700 mt-1">
+                        <div className="text-sm text-fg-muted mt-1">
                             Esto te sirve luego para decidir el layout/estilo de
                             impresión (58mm vs 80mm, etc.).
                         </div>
@@ -245,7 +245,7 @@ export function Ticket({
                         />
                     </Field>
                     {!ticket.showFooterMessage ? (
-                        <div className="mt-2 text-xs text-slate-500">
+                        <div className="mt-2 text-xs text-fg-muted">
                             Activa “Mostrar mensaje final” para editarlo.
                         </div>
                     ) : null}

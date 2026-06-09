@@ -1,5 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Plus,
+  X,
+  Users,
+  Phone,
+  Mail,
+  Armchair,
+  Map as MapIcon,
+  Pencil,
+  Trash2,
+  Clock,
+} from "lucide-react";
+import {
   type Turno as TurnoApi,
 } from "../../features/reservas/reservasApis";
 import {
@@ -512,40 +527,48 @@ export default function Reservas() {
   }
 
   return (
-    <div className="w-full h-full overflow-hidden bg-gris text-gray-800">
-      <div className="flex h-full flex-col p-6 overflow-hidden">
-        <div className="mb-4 flex items-center justify-between rounded-2xl bg-blanco px-6 py-4 shadow">
-          <h1 className="text-xl font-extrabold tracking-widest">RESERVAS</h1>
-          <div className="text-sm text-gray-500">
-            Día: <span className="font-bold text-gray-800">{seleccionadoClave}</span>
+    <div className="h-full w-full overflow-hidden bg-bg text-fg">
+      <div className="flex h-full flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:px-10 lg:py-5">
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+              <CalendarDays className="size-6" aria-hidden />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-xl font-bold text-fg sm:text-2xl">Reservas</h1>
+              <p className="text-sm text-fg-muted">Gestiona las reservas por día.</p>
+            </div>
+          </div>
+          <div className="shrink-0 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg-muted">
+            Día: <span className="font-bold text-fg">{seleccionadoClave}</span>
           </div>
         </div>
 
-        <div className="mb-4 flex items-center justify-between rounded-2xl bg-blanco px-4 py-3 shadow">
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3 shadow-sm">
           <button
             onClick={irMesAnterior}
-            className="rounded-lg border border-gray-200 px-3 py-1 hover:bg-gris-100"
+            className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border text-fg-muted transition hover:bg-surface-2 hover:text-fg"
             aria-label="Mes anterior"
           >
-            ←
+            <ChevronLeft className="size-5" aria-hidden />
           </button>
 
-          <div className="font-extrabold uppercase tracking-widest">
+          <div className="font-extrabold uppercase tracking-widest text-fg">
             {nombreMesYAnioLocal(mesActual)}
           </div>
 
           <button
             onClick={irMesSiguiente}
-            className="rounded-lg border border-gray-200 px-3 py-1 hover:bg-gris-100"
+            className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border text-fg-muted transition hover:bg-surface-2 hover:text-fg"
             aria-label="Mes siguiente"
           >
-            →
+            <ChevronRight className="size-5" aria-hidden />
           </button>
         </div>
 
         <div className="flex flex-1 gap-6 overflow-hidden">
-          <div className="w-[520px] shrink-0 overflow-hidden rounded-2xl bg-blanco p-4 shadow">
-            <div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-gray-500">
+          <div className="w-[520px] shrink-0 overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-fg-muted">
               {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
                 <div key={d} className="py-1">
                   {d}
@@ -567,19 +590,19 @@ export default function Reservas() {
                     onClick={() => seleccionarDia(fecha)}
                     className={[
                       "relative h-20 rounded-xl border p-2 text-left transition",
-                      esMes ? "bg-blanco" : "bg-gris-50 text-gray-400",
-                      esSel ? "border-green-500 ring-2 ring-green-200" : "border-gray-200",
-                      "hover:bg-gris-100",
+                      esMes ? "bg-surface" : "bg-surface-2 text-fg-subtle",
+                      esSel ? "border-accent ring-2 ring-ring" : "border-border",
+                      "hover:bg-surface-2",
                     ].join(" ")}
                     title={clave}
                   >
                     <div className="flex items-center justify-between text-sm font-bold">
                       <span>{fecha.getDate()}</span>
-                      {esHoy && <span className="h-2 w-2 rounded-full bg-green-500" />}
+                      {esHoy && <span className="h-2 w-2 rounded-full bg-accent" />}
                     </div>
 
                     {total > 0 && (
-                      <div className="absolute bottom-1 left-1 inline-flex items-center rounded-md bg-green-100 px-1.5 py-0.5 text-[10px] font-extrabold text-green-700">
+                      <div className="absolute bottom-1 left-1 inline-flex items-center rounded-md bg-accent-soft px-1.5 py-0.5 text-[10px] font-extrabold text-accent">
                         {total} res
                       </div>
                     )}
@@ -589,27 +612,29 @@ export default function Reservas() {
             </div>
           </div>
 
-          <div className="flex flex-1 flex-col overflow-hidden rounded-2xl bg-blanco p-4 shadow">
+          <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-sm">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <div className="font-extrabold tracking-widest">
                   RESERVAS {diaSeleccionado.toLocaleDateString("es-ES")}
                 </div>
-                <div className="text-xs text-gray-500">Total: {reservasDelDia.length}</div>
+                <div className="text-xs text-fg-muted">Total: {reservasDelDia.length}</div>
               </div>
 
               {!mostrarFormulario ? (
                 <button
                   onClick={() => abrirFormulario()}
-                  className="rounded-full bg-green-700 px-4 py-2 text-xs font-bold tracking-widest text-white hover:bg-gris-800"
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-xs font-bold tracking-widest text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
                 >
+                  <Plus className="size-4" aria-hidden />
                   AÑADIR RESERVA
                 </button>
               ) : (
                 <button
                   onClick={cerrarFormulario}
-                  className="rounded-full border border-gray-200 bg-red-700 px-4 py-2 text-xs font-bold tracking-widest text-blanco hover:bg-gris-50"
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-danger/30 bg-danger-soft px-4 py-2 text-xs font-bold tracking-widest text-danger transition hover:opacity-90 active:scale-[0.98]"
                 >
+                  <X className="size-4" aria-hidden />
                   CERRAR
                 </button>
               )}
@@ -620,20 +645,20 @@ export default function Reservas() {
                 <div className="relative h-full">
                   <form
                     onSubmit={guardarReserva}
-                    className="h-full rounded-xl border border-gray-200 bg-gris-50 p-3"
+                    className="h-full rounded-xl border border-border bg-surface-2 p-3"
                   >
-                    <div className="mb-2 text-xs font-extrabold tracking-widest text-gray-600">
+                    <div className="mb-2 text-xs font-extrabold tracking-widest text-fg-muted">
                       {reservaEditandoId != null
                         ? `MODIFICAR RESERVA (${seleccionadoClave})`
                         : `NUEVA RESERVA (${seleccionadoClave})`}
                     </div>
 
                     <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-gris-900 px-3 py-1 text-xs font-extrabold tracking-widest text-gray-700">
+                      <span className="rounded-full bg-surface-2 px-3 py-1 text-xs font-extrabold tracking-widest text-fg-muted">
                         {turnoLabel(turnoPorHora(form.hora))}
                       </span>
 
-                      <span className="rounded-full border border-gray-200 bg-blanco px-3 py-1 text-xs font-bold text-gray-700">
+                      <span className="rounded-full border border-border bg-surface px-3 py-1 text-xs font-bold text-fg-muted">
                         {sessionBadge.rolNombre}:{" "}
                         <span className="font-extrabold">{sessionBadge.usuarioNombre}</span>
                       </span>
@@ -641,7 +666,7 @@ export default function Reservas() {
 
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <div className="sm:col-span-2">
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Nombre cliente *
                         </label>
                         <input
@@ -649,39 +674,39 @@ export default function Reservas() {
                           ref={nombreInputRef}
                           value={form.nombreCliente}
                           onChange={(e) => setForm((p) => ({ ...p, nombreCliente: e.target.value }))}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                           placeholder="Ej: Carlos Pérez"
                         />
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Teléfono *
                         </label>
                         <input
                           required
                           value={form.telefono}
                           onChange={(e) => setForm((p) => ({ ...p, telefono: e.target.value }))}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                           placeholder="Ej: 600 123 456"
                         />
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Email (opcional)
                         </label>
                         <input
                           type="email"
                           value={form.email}
                           onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                           placeholder="Ej: cliente@email.com"
                         />
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Hora *
                         </label>
                         <input
@@ -689,12 +714,12 @@ export default function Reservas() {
                           required
                           value={form.hora}
                           onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                         />
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Comensales *
                         </label>
                         <input
@@ -705,24 +730,24 @@ export default function Reservas() {
                           onChange={(e) =>
                             setForm((p) => ({ ...p, comensales: Number(e.target.value) }))
                           }
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                         />
                       </div>
 
                       <div className="sm:col-span-2">
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Nota (opcional)
                         </label>
                         <input
                           value={form.nota}
                           onChange={(e) => setForm((p) => ({ ...p, nota: e.target.value }))}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                           placeholder="Ej: Cumpleaños, trona..."
                         />
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Salón *
                         </label>
                         <select
@@ -732,7 +757,7 @@ export default function Reservas() {
                             const idZona = Number(e.target.value);
                             setForm((p) => ({ ...p, idZona, idMesa: 0 }));
                           }}
-                          className="w-full rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-sm outline-none focus:border-green-400"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                         >
                           {zonas.map((z) => (
                             <option key={z.idZona} value={z.idZona}>
@@ -743,7 +768,7 @@ export default function Reservas() {
                       </div>
 
                       <div>
-                        <label className="mb-1 block text-[11px] font-bold text-gray-600">
+                        <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Mesa *
                         </label>
                         <div className="flex gap-2">
@@ -752,18 +777,19 @@ export default function Reservas() {
                             value={mesaSeleccionada ? mesaSeleccionada.nombre : ""}
                             placeholder="Selecciona mesa"
                             onClick={() => setMostrarMapaMesas(true)}
-                            className="w-full cursor-pointer rounded-lg border border-gray-200 bg-gris-100 px-3 py-2 text-sm text-gray-700 outline-none"
+                            className="w-full cursor-pointer rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
                           />
                           <button
                             type="button"
                             onClick={() => setMostrarMapaMesas(true)}
-                            className="rounded-lg bg-black px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-gris-800"
+                            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover"
                           >
+                            <MapIcon className="size-4" aria-hidden />
                             VISUALIZAR
                           </button>
                         </div>
 
-                        <div className="mt-1 text-[11px] text-gray-500">
+                        <div className="mt-1 text-[11px] text-fg-muted">
                           Salón: <b>{zonaSeleccionada?.nombre ?? "-"}</b> · Turno:{" "}
                           <b>{turnoLabel(turnoPorHora(form.hora))}</b>
                         </div>
@@ -774,14 +800,14 @@ export default function Reservas() {
                       <button
                         type="button"
                         onClick={cerrarFormulario}
-                        className="rounded-lg border border-gray-200 bg-red-700 px-3 py-2 text-xs font-bold text-blanco hover:bg-gris-50"
+                        className="cursor-pointer rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-bold text-danger transition hover:opacity-90"
                       >
                         CANCELAR
                       </button>
 
                       <button
                         type="submit"
-                        className="rounded-lg bg-green-600 px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-green-700"
+                        className="cursor-pointer rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover"
                       >
                         {reservaEditandoId != null ? "GUARDAR CAMBIOS" : "GUARDAR"}
                       </button>
@@ -815,54 +841,54 @@ export default function Reservas() {
                   />
                 </div>
               ) : reservasDelDia.length === 0 ? (
-                <div className="text-sm text-gray-500">No hay reservas para este día.</div>
+                <div className="text-sm text-fg-muted">No hay reservas para este día.</div>
               ) : (
                 <div className="h-full overflow-y-auto space-y-3 pr-2">
                   {reservasDelDia.map((r) => (
                     <div
                       key={r.id}
-                      className="flex items-stretch justify-between gap-4 rounded-2xl border border-gray-200 bg-blanco p-4 shadow-sm"
+                      className="flex items-stretch justify-between gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm"
                     >
                       <div className="flex min-w-0 gap-4">
-                        <div className="flex w-[92px] flex-col items-center justify-center rounded-xl bg-black px-3 py-2 text-white">
+                        <div className="flex w-[92px] flex-col items-center justify-center rounded-xl bg-accent px-3 py-2 text-white">
                           <div className="text-[11px] font-semibold tracking-wider text-white/70">
                             HORA
                           </div>
                           <div className="text-lg font-extrabold tracking-wide">{r.hora}</div>
-                          <div className="mt-1 rounded-md bg-blanco/10 px-2 py-0.5 text-[10px] font-extrabold tracking-widest">
+                          <div className="mt-1 rounded-md bg-surface-2 px-2 py-0.5 text-[10px] font-extrabold tracking-widest">
                             {turnoLabel(r.turno)}
                           </div>
                         </div>
 
                         <div className="min-w-0 py-0.5">
-                          <div className="truncate text-lg font-extrabold text-gray-900">
+                          <div className="truncate text-lg font-extrabold text-fg">
                             {r.nombre}
                           </div>
 
                           <div className="mt-2 flex flex-wrap items-center gap-2">
-                            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gris-50 px-3 py-1 text-sm font-semibold text-gray-800">
-                              <span className="mr-2 text-gray-500">👥</span>
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                              <Users className="mr-1.5 size-4 text-fg-muted" aria-hidden />
                               {r.comensales} comensales
                             </span>
 
-                            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gris-50 px-3 py-1 text-sm font-semibold text-gray-800">
-                              <span className="mr-2 text-gray-500">📞</span>
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                              <Phone className="mr-1.5 size-4 text-fg-muted" aria-hidden />
                               {r.telefono}
                             </span>
 
-                            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gris-50 px-3 py-1 text-sm font-semibold text-gray-800">
-                              <span className="mr-2 text-gray-500">✉️</span>
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                              <Mail className="mr-1.5 size-4 text-fg-muted" aria-hidden />
                               {r.email}
                             </span>
 
-                            <span className="inline-flex items-center rounded-full border border-gray-200 bg-gris-50 px-3 py-1 text-sm font-semibold text-gray-800">
-                              <span className="mr-2 text-gray-500">🪑</span>
+                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                              <Armchair className="mr-1.5 size-4 text-fg-muted" aria-hidden />
                               {r.zonaNombre} · {r.mesaNombre}
                             </span>
                           </div>
 
-                          <div className="mt-2 text-xs font-semibold text-gray-500">
-                            Estado: <span className="text-gray-700">{r.estado}</span>
+                          <div className="mt-2 text-xs font-semibold text-fg-muted">
+                            Estado: <span className="text-fg-muted">{r.estado}</span>
                           </div>
                         </div>
                       </div>
@@ -870,16 +896,18 @@ export default function Reservas() {
                       <div className="flex shrink-0 items-center gap-2">
                         <button
                           onClick={() => abrirFormulario(r)}
-                          className="rounded-xl bg-gris-100 px-4 py-2 text-xs font-extrabold tracking-widest text-gray-800 hover:bg-gris-200"
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2"
                         >
+                          <Pencil className="size-3.5" aria-hidden />
                           MODIFICAR
                         </button>
 
                         <button
                           type="button"
                           onClick={() => setConfirmBorrar({ open: true, reserva: r })}
-                          className="rounded-xl bg-red-100 px-4 py-2 text-xs font-extrabold tracking-widest text-red-700 hover:bg-red-200"
+                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90"
                         >
+                          <Trash2 className="size-3.5" aria-hidden />
                           BORRAR
                         </button>
                       </div>
@@ -896,31 +924,34 @@ export default function Reservas() {
               onClick={() => (borrando ? null : setConfirmBorrar({ open: false, reserva: null }))}
             >
               <div
-                className="w-full max-w-md rounded-2xl bg-blanco p-5 shadow-xl"
+                className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-xl"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="text-lg font-extrabold tracking-widest text-gray-900">
+                <div className="text-lg font-extrabold tracking-widest text-fg">
                   ¿Borrar esta reserva?
                 </div>
 
-                <div className="mt-2 text-sm text-gray-600">
+                <div className="mt-2 text-sm text-fg-muted">
                   Esta acción no se puede deshacer.
                 </div>
 
                 {confirmBorrar.reserva && (
-                  <div className="mt-4 space-y-2 rounded-xl border border-gray-200 bg-gris-50 p-3">
-                    <div className="text-sm font-bold text-gray-900 truncate">
+                  <div className="mt-4 space-y-2 rounded-xl border border-border bg-surface-2 p-3">
+                    <div className="text-sm font-bold text-fg truncate">
                       {confirmBorrar.reserva.nombre}
                     </div>
-                    <div className="flex flex-wrap gap-2 text-xs font-semibold text-gray-700">
-                      <span className="rounded-full border border-gray-200 bg-blanco px-3 py-1">
-                        🕒 {confirmBorrar.reserva.hora} · {turnoLabel(confirmBorrar.reserva.turno)}
+                    <div className="flex flex-wrap gap-2 text-xs font-semibold text-fg-muted">
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                        <Clock className="size-3.5" aria-hidden />
+                        {confirmBorrar.reserva.hora} · {turnoLabel(confirmBorrar.reserva.turno)}
                       </span>
-                      <span className="rounded-full border border-gray-200 bg-blanco px-3 py-1">
-                        🪑 {confirmBorrar.reserva.zonaNombre} · {confirmBorrar.reserva.mesaNombre}
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                        <Armchair className="size-3.5" aria-hidden />
+                        {confirmBorrar.reserva.zonaNombre} · {confirmBorrar.reserva.mesaNombre}
                       </span>
-                      <span className="rounded-full border border-gray-200 bg-blanco px-3 py-1">
-                        👥 {confirmBorrar.reserva.comensales} comensales
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1">
+                        <Users className="size-3.5" aria-hidden />
+                        {confirmBorrar.reserva.comensales} comensales
                       </span>
                     </div>
                   </div>
@@ -931,7 +962,7 @@ export default function Reservas() {
                     type="button"
                     disabled={borrando}
                     onClick={() => setConfirmBorrar({ open: false, reserva: null })}
-                    className="rounded-lg border border-gray-200 bg-blanco px-3 py-2 text-xs font-bold text-gray-800 hover:bg-gris-50 disabled:opacity-60"
+                    className="rounded-lg border border-border bg-surface px-3 py-2 text-xs font-bold text-fg hover:bg-surface-2 disabled:opacity-60"
                   >
                     CANCELAR
                   </button>
@@ -951,7 +982,7 @@ export default function Reservas() {
                         setBorrando(false);
                       }
                     }}
-                    className="rounded-lg bg-red-700 px-3 py-2 text-xs font-extrabold tracking-widest text-blanco hover:bg-red-800 disabled:opacity-60"
+                    className="rounded-lg bg-danger px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-danger disabled:opacity-60"
                   >
                     {borrando ? "BORRANDO..." : "BORRAR"}
                   </button>

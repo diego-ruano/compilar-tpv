@@ -79,16 +79,16 @@ export function Negocio({
                     className={cn(
                         "rounded-2xl border p-4 flex items-center gap-4",
                         darkMode
-                            ? "border-slate-800 bg-slate-950/40"
-                            : "border-slate-200 bg-white",
+                            ? "border-border bg-surface-2"
+                            : "border-border bg-surface",
                     )}
                 >
                     <div
                         className={cn(
                             "h-16 w-16 rounded-2xl border overflow-hidden grid place-items-center shrink-0",
                             darkMode
-                                ? "border-slate-800 bg-slate-900"
-                                : "border-slate-200 bg-white",
+                                ? "border-border bg-surface-2"
+                                : "border-border bg-surface",
                         )}
                     >
                         {draft.logoDataUrl ? (
@@ -102,8 +102,8 @@ export function Negocio({
                                 className={cn(
                                     "text-xs font-semibold",
                                     darkMode
-                                        ? "text-slate-300"
-                                        : "text-slate-600",
+                                        ? "text-fg-muted"
+                                        : "text-fg-muted",
                                 )}
                             >
                                 LOGO
@@ -115,7 +115,7 @@ export function Negocio({
                         <div
                             className={cn(
                                 "text-sm font-bold truncate",
-                                darkMode ? "text-white" : "text-slate-900",
+                                darkMode ? "text-white" : "text-fg",
                             )}
                         >
                             {draft.businessName || "TPV"}
@@ -123,7 +123,7 @@ export function Negocio({
                         <div
                             className={cn(
                                 "text-xs mt-0.5",
-                                darkMode ? "text-slate-300" : "text-slate-600",
+                                darkMode ? "text-fg-muted" : "text-fg-muted",
                             )}
                         >
                             Cambios del logo se guardan al pulsar “Guardar
@@ -193,7 +193,7 @@ export function Negocio({
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-2">
-                    <div className="text-xs text-slate-500">
+                    <div className="text-xs text-fg-muted">
                         {bizHydrated
                             ? "Persistencia en DB local (SQLite)"
                             : "Cargando configuración..."}

@@ -68,8 +68,8 @@ function TareasLine({
     finalizadas: number;
 }) {
     return (
-        <p className="text-sm text-negro/70">
-            <span className="font-semibold text-negro">Tareas:</span>{" "}
+        <p className="text-sm text-fg-muted">
+            <span className="font-semibold text-fg">Tareas:</span>{" "}
             {finalizadas}/{asignadas}
         </p>
     );
@@ -77,8 +77,8 @@ function TareasLine({
 
 function HorasLine({ horas }: { horas: number }) {
     return (
-        <p className="text-sm text-negro/70">
-            <span className="font-semibold text-negro">Horas trabajadas:</span>{" "}
+        <p className="text-sm text-fg-muted">
+            <span className="font-semibold text-fg">Horas trabajadas:</span>{" "}
             {formatHours(horas)}
         </p>
     );
@@ -95,7 +95,7 @@ function EmployeeCard({
     const initial = initialFromName(w.nombre);
 
     return (
-        <div className="bg-blanco rounded-xl shadow-xs p-4 border border-black/5 overflow-hidden">
+        <div className="bg-surface rounded-xl shadow-sm p-4 border border-border overflow-hidden">
             <div className="flex items-start gap-3">
                 <div
                     className={cn(
@@ -107,10 +107,10 @@ function EmployeeCard({
                 </div>
 
                 <div className="min-w-0 flex-1">
-                    <p className="text-base font-extrabold text-negro truncate">
+                    <p className="text-base font-extrabold text-fg truncate">
                         {w.nombre}
                     </p>
-                    <p className="text-xs text-negro/50 truncate">{w.rol}</p>
+                    <p className="text-xs text-fg-subtle truncate">{w.rol}</p>
 
                     <div className="mt-3 flex flex-col gap-1 min-w-0">
                         {lines}
@@ -131,12 +131,12 @@ function Section({
     children: React.ReactNode;
 }) {
     return (
-        <div className="bg-blanco rounded-xl shadow-xs p-4 flex flex-col gap-3 min-h-0 overflow-hidden">
+        <div className="bg-surface rounded-xl shadow-sm p-4 flex flex-col gap-3 min-h-0 overflow-hidden">
             <div className="min-w-0">
-                <h4 className="text-base font-extrabold text-negro truncate">
+                <h4 className="text-base font-extrabold text-fg truncate">
                     {title}
                 </h4>
-                <p className="text-sm text-negro/60 truncate">{subtitle}</p>
+                <p className="text-sm text-fg-muted truncate">{subtitle}</p>
             </div>
             <div className="min-h-0">{children}</div>
         </div>
@@ -232,24 +232,24 @@ function HorasBarChart({
     const series = useMemo(() => [{ name: "Horas", data: values }], [values]);
 
     return (
-        <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-0 overflow-hidden">
+        <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-0 overflow-hidden">
             <div className="min-w-0">
-                <h5 className="text-sm font-extrabold text-negro truncate">
+                <h5 className="text-sm font-extrabold text-fg truncate">
                     {title}
                 </h5>
-                <p className="text-xs text-negro/50 truncate">{subtitle}</p>
+                <p className="text-xs text-fg-subtle truncate">{subtitle}</p>
             </div>
 
-            <div className="mt-3 flex-1 min-h-0 overflow-auto">
+            <div className="mt-3 flex-1 min-h-[260px] overflow-x-auto overflow-y-hidden">
                 {labels.length === 0 ? (
-                    <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                    <div className="flex h-full items-center justify-center text-sm text-fg-subtle">
                         No hay datos de horas en este rango.
                     </div>
                 ) : (
-                    <div className="min-w-[520px]">
+                    <div className="h-full min-w-[480px]">
                         <ReactApexChart
                             type="bar"
-                            height={height}
+                            height="100%"
                             options={options}
                             series={series as any}
                         />
@@ -329,21 +329,21 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
     return (
         <div className="w-full h-full flex flex-col gap-4 min-h-0 overflow-hidden">
             {/* Header fijo */}
-            <div className="bg-blanco rounded-xl shadow-xs p-4 flex items-center justify-between">
+            <div className="bg-surface rounded-xl shadow-sm p-4 flex items-center justify-between">
                 <div className="min-w-0">
-                    <h3 className="text-lg font-bold text-negro">
+                    <h3 className="text-lg font-bold text-fg">
                         Trabajadores
                     </h3>
-                    <p className="text-sm text-negro/60">
+                    <p className="text-sm text-fg-muted">
                         Rendimiento por rol (comandas, cobros, tareas) +{" "}
-                        <span className="font-semibold text-negro/70">
+                        <span className="font-semibold text-fg-muted">
                             horas trabajadas
                         </span>{" "}
                         (según fichajes).
                     </p>
                 </div>
 
-                <div className="text-xs text-negro/50 shrink-0">
+                <div className="text-xs text-fg-subtle shrink-0">
                     {loading ? "Cargando…" : "Actualizado"}
                 </div>
             </div>
@@ -357,21 +357,21 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                         subtitle="Comandas preparadas · Tareas · Horas trabajadas"
                     >
                         {cocineros.length === 0 ? (
-                            <div className="text-sm text-negro/50">
+                            <div className="text-sm text-fg-subtle">
                                 No hay cocineros o no hay datos en este rango.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 min-h-0">
+                            <div className="grid grid-cols-1 gap-4 min-h-0 xl:grid-cols-2">
                                 <div className="min-h-0">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                                         {cocineros.map((w) => (
                                             <EmployeeCard
                                                 key={`cocinero-${w.id_trabajador}`}
                                                 w={w}
                                                 lines={
                                                     <>
-                                                        <p className="text-sm text-negro/70">
-                                                            <span className="font-semibold text-negro">
+                                                        <p className="text-sm text-fg-muted">
+                                                            <span className="font-semibold text-fg">
                                                                 Comandas preparadas:
                                                             </span>{" "}
                                                             {w.comandas_preparadas ?? 0}
@@ -404,36 +404,36 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                         subtitle="Comandas tomadas · Cobros · Ticket medio · Tareas · Horas trabajadas + ranking ventas"
                     >
                         {camareros.length === 0 ? (
-                            <div className="text-sm text-negro/50">
+                            <div className="text-sm text-fg-subtle">
                                 No hay camareros o no hay datos en este rango.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 min-h-0">
+                            <div className="grid grid-cols-1 gap-4 min-h-0 xl:grid-cols-2">
                                 {/* Cards + horas */}
                                 <div className="min-h-0">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                                         {camareros.map((w) => (
                                             <EmployeeCard
                                                 key={`camarero-${w.id_trabajador}`}
                                                 w={w}
                                                 lines={
                                                     <>
-                                                        <p className="text-sm text-negro/70">
-                                                            <span className="font-semibold text-negro">
+                                                        <p className="text-sm text-fg-muted">
+                                                            <span className="font-semibold text-fg">
                                                                 Comandas:
                                                             </span>{" "}
                                                             {w.comandas_tomadas ?? 0}
                                                         </p>
 
-                                                        <p className="text-sm text-negro/70">
-                                                            <span className="font-semibold text-negro">
+                                                        <p className="text-sm text-fg-muted">
+                                                            <span className="font-semibold text-fg">
                                                                 Cobros:
                                                             </span>{" "}
                                                             {w.cobros_realizados ?? 0}
                                                         </p>
 
-                                                        <p className="text-sm text-negro/70">
-                                                            <span className="font-semibold text-negro">
+                                                        <p className="text-sm text-fg-muted">
+                                                            <span className="font-semibold text-fg">
                                                                 Ticket medio:
                                                             </span>{" "}
                                                             {formatEur(w.ticket_medio_eur ?? 0)}
@@ -461,19 +461,19 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                                         color="#0ea5e9"
                                     />
 
-                                    <div className="bg-white rounded-xl border border-black/10 p-4 flex flex-col min-h-0 overflow-hidden">
+                                    <div className="bg-surface rounded-xl border border-border p-4 flex flex-col min-h-0 overflow-hidden">
                                         <div className="min-w-0">
-                                            <h5 className="text-sm font-extrabold text-negro truncate">
+                                            <h5 className="text-sm font-extrabold text-fg truncate">
                                                 Ranking de ventas por camarero
                                             </h5>
-                                            <p className="text-xs text-negro/50 truncate">
+                                            <p className="text-xs text-fg-subtle truncate">
                                                 Total vendido por trabajador (según el rango).
                                             </p>
                                         </div>
 
                                         <div className="mt-3 flex-1 min-h-0 overflow-auto">
                                             {rankingLabels.length === 0 ? (
-                                                <div className="h-full flex items-center justify-center text-sm text-negro/50">
+                                                <div className="h-full flex items-center justify-center text-sm text-fg-subtle">
                                                     No hay datos de ranking para este rango.
                                                 </div>
                                             ) : (
@@ -499,13 +499,13 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                         subtitle="Tareas · Horas trabajadas"
                     >
                         {limpieza.length === 0 ? (
-                            <div className="text-sm text-negro/50">
+                            <div className="text-sm text-fg-subtle">
                                 No hay personal de limpieza o no hay datos en este rango.
                             </div>
                         ) : (
-                            <div className="grid grid-cols-1 xl:grid-cols-[1fr_420px] gap-4 min-h-0">
+                            <div className="grid grid-cols-1 gap-4 min-h-0 xl:grid-cols-2">
                                 <div className="min-h-0">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4">
+                                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
                                         {limpieza.map((w) => (
                                             <EmployeeCard
                                                 key={`limpieza-${w.id_trabajador}`}

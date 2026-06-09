@@ -133,8 +133,8 @@ export default function AddCategoryModal({
         <Modal open={open} onClose={handleClose} title="Añadir categoría">
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
-                    <label className="font-semibold text-negro">
-                        Nombre <span className="text-rojo">*</span>
+                    <label className="font-semibold text-fg">
+                        Nombre <span className="text-danger">*</span>
                     </label>
                     <input
                         type="text"
@@ -144,28 +144,28 @@ export default function AddCategoryModal({
                         disabled={loading}
                         placeholder="Ej: Bebidas, Cocina, Postres..."
                         className={`border rounded-xl px-3 py-2 outline-none transition ${nameError
-                                ? "border-rojo"
-                                : "border-negro/20 focus:border-verde"
+                                ? "border-danger"
+                                : "border-border focus:border-accent"
                             }`}
                     />
-                    {nameError && <p className="text-sm text-rojo">{nameError}</p>}
+                    {nameError && <p className="text-sm text-danger">{nameError}</p>}
                 </div>
 
-                <div className="rounded-2xl border border-negro/10 bg-white p-3">
-                    <p className="font-bold text-negro mb-2">Opciones de la categoría</p>
+                <div className="rounded-2xl border border-border bg-surface p-3">
+                    <p className="font-bold text-fg mb-2">Opciones de la categoría</p>
 
                     <div className="flex flex-col gap-2">
                         <label
                             className={cn(
                                 "flex items-start justify-between gap-4 rounded-2xl border p-3 transition select-none",
-                                "border-negro/10 bg-white hover:bg-black/[0.02]",
+                                "border-border bg-surface hover:bg-surface-2",
                                 loading && "opacity-60 cursor-not-allowed",
                                 !loading && "cursor-pointer",
                             )}
                         >
                             <div className="leading-tight">
-                                <p className="font-semibold text-negro">¿Esta categoría es vendible?</p>
-                                <p className="text-sm text-negro/60">
+                                <p className="font-semibold text-fg">¿Esta categoría es vendible?</p>
+                                <p className="text-sm text-fg-muted">
                                     Si está desactivado, no aparecerá en la pantalla de venta.
                                 </p>
                             </div>
@@ -181,13 +181,13 @@ export default function AddCategoryModal({
                                 <span
                                     className={cn(
                                         "block h-6 w-11 rounded-full border transition",
-                                        "border-black/10 bg-black/10 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-black/10",
-                                        "peer-checked:bg-verde peer-checked:border-verde/60",
+                                        "border-border bg-surface-3 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring",
+                                        "peer-checked:bg-accent peer-checked:border-accent/60",
                                     )}
                                 />
                                 <span
                                     className={cn(
-                                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
+                                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-surface shadow-sm transition",
                                         "translate-x-0 peer-checked:translate-x-5",
                                     )}
                                 />
@@ -197,14 +197,14 @@ export default function AddCategoryModal({
                         <label
                             className={cn(
                                 "flex items-start justify-between gap-4 rounded-2xl border p-3 transition select-none",
-                                "border-negro/10 bg-white hover:bg-black/[0.02]",
+                                "border-border bg-surface hover:bg-surface-2",
                                 loading && "opacity-60 cursor-not-allowed",
                                 !loading && "cursor-pointer",
                             )}
                         >
                             <div className="leading-tight">
-                                <p className="font-semibold text-negro">¿Esta categoría pasa a cocina?</p>
-                                <p className="text-sm text-negro/60">
+                                <p className="font-semibold text-fg">¿Esta categoría pasa a cocina?</p>
+                                <p className="text-sm text-fg-muted">
                                     Si está activado, sus productos se enviarán a cocina en la comanda.
                                 </p>
                             </div>
@@ -220,13 +220,13 @@ export default function AddCategoryModal({
                                 <span
                                     className={cn(
                                         "block h-6 w-11 rounded-full border transition",
-                                        "border-black/10 bg-black/10 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-black/10",
-                                        "peer-checked:bg-verde peer-checked:border-verde/60",
+                                        "border-border bg-surface-3 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-ring",
+                                        "peer-checked:bg-accent peer-checked:border-accent/60",
                                     )}
                                 />
                                 <span
                                     className={cn(
-                                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition",
+                                        "absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-surface shadow-sm transition",
                                         "translate-x-0 peer-checked:translate-x-5",
                                     )}
                                 />
@@ -236,8 +236,8 @@ export default function AddCategoryModal({
                 </div>
 
                 <div className="flex flex-col gap-2">
-                    <label className="font-semibold text-negro">
-                        Imagen <span className="text-negro/50 text-sm">(opcional)</span>
+                    <label className="font-semibold text-fg">
+                        Imagen <span className="text-fg-subtle text-sm">(opcional)</span>
                     </label>
 
                     <input
@@ -253,14 +253,14 @@ export default function AddCategoryModal({
                         onClick={() => !loading && pickFile()}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={handleDrop}
-                        className="cursor-pointer rounded-2xl border-2 border-dashed p-4 transition border-verde/60 hover:border-verde"
+                        className="cursor-pointer rounded-2xl border-2 border-dashed p-4 transition border-accent/60 hover:border-accent"
                     >
                         {!image ? (
                             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-11 h-11 rounded-2xl border border-negro/10 bg-gris flex items-center justify-center">
+                                    <div className="w-11 h-11 rounded-2xl border border-border bg-surface-2 flex items-center justify-center">
                                         <svg
-                                            className="w-6 h-6 text-negro/70"
+                                            className="w-6 h-6 text-fg-muted"
                                             xmlns="http://www.w3.org/2000/svg"
                                             fill="none"
                                             viewBox="0 0 24 24"
@@ -276,31 +276,31 @@ export default function AddCategoryModal({
                                         </svg>
                                     </div>
                                     <div>
-                                        <p className="font-bold text-negro">Sube una imagen</p>
-                                        <p className="text-sm text-negro/60">Click o arrastra y suelta (PNG/JPG).</p>
+                                        <p className="font-bold text-fg">Sube una imagen</p>
+                                        <p className="text-sm text-fg-muted">Click o arrastra y suelta (PNG/JPG).</p>
                                     </div>
                                 </div>
 
-                                <div className="w-full sm:w-auto text-center px-4 py-2 rounded-xl bg-verde text-white font-bold">
+                                <div className="w-full sm:w-auto text-center px-4 py-2 rounded-xl bg-accent text-white font-bold">
                                     Elegir archivo
                                 </div>
                             </div>
                         ) : (
                             <div className="flex flex-col sm:flex-row gap-4 items-center">
-                                <div className="w-full sm:w-[200px] aspect-[4/3] rounded-2xl overflow-hidden border border-negro/10 bg-gris">
+                                <div className="w-full sm:w-[200px] aspect-[4/3] rounded-2xl overflow-hidden border border-border bg-surface-2">
                                     <img src={previewUrl} alt="preview" className="w-full h-full object-cover" />
                                 </div>
 
                                 <div className="flex-1 w-full">
-                                    <p className="font-bold text-negro break-words">{image.name}</p>
-                                    <p className="text-sm text-negro/60">{(image.size / 1024 / 1024).toFixed(2)} MB</p>
+                                    <p className="font-bold text-fg break-words">{image.name}</p>
+                                    <p className="text-sm text-fg-muted">{(image.size / 1024 / 1024).toFixed(2)} MB</p>
 
                                     <div className="grid grid-cols-2 gap-2 mt-3">
                                         <button
                                             type="button"
                                             onClick={pickFile}
                                             disabled={loading}
-                                            className="border border-negro/20 rounded-xl py-2 font-semibold hover:bg-gris transition"
+                                            className="border border-border rounded-xl py-2 font-semibold hover:bg-surface-2 transition"
                                         >
                                             Cambiar
                                         </button>
@@ -308,7 +308,7 @@ export default function AddCategoryModal({
                                             type="button"
                                             onClick={() => setImage(null)}
                                             disabled={loading}
-                                            className="border border-rojo text-rojo rounded-xl py-2 font-semibold hover:bg-rojo hover:text-white transition"
+                                            className="border border-danger text-danger rounded-xl py-2 font-semibold hover:bg-danger hover:text-danger-fg transition"
                                         >
                                             Quitar
                                         </button>
@@ -324,7 +324,7 @@ export default function AddCategoryModal({
                         type="button"
                         onClick={handleClose}
                         disabled={loading}
-                        className="w-full px-4 py-2 rounded-xl border border-negro/20 hover:bg-gris transition font-semibold"
+                        className="w-full px-4 py-2 rounded-xl border border-border hover:bg-surface-2 transition font-semibold"
                     >
                         Cancelar
                     </button>
@@ -332,9 +332,9 @@ export default function AddCategoryModal({
                     <button
                         type="submit"
                         disabled={loading}
-                        className={`w-full px-4 py-2 rounded-xl font-extrabold transition ${loading
-                                ? "bg-gray-400 cursor-not-allowed text-white"
-                                : "bg-verde text-white hover:opacity-90"
+                        className={`w-full cursor-pointer rounded-xl px-4 py-2 font-extrabold shadow-sm transition ${loading
+                                ? "cursor-not-allowed bg-surface-2 text-fg-subtle"
+                                : "bg-accent text-accent-fg hover:bg-accent-hover"
                             }`}
                     >
                         {loading ? "Guardando..." : "Guardar categoría"}

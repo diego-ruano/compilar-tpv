@@ -18,8 +18,8 @@ function SummaryList({
 }) {
     return (
         <ListProducts title={title}>
-            <div className="rounded-2xl border border-negro/10 overflow-hidden flex-1 min-h-0 flex flex-col">
-                <div className="flex-none bg-gris/40">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
+                <div className="flex-none bg-surface-2 text-fg-muted">
                     <ItemListProduct
                         className="font-bold"
                         cantidad="Cantidad"
@@ -30,12 +30,12 @@ function SummaryList({
                     />
                 </div>
 
-                <div className="flex-1 min-h-0 overflow-auto pr-2 pb-4">
+                <div className="min-h-0 flex-1 overflow-auto pr-2 pb-4">
                     {rows.length === 0 ? (
-                        <p className="text-center text-negro/60 py-4">{emptyText}</p>
+                        <p className="py-4 text-center text-fg-muted">{emptyText}</p>
                     ) : (
                         rows.map((p, idx) => (
-                            <div key={keyFn(p, idx)} className="border-t border-negro/10">
+                            <div key={keyFn(p, idx)} className="border-t border-border">
                                 <ItemListProduct
                                     cantidad={formatCantidad(p.Stock_Actual, p.Unidad_Medida)}
                                     nombre={p.Nombre}

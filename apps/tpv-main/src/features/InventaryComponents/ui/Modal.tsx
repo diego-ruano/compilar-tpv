@@ -1,5 +1,6 @@
 // components/ui/Modal.tsx
 import React from "react";
+import { X } from "lucide-react";
 
 export default function Modal({
     open,
@@ -18,25 +19,26 @@ export default function Modal({
 
     return (
         <div
-            className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
             onMouseDown={(e) => {
                 if (e.target === e.currentTarget) onClose();
             }}
         >
             <div
-                className={`bg-blanco w-full ${maxWidthClass} rounded-2xl shadow-xl border border-black/10 relative`}
+                className={`relative w-full ${maxWidthClass} rounded-2xl border border-border bg-surface text-fg shadow-xl`}
             >
                 <button
                     type="button"
                     onClick={onClose}
-                    className="absolute top-3 right-3 px-3 py-1 rounded-xl border border-negro/20 hover:bg-gris transition"
+                    aria-label="Cerrar"
+                    className="absolute top-3 right-3 grid size-9 place-items-center rounded-xl border border-border text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer"
                 >
-                    ✕
+                    <X className="size-4" aria-hidden />
                 </button>
 
                 {title && (
-                    <div className="px-5 pt-5 pb-3 border-b border-black/10">
-                        <h2 className="text-lg font-extrabold text-center">{title}</h2>
+                    <div className="border-b border-border px-5 pt-5 pb-3">
+                        <h2 className="text-center text-lg font-extrabold text-fg">{title}</h2>
                     </div>
                 )}
 
