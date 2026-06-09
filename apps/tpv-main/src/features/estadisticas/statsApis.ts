@@ -5,32 +5,39 @@
 // Nota: stats_mesas_get recibe `range` directo (no envuelto en `args`); el resto usa `{ args }`.
 
 import { invokeClient } from "@tpv/client";
+import type {
+    StatsRange,
+    StatsTurno,
+    StatsCategoriaRow,
+    MesasStatsResponse,
+    ProductosStatsResponse,
+    ReservasStatsResponse,
+    TrabajadoresStatsResponse,
+    ClientesStatsResponse,
+    ProveedoresStatsResponse,
+    TrabajadorCardStats,
+    PuntualidadInfo,
+} from "@tpv/contracts";
 
-export type StatsRange = "hoy" | "semana" | "mes" | "anio";
+// Tipos autogenerados desde Rust (ts-rs). Se reexportan con los mismos nombres
+// que ya consumían los componentes; aquí sólo viven las firmas de las llamadas.
+export type {
+    StatsRange,
+    StatsTurno,
+    StatsCategoriaRow,
+    MesasStatsResponse,
+    ProductosStatsResponse,
+    ReservasStatsResponse,
+    TrabajadoresStatsResponse,
+    ClientesStatsResponse,
+    ProveedoresStatsResponse,
+    TrabajadorCardStats,
+    PuntualidadInfo,
+};
 
 /* =========================
    MESAS
 ========================= */
-
-export type MesasStatsResponse = {
-    total_mesas: number;
-    ocupadas: number;
-    ticket_medio_por_mesa: number;
-    mesa_top_comandas: null | {
-        mesa: string;
-        zona: string;
-        comandas: number;
-    };
-    servicios: {
-        labels: string[];
-        values: number[];
-    };
-    top_mesas_ingresos: Array<{
-        mesa: string;
-        zona: string;
-        total: number;
-    }>;
-};
 
 export async function mesasStatsGet(
     range: StatsRange,
@@ -42,23 +49,13 @@ export async function mesasStatsGet(
    PRODUCTOS
 ========================= */
 
-export type StatsCategoriaRow = {
-    ID_Categoria: number;
-    Nombre: string;
-};
-
+// Helper solo-frontend (forma de las series de los gráficos de productos).
 export type ProductosTop10 = {
     labels: string[];
     values: number[];
 };
 
-export type ProductosStatsResponse = {
-    mejor_producto: string | null;
-    peor_producto_vendible: string | null;
-    top10_mejores: ProductosTop10;
-    top10_peores: ProductosTop10;
-};
-
+// Alias conservado por compatibilidad con los componentes que lo importan.
 export type ProductosStatsResumen = ProductosStatsResponse;
 
 export async function productosStatsListCategorias(): Promise<
@@ -90,30 +87,6 @@ export const statsProductosResumen = productosStatsResumen;
    RESERVAS
 ========================= */
 
-export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
-
-export type ReservasStatsResponse = {
-    total_reservas: number;
-    cancelaciones: number;
-    mesas_turno: {
-        turno: StatsTurno;
-        mesas_reservadas: number;
-        mesas_no_reservadas: number;
-    };
-    reservas_por_bucket: {
-        labels: string[];
-        values: number[];
-    };
-    estado: {
-        labels: string[];
-        values: number[];
-    };
-    franjas: {
-        labels: string[];
-        values: number[];
-    };
-};
-
 export async function reservasStatsResumen(args: {
     range: StatsRange;
     turno: StatsTurno;
@@ -128,40 +101,6 @@ export const statsReservasResumen = reservasStatsResumen;
 /* =========================
    TRABAJADORES
 ========================= */
-
-export type PuntualidadInfo = {
-    puntual: boolean;
-    programado: string;
-    entrada: string;
-    minutos_retraso: number;
-};
-
-export type TrabajadorCardStats = {
-    id_trabajador: number;
-    nombre: string;
-    rol: "Cocinero" | "Camarero" | "Limpieza";
-
-    tareas_asignadas: number;
-    tareas_finalizadas: number;
-    horas_trabajadas: number;
-
-    puntualidad?: PuntualidadInfo | null;
-
-    comandas_preparadas?: number;
-    comandas_tomadas?: number;
-    cobros_realizados?: number;
-    ticket_medio_eur?: number;
-};
-
-export type TrabajadoresStatsResponse = {
-    cocineros: TrabajadorCardStats[];
-    camareros: TrabajadorCardStats[];
-    limpieza: TrabajadorCardStats[];
-    ranking_ventas: {
-        labels: string[];
-        values: number[];
-    };
-};
 
 export async function trabajadoresStatsResumen(args: {
     range: StatsRange;
@@ -178,21 +117,6 @@ export const statsTrabajadoresResumen = trabajadoresStatsResumen;
    CLIENTES
 ========================= */
 
-export type ClientesStatsResponse = {
-    nuevos: number;
-    recurrentes: number;
-    no_recurrentes: number;
-    ticket_medio_cliente: number;
-    nuevos_por_bucket: {
-        labels: string[];
-        values: number[];
-    };
-    top_clientes_gasto: {
-        labels: string[];
-        values: number[];
-    };
-};
-
 export async function clientesStatsResumen(args: {
     range: StatsRange;
 }): Promise<ClientesStatsResponse> {
@@ -206,35 +130,6 @@ export const statsClientesResumen = clientesStatsResumen;
 /* =========================
    PROVEEDORES
 ========================= */
-
-export type ProveedoresStatsResponse = {
-    total_gasto: number;
-    num_gastos: number;
-    gasto_medio: number;
-    porcentaje_sobre_total_gastos: number;
-
-    proveedor_top: null | {
-        nombre: string;
-        total: number;
-    };
-
-    gastos_evolucion: {
-        labels: string[];
-        values: number[];
-    };
-
-    gasto_por_proveedor: {
-        labels: string[];
-        values: number[];
-    };
-
-    ultimos_gastos?: Array<{
-        fecha: string;
-        proveedor: string;
-        concepto: string;
-        importe: number;
-    }>;
-};
 
 export async function proveedoresStatsResumen(args: {
     range: StatsRange;

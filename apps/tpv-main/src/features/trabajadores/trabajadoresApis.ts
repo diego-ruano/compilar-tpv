@@ -7,35 +7,13 @@
 // devuelve Rust ya vienen en PascalCase (serde rename), idénticos a estos tipos.
 
 import { invokeClient } from "@tpv/client";
+import type { TrabajadorRow, TurnoRow, AsignacionRow } from "@tpv/contracts";
 
-export type TrabajadorRow = {
-    ID_Trabajador: number;
-    ID_Usuario: number;
-    Nombre: string;
-    Apellido: string | null;
-    Email: string;
-    Estado: string;
-    Nombre_Rol: string;
-    Telefono: string | null;
-    Puesto: string | null;
-};
-
-export type Turno = {
-    ID_Turno: number;
-    Nombre_Turno: string;
-};
-
-export type Asignacion = {
-    ID_Asignacion: number;
-    ID_Trabajador: number;
-    Fecha: string;
-    ID_Turno: number;
-    Area: string;
-    Hora_Inicio: string | null;
-    Hora_Fin: string | null;
-    Notas: string | null;
-    Nombre_Turno: string;
-};
+// Tipos autogenerados desde Rust (ts-rs). Se reexportan con los nombres que ya
+// consumían los componentes (Turno/Asignacion) para no duplicar la definición.
+export type { TrabajadorRow };
+export type Turno = TurnoRow;
+export type Asignacion = AsignacionRow;
 
 /* =========================================================
    Reads

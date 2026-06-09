@@ -6,52 +6,23 @@
 // cambian, así que los componentes que la consumen siguen igual.
 
 import { invokeClient } from "@tpv/client";
+import type {
+    TrabajadorUI,
+    TareaAdminRow,
+    TareaRow,
+    TareaAsignadoRow,
+    MisTareasRow,
+} from "@tpv/contracts";
 
-export type TrabajadorUI = {
-    ID_Trabajador: number;
-    ID_Usuario: number;
-    Nombre: string;
-    Apellido: string | null;
-    Puesto: string | null;
-    Email: string;
-};
-
-export type TareaAdminRow = {
-    ID_Tarea: number;
-    Titulo: string;
-    Descripcion: string | null;
-    Fecha_Creacion: string;
-    Fecha_Limite: string | null;
-    Total_Asignados: number;
-    Total_Finalizadas: number;
-};
-
-export type TareaRow = {
-    ID_Tarea: number;
-    Titulo: string;
-    Descripcion: string | null;
-    Fecha_Creacion: string;
-    Fecha_Limite: string | null;
-};
-
-export type TareaAsignadoRow = {
-    ID_Trabajador: number;
-    Nombre: string;
-    Apellido: string | null;
-    Puesto: string | null;
-    Asignada_At: string;
-    Estado: string;
-    Finalizada_At: string | null;
-};
-
-export type MisTareasRow = {
-    ID_Tarea: number;
-    Titulo: string;
-    Descripcion: string | null;
-    Fecha_Limite: string | null;
-    Asignada_At: string;
-    Estado: "PENDIENTE" | "FINALIZADA" | string;
-    Finalizada_At: string | null;
+// Tipos autogenerados desde Rust (ts-rs). Se reexportan para conservar la
+// superficie pública del módulo; los mappers de abajo siguen normalizando el
+// payload (snake/Pascal/camel) hacia estas formas.
+export type {
+    TrabajadorUI,
+    TareaAdminRow,
+    TareaRow,
+    TareaAsignadoRow,
+    MisTareasRow,
 };
 
 /* =========================================================
