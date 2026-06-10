@@ -5,10 +5,12 @@ import { RouterProvider } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { useMode, type DeviceMode } from "../shared/stores/useMode";
+import { useConnectionMode } from "../shared/stores/useConnectionMode";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
+import { useMainSocket } from "../shared/lib/useMainSocket";
 
 import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
@@ -316,6 +318,15 @@ export default function AppBoot({ router }: { router: any }) {
     });
     const [handyPairBusy, setHandyPairBusy] = useState(false);
     const [handyPairErr, setHandyPairErr] = useState<string | null>(null);
+    // Modo de funcionamiento (offline/online) persistido en AppData: hidratar al arrancar.
+    const hydrateConnMode = useConnectionMode((s) => s.hydrate);
+    useEffect(() => {
+        void hydrateConnMode();
+    }, [hydrateConnMode]);
+
+    // WebSocket de la Main: se abre/cierra según el modo (online → abre, offline → cierra).
+    useMainSocket();
+
     // Huella propia del dispositivo: el operador del Main la compara con la que ve en la
     // lista de solicitudes antes de aprobar (sobre todo en la ruta de "solo código").
     const [handyFingerprint, setHandyFingerprint] = useState("");

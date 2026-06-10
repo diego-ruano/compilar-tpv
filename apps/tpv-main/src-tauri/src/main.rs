@@ -49,9 +49,20 @@ enum DeviceMode {
     Handy,
 }
 
+/// Modo de funcionamiento de la Main respecto a la nube (ajuste explícito persistido).
+/// `Offline`: solo SQLite local. `Online`: además abre WebSocket con el worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ConnectivityMode {
+    Offline,
+    Online,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DeviceConfig {
     mode: Option<DeviceMode>,
+    #[serde(default)]
+    connectivity: Option<ConnectivityMode>,
 }
 
 /* =========================================================
@@ -61,6 +72,11 @@ struct DeviceConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct SetDeviceModeArgs {
     mode: DeviceMode,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SetConnectionModeArgs {
+    mode: ConnectivityMode,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -257,6 +273,32 @@ fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, String> {
     let cfg = load_config(&app_data_dir);
 
     Ok(cfg.mode)
+}
+
+/// Lee el modo de funcionamiento (offline/online) persistido en `device_config.json`.
+/// Si nunca se eligió, devuelve `None` (la UI asume `offline`).
+#[tauri::command]
+fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    Ok(load_config(&app_data_dir).connectivity)
+}
+
+/// Persiste el modo de funcionamiento (offline/online) en `device_config.json`.
+#[tauri::command]
+fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let mut cfg = load_config(&app_data_dir);
+    cfg.connectivity = Some(args.mode);
+    save_config(&app_data_dir, &cfg)?;
+
+    Ok("OK".into())
 }
 
 #[tauri::command]
@@ -468,6 +510,8 @@ pub fn run() {
             // device
             get_device_mode,
             set_device_mode,
+            get_connection_mode,
+            set_connection_mode,
             init_main,
             device_reset_mode,
             // genéricos
