@@ -27,6 +27,7 @@ import { Contacto } from "../../features/configuracion/sections/Contacto";
 import { Ticket } from "../../features/configuracion/sections/Ticket";
 import { Licencia } from "../../features/configuracion/sections/Licencia";
 import { Apariencia } from "../../features/configuracion/sections/Apariencia";
+import { Conectividad } from "../../features/configuracion/sections/Conectividad";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 
 
@@ -128,6 +129,21 @@ export default function Configuracion() {
         if (!isMain) return baseNavItems;
         return [
             ...baseNavItems,
+            {
+                key: "CONECTIVIDAD",
+                title: "Modo de funcionamiento",
+                desc: "Local o sincronizado con la nube",
+                keywords: [
+                    "modo",
+                    "conexión",
+                    "online",
+                    "offline",
+                    "nube",
+                    "internet",
+                    "copia",
+                    "backup",
+                ],
+            },
             {
                 key: "VINCULAR_HANDY",
                 title: "Vincular Handy",
@@ -256,9 +272,13 @@ export default function Configuracion() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [section, isMain]);
 
-    // Si cambia a handy, fuera de esta sección
+    // Si cambia a handy, fuera de las secciones solo-Main
     useEffect(() => {
-        if (!isMain && section === "VINCULAR_HANDY") setSection("LICENCIA");
+        if (
+            !isMain &&
+            (section === "VINCULAR_HANDY" || section === "CONECTIVIDAD")
+        )
+            setSection("LICENCIA");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isMain]);
 
@@ -657,6 +677,11 @@ export default function Configuracion() {
                                                 darkMode={darkMode}
                                                 setDarkMode={setDarkMode}
                                             />
+                                        ) : null}
+
+                                        {section === "CONECTIVIDAD" &&
+                                            isMain ? (
+                                            <Conectividad darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "LICENCIA" ? (

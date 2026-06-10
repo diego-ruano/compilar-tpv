@@ -13,6 +13,7 @@ export type SectionKey =
 	| "TICKET"
 	| "LICENCIA"
 	| "APARIENCIA"
+	| "CONECTIVIDAD"
 	| "VINCULAR_HANDY";
 
 export type NavItem = {
