@@ -42,6 +42,56 @@ function rowsAffected(result: any): number {
 	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
 }
 
+// Throttle por IP del endpoint de claim (anónimo). El secret protege la ruta del QR, pero la
+// ruta de "solo código" no lo lleva, así que sin esto el espacio de 10^6 códigos quedaría
+// abierto a enumeración. Ventana fija de 60s; el límite es holgado para reintentos legítimos
+// (un emparejamiento hace UN claim y luego sondea fetch-token, otro endpoint), pero corta en
+// seco cualquier barrido masivo. Global (no por-colo), apoyado en la DB de control.
+const CLAIM_RL_WINDOW_MS = 60 * 1000;
+const CLAIM_RL_MAX = 30;
+
+async function claimRateLimitOk(
+	db: Client,
+	ip: string,
+	now: number,
+): Promise<boolean> {
+	await db.execute(`
+		CREATE TABLE IF NOT EXISTS pair_claim_throttle (
+			ip TEXT PRIMARY KEY,
+			window_start_ms INTEGER NOT NULL,
+			count INTEGER NOT NULL
+		);
+	`);
+
+	const r = await db.execute({
+		sql: `SELECT window_start_ms, count FROM pair_claim_throttle WHERE ip=? LIMIT 1;`,
+		args: [ip],
+	});
+
+	const row = r.rows?.[0] as any | undefined;
+
+	// Ventana nueva (o primera vez): reinicia el contador.
+	if (!row || now - Number(row.window_start_ms || 0) >= CLAIM_RL_WINDOW_MS) {
+		await db.execute({
+			sql: `
+				INSERT INTO pair_claim_throttle (ip, window_start_ms, count)
+				VALUES (?, ?, 1)
+				ON CONFLICT(ip) DO UPDATE SET window_start_ms=excluded.window_start_ms, count=1;
+			`,
+			args: [ip, now],
+		});
+		return true;
+	}
+
+	if (Number(row.count || 0) >= CLAIM_RL_MAX) return false;
+
+	await db.execute({
+		sql: `UPDATE pair_claim_throttle SET count=count+1 WHERE ip=?;`,
+		args: [ip],
+	});
+	return true;
+}
+
 export async function handlePairClaim(
 	req: Request,
 	env: any,
@@ -66,9 +116,10 @@ export async function handlePairClaim(
 			return json({ ok: false, error: "invalid_pair_code" }, 400, req);
 		}
 
-		if (!pairSecret) {
-			return json({ ok: false, error: "missing_pairSecret" }, 400, req);
-		}
+		// Ruta dual: el `pairSecret` es OPCIONAL.
+		//  - QR/URI  → llega el secret → se verifica abajo (prueba criptográfica de posesión).
+		//  - Solo código → sin secret → se omite la verificación y la seguridad recae en la
+		//    aprobación manual del Main (+ el throttle por IP de arriba contra enumeración).
 
 		if (!deviceId) {
 			return json({ ok: false, error: "missing_deviceId" }, 400, req);
@@ -84,6 +135,18 @@ export async function handlePairClaim(
 		}
 
 		const now = Date.now();
+
+		const clientIp = String(
+			req.headers.get("CF-Connecting-IP") ||
+				req.headers.get("x-forwarded-for") ||
+				"unknown",
+		)
+			.split(",")[0]
+			.trim();
+
+		if (!(await claimRateLimitOk(dbCentral, clientIp, now))) {
+			return json({ ok: false, error: "too_many_requests" }, 429, req);
+		}
 
 		const prRes = await dbCentral.execute({
 			sql: `SELECT * FROM pair_requests WHERE pair_code=? LIMIT 1;`,
@@ -134,21 +197,25 @@ export async function handlePairClaim(
 			);
 		}
 
-		const pepper = String(env.PAIR_PEPPER || "");
-		const hash = await sha256HexStr(`${pairSecret}.${pepper}`);
+		// Verificación del secret SOLO en la ruta fuerte (QR/URI). Si no llega secret, es la
+		// ruta de "solo código" y se confía en la aprobación manual posterior.
+		if (pairSecret) {
+			const pepper = String(env.PAIR_PEPPER || "");
+			const hash = await sha256HexStr(`${pairSecret}.${pepper}`);
 
-		if (hash !== String(pr.secret_hash || "")) {
-			await dbCentral.execute({
-				sql: `
-					UPDATE pair_requests
-					SET attempts = attempts + 1,
-					    last_attempt_at_ms=?
-					WHERE pair_code=?;
-				`,
-				args: [now, pairCode],
-			});
+			if (hash !== String(pr.secret_hash || "")) {
+				await dbCentral.execute({
+					sql: `
+						UPDATE pair_requests
+						SET attempts = attempts + 1,
+						    last_attempt_at_ms=?
+						WHERE pair_code=?;
+					`,
+					args: [now, pairCode],
+				});
 
-			return json({ ok: false, error: "invalid_pair_secret" }, 401, req);
+				return json({ ok: false, error: "invalid_pair_secret" }, 401, req);
+			}
 		}
 
 		const claimRes = await dbCentral.execute({

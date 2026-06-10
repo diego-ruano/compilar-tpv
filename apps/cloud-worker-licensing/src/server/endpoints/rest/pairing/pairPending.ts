@@ -91,6 +91,7 @@ export async function handlePairPending(
 					claimed_at_ms,
 					claimed_by_device_id,
 					claimed_device_name,
+					claimed_device_pubkey_b64,
 					attempts,
 					last_attempt_at_ms
 				FROM pair_requests
@@ -118,6 +119,9 @@ export async function handlePairPending(
 				: null,
 			claimedDeviceName: row.claimed_device_name
 				? String(row.claimed_device_name)
+				: null,
+			claimedDevicePubKeyB64: row.claimed_device_pubkey_b64
+				? String(row.claimed_device_pubkey_b64)
 				: null,
 
 			attempts: Number(row.attempts || 0),

@@ -5,6 +5,7 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { QRCodeCanvas } from "qrcode.react";
 import { cloudPost } from "../../../shared/lib/cloudApi";
+import { deviceFingerprint } from "../../../shared/lib/deviceFingerprint";
 
 type PairPendingItem = {
 	pairCode: string;
@@ -15,9 +16,13 @@ type PairPendingItem = {
 	claimedAtMs: number | null;
 	claimedDeviceId: string | null;
 	claimedDeviceName: string | null;
+	claimedDevicePubKeyB64: string | null;
 
 	attempts: number;
 	lastAttemptAtMs: number | null;
+
+	// Calculada en el cliente a partir de claimedDevicePubKeyB64 (no viene del worker).
+	fingerprint?: string;
 };
 
 export function VincularHandy({
@@ -61,7 +66,20 @@ export function VincularHandy({
 		try {
 			setPendingErr(null);
 			const r = (await cloudPost("tpv", "/v1/pair/pending", {})) as any;
-			setPending((r.items || []) as PairPendingItem[]);
+			const items = (r.items || []) as PairPendingItem[];
+
+			// Resolvemos la huella de cada dispositivo para que el operador pueda
+			// compararla con la que muestra el Handy antes de aprobar.
+			const withFp = await Promise.all(
+				items.map(async (it) => ({
+					...it,
+					fingerprint: it.claimedDevicePubKeyB64
+						? await deviceFingerprint(it.claimedDevicePubKeyB64)
+						: "",
+				})),
+			);
+
+			setPending(withFp);
 		} catch (e: any) {
 			setPendingErr(String(e?.message || e));
 		}
@@ -337,6 +355,23 @@ export function VincularHandy({
 																	{p.pairCode}
 																</span>{" "}
 																· Solicitado: {claimedAt} · Caduca: {exp}
+															</div>
+
+															<div
+																className={cn(
+																	"text-xs mt-1",
+																	darkMode
+																		? "text-fg-subtle"
+																		: "text-fg-muted",
+																)}
+															>
+																Huella:{" "}
+																<span className="font-mono font-semibold">
+																	{p.fingerprint || "—"}
+																</span>{" "}
+																<span className="text-[11px]">
+																	(verifícala contra la que muestra el Handy)
+																</span>
 															</div>
 														</div>
 

@@ -8,6 +8,7 @@ import { useMode, type DeviceMode } from "../shared/stores/useMode";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
+import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
 
 import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
@@ -315,6 +316,26 @@ export default function AppBoot({ router }: { router: any }) {
     });
     const [handyPairBusy, setHandyPairBusy] = useState(false);
     const [handyPairErr, setHandyPairErr] = useState<string | null>(null);
+    // Huella propia del dispositivo: el operador del Main la compara con la que ve en la
+    // lista de solicitudes antes de aprobar (sobre todo en la ruta de "solo código").
+    const [handyFingerprint, setHandyFingerprint] = useState("");
+
+    useEffect(() => {
+        let alive = true;
+        (async () => {
+            try {
+                const ident = await handyGetIdentity();
+                const fp = await deviceFingerprint(ident.devicePubKeyB64);
+                if (alive) setHandyFingerprint(fp);
+            } catch {
+                /* sin identidad todavía: simplemente no mostramos huella */
+            }
+        })();
+        return () => {
+            alive = false;
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     async function handyGetIdentity(): Promise<HandyIdentity> {
         const r = (await invoke("device_get_identity")) as any;
@@ -786,6 +807,20 @@ export default function AppBoot({ router }: { router: any }) {
                                                 aquí) o introduce el código
                                                 manual.
                                             </div>
+
+                                            {handyFingerprint ? (
+                                                <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
+                                                    Huella de este dispositivo:{" "}
+                                                    <span className="font-mono font-semibold text-slate-900">
+                                                        {handyFingerprint}
+                                                    </span>
+                                                    <div className="mt-0.5 text-[11px] text-slate-500">
+                                                        Si usas solo el código, comprueba que esta
+                                                        huella coincide con la que ve el Main antes
+                                                        de aceptar.
+                                                    </div>
+                                                </div>
+                                            ) : null}
 
                                             <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                                                 <div>
