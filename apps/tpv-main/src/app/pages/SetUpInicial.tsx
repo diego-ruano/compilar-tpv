@@ -1,6 +1,9 @@
 import React, { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { completeInitialSetup } from "../../features/login/loginApi";
+import {
+    completeInitialSetup,
+    uploadInitialSetupToCloud,
+} from "../../features/login/loginApi";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
 
@@ -69,6 +72,19 @@ export default function SetupInicial() {
                 pinNuevo,
                 emailNuevo: cleanEmail,
             });
+
+            // Subimos el setup a la nube para que la Handy haga login con datos reales.
+            // No es bloqueante: si la nube falla, el TPV local ya quedó configurado y debe
+            // poder continuar (solo se resentiría el login de la Handy hasta reintentarlo).
+            try {
+                await uploadInitialSetupToCloud({
+                    idUsuario,
+                    email: cleanEmail,
+                    pin: pinNuevo,
+                });
+            } catch (e) {
+                console.warn("uploadInitialSetupToCloud falló (setup local OK):", e);
+            }
 
             setSession({
                 role: role!,

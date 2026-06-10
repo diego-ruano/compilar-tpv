@@ -192,6 +192,25 @@ export async function setTurnoPartidoHoy(params: {
         : toStr(data?.message ?? data?.status ?? "ok", "ok");
 }
 
+/**
+ * Sube a la nube el setup inicial del admin (solo Main/TPV). Se llama DESPUÉS de
+ * `completeInitialSetup` local, para que el login de la Handy use el PIN/email reales en vez
+ * del seed. No es local-first: invoca el comando que firma y postea al worker.
+ */
+export async function uploadInitialSetupToCloud(params: {
+    idUsuario: number;
+    email: string;
+    pin: string;
+}): Promise<void> {
+    await invokeClient<string>("config_upload_initial_setup", {
+        args: {
+            id_usuario: Number(params.idUsuario),
+            email: String(params.email ?? ""),
+            pin: String(params.pin ?? ""),
+        },
+    });
+}
+
 export async function completeInitialSetup(params: {
     idUsuario: number;
     pinActual: string;

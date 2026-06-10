@@ -382,6 +382,12 @@ export type UpdatePagoInput = { id_pago: number, fecha_hora: string, metodo: str
 
 export type UpdateTareaInput = { id_tarea: number, titulo: string, descripcion?: string, fecha_limite?: string, };
 
+/**
+ * Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
+ * panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
+ */
+export type UploadInitialSetupArgs = { id_usuario: number, email: string, pin: string, };
+
 export type UpsertCategoriaInput = { id_categoria?: number, nombre: string, nombre_imagen: string, ruta_imagen: string, vendible: boolean, pasa_cocina: boolean, };
 
 export type UpsertProductoInput = { id_producto?: number, id_categoria: number, id_proveedor?: number, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, ids_alergenos: Array<number>, };

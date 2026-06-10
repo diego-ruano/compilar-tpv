@@ -8,11 +8,13 @@ use std::path::PathBuf;
 use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Manager};
 
+use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::licensing as uc_lic;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, LicenseLocalState,
     PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 
@@ -73,6 +75,17 @@ pub async fn tpv_server_post_json(
 #[tauri::command]
 pub async fn pair_create(app: AppHandle) -> Result<PairCreateResult, String> {
     Ok(uc::pair_create(&svc(&app)?).await?)
+}
+
+/// Sube a la nube el setup inicial del admin tras completarlo en local (panel de
+/// configuración inicial). El `PairingAdapter` firma la petición como dispositivo TPV.
+#[tauri::command]
+pub async fn config_upload_initial_setup(
+    app: AppHandle,
+    args: UploadInitialSetupArgs,
+) -> Result<String, String> {
+    uc_sync::upload_initial_setup(&svc(&app)?, args).await?;
+    Ok("OK".into())
 }
 
 /// Lectura del estado de licencia para la UI (mismo dato que `license_get_state`).

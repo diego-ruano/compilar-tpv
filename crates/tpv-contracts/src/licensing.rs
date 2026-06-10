@@ -165,3 +165,14 @@ pub struct TpvServerPostJsonArgs {
     #[ts(type = "unknown")]
     pub body: serde_json::Value,
 }
+
+/// Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
+/// panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct UploadInitialSetupArgs {
+    #[ts(type = "number")]
+    pub id_usuario: i64,
+    pub email: String,
+    pub pin: String,
+}

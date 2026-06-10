@@ -7,6 +7,7 @@ import type { Env } from "../../env";
 import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { getDb } from "../../server/db";
 
 import * as cmd from "./login.commands";
 import { hashPin, verifyPin } from "./login.crypto";
@@ -125,6 +126,51 @@ loginRoutes.post("/complete-initial-setup", async (c) => {
 			password_hash: passwordHash,
 		}),
 	);
+	return c.json({ ok: true });
+});
+
+// ¿El dispositivo autenticado es la Main (rol tpv)? La subida del setup escribe credenciales
+// del admin saltándose el hub, así que la restringimos a la Main (una Handy no debe poder
+// reescribir el setup). El rol vive en la DB central (tabla devices), como en pairing.
+async function isTpvDevice(
+	c: any,
+	tenantId: string,
+	deviceId: string,
+): Promise<boolean> {
+	const r = await getDb(c.env).execute({
+		sql: `
+			SELECT role
+			FROM devices
+			WHERE tenant_id=? AND device_id=?
+			  AND (revoked_at_ms IS NULL OR revoked_at_ms=0)
+			LIMIT 1;
+		`,
+		args: [tenantId, deviceId],
+	});
+	const row = r.rows?.[0] as any | undefined;
+	return String(row?.role || "").trim().toLowerCase() === "tpv";
+}
+
+// Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
+// no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con
+// las credenciales reales del admin para que el login de la Handy funcione.
+loginRoutes.post("/sync-initial-setup", async (c) => {
+	const p = await parseBody(c, S.syncInitialSetupSchema);
+	if (!p.ok) return p.res;
+
+	const okTpv = await isTpvDevice(c, c.get("tenantId"), c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const passwordHash = await hashPin(p.data.pin);
+
+	await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.applyInitialSetupDirect(db, {
+			idUsuario: p.data.id_usuario,
+			email: p.data.email,
+			passwordHash,
+		}),
+	);
+
 	return c.json({ ok: true });
 });
 

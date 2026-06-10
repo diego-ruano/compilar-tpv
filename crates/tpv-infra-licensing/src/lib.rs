@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use tpv_application::error::{AppError, AppResult};
+use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
 use tpv_contracts::licensing::{
     ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, LicenseActivateInput, LicenseGateResult,
@@ -620,5 +621,27 @@ impl PairingService for PairingAdapter {
             .tpv_server_post_json("tpv", "/v1/pair/create", JsonValue::Object(Default::default()))
             .await?;
         serde_json::from_value(parsed).map_err(|e| ext(format!("bad_pair_create_response:{e}")))
+    }
+}
+
+#[async_trait]
+impl CloudSyncService for PairingAdapter {
+    async fn upload_initial_setup(
+        &self,
+        id_usuario: i64,
+        email: &str,
+        pin: &str,
+    ) -> AppResult<()> {
+        // POST firmado en modo `tpv` (el worker comprueba rol TPV y escribe directo en Turso,
+        // sin pasar por el hub → no se topa con `main_offline`).
+        let body = serde_json::json!({
+            "id_usuario": id_usuario,
+            "email": email,
+            "pin": pin,
+        });
+        let _ = self
+            .tpv_server_post_json("tpv", "/v1/login/sync-initial-setup", body)
+            .await?;
+        Ok(())
     }
 }

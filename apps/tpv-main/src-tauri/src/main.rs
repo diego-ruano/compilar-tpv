@@ -618,6 +618,7 @@ pub fn run() {
             commands::pairing::device_sign_b64,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
+            commands::pairing::config_upload_initial_setup,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

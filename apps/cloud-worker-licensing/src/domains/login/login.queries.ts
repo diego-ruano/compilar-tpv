@@ -68,6 +68,25 @@ export async function loginOk(db: Client, idUsuario: number): Promise<LoginOk | 
 	};
 }
 
+/**
+ * Escritura DIRECTA del setup inicial en la Turso del tenant (mismo UPDATE que aplica el
+ * comando `complete_initial_setup` vía el hub). Se usa para la SUBIDA desde la Main, que no
+ * está conectada por WebSocket: por eso no pasa por el Durable Object (evita el `main_offline`).
+ */
+export async function applyInitialSetupDirect(
+	db: Client,
+	input: { idUsuario: number; email: string; passwordHash: string },
+): Promise<void> {
+	await db.execute({
+		sql: `
+			UPDATE Usuarios
+			SET Email = ?2, Password_Hash = ?3, Requiere_Setup = 0
+			WHERE ID_Usuario = ?1;
+		`,
+		args: [input.idUsuario, input.email, input.passwordHash],
+	});
+}
+
 export async function emailInUse(
 	db: Client,
 	email: string,

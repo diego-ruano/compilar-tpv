@@ -33,6 +33,15 @@ export const completeInitialSetupSchema = z.object({
 	email_nuevo: z.string().trim().email("email invalid"),
 });
 
+// Subida del setup inicial desde la Main (modo TPV) a la nube. No verifica pin_actual: la
+// Main ya lo hizo en local y la petición va firmada como dispositivo TPV (la autoriza el
+// device-proof + el chequeo de rol). El `pin` viaja para hashearlo aquí (como complete-setup).
+export const syncInitialSetupSchema = z.object({
+	id_usuario: posInt,
+	email: z.string().trim().email("email invalid"),
+	pin: z.string().trim().min(4, "PIN demasiado corto"),
+});
+
 export const punchSchema = z.object({
 	id_usuario: posInt,
 	pin: z.string().trim().min(1, "pin required"),
