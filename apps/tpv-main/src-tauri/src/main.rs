@@ -17,8 +17,8 @@ use tpv_application::ports::{
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
     mesas::MesasRepository, proveedores::ProveedoresRepository, reservas::ReservasRepository,
-    stats::StatsRepository, tareas::TareasRepository, trabajadores::TrabajadoresRepository,
-    venta_rapida::VentaRapidaRepository,
+    stats::StatsRepository, sync::SyncRepository, tareas::TareasRepository,
+    trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
 };
 use tpv_infra_http::{
     clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
@@ -34,7 +34,7 @@ use tpv_infra_sqlite::{
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
     proveedores::SqliteProveedoresRepository, reservas::SqliteReservasRepository,
-    stats::SqliteStatsRepository, tareas::SqliteTareasRepository,
+    stats::SqliteStatsRepository, sync::SqliteSyncRepository, tareas::SqliteTareasRepository,
     trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
 };
 
@@ -257,6 +257,19 @@ impl AppState {
         SqliteVentaRapidaRepository,
         HttpVentaRapidaRepository
     );
+
+    /// Repositorio de sincronización (aplicar cambios de la nube en la BD local). NO es
+    /// mode-switched: siempre es la Main (SQLite local) la que aplica lo recibido por el WS.
+    pub(crate) async fn sync_repo(&self) -> Result<Arc<dyn SyncRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (sync requiere modo Main)".to_string())?;
+        Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -663,6 +676,9 @@ pub fn run() {
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
             commands::pairing::config_upload_initial_setup,
+            // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
+            commands::sync::sync_apply_changes,
+            commands::sync::sync_get_checkpoint,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

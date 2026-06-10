@@ -18,6 +18,11 @@ export type ApiGetAuthHeadersArgs = { method: string, path: string, };
  */
 export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };
 
+/**
+ * Args del comando que aplica un lote de cambios en orden de `seq`.
+ */
+export type ApplySyncChangesArgs = { changes: Array<SyncChange>, };
+
 export type AsignacionCreateInput = { id_trabajador: number, fecha: string, id_turno: number, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
 export type AsignacionDeleteInput = { id_asignacion: number, };
@@ -309,6 +314,12 @@ export type SetTurnoPartidoInput = { id_usuario: number, turno_partido: boolean,
 
 export type SigB64 = { sigB64: string, };
 
+/**
+ * Una sentencia de escritura ya resuelta. `args` son escalares JSON (string/number/bool/null)
+ * que se enlazan a los `?` del `sql`.
+ */
+export type SqlStatement = { sql: string, args: Array<unknown>, };
+
 export type StatsCategoriaRow = { ID_Categoria: number, Nombre: string, };
 
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
@@ -318,6 +329,12 @@ export type StatsTurno = "COMIDA" | "CENA" | "TODOS";
 export type StockLinea = { producto_id: number, cantidad: number, };
 
 export type SummaryArgs = { limit?: number, };
+
+/**
+ * Una operación a aplicar de forma atómica e idempotente (por `op_id`). `seq` es el cursor
+ * monotono del log de la nube; la Main lo usa como checkpoint del catch-up.
+ */
+export type SyncChange = { op_id: string, seq: number, statements: Array<SqlStatement>, };
 
 export type TableInput = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
 

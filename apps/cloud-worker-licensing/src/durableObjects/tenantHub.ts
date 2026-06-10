@@ -41,6 +41,9 @@ type SqlScalar = string | number | boolean | null;
 type SqlRef = { $ref: string };
 type SqlArg = SqlScalar | SqlRef;
 
+// Sentencia de escritura ya resuelta (sin $ref): lo que se reenvía/persiste para la Main.
+type ResolvedStmt = { sql: string; args: SqlScalar[] };
+
 type ExecPayload = {
 	sql: string;
 	args?: SqlArg[];
@@ -618,9 +621,13 @@ export class TenantHub {
 		executor: any,
 		payload: ExecPayload,
 		bag: Record<string, any> = {},
+		capture?: ResolvedStmt[],
 	): Promise<number> {
 		const sql = normalizeSql(payload?.sql);
 		const args = resolveSqlArgs(payload?.args, bag);
+		// Capturamos SOLO las escrituras (kind=execute) con sus args ya resueltos (los $ref /
+		// MAX+1 ya son literales). Es lo que se reenvía a la Main para que las aplique tal cual.
+		if (capture) capture.push({ sql, args });
 		const res = await executor.execute({ sql, args });
 		return Number(res?.rowsAffected ?? 0);
 	}
@@ -661,6 +668,7 @@ export class TenantHub {
 	private async runTransactionStepsOnExecutor(
 		executor: any,
 		payload: TransactionPayload,
+		capture?: ResolvedStmt[],
 	): Promise<any> {
 		const steps = Array.isArray(payload?.steps) ? payload.steps : [];
 		if (!steps.length) throw new Error("missing_transaction_steps");
@@ -673,7 +681,7 @@ export class TenantHub {
 			}
 
 			if (step.kind === "execute") {
-				const res = await this.runExecOnExecutor(executor, step, bag);
+				const res = await this.runExecOnExecutor(executor, step, bag, capture);
 
 				if (step.saveAs) {
 					bag[step.saveAs] = res;
@@ -772,6 +780,7 @@ export class TenantHub {
 		tenantId: string,
 		executor: any,
 		cmd: InternalApplyCommand,
+		capture?: ResolvedStmt[],
 	): Promise<any> {
 		switch (cmd.type) {
 			case "tenantDb.ping": {
@@ -786,7 +795,7 @@ export class TenantHub {
 			}
 
 			case "tenantDb.exec":
-				return await this.runExecOnExecutor(executor, cmd.payload);
+				return await this.runExecOnExecutor(executor, cmd.payload, {}, capture);
 
 			case "tenantDb.value":
 				return await this.runValueOnExecutor(executor, cmd.payload);
@@ -798,7 +807,7 @@ export class TenantHub {
 				return await this.runRowsOnExecutor(executor, cmd.payload);
 
 			case "tenantDb.transaction":
-				return await this.runTransactionStepsOnExecutor(executor, cmd.payload);
+				return await this.runTransactionStepsOnExecutor(executor, cmd.payload, capture);
 
 			default: {
 				const neverCmd: never = cmd;
@@ -984,10 +993,12 @@ export class TenantHub {
 					],
 				});
 
+				const statements: ResolvedStmt[] = [];
 				const result = await this.applyInternalCommandOnExecutor(
 					tenantId,
 					tx,
 					cmd,
+					statements,
 				);
 
 				const appliedAtMs = nowMs();
@@ -1008,6 +1019,26 @@ export class TenantHub {
 					args: [op, command, resultJson, appliedAtMs, appliedAtMs],
 				});
 
+				// Log ordenado de cambios para que la Main los aplique a su SQLite local
+				// (Opción 3: sentencias ya resueltas). Va en la MISMA transacción que la
+				// escritura, así el cambio se registra si y solo si se aplicó. El `Seq`
+				// autoincremental es el cursor del catch-up al reconectar.
+				await this.ensureSyncChangesTable(tx);
+				const seqRes = await tx.execute({
+					sql: `
+						INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
+						VALUES (?1, ?2, ?3, ?4, ?5);
+					`,
+					args: [
+						op,
+						command,
+						stableStringify(statements),
+						deviceId || null,
+						appliedAtMs,
+					],
+				});
+				const seq = Number(seqRes?.lastInsertRowid ?? 0);
+
 				await tx.commit();
 
 				// Tras confirmar en Turso, propagamos el cambio (payload + resultado)
@@ -1021,6 +1052,8 @@ export class TenantHub {
 						deviceId: deviceId || null,
 						payloadJson: cloudPayloadJson,
 						result,
+						seq,
+						statements,
 					},
 					deviceId || undefined,
 				);
@@ -1072,6 +1105,21 @@ export class TenantHub {
 		return false;
 	}
 
+	// Crea (idempotente) la tabla de log de cambios para la sincronización con la Main.
+	// El `Seq` autoincremental es el cursor monotono que usa el catch-up.
+	private async ensureSyncChangesTable(executor: any) {
+		await executor.execute(`
+			CREATE TABLE IF NOT EXISTS Sync_Changes (
+				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+				Op_Id TEXT NOT NULL,
+				Command_Name TEXT,
+				Statements_Json TEXT NOT NULL,
+				Device_Id TEXT,
+				Created_At_Ms INTEGER NOT NULL
+			);
+		`);
+	}
+
 	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
 	// autenticados, excluyendo al originador. Reemplaza la antigua señal
 	// `cloud_changes_available` (modelo de refetch) por el envío directo del JSON.
@@ -1082,6 +1130,8 @@ export class TenantHub {
 			deviceId: string | null;
 			payloadJson: string;
 			result: any;
+			seq: number;
+			statements: ResolvedStmt[];
 		},
 		exceptDeviceId?: string,
 	) {
@@ -1093,6 +1143,10 @@ export class TenantHub {
 				deviceId: params.deviceId,
 				payload: safeJsonParse(params.payloadJson),
 				result: params.result ?? null,
+				// Opción 3: sentencias ya resueltas + cursor, para que la Main las aplique
+				// directamente a su SQLite local (y sepa su checkpoint).
+				seq: params.seq,
+				statements: params.statements,
 				ts: nowMs(),
 			},
 			exceptDeviceId,

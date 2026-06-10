@@ -20,6 +20,7 @@ pub mod mesas;
 pub mod proveedores;
 pub mod reservas;
 pub mod stats;
+pub mod sync;
 pub mod tareas;
 pub mod trabajadores;
 pub mod venta_rapida;

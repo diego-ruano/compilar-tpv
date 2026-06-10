@@ -1,26 +1,38 @@
 // src/shared/lib/useMainSocket.ts
 //
-// Mantiene el WebSocket de la Main con el worker cuando el modo de funcionamiento es "online"
-// (y el dispositivo es la Main / tpv). Conectar + responder al challenge firmado registra el
-// dispositivo como `tpv` en el TenantHub, lo que habilita las escrituras de la Handy (deja de
-// devolver `main_offline`). En "offline" cierra el socket.
+// Mantiene el WebSocket de la Main con el worker cuando el modo es "online" (y el dispositivo
+// es la Main / tpv), y APLICA en la BD local los cambios que llegan de la nube (Opción 3:
+// sentencias ya resueltas). Conectar + responder al challenge firmado registra el dispositivo
+// como `tpv` en el TenantHub (habilita las escrituras de la Handy). En "offline" cierra.
 //
-// Handshake (lo define el worker en durableObjects/tenantHub.ts):
-//   1. El cliente abre  wss://.../ws?token=<jwt-licencia>
-//   2. El DO responde   { type: "challenge", nonceB64 }
-//   3. El cliente firma `${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}` (ed25519, vía
-//      el comando device_sign_b64) y envía { type: "helloSigned", ts, nonceB64, sigB64 }
-//   4. El DO responde   { type: "hello_ok", authed: true } → la Main cuenta como conectada.
+// Flujo de aplicación:
+//   - Al autenticarse (hello_ok) se hace un CATCH-UP: se pide a /v1/sync/changes todo lo que
+//     falte desde el último checkpoint local y se aplica en orden. Los `change` que lleguen en
+//     vivo durante el catch-up se BUFFERIZAN y se aplican al terminar (evita desorden).
+//   - Después, cada `change` en vivo se aplica directo (el WS preserva el orden).
+//   - Todo se aplica de forma serializada (una cadena de promesas) e idempotente por op_id en
+//     Rust, así que solapes entre catch-up y vivo no duplican ni corrompen.
 
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 import { useConnectionMode } from "../stores/useConnectionMode";
 import { useMode } from "../stores/useMode";
+import { cloudPost } from "./cloudApi";
 
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 const RECONNECT_MS = 3000;
 const PING_MS = 30000;
+
+type ChangeArg = { op_id: string; seq: number; statements: unknown[] };
+
+function toChange(m: any): ChangeArg | null {
+	const opId = String(m?.opId ?? m?.op_id ?? "");
+	const seq = Number(m?.seq ?? 0);
+	const statements = Array.isArray(m?.statements) ? m.statements : [];
+	if (!opId || !statements.length) return null;
+	return { op_id: opId, seq, statements };
+}
 
 async function loadLicense(): Promise<{ token: string; tenantId: string } | null> {
 	try {
@@ -59,14 +71,61 @@ export function useMainSocket() {
 	const deviceMode = useMode((s) => s.mode);
 
 	useEffect(() => {
-		// Solo la Main en modo online abre el socket. Cualquier otro caso: no hacer nada
-		// (el cleanup del render anterior ya habrá cerrado lo que hubiera).
 		if (deviceMode !== "tpv" || connMode !== "online") return;
 
 		let cancelled = false;
 		let ws: WebSocket | null = null;
 		let retryTimer: number | null = null;
 		let pingTimer: number | null = null;
+
+		// Estado de aplicación (compartido entre reconexiones dentro de este efecto).
+		let caughtUp = false;
+		let buffer: ChangeArg[] = [];
+		let chain: Promise<void> = Promise.resolve();
+
+		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
+		function enqueue(changes: ChangeArg[]) {
+			if (!changes.length) return;
+			chain = chain.then(async () => {
+				if (cancelled) return;
+				try {
+					await invoke("sync_apply_changes", { args: { changes } });
+				} catch (e) {
+					console.warn("sync_apply_changes falló:", e);
+				}
+			});
+		}
+
+		async function catchUpThenLive() {
+			caughtUp = false;
+			try {
+				let since = 0;
+				try {
+					since = Number(await invoke<number>("sync_get_checkpoint")) || 0;
+				} catch {
+					since = 0;
+				}
+
+				for (let i = 0; i < 2000 && !cancelled; i++) {
+					const resp = (await cloudPost<any>("tpv", "/v1/sync/changes", {
+						since,
+					})) as any;
+					const items: any[] = Array.isArray(resp?.items) ? resp.items : [];
+					if (!items.length) break;
+					enqueue(items.map(toChange).filter(Boolean) as ChangeArg[]);
+					const next = Number(resp?.nextSince ?? since);
+					if (next <= since) break;
+					since = next;
+				}
+			} catch (e) {
+				console.warn("catch-up de sync falló:", e);
+			} finally {
+				// Aplica (en orden) lo recibido en vivo durante el catch-up y abre el flujo vivo.
+				const pending = buffer.splice(0).sort((a, b) => a.seq - b.seq);
+				caughtUp = true;
+				enqueue(pending);
+			}
+		}
 
 		const scheduleReconnect = () => {
 			if (cancelled || retryTimer) return;
@@ -131,9 +190,22 @@ export function useMainSocket() {
 					} catch (e) {
 						console.warn("WS hello: firma falló:", e);
 					}
+					return;
 				}
-				// hello_ok / main_status / presence / apply_*: informativos por ahora.
-				// (El relay de escrituras a la BD local es la fase siguiente.)
+
+				if (msg.type === "hello_ok") {
+					// Autenticados: ponerse al día con lo perdido y luego procesar lo vivo.
+					void catchUpThenLive();
+					return;
+				}
+
+				if (msg.type === "change") {
+					const ch = toChange(msg);
+					if (!ch) return;
+					if (caughtUp) enqueue([ch]);
+					else buffer.push(ch);
+					return;
+				}
 			};
 
 			socket.onclose = () => {
@@ -142,6 +214,8 @@ export function useMainSocket() {
 					pingTimer = null;
 				}
 				if (ws === socket) ws = null;
+				// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
+				caughtUp = false;
 				scheduleReconnect();
 			};
 
