@@ -1,9 +1,8 @@
 // src/pages/Configuracion.tsx
 
-// AQUÍ HAY QUE ARREGLAR LA PARTE DE LA OBTENCIÓN DEL CÓDIGO, ANTES SE HACÍA POR UNA PETICIÓN QUE
-// MANEJABA UN ARCHIVO LEGACY QUE NO TENÍA MÁS UTILIDAD QUE ESA, SE QUEDAN LAS COSAS
-// SE QUEDA COMENTADA LA PARTE QUE HAY QUE ARREGLAR PARA QUE COMPILE, PERO NO FUNCIONA AHORA MISMO ESTE ARCHIVO
 import React, { useEffect, useMemo, useState } from "react";
+import { invokeClient } from "@tpv/client";
+import type { PairCreateResult } from "@tpv/contracts";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import { useMode } from "../../shared/stores/useMode";
@@ -226,27 +225,24 @@ export default function Configuracion() {
     const [pairError, setPairError] = useState<string | null>(null);
 
     const generatePair = async () => {
-        // try {
-        //     setPairError(null);
-        //     setPairLoading(true);
+        try {
+            setPairError(null);
+            setPairLoading(true);
 
-        //     const j = await tpvPost<{
-        //         ok: true;
-        //         pairCode: string;
-        //         pairSecret: string;
-        //         expiresAtMs: number;
-        //     }>("/v1/pair/create", {});
+            // Comando hexagonal dedicado: pide al worker un código nuevo (firma device-proof
+            // en modo TPV) y devuelve el DTO tipado generado desde Rust.
+            const j = await invokeClient<PairCreateResult>("pair_create");
 
-        //     setPairCode(String(j.pairCode || ""));
-        //     setPairSecret(String(j.pairSecret || ""));
-        //     setPairExpiresAtMs(
-        //         typeof j.expiresAtMs === "number" ? j.expiresAtMs : null,
-        //     );
-        // } catch (e: any) {
-        //     setPairError(String(e?.message || e));
-        // } finally {
-        //     setPairLoading(false);
-        // }
+            setPairCode(String(j.pairCode || ""));
+            setPairSecret(String(j.pairSecret || ""));
+            setPairExpiresAtMs(
+                typeof j.expiresAtMs === "number" ? j.expiresAtMs : null,
+            );
+        } catch (e: any) {
+            setPairError(String(e?.message || e));
+        } finally {
+            setPairLoading(false);
+        }
     };
 
     // Autogenerar al entrar en sección (solo MAIN)

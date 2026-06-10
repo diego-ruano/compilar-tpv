@@ -70,6 +70,19 @@ pub struct ApiSignedHeaders {
     pub x_device_sig: String,
 }
 
+/// Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
+/// worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct PairCreateResult {
+    pub ok: bool,
+    pub pair_code: String,
+    pub pair_secret: String,
+    #[ts(type = "number")]
+    pub expires_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

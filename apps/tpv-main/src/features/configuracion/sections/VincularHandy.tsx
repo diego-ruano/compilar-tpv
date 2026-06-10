@@ -1,10 +1,10 @@
 // src/features/configuracion/sections/VincularHandy.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { QRCodeCanvas } from "qrcode.react";
+import { cloudPost } from "../../../shared/lib/cloudApi";
 
 type PairPendingItem = {
 	pairCode: string;
@@ -19,16 +19,6 @@ type PairPendingItem = {
 	attempts: number;
 	lastAttemptAtMs: number | null;
 };
-
-async function tpvApi(path: string, body: any) {
-	return await invoke("tpv_server_post_json", {
-		args: {
-			mode: "tpv",
-			path,
-			body,
-		},
-	});
-}
 
 export function VincularHandy({
 	darkMode,
@@ -70,7 +60,7 @@ export function VincularHandy({
 	async function refreshPending() {
 		try {
 			setPendingErr(null);
-			const r = (await tpvApi("/v1/pair/pending", {})) as any;
+			const r = (await cloudPost("tpv", "/v1/pair/pending", {})) as any;
 			setPending((r.items || []) as PairPendingItem[]);
 		} catch (e: any) {
 			setPendingErr(String(e?.message || e));
@@ -88,7 +78,7 @@ export function VincularHandy({
 		setPendingBusy(true);
 
 		try {
-			await tpvApi("/v1/pair/approve", { pairCode: code });
+			await cloudPost("tpv", "/v1/pair/approve", { pairCode: code });
 			await refreshPending();
 		} catch (e: any) {
 			setPendingErr(String(e?.message || e));

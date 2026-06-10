@@ -4,8 +4,8 @@
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, SigB64,
-    TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, PairCreateResult,
+    SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
 };
 
 use crate::error::{AppError, AppResult};
@@ -75,4 +75,10 @@ pub async fn tpv_server_post_json(
     let mode = normalize_mode(&args.mode)?;
     let path = normalize_path(&args.path)?;
     svc.tpv_server_post_json(&mode, &path, args.body).await
+}
+
+/// Genera (pide al worker) un nuevo código de emparejamiento para mostrarlo en el Main.
+/// El dispositivo debe estar en modo TPV con licencia activa (lo exige el worker).
+pub async fn pair_create(svc: &dyn PairingService) -> AppResult<PairCreateResult> {
+    svc.pair_create().await
 }

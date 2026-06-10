@@ -23,7 +23,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::{LicensingService, PairingService};
 use tpv_contracts::licensing::{
     ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState, SigB64,
+    LicenseLocalState, PairCreateResult, SigB64,
 };
 
 use device::{
@@ -611,5 +611,14 @@ impl PairingService for PairingAdapter {
         }
 
         Ok(parsed)
+    }
+
+    async fn pair_create(&self) -> AppResult<PairCreateResult> {
+        // Reutiliza el POST firmado en modo `tpv` (el worker exige rol TPV + licencia activa)
+        // y tipa la respuesta `{ ok, pairCode, pairSecret, expiresAtMs }`.
+        let parsed = self
+            .tpv_server_post_json("tpv", "/v1/pair/create", JsonValue::Object(Default::default()))
+            .await?;
+        serde_json::from_value(parsed).map_err(|e| ext(format!("bad_pair_create_response:{e}")))
     }
 }

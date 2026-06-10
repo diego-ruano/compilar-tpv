@@ -9,7 +9,7 @@ use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
     ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState, SigB64,
+    LicenseLocalState, PairCreateResult, SigB64,
 };
 
 use crate::error::AppResult;
@@ -51,4 +51,7 @@ pub trait PairingService: Send + Sync {
         path: &str,
         body: JsonValue,
     ) -> AppResult<JsonValue>;
+    /// Solicita al worker un nuevo código de emparejamiento (modo `tpv`, firmado).
+    /// Lo expone tipado a la UI para que el Main lo muestre (QR + código).
+    async fn pair_create(&self) -> AppResult<PairCreateResult>;
 }

@@ -12,7 +12,7 @@ use tpv_application::use_cases::licensing as uc_lic;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, LicenseLocalState,
-    SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
 };
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 
@@ -67,6 +67,12 @@ pub async fn tpv_server_post_json(
     args: TpvServerPostJsonArgs,
 ) -> Result<JsonValue, String> {
     Ok(uc::tpv_server_post_json(&svc(&app)?, args).await?)
+}
+
+/// Genera un nuevo código de emparejamiento (lo pide al worker) y lo devuelve tipado a la UI.
+#[tauri::command]
+pub async fn pair_create(app: AppHandle) -> Result<PairCreateResult, String> {
+    Ok(uc::pair_create(&svc(&app)?).await?)
 }
 
 /// Lectura del estado de licencia para la UI (mismo dato que `license_get_state`).

@@ -203,6 +203,12 @@ export type MisTareasArgs = { id_trabajador: number, };
 
 export type MisTareasRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Limite: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
 
+/**
+ * Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
+ * worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
+ */
+export type PairCreateResult = { ok: boolean, pairCode: string, pairSecret: string, expiresAtMs: number, };
+
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
 export type ProductoBaseDto = { ID_Producto: number, ID_Categoria: number, ID_Proveedor: number | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };
