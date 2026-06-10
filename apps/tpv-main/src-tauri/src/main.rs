@@ -12,6 +12,32 @@ use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
 
+use tpv_application::ports::licensing::PairingService;
+use tpv_application::ports::{
+    clientes::ClientesRepository, configuracion::ConfiguracionRepository,
+    cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
+    mesas::MesasRepository, proveedores::ProveedoresRepository, reservas::ReservasRepository,
+    stats::StatsRepository, tareas::TareasRepository, trabajadores::TrabajadoresRepository,
+    venta_rapida::VentaRapidaRepository,
+};
+use tpv_infra_http::{
+    clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
+    cuentas::HttpCuentasRepository, inventario::HttpInventarioRepository,
+    login::HttpLoginRepository, mesas::HttpMesasRepository, proveedores::HttpProveedoresRepository,
+    reservas::HttpReservasRepository, stats::HttpStatsRepository, tareas::HttpTareasRepository,
+    trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
+    CLOUD_API_BASE,
+};
+use tpv_infra_licensing::PairingAdapter;
+use tpv_infra_sqlite::{
+    clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
+    cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
+    login::SqliteLoginRepository, mesas::SqliteMesasRepository,
+    proveedores::SqliteProveedoresRepository, reservas::SqliteReservasRepository,
+    stats::SqliteStatsRepository, tareas::SqliteTareasRepository,
+    trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
+};
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Device mode (TPV / HANDY) + config persistente
 // ──────────────────────────────────────────────────────────────────────────────
@@ -104,16 +130,117 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
 
 pub(crate) struct AppState {
     db: Arc<Mutex<Option<Arc<Connection>>>>,
+    cloud: Arc<Mutex<Option<Arc<CloudClient>>>>,
     mode: Arc<Mutex<Option<DeviceMode>>>,
 }
 
-pub(crate) async fn get_db(state: &State<'_, AppState>) -> Result<Arc<Connection>, String> {
-    let guard = state.db.lock().await;
+/// Genera un accessor `<name>(&self) -> Arc<dyn $trait>` que devuelve el repositorio
+/// adecuado al modo activo (el "puntero dinámico"): el adaptador SQLite local en modo TPV
+/// o el adaptador HTTP a la nube en modo Handy. El comando que lo invoca no sabe contra qué
+/// backend habla. Añadir un módulo = una línea más con su puerto/adaptadores.
+macro_rules! repo_accessor {
+    ($name:ident, $trait:path, $sqlite:ty, $http:ty) => {
+        pub(crate) async fn $name(&self) -> Result<Arc<dyn $trait>, String> {
+            match *self.mode.lock().await {
+                Some(DeviceMode::Tpv) => {
+                    let conn = self
+                        .db
+                        .lock()
+                        .await
+                        .as_ref()
+                        .cloned()
+                        .ok_or_else(|| "DB no inicializada (modo TPV)".to_string())?;
+                    Ok(Arc::new(<$sqlite>::new(conn)) as Arc<dyn $trait>)
+                }
+                Some(DeviceMode::Handy) => {
+                    let client = self
+                        .cloud
+                        .lock()
+                        .await
+                        .as_ref()
+                        .cloned()
+                        .ok_or_else(|| "Cliente nube no inicializado (modo Handy)".to_string())?;
+                    Ok(Arc::new(<$http>::new(client)) as Arc<dyn $trait>)
+                }
+                None => Err("Modo de dispositivo no seleccionado".to_string()),
+            }
+        }
+    };
+}
 
-    guard
-        .as_ref()
-        .cloned()
-        .ok_or_else(|| "DB no inicializada (modo handy o sin init_main)".to_string())
+impl AppState {
+    repo_accessor!(
+        clientes_repo,
+        ClientesRepository,
+        SqliteClientesRepository,
+        HttpClientesRepository
+    );
+    repo_accessor!(
+        configuracion_repo,
+        ConfiguracionRepository,
+        SqliteConfiguracionRepository,
+        HttpConfiguracionRepository
+    );
+    repo_accessor!(
+        cuentas_repo,
+        CuentasRepository,
+        SqliteCuentasRepository,
+        HttpCuentasRepository
+    );
+    repo_accessor!(
+        inventario_repo,
+        InventarioRepository,
+        SqliteInventarioRepository,
+        HttpInventarioRepository
+    );
+    repo_accessor!(
+        login_repo,
+        LoginRepository,
+        SqliteLoginRepository,
+        HttpLoginRepository
+    );
+    repo_accessor!(
+        mesas_repo,
+        MesasRepository,
+        SqliteMesasRepository,
+        HttpMesasRepository
+    );
+    repo_accessor!(
+        proveedores_repo,
+        ProveedoresRepository,
+        SqliteProveedoresRepository,
+        HttpProveedoresRepository
+    );
+    repo_accessor!(
+        reservas_repo,
+        ReservasRepository,
+        SqliteReservasRepository,
+        HttpReservasRepository
+    );
+    repo_accessor!(
+        stats_repo,
+        StatsRepository,
+        SqliteStatsRepository,
+        HttpStatsRepository
+    );
+    repo_accessor!(
+        tareas_repo,
+        TareasRepository,
+        SqliteTareasRepository,
+        HttpTareasRepository
+    );
+    repo_accessor!(
+        trabajadores_repo,
+        TrabajadoresRepository,
+        SqliteTrabajadoresRepository,
+        HttpTrabajadoresRepository
+    );
+    repo_accessor!(
+        venta_rapida_repo,
+        VentaRapidaRepository,
+        SqliteVentaRapidaRepository,
+        HttpVentaRapidaRepository
+    );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -150,8 +277,20 @@ async fn set_device_mode(
 
     save_config(&app_data_dir, &cfg)?;
 
-    let mut m = state.mode.lock().await;
-    *m = Some(args.mode);
+    {
+        let mut m = state.mode.lock().await;
+        *m = Some(args.mode);
+    }
+
+    // En modo Handy preparamos el cliente HTTP a la nube (no hace red, sólo lo deja listo)
+    // para que el cambio de modo sea efectivo sin reiniciar la app.
+    if args.mode == DeviceMode::Handy {
+        let mut c = state.cloud.lock().await;
+        if c.is_none() {
+            let client = CloudClient::new(CLOUD_API_BASE, app_data_dir.clone()).map_err(String::from)?;
+            *c = Some(Arc::new(client));
+        }
+    }
 
     Ok("OK".into())
 }
@@ -186,6 +325,46 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     let mut guard = state.db.lock().await;
     *guard = Some(db);
+
+    Ok("OK".into())
+}
+
+/// Reversibilidad: vuelve al menú de selección de modo. Persiste `mode = None`, suelta los
+/// backends activos (BD local y cliente de nube) y, si el dispositivo estaba en Handy,
+/// lo **desvincula** (borra el token Handy del keyring) para forzar un emparejamiento limpio
+/// al re-elegir. Tras esto, `get_device_mode` devuelve `null` y la UI muestra de nuevo el
+/// selector Main/Handy. La licencia local (modo Main) NO se toca: si se vuelve a elegir Main,
+/// el gate de licencia sigue resolviéndose con el estado guardado.
+#[tauri::command]
+async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let was_handy = { *state.mode.lock().await == Some(DeviceMode::Handy) };
+
+    // 1) Persistir mode = None.
+    let mut cfg = load_config(&app_data_dir);
+    cfg.mode = None;
+    save_config(&app_data_dir, &cfg)?;
+
+    // 2) Estado en memoria: sin modo y sin backends acoplados.
+    {
+        *state.mode.lock().await = None;
+    }
+    {
+        *state.db.lock().await = None;
+    }
+    {
+        *state.cloud.lock().await = None;
+    }
+
+    // 3) Si veníamos de Handy, desvincular (borrar token del keyring). Si no había token
+    //    previo, ignoramos el error.
+    if was_handy {
+        let _ = PairingAdapter::new(app_data_dir).handy_clear_token();
+    }
 
     Ok("OK".into())
 }
@@ -267,8 +446,19 @@ pub fn run() {
                 None
             };
 
+            // En modo Handy dejamos preparado el cliente HTTP a la nube (sin BD local).
+            let cloud_opt: Option<Arc<CloudClient>> = if mode == Some(DeviceMode::Handy) {
+                Some(Arc::new(
+                    CloudClient::new(CLOUD_API_BASE, app_data_dir.clone())
+                        .expect("Error creando CloudClient"),
+                ))
+            } else {
+                None
+            };
+
             app.manage(AppState {
                 db: Arc::new(Mutex::new(db_opt)),
+                cloud: Arc::new(Mutex::new(cloud_opt)),
                 mode: Arc::new(Mutex::new(mode)),
             });
 
@@ -279,6 +469,7 @@ pub fn run() {
             get_device_mode,
             set_device_mode,
             init_main,
+            device_reset_mode,
             // genéricos
             save_image,
             get_app_data_path,

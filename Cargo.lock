@@ -5656,6 +5656,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "tpv-infra-http",
  "tpv-infra-licensing",
  "tpv-infra-sqlite",
  "uuid",
@@ -5695,6 +5696,21 @@ dependencies = [
  "serde",
  "sha2",
  "thiserror 1.0.69",
+ "uuid",
+]
+
+[[package]]
+name = "tpv-infra-http"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tpv-application",
+ "tpv-contracts",
+ "tpv-domain",
+ "tpv-infra-licensing",
  "uuid",
 ]
 

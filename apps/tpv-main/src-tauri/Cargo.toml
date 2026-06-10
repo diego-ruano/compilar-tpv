@@ -59,4 +59,5 @@ tpv-domain = { workspace = true }
 tpv-application = { workspace = true }
 tpv-infra-sqlite = { workspace = true }
 tpv-infra-licensing = { workspace = true }
+tpv-infra-http = { workspace = true }
 tpv-contracts = { workspace = true }

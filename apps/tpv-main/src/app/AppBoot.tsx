@@ -644,6 +644,10 @@ export default function AppBoot({ router }: { router: any }) {
         setErr(null);
 
         try {
+            // Reversibilidad real: persiste mode=None, suelta los backends y, si veníamos de
+            // Handy, desvincula el token. Tras esto, al reiniciar la app vuelve a salir el
+            // selector de modo (no solo es un cambio visual).
+            await invoke("device_reset_mode");
             setMode(null);
         } catch (e: any) {
             setErr(String(e));

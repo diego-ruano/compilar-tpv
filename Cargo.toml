@@ -11,6 +11,7 @@ members = [
   "crates/tpv-application",
   "crates/tpv-infra-sqlite",
   "crates/tpv-infra-licensing",
+  "crates/tpv-infra-http",
   "crates/tpv-contracts",
   "apps/tpv-main/src-tauri",
 ]
@@ -26,6 +27,7 @@ tpv-domain = { path = "crates/tpv-domain" }
 tpv-application = { path = "crates/tpv-application" }
 tpv-infra-sqlite = { path = "crates/tpv-infra-sqlite" }
 tpv-infra-licensing = { path = "crates/tpv-infra-licensing" }
+tpv-infra-http = { path = "crates/tpv-infra-http" }
 tpv-contracts = { path = "crates/tpv-contracts" }
 
 # ── Async / Runtime ──

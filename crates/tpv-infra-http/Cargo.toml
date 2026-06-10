@@ -1,0 +1,17 @@
+[package]
+name = "tpv-infra-http"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Adaptador HTTP (modo Handy): implementa los puertos de repositorio de tpv-application contra el worker tpv-api en la nube, reutilizando la firma device-proof de tpv-infra-licensing."
+
+[dependencies]
+tpv-domain = { workspace = true }
+tpv-application = { workspace = true }
+tpv-contracts = { workspace = true }
+tpv-infra-licensing = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }

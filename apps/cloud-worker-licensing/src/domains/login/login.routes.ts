@@ -56,6 +56,21 @@ async function apply(
 	});
 }
 
+// Verifica el PIN; si es incorrecto (o el hash esta mal formado) devuelve un 401 con el
+// mensaje, en vez de dejar que el throw caiga al onError como 500 internal_error.
+async function ensurePin(
+	c: any,
+	pin: string,
+	hash: string,
+): Promise<Response | null> {
+	try {
+		await verifyPin(pin, hash);
+		return null;
+	} catch (e: any) {
+		return c.json({ error: String(e?.message || "PIN incorrecto") }, 401);
+	}
+}
+
 loginRoutes.get("/users", async (c) =>
 	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.listLoginUsers(db))),
 );
@@ -67,7 +82,8 @@ loginRoutes.post("/login", async (c) => {
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	await verifyPin(p.data.pin, String(record.password_hash));
+	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
+	if (badPin) return badPin;
 	const ok = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.loginOk(db, p.data.id_usuario),
 	);
@@ -94,7 +110,8 @@ loginRoutes.post("/complete-initial-setup", async (c) => {
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	await verifyPin(p.data.pin_actual, String(record.password_hash));
+	const badPin = await ensurePin(c, p.data.pin_actual, String(record.password_hash));
+	if (badPin) return badPin;
 	const inUse = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.emailInUse(db, p.data.email_nuevo, p.data.id_usuario),
 	);
@@ -118,7 +135,8 @@ loginRoutes.post("/punch", async (c) => {
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	await verifyPin(p.data.pin, String(record.password_hash));
+	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
+	if (badPin) return badPin;
 
 	const fecha =
 		p.data.fecha ||
