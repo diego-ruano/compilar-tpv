@@ -1,6 +1,6 @@
 //! Utilidades compartidas por los repositorios SQLite.
 
-use libsql::Connection;
+use crate::recording::TrackedConnection as Connection;
 
 use tpv_application::error::{AppError, AppResult};
 

@@ -5,7 +5,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::{Connection, Value};
+use libsql::Value;
+
+use crate::recording::TrackedConnection as Connection;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::tareas::TareasRepository;

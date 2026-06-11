@@ -25,8 +25,17 @@ import { queryClient } from "./queryClient";
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 const RECONNECT_MS = 3000;
 const PING_MS = 30000;
+const OUTBOX_BATCH = 50;
+const ACK_TIMEOUT_MS = 10000;
+const DRAIN_INTERVAL_MS = 4000;
 
 type ChangeArg = { op_id: string; seq: number; statements: unknown[] };
+type OutboxEntry = {
+	seq: number;
+	op_id: string;
+	command_name: string;
+	statements: { sql: string; args: unknown[] }[];
+};
 
 function toChange(m: any): ChangeArg | null {
 	const opId = String(m?.opId ?? m?.op_id ?? "");
@@ -85,6 +94,12 @@ export function useMainSocket() {
 		let buffer: ChangeArg[] = [];
 		let chain: Promise<void> = Promise.resolve();
 
+		// Estado del drenado del outbox (Main → nube).
+		let authed = false;
+		let draining = false;
+		let drainTimer: number | null = null;
+		const acks = new Map<string, (ok: boolean) => void>();
+
 		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
 		function enqueue(changes: ChangeArg[]) {
 			if (!changes.length) return;
@@ -103,6 +118,78 @@ export function useMainSocket() {
 					console.warn("sync_apply_changes falló:", e);
 				}
 			});
+		}
+
+		// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
+		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<boolean> {
+			return new Promise<boolean>((resolve) => {
+				if (socket.readyState !== WebSocket.OPEN) {
+					resolve(false);
+					return;
+				}
+				const timer = window.setTimeout(() => {
+					acks.delete(entry.op_id);
+					resolve(false);
+				}, ACK_TIMEOUT_MS);
+
+				acks.set(entry.op_id, (ok) => {
+					window.clearTimeout(timer);
+					acks.delete(entry.op_id);
+					resolve(ok);
+				});
+
+				socket.send(
+					JSON.stringify({
+						type: "apply",
+						opId: entry.op_id,
+						commandName: entry.command_name,
+						command: {
+							type: "tenantDb.transaction",
+							payload: {
+								steps: entry.statements.map((s) => ({
+									kind: "execute",
+									sql: s.sql,
+									args: s.args,
+								})),
+							},
+						},
+					}),
+				);
+			});
+		}
+
+		// Drena el outbox local en orden: por cada op pendiente, la envía y, si la nube confirma
+		// (apply_ack ok), la marca como enviada. Si una falla/expira, para y reintenta más tarde.
+		async function drainOutbox(socket: WebSocket) {
+			if (draining || !authed || socket.readyState !== WebSocket.OPEN) return;
+			draining = true;
+			try {
+				for (let i = 0; i < 1000 && !cancelled && authed; i++) {
+					const pending = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
+						limit: OUTBOX_BATCH,
+					})) as OutboxEntry[];
+					if (!pending.length) break;
+
+					let progressed = false;
+					for (const entry of pending) {
+						if (cancelled || socket.readyState !== WebSocket.OPEN) break;
+						const ok = await sendApply(socket, entry);
+						if (!ok) break;
+						try {
+							await invoke("sync_outbox_mark_sent", { op_id: entry.op_id });
+							progressed = true;
+						} catch (e) {
+							console.warn("sync_outbox_mark_sent falló:", e);
+							break;
+						}
+					}
+					if (!progressed) break;
+				}
+			} catch (e) {
+				console.warn("drenado del outbox falló:", e);
+			} finally {
+				draining = false;
+			}
 		}
 
 		async function catchUpThenLive() {
@@ -203,8 +290,21 @@ export function useMainSocket() {
 				}
 
 				if (msg.type === "hello_ok") {
-					// Autenticados: ponerse al día con lo perdido y luego procesar lo vivo.
+					// Autenticados: ponerse al día (nube→Main) y drenar el outbox (Main→nube).
+					authed = true;
 					void catchUpThenLive();
+					void drainOutbox(socket);
+					if (drainTimer) clearInterval(drainTimer);
+					drainTimer = window.setInterval(() => {
+						void drainOutbox(socket);
+					}, DRAIN_INTERVAL_MS);
+					return;
+				}
+
+				if (msg.type === "apply_ack") {
+					const opId = String(msg.opId ?? msg.op_id ?? "");
+					const cb = acks.get(opId);
+					if (cb) cb(Boolean(msg.ok));
 					return;
 				}
 
@@ -222,7 +322,15 @@ export function useMainSocket() {
 					clearInterval(pingTimer);
 					pingTimer = null;
 				}
+				if (drainTimer) {
+					clearInterval(drainTimer);
+					drainTimer = null;
+				}
+				// Resolver como fallo los acks pendientes para no dejar promesas colgadas.
+				for (const cb of acks.values()) cb(false);
+				acks.clear();
 				if (ws === socket) ws = null;
+				authed = false;
 				// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
 				caughtUp = false;
 				scheduleReconnect();
@@ -241,8 +349,12 @@ export function useMainSocket() {
 
 		return () => {
 			cancelled = true;
+			authed = false;
 			if (retryTimer) clearTimeout(retryTimer);
 			if (pingTimer) clearInterval(pingTimer);
+			if (drainTimer) clearInterval(drainTimer);
+			for (const cb of acks.values()) cb(false);
+			acks.clear();
 			if (ws) {
 				try {
 					ws.close();

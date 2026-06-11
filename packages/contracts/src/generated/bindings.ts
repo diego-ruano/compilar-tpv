@@ -209,6 +209,12 @@ export type MisTareasArgs = { id_trabajador: number, };
 export type MisTareasRow = { ID_Tarea: number, Titulo: string, Descripcion: string | null, Fecha_Limite: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
 
 /**
+ * Una operación pendiente en el outbox local de la Main (dirección Main → nube). El frontend
+ * la envía al worker por el WebSocket (`apply`) y, al recibir el `apply_ack`, la marca enviada.
+ */
+export type OutboxEntry = { seq: number, op_id: string, command_name: string, statements: Array<SqlStatement>, };
+
+/**
  * Resultado de `POST /v1/pair/create`: código de emparejamiento recién generado por el
  * worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
  */

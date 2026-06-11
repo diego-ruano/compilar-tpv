@@ -6,7 +6,7 @@
 use tauri::State;
 
 use tpv_application::use_cases::sync as uc;
-use tpv_contracts::sync::ApplySyncChangesArgs;
+use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry};
 
 use crate::AppState;
 
@@ -25,4 +25,25 @@ pub async fn sync_apply_changes(
 pub async fn sync_get_checkpoint(state: State<'_, AppState>) -> Result<i64, String> {
     let repo = state.sync_repo().await?;
     Ok(uc::get_checkpoint(repo.as_ref()).await?)
+}
+
+/// Operaciones pendientes de subir a la nube (outbox local), en orden de `seq`.
+#[tauri::command]
+pub async fn sync_outbox_pending(
+    state: State<'_, AppState>,
+    limit: i64,
+) -> Result<Vec<OutboxEntry>, String> {
+    let repo = state.sync_repo().await?;
+    Ok(uc::outbox_pending(repo.as_ref(), limit).await?)
+}
+
+/// Marca una operación del outbox como enviada (tras el `apply_ack` de la nube).
+#[tauri::command]
+pub async fn sync_outbox_mark_sent(
+    state: State<'_, AppState>,
+    op_id: String,
+) -> Result<(), String> {
+    let repo = state.sync_repo().await?;
+    uc::outbox_mark_sent(repo.as_ref(), &op_id).await?;
+    Ok(())
 }

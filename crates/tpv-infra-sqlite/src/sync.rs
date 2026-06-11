@@ -13,7 +13,7 @@ use libsql::{Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
-use tpv_contracts::sync::SyncChange;
+use tpv_contracts::sync::{OutboxEntry, SqlStatement, SyncChange};
 
 use crate::mapping::v_i64;
 
@@ -73,6 +73,13 @@ async fn ensure_tables(conn: &Connection) -> AppResult<()> {
             Last_Seq INTEGER NOT NULL
         );
         INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS _Sync_Outbox (
+            Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+            Op_Id TEXT NOT NULL UNIQUE,
+            Command_Name TEXT NOT NULL,
+            Statements_Json TEXT NOT NULL,
+            Created_At_Ms INTEGER NOT NULL
+        );
         "#,
     )
     .await
@@ -99,6 +106,19 @@ async fn op_already_applied(conn: &Connection, op_id: &str) -> AppResult<bool> {
         .await
         .map_err(db_err)?;
     Ok(rows.next().await.map_err(db_err)?.is_some())
+}
+
+/// Avanza el checkpoint hasta `seq` (solo hacia delante). Se usa al SALTAR una op ya aplicada
+/// (p. ej. un eco de las propias escrituras de la Main que vuelve por el catch-up): aunque no se
+/// reaplique, hay que mover el cursor para no volver a pedirla indefinidamente.
+async fn advance_checkpoint(conn: &Connection, seq: i64) -> AppResult<()> {
+    conn.execute(
+        "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1 AND Last_Seq < ?1;",
+        vec![Value::Integer(seq)],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
 }
 
 /// Aplica una operación de forma atómica: sus sentencias + el registro de idempotencia + el
@@ -156,8 +176,10 @@ impl SyncRepository for SqliteSyncRepository {
         ensure_tables(conn).await?;
 
         for ch in &changes {
-            // Idempotencia: una op ya aplicada (re-broadcast o solape con el catch-up) se ignora.
+            // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up o eco de
+            // las propias escrituras de la Main) se ignora, pero igualmente avanza el checkpoint.
             if op_already_applied(conn, &ch.op_id).await? {
+                advance_checkpoint(conn, ch.seq).await?;
                 continue;
             }
             apply_one(conn, ch).await?;
@@ -169,5 +191,58 @@ impl SyncRepository for SqliteSyncRepository {
     async fn get_checkpoint(&self) -> AppResult<i64> {
         ensure_tables(&self.conn).await?;
         checkpoint(&self.conn).await
+    }
+
+    async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>> {
+        let conn = &self.conn;
+        ensure_tables(conn).await?;
+
+        let mut rows = conn
+            .query(
+                "SELECT Seq, Op_Id, Command_Name, Statements_Json \
+                 FROM _Sync_Outbox ORDER BY Seq ASC LIMIT ?1;",
+                vec![Value::Integer(limit)],
+            )
+            .await
+            .map_err(db_err)?;
+
+        let mut out = Vec::new();
+        while let Some(r) = rows.next().await.map_err(db_err)? {
+            let seq = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
+            let op_id = match r.get_value(1).map_err(db_err)? {
+                Value::Text(s) => s,
+                _ => continue,
+            };
+            let command_name = match r.get_value(2).map_err(db_err)? {
+                Value::Text(s) => s,
+                _ => "main_op".to_string(),
+            };
+            let statements_json = match r.get_value(3).map_err(db_err)? {
+                Value::Text(s) => s,
+                _ => "[]".to_string(),
+            };
+            let statements: Vec<SqlStatement> =
+                serde_json::from_str(&statements_json).unwrap_or_default();
+
+            out.push(OutboxEntry {
+                seq,
+                op_id,
+                command_name,
+                statements,
+            });
+        }
+
+        Ok(out)
+    }
+
+    async fn outbox_mark_sent(&self, op_id: &str) -> AppResult<()> {
+        self.conn
+            .execute(
+                "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
     }
 }

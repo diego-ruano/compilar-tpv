@@ -5749,6 +5749,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "uuid",
 ]
 
 [[package]]

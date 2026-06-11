@@ -3,8 +3,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::{Connection, Value};
+use libsql::Value;
 use serde_json::Value as JsonValue;
+
+use crate::recording::TrackedConnection as Connection;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::configuracion::ConfiguracionRepository;

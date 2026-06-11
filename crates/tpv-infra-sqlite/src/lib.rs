@@ -16,6 +16,9 @@ pub mod util;
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 pub mod connection;
 
+// Capa de captura de escrituras (outbox Main → nube):
+pub mod recording;
+
 // Repositorios concretos (uno por agregado/módulo):
 pub mod clientes;
 pub mod configuracion;

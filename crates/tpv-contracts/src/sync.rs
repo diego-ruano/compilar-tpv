@@ -34,3 +34,15 @@ pub struct SyncChange {
 pub struct ApplySyncChangesArgs {
     pub changes: Vec<SyncChange>,
 }
+
+/// Una operación pendiente en el outbox local de la Main (dirección Main → nube). El frontend
+/// la envía al worker por el WebSocket (`apply`) y, al recibir el `apply_ack`, la marca enviada.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct OutboxEntry {
+    #[ts(type = "number")]
+    pub seq: i64,
+    pub op_id: String,
+    pub command_name: String,
+    pub statements: Vec<SqlStatement>,
+}

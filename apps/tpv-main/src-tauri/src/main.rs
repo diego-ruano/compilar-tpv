@@ -6,6 +6,7 @@ mod commands;
 use base64::prelude::*;
 use libsql::Connection;
 use serde::{Deserialize, Serialize};
+use tpv_infra_sqlite::recording::TrackedConnection;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -145,7 +146,7 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 pub(crate) struct AppState {
-    db: Arc<Mutex<Option<Arc<Connection>>>>,
+    db: Arc<Mutex<Option<Arc<TrackedConnection>>>>,
     cloud: Arc<Mutex<Option<Arc<CloudClient>>>>,
     mode: Arc<Mutex<Option<DeviceMode>>>,
 }
@@ -268,7 +269,9 @@ impl AppState {
             .as_ref()
             .cloned()
             .ok_or_else(|| "DB no inicializada (sync requiere modo Main)".to_string())?;
-        Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
+        // El aplicador usa la conexión CRUDA (sin captura): aplicar cambios de la nube no debe
+        // re-encolarse en el outbox.
+        Ok(Arc::new(SqliteSyncRepository::new(conn.raw())) as Arc<dyn SyncRepository>)
     }
 }
 
@@ -299,9 +302,14 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, Strin
     Ok(load_config(&app_data_dir).connectivity)
 }
 
-/// Persiste el modo de funcionamiento (offline/online) en `device_config.json`.
+/// Persiste el modo de funcionamiento (offline/online) en `device_config.json` y activa/desactiva
+/// la captura de escrituras para el outbox (solo se captura en "online").
 #[tauri::command]
-fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, String> {
+async fn set_connection_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: SetConnectionModeArgs,
+) -> Result<String, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -310,6 +318,10 @@ fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<St
     let mut cfg = load_config(&app_data_dir);
     cfg.connectivity = Some(args.mode);
     save_config(&app_data_dir, &cfg)?;
+
+    if let Some(conn) = state.db.lock().await.as_ref() {
+        conn.set_sync_enabled(args.mode == ConnectivityMode::Online);
+    }
 
     Ok("OK".into())
 }
@@ -376,7 +388,15 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     let conn = tpv_infra_sqlite::connection::init_main_db(&app_data_dir, include_str!("../../../../packages/database/schema.sql"))
         .await
         .map_err(String::from)?;
-    let db = Arc::new(conn);
+
+    let tracked = TrackedConnection::new(Arc::new(conn));
+    tracked
+        .init_sync_tables()
+        .await
+        .map_err(|e| format!("Error init_sync_tables: {e}"))?;
+    // Captura de escrituras activa solo si el modo de funcionamiento es "online".
+    tracked.set_sync_enabled(load_config(&app_data_dir).connectivity == Some(ConnectivityMode::Online));
+    let db = Arc::new(tracked);
 
     let mut guard = state.db.lock().await;
     *guard = Some(db);
@@ -488,15 +508,21 @@ pub fn run() {
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;
 
-            let db_opt: Option<Arc<Connection>> = if mode == Some(DeviceMode::Tpv) {
-                Some(Arc::new(tauri::async_runtime::block_on(async {
+            let db_opt: Option<Arc<TrackedConnection>> = if mode == Some(DeviceMode::Tpv) {
+                let raw: Connection = tauri::async_runtime::block_on(async {
                     tpv_infra_sqlite::connection::init_main_db(
                         &app_data_dir,
                         include_str!("../../../../packages/database/schema.sql"),
                     )
                     .await
                     .expect("Error init_main_db")
-                })))
+                });
+                let tracked = TrackedConnection::new(Arc::new(raw));
+                tauri::async_runtime::block_on(tracked.init_sync_tables())
+                    .expect("Error init_sync_tables");
+                // Captura de escrituras activa solo si el modo de funcionamiento es "online".
+                tracked.set_sync_enabled(cfg.connectivity == Some(ConnectivityMode::Online));
+                Some(Arc::new(tracked))
             } else {
                 None
             };
@@ -679,6 +705,9 @@ pub fn run() {
             // sincronización nube → Main (aplicar cambios recibidos por WebSocket / catch-up)
             commands::sync::sync_apply_changes,
             commands::sync::sync_get_checkpoint,
+            // sincronización Main → nube (outbox de escrituras locales)
+            commands::sync::sync_outbox_pending,
+            commands::sync::sync_outbox_mark_sent,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

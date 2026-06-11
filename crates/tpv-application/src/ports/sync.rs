@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::sync::SyncChange;
+use tpv_contracts::sync::{OutboxEntry, SyncChange};
 
 use crate::error::AppResult;
 
@@ -18,4 +18,10 @@ pub trait SyncRepository: Send + Sync {
 
     /// Último `seq` aplicado localmente (0 si todavía ninguno).
     async fn get_checkpoint(&self) -> AppResult<i64>;
+
+    /// Operaciones pendientes de subir a la nube (outbox local), en orden, hasta `limit`.
+    async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>>;
+
+    /// Marca una operación del outbox como enviada (la nube confirmó con `apply_ack`).
+    async fn outbox_mark_sent(&self, op_id: &str) -> AppResult<()>;
 }
