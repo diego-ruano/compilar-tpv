@@ -28,6 +28,7 @@ import { Ticket } from "../../features/configuracion/sections/Ticket";
 import { Licencia } from "../../features/configuracion/sections/Licencia";
 import { Apariencia } from "../../features/configuracion/sections/Apariencia";
 import { Conectividad } from "../../features/configuracion/sections/Conectividad";
+import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 
 
@@ -126,7 +127,22 @@ export default function Configuracion() {
     ];
 
     const navItems: NavItem[] = useMemo(() => {
-        if (!isMain) return baseNavItems;
+        if (!isMain)
+            return [
+                ...baseNavItems,
+                {
+                    key: "DISPOSITIVO",
+                    title: "Dispositivo",
+                    desc: "Desvincular este equipo",
+                    keywords: [
+                        "desvincular",
+                        "dispositivo",
+                        "handy",
+                        "salir",
+                        "reset",
+                    ],
+                },
+            ];
         return [
             ...baseNavItems,
             {
@@ -279,6 +295,7 @@ export default function Configuracion() {
             (section === "VINCULAR_HANDY" || section === "CONECTIVIDAD")
         )
             setSection("LICENCIA");
+        if (isMain && section === "DISPOSITIVO") setSection("LICENCIA");
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isMain]);
 
@@ -682,6 +699,11 @@ export default function Configuracion() {
                                         {section === "CONECTIVIDAD" &&
                                             isMain ? (
                                             <Conectividad darkMode={darkMode} />
+                                        ) : null}
+
+                                        {section === "DISPOSITIVO" &&
+                                            !isMain ? (
+                                            <Dispositivo darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "LICENCIA" ? (

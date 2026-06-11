@@ -43,6 +43,7 @@ import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { ventaRapidaRoutes } from "./domains/venta_rapida/venta_rapida.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
+import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
 
 import legacyLicensing from "./server/index";
 
@@ -149,6 +150,10 @@ app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
 
 // ---------------- Gestión de dispositivos ----------------
+app.post("/v1/device/list", (c) =>
+	handleListDevices(c.req.raw, c.env, getDb(c.env)),
+);
+
 app.post("/v1/device/revoke", (c) =>
 	handleRevokeDevice(c.req.raw, c.env, getDb(c.env), c.env.TenantHub),
 );

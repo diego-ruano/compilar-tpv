@@ -14,7 +14,8 @@ export type SectionKey =
 	| "LICENCIA"
 	| "APARIENCIA"
 	| "CONECTIVIDAD"
-	| "VINCULAR_HANDY";
+	| "VINCULAR_HANDY"
+	| "DISPOSITIVO";
 
 export type NavItem = {
 	key: SectionKey;

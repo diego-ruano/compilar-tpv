@@ -25,6 +25,14 @@ type PairPendingItem = {
 	fingerprint?: string;
 };
 
+type LinkedDevice = {
+	deviceId: string;
+	devicePubKeyB64: string | null;
+	firstSeenAtMs: number;
+	lastSeenAtMs: number;
+	fingerprint?: string;
+};
+
 export function VincularHandy({
 	darkMode,
 	pairCode,
@@ -62,6 +70,47 @@ export function VincularHandy({
 	const [pendingErr, setPendingErr] = useState<string | null>(null);
 	const [pendingBusy, setPendingBusy] = useState(false);
 
+	const [linked, setLinked] = useState<LinkedDevice[]>([]);
+	const [linkedErr, setLinkedErr] = useState<string | null>(null);
+	const [revokingId, setRevokingId] = useState<string | null>(null);
+
+	async function refreshLinked() {
+		try {
+			setLinkedErr(null);
+			const r = (await cloudPost("tpv", "/v1/device/list", {})) as any;
+			const items = (r.items || []) as LinkedDevice[];
+			const withFp = await Promise.all(
+				items.map(async (it) => ({
+					...it,
+					fingerprint: it.devicePubKeyB64
+						? await deviceFingerprint(it.devicePubKeyB64)
+						: "",
+				})),
+			);
+			setLinked(withFp);
+		} catch (e: any) {
+			setLinkedErr(String(e?.message || e));
+		}
+	}
+
+	async function revoke(deviceId: string) {
+		if (
+			!window.confirm(
+				"¿Desvincular este dispositivo? Perderá el acceso y tendrá que volver a emparejarse.",
+			)
+		)
+			return;
+		setRevokingId(deviceId);
+		try {
+			await cloudPost("tpv", "/v1/device/revoke", { deviceId });
+			await refreshLinked();
+		} catch (e: any) {
+			setLinkedErr(String(e?.message || e));
+		} finally {
+			setRevokingId(null);
+		}
+	}
+
 	async function refreshPending() {
 		try {
 			setPendingErr(null);
@@ -87,7 +136,11 @@ export function VincularHandy({
 
 	useEffect(() => {
 		refreshPending();
-		const id = window.setInterval(() => refreshPending(), 5000);
+		refreshLinked();
+		const id = window.setInterval(() => {
+			refreshPending();
+			refreshLinked();
+		}, 5000);
 		return () => window.clearInterval(id);
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
@@ -98,6 +151,7 @@ export function VincularHandy({
 		try {
 			await cloudPost("tpv", "/v1/pair/approve", { pairCode: code });
 			await refreshPending();
+			await refreshLinked();
 		} catch (e: any) {
 			setPendingErr(String(e?.message || e));
 		} finally {
@@ -412,6 +466,74 @@ export function VincularHandy({
 						</div>
 					</div>
 				</div>
+			</Panel>
+
+			<Panel
+				title="Dispositivos vinculados"
+				subtitle="Handys con acceso ahora mismo. Puedes desvincular cualquiera."
+			>
+				{linkedErr ? (
+					<div className="mb-3 text-sm rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-danger">
+						{linkedErr}
+					</div>
+				) : null}
+
+				{linked.length === 0 ? (
+					<div className="text-xs text-fg-muted">
+						No hay dispositivos vinculados.
+					</div>
+				) : (
+					<div className="space-y-2">
+						{linked.map((d) => {
+							const lastSeen = d.lastSeenAtMs
+								? new Date(d.lastSeenAtMs).toLocaleString("es-ES")
+								: "—";
+							return (
+								<div
+									key={d.deviceId}
+									className={cn(
+										"rounded-xl border p-3 flex items-center justify-between gap-3",
+										darkMode
+											? "border-border bg-surface-2"
+											: "border-border bg-surface-2",
+									)}
+								>
+									<div className="min-w-0">
+										<div
+											className={cn(
+												"text-sm font-semibold",
+												darkMode ? "text-white" : "text-fg",
+											)}
+										>
+											Handy{" "}
+											<span className="font-mono font-semibold text-xs">
+												{d.fingerprint || "—"}
+											</span>
+										</div>
+										<div className="text-xs text-fg-muted mt-0.5 truncate">
+											ID:{" "}
+											<span className="font-mono">
+												{d.deviceId.slice(0, 12)}…
+											</span>{" "}
+											· Visto: {lastSeen}
+										</div>
+									</div>
+
+									<div className="shrink-0">
+										<GhostButton
+											onClick={() => revoke(d.deviceId)}
+											disabled={revokingId === d.deviceId}
+										>
+											{revokingId === d.deviceId
+												? "Desvinculando..."
+												: "Desvincular"}
+										</GhostButton>
+									</div>
+								</div>
+							);
+						})}
+					</div>
+				)}
 			</Panel>
 		</div>
 	);
