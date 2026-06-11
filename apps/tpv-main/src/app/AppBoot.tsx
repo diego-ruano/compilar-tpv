@@ -676,7 +676,10 @@ export default function AppBoot({ router }: { router: any }) {
     }
 
     const isMainAppReady = mode === "tpv" && gate !== "loading" && gate.allowed;
-    const showBootTopBar = !isMainAppReady;
+    const handyIsReady = mode === "handy" && handyPair.step === "paired";
+    // El layout del Handy (RouterProvider) ya trae su propia barra de título (Titlebar, con el
+    // toggle claro/oscuro). No mostramos también la barra de arranque para no duplicarla.
+    const showBootTopBar = !isMainAppReady && !handyIsReady;
 
     const TopBar = (
         <div className="w-full flex justify-between shrink-0 overflow-hidden">
@@ -731,8 +734,6 @@ export default function AppBoot({ router }: { router: any }) {
             </div>
         </div>
     );
-
-    const handyIsReady = mode === "handy" && handyPair.step === "paired";
 
     return (
         <div className="w-screen h-screen flex flex-col overflow-hidden">
