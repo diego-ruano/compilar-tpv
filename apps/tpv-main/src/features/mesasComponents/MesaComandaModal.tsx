@@ -4,6 +4,7 @@ import { X } from "lucide-react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
@@ -467,6 +468,16 @@ export default function MesaComandaModal({
             setLoadingTicket(false);
         }
     }
+
+    // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
+    // abierta, recargar el ticket para verlo al instante (la BD local ya es la verdad).
+    const syncTick = useSyncSignal((s) => s.tick);
+    useEffect(() => {
+        if (!syncTick) return;
+        if (!open || !idComanda) return;
+        void reloadTicket();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [syncTick]);
 
     useEffect(() => {
         const cargarProductos = async () => {

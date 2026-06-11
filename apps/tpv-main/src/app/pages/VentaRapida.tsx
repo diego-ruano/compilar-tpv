@@ -4,6 +4,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Plus, ReceiptText, ArrowLeft } from "lucide-react";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { useToast } from "../../shared/toast";
 import { SearchInput } from "../../shared/ui";
 
@@ -738,6 +739,21 @@ export default function VentaRapida() {
     },
     [cargarComandaEnTicketPanel, openVerTickets, refreshComandasBarra],
   );
+
+  // Sincronización nube → Main: al aplicarse un cambio recibido por WebSocket, recargar el
+  // ticket de la comanda activa y la lista de comandas. Usa el camino "seguro"
+  // (queueComandaRefresh respeta las escrituras locales pendientes, no interrumpe al cajero).
+  const syncTick = useSyncSignal((s) => s.tick);
+  useEffect(() => {
+    if (!syncTick) return;
+    const id = idComandaActivaRef.current;
+    if (id) {
+      queueComandaRefresh(id, { refreshTicket: true, refreshComandas: true });
+    } else {
+      void refreshComandasBarra({ silent: true, includePagadas: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTick]);
 
   const ensureComandaActiva = useCallback(async () => {
     if (idComandaActivaRef.current) {

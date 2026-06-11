@@ -18,7 +18,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useConnectionMode } from "../stores/useConnectionMode";
 import { useMode } from "../stores/useMode";
+import { useSyncSignal } from "../stores/useSyncSignal";
 import { cloudPost } from "./cloudApi";
+import { queryClient } from "./queryClient";
 
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 const RECONNECT_MS = 3000;
@@ -90,6 +92,13 @@ export function useMainSocket() {
 				if (cancelled) return;
 				try {
 					await invoke("sync_apply_changes", { args: { changes } });
+					// Avisar al front de que los datos locales cambiaron:
+					//  - React Query: invalida (solo refetchea las queries MONTADAS, es barato).
+					//  - POS (mesas / venta_rápida): tick para que vuelvan a leer (no usan caché).
+					if (!cancelled) {
+						queryClient.invalidateQueries();
+						useSyncSignal.getState().bump();
+					}
 				} catch (e) {
 					console.warn("sync_apply_changes falló:", e);
 				}
