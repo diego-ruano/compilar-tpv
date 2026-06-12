@@ -36,13 +36,13 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         self.client.get_json("/v1/trabajadores").await
     }
 
-    async fn get_detail(&self, id_trabajador: i64) -> AppResult<Option<TrabajadorDetailRow>> {
+    async fn get_detail(&self, id_trabajador: &str) -> AppResult<Option<TrabajadorDetailRow>> {
         self.client
             .get_json(&format!("/v1/trabajadores/{id_trabajador}"))
             .await
     }
 
-    async fn get_id_by_usuario(&self, id_usuario: i64) -> AppResult<Option<i64>> {
+    async fn get_id_by_usuario(&self, id_usuario: &str) -> AppResult<Option<String>> {
         self.client
             .get_json(&format!("/v1/trabajadores/by-usuario/{id_usuario}"))
             .await
@@ -74,7 +74,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
 
     async fn update_trabajador(
         &self,
-        id_trabajador: i64,
+        id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool> {
         let body = json!({
@@ -126,7 +126,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
 
     async fn update_asignacion(
         &self,
-        id_asignacion: i64,
+        id_asignacion: &str,
         cambios: AsignacionCambios,
     ) -> AppResult<bool> {
         let body = json!({
@@ -146,7 +146,7 @@ impl TrabajadoresRepository for HttpTrabajadoresRepository {
         Ok(true)
     }
 
-    async fn delete_asignacion(&self, id_asignacion: i64) -> AppResult<bool> {
+    async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!(

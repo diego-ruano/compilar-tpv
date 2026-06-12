@@ -41,7 +41,7 @@ pub async fn trabajadores_get_detail(
 pub async fn trabajadores_get_trabajador_id_by_usuario(
     state: State<'_, AppState>,
     args: TrabajadorIdByUsuarioArgs,
-) -> Result<Option<i64>, String> {
+) -> Result<Option<String>, String> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_trabajador_id_by_usuario(repo.as_ref(), args).await?)
 }

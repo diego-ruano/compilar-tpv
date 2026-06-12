@@ -13,8 +13,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct RolRow {
     #[serde(rename = "ID_Rol")]
-    #[ts(type = "number")]
-    pub id_rol: i64,
+    pub id_rol: String,
     #[serde(rename = "Nombre_Rol")]
     pub nombre_rol: String,
 }
@@ -23,11 +22,9 @@ pub struct RolRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorRow {
     #[serde(rename = "ID_Trabajador")]
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     #[serde(rename = "ID_Usuario")]
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Apellido")]
@@ -48,14 +45,11 @@ pub struct TrabajadorRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorDetailRow {
     #[serde(rename = "ID_Trabajador")]
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     #[serde(rename = "ID_Usuario")]
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     #[serde(rename = "ID_Rol")]
-    #[ts(type = "number")]
-    pub id_rol: i64,
+    pub id_rol: String,
     #[serde(rename = "Email")]
     pub email: String,
     #[serde(rename = "Nombre")]
@@ -84,8 +78,7 @@ pub struct TrabajadorDetailRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TurnoRow {
     #[serde(rename = "ID_Turno")]
-    #[ts(type = "number")]
-    pub id_turno: i64,
+    pub id_turno: String,
     #[serde(rename = "Nombre_Turno")]
     pub nombre_turno: String,
 }
@@ -94,16 +87,13 @@ pub struct TurnoRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AsignacionRow {
     #[serde(rename = "ID_Asignacion")]
-    #[ts(type = "number")]
-    pub id_asignacion: i64,
+    pub id_asignacion: String,
     #[serde(rename = "ID_Trabajador")]
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     #[serde(rename = "Fecha")]
     pub fecha: String,
     #[serde(rename = "ID_Turno")]
-    #[ts(type = "number")]
-    pub id_turno: i64,
+    pub id_turno: String,
     #[serde(rename = "Area")]
     pub area: String,
     #[serde(rename = "Hora_Inicio")]
@@ -123,15 +113,13 @@ pub struct AsignacionRow {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorDetailArgs {
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorIdByUsuarioArgs {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -143,11 +131,9 @@ pub struct HorariosSemanaArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AsignacionCreateInput {
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     pub fecha: String,
-    #[ts(type = "number")]
-    pub id_turno: i64,
+    pub id_turno: String,
     pub area: String,
     #[serde(default)]
     #[ts(optional)]
@@ -163,10 +149,8 @@ pub struct AsignacionCreateInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AsignacionUpdateInput {
-    #[ts(type = "number")]
-    pub id_asignacion: i64,
-    #[ts(type = "number")]
-    pub id_turno: i64,
+    pub id_asignacion: String,
+    pub id_turno: String,
     pub area: String,
     #[serde(default)]
     #[ts(optional)]
@@ -182,8 +166,7 @@ pub struct AsignacionUpdateInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AsignacionDeleteInput {
-    #[ts(type = "number")]
-    pub id_asignacion: i64,
+    pub id_asignacion: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -206,8 +189,7 @@ pub struct SetPredeterminadoInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorCreateInput {
-    #[ts(type = "number")]
-    pub id_rol: i64,
+    pub id_rol: String,
     pub email: String,
     pub password_hash: String,
     pub nombre: String,
@@ -243,12 +225,9 @@ pub struct TrabajadorCreateInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorUpdateInput {
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
-    #[ts(type = "number")]
-    pub id_usuario: i64,
-    #[ts(type = "number")]
-    pub id_rol: i64,
+    pub id_trabajador: String,
+    pub id_usuario: String,
+    pub id_rol: String,
     pub email: String,
     pub nombre: String,
     #[serde(default)]

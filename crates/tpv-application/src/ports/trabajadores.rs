@@ -16,15 +16,15 @@ pub trait TrabajadoresRepository: Send + Sync {
     /* Lecturas */
     async fn get_roles(&self) -> AppResult<Vec<RolRow>>;
     async fn get_all(&self) -> AppResult<Vec<TrabajadorRow>>;
-    async fn get_detail(&self, id_trabajador: i64) -> AppResult<Option<TrabajadorDetailRow>>;
-    async fn get_id_by_usuario(&self, id_usuario: i64) -> AppResult<Option<i64>>;
+    async fn get_detail(&self, id_trabajador: &str) -> AppResult<Option<TrabajadorDetailRow>>;
+    async fn get_id_by_usuario(&self, id_usuario: &str) -> AppResult<Option<String>>;
     async fn turnos_get_all(&self) -> AppResult<Vec<TurnoRow>>;
 
     /* Alta / edición de trabajador (crea/actualiza Usuario + Trabajador) */
     async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool>;
     async fn update_trabajador(
         &self,
-        id_trabajador: i64,
+        id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool>;
     /// Asignaciones de la semana del lunes dado, rellenando con el horario
@@ -35,10 +35,10 @@ pub trait TrabajadoresRepository: Send + Sync {
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool>;
     async fn update_asignacion(
         &self,
-        id_asignacion: i64,
+        id_asignacion: &str,
         cambios: AsignacionCambios,
     ) -> AppResult<bool>;
-    async fn delete_asignacion(&self, id_asignacion: i64) -> AppResult<bool>;
+    async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool>;
     /// Copia las asignaciones de una semana a otra (desplazando 7 días).
     async fn copy_semana(
         &self,

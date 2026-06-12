@@ -24,9 +24,9 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
 /// Datos para crear una asignación de turno (ya validados/normalizados).
 #[derive(Debug, Clone)]
 pub struct AsignacionNueva {
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     pub fecha: String,
-    pub id_turno: i64,
+    pub id_turno: String,
     pub area: String,
     pub hora_inicio: Option<String>,
     pub hora_fin: Option<String>,
@@ -36,7 +36,7 @@ pub struct AsignacionNueva {
 /// Cambios sobre una asignación existente (no se mueve de trabajador/fecha).
 #[derive(Debug, Clone)]
 pub struct AsignacionCambios {
-    pub id_turno: i64,
+    pub id_turno: String,
     pub area: String,
     pub hora_inicio: Option<String>,
     pub hora_fin: Option<String>,
@@ -56,7 +56,7 @@ pub fn normalizar_estado(estado: &str) -> String {
 /// Datos para dar de alta un trabajador (crea Usuario + Trabajador). Ya validados.
 #[derive(Debug, Clone)]
 pub struct TrabajadorNuevo {
-    pub id_rol: i64,
+    pub id_rol: String,
     pub email: String,
     pub password_hash: String,
     pub nombre: String,
@@ -74,8 +74,8 @@ pub struct TrabajadorNuevo {
 /// Cambios sobre un trabajador existente. `password_hash` opcional (si `None`, no se cambia).
 #[derive(Debug, Clone)]
 pub struct TrabajadorCambios {
-    pub id_usuario: i64,
-    pub id_rol: i64,
+    pub id_usuario: String,
+    pub id_rol: String,
     pub email: String,
     pub nombre: String,
     pub apellido: Option<String>,

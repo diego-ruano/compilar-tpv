@@ -20,6 +20,7 @@ use tpv_domain::trabajadores::{
 };
 
 use crate::mapping::{v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteTrabajadoresRepository {
     conn: Arc<Connection>,
@@ -57,14 +58,6 @@ fn opt_text(o: Option<String>) -> Value {
     o.map(Value::Text).unwrap_or(Value::Null)
 }
 
-async fn select_one_i64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
-    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
-    if let Some(row) = rows.next().await.map_err(db_err)? {
-        return Ok(v_i64(row.get_value(0).map_err(db_err)?));
-    }
-    Ok(None)
-}
-
 #[async_trait]
 impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     async fn get_roles(&self) -> AppResult<Vec<RolRow>> {
@@ -81,7 +74,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(RolRow {
-                id_rol: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_rol: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 nombre_rol: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
             });
         }
@@ -114,8 +107,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(TrabajadorRow {
-                id_trabajador: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
-                id_usuario: v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+                id_trabajador: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                id_usuario: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 telefono: v_string(row.get_value(2).map_err(db_err)?),
                 puesto: v_string(row.get_value(3).map_err(db_err)?),
                 nombre: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
@@ -130,10 +123,10 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         Ok(out)
     }
 
-    async fn get_detail(&self, id_trabajador: i64) -> AppResult<Option<TrabajadorDetailRow>> {
+    async fn get_detail(&self, id_trabajador: &str) -> AppResult<Option<TrabajadorDetailRow>> {
         let db = &self.conn;
 
-        if id_trabajador <= 0 {
+        if id_trabajador.trim().is_empty() {
             return Err(AppError::validation("id_trabajador required"));
         }
 
@@ -160,7 +153,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 WHERE t.ID_Trabajador = ?1
                 LIMIT 1;
                 "#,
-                vec![Value::Integer(id_trabajador)],
+                vec![Value::Text(id_trabajador.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -170,9 +163,9 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         };
 
         Ok(Some(TrabajadorDetailRow {
-            id_trabajador: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
-            id_usuario: v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
-            id_rol: v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0),
+            id_trabajador: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            id_usuario: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+            id_rol: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
             email: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
             nombre: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default(),
             apellido: v_string(row.get_value(5).map_err(db_err)?),
@@ -188,10 +181,10 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         }))
     }
 
-    async fn get_id_by_usuario(&self, id_usuario: i64) -> AppResult<Option<i64>> {
+    async fn get_id_by_usuario(&self, id_usuario: &str) -> AppResult<Option<String>> {
         let db = &self.conn;
 
-        if id_usuario <= 0 {
+        if id_usuario.trim().is_empty() {
             return Ok(None);
         }
 
@@ -203,7 +196,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 WHERE ID_Usuario = ?1
                 LIMIT 1;
                 "#,
-                vec![Value::Integer(id_usuario)],
+                vec![Value::Text(id_usuario.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -212,12 +205,12 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             return Ok(None);
         };
 
-        let id_trab = v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0);
+        let id_trab = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
 
-        if id_trab > 0 {
-            Ok(Some(id_trab))
-        } else {
+        if id_trab.trim().is_empty() {
             Ok(None)
+        } else {
+            Ok(Some(id_trab))
         }
     }
 
@@ -237,7 +230,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(TurnoRow {
-                id_turno: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_turno: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 nombre_turno: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
             });
         }
@@ -275,10 +268,10 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(AsignacionRow {
-                id_asignacion: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
-                id_trabajador: v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+                id_asignacion: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                id_trabajador: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 fecha: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                id_turno: v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0),
+                id_turno: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
                 area: v_string(row.get_value(4).map_err(db_err)?).unwrap_or_else(|| "Sala".into()),
                 hora_inicio: v_string(row.get_value(5).map_err(db_err)?),
                 hora_fin: v_string(row.get_value(6).map_err(db_err)?),
@@ -297,10 +290,10 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         let should_fill_defaults = req_monday >= current_monday;
 
         if should_fill_defaults {
-            let mut real_cells: HashSet<(i64, String)> = HashSet::new();
+            let mut real_cells: HashSet<(String, String)> = HashSet::new();
 
             for a in out.iter() {
-                real_cells.insert((a.id_trabajador, a.fecha.clone()));
+                real_cells.insert((a.id_trabajador.clone(), a.fecha.clone()));
             }
 
             let mut drows = db
@@ -327,7 +320,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
             #[derive(Clone)]
             struct DefItem {
-                id_turno: i64,
+                id_turno: String,
                 area: String,
                 hora_inicio: Option<String>,
                 hora_fin: Option<String>,
@@ -335,13 +328,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 nombre_turno: String,
             }
 
-            let mut defs: BTreeMap<(i64, i64), Vec<DefItem>> = BTreeMap::new();
+            let mut defs: BTreeMap<(String, i64), Vec<DefItem>> = BTreeMap::new();
 
             while let Some(r) = drows.next().await.map_err(db_err)? {
-                let id_trab = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
+                let id_trab = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
                 let weekday = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
 
-                let id_turno = v_i64(r.get_value(3).map_err(db_err)?).unwrap_or(0);
+                let id_turno = v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default();
                 let area =
                     v_string(r.get_value(4).map_err(db_err)?).unwrap_or_else(|| "Sala".into());
                 let hora_inicio = v_string(r.get_value(5).map_err(db_err)?);
@@ -350,7 +343,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 let nombre_turno =
                     v_string(r.get_value(8).map_err(db_err)?).unwrap_or_default();
 
-                if id_trab <= 0 || weekday < 1 || weekday > 7 || id_turno <= 0 {
+                if id_trab.is_empty() || weekday < 1 || weekday > 7 || id_turno.is_empty() {
                     continue;
                 }
 
@@ -374,16 +367,18 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                         continue;
                     }
 
-                    if real_cells.contains(&(*id_trab, ymd.clone())) {
+                    if real_cells.contains(&(id_trab.clone(), ymd.clone())) {
                         continue;
                     }
 
                     for it in list.iter() {
                         out.push(AsignacionRow {
-                            id_asignacion: 0,
-                            id_trabajador: *id_trab,
+                            // Cadena vacía = fila de horario predeterminado (no es una
+                            // asignación real persistida). Antes era id 0.
+                            id_asignacion: String::new(),
+                            id_trabajador: id_trab.clone(),
                             fecha: ymd.clone(),
-                            id_turno: it.id_turno,
+                            id_turno: it.id_turno.clone(),
                             area: it.area.clone(),
                             hora_inicio: it.hora_inicio.clone(),
                             hora_fin: it.hora_fin.clone(),
@@ -411,14 +406,17 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
+            // UUIDv7 explícitos (la BD ya no autoincrementa).
+            let id_usuario = new_id();
             db.execute(
                 r#"
                 INSERT INTO Usuarios (
-                  ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+                  ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido, Estado
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
                 "#,
                 vec![
-                    Value::Integer(data.id_rol),
+                    Value::Text(id_usuario.clone()),
+                    Value::Text(data.id_rol.clone()),
                     Value::Text(data.email.clone()),
                     Value::Text(data.password_hash.clone()),
                     Value::Text(data.nombre.clone()),
@@ -429,19 +427,16 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             .await
             .map_err(db_err)?;
 
-            let id_usuario = select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-                .await?
-                .ok_or_else(|| AppError::repository("No se pudo obtener last_insert_rowid() de Usuario"))?;
-
             db.execute(
                 r#"
                 INSERT INTO Trabajadores (
-                  ID_Usuario, DNI, Telefono, Puesto, IBAN,
+                  ID_Trabajador, ID_Usuario, DNI, Telefono, Puesto, IBAN,
                   Numero_Seguridad_Social, Fecha_Inicio_Contrato, Fecha_Fin_Contrato
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
                 "#,
                 vec![
-                    Value::Integer(id_usuario),
+                    Value::Text(new_id()),
+                    Value::Text(id_usuario.clone()),
                     opt_text(data.dni.clone()),
                     opt_text(data.telefono.clone()),
                     opt_text(data.puesto.clone()),
@@ -472,7 +467,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
     async fn update_trabajador(
         &self,
-        id_trabajador: i64,
+        id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool> {
         let db = &self.conn;
@@ -490,13 +485,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                      WHERE ID_Usuario = ?7;
                     "#,
                     vec![
-                        Value::Integer(cambios.id_rol),
+                        Value::Text(cambios.id_rol.clone()),
                         Value::Text(cambios.email.clone()),
                         Value::Text(cambios.nombre.clone()),
                         opt_text(cambios.apellido.clone()),
                         Value::Text(cambios.estado.clone()),
                         Value::Text(hash),
-                        Value::Integer(cambios.id_usuario),
+                        Value::Text(cambios.id_usuario.clone()),
                     ],
                 )
                 .await
@@ -509,12 +504,12 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                      WHERE ID_Usuario = ?6;
                     "#,
                     vec![
-                        Value::Integer(cambios.id_rol),
+                        Value::Text(cambios.id_rol.clone()),
                         Value::Text(cambios.email.clone()),
                         Value::Text(cambios.nombre.clone()),
                         opt_text(cambios.apellido.clone()),
                         Value::Text(cambios.estado.clone()),
-                        Value::Integer(cambios.id_usuario),
+                        Value::Text(cambios.id_usuario.clone()),
                     ],
                 )
                 .await
@@ -538,7 +533,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     opt_text(cambios.numero_seguridad_social.clone()),
                     opt_text(cambios.fecha_inicio_contrato.clone()),
                     opt_text(cambios.fecha_fin_contrato.clone()),
-                    Value::Integer(id_trabajador),
+                    Value::Text(id_trabajador.to_string()),
                 ],
             )
             .await
@@ -566,6 +561,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         db.execute(
             r#"
             INSERT INTO Asignacion_Turnos (
+              ID_Asignacion,
               ID_Trabajador,
               Fecha,
               ID_Turno,
@@ -576,18 +572,20 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             )
             VALUES (
               ?1,
-              date(?2),
-              ?3,
+              ?2,
+              date(?3),
               ?4,
               ?5,
               ?6,
-              ?7
+              ?7,
+              ?8
             );
             "#,
             vec![
-                Value::Integer(data.id_trabajador),
+                Value::Text(new_id()),
+                Value::Text(data.id_trabajador.clone()),
                 Value::Text(data.fecha.clone()),
-                Value::Integer(data.id_turno),
+                Value::Text(data.id_turno.clone()),
                 Value::Text(data.area.clone()),
                 opt_text(data.hora_inicio.clone()),
                 opt_text(data.hora_fin.clone()),
@@ -602,7 +600,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
 
     async fn update_asignacion(
         &self,
-        id_asignacion: i64,
+        id_asignacion: &str,
         cambios: AsignacionCambios,
     ) -> AppResult<bool> {
         let db = &self.conn;
@@ -620,8 +618,8 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 WHERE ID_Asignacion = ?1;
                 "#,
                 vec![
-                    Value::Integer(id_asignacion),
-                    Value::Integer(cambios.id_turno),
+                    Value::Text(id_asignacion.to_string()),
+                    Value::Text(cambios.id_turno.clone()),
                     Value::Text(cambios.area.clone()),
                     opt_text(cambios.hora_inicio.clone()),
                     opt_text(cambios.hora_fin.clone()),
@@ -638,13 +636,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         Ok(true)
     }
 
-    async fn delete_asignacion(&self, id_asignacion: i64) -> AppResult<bool> {
+    async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool> {
         let db = &self.conn;
 
         let affected = db
             .execute(
                 "DELETE FROM Asignacion_Turnos WHERE ID_Asignacion = ?1;",
-                vec![Value::Integer(id_asignacion)],
+                vec![Value::Text(id_asignacion.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -664,6 +662,48 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     ) -> AppResult<bool> {
         let db = &self.conn;
 
+        // Desplazamiento en días entre la semana origen y la destino.
+        let from_d = NaiveDate::parse_from_str(&from_monday, "%Y-%m-%d")
+            .map_err(|_| AppError::validation("from_monday inválido (YYYY-MM-DD)"))?;
+        let to_d = NaiveDate::parse_from_str(&to_monday, "%Y-%m-%d")
+            .map_err(|_| AppError::validation("to_monday inválido (YYYY-MM-DD)"))?;
+        let shift = (to_d - from_d).num_days();
+
+        // Leemos las asignaciones origen en Rust para poder asignar a cada copia un UUIDv7
+        // propio (un INSERT…SELECT no puede generar ids deterministas que sincronicen).
+        struct SrcRow {
+            id_trabajador: String,
+            fecha: String,
+            id_turno: String,
+            area: String,
+            hora_inicio: Option<String>,
+            hora_fin: Option<String>,
+            notas: Option<String>,
+        }
+        let mut srows = db
+            .query(
+                r#"
+                SELECT ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
+                FROM Asignacion_Turnos
+                WHERE Fecha >= date(?1) AND Fecha < date(?1, '+7 day');
+                "#,
+                vec![Value::Text(from_monday.clone())],
+            )
+            .await
+            .map_err(db_err)?;
+        let mut origen: Vec<SrcRow> = Vec::new();
+        while let Some(r) = srows.next().await.map_err(db_err)? {
+            origen.push(SrcRow {
+                id_trabajador: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                fecha: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                id_turno: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                area: v_string(r.get_value(3).map_err(db_err)?).unwrap_or_else(|| "Sala".into()),
+                hora_inicio: v_string(r.get_value(4).map_err(db_err)?),
+                hora_fin: v_string(r.get_value(5).map_err(db_err)?),
+                notas: v_string(r.get_value(6).map_err(db_err)?),
+            });
+        }
+
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             if overwrite {
@@ -679,38 +719,37 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 .map_err(db_err)?;
             }
 
-            let affected = db
-                .execute(
+            let mut inserted = 0u64;
+            for s in origen.iter() {
+                let src_date = match NaiveDate::parse_from_str(&s.fecha, "%Y-%m-%d") {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let dst = (src_date + Duration::days(shift)).format("%Y-%m-%d").to_string();
+                db.execute(
                     r#"
                     INSERT INTO Asignacion_Turnos (
-                      ID_Trabajador,
-                      Fecha,
-                      ID_Turno,
-                      Area,
-                      Hora_Inicio,
-                      Hora_Fin,
-                      Notas
+                      ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
                     )
-                    SELECT
-                      a.ID_Trabajador,
-                      date(a.Fecha, printf('%+d day',
-                        CAST((julianday(date(?2)) - julianday(date(?1))) AS INTEGER)
-                      )),
-                      a.ID_Turno,
-                      a.Area,
-                      a.Hora_Inicio,
-                      a.Hora_Fin,
-                      a.Notas
-                    FROM Asignacion_Turnos a
-                    WHERE a.Fecha >= date(?1)
-                      AND a.Fecha < date(?1, '+7 day');
+                    VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
                     "#,
-                    vec![Value::Text(from_monday.clone()), Value::Text(to_monday.clone())],
+                    vec![
+                        Value::Text(new_id()),
+                        Value::Text(s.id_trabajador.clone()),
+                        Value::Text(dst),
+                        Value::Text(s.id_turno.clone()),
+                        Value::Text(s.area.clone()),
+                        opt_text(s.hora_inicio.clone()),
+                        opt_text(s.hora_fin.clone()),
+                        opt_text(s.notas.clone()),
+                    ],
                 )
                 .await
                 .map_err(db_err)?;
+                inserted += 1;
+            }
 
-            Ok(affected > 0 || overwrite)
+            Ok(inserted > 0 || overwrite)
         }
         .await;
 
@@ -751,26 +790,26 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             .map_err(db_err)?;
 
         struct PredItem {
-            id_turno: i64,
+            id_turno: String,
             area: String,
             hora_inicio: Option<String>,
             hora_fin: Option<String>,
             notas: Option<String>,
         }
 
-        let mut map: BTreeMap<(i64, i64), Vec<PredItem>> = BTreeMap::new();
+        let mut map: BTreeMap<(String, i64), Vec<PredItem>> = BTreeMap::new();
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let id_trab = v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0);
+            let id_trab = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
             let fecha = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
-            let id_turno = v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0);
+            let id_turno = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
             let area =
                 v_string(row.get_value(3).map_err(db_err)?).unwrap_or_else(|| "Sala".into());
             let hora_inicio = v_string(row.get_value(4).map_err(db_err)?);
             let hora_fin = v_string(row.get_value(5).map_err(db_err)?);
             let notas = v_string(row.get_value(6).map_err(db_err)?);
 
-            if id_trab <= 0 || id_turno <= 0 || fecha.trim().is_empty() {
+            if id_trab.is_empty() || id_turno.is_empty() || fecha.trim().is_empty() {
                 continue;
             }
 
@@ -794,14 +833,14 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         // 2) Aplicar el mapa: borra el predeterminado de cada trabajador implicado e inserta.
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
-            let mut trabajadores: Vec<i64> = map.keys().map(|(t, _)| *t).collect();
+            let mut trabajadores: Vec<String> = map.keys().map(|(t, _)| t.clone()).collect();
             trabajadores.sort_unstable();
             trabajadores.dedup();
 
             for id_trab in trabajadores.iter() {
                 db.execute(
                     "DELETE FROM Horario_Predeterminado WHERE ID_Trabajador = ?1;",
-                    vec![Value::Integer(*id_trab)],
+                    vec![Value::Text(id_trab.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -814,6 +853,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                     db.execute(
                         r#"
                         INSERT INTO Horario_Predeterminado (
+                          ID_Default,
                           ID_Trabajador,
                           Weekday,
                           Orden,
@@ -823,13 +863,14 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                           Hora_Fin,
                           Notas
                         )
-                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+                        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
                         "#,
                         vec![
-                            Value::Integer(id_trab),
+                            Value::Text(new_id()),
+                            Value::Text(id_trab.clone()),
                             Value::Integer(weekday),
                             Value::Integer(orden),
-                            Value::Integer(it.id_turno),
+                            Value::Text(it.id_turno),
                             Value::Text(it.area),
                             opt_text(limpiar_opcional(it.hora_inicio)),
                             opt_text(limpiar_opcional(it.hora_fin)),

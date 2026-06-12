@@ -29,20 +29,20 @@ pub async fn get_detail(
     repo: &dyn TrabajadoresRepository,
     args: TrabajadorDetailArgs,
 ) -> AppResult<Option<TrabajadorDetailRow>> {
-    if args.id_trabajador <= 0 {
+    if args.id_trabajador.trim().is_empty() {
         return Err(AppError::validation("id_trabajador required"));
     }
-    repo.get_detail(args.id_trabajador).await
+    repo.get_detail(&args.id_trabajador).await
 }
 
 pub async fn get_trabajador_id_by_usuario(
     repo: &dyn TrabajadoresRepository,
     args: TrabajadorIdByUsuarioArgs,
-) -> AppResult<Option<i64>> {
-    if args.id_usuario <= 0 {
+) -> AppResult<Option<String>> {
+    if args.id_usuario.trim().is_empty() {
         return Ok(None);
     }
-    repo.get_id_by_usuario(args.id_usuario).await
+    repo.get_id_by_usuario(&args.id_usuario).await
 }
 
 pub async fn turnos_get_all(repo: &dyn TrabajadoresRepository) -> AppResult<Vec<TurnoRow>> {
@@ -63,7 +63,7 @@ pub async fn create_asignacion(
     repo: &dyn TrabajadoresRepository,
     input: AsignacionCreateInput,
 ) -> AppResult<bool> {
-    if input.id_trabajador <= 0 || input.id_turno <= 0 {
+    if input.id_trabajador.trim().is_empty() || input.id_turno.trim().is_empty() {
         return Err(AppError::validation("id_trabajador/id_turno required"));
     }
 
@@ -87,7 +87,7 @@ pub async fn update_asignacion(
     repo: &dyn TrabajadoresRepository,
     input: AsignacionUpdateInput,
 ) -> AppResult<bool> {
-    if input.id_asignacion <= 0 || input.id_turno <= 0 {
+    if input.id_asignacion.trim().is_empty() || input.id_turno.trim().is_empty() {
         return Err(AppError::validation("id_asignacion/id_turno required"));
     }
 
@@ -101,17 +101,17 @@ pub async fn update_asignacion(
         notas: limpiar_opcional(input.notas),
     };
 
-    repo.update_asignacion(input.id_asignacion, cambios).await
+    repo.update_asignacion(&input.id_asignacion, cambios).await
 }
 
 pub async fn delete_asignacion(
     repo: &dyn TrabajadoresRepository,
     input: AsignacionDeleteInput,
 ) -> AppResult<bool> {
-    if input.id_asignacion <= 0 {
+    if input.id_asignacion.trim().is_empty() {
         return Err(AppError::validation("id_asignacion required"));
     }
-    repo.delete_asignacion(input.id_asignacion).await
+    repo.delete_asignacion(&input.id_asignacion).await
 }
 
 pub async fn copy_semana_asignaciones(
@@ -139,7 +139,7 @@ pub async fn create_trabajador(
     repo: &dyn TrabajadoresRepository,
     input: TrabajadorCreateInput,
 ) -> AppResult<bool> {
-    if input.id_rol <= 0 {
+    if input.id_rol.trim().is_empty() {
         return Err(AppError::validation("id_rol required"));
     }
 
@@ -171,7 +171,10 @@ pub async fn update_trabajador(
     repo: &dyn TrabajadoresRepository,
     input: TrabajadorUpdateInput,
 ) -> AppResult<bool> {
-    if input.id_trabajador <= 0 || input.id_usuario <= 0 || input.id_rol <= 0 {
+    if input.id_trabajador.trim().is_empty()
+        || input.id_usuario.trim().is_empty()
+        || input.id_rol.trim().is_empty()
+    {
         return Err(AppError::validation(
             "id_trabajador/id_usuario/id_rol required",
         ));
@@ -197,5 +200,5 @@ pub async fn update_trabajador(
         password_hash: limpiar_opcional(input.password_hash),
     };
 
-    repo.update_trabajador(input.id_trabajador, cambios).await
+    repo.update_trabajador(&input.id_trabajador, cambios).await
 }
