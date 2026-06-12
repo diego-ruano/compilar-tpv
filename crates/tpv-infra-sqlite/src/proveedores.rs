@@ -12,8 +12,8 @@ use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 
-use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string};
-use crate::util::next_table_id;
+use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteProveedoresRepository {
     conn: Arc<Connection>,
@@ -32,18 +32,8 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 fn s(v: Value) -> String {
     v_string(v).unwrap_or_default()
 }
-fn i(v: Value) -> i64 {
-    v_i64(v).unwrap_or(0)
-}
 fn f(v: Value) -> f64 {
     v_f64(v).unwrap_or(0.0)
-}
-fn pos_or_none(v: i64) -> Option<i64> {
-    if v == 0 {
-        None
-    } else {
-        Some(v)
-    }
 }
 fn fpos_or_none(v: f64) -> Option<f64> {
     if v == 0.0 {
@@ -72,9 +62,9 @@ const SQL_PRODUCTO_COLS: &str = r#"
 fn map_producto(row: &Row) -> AppResult<ProductoProveedorDto> {
     let g = |idx: i32| row.get_value(idx).map_err(db_err);
     Ok(ProductoProveedorDto {
-        id_producto: i(g(0)?),
-        id_categoria: pos_or_none(i(g(1)?)),
-        id_proveedor: pos_or_none(i(g(2)?)),
+        id_producto: s(g(0)?),
+        id_categoria: norm_opt_string(g(1)?),
+        id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
         precio_venta: fpos_or_none(f(g(4)?)),
         stock_actual: Some(f(g(5)?)),
@@ -102,7 +92,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(ProveedorDto {
-                id_proveedor: i(g(0)?),
+                id_proveedor: s(g(0)?),
                 nombre_empresa: s(g(1)?),
                 contacto: norm_opt_string(g(2)?),
                 telefono: norm_opt_string(g(3)?),
@@ -116,13 +106,13 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         Ok(out)
     }
 
-    async fn get_productos(&self, id_proveedor: i64) -> AppResult<Vec<ProductoProveedorDto>> {
+    async fn get_productos(&self, id_proveedor: &str) -> AppResult<Vec<ProductoProveedorDto>> {
         let sql = format!(
             "SELECT {SQL_PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 ORDER BY p.Nombre ASC;"
         );
         let mut rows = self
             .conn
-            .query(&sql, vec![Value::Integer(id_proveedor)])
+            .query(&sql, vec![Value::Text(id_proveedor.to_string())])
             .await
             .map_err(db_err)?;
         let mut out = Vec::new();
@@ -139,7 +129,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(CategoriaProveedorDto {
-                id_categoria: i(g(0)?),
+                id_categoria: s(g(0)?),
                 nombre: s(g(1)?),
                 nombre_imagen: norm_opt_string(g(2)?),
                 ruta_imagen: norm_opt_string(g(3)?),
@@ -159,10 +149,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     }
 
     async fn guardar(&self, p: ProveedorValidado) -> AppResult<bool> {
-        let id = match p.id {
-            Some(id) => id,
-            None => next_table_id(&self.conn, "Proveedores", "ID_Proveedor").await?,
-        };
+        let id = p.id.unwrap_or_else(new_id);
 
         self.conn
             .execute(
@@ -180,7 +167,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                   Ruta_Imagen = excluded.Ruta_Imagen;
                 "#,
                 vec![
-                    Value::Integer(id),
+                    Value::Text(id),
                     Value::Text(p.nombre_empresa),
                     opt_text(p.contacto),
                     opt_text(p.telefono),
@@ -196,26 +183,26 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         Ok(true)
     }
 
-    async fn eliminar(&self, id_proveedor: i64) -> AppResult<bool> {
+    async fn eliminar(&self, id_proveedor: &str) -> AppResult<bool> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
                 "UPDATE Lotes_Producto SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
-                vec![Value::Integer(id_proveedor)],
+                vec![Value::Text(id_proveedor.to_string())],
             )
             .await
             .map_err(db_err)?;
             conn.execute(
                 "UPDATE Productos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
-                vec![Value::Integer(id_proveedor)],
+                vec![Value::Text(id_proveedor.to_string())],
             )
             .await
             .map_err(db_err)?;
             let affected = conn
                 .execute(
                     "DELETE FROM Proveedores WHERE ID_Proveedor = ?1;",
-                    vec![Value::Integer(id_proveedor)],
+                    vec![Value::Text(id_proveedor.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -234,20 +221,20 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         }
     }
 
-    async fn set_vinculos(&self, id_proveedor: i64, producto_ids: Vec<i64>) -> AppResult<bool> {
+    async fn set_vinculos(&self, id_proveedor: &str, producto_ids: Vec<String>) -> AppResult<bool> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
                 "UPDATE Productos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
-                vec![Value::Integer(id_proveedor)],
+                vec![Value::Text(id_proveedor.to_string())],
             )
             .await
             .map_err(db_err)?;
             for pid in producto_ids.iter() {
                 conn.execute(
                     "UPDATE Productos SET ID_Proveedor = ?1 WHERE ID_Producto = ?2;",
-                    vec![Value::Integer(id_proveedor), Value::Integer(*pid)],
+                    vec![Value::Text(id_proveedor.to_string()), Value::Text(pid.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -267,15 +254,12 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         }
     }
 
-    async fn crear_producto(&self, p: ProductoNuevo) -> AppResult<i64> {
+    async fn crear_producto(&self, p: ProductoNuevo) -> AppResult<String> {
         let conn = &self.conn;
-        let id_producto = match p.id {
-            Some(id) => id,
-            None => next_table_id(conn, "Productos", "ID_Producto").await?,
-        };
+        let id_producto = p.id.unwrap_or_else(new_id);
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<i64> = async {
+        let res: AppResult<String> = async {
             conn.execute(
                 r#"
                 INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada)
@@ -289,9 +273,9 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                   Unidad_Medida = excluded.Unidad_Medida;
                 "#,
                 vec![
-                    Value::Integer(id_producto),
-                    Value::Integer(p.id_categoria),
-                    Value::Integer(p.id_proveedor),
+                    Value::Text(id_producto.clone()),
+                    Value::Text(p.id_categoria.clone()),
+                    Value::Text(p.id_proveedor.clone()),
                     Value::Text(p.nombre.clone()),
                     opt_real(p.precio_venta),
                     opt_real(p.stock_minimo),
@@ -312,11 +296,11 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                           (?1, ?2, datetime('now','localtime'), NULL, ?3, ?4, NULL, ?5, ?6);
                         "#,
                         vec![
-                            Value::Integer(id_producto),
+                            Value::Text(id_producto.clone()),
                             Value::Text(codigo_lote),
                             Value::Real(stock),
                             Value::Real(stock),
-                            Value::Integer(p.id_proveedor),
+                            Value::Text(p.id_proveedor.clone()),
                             Value::Text("Lote inicial creado desde Proveedores".into()),
                         ],
                     )

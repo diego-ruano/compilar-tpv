@@ -7,7 +7,7 @@ fn limpia(o: Option<String>) -> Option<String> {
 /// Proveedor validado listo para upsert. `id = None` => se asigna el siguiente libre.
 #[derive(Debug, Clone)]
 pub struct ProveedorValidado {
-    pub id: Option<i64>,
+    pub id: Option<String>,
     pub nombre_empresa: String,
     pub contacto: Option<String>,
     pub telefono: Option<String>,
@@ -21,7 +21,7 @@ pub struct ProveedorValidado {
 impl ProveedorValidado {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
-        id_proveedor: Option<i64>,
+        id_proveedor: Option<String>,
         nombre_empresa: String,
         contacto: Option<String>,
         telefono: Option<String>,
@@ -36,7 +36,7 @@ impl ProveedorValidado {
             return Err("nombre_empresa required".into());
         }
         Ok(ProveedorValidado {
-            id: id_proveedor.filter(|n| *n > 0),
+            id: id_proveedor.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre_empresa: nombre,
             contacto: limpia(contacto),
             telefono: limpia(telefono),
@@ -52,9 +52,9 @@ impl ProveedorValidado {
 /// Producto nuevo (creado desde la pantalla de proveedores).
 #[derive(Debug, Clone)]
 pub struct ProductoNuevo {
-    pub id: Option<i64>,
-    pub id_categoria: i64,
-    pub id_proveedor: i64,
+    pub id: Option<String>,
+    pub id_categoria: String,
+    pub id_proveedor: String,
     pub nombre: String,
     pub precio_venta: Option<f64>,
     pub stock_actual: Option<f64>,
@@ -74,9 +74,9 @@ fn check_no_negativo(v: Option<f64>, campo: &str) -> Result<(), String> {
 impl ProductoNuevo {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
-        id_producto: Option<i64>,
-        id_categoria: i64,
-        id_proveedor: i64,
+        id_producto: Option<String>,
+        id_categoria: String,
+        id_proveedor: String,
         nombre: String,
         precio_venta: Option<f64>,
         stock_actual: Option<f64>,
@@ -87,10 +87,12 @@ impl ProductoNuevo {
         if nombre.is_empty() {
             return Err("nombre required".into());
         }
-        if id_categoria <= 0 {
+        let id_categoria = id_categoria.trim().to_string();
+        if id_categoria.is_empty() {
             return Err("ID_Categoria inválido".into());
         }
-        if id_proveedor <= 0 {
+        let id_proveedor = id_proveedor.trim().to_string();
+        if id_proveedor.is_empty() {
             return Err("ID_Proveedor inválido".into());
         }
         check_no_negativo(stock_actual, "Stock_Actual")?;
@@ -98,7 +100,7 @@ impl ProductoNuevo {
         check_no_negativo(stock_minimo, "Stock_Minimo")?;
 
         Ok(ProductoNuevo {
-            id: id_producto.filter(|n| *n > 0),
+            id: id_producto.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_categoria,
             id_proveedor,
             nombre,
@@ -110,9 +112,13 @@ impl ProductoNuevo {
     }
 }
 
-/// Normaliza una lista de IDs de producto: descarta <=0, ordena y deduplica.
-pub fn normalizar_producto_ids(ids: Vec<i64>) -> Vec<i64> {
-    let mut v: Vec<i64> = ids.into_iter().filter(|n| *n > 0).collect();
+/// Normaliza una lista de IDs de producto: descarta vacíos, ordena y deduplica.
+pub fn normalizar_producto_ids(ids: Vec<String>) -> Vec<String> {
+    let mut v: Vec<String> = ids
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     v.sort_unstable();
     v.dedup();
     v

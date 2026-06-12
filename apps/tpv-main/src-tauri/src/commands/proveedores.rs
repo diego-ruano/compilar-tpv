@@ -72,7 +72,7 @@ pub async fn proveedores_set_vinculos(
 pub async fn proveedores_create_producto(
     state: State<'_, AppState>,
     args: ProveedoresCreateProductoInput,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::crear_producto(repo.as_ref(), args).await?)
 }

@@ -10,7 +10,7 @@ use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 
-use crate::{extract_id, CloudClient};
+use crate::CloudClient;
 
 pub struct HttpProveedoresRepository {
     client: Arc<CloudClient>,
@@ -28,7 +28,7 @@ impl ProveedoresRepository for HttpProveedoresRepository {
         self.client.get_json("/v1/proveedores").await
     }
 
-    async fn get_productos(&self, id_proveedor: i64) -> AppResult<Vec<ProductoProveedorDto>> {
+    async fn get_productos(&self, id_proveedor: &str) -> AppResult<Vec<ProductoProveedorDto>> {
         self.client
             .get_json(&format!("/v1/proveedores/{id_proveedor}/productos"))
             .await
@@ -43,8 +43,11 @@ impl ProveedoresRepository for HttpProveedoresRepository {
     }
 
     async fn guardar(&self, proveedor: ProveedorValidado) -> AppResult<bool> {
+        let id_proveedor = proveedor
+            .id
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_proveedor": proveedor.id,
+            "id_proveedor": id_proveedor,
             "nombre_empresa": proveedor.nombre_empresa,
             "contacto": proveedor.contacto,
             "telefono": proveedor.telefono,
@@ -58,7 +61,7 @@ impl ProveedoresRepository for HttpProveedoresRepository {
         Ok(true)
     }
 
-    async fn eliminar(&self, id_proveedor: i64) -> AppResult<bool> {
+    async fn eliminar(&self, id_proveedor: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/proveedores/{id_proveedor}"))
@@ -66,7 +69,7 @@ impl ProveedoresRepository for HttpProveedoresRepository {
         Ok(true)
     }
 
-    async fn set_vinculos(&self, id_proveedor: i64, producto_ids: Vec<i64>) -> AppResult<bool> {
+    async fn set_vinculos(&self, id_proveedor: &str, producto_ids: Vec<String>) -> AppResult<bool> {
         let body = json!({ "producto_ids": producto_ids });
         let _: JsonValue = self
             .client
@@ -75,9 +78,13 @@ impl ProveedoresRepository for HttpProveedoresRepository {
         Ok(true)
     }
 
-    async fn crear_producto(&self, producto: ProductoNuevo) -> AppResult<i64> {
+    async fn crear_producto(&self, producto: ProductoNuevo) -> AppResult<String> {
+        let id_producto = producto
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_producto": producto.id,
+            "id_producto": id_producto,
             "id_categoria": producto.id_categoria,
             "id_proveedor": producto.id_proveedor,
             "nombre": producto.nombre,
@@ -86,10 +93,10 @@ impl ProveedoresRepository for HttpProveedoresRepository {
             "stock_minimo": producto.stock_minimo,
             "unidad_medida": producto.unidad_medida,
         });
-        let resp: JsonValue = self
+        let _: JsonValue = self
             .client
             .post_json("/v1/proveedores/productos", &body)
             .await?;
-        extract_id(&resp, "id_producto")
+        Ok(id_producto)
     }
 }
