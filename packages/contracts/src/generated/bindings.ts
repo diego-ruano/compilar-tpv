@@ -116,6 +116,12 @@ export type FinalizarTareaInput = { id_tarea: number, id_trabajador: number, };
 
 export type HandySetTokenArgs = { token: string, tenant_id: string, };
 
+/**
+ * Credenciales del Handy para abrir el WebSocket con el worker (`/ws?token=`). El token
+ * vive en el keyring (lo guarda el pairing); el frontend lo necesita para el query string.
+ */
+export type HandyWsAuth = { token: string, tenantId: string, };
+
 export type HorariosSemanaArgs = { fecha_lunes: string, };
 
 export type IdCategoriaArgs = { id_categoria: number, };

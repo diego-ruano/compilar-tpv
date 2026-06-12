@@ -4,8 +4,8 @@
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, PairCreateResult,
-    SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
+    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
 };
 
 use crate::error::{AppError, AppResult};
@@ -56,6 +56,11 @@ pub fn handy_clear_token(svc: &dyn PairingService) -> AppResult<()> {
 
 pub fn handy_get_tenant(svc: &dyn PairingService) -> AppResult<Option<String>> {
     svc.handy_get_tenant()
+}
+
+/// Credenciales (token + tenant) para abrir el WebSocket del Handy.
+pub fn handy_get_ws_auth(svc: &dyn PairingService) -> AppResult<HandyWsAuth> {
+    svc.handy_get_ws_auth()
 }
 
 pub fn tpv_server_signed_headers(

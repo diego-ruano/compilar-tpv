@@ -11,6 +11,7 @@ import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
 import { useMainSocket } from "../shared/lib/useMainSocket";
+import { useHandySocket } from "../shared/lib/useHandySocket";
 
 import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
@@ -326,6 +327,10 @@ export default function AppBoot({ router }: { router: any }) {
 
     // WebSocket de la Main: se abre/cierra según el modo (online → abre, offline → cierra).
     useMainSocket();
+
+    // WebSocket del Handy: se abre cuando el dispositivo es Handy. Solo recibe `change` de la
+    // nube y refresca React Query + el tick del POS (no aplica SQL: no hay BD local).
+    useHandySocket();
 
     // Huella propia del dispositivo: el operador del Main la compara con la que ve en la
     // lista de solicitudes antes de aprobar (sobre todo en la ruta de "solo código").

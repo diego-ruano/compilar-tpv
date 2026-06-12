@@ -21,6 +21,7 @@ import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { cloudPost } from "./cloudApi";
 import { queryClient } from "./queryClient";
+import { affectedComandas, type RawStatement } from "./syncStatements";
 
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 const RECONNECT_MS = 3000;
@@ -109,10 +110,14 @@ export function useMainSocket() {
 					await invoke("sync_apply_changes", { args: { changes } });
 					// Avisar al front de que los datos locales cambiaron:
 					//  - React Query: invalida (solo refetchea las queries MONTADAS, es barato).
-					//  - POS (mesas / venta_rápida): tick para que vuelvan a leer (no usan caché).
+					//  - POS (mesas / venta_rápida): tick + qué comandas tocó el lote, para que
+					//    recarguen el ticket solo si es la comanda abierta (no la de otro device).
 					if (!cancelled) {
+						const statements = changes.flatMap((c) =>
+							Array.isArray(c.statements) ? c.statements : [],
+						) as RawStatement[];
 						queryClient.invalidateQueries();
-						useSyncSignal.getState().bump();
+						useSyncSignal.getState().bump(affectedComandas(statements));
 					}
 				} catch (e) {
 					console.warn("sync_apply_changes falló:", e);

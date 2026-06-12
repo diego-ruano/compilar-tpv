@@ -5,6 +5,7 @@ import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
+import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
@@ -470,12 +471,14 @@ export default function MesaComandaModal({
     }
 
     // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
-    // abierta, recargar el ticket para verlo al instante (la BD local ya es la verdad).
+    // abierta, recargar el ticket SOLO si el cambio afecta a esta comanda (no a otra que edite
+    // otro dispositivo). La BD local ya es la verdad.
     const syncTick = useSyncSignal((s) => s.tick);
     useEffect(() => {
         if (!syncTick) return;
         if (!open || !idComanda) return;
-        void reloadTicket();
+        const info = useSyncSignal.getState().comanda;
+        if (shouldReloadTicket(info, idComanda)) void reloadTicket();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [syncTick]);
 

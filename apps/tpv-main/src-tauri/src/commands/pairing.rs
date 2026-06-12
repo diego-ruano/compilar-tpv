@@ -12,8 +12,8 @@ use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::licensing as uc_lic;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, LicenseLocalState,
-    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
+    LicenseLocalState, PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
     UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
@@ -43,6 +43,12 @@ pub fn handy_clear_token(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, String> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
+}
+
+/// Credenciales (token + tenant) para abrir el WebSocket del Handy (`/ws?token=`).
+#[tauri::command]
+pub fn handy_get_ws_auth(app: AppHandle) -> Result<HandyWsAuth, String> {
+    Ok(uc::handy_get_ws_auth(&svc(&app)?)?)
 }
 
 #[tauri::command]

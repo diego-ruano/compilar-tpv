@@ -23,8 +23,8 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState, PairCreateResult, SigB64,
+    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
+    LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
 };
 
 use device::{
@@ -533,6 +533,14 @@ impl PairingService for PairingAdapter {
 
     fn handy_get_tenant(&self) -> AppResult<Option<String>> {
         device::handy_get_tenant().map_err(ext)
+    }
+
+    fn handy_get_ws_auth(&self) -> AppResult<HandyWsAuth> {
+        let token = get_handy_token().map_err(ext)?;
+        let tenant_id = device::handy_get_tenant()
+            .map_err(ext)?
+            .ok_or_else(|| ext("handy_tenant_missing"))?;
+        Ok(HandyWsAuth { token, tenant_id })
     }
 
     fn tpv_server_signed_headers(

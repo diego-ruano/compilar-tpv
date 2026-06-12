@@ -1,0 +1,182 @@
+// src/shared/lib/useHandySocket.ts
+//
+// WebSocket del Handy con el worker. A diferencia de la Main (useMainSocket), el Handy NO
+// tiene BD local ni outbox: su fuente de datos es la nube y lee por HTTP. Por eso aquí el
+// WebSocket sirve SOLO para enterarse en vivo de los cambios: al recibir un `change` (que el
+// Durable Object difunde a todas las sesiones autenticadas), invalidamos React Query para
+// que las lecturas montadas se refresquen, y hacemos `bump()` del tick para que el POS
+// (mesas / venta-rápida, que no usan caché) vuelva a leer de la nube.
+//
+// No aplicamos las sentencias del `change` (no hay SQLite local que tocar): basta refetch.
+
+import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+import { useMode } from "../stores/useMode";
+import { useSyncSignal } from "../stores/useSyncSignal";
+import { queryClient } from "./queryClient";
+import { affectedComandas } from "./syncStatements";
+
+const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
+const RECONNECT_MS = 3000;
+const PING_MS = 30000;
+
+async function loadAuth(): Promise<{ token: string; tenantId: string } | null> {
+	try {
+		const r = (await invoke<any>("handy_get_ws_auth")) as any;
+		const token = String(r?.token ?? "");
+		const tenantId = String(r?.tenantId ?? r?.tenant_id ?? "");
+		if (!token || !tenantId) return null;
+		return { token, tenantId };
+	} catch {
+		return null;
+	}
+}
+
+async function loadDeviceId(): Promise<string> {
+	try {
+		const r = (await invoke<any>("device_get_identity")) as any;
+		return String(r?.deviceId ?? r?.device_id ?? "");
+	} catch {
+		return "";
+	}
+}
+
+async function signWsHello(
+	ts: number,
+	tenantId: string,
+	deviceId: string,
+	nonceB64: string,
+): Promise<string> {
+	const payload = `${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}`;
+	const r = (await invoke<any>("device_sign_b64", { args: { payload } })) as any;
+	return String(r?.sigB64 ?? r?.sig_b64 ?? "");
+}
+
+export function useHandySocket() {
+	const deviceMode = useMode((s) => s.mode);
+
+	useEffect(() => {
+		if (deviceMode !== "handy") return;
+
+		let cancelled = false;
+		let ws: WebSocket | null = null;
+		let retryTimer: number | null = null;
+		let pingTimer: number | null = null;
+
+		const scheduleReconnect = () => {
+			if (cancelled || retryTimer) return;
+			retryTimer = window.setTimeout(() => {
+				retryTimer = null;
+				void open();
+			}, RECONNECT_MS);
+		};
+
+		async function open() {
+			if (cancelled) return;
+
+			const auth = await loadAuth();
+			const deviceId = await loadDeviceId();
+			if (cancelled || !auth || !deviceId) {
+				// Aún sin emparejar (no hay token) o sin identidad: reintentar más tarde.
+				scheduleReconnect();
+				return;
+			}
+
+			const socket = new WebSocket(
+				`${WS_URL}?token=${encodeURIComponent(auth.token)}`,
+			);
+			ws = socket;
+
+			socket.onopen = () => {
+				if (pingTimer) clearInterval(pingTimer);
+				pingTimer = window.setInterval(() => {
+					if (socket.readyState === WebSocket.OPEN) {
+						socket.send(JSON.stringify({ type: "ping" }));
+					}
+				}, PING_MS);
+			};
+
+			socket.onmessage = async (ev) => {
+				let msg: any;
+				try {
+					msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+				} catch {
+					return;
+				}
+				if (!msg || typeof msg.type !== "string") return;
+
+				if (msg.type === "challenge") {
+					try {
+						const ts = Date.now();
+						const sigB64 = await signWsHello(
+							ts,
+							auth.tenantId,
+							deviceId,
+							String(msg.nonceB64 ?? ""),
+						);
+						if (!cancelled && socket.readyState === WebSocket.OPEN) {
+							socket.send(
+								JSON.stringify({
+									type: "helloSigned",
+									ts,
+									nonceB64: msg.nonceB64,
+									sigB64,
+								}),
+							);
+						}
+					} catch (e) {
+						console.warn("WS handy hello: firma falló:", e);
+					}
+					return;
+				}
+
+				// Cualquier cambio aplicado en la nube por otro dispositivo (típicamente la
+				// Main): refrescamos. No aplicamos SQL (no hay BD local): solo refetch.
+				if (msg.type === "change") {
+					if (!cancelled) {
+						const statements = Array.isArray(msg.statements)
+							? msg.statements
+							: [];
+						queryClient.invalidateQueries();
+						useSyncSignal.getState().bump(affectedComandas(statements));
+					}
+					return;
+				}
+			};
+
+			socket.onclose = () => {
+				if (pingTimer) {
+					clearInterval(pingTimer);
+					pingTimer = null;
+				}
+				if (ws === socket) ws = null;
+				scheduleReconnect();
+			};
+
+			socket.onerror = () => {
+				try {
+					socket.close();
+				} catch {
+					/* noop */
+				}
+			};
+		}
+
+		void open();
+
+		return () => {
+			cancelled = true;
+			if (retryTimer) clearTimeout(retryTimer);
+			if (pingTimer) clearInterval(pingTimer);
+			if (ws) {
+				try {
+					ws.close();
+				} catch {
+					/* noop */
+				}
+				ws = null;
+			}
+		};
+	}, [deviceMode]);
+}

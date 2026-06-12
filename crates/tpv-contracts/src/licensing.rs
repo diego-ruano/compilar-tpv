@@ -98,6 +98,16 @@ pub struct SigB64 {
     pub sig_b64: String,
 }
 
+/// Credenciales del Handy para abrir el WebSocket con el worker (`/ws?token=`). El token
+/// vive en el keyring (lo guarda el pairing); el frontend lo necesita para el query string.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct HandyWsAuth {
+    pub token: String,
+    pub tenant_id: String,
+}
+
 /* =========================================================
    Args / Inputs
 ========================================================= */

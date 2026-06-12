@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState, PairCreateResult, SigB64,
+    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
+    LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
 };
 
 use crate::error::AppResult;
@@ -37,6 +37,8 @@ pub trait PairingService: Send + Sync {
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()>;
     fn handy_clear_token(&self) -> AppResult<()>;
     fn handy_get_tenant(&self) -> AppResult<Option<String>>;
+    /// Credenciales (token + tenant) para abrir el WebSocket del Handy. Error si no hay token.
+    fn handy_get_ws_auth(&self) -> AppResult<HandyWsAuth>;
     /// Cabeceras firmadas para tpv-server según el modo (anon|tpv|handy).
     fn tpv_server_signed_headers(
         &self,

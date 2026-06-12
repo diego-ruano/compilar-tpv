@@ -5,6 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { Plus, ReceiptText, ArrowLeft } from "lucide-react";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
+import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useToast } from "../../shared/toast";
 import { SearchInput } from "../../shared/ui";
 
@@ -741,15 +742,18 @@ export default function VentaRapida() {
   );
 
   // Sincronización nube → Main: al aplicarse un cambio recibido por WebSocket, recargar el
-  // ticket de la comanda activa y la lista de comandas. Usa el camino "seguro"
-  // (queueComandaRefresh respeta las escrituras locales pendientes, no interrumpe al cajero).
+  // ticket SOLO si el cambio afecta a la comanda abierta (no la que edite otro dispositivo).
+  // Usa el camino "seguro" (queueComandaRefresh respeta las escrituras locales pendientes, no
+  // interrumpe al cajero). La barra de comandas sí se mantiene al día.
   const syncTick = useSyncSignal((s) => s.tick);
   useEffect(() => {
     if (!syncTick) return;
+    const info = useSyncSignal.getState().comanda;
     const id = idComandaActivaRef.current;
-    if (id) {
+    if (id && shouldReloadTicket(info, id)) {
       queueComandaRefresh(id, { refreshTicket: true, refreshComandas: true });
-    } else {
+    } else if (info.touchedComanda) {
+      // El cambio tocó otra comanda (o no hay ticket abierto): refrescar solo la barra.
       void refreshComandasBarra({ silent: true, includePagadas: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1553,6 +1557,18 @@ export default function VentaRapida() {
     cargarProductosDeCategoria,
     cargarCategorias,
   ]);
+
+  // Sincronización nube → catálogo: al llegar un cambio por WebSocket (`syncTick`) que afecte
+  // al catálogo (productos/categorías/stock), recargar SOLO la vista de catálogo visible
+  // (búsqueda / productos de la categoría abierta / grid de categorías). Va en un efecto aparte
+  // del ticket a propósito: se refresca sin tocar el ticket ni el resto de la pantalla (buena
+  // UX). Si el cambio fue solo de una comanda, no recargamos el catálogo.
+  useEffect(() => {
+    if (!syncTick) return;
+    if (!useSyncSignal.getState().comanda.touchedCatalog) return;
+    void onProductoGuardado();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [syncTick]);
 
   const variant: "search" | "categories" | "products" = showingSearch
     ? "search"

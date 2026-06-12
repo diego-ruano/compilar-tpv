@@ -697,6 +697,7 @@ pub fn run() {
             commands::pairing::handy_set_token,
             commands::pairing::handy_clear_token,
             commands::pairing::handy_get_tenant,
+            commands::pairing::handy_get_ws_auth,
             commands::pairing::device_get_identity,
             commands::pairing::device_sign_b64,
             commands::pairing::tpv_server_post_json,
