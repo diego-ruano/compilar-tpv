@@ -30,13 +30,13 @@ impl LoginRepository for HttpLoginRepository {
         self.client.get_json("/v1/login/users").await
     }
 
-    async fn get_today_punch_status(&self, id_usuario: i64) -> AppResult<PunchStatus> {
+    async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
         self.client
             .get_json(&format!("/v1/login/{id_usuario}/punch-status"))
             .await
     }
 
-    async fn login(&self, id_usuario: i64, pin: &str) -> AppResult<LoginOk> {
+    async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
         self.client
             .post_json("/v1/login/login", &json!({ "id_usuario": id_usuario, "pin": pin }))
             .await
@@ -44,7 +44,7 @@ impl LoginRepository for HttpLoginRepository {
 
     async fn complete_initial_setup(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin_actual: &str,
         pin_nuevo: &str,
         email_nuevo: &str,
@@ -64,7 +64,7 @@ impl LoginRepository for HttpLoginRepository {
 
     async fn punch(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin: &str,
         tipo: &str,
         fecha: Option<String>,
@@ -82,7 +82,7 @@ impl LoginRepository for HttpLoginRepository {
 
     async fn set_turno_partido(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         fecha: Option<String>,
         turno_partido: bool,
     ) -> AppResult<()> {

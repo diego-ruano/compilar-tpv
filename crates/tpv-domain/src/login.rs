@@ -151,8 +151,8 @@ pub fn verify_pin(pin: &str, stored_hash: &str) -> Result<(), String> {
 /// Registro de usuario para el flujo de login (incluye el hash, que NO sale a la UI).
 #[derive(Debug, Clone)]
 pub struct LoginUserRecord {
-    pub id_usuario: i64,
-    pub id_trabajador: Option<i64>,
+    pub id_usuario: String,
+    pub id_trabajador: Option<String>,
     pub nombre: String,
     pub apellido: Option<String>,
     pub email: String,

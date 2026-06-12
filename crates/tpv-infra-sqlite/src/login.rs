@@ -19,6 +19,7 @@ use tpv_contracts::login::{LoginOk, PunchParte, PunchStatus, UserListItem};
 use tpv_domain::login::{hash_pin, verify_pin, LoginUserRecord, SetupInfo};
 
 use crate::mapping::v_i64;
+use crate::util::new_id;
 
 pub struct SqliteLoginRepository {
     conn: Arc<Connection>,
@@ -44,7 +45,7 @@ fn now_iso() -> String {
 
 async fn get_turno_partido_for(
     conn: &Connection,
-    id_usuario: i64,
+    id_usuario: &str,
     fecha: &str,
 ) -> AppResult<i64> {
     let mut rows = conn
@@ -55,7 +56,7 @@ async fn get_turno_partido_for(
             WHERE ID_Usuario=?1 AND Fecha=?2
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_usuario), Value::Text(fecha.to_string())],
+            vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -72,7 +73,7 @@ async fn get_turno_partido_for(
 
 async fn build_punch_status(
     conn: &Connection,
-    id_usuario: i64,
+    id_usuario: &str,
     fecha: &str,
 ) -> AppResult<PunchStatus> {
     let turno_partido = get_turno_partido_for(conn, id_usuario, fecha).await?;
@@ -85,7 +86,7 @@ async fn build_punch_status(
             WHERE ID_Usuario=?1 AND Fecha=?2
             ORDER BY Parte ASC;
             "#,
-            vec![Value::Integer(id_usuario), Value::Text(fecha.to_string())],
+            vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -133,7 +134,7 @@ async fn build_punch_status(
 
 async fn query_login_record(
     conn: &Connection,
-    id_usuario: i64,
+    id_usuario: &str,
 ) -> AppResult<Option<LoginUserRecord>> {
     let mut rows = conn
         .query(
@@ -146,7 +147,7 @@ async fn query_login_record(
             WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo'
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_usuario)],
+            vec![Value::Text(id_usuario.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -156,11 +157,11 @@ async fn query_login_record(
     };
 
     let id = match row.get_value(0).map_err(db_err)? {
-        Value::Integer(n) => n,
+        Value::Text(s) => s,
         _ => return Err(AppError::repository("ID_Usuario inválido")),
     };
     let id_trabajador = match row.get_value(1).map_err(db_err)? {
-        Value::Integer(n) => Some(n),
+        Value::Text(s) => Some(s),
         _ => None,
     };
     let nombre = match row.get_value(2).map_err(db_err)? {
@@ -201,7 +202,7 @@ async fn query_login_record(
     }))
 }
 
-async fn query_password_hash(conn: &Connection, id_usuario: i64) -> AppResult<Option<String>> {
+async fn query_password_hash(conn: &Connection, id_usuario: &str) -> AppResult<Option<String>> {
     let mut rows = conn
         .query(
             r#"
@@ -210,7 +211,7 @@ async fn query_password_hash(conn: &Connection, id_usuario: i64) -> AppResult<Op
             WHERE ID_Usuario = ?1 AND Estado = 'Activo'
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_usuario)],
+            vec![Value::Text(id_usuario.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -224,7 +225,7 @@ async fn query_password_hash(conn: &Connection, id_usuario: i64) -> AppResult<Op
     }
 }
 
-async fn query_setup_info(conn: &Connection, id_usuario: i64) -> AppResult<Option<SetupInfo>> {
+async fn query_setup_info(conn: &Connection, id_usuario: &str) -> AppResult<Option<SetupInfo>> {
     let mut rows = conn
         .query(
             r#"
@@ -233,7 +234,7 @@ async fn query_setup_info(conn: &Connection, id_usuario: i64) -> AppResult<Optio
             WHERE ID_Usuario = ?1 AND Estado='Activo'
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_usuario)],
+            vec![Value::Text(id_usuario.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -258,7 +259,7 @@ async fn query_setup_info(conn: &Connection, id_usuario: i64) -> AppResult<Optio
 async fn query_email_in_use(
     conn: &Connection,
     email: &str,
-    exclude_id: i64,
+    exclude_id: &str,
 ) -> AppResult<bool> {
     let mut rows = conn
         .query(
@@ -267,7 +268,7 @@ async fn query_email_in_use(
             FROM Usuarios
             WHERE Email = ?1 AND ID_Usuario <> ?2;
             "#,
-            vec![Value::Text(email.to_string()), Value::Integer(exclude_id)],
+            vec![Value::Text(email.to_string()), Value::Text(exclude_id.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -281,7 +282,7 @@ async fn query_email_in_use(
 
 async fn exec_apply_initial_setup(
     conn: &Connection,
-    id_usuario: i64,
+    id_usuario: &str,
     email: String,
     new_hash: String,
 ) -> AppResult<()> {
@@ -292,7 +293,7 @@ async fn exec_apply_initial_setup(
         WHERE ID_Usuario = ?1;
         "#,
         vec![
-            Value::Integer(id_usuario),
+            Value::Text(id_usuario.to_string()),
             Value::Text(email),
             Value::Text(new_hash),
         ],
@@ -304,7 +305,7 @@ async fn exec_apply_initial_setup(
 
 async fn exec_punch(
     conn: &Connection,
-    id_usuario: i64,
+    id_usuario: &str,
     tipo: &str,
     fecha: Option<String>,
     hora_evento: Option<String>,
@@ -327,7 +328,7 @@ async fn exec_punch(
                       AND Hora_Salida IS NULL
                     LIMIT 1;
                     "#,
-                    vec![Value::Integer(id_usuario), Value::Text(fecha.clone())],
+                    vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -348,7 +349,7 @@ async fn exec_punch(
                     WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=1
                     LIMIT 1;
                     "#,
-                    vec![Value::Integer(id_usuario), Value::Text(fecha.clone())],
+                    vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -374,7 +375,7 @@ async fn exec_punch(
                             FROM Fichajes
                             WHERE ID_Usuario=?1 AND Fecha=?2 AND Parte=2;
                             "#,
-                            vec![Value::Integer(id_usuario), Value::Text(fecha.clone())],
+                            vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
                         )
                         .await
                         .map_err(db_err)?;
@@ -401,12 +402,13 @@ async fn exec_punch(
             conn.execute(
                 r#"
                 INSERT INTO Fichajes (
-                  ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
+                  ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
                 )
-                VALUES (?1, ?2, ?3, ?4, NULL, 'ABIERTO', 0);
+                VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'ABIERTO', 0);
                 "#,
                 vec![
-                    Value::Integer(id_usuario),
+                    Value::Text(new_id()),
+                    Value::Text(id_usuario.to_string()),
                     Value::Text(fecha.clone()),
                     Value::Integer(parte_a_abrir),
                     Value::Text(hora_evento.clone()),
@@ -427,7 +429,7 @@ async fn exec_punch(
                     ORDER BY Parte DESC
                     LIMIT 1;
                     "#,
-                    vec![Value::Integer(id_usuario), Value::Text(fecha.clone())],
+                    vec![Value::Text(id_usuario.to_string()), Value::Text(fecha.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -439,7 +441,7 @@ async fn exec_punch(
             };
 
             let id_f = match row.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => return Err(AppError::repository("ID_Fichaje inválido")),
             };
 
@@ -453,7 +455,7 @@ async fn exec_punch(
                     Incidencia = NULL
                 WHERE ID_Fichaje = ?1;
                 "#,
-                vec![Value::Integer(id_f), Value::Text(hora_evento.clone())],
+                vec![Value::Text(id_f), Value::Text(hora_evento.clone())],
             )
             .await
             .map_err(db_err)?;
@@ -497,7 +499,7 @@ impl LoginRepository for SqliteLoginRepository {
         let mut out: Vec<UserListItem> = vec![];
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let id_usuario = match row.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             let nombre = match row.get_value(1).map_err(db_err)? {
@@ -524,11 +526,11 @@ impl LoginRepository for SqliteLoginRepository {
         Ok(out)
     }
 
-    async fn get_today_punch_status(&self, id_usuario: i64) -> AppResult<PunchStatus> {
+    async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
         build_punch_status(&self.conn, id_usuario, &today_ymd()).await
     }
 
-    async fn login(&self, id_usuario: i64, pin: &str) -> AppResult<LoginOk> {
+    async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
         let rec = query_login_record(&self.conn, id_usuario)
             .await?
             .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?;
@@ -548,7 +550,7 @@ impl LoginRepository for SqliteLoginRepository {
 
     async fn complete_initial_setup(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin_actual: &str,
         pin_nuevo: &str,
         email_nuevo: &str,
@@ -574,7 +576,7 @@ impl LoginRepository for SqliteLoginRepository {
 
     async fn punch(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin: &str,
         tipo: &str,
         fecha: Option<String>,
@@ -591,7 +593,7 @@ impl LoginRepository for SqliteLoginRepository {
 
     async fn set_turno_partido(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         fecha: Option<String>,
         turno_partido: bool,
     ) -> AppResult<()> {
@@ -606,7 +608,7 @@ impl LoginRepository for SqliteLoginRepository {
               Turno_Partido = excluded.Turno_Partido;
             "#,
             vec![
-                Value::Integer(id_usuario),
+                Value::Text(id_usuario.to_string()),
                 Value::Text(fecha),
                 Value::Integer(if turno_partido { 1 } else { 0 }),
             ],

@@ -12,8 +12,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UserListItem {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     pub nombre: String,
     pub apellido: Option<String>,
     pub nombre_rol: String,
@@ -22,10 +21,8 @@ pub struct UserListItem {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LoginOk {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
-    #[ts(type = "number | null")]
-    pub id_trabajador: Option<i64>,
+    pub id_usuario: String,
+    pub id_trabajador: Option<String>,
     pub nombre: String,
     pub apellido: Option<String>,
     pub rol: String,
@@ -60,23 +57,20 @@ pub struct PunchStatus {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LoginUserArgs {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     pub pin: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct PunchStatusArgs {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct SetTurnoPartidoInput {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     pub turno_partido: bool,
     #[serde(default)]
     #[ts(optional)]
@@ -86,8 +80,7 @@ pub struct SetTurnoPartidoInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CompleteInitialSetupInput {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     pub pin_actual: String,
     pub pin_nuevo: String,
     pub email_nuevo: String,
@@ -96,8 +89,7 @@ pub struct CompleteInitialSetupInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct PunchInput {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     pub pin: String,
     pub tipo: String,
     #[serde(default)]

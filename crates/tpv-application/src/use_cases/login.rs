@@ -21,25 +21,25 @@ pub async fn list_login_users(repo: &dyn LoginRepository) -> AppResult<Vec<UserL
 }
 
 pub async fn login_user(repo: &dyn LoginRepository, args: LoginUserArgs) -> AppResult<LoginOk> {
-    repo.login(args.id_usuario, &args.pin).await
+    repo.login(&args.id_usuario, &args.pin).await
 }
 
 pub async fn get_today_punch_status(
     repo: &dyn LoginRepository,
     args: PunchStatusArgs,
 ) -> AppResult<PunchStatus> {
-    repo.get_today_punch_status(args.id_usuario).await
+    repo.get_today_punch_status(&args.id_usuario).await
 }
 
 pub async fn set_turno_partido_hoy(
     repo: &dyn LoginRepository,
     input: SetTurnoPartidoInput,
 ) -> AppResult<()> {
-    if input.id_usuario <= 0 {
+    if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
     }
     repo.set_turno_partido(
-        input.id_usuario,
+        &input.id_usuario,
         limpiar_opcional(input.fecha),
         input.turno_partido,
     )
@@ -54,7 +54,7 @@ pub async fn complete_initial_setup(
     let pin_actual = requerido(&input.pin_actual, "pin_actual").map_err(AppError::validation)?;
     let pin_nuevo = requerido(&input.pin_nuevo, "pin_nuevo").map_err(AppError::validation)?;
 
-    if input.id_usuario <= 0 {
+    if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
     }
     if pin_nuevo.trim().len() < 4 {
@@ -65,7 +65,7 @@ pub async fn complete_initial_setup(
     }
 
     repo.complete_initial_setup(
-        input.id_usuario,
+        &input.id_usuario,
         pin_actual.trim(),
         pin_nuevo.trim(),
         email_nuevo.trim(),
@@ -74,7 +74,7 @@ pub async fn complete_initial_setup(
 }
 
 pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<PunchStatus> {
-    if input.id_usuario <= 0 {
+    if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
     }
 
@@ -87,7 +87,7 @@ pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<P
     }
 
     repo.punch(
-        input.id_usuario,
+        &input.id_usuario,
         &input.pin,
         &tipo,
         limpiar_opcional(input.fecha),

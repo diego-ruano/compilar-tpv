@@ -15,16 +15,16 @@ use crate::error::AppResult;
 pub trait LoginRepository: Send + Sync {
     /* Lecturas */
     async fn list_login_users(&self) -> AppResult<Vec<UserListItem>>;
-    async fn get_today_punch_status(&self, id_usuario: i64) -> AppResult<PunchStatus>;
+    async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus>;
 
     /* Operaciones que verifican el PIN dentro del adaptador */
     /// Verifica el PIN y devuelve los datos de sesión.
-    async fn login(&self, id_usuario: i64, pin: &str) -> AppResult<LoginOk>;
+    async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk>;
 
     /// Verifica el PIN actual, comprueba el email y aplica el setup inicial (cambia PIN + email).
     async fn complete_initial_setup(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin_actual: &str,
         pin_nuevo: &str,
         email_nuevo: &str,
@@ -33,7 +33,7 @@ pub trait LoginRepository: Send + Sync {
     /// Aplica el fichaje (entrada/salida) tras verificar el PIN; devuelve el estado del día.
     async fn punch(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         pin: &str,
         tipo: &str,
         fecha: Option<String>,
@@ -43,7 +43,7 @@ pub trait LoginRepository: Send + Sync {
     /// Fija el turno partido del día (no requiere PIN).
     async fn set_turno_partido(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         fecha: Option<String>,
         turno_partido: bool,
     ) -> AppResult<()>;
