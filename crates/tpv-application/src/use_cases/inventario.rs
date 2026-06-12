@@ -25,9 +25,9 @@ pub async fn list_proveedores_mini(repo: &R) -> AppResult<Vec<ProveedorMiniDto>>
 
 pub async fn list_productos_by_categoria(
     repo: &R,
-    id_categoria: i64,
+    id_categoria: String,
 ) -> AppResult<Vec<ProductoListDto>> {
-    repo.list_productos_by_categoria(id_categoria).await
+    repo.list_productos_by_categoria(&id_categoria).await
 }
 
 pub async fn get_resumen(repo: &R, args: SummaryArgs) -> AppResult<InventarioResumenResponse> {
@@ -38,27 +38,27 @@ pub async fn list_alergenos(repo: &R) -> AppResult<Vec<AlergenoInvDto>> {
     repo.list_alergenos().await
 }
 
-pub async fn get_alergenos_producto(repo: &R, id_producto: i64) -> AppResult<Vec<i64>> {
-    repo.alergenos_producto(id_producto).await
+pub async fn get_alergenos_producto(repo: &R, id_producto: String) -> AppResult<Vec<String>> {
+    repo.alergenos_producto(&id_producto).await
 }
 
-pub async fn get_producto(repo: &R, id_producto: i64) -> AppResult<Option<ProductoBaseDto>> {
-    repo.get_producto(id_producto).await
+pub async fn get_producto(repo: &R, id_producto: String) -> AppResult<Option<ProductoBaseDto>> {
+    repo.get_producto(&id_producto).await
 }
 
-pub async fn get_product_detail(repo: &R, id_producto: i64) -> AppResult<ProductDetailResponse> {
-    repo.product_detail(id_producto).await
+pub async fn get_product_detail(repo: &R, id_producto: String) -> AppResult<ProductDetailResponse> {
+    repo.product_detail(&id_producto).await
 }
 
 pub async fn get_producto_detalle(
     repo: &R,
-    id_producto: i64,
+    id_producto: String,
 ) -> AppResult<Option<ProductoDetalleDto>> {
-    repo.producto_detalle(id_producto).await
+    repo.producto_detalle(&id_producto).await
 }
 
-pub async fn list_lotes_by_producto(repo: &R, id_producto: i64) -> AppResult<Vec<LoteDto>> {
-    repo.list_lotes_by_producto(id_producto).await
+pub async fn list_lotes_by_producto(repo: &R, id_producto: String) -> AppResult<Vec<LoteDto>> {
+    repo.list_lotes_by_producto(&id_producto).await
 }
 
 pub async fn create_categoria(repo: &R, input: UpsertCategoriaInput) -> AppResult<String> {
@@ -79,19 +79,19 @@ pub async fn set_alergenos_producto(
     repo: &R,
     input: SetProductoAlergenosInput,
 ) -> AppResult<String> {
-    if input.id_producto <= 0 {
+    if input.id_producto.trim().is_empty() {
         return Err(AppError::validation("id_producto inválido"));
     }
     let ids = normalize_ids(input.ids_alergenos);
-    repo.set_alergenos_producto(input.id_producto, ids).await?;
+    repo.set_alergenos_producto(&input.id_producto, ids).await?;
     Ok("OK".to_string())
 }
 
-pub async fn delete_producto(repo: &R, id_producto: i64) -> AppResult<String> {
-    if id_producto <= 0 {
+pub async fn delete_producto(repo: &R, id_producto: String) -> AppResult<String> {
+    if id_producto.trim().is_empty() {
         return Err(AppError::validation("id_producto inválido"));
     }
-    repo.delete_producto(id_producto).await?;
+    repo.delete_producto(&id_producto).await?;
     Ok("OK".to_string())
 }
 

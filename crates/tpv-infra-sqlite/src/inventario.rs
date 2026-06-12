@@ -16,8 +16,8 @@ use tpv_contracts::inventario::{
 };
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
 
-use crate::mapping::{opt_real, opt_text, v_f64, v_i64, v_string};
-use crate::util::next_table_id;
+use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteInventarioRepository {
     conn: Arc<Connection>,
@@ -36,9 +36,6 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 fn s(v: Value) -> String {
     v_string(v).unwrap_or_default()
 }
-fn i(v: Value) -> i64 {
-    v_i64(v).unwrap_or(0)
-}
 fn fl(v: Value) -> f64 {
     v_f64(v).unwrap_or(0.0)
 }
@@ -46,9 +43,9 @@ fn fl(v: Value) -> f64 {
 fn map_producto_base(row: &Row) -> AppResult<ProductoBaseDto> {
     let g = |idx: i32| row.get_value(idx).map_err(db_err);
     Ok(ProductoBaseDto {
-        id_producto: i(g(0)?),
-        id_categoria: i(g(1)?),
-        id_proveedor: v_i64(g(2)?),
+        id_producto: s(g(0)?),
+        id_categoria: s(g(1)?),
+        id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
         precio_venta: v_f64(g(4)?),
         stock_minimo: v_f64(g(5)?),
@@ -62,9 +59,9 @@ fn map_producto_base(row: &Row) -> AppResult<ProductoBaseDto> {
 fn map_producto_list(row: &Row) -> AppResult<ProductoListDto> {
     let g = |idx: i32| row.get_value(idx).map_err(db_err);
     let base = ProductoBaseDto {
-        id_producto: i(g(0)?),
-        id_categoria: i(g(1)?),
-        id_proveedor: v_i64(g(2)?),
+        id_producto: s(g(0)?),
+        id_categoria: s(g(1)?),
+        id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
         precio_venta: v_f64(g(4)?),
         stock_minimo: v_f64(g(6)?),
@@ -96,25 +93,25 @@ fn map_resumen(row: &Row) -> AppResult<ProductoResumenDto> {
 fn map_lote(row: &Row) -> AppResult<LoteDto> {
     let g = |idx: i32| row.get_value(idx).map_err(db_err);
     Ok(LoteDto {
-        id_lote: i(g(0)?),
-        id_producto: i(g(1)?),
+        id_lote: s(g(0)?),
+        id_producto: s(g(1)?),
         codigo_lote: s(g(2)?),
         fecha_entrada: s(g(3)?),
         caducidad: v_string(g(4)?),
         cantidad_inicial: fl(g(5)?),
         stock_disponible: fl(g(6)?),
         coste_unitario: v_f64(g(7)?),
-        id_proveedor: v_i64(g(8)?),
+        id_proveedor: norm_opt_string(g(8)?),
         notas: v_string(g(9)?),
     })
 }
 
 const SQL_PRODUCTO_BASE_COLS: &str = "ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada";
 
-async fn fetch_producto(conn: &Connection, id_producto: i64) -> AppResult<Option<ProductoBaseDto>> {
+async fn fetch_producto(conn: &Connection, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
     let sql = format!("SELECT {SQL_PRODUCTO_BASE_COLS} FROM Productos WHERE ID_Producto=?1 LIMIT 1;");
     let mut rows = conn
-        .query(&sql, vec![Value::Integer(id_producto)])
+        .query(&sql, vec![Value::Text(id_producto.to_string())])
         .await
         .map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
@@ -139,7 +136,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(CategoriaInvDto {
-                id_categoria: i(g(0)?),
+                id_categoria: s(g(0)?),
                 nombre: s(g(1)?),
                 nombre_imagen: v_string(g(2)?),
                 ruta_imagen: v_string(g(3)?),
@@ -163,7 +160,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(ProveedorMiniDto {
-                id_proveedor: i(g(0)?),
+                id_proveedor: s(g(0)?),
                 nombre_empresa: s(g(1)?),
                 email: v_string(g(2)?),
             });
@@ -173,7 +170,7 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn list_productos_by_categoria(
         &self,
-        id_categoria: i64,
+        id_categoria: &str,
     ) -> AppResult<Vec<ProductoListDto>> {
         let sql = r#"
           SELECT
@@ -189,7 +186,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         "#;
         let mut rows = self
             .conn
-            .query(sql, vec![Value::Integer(id_categoria)])
+            .query(sql, vec![Value::Text(id_categoria.to_string())])
             .await
             .map_err(db_err)?;
         let mut out = Vec::new();
@@ -264,7 +261,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(AlergenoInvDto {
-                id_alergeno: i(g(0)?),
+                id_alergeno: s(g(0)?),
                 nombre: s(g(1)?),
                 nombre_imagen: v_string(g(2)?),
                 ruta_imagen: v_string(g(3)?),
@@ -273,30 +270,30 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(out)
     }
 
-    async fn alergenos_producto(&self, id_producto: i64) -> AppResult<Vec<i64>> {
+    async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
         let mut rows = self
             .conn
             .query(
                 "SELECT ID_Alergeno FROM Producto_Alergenos WHERE ID_Producto=?1 ORDER BY ID_Alergeno ASC;",
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let id_a = i(row.get_value(0).map_err(db_err)?);
-            if id_a > 0 {
+            let id_a = s(row.get_value(0).map_err(db_err)?);
+            if !id_a.is_empty() {
                 out.push(id_a);
             }
         }
         Ok(out)
     }
 
-    async fn get_producto(&self, id_producto: i64) -> AppResult<Option<ProductoBaseDto>> {
+    async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
         fetch_producto(&self.conn, id_producto).await
     }
 
-    async fn product_detail(&self, id_producto: i64) -> AppResult<ProductDetailResponse> {
+    async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse> {
         let producto = fetch_producto(&self.conn, id_producto).await?;
         let mut rows = self
             .conn
@@ -308,7 +305,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 WHERE pa.ID_Producto = ?1
                 ORDER BY a.Nombre ASC;
                 "#,
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -316,7 +313,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             alergenos.push(AlergenoInvDto {
-                id_alergeno: i(g(0)?),
+                id_alergeno: s(g(0)?),
                 nombre: s(g(1)?),
                 nombre_imagen: v_string(g(2)?),
                 ruta_imagen: v_string(g(3)?),
@@ -325,7 +322,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(ProductDetailResponse { producto, alergenos })
     }
 
-    async fn producto_detalle(&self, id_producto: i64) -> AppResult<Option<ProductoDetalleDto>> {
+    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
         let Some(producto) = fetch_producto(&self.conn, id_producto).await? else {
             return Ok(None);
         };
@@ -339,7 +336,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 WHERE pa.ID_Producto=?1
                 ORDER BY a.Nombre ASC;
                 "#,
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -347,7 +344,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             alergs.push(AlergenoMiniDto {
-                id_alergeno: i(g(0)?),
+                id_alergeno: s(g(0)?),
                 nombre: s(g(1)?),
                 ruta_imagen: v_string(g(2)?),
             });
@@ -355,7 +352,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(Some(ProductoDetalleDto { producto, alergs }))
     }
 
-    async fn list_lotes_by_producto(&self, id_producto: i64) -> AppResult<Vec<LoteDto>> {
+    async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {
         let sql = r#"
           SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
           FROM Lotes_Producto
@@ -364,7 +361,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         "#;
         let mut rows = self
             .conn
-            .query(sql, vec![Value::Integer(id_producto)])
+            .query(sql, vec![Value::Text(id_producto.to_string())])
             .await
             .map_err(db_err)?;
         let mut out = Vec::new();
@@ -375,10 +372,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn create_categoria(&self, c: CategoriaUpsert) -> AppResult<()> {
-        let id = match c.id {
-            Some(id) => id,
-            None => next_table_id(&self.conn, "Categorias_Producto", "ID_Categoria").await?,
-        };
+        let id = c.id.unwrap_or_else(new_id);
         self.conn
             .execute(
                 r#"
@@ -392,7 +386,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Pasa_Cocina = excluded.Pasa_Cocina;
                 "#,
                 vec![
-                    Value::Integer(id),
+                    Value::Text(id),
                     Value::Text(c.nombre),
                     Value::Text(c.nombre_imagen),
                     Value::Text(c.ruta_imagen),
@@ -405,20 +399,20 @@ impl InventarioRepository for SqliteInventarioRepository {
         Ok(())
     }
 
-    async fn set_alergenos_producto(&self, id_producto: i64, ids: Vec<i64>) -> AppResult<()> {
+    async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             conn.execute(
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
             for id_a in ids {
                 conn.execute(
                     "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
-                    vec![Value::Integer(id_producto), Value::Integer(id_a)],
+                    vec![Value::Text(id_producto.to_string()), Value::Text(id_a)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -429,7 +423,7 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
-    async fn delete_producto(&self, id_producto: i64) -> AppResult<()> {
+    async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -438,7 +432,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
                 "DELETE FROM Productos WHERE ID_Producto=?1;",
             ] {
-                conn.execute(sql, vec![Value::Integer(id_producto)])
+                conn.execute(sql, vec![Value::Text(id_producto.to_string())])
                     .await
                     .map_err(db_err)?;
             }
@@ -448,12 +442,9 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
-    async fn upsert_producto(&self, p: ProductoUpsert) -> AppResult<i64> {
+    async fn upsert_producto(&self, p: ProductoUpsert) -> AppResult<String> {
         let conn = &self.conn;
-        let id_producto = match p.id {
-            Some(id) => id,
-            None => next_table_id(conn, "Productos", "ID_Producto").await?,
-        };
+        let id_producto = p.id.unwrap_or_else(new_id);
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             conn.execute(
@@ -472,10 +463,10 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada;
                 "#,
                 vec![
-                    Value::Integer(id_producto),
-                    Value::Integer(p.id_categoria),
+                    Value::Text(id_producto.to_string()),
+                    Value::Text(p.id_categoria),
                     match p.id_proveedor {
-                        Some(v) => Value::Integer(v),
+                        Some(v) => Value::Text(v),
                         None => Value::Null,
                     },
                     Value::Text(p.nombre),
@@ -492,14 +483,14 @@ impl InventarioRepository for SqliteInventarioRepository {
 
             conn.execute(
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
             for id_a in p.ids_alergenos {
                 conn.execute(
                     "INSERT OR IGNORE INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES (?1, ?2);",
-                    vec![Value::Integer(id_producto), Value::Integer(id_a)],
+                    vec![Value::Text(id_producto.to_string()), Value::Text(id_a)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -512,10 +503,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn create_lote(&self, l: LoteNuevo) -> AppResult<()> {
-        let id_lote = match l.id {
-            Some(id) => id,
-            None => next_table_id(&self.conn, "Lotes_Producto", "ID_Lote").await?,
-        };
+        let id_lote = l.id.unwrap_or_else(new_id);
         self.conn
             .execute(
                 r#"
@@ -535,8 +523,8 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Notas = excluded.Notas;
                 "#,
                 vec![
-                    Value::Integer(id_lote),
-                    Value::Integer(l.id_producto),
+                    Value::Text(id_lote),
+                    Value::Text(l.id_producto),
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
@@ -544,7 +532,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Real(l.stock_disponible),
                     opt_real(l.coste_unitario),
                     match l.id_proveedor {
-                        Some(v) => Value::Integer(v),
+                        Some(v) => Value::Text(v),
                         None => Value::Null,
                     },
                     opt_text(l.notas),
@@ -562,7 +550,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                 vec![
                     Value::Real(a.stock_disponible),
                     opt_text(a.notas),
-                    Value::Integer(a.id_lote),
+                    Value::Text(a.id_lote),
                 ],
             )
             .await

@@ -66,7 +66,7 @@ pub async fn inventario_list_alergenos(
 pub async fn inventario_get_alergenos_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<Vec<i64>, String> {
+) -> Result<Vec<String>, String> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_alergenos_producto(repo.as_ref(), args.id_producto).await?)
 }

@@ -16,7 +16,7 @@ use tpv_contracts::inventario::{
 };
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
 
-use crate::{extract_id, CloudClient};
+use crate::CloudClient;
 
 pub struct HttpInventarioRepository {
     client: Arc<CloudClient>,
@@ -27,7 +27,7 @@ impl HttpInventarioRepository {
         Self { client }
     }
 
-    async fn detalle(&self, id_producto: i64) -> AppResult<ProductDetailResponse> {
+    async fn detalle(&self, id_producto: &str) -> AppResult<ProductDetailResponse> {
         self.client
             .get_json(&format!("/v1/inventario/productos/{id_producto}"))
             .await
@@ -55,7 +55,7 @@ impl InventarioRepository for HttpInventarioRepository {
 
     async fn list_productos_by_categoria(
         &self,
-        id_categoria: i64,
+        id_categoria: &str,
     ) -> AppResult<Vec<ProductoListDto>> {
         self.client
             .get_query("/v1/inventario/productos", &[("categoria", id_categoria.to_string())])
@@ -72,21 +72,21 @@ impl InventarioRepository for HttpInventarioRepository {
         self.client.get_json("/v1/inventario/alergenos").await
     }
 
-    async fn alergenos_producto(&self, id_producto: i64) -> AppResult<Vec<i64>> {
+    async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
         self.client
             .get_json(&format!("/v1/inventario/productos/{id_producto}/alergenos"))
             .await
     }
 
-    async fn get_producto(&self, id_producto: i64) -> AppResult<Option<ProductoBaseDto>> {
+    async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
         Ok(self.detalle(id_producto).await?.producto)
     }
 
-    async fn product_detail(&self, id_producto: i64) -> AppResult<ProductDetailResponse> {
+    async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse> {
         self.detalle(id_producto).await
     }
 
-    async fn producto_detalle(&self, id_producto: i64) -> AppResult<Option<ProductoDetalleDto>> {
+    async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
         let resp = self.detalle(id_producto).await?;
         Ok(resp.producto.map(|producto| ProductoDetalleDto {
             producto,
@@ -94,7 +94,7 @@ impl InventarioRepository for HttpInventarioRepository {
         }))
     }
 
-    async fn list_lotes_by_producto(&self, id_producto: i64) -> AppResult<Vec<LoteDto>> {
+    async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {
         self.client
             .get_json(&format!("/v1/inventario/productos/{id_producto}/lotes"))
             .await
@@ -102,8 +102,9 @@ impl InventarioRepository for HttpInventarioRepository {
 
     // ── Escrituras ──
     async fn create_categoria(&self, cat: CategoriaUpsert) -> AppResult<()> {
+        let id_categoria = cat.id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_categoria": cat.id,
+            "id_categoria": id_categoria,
             "nombre": cat.nombre,
             "nombre_imagen": cat.nombre_imagen,
             "ruta_imagen": cat.ruta_imagen,
@@ -114,7 +115,7 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn set_alergenos_producto(&self, id_producto: i64, ids: Vec<i64>) -> AppResult<()> {
+    async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()> {
         let body = json!({ "ids_alergenos": ids });
         let _: JsonValue = self
             .client
@@ -123,7 +124,7 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn delete_producto(&self, id_producto: i64) -> AppResult<()> {
+    async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/inventario/productos/{id_producto}"))
@@ -131,9 +132,13 @@ impl InventarioRepository for HttpInventarioRepository {
         Ok(())
     }
 
-    async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<i64> {
+    async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String> {
+        let id_producto = producto
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_producto": producto.id,
+            "id_producto": id_producto,
             "id_categoria": producto.id_categoria,
             "id_proveedor": producto.id_proveedor,
             "nombre": producto.nombre,
@@ -145,13 +150,14 @@ impl InventarioRepository for HttpInventarioRepository {
             "cantidad_pedido_esperada": producto.cantidad_pedido_esperada,
             "ids_alergenos": producto.ids_alergenos,
         });
-        let resp: JsonValue = self.client.post_json("/v1/inventario/productos", &body).await?;
-        extract_id(&resp, "id_producto")
+        let _: JsonValue = self.client.post_json("/v1/inventario/productos", &body).await?;
+        Ok(id_producto)
     }
 
     async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()> {
+        let id_lote = lote.id.clone().unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_lote": lote.id,
+            "id_lote": id_lote,
             "id_producto": lote.id_producto,
             "codigo_lote": lote.codigo_lote,
             "caducidad": lote.caducidad,

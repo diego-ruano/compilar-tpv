@@ -4,9 +4,13 @@ fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Normaliza una lista de IDs: descarta <=0, ordena y deduplica.
-pub fn normalize_ids(ids: Vec<i64>) -> Vec<i64> {
-    let mut v: Vec<i64> = ids.into_iter().filter(|n| *n > 0).collect();
+/// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
+pub fn normalize_ids(ids: Vec<String>) -> Vec<String> {
+    let mut v: Vec<String> = ids
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     v.sort_unstable();
     v.dedup();
     v
@@ -15,7 +19,7 @@ pub fn normalize_ids(ids: Vec<i64>) -> Vec<i64> {
 /// Categoría a crear/upsertar.
 #[derive(Debug, Clone)]
 pub struct CategoriaUpsert {
-    pub id: Option<i64>,
+    pub id: Option<String>,
     pub nombre: String,
     pub nombre_imagen: String,
     pub ruta_imagen: String,
@@ -25,7 +29,7 @@ pub struct CategoriaUpsert {
 
 impl CategoriaUpsert {
     pub fn validar(
-        id_categoria: Option<i64>,
+        id_categoria: Option<String>,
         nombre: String,
         nombre_imagen: String,
         ruta_imagen: String,
@@ -37,7 +41,7 @@ impl CategoriaUpsert {
             return Err("nombre required".into());
         }
         Ok(CategoriaUpsert {
-            id: id_categoria.filter(|n| *n > 0),
+            id: id_categoria.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre,
             nombre_imagen: nombre_imagen.trim().to_string(),
             ruta_imagen: ruta_imagen.trim().to_string(),
@@ -50,9 +54,9 @@ impl CategoriaUpsert {
 /// Producto a crear/upsertar (con sus alérgenos).
 #[derive(Debug, Clone)]
 pub struct ProductoUpsert {
-    pub id: Option<i64>,
-    pub id_categoria: i64,
-    pub id_proveedor: Option<i64>,
+    pub id: Option<String>,
+    pub id_categoria: String,
+    pub id_proveedor: Option<String>,
     pub nombre: String,
     pub precio_venta: Option<f64>,
     pub stock_minimo: Option<f64>,
@@ -60,15 +64,15 @@ pub struct ProductoUpsert {
     pub nombre_imagen: Option<String>,
     pub ruta_imagen: Option<String>,
     pub cantidad_pedido_esperada: Option<f64>,
-    pub ids_alergenos: Vec<i64>,
+    pub ids_alergenos: Vec<String>,
 }
 
 impl ProductoUpsert {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
-        id_producto: Option<i64>,
-        id_categoria: i64,
-        id_proveedor: Option<i64>,
+        id_producto: Option<String>,
+        id_categoria: String,
+        id_proveedor: Option<String>,
         nombre: String,
         precio_venta: Option<f64>,
         stock_minimo: Option<f64>,
@@ -76,19 +80,20 @@ impl ProductoUpsert {
         nombre_imagen: Option<String>,
         ruta_imagen: Option<String>,
         cantidad_pedido_esperada: Option<f64>,
-        ids_alergenos: Vec<i64>,
+        ids_alergenos: Vec<String>,
     ) -> Result<Self, String> {
         let nombre = nombre.trim().to_string();
         if nombre.is_empty() {
             return Err("nombre required".into());
         }
-        if id_categoria <= 0 {
+        let id_categoria = id_categoria.trim().to_string();
+        if id_categoria.is_empty() {
             return Err("id_categoria inválido".into());
         }
         Ok(ProductoUpsert {
-            id: id_producto.filter(|n| *n > 0),
+            id: id_producto.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_categoria,
-            id_proveedor: id_proveedor.filter(|n| *n > 0),
+            id_proveedor: id_proveedor.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre,
             precio_venta,
             stock_minimo,
@@ -104,33 +109,34 @@ impl ProductoUpsert {
 /// Lote a crear/upsertar.
 #[derive(Debug, Clone)]
 pub struct LoteNuevo {
-    pub id: Option<i64>,
-    pub id_producto: i64,
+    pub id: Option<String>,
+    pub id_producto: String,
     pub codigo_lote: String,
     pub caducidad: Option<String>,
     pub cantidad_inicial: f64,
     pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
     pub coste_unitario: Option<f64>,
-    pub id_proveedor: Option<i64>,
+    pub id_proveedor: Option<String>,
     pub notas: Option<String>,
 }
 
 impl LoteNuevo {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
-        id_lote: Option<i64>,
-        id_producto: i64,
+        id_lote: Option<String>,
+        id_producto: String,
         codigo_lote: String,
         caducidad: Option<String>,
         cantidad_inicial: f64,
         stock_disponible: Option<f64>,
         fecha_entrada: Option<String>,
         coste_unitario: Option<f64>,
-        id_proveedor: Option<i64>,
+        id_proveedor: Option<String>,
         notas: Option<String>,
     ) -> Result<Self, String> {
-        if id_producto <= 0 {
+        let id_producto = id_producto.trim().to_string();
+        if id_producto.is_empty() {
             return Err("id_producto inválido".into());
         }
         let codigo_lote = codigo_lote.trim().to_string();
@@ -145,7 +151,7 @@ impl LoteNuevo {
             return Err("Stock_Disponible inválido".into());
         }
         Ok(LoteNuevo {
-            id: id_lote.filter(|n| *n > 0),
+            id: id_lote.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_producto,
             codigo_lote,
             caducidad: limpia(caducidad),
@@ -162,18 +168,19 @@ impl LoteNuevo {
 /// Ajuste de stock de un lote.
 #[derive(Debug, Clone)]
 pub struct AjusteLote {
-    pub id_lote: i64,
+    pub id_lote: String,
     pub stock_disponible: f64,
     pub notas: Option<String>,
 }
 
 impl AjusteLote {
     pub fn validar(
-        id_lote: i64,
+        id_lote: String,
         stock_disponible: f64,
         notas: Option<String>,
     ) -> Result<Self, String> {
-        if id_lote <= 0 {
+        let id_lote = id_lote.trim().to_string();
+        if id_lote.is_empty() {
             return Err("id_lote inválido".into());
         }
         if !stock_disponible.is_finite() || stock_disponible < 0.0 {

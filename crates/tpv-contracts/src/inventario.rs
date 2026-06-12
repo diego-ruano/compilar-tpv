@@ -11,8 +11,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CategoriaInvDto {
     #[serde(rename = "ID_Categoria")]
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Nombre_Imagen")]
@@ -31,8 +30,7 @@ pub struct CategoriaInvDto {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ProveedorMiniDto {
     #[serde(rename = "ID_Proveedor")]
-    #[ts(type = "number")]
-    pub id_proveedor: i64,
+    pub id_proveedor: String,
     #[serde(rename = "Nombre_Empresa")]
     pub nombre_empresa: String,
     #[serde(rename = "Email")]
@@ -43,14 +41,11 @@ pub struct ProveedorMiniDto {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ProductoBaseDto {
     #[serde(rename = "ID_Producto")]
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
     #[serde(rename = "ID_Categoria")]
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
     #[serde(rename = "ID_Proveedor")]
-    #[ts(type = "number | null")]
-    pub id_proveedor: Option<i64>,
+    pub id_proveedor: Option<String>,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Precio_Venta")]
@@ -102,8 +97,7 @@ pub struct ProductoResumenDto {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AlergenoInvDto {
     #[serde(rename = "ID_Alergeno")]
-    #[ts(type = "number")]
-    pub id_alergeno: i64,
+    pub id_alergeno: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Nombre_Imagen")]
@@ -116,8 +110,7 @@ pub struct AlergenoInvDto {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AlergenoMiniDto {
     #[serde(rename = "ID_Alergeno")]
-    #[ts(type = "number")]
-    pub id_alergeno: i64,
+    pub id_alergeno: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Ruta_Imagen")]
@@ -145,11 +138,9 @@ pub struct ProductDetailResponse {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LoteDto {
     #[serde(rename = "ID_Lote")]
-    #[ts(type = "number")]
-    pub id_lote: i64,
+    pub id_lote: String,
     #[serde(rename = "ID_Producto")]
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
     #[serde(rename = "Codigo_Lote")]
     pub codigo_lote: String,
     #[serde(rename = "Fecha_Entrada")]
@@ -163,8 +154,7 @@ pub struct LoteDto {
     #[serde(rename = "Coste_Unitario")]
     pub coste_unitario: Option<f64>,
     #[serde(rename = "ID_Proveedor")]
-    #[ts(type = "number | null")]
-    pub id_proveedor: Option<i64>,
+    pub id_proveedor: Option<String>,
     #[serde(rename = "Notas")]
     pub notas: Option<String>,
 }
@@ -181,8 +171,7 @@ pub struct InventarioResumenResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpsertProductoResult {
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
 }
 
 /* ── Args/Inputs ── */
@@ -190,15 +179,13 @@ pub struct UpsertProductoResult {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct IdCategoriaArgs {
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct IdProductoArgs {
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -213,8 +200,8 @@ pub struct SummaryArgs {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpsertCategoriaInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_categoria: Option<i64>,
+    #[ts(optional)]
+    pub id_categoria: Option<String>,
     pub nombre: String,
     pub nombre_imagen: String,
     pub ruta_imagen: String,
@@ -225,23 +212,20 @@ pub struct UpsertCategoriaInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct SetProductoAlergenosInput {
-    #[ts(type = "number")]
-    pub id_producto: i64,
-    #[ts(type = "Array<number>")]
-    pub ids_alergenos: Vec<i64>,
+    pub id_producto: String,
+    pub ids_alergenos: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpsertProductoInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_producto: Option<i64>,
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    #[ts(optional)]
+    pub id_producto: Option<String>,
+    pub id_categoria: String,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_proveedor: Option<i64>,
+    #[ts(optional)]
+    pub id_proveedor: Option<String>,
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]
@@ -262,18 +246,16 @@ pub struct UpsertProductoInput {
     #[ts(optional)]
     pub cantidad_pedido_esperada: Option<f64>,
     #[serde(default)]
-    #[ts(type = "Array<number>")]
-    pub ids_alergenos: Vec<i64>,
+    pub ids_alergenos: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CreateLoteInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_lote: Option<i64>,
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    #[ts(optional)]
+    pub id_lote: Option<String>,
+    pub id_producto: String,
     pub codigo_lote: String,
     #[serde(default)]
     #[ts(optional)]
@@ -289,8 +271,8 @@ pub struct CreateLoteInput {
     #[ts(optional)]
     pub coste_unitario: Option<f64>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_proveedor: Option<i64>,
+    #[ts(optional)]
+    pub id_proveedor: Option<String>,
     #[serde(default)]
     #[ts(optional)]
     pub notas: Option<String>,
@@ -299,8 +281,7 @@ pub struct CreateLoteInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AjusteLoteInput {
-    #[ts(type = "number")]
-    pub id_lote: i64,
+    pub id_lote: String,
     pub stock_disponible: f64,
     #[serde(default)]
     #[ts(optional)]
