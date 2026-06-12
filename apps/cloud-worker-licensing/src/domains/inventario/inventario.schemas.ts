@@ -19,8 +19,13 @@ const optStr = z.string().nullish();
 const posInt = z.number().int().positive();
 const idList = z.array(z.number()).default([]);
 
+// ID autogenerado por el backend (MAX+1 en el DO). El cliente HTTP de la Main/Handy lo
+// envía como `null` cuando no lo conoce; lo aceptamos y lo normalizamos a `undefined` para
+// no romper los tipos de @tpv/contracts (que esperan `number | undefined`).
+const optId = posInt.nullish().transform((v) => (v == null ? undefined : v));
+
 export const upsertCategoriaSchema = z.object({
-	id_categoria: posInt.optional(),
+	id_categoria: optId,
 	nombre: z.string().trim().min(1, "nombre required"),
 	nombre_imagen: z.string().default(""),
 	ruta_imagen: z.string().default(""),
@@ -29,7 +34,7 @@ export const upsertCategoriaSchema = z.object({
 });
 
 export const upsertProductoSchema = z.object({
-	id_producto: posInt.optional(),
+	id_producto: optId,
 	id_categoria: posInt,
 	id_proveedor: posInt.nullish(),
 	nombre: z.string().trim().min(1, "nombre required"),
@@ -47,7 +52,7 @@ export const setAlergenosSchema = z.object({
 });
 
 export const createLoteSchema = z.object({
-	id_lote: posInt.optional(),
+	id_lote: optId,
 	id_producto: posInt,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
 	caducidad: optStr,

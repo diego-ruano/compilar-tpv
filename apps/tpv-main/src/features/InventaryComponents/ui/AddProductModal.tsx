@@ -18,6 +18,7 @@ import {
     useProveedoresMini,
     useUpsertProducto,
 } from "../inventarioQueries";
+import { useMode } from "../../../shared/stores/useMode";
 
 type CategoriaMini = { ID_Categoria: number; Nombre: string };
 
@@ -66,6 +67,7 @@ export function AddProductModal({
 
     const upsertProducto = useUpsertProducto();
     const createLote = useCreateLote();
+    const deviceMode = useMode((s) => s.mode);
 
     const categorias: CategoriaMini[] = useMemo(
         () =>
@@ -280,7 +282,10 @@ export function AddProductModal({
             let nombreArchivo = existingImageName;
             let rutaParaBD = existingImagePath;
 
-            if (image) {
+            // En modo Handy NO guardamos la imagen: el comando `save_image` escribe en el
+            // AppData local del Handy y esos bytes no se sincronizan (no hay bucket todavía).
+            // Subimos el producto sin imagen (cadena vacía → placeholder).
+            if (image && deviceMode !== "handy") {
                 const uuid = crypto.randomUUID();
                 const extension = image.name.split(".").pop() || "png";
                 nombreArchivo = `${uuid}.${extension}`;
@@ -292,9 +297,11 @@ export function AddProductModal({
                 const base64Data = base64String.split(",")[1];
 
                 await invoke("save_image", {
-                    subfolder: subcarpeta,
-                    filename: nombreArchivo,
-                    base64Data,
+                    args: {
+                        subfolder: subcarpeta,
+                        filename: nombreArchivo,
+                        base64_data: base64Data,
+                    },
                 });
             }
 

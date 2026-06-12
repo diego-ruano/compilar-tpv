@@ -16,7 +16,9 @@ function cleanOptional(v: unknown): string | null {
 const optStr = z.string().nullish().transform(cleanOptional);
 
 export const createClienteSchema = z.object({
-	id_cliente: posInt.optional(),
+	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
+	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
+	id_cliente: posInt.nullish().transform((v) => (v == null ? undefined : v)),
 	nombre: z.string().trim().min(1, "nombre required"),
 	email: optStr,
 	telefono: optStr,

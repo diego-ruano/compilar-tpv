@@ -12,6 +12,7 @@ import {
   useProveedoresMini,
   useUpsertProducto,
 } from "../../InventaryComponents/inventarioQueries";
+import { useMode } from "../../../shared/stores/useMode";
 
 type CategoriaMini = { ID_Categoria: number; Nombre: string };
 type ProveedorMini = {
@@ -69,6 +70,7 @@ export default function AddProductModal({
 
   const upsertProducto = useUpsertProducto();
   const createLote = useCreateLote();
+  const deviceMode = useMode((s) => s.mode);
 
   const categorias: CategoriaMini[] = useMemo(
     () =>
@@ -157,28 +159,44 @@ export default function AddProductModal({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    if (!nombre.trim() || idCategoria === "" || !image) {
-      toast.info("Validación", "Nombre, categoría e imagen son obligatorios.");
+    // En Handy la imagen NO es obligatoria: no hay bucket y `save_image` solo escribiría
+    // en el AppData local del Handy (no se sincroniza). En la Main sigue siendo obligatoria.
+    const requiereImagen = deviceMode !== "handy";
+    if (!nombre.trim() || idCategoria === "" || (requiereImagen && !image)) {
+      toast.info(
+        "Validación",
+        requiereImagen
+          ? "Nombre, categoría e imagen son obligatorios."
+          : "Nombre y categoría son obligatorios.",
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      const uuid = crypto.randomUUID();
-      const extension = image.name.split(".").pop() || "png";
-      const nombreArchivo = `${uuid}.${extension}`;
-      const subcarpeta = "productos";
-      const rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
+      let nombreArchivo = "";
+      let rutaParaBD = "";
 
-      const base64String = await convertirABase64(image);
-      const base64Data = base64String.split(",")[1];
+      // En Handy subimos el producto sin imagen (cadena vacía → placeholder).
+      if (image && deviceMode !== "handy") {
+        const uuid = crypto.randomUUID();
+        const extension = image.name.split(".").pop() || "png";
+        nombreArchivo = `${uuid}.${extension}`;
+        const subcarpeta = "productos";
+        rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
 
-      await invoke("save_image", {
-        subfolder: subcarpeta,
-        filename: nombreArchivo,
-        base64Data,
-      });
+        const base64String = await convertirABase64(image);
+        const base64Data = base64String.split(",")[1];
+
+        await invoke("save_image", {
+          args: {
+            subfolder: subcarpeta,
+            filename: nombreArchivo,
+            base64_data: base64Data,
+          },
+        });
+      }
 
       const nuevoProductoId = await upsertProducto.mutateAsync({
         id_categoria: Number(idCategoria),

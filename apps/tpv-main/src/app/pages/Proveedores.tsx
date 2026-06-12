@@ -13,6 +13,7 @@ import {
 import { useToast } from "../../shared/toast";
 import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
+import { useMode } from "../../shared/stores/useMode";
 
 import Product from "../../features/InventaryComponents/Product";
 import Modal from "../../features/proveedores/Modal";
@@ -78,6 +79,7 @@ export default function Proveedores() {
   const [busqueda, setBusqueda] = useState("");
 
   const [loadingLocal, setLoadingLocal] = useState(false);
+  const deviceMode = useMode((s) => s.mode);
   const [proveedores, setProveedores] = useState<ProveedorUI[]>([]);
   const [proveedorActivo, setProveedorActivo] = useState<ProveedorUI | null>(null);
   const toast = useToast();
@@ -341,7 +343,10 @@ export default function Proveedores() {
       let nombreImagen: string | null = null;
       let rutaImagen: string | null = null;
 
-      if (fotoNuevaFile) {
+      // En modo Handy NO guardamos la imagen: `save_image` escribe en el AppData local
+      // del Handy y esos bytes no se sincronizan (no hay bucket todavía). El proveedor se
+      // sube sin imagen (null → placeholder).
+      if (fotoNuevaFile && deviceMode !== "handy") {
         const uuid = crypto.randomUUID();
         const ext = safeExtFromName(fotoNuevaFile.name);
         nombreImagen = `prov_${uuid}.${ext}`;
@@ -353,9 +358,11 @@ export default function Proveedores() {
         const base64Data = base64String.split(",")[1];
 
         await invoke("save_image", {
-          subfolder: subcarpeta,
-          filename: nombreImagen,
-          base64Data,
+          args: {
+            subfolder: subcarpeta,
+            filename: nombreImagen,
+            base64_data: base64Data,
+          },
         });
       }
 

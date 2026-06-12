@@ -4,6 +4,7 @@ import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { convertirABase64 } from "../utils/inventarioFormat";
 import { useCreateCategoria } from "../inventarioQueries";
+import { useMode } from "../../../shared/stores/useMode";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -30,6 +31,7 @@ export default function AddCategoryModal({
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     const createCategoria = useCreateCategoria();
+    const deviceMode = useMode((s) => s.mode);
 
     const nameError = useMemo(() => {
         if (!touched) return "";
@@ -93,7 +95,10 @@ export default function AddCategoryModal({
             let nombreArchivo = "";
             let rutaParaBD = "";
 
-            if (image) {
+            // En modo Handy NO guardamos la imagen: el comando `save_image` escribe en el
+            // AppData local del Handy y esos bytes no se sincronizan (no hay bucket todavía).
+            // Subimos la categoría sin imagen (cadena vacía → placeholder).
+            if (image && deviceMode !== "handy") {
                 const uuid = crypto.randomUUID();
                 const extension = image.name.split(".").pop() || "png";
                 nombreArchivo = `${uuid}.${extension}`;
@@ -105,9 +110,11 @@ export default function AddCategoryModal({
                 const base64Data = base64String.split(",")[1];
 
                 await invoke("save_image", {
-                    subfolder: subcarpeta,
-                    filename: nombreArchivo,
-                    base64Data,
+                    args: {
+                        subfolder: subcarpeta,
+                        filename: nombreArchivo,
+                        base64_data: base64Data,
+                    },
                 });
             }
 
