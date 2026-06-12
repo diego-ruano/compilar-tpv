@@ -23,30 +23,30 @@ pub async fn get_tarea_by_id(
     repo: &dyn TareasRepository,
     args: TareaIdArgs,
 ) -> AppResult<Option<TareaRow>> {
-    if args.id_tarea <= 0 {
+    if args.id_tarea.trim().is_empty() {
         return Ok(None);
     }
-    repo.get_tarea_by_id(args.id_tarea).await
+    repo.get_tarea_by_id(&args.id_tarea).await
 }
 
 pub async fn get_tarea_asignados(
     repo: &dyn TareasRepository,
     args: TareaIdArgs,
 ) -> AppResult<Vec<TareaAsignadoRow>> {
-    if args.id_tarea <= 0 {
+    if args.id_tarea.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.get_tarea_asignados(args.id_tarea).await
+    repo.get_tarea_asignados(&args.id_tarea).await
 }
 
 pub async fn get_mis_tareas(
     repo: &dyn TareasRepository,
     args: MisTareasArgs,
 ) -> AppResult<Vec<MisTareasRow>> {
-    if args.id_trabajador <= 0 {
+    if args.id_trabajador.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.get_mis_tareas(args.id_trabajador).await
+    repo.get_mis_tareas(&args.id_trabajador).await
 }
 
 /* Escrituras */
@@ -69,7 +69,7 @@ pub async fn create_tarea(repo: &dyn TareasRepository, input: CreateTareaInput) 
 }
 
 pub async fn update_tarea(repo: &dyn TareasRepository, input: UpdateTareaInput) -> AppResult<bool> {
-    if input.id_tarea <= 0 {
+    if input.id_tarea.trim().is_empty() {
         return Err(AppError::validation("id_tarea required"));
     }
 
@@ -81,34 +81,34 @@ pub async fn update_tarea(repo: &dyn TareasRepository, input: UpdateTareaInput) 
         fecha_limite: limpiar_opcional(input.fecha_limite),
     };
 
-    repo.update_tarea(input.id_tarea, data).await
+    repo.update_tarea(&input.id_tarea, data).await
 }
 
 pub async fn set_asignaciones(
     repo: &dyn TareasRepository,
     input: SetAsignacionesTareaInput,
 ) -> AppResult<bool> {
-    if input.id_tarea <= 0 {
+    if input.id_tarea.trim().is_empty() {
         return Err(AppError::validation("id_tarea required"));
     }
 
-    repo.set_asignaciones(input.id_tarea, normalizar_ids(input.ids_trabajadores))
+    repo.set_asignaciones(&input.id_tarea, normalizar_ids(input.ids_trabajadores))
         .await
 }
 
 pub async fn delete_tarea(repo: &dyn TareasRepository, args: TareaIdArgs) -> AppResult<bool> {
-    if args.id_tarea <= 0 {
+    if args.id_tarea.trim().is_empty() {
         return Err(AppError::validation("id_tarea required"));
     }
-    repo.delete_tarea(args.id_tarea).await
+    repo.delete_tarea(&args.id_tarea).await
 }
 
 pub async fn marcar_finalizada(
     repo: &dyn TareasRepository,
     input: FinalizarTareaInput,
 ) -> AppResult<bool> {
-    if input.id_tarea <= 0 || input.id_trabajador <= 0 {
+    if input.id_tarea.trim().is_empty() || input.id_trabajador.trim().is_empty() {
         return Err(AppError::validation("id_tarea/id_trabajador required"));
     }
-    repo.marcar_finalizada(input.id_tarea, input.id_trabajador).await
+    repo.marcar_finalizada(&input.id_tarea, &input.id_trabajador).await
 }

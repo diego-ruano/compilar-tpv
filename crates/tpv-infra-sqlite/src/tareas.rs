@@ -17,6 +17,7 @@ use tpv_contracts::tareas::{
 use tpv_domain::tareas::TareaData;
 
 use crate::mapping::{v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteTareasRepository {
     conn: Arc<Connection>,
@@ -51,13 +52,13 @@ async fn select_one_i64(
     Ok(None)
 }
 
-async fn exists_tarea(conn: &Connection, id_tarea: i64) -> AppResult<bool> {
-    if id_tarea <= 0 {
+async fn exists_tarea(conn: &Connection, id_tarea: &str) -> AppResult<bool> {
+    if id_tarea.trim().is_empty() {
         return Ok(false);
     }
     Ok(
         select_one_i64(conn, "SELECT 1 FROM Tareas WHERE ID_Tarea=?1 LIMIT 1;", vec![
-            Value::Integer(id_tarea),
+            Value::Text(id_tarea.to_string()),
         ])
         .await?
         .is_some(),
@@ -68,13 +69,13 @@ async fn exists_tarea(conn: &Connection, id_tarea: i64) -> AppResult<bool> {
 /// las nuevas con estado PENDIENTE). No abre transacción: el llamador la gestiona.
 async fn apply_set_asignaciones_core(
     conn: &Connection,
-    id_tarea: i64,
-    ids_trabajadores: &[i64],
+    id_tarea: &str,
+    ids_trabajadores: &[String],
 ) -> AppResult<()> {
     if ids_trabajadores.is_empty() {
         conn.execute(
             "DELETE FROM Tarea_Asignaciones WHERE ID_Tarea = ?1;",
-            vec![Value::Integer(id_tarea)],
+            vec![Value::Text(id_tarea.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -82,9 +83,9 @@ async fn apply_set_asignaciones_core(
         let placeholders = build_in_placeholders(2, ids_trabajadores.len());
 
         let mut sql_args: Vec<Value> = Vec::with_capacity(1 + ids_trabajadores.len());
-        sql_args.push(Value::Integer(id_tarea));
+        sql_args.push(Value::Text(id_tarea.to_string()));
         for id_trab in ids_trabajadores.iter() {
-            sql_args.push(Value::Integer(*id_trab));
+            sql_args.push(Value::Text(id_trab.clone()));
         }
 
         let sql = format!(
@@ -115,7 +116,7 @@ async fn apply_set_asignaciones_core(
               'PENDIENTE'
             );
             "#,
-            vec![Value::Integer(id_tarea), Value::Integer(*id_trab)],
+            vec![Value::Text(id_tarea.to_string()), Value::Text(id_trab.clone())],
         )
         .await
         .map_err(db_err)?;
@@ -148,8 +149,8 @@ impl TareasRepository for SqliteTareasRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(TrabajadorUI {
-                id_trabajador: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
-                id_usuario: v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+                id_trabajador: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                id_usuario: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 nombre: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 apellido: v_string(row.get_value(3).map_err(db_err)?),
                 puesto: v_string(row.get_value(4).map_err(db_err)?),
@@ -191,7 +192,7 @@ impl TareasRepository for SqliteTareasRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(TareaAdminRow {
-                id_tarea: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_tarea: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 titulo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 descripcion: v_string(row.get_value(2).map_err(db_err)?),
                 fecha_creacion: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
@@ -204,10 +205,10 @@ impl TareasRepository for SqliteTareasRepository {
         Ok(out)
     }
 
-    async fn get_tarea_by_id(&self, id_tarea: i64) -> AppResult<Option<TareaRow>> {
+    async fn get_tarea_by_id(&self, id_tarea: &str) -> AppResult<Option<TareaRow>> {
         let conn = &self.conn;
 
-        if id_tarea <= 0 {
+        if id_tarea.trim().is_empty() {
             return Ok(None);
         }
 
@@ -219,7 +220,7 @@ impl TareasRepository for SqliteTareasRepository {
                 WHERE ID_Tarea = ?1
                 LIMIT 1;
                 "#,
-                vec![Value::Integer(id_tarea)],
+                vec![Value::Text(id_tarea.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -229,7 +230,7 @@ impl TareasRepository for SqliteTareasRepository {
         };
 
         Ok(Some(TareaRow {
-            id_tarea: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+            id_tarea: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
             titulo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
             descripcion: v_string(row.get_value(2).map_err(db_err)?),
             fecha_creacion: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
@@ -237,10 +238,10 @@ impl TareasRepository for SqliteTareasRepository {
         }))
     }
 
-    async fn get_tarea_asignados(&self, id_tarea: i64) -> AppResult<Vec<TareaAsignadoRow>> {
+    async fn get_tarea_asignados(&self, id_tarea: &str) -> AppResult<Vec<TareaAsignadoRow>> {
         let conn = &self.conn;
 
-        if id_tarea <= 0 {
+        if id_tarea.trim().is_empty() {
             return Ok(vec![]);
         }
 
@@ -261,7 +262,7 @@ impl TareasRepository for SqliteTareasRepository {
         "#;
 
         let mut rows = conn
-            .query(sql, vec![Value::Integer(id_tarea)])
+            .query(sql, vec![Value::Text(id_tarea.to_string())])
             .await
             .map_err(db_err)?;
 
@@ -269,7 +270,7 @@ impl TareasRepository for SqliteTareasRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(TareaAsignadoRow {
-                id_trabajador: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_trabajador: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 apellido: v_string(row.get_value(2).map_err(db_err)?),
                 puesto: v_string(row.get_value(3).map_err(db_err)?),
@@ -283,10 +284,10 @@ impl TareasRepository for SqliteTareasRepository {
         Ok(out)
     }
 
-    async fn get_mis_tareas(&self, id_trabajador: i64) -> AppResult<Vec<MisTareasRow>> {
+    async fn get_mis_tareas(&self, id_trabajador: &str) -> AppResult<Vec<MisTareasRow>> {
         let conn = &self.conn;
 
-        if id_trabajador <= 0 {
+        if id_trabajador.trim().is_empty() {
             return Ok(vec![]);
         }
 
@@ -314,7 +315,7 @@ impl TareasRepository for SqliteTareasRepository {
         "#;
 
         let mut rows = conn
-            .query(sql, vec![Value::Integer(id_trabajador)])
+            .query(sql, vec![Value::Text(id_trabajador.to_string())])
             .await
             .map_err(db_err)?;
 
@@ -322,7 +323,7 @@ impl TareasRepository for SqliteTareasRepository {
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(MisTareasRow {
-                id_tarea: v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_tarea: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 titulo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 descripcion: v_string(row.get_value(2).map_err(db_err)?),
                 fecha_limite: v_string(row.get_value(3).map_err(db_err)?),
@@ -339,22 +340,26 @@ impl TareasRepository for SqliteTareasRepository {
     async fn create_tarea(
         &self,
         data: TareaData,
-        ids_trabajadores: Vec<i64>,
+        ids_trabajadores: Vec<String>,
     ) -> AppResult<bool> {
         let conn = &self.conn;
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
+            // UUIDv7 explícito (la BD ya no autoincrementa el id).
+            let id_tarea = new_id();
             conn.execute(
                 r#"
                 INSERT INTO Tareas (
+                  ID_Tarea,
                   Titulo,
                   Descripcion,
                   Fecha_Limite
                 )
-                VALUES (?1, ?2, ?3);
+                VALUES (?1, ?2, ?3, ?4);
                 "#,
                 vec![
+                    Value::Text(id_tarea.clone()),
                     Value::Text(data.titulo.clone()),
                     data.descripcion.clone().map(Value::Text).unwrap_or(Value::Null),
                     data.fecha_limite.clone().map(Value::Text).unwrap_or(Value::Null),
@@ -363,15 +368,7 @@ impl TareasRepository for SqliteTareasRepository {
             .await
             .map_err(db_err)?;
 
-            let id_tarea = select_one_i64(conn, "SELECT last_insert_rowid();", vec![])
-                .await?
-                .ok_or_else(|| AppError::repository("No se pudo obtener last_insert_rowid()"))?;
-
-            if id_tarea <= 0 {
-                return Err(AppError::repository("ID_Tarea inválido al crear"));
-            }
-
-            apply_set_asignaciones_core(conn, id_tarea, &ids_trabajadores).await?;
+            apply_set_asignaciones_core(conn, &id_tarea, &ids_trabajadores).await?;
 
             Ok(true)
         }
@@ -389,7 +386,7 @@ impl TareasRepository for SqliteTareasRepository {
         }
     }
 
-    async fn update_tarea(&self, id_tarea: i64, data: TareaData) -> AppResult<bool> {
+    async fn update_tarea(&self, id_tarea: &str, data: TareaData) -> AppResult<bool> {
         let conn = &self.conn;
 
         let affected = conn
@@ -403,7 +400,7 @@ impl TareasRepository for SqliteTareasRepository {
                 WHERE ID_Tarea = ?1;
                 "#,
                 vec![
-                    Value::Integer(id_tarea),
+                    Value::Text(id_tarea.to_string()),
                     Value::Text(data.titulo.clone()),
                     data.descripcion.clone().map(Value::Text).unwrap_or(Value::Null),
                     data.fecha_limite.clone().map(Value::Text).unwrap_or(Value::Null),
@@ -421,8 +418,8 @@ impl TareasRepository for SqliteTareasRepository {
 
     async fn set_asignaciones(
         &self,
-        id_tarea: i64,
-        ids_trabajadores: Vec<i64>,
+        id_tarea: &str,
+        ids_trabajadores: Vec<String>,
     ) -> AppResult<bool> {
         let conn = &self.conn;
 
@@ -449,14 +446,14 @@ impl TareasRepository for SqliteTareasRepository {
         }
     }
 
-    async fn delete_tarea(&self, id_tarea: i64) -> AppResult<bool> {
+    async fn delete_tarea(&self, id_tarea: &str) -> AppResult<bool> {
         let conn = &self.conn;
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
                 "DELETE FROM Tarea_Asignaciones WHERE ID_Tarea = ?1;",
-                vec![Value::Integer(id_tarea)],
+                vec![Value::Text(id_tarea.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -464,7 +461,7 @@ impl TareasRepository for SqliteTareasRepository {
             let affected = conn
                 .execute(
                     "DELETE FROM Tareas WHERE ID_Tarea = ?1;",
-                    vec![Value::Integer(id_tarea)],
+                    vec![Value::Text(id_tarea.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -489,7 +486,7 @@ impl TareasRepository for SqliteTareasRepository {
         }
     }
 
-    async fn marcar_finalizada(&self, id_tarea: i64, id_trabajador: i64) -> AppResult<bool> {
+    async fn marcar_finalizada(&self, id_tarea: &str, id_trabajador: &str) -> AppResult<bool> {
         let conn = &self.conn;
 
         let affected = conn
@@ -502,7 +499,7 @@ impl TareasRepository for SqliteTareasRepository {
                 WHERE ID_Tarea = ?1
                   AND ID_Trabajador = ?2;
                 "#,
-                vec![Value::Integer(id_tarea), Value::Integer(id_trabajador)],
+                vec![Value::Text(id_tarea.to_string()), Value::Text(id_trabajador.to_string())],
             )
             .await
             .map_err(db_err)?;

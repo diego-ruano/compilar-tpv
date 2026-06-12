@@ -21,9 +21,13 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
     })
 }
 
-/// Normaliza una lista de IDs: descarta <= 0, ordena y deduplica.
-pub fn normalizar_ids(mut ids: Vec<i64>) -> Vec<i64> {
-    ids.retain(|n| *n > 0);
+/// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
+pub fn normalizar_ids(ids: Vec<String>) -> Vec<String> {
+    let mut ids: Vec<String> = ids
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     ids.sort_unstable();
     ids.dedup();
     ids

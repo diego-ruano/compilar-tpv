@@ -14,11 +14,9 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorUI {
     #[serde(rename = "ID_Trabajador")]
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     #[serde(rename = "ID_Usuario")]
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    pub id_usuario: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Apellido")]
@@ -33,8 +31,7 @@ pub struct TrabajadorUI {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TareaAdminRow {
     #[serde(rename = "ID_Tarea")]
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
     #[serde(rename = "Titulo")]
     pub titulo: String,
     #[serde(rename = "Descripcion")]
@@ -55,8 +52,7 @@ pub struct TareaAdminRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TareaRow {
     #[serde(rename = "ID_Tarea")]
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
     #[serde(rename = "Titulo")]
     pub titulo: String,
     #[serde(rename = "Descripcion")]
@@ -71,8 +67,7 @@ pub struct TareaRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TareaAsignadoRow {
     #[serde(rename = "ID_Trabajador")]
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Apellido")]
@@ -91,8 +86,7 @@ pub struct TareaAsignadoRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MisTareasRow {
     #[serde(rename = "ID_Tarea")]
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
     #[serde(rename = "Titulo")]
     pub titulo: String,
     #[serde(rename = "Descripcion")]
@@ -122,15 +116,13 @@ pub struct CreateTareaInput {
     #[ts(optional)]
     pub fecha_limite: Option<String>,
     #[serde(default)]
-    #[ts(type = "Array<number>")]
-    pub ids_trabajadores: Vec<i64>,
+    pub ids_trabajadores: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpdateTareaInput {
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
     pub titulo: String,
     #[serde(default)]
     #[ts(optional)]
@@ -143,34 +135,28 @@ pub struct UpdateTareaInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct SetAsignacionesTareaInput {
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
     #[serde(default)]
-    #[ts(type = "Array<number>")]
-    pub ids_trabajadores: Vec<i64>,
+    pub ids_trabajadores: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct FinalizarTareaInput {
-    #[ts(type = "number")]
-    pub id_tarea: i64,
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_tarea: String,
+    pub id_trabajador: String,
 }
 
 /// Argumento con sólo el id de tarea (get por id, asignados, borrar).
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TareaIdArgs {
-    #[ts(type = "number")]
-    pub id_tarea: i64,
+    pub id_tarea: String,
 }
 
 /// Argumento con sólo el id de trabajador (mis tareas).
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MisTareasArgs {
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
 }
