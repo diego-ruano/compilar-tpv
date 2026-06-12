@@ -12,8 +12,8 @@ use tpv_application::ports::cuentas::CuentasRepository;
 use tpv_contracts::cuentas::{EntradaDto, SalidaDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
-use crate::mapping::{v_f64, v_i64, v_string};
-use crate::util::next_table_id;
+use crate::mapping::{norm_opt_string, v_f64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
     conn: Arc<Connection>,
@@ -104,14 +104,14 @@ impl CuentasRepository for SqliteCuentasRepository {
         let mut rows = self.conn.query(sql.as_str(), params).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let id = v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0);
+            let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
             let fecha_hora = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
             let cliente = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
             let metodo =
                 v_string(row.get_value(3).map_err(db_err)?).unwrap_or_else(|| "Efectivo".into());
             let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
             out.push(EntradaDto {
-                id: id.to_string(),
+                id,
                 fecha_hora: fecha_hora.chars().take(16).collect(),
                 cliente,
                 metodo,
@@ -145,14 +145,14 @@ impl CuentasRepository for SqliteCuentasRepository {
         let mut rows = self.conn.query(sql.as_str(), params).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
-            let id = v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0);
+            let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
             let fecha = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
             let tipo = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
             let concepto = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
             let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
-            let prov = v_i64(row.get_value(5).map_err(db_err)?);
+            let prov = norm_opt_string(row.get_value(5).map_err(db_err)?);
             out.push(SalidaDto {
-                id: id.to_string(),
+                id,
                 fecha_hora: fecha.chars().take(10).collect(),
                 tipo_gasto: tipo,
                 concepto,
@@ -163,11 +163,8 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(out)
     }
 
-    async fn crear_gasto(&self, id: Option<i64>, g: GastoData) -> AppResult<bool> {
-        let id_gasto = match id {
-            Some(id) => id,
-            None => next_table_id(&self.conn, "Cuentas_Gastos", "ID_Gasto").await?,
-        };
+    async fn crear_gasto(&self, id: Option<String>, g: GastoData) -> AppResult<bool> {
+        let id_gasto = id.unwrap_or_else(new_id);
         self.conn
             .execute(
                 r#"
@@ -181,13 +178,13 @@ impl CuentasRepository for SqliteCuentasRepository {
                   ID_Proveedor = excluded.ID_Proveedor;
                 "#,
                 vec![
-                    Value::Integer(id_gasto),
+                    Value::Text(id_gasto),
                     Value::Text(g.fecha),
                     Value::Text(g.concepto),
                     Value::Real(g.importe),
                     Value::Text(g.tipo_gasto),
                     match g.proveedor_id {
-                        Some(id) => Value::Integer(id),
+                        Some(id) => Value::Text(id),
                         None => Value::Null,
                     },
                 ],
@@ -197,7 +194,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(true)
     }
 
-    async fn actualizar_gasto(&self, id_gasto: i64, g: GastoData) -> AppResult<bool> {
+    async fn actualizar_gasto(&self, id_gasto: &str, g: GastoData) -> AppResult<bool> {
         let affected = self
             .conn
             .execute(
@@ -207,13 +204,13 @@ impl CuentasRepository for SqliteCuentasRepository {
                 WHERE ID_Gasto = ?1;
                 "#,
                 vec![
-                    Value::Integer(id_gasto),
+                    Value::Text(id_gasto.to_string()),
                     Value::Text(g.fecha),
                     Value::Text(g.tipo_gasto),
                     Value::Text(g.concepto),
                     Value::Real(g.importe),
                     match g.proveedor_id {
-                        Some(id) => Value::Integer(id),
+                        Some(id) => Value::Text(id),
                         None => Value::Null,
                     },
                 ],
@@ -223,19 +220,19 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
-    async fn eliminar_gasto(&self, id_gasto: i64) -> AppResult<bool> {
+    async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool> {
         let affected = self
             .conn
             .execute(
                 "DELETE FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
-                vec![Value::Integer(id_gasto)],
+                vec![Value::Text(id_gasto.to_string())],
             )
             .await
             .map_err(db_err)?;
         Ok(affected > 0)
     }
 
-    async fn actualizar_pago(&self, id_pago: i64, p: PagoData) -> AppResult<bool> {
+    async fn actualizar_pago(&self, id_pago: &str, p: PagoData) -> AppResult<bool> {
         let affected = self
             .conn
             .execute(
@@ -245,7 +242,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 WHERE ID_Pago = ?1;
                 "#,
                 vec![
-                    Value::Integer(id_pago),
+                    Value::Text(id_pago.to_string()),
                     Value::Text(p.fecha_hora),
                     Value::Text(p.metodo),
                     Value::Real(p.importe),
@@ -256,20 +253,20 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
-    async fn eliminar_pago(&self, id_pago: i64) -> AppResult<bool> {
+    async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
-                vec![Value::Integer(id_pago)],
+                vec![Value::Text(id_pago.to_string())],
             )
             .await
             .map_err(db_err)?;
             let affected = conn
                 .execute(
                     "DELETE FROM Pagos WHERE ID_Pago = ?1;",
-                    vec![Value::Integer(id_pago)],
+                    vec![Value::Text(id_pago.to_string())],
                 )
                 .await
                 .map_err(db_err)?;

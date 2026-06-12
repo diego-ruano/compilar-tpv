@@ -47,9 +47,10 @@ impl CuentasRepository for HttpCuentasRepository {
             .await
     }
 
-    async fn crear_gasto(&self, id: Option<i64>, gasto: GastoData) -> AppResult<bool> {
+    async fn crear_gasto(&self, id: Option<String>, gasto: GastoData) -> AppResult<bool> {
+        let id_gasto = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_gasto": id,
+            "id_gasto": id_gasto,
             "fecha": gasto.fecha,
             "tipo_gasto": gasto.tipo_gasto,
             "concepto": gasto.concepto,
@@ -60,7 +61,7 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
-    async fn actualizar_gasto(&self, id_gasto: i64, gasto: GastoData) -> AppResult<bool> {
+    async fn actualizar_gasto(&self, id_gasto: &str, gasto: GastoData) -> AppResult<bool> {
         let body = json!({
             "fecha": gasto.fecha,
             "tipo_gasto": gasto.tipo_gasto,
@@ -75,7 +76,7 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
-    async fn eliminar_gasto(&self, id_gasto: i64) -> AppResult<bool> {
+    async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/cuentas/gastos/{id_gasto}"))
@@ -83,7 +84,7 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
-    async fn actualizar_pago(&self, id_pago: i64, pago: PagoData) -> AppResult<bool> {
+    async fn actualizar_pago(&self, id_pago: &str, pago: PagoData) -> AppResult<bool> {
         let body = json!({
             "fecha_hora": pago.fecha_hora,
             "metodo": pago.metodo,
@@ -96,7 +97,7 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
-    async fn eliminar_pago(&self, id_pago: i64) -> AppResult<bool> {
+    async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/cuentas/pagos/{id_pago}"))

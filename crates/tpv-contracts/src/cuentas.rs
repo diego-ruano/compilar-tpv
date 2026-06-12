@@ -24,8 +24,7 @@ pub struct SalidaDto {
     pub tipo_gasto: String,
     pub concepto: String,
     pub importe: f64,
-    #[ts(type = "number | null")]
-    pub proveedor_id: Option<i64>,
+    pub proveedor_id: Option<String>,
 }
 
 /* ── Args/Inputs ── */
@@ -45,43 +44,40 @@ pub struct CuentasRangoArgs {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CreateGastoInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_gasto: Option<i64>,
+    #[ts(optional)]
+    pub id_gasto: Option<String>,
     pub fecha: String,
     pub tipo_gasto: String,
     pub concepto: String,
     pub importe: f64,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub proveedor_id: Option<i64>,
+    #[ts(optional)]
+    pub proveedor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpdateGastoInput {
-    #[ts(type = "number")]
-    pub id_gasto: i64,
+    pub id_gasto: String,
     pub fecha: String,
     pub tipo_gasto: String,
     pub concepto: String,
     pub importe: f64,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub proveedor_id: Option<i64>,
+    #[ts(optional)]
+    pub proveedor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DeleteGastoInput {
-    #[ts(type = "number")]
-    pub id_gasto: i64,
+    pub id_gasto: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpdatePagoInput {
-    #[ts(type = "number")]
-    pub id_pago: i64,
+    pub id_pago: String,
     pub fecha_hora: String,
     pub metodo: String,
     pub importe: f64,
@@ -90,6 +86,5 @@ pub struct UpdatePagoInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DeletePagoInput {
-    #[ts(type = "number")]
-    pub id_pago: i64,
+    pub id_pago: String,
 }

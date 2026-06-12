@@ -26,9 +26,11 @@ pub async fn get_salidas(
     repo.salidas(args.del, args.al).await
 }
 
-fn proveedor_para(tipo_gasto: &str, proveedor_id: Option<i64>) -> Option<i64> {
+fn proveedor_para(tipo_gasto: &str, proveedor_id: Option<String>) -> Option<String> {
     if tipo_gasto == "Proveedor" {
-        proveedor_id.filter(|n| *n > 0)
+        proveedor_id
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
     } else {
         None
     }
@@ -51,7 +53,11 @@ pub async fn create_gasto(repo: &dyn CuentasRepository, input: CreateGastoInput)
         importe: input.importe,
         proveedor_id,
     };
-    repo.crear_gasto(input.id_gasto.filter(|n| *n > 0), gasto).await
+    let id = input
+        .id_gasto
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    repo.crear_gasto(id, gasto).await
 }
 
 pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput) -> AppResult<bool> {
@@ -59,7 +65,7 @@ pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput)
     let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
     let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
 
-    if input.id_gasto <= 0 || !input.importe.is_finite() || input.importe <= 0.0 {
+    if input.id_gasto.trim().is_empty() || !input.importe.is_finite() || input.importe <= 0.0 {
         return Ok(false);
     }
 
@@ -71,21 +77,21 @@ pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput)
         importe: input.importe,
         proveedor_id,
     };
-    repo.actualizar_gasto(input.id_gasto, gasto).await
+    repo.actualizar_gasto(&input.id_gasto, gasto).await
 }
 
 pub async fn delete_gasto(repo: &dyn CuentasRepository, input: DeleteGastoInput) -> AppResult<bool> {
-    if input.id_gasto <= 0 {
+    if input.id_gasto.trim().is_empty() {
         return Ok(false);
     }
-    repo.eliminar_gasto(input.id_gasto).await
+    repo.eliminar_gasto(&input.id_gasto).await
 }
 
 pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -> AppResult<bool> {
     let fecha_hora = requerido(&input.fecha_hora, "fecha_hora").map_err(AppError::validation)?;
     let metodo = normalize_metodo(&input.metodo);
 
-    if input.id_pago <= 0 || !input.importe.is_finite() || input.importe <= 0.0 {
+    if input.id_pago.trim().is_empty() || !input.importe.is_finite() || input.importe <= 0.0 {
         return Ok(false);
     }
 
@@ -94,12 +100,12 @@ pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -
         metodo,
         importe: input.importe,
     };
-    repo.actualizar_pago(input.id_pago, pago).await
+    repo.actualizar_pago(&input.id_pago, pago).await
 }
 
 pub async fn delete_pago(repo: &dyn CuentasRepository, input: DeletePagoInput) -> AppResult<bool> {
-    if input.id_pago <= 0 {
+    if input.id_pago.trim().is_empty() {
         return Ok(false);
     }
-    repo.eliminar_pago(input.id_pago).await
+    repo.eliminar_pago(&input.id_pago).await
 }

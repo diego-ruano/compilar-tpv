@@ -24,7 +24,7 @@ pub struct GastoData {
     pub tipo_gasto: String,
     pub concepto: String,
     pub importe: f64,
-    pub proveedor_id: Option<i64>,
+    pub proveedor_id: Option<String>,
 }
 
 /// Datos de actualización de un pago.
