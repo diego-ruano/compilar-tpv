@@ -19,5 +19,5 @@ pub trait ReservasRepository: Send + Sync {
     async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool>;
 
     /// Elimina una reserva (desvinculando comandas). Devuelve `true` si borró alguna fila.
-    async fn eliminar(&self, id_reserva: i64) -> AppResult<bool>;
+    async fn eliminar(&self, id_reserva: &str) -> AppResult<bool>;
 }

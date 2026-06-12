@@ -13,6 +13,7 @@ use tpv_contracts::reservas::{MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 
 use crate::mapping::{norm_opt_string, opt_text, v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteReservasRepository {
     conn: Arc<Connection>,
@@ -49,13 +50,13 @@ async fn select_one_i64(
 }
 
 /// Busca o crea el cliente asociado a la reserva (por email, luego por teléfono).
-async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64> {
+async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<String> {
     let nombre = c.nombre.clone();
     let email = c.email.clone();
     let telefono = c.telefono.clone();
     let notas = c.notas.clone();
 
-    let mut existing_id: Option<i64> = None;
+    let mut existing_id: Option<String> = None;
     let mut existing_email: Option<String> = None;
 
     if let Some(ref e) = email {
@@ -67,7 +68,7 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
             .await
             .map_err(db_err)?;
         if let Some(row) = rows.next().await.map_err(db_err)? {
-            existing_id = Some(i(row.get_value(0).map_err(db_err)?));
+            existing_id = Some(s(row.get_value(0).map_err(db_err)?));
             existing_email = norm_opt_string(row.get_value(1).map_err(db_err)?);
         }
     }
@@ -82,7 +83,7 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
                 .await
                 .map_err(db_err)?;
             if let Some(row) = rows.next().await.map_err(db_err)? {
-                existing_id = Some(i(row.get_value(0).map_err(db_err)?));
+                existing_id = Some(s(row.get_value(0).map_err(db_err)?));
                 existing_email = norm_opt_string(row.get_value(1).map_err(db_err)?);
             }
         }
@@ -103,7 +104,7 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
                     opt_text(email),
                     opt_text(telefono),
                     opt_text(notas),
-                    Value::Integer(id_cliente),
+                    Value::Text(id_cliente.clone()),
                 ],
             )
             .await
@@ -115,7 +116,7 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
                     Value::Text(nombre),
                     opt_text(telefono),
                     opt_text(notas),
-                    Value::Integer(id_cliente),
+                    Value::Text(id_cliente.clone()),
                 ],
             )
             .await
@@ -124,9 +125,11 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
         return Ok(id_cliente);
     }
 
+    let id_cliente = new_id();
     conn.execute(
-        "INSERT INTO Clientes (Nombre, Telefono, Email, Notas, Created_At) VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'));",
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
         vec![
+            Value::Text(id_cliente.clone()),
             Value::Text(nombre),
             opt_text(telefono),
             opt_text(email),
@@ -136,15 +139,7 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<i64>
     .await
     .map_err(db_err)?;
 
-    let id = select_one_i64(conn, "SELECT last_insert_rowid();", vec![])
-        .await?
-        .unwrap_or(0);
-    if id <= 0 {
-        return Err(AppError::repository(
-            "No se pudo obtener last_insert_rowid() de Cliente",
-        ));
-    }
-    Ok(id)
+    Ok(id_cliente)
 }
 
 #[async_trait]
@@ -160,7 +155,7 @@ impl ReservasRepository for SqliteReservasRepository {
         let mut zonas: Vec<ZonaDto> = Vec::new();
         while let Some(row) = zrows.next().await.map_err(db_err)? {
             zonas.push(ZonaDto {
-                id_zona: i(row.get_value(0).map_err(db_err)?),
+                id_zona: s(row.get_value(0).map_err(db_err)?),
                 nombre_zona: s(row.get_value(1).map_err(db_err)?),
             });
         }
@@ -176,8 +171,8 @@ impl ReservasRepository for SqliteReservasRepository {
         let mut mesas: Vec<MesaDto> = Vec::new();
         while let Some(row) = mrows.next().await.map_err(db_err)? {
             mesas.push(MesaDto {
-                id_mesa: i(row.get_value(0).map_err(db_err)?),
-                id_zona: i(row.get_value(1).map_err(db_err)?),
+                id_mesa: s(row.get_value(0).map_err(db_err)?),
+                id_zona: s(row.get_value(1).map_err(db_err)?),
                 numero_mesa: s(row.get_value(2).map_err(db_err)?),
                 capacidad: i(row.get_value(3).map_err(db_err)?),
             });
@@ -211,8 +206,8 @@ impl ReservasRepository for SqliteReservasRepository {
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
             out.push(ReservaDto {
-                id_reserva: i(g(0)?),
-                id_mesa: i(g(1)?),
+                id_reserva: s(g(0)?),
+                id_mesa: s(g(1)?),
                 dia_ymd: s(g(2)?),
                 hora: s(g(3)?),
                 turno: norm_opt_string(g(4)?),
@@ -222,7 +217,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 nombre_cliente: s(g(8)?),
                 telefono_cliente: norm_opt_string(g(9)?),
                 email_cliente: norm_opt_string(g(10)?),
-                id_zona: i(g(11)?),
+                id_zona: s(g(11)?),
                 numero_mesa: s(g(12)?),
                 capacidad: i(g(13)?),
                 nombre_zona: s(g(14)?),
@@ -238,69 +233,50 @@ impl ReservasRepository for SqliteReservasRepository {
         let res: AppResult<bool> = async {
             let id_cliente = upsert_cliente(conn, &r.cliente).await?;
 
-            match r.id {
-                Some(id) => {
-                    let exists = select_one_i64(
-                        conn,
-                        "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 LIMIT 1;",
-                        vec![Value::Integer(id)],
-                    )
-                    .await?
-                    .is_some();
+            // UUIDv7 explícito: si no viene id (alta), lo generamos. Upsert por id.
+            let id_reserva = r.id.clone().unwrap_or_else(new_id);
+            let exists = select_one_i64(
+                conn,
+                "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 LIMIT 1;",
+                vec![Value::Text(id_reserva.clone())],
+            )
+            .await?
+            .is_some();
 
-                    if exists {
-                        conn.execute(
-                            r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Estado = ?8 WHERE ID_Reserva = ?9;"#,
-                            vec![
-                                Value::Integer(id_cliente),
-                                Value::Integer(r.id_mesa),
-                                Value::Text(r.dia_ymd.clone()),
-                                Value::Text(r.hora.clone()),
-                                Value::Text(r.turno.clone()),
-                                Value::Integer(r.comensales),
-                                opt_text(r.nota.clone()),
-                                Value::Text(r.estado.clone()),
-                                Value::Integer(id),
-                            ],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                    } else {
-                        conn.execute(
-                            r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);"#,
-                            vec![
-                                Value::Integer(id),
-                                Value::Integer(id_cliente),
-                                Value::Integer(r.id_mesa),
-                                Value::Text(r.dia_ymd.clone()),
-                                Value::Text(r.hora.clone()),
-                                Value::Text(r.turno.clone()),
-                                Value::Integer(r.comensales),
-                                opt_text(r.nota.clone()),
-                                Value::Text(r.estado.clone()),
-                            ],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                    }
-                }
-                None => {
-                    conn.execute(
-                        r#"INSERT INTO Reservas (ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);"#,
-                        vec![
-                            Value::Integer(id_cliente),
-                            Value::Integer(r.id_mesa),
-                            Value::Text(r.dia_ymd.clone()),
-                            Value::Text(r.hora.clone()),
-                            Value::Text(r.turno.clone()),
-                            Value::Integer(r.comensales),
-                            opt_text(r.nota.clone()),
-                            Value::Text(r.estado.clone()),
-                        ],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                }
+            if exists {
+                conn.execute(
+                    r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Estado = ?8 WHERE ID_Reserva = ?9;"#,
+                    vec![
+                        Value::Text(id_cliente),
+                        Value::Text(r.id_mesa.clone()),
+                        Value::Text(r.dia_ymd.clone()),
+                        Value::Text(r.hora.clone()),
+                        Value::Text(r.turno.clone()),
+                        Value::Integer(r.comensales),
+                        opt_text(r.nota.clone()),
+                        Value::Text(r.estado.clone()),
+                        Value::Text(id_reserva.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            } else {
+                conn.execute(
+                    r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);"#,
+                    vec![
+                        Value::Text(id_reserva.clone()),
+                        Value::Text(id_cliente),
+                        Value::Text(r.id_mesa.clone()),
+                        Value::Text(r.dia_ymd.clone()),
+                        Value::Text(r.hora.clone()),
+                        Value::Text(r.turno.clone()),
+                        Value::Integer(r.comensales),
+                        opt_text(r.nota.clone()),
+                        Value::Text(r.estado.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
             }
 
             Ok(true)
@@ -319,14 +295,14 @@ impl ReservasRepository for SqliteReservasRepository {
         }
     }
 
-    async fn eliminar(&self, id_reserva: i64) -> AppResult<bool> {
+    async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
         let conn = &self.conn;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
             conn.execute(
                 "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
-                vec![Value::Integer(id_reserva)],
+                vec![Value::Text(id_reserva.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -334,7 +310,7 @@ impl ReservasRepository for SqliteReservasRepository {
             let affected = conn
                 .execute(
                     "DELETE FROM Reservas WHERE ID_Reserva = ?1;",
-                    vec![Value::Integer(id_reserva)],
+                    vec![Value::Text(id_reserva.to_string())],
                 )
                 .await
                 .map_err(db_err)?;

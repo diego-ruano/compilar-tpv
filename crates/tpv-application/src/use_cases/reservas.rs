@@ -42,8 +42,8 @@ pub async fn guardar(repo: &dyn ReservasRepository, input: ReservaSaveInput) -> 
 }
 
 pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
-    if input.id_reserva <= 0 {
+    if input.id_reserva.trim().is_empty() {
         return Err(AppError::validation("ID_Reserva inválido"));
     }
-    repo.eliminar(input.id_reserva).await
+    repo.eliminar(&input.id_reserva).await
 }

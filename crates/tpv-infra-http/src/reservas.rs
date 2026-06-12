@@ -39,8 +39,12 @@ impl ReservasRepository for HttpReservasRepository {
 
     async fn guardar(&self, reserva: ReservaValidada) -> AppResult<bool> {
         // El worker hace el upsert del cliente internamente a partir de estos campos.
+        let id_reserva = reserva
+            .id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_reserva": reserva.id,
+            "id_reserva": id_reserva,
             "dia_ymd": reserva.dia_ymd,
             "hora": reserva.hora,
             "turno": reserva.turno,
@@ -57,7 +61,7 @@ impl ReservasRepository for HttpReservasRepository {
         Ok(true)
     }
 
-    async fn eliminar(&self, id_reserva: i64) -> AppResult<bool> {
+    async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/reservas/{id_reserva}"))

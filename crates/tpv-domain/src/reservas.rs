@@ -120,8 +120,8 @@ pub struct ClienteReserva {
 /// `id = Some` => upsert por id (edición); `None` => alta nueva (autoincrement).
 #[derive(Debug, Clone)]
 pub struct ReservaValidada {
-    pub id: Option<i64>,
-    pub id_mesa: i64,
+    pub id: Option<String>,
+    pub id_mesa: String,
     pub dia_ymd: String,
     pub hora: String,
     pub turno: String,
@@ -134,14 +134,14 @@ pub struct ReservaValidada {
 impl ReservaValidada {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
-        id_reserva: Option<i64>,
+        id_reserva: Option<String>,
         dia_ymd: &str,
         hora: &str,
         turno: Option<String>,
         comensales: i64,
         nota: Option<String>,
         estado: Option<String>,
-        id_mesa: i64,
+        id_mesa: String,
         nombre_cliente: String,
         telefono: Option<String>,
         email: Option<String>,
@@ -157,11 +157,12 @@ impl ReservaValidada {
         if comensales <= 0 {
             return Err("Comensales inválidos".into());
         }
-        if id_mesa <= 0 {
+        let id_mesa = id_mesa.trim().to_string();
+        if id_mesa.is_empty() {
             return Err("ID_Mesa inválido".into());
         }
 
-        let id = id_reserva.filter(|n| *n > 0);
+        let id = id_reserva.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let estado = if id.is_none() {
             "PROXIMA".to_string()
         } else {

@@ -7,18 +7,15 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ZonaDto {
-    #[ts(type = "number")]
-    pub id_zona: i64,
+    pub id_zona: String,
     pub nombre_zona: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesaDto {
-    #[ts(type = "number")]
-    pub id_mesa: i64,
-    #[ts(type = "number")]
-    pub id_zona: i64,
+    pub id_mesa: String,
+    pub id_zona: String,
     pub numero_mesa: String,
     #[ts(type = "number")]
     pub capacidad: i64,
@@ -34,10 +31,8 @@ pub struct ReservasMetaDto {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ReservaDto {
-    #[ts(type = "number")]
-    pub id_reserva: i64,
-    #[ts(type = "number")]
-    pub id_mesa: i64,
+    pub id_reserva: String,
+    pub id_mesa: String,
     pub dia_ymd: String,
     pub hora: String,
     pub turno: Option<String>,
@@ -50,8 +45,7 @@ pub struct ReservaDto {
     pub telefono_cliente: Option<String>,
     pub email_cliente: Option<String>,
 
-    #[ts(type = "number")]
-    pub id_zona: i64,
+    pub id_zona: String,
     pub numero_mesa: String,
     #[ts(type = "number")]
     pub capacidad: i64,
@@ -71,8 +65,8 @@ pub struct ReservasGetMesArgs {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ReservaSaveInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_reserva: Option<i64>,
+    #[ts(optional)]
+    pub id_reserva: Option<String>,
 
     pub dia_ymd: String,
     pub hora: String,
@@ -89,8 +83,7 @@ pub struct ReservaSaveInput {
     #[ts(optional)]
     pub estado: Option<String>,
 
-    #[ts(type = "number")]
-    pub id_mesa: i64,
+    pub id_mesa: String,
     pub nombre_cliente: String,
     #[serde(default)]
     #[ts(optional)]
@@ -107,6 +100,5 @@ pub struct ReservaSaveInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ReservaDeleteInput {
-    #[ts(type = "number")]
-    pub id_reserva: i64,
+    pub id_reserva: String,
 }
