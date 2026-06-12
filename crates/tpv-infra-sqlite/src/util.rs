@@ -25,6 +25,18 @@ pub async fn next_table_id(conn: &Connection, table: &str, column: &str) -> AppR
     Ok(v_i64(v).unwrap_or(1).max(1))
 }
 
+/// Genera un identificador único global (UUIDv7, ordenable por tiempo) como `String`.
+/// Sustituye a `next_table_id` (MAX+1) para las claves primarias: al ser único en todos los
+/// dispositivos, evita la divergencia de ids entre la BD local de la Main y la nube.
+pub fn new_id() -> String {
+    uuid::Uuid::now_v7().to_string()
+}
+
+/// UUID fijos de los seeds (idénticos en local y nube). Ver `packages/database/schema.sql`.
+/// La mesa/zona BARRA usa un id fijo para que la venta rápida cuadre entre dispositivos.
+pub const BARRA_MESA_ID: &str = "00000000-0000-7000-8000-000000000401";
+pub const BARRA_ZONA_ID: &str = "00000000-0000-7000-8000-000000000303";
+
 /// Epoch en milisegundos (para columnas `*_At_Ms`).
 pub fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};

@@ -13,6 +13,17 @@
      recuperar al reconectar.
    - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
      unico esquema para ambos.
+
+   IDENTIFICADORES (UUIDv7):
+   - Todas las claves primarias de negocio son TEXT (UUIDv7 generado por el
+     cliente: Rust en la Main, repo HTTP del Handy). Las claves foraneas son
+     TEXT a juego. Esto hace que una fila tenga el MISMO id en todos los
+     dispositivos y en la nube → no hay divergencia de ids al sincronizar.
+   - Los seeds (Roles, Turnos, Alergenos, Zonas, mesa BARRA) usan UUID FIJOS
+     identicos en local y nube, para que sus ids coincidan siempre.
+   - Excepciones que NO son ids de negocio y siguen siendo INTEGER:
+     singletons de configuracion (Business_Settings / Ticket_Settings, ID=1)
+     y la tabla interna Applied_Operations.
 ========================================================= */
 
 PRAGMA foreign_keys = ON;
@@ -21,19 +32,19 @@ PRAGMA foreign_keys = ON;
    1. Seguridad y Usuarios
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Roles (
-  ID_Rol INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Rol TEXT PRIMARY KEY,
   Nombre_Rol TEXT NOT NULL UNIQUE
 );
 
-INSERT OR IGNORE INTO Roles (Nombre_Rol) VALUES
-  ('Administrador'),
-  ('Camarero'),
-  ('Cocinero'),
-  ('Limpieza');
+INSERT OR IGNORE INTO Roles (ID_Rol, Nombre_Rol) VALUES
+  ('00000000-0000-7000-8000-000000000001', 'Administrador'),
+  ('00000000-0000-7000-8000-000000000002', 'Camarero'),
+  ('00000000-0000-7000-8000-000000000003', 'Cocinero'),
+  ('00000000-0000-7000-8000-000000000004', 'Limpieza');
 
 CREATE TABLE IF NOT EXISTS Usuarios (
-  ID_Usuario INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Rol INTEGER NOT NULL,
+  ID_Usuario TEXT PRIMARY KEY,
+  ID_Rol TEXT NOT NULL,
   Email TEXT NOT NULL UNIQUE,
   Password_Hash TEXT NOT NULL,
   Nombre TEXT NOT NULL,
@@ -47,8 +58,8 @@ CREATE TABLE IF NOT EXISTS Usuarios (
    2. Personal y Horarios
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Trabajadores (
-  ID_Trabajador INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Usuario INTEGER UNIQUE NOT NULL,
+  ID_Trabajador TEXT PRIMARY KEY,
+  ID_Usuario TEXT UNIQUE NOT NULL,
   DNI TEXT UNIQUE,
   Telefono TEXT,
   Puesto TEXT,
@@ -60,15 +71,15 @@ CREATE TABLE IF NOT EXISTS Trabajadores (
 );
 
 CREATE TABLE IF NOT EXISTS Turnos (
-  ID_Turno INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Turno TEXT PRIMARY KEY,
   Nombre_Turno TEXT NOT NULL UNIQUE
 );
 
 CREATE TABLE IF NOT EXISTS Asignacion_Turnos (
-  ID_Asignacion INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Trabajador INTEGER NOT NULL,
+  ID_Asignacion TEXT PRIMARY KEY,
+  ID_Trabajador TEXT NOT NULL,
   Fecha DATE NOT NULL,
-  ID_Turno INTEGER NOT NULL,
+  ID_Turno TEXT NOT NULL,
   Area TEXT NOT NULL,
   Hora_Inicio TIME,
   Hora_Fin TIME,
@@ -80,19 +91,19 @@ CREATE TABLE IF NOT EXISTS Asignacion_Turnos (
 CREATE INDEX IF NOT EXISTS idx_asig_fecha ON Asignacion_Turnos(Fecha);
 CREATE INDEX IF NOT EXISTS idx_asig_trab_fecha ON Asignacion_Turnos(ID_Trabajador, Fecha);
 
-INSERT OR IGNORE INTO Turnos (Nombre_Turno) VALUES
-  ('LIBRE'),
-  ('PARTIDO'),
-  ('MAÑANA'),
-  ('TARDE'),
-  ('NOCHE');
+INSERT OR IGNORE INTO Turnos (ID_Turno, Nombre_Turno) VALUES
+  ('00000000-0000-7000-8000-000000000101', 'LIBRE'),
+  ('00000000-0000-7000-8000-000000000102', 'PARTIDO'),
+  ('00000000-0000-7000-8000-000000000103', 'MAÑANA'),
+  ('00000000-0000-7000-8000-000000000104', 'TARDE'),
+  ('00000000-0000-7000-8000-000000000105', 'NOCHE');
 
 CREATE TABLE IF NOT EXISTS Horario_Predeterminado (
-  ID_Default INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Trabajador INTEGER NOT NULL,
+  ID_Default TEXT PRIMARY KEY,
+  ID_Trabajador TEXT NOT NULL,
   Weekday INTEGER NOT NULL,
   Orden INTEGER NOT NULL DEFAULT 1,
-  ID_Turno INTEGER NOT NULL,
+  ID_Turno TEXT NOT NULL,
   Area TEXT NOT NULL,
   Hora_Inicio TIME,
   Hora_Fin TIME,
@@ -109,7 +120,7 @@ ON Horario_Predeterminado(ID_Trabajador, Weekday);
    3. Inventario y Productos
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Categorias_Producto (
-  ID_Categoria INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Categoria TEXT PRIMARY KEY,
   Nombre TEXT NOT NULL UNIQUE,
   Nombre_Imagen TEXT,
   Ruta_Imagen TEXT,
@@ -118,7 +129,7 @@ CREATE TABLE IF NOT EXISTS Categorias_Producto (
 );
 
 CREATE TABLE IF NOT EXISTS Proveedores (
-  ID_Proveedor INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Proveedor TEXT PRIMARY KEY,
   Nombre_Empresa TEXT NOT NULL,
   Contacto TEXT,
   Telefono TEXT,
@@ -130,9 +141,9 @@ CREATE TABLE IF NOT EXISTS Proveedores (
 );
 
 CREATE TABLE IF NOT EXISTS Productos (
-  ID_Producto INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Categoria INTEGER NOT NULL,
-  ID_Proveedor INTEGER,
+  ID_Producto TEXT PRIMARY KEY,
+  ID_Categoria TEXT NOT NULL,
+  ID_Proveedor TEXT,
   Nombre TEXT NOT NULL UNIQUE,
   Precio_Venta REAL,
   Stock_Minimo REAL DEFAULT 0,
@@ -145,15 +156,15 @@ CREATE TABLE IF NOT EXISTS Productos (
 );
 
 CREATE TABLE IF NOT EXISTS Lotes_Producto (
-  ID_Lote INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Producto INTEGER NOT NULL,
+  ID_Lote TEXT PRIMARY KEY,
+  ID_Producto TEXT NOT NULL,
   Codigo_Lote TEXT NOT NULL,
   Fecha_Entrada DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
   Caducidad DATE,
   Cantidad_Inicial REAL NOT NULL DEFAULT 0,
   Stock_Disponible REAL NOT NULL DEFAULT 0,
   Coste_Unitario REAL,
-  ID_Proveedor INTEGER,
+  ID_Proveedor TEXT,
   Notas TEXT,
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
@@ -175,15 +186,15 @@ ON Lotes_Producto(ID_Producto, Fecha_Entrada);
    4. Alérgenos
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Alergenos (
-  ID_Alergeno INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Alergeno TEXT PRIMARY KEY,
   Nombre TEXT NOT NULL UNIQUE,
   Nombre_Imagen TEXT,
   Ruta_Imagen TEXT
 );
 
 CREATE TABLE IF NOT EXISTS Producto_Alergenos (
-  ID_Producto INTEGER NOT NULL,
-  ID_Alergeno INTEGER NOT NULL,
+  ID_Producto TEXT NOT NULL,
+  ID_Alergeno TEXT NOT NULL,
   PRIMARY KEY (ID_Producto, ID_Alergeno),
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Alergeno) REFERENCES Alergenos(ID_Alergeno) ON DELETE CASCADE
@@ -199,15 +210,15 @@ ON Producto_Alergenos(ID_Alergeno);
    5. Zonas / Mesas / Clientes / Reservas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Zonas (
-  ID_Zona INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Zona TEXT PRIMARY KEY,
   Nombre_Zona TEXT NOT NULL UNIQUE,
   Room_Points TEXT NOT NULL DEFAULT '[]',
   Updated_At DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS Mesas (
-  ID_Mesa INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Zona INTEGER NOT NULL,
+  ID_Mesa TEXT PRIMARY KEY,
+  ID_Zona TEXT NOT NULL,
   Numero_Mesa TEXT NOT NULL,
   Capacidad INTEGER NOT NULL,
   Ubicacion_X INTEGER NOT NULL,
@@ -223,7 +234,7 @@ CREATE TABLE IF NOT EXISTS Mesas (
 );
 
 CREATE TABLE IF NOT EXISTS Clientes (
-  ID_Cliente INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Cliente TEXT PRIMARY KEY,
   Nombre TEXT NOT NULL,
   Telefono TEXT,
   Email TEXT,
@@ -233,9 +244,9 @@ CREATE TABLE IF NOT EXISTS Clientes (
 );
 
 CREATE TABLE IF NOT EXISTS Reservas (
-  ID_Reserva INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Cliente INTEGER NOT NULL,
-  ID_Mesa INTEGER NOT NULL,
+  ID_Reserva TEXT PRIMARY KEY,
+  ID_Cliente TEXT NOT NULL,
+  ID_Mesa TEXT NOT NULL,
   Dia_YMD TEXT NOT NULL,
   Hora TEXT NOT NULL,
   Turno TEXT NOT NULL,
@@ -254,10 +265,10 @@ ON Reservas(ID_Mesa, Dia_YMD, Hora);
    6. Comandas / Detalles / Facturas / Cuentas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Comandas (
-  ID_Comanda INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Mesa INTEGER NOT NULL,
-  ID_Reserva INTEGER NULL,
-  ID_Trabajador INTEGER NULL,
+  ID_Comanda TEXT PRIMARY KEY,
+  ID_Mesa TEXT NOT NULL,
+  ID_Reserva TEXT NULL,
+  ID_Trabajador TEXT NULL,
   Fecha_Hora_Apertura TEXT NOT NULL,
   Fecha_Hora_Cierre TEXT NULL,
   Total_Comanda REAL NOT NULL DEFAULT 0,
@@ -277,15 +288,15 @@ CREATE INDEX IF NOT EXISTS idx_comandas_trab_apertura
 ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
-  ID_Detalle INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Comanda INTEGER NOT NULL,
-  ID_Producto INTEGER NOT NULL,
+  ID_Detalle TEXT PRIMARY KEY,
+  ID_Comanda TEXT NOT NULL,
+  ID_Producto TEXT NOT NULL,
   Cantidad REAL NOT NULL,
   Precio_Unitario REAL NOT NULL,
   Notas TEXT,
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
   Fecha_Hora_Cocina DATETIME,
-  ID_Usuario_Cocinero INTEGER,
+  ID_Usuario_Cocinero TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto)
 );
@@ -297,8 +308,8 @@ CREATE INDEX IF NOT EXISTS idx_dc_estado_fecha
 ON Detalle_Comanda(Estado_Cocina, Fecha_Hora_Cocina);
 
 CREATE TABLE IF NOT EXISTS Lote_Consumos (
-  ID_Detalle INTEGER NOT NULL,
-  ID_Lote INTEGER NOT NULL,
+  ID_Detalle TEXT NOT NULL,
+  ID_Lote TEXT NOT NULL,
   Cantidad REAL NOT NULL,
   PRIMARY KEY (ID_Detalle, ID_Lote),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
@@ -310,9 +321,9 @@ CREATE INDEX IF NOT EXISTS idx_lote_consumos_lote
 ON Lote_Consumos(ID_Lote);
 
 CREATE TABLE IF NOT EXISTS Facturas (
-  ID_Factura INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Comanda INTEGER UNIQUE NOT NULL,
-  ID_Cliente INTEGER,
+  ID_Factura TEXT PRIMARY KEY,
+  ID_Comanda TEXT UNIQUE NOT NULL,
+  ID_Cliente TEXT,
   Fecha_Emision DATETIME NOT NULL,
   Subtotal REAL NOT NULL,
   IVA REAL NOT NULL,
@@ -323,12 +334,12 @@ CREATE TABLE IF NOT EXISTS Facturas (
 );
 
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
-  ID_Gasto INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Gasto TEXT PRIMARY KEY,
   Fecha DATE NOT NULL,
   Concepto TEXT NOT NULL,
   Importe REAL NOT NULL,
   Tipo_Gasto TEXT NOT NULL,
-  ID_Proveedor INTEGER NULL,
+  ID_Proveedor TEXT NULL,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL
 );
 
@@ -342,7 +353,7 @@ ON Cuentas_Gastos(ID_Proveedor);
    7. Tareas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Tareas (
-  ID_Tarea INTEGER PRIMARY KEY AUTOINCREMENT,
+  ID_Tarea TEXT PRIMARY KEY,
   Titulo TEXT NOT NULL,
   Descripcion TEXT,
   Fecha_Creacion DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
@@ -351,8 +362,8 @@ CREATE TABLE IF NOT EXISTS Tareas (
 );
 
 CREATE TABLE IF NOT EXISTS Tarea_Asignaciones (
-  ID_Tarea INTEGER NOT NULL,
-  ID_Trabajador INTEGER NOT NULL,
+  ID_Tarea TEXT NOT NULL,
+  ID_Trabajador TEXT NOT NULL,
   Asignada_At DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
   Estado TEXT NOT NULL DEFAULT 'PENDIENTE',
   Finalizada_At DATETIME,
@@ -371,8 +382,8 @@ ON Tarea_Asignaciones(ID_Tarea);
    8. Fichajes
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Fichajes (
-  ID_Fichaje INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Usuario INTEGER NOT NULL,
+  ID_Fichaje TEXT PRIMARY KEY,
+  ID_Usuario TEXT NOT NULL,
   Fecha DATE NOT NULL,
   Parte INTEGER NOT NULL DEFAULT 1,
   Hora_Entrada DATETIME,
@@ -392,7 +403,7 @@ CREATE INDEX IF NOT EXISTS idx_fichajes_user_abierto
 ON Fichajes(ID_Usuario, Estado);
 
 CREATE TABLE IF NOT EXISTS Fichaje_Dia (
-  ID_Usuario INTEGER NOT NULL,
+  ID_Usuario TEXT NOT NULL,
   Fecha DATE NOT NULL,
   Turno_Partido INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (ID_Usuario, Fecha),
@@ -403,14 +414,14 @@ CREATE TABLE IF NOT EXISTS Fichaje_Dia (
    9. Pagos
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Pagos (
-  ID_Pago INTEGER PRIMARY KEY AUTOINCREMENT,
-  ID_Comanda INTEGER NOT NULL,
+  ID_Pago TEXT PRIMARY KEY,
+  ID_Comanda TEXT NOT NULL,
   Fecha_Hora DATETIME NOT NULL,
   Metodo_Pago TEXT NOT NULL,
   Importe_Total REAL NOT NULL,
   Tipo TEXT NOT NULL,
-  ID_Usuario_Cobrador INTEGER,
-  ID_Trabajador_Cobrador INTEGER,
+  ID_Usuario_Cobrador TEXT,
+  ID_Trabajador_Cobrador TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario_Cobrador) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL
@@ -426,8 +437,8 @@ CREATE INDEX IF NOT EXISTS idx_pagos_trab_cobrador_fecha
 ON Pagos(ID_Trabajador_Cobrador, Fecha_Hora);
 
 CREATE TABLE IF NOT EXISTS Pago_Detalles (
-  ID_Pago INTEGER NOT NULL,
-  ID_Detalle INTEGER NOT NULL,
+  ID_Pago TEXT NOT NULL,
+  ID_Detalle TEXT NOT NULL,
   PRIMARY KEY (ID_Pago, ID_Detalle),
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle)
@@ -438,6 +449,7 @@ CREATE TABLE IF NOT EXISTS Pago_Detalles (
    Registro de operaciones ya aplicadas (por Op_Id) para evitar
    duplicados y dar atomicidad al aplicar cambios (en la nube al
    recibir ops de las Handy; en local al aplicar cambios entrantes).
+   Tabla interna de control: su ID sigue siendo INTEGER local.
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Applied_Operations (
   ID_Applied_Operation INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -474,10 +486,10 @@ CREATE TABLE IF NOT EXISTS Schema_Meta (
 );
 
 INSERT OR IGNORE INTO Schema_Meta (Key, Value, Updated_At_Ms)
-VALUES ('schema_version', '1', 0);
+VALUES ('schema_version', '2', 0);
 
 /* =========================================================
-   12. Configuración
+   12. Configuración (singletons: ID=1, no son ids de negocio)
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Business_Settings (
   ID INTEGER PRIMARY KEY CHECK (ID = 1),
@@ -555,32 +567,31 @@ LEFT JOIN Lotes_Producto l ON l.ID_Producto = p.ID_Producto
 GROUP BY p.ID_Producto;
 
 /* =========================================================
-   14. Seeds
+   14. Seeds (UUID fijos: identicos en local y nube)
 ========================================================= */
-INSERT OR IGNORE INTO Alergenos (Nombre, Nombre_Imagen, Ruta_Imagen) VALUES
-  ('Gluten', 'gluten.png', '/alergenos/gluten.png'),
-  ('Crustáceos', 'crustaceos.png', '/alergenos/crustaceos.png'),
-  ('Huevos', 'huevos.png', '/alergenos/huevos.png'),
-  ('Pescado', 'pescado.png', '/alergenos/pescado.png'),
-  ('Cacahuetes', 'cacahuetes.png', '/alergenos/cacahuetes.png'),
-  ('Soja', 'soja.png', '/alergenos/soja.png'),
-  ('Lácteos', 'lacteos.png', '/alergenos/lacteos.png'),
-  ('Frutos de cáscara', 'frutos_cascara.png', '/alergenos/frutos_cascara.png'),
-  ('Apio', 'apio.png', '/alergenos/apio.png'),
-  ('Mostaza', 'mostaza.png', '/alergenos/mostaza.png'),
-  ('Sésamo', 'sesamo.png', '/alergenos/sesamo.png'),
-  ('Sulfitos', 'sulfitos.png', '/alergenos/sulfitos.png'),
-  ('Altramuces', 'altramuces.png', '/alergenos/altramuces.png'),
-  ('Moluscos', 'moluscos.png', '/alergenos/moluscos.png');
+INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen) VALUES
+  ('00000000-0000-7000-8000-000000000201', 'Gluten', 'gluten.png', '/alergenos/gluten.png'),
+  ('00000000-0000-7000-8000-000000000202', 'Crustáceos', 'crustaceos.png', '/alergenos/crustaceos.png'),
+  ('00000000-0000-7000-8000-000000000203', 'Huevos', 'huevos.png', '/alergenos/huevos.png'),
+  ('00000000-0000-7000-8000-000000000204', 'Pescado', 'pescado.png', '/alergenos/pescado.png'),
+  ('00000000-0000-7000-8000-000000000205', 'Cacahuetes', 'cacahuetes.png', '/alergenos/cacahuetes.png'),
+  ('00000000-0000-7000-8000-000000000206', 'Soja', 'soja.png', '/alergenos/soja.png'),
+  ('00000000-0000-7000-8000-000000000207', 'Lácteos', 'lacteos.png', '/alergenos/lacteos.png'),
+  ('00000000-0000-7000-8000-000000000208', 'Frutos de cáscara', 'frutos_cascara.png', '/alergenos/frutos_cascara.png'),
+  ('00000000-0000-7000-8000-000000000209', 'Apio', 'apio.png', '/alergenos/apio.png'),
+  ('00000000-0000-7000-8000-00000000020a', 'Mostaza', 'mostaza.png', '/alergenos/mostaza.png'),
+  ('00000000-0000-7000-8000-00000000020b', 'Sésamo', 'sesamo.png', '/alergenos/sesamo.png'),
+  ('00000000-0000-7000-8000-00000000020c', 'Sulfitos', 'sulfitos.png', '/alergenos/sulfitos.png'),
+  ('00000000-0000-7000-8000-00000000020d', 'Altramuces', 'altramuces.png', '/alergenos/altramuces.png'),
+  ('00000000-0000-7000-8000-00000000020e', 'Moluscos', 'moluscos.png', '/alergenos/moluscos.png');
 
-INSERT OR IGNORE INTO Zonas (Nombre_Zona, Room_Points, Updated_At) VALUES
-  ('Salon', '[]', datetime('now')),
-  ('Terraza', '[]', datetime('now'));
-
-INSERT OR IGNORE INTO Zonas (Nombre_Zona, Room_Points, Updated_At)
-VALUES ('BARRA', '[]', datetime('now'));
+INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At) VALUES
+  ('00000000-0000-7000-8000-000000000301', 'Salon', '[]', datetime('now')),
+  ('00000000-0000-7000-8000-000000000302', 'Terraza', '[]', datetime('now')),
+  ('00000000-0000-7000-8000-000000000303', 'BARRA', '[]', datetime('now'));
 
 INSERT OR IGNORE INTO Mesas (
+  ID_Mesa,
   ID_Zona,
   Numero_Mesa,
   Capacidad,
@@ -593,7 +604,8 @@ INSERT OR IGNORE INTO Mesas (
   Updated_At,
   Es_Sistema
 ) VALUES (
-  (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = 'BARRA' LIMIT 1),
+  '00000000-0000-7000-8000-000000000401',
+  '00000000-0000-7000-8000-000000000303',
   'BARRA',
   0,
   0,
