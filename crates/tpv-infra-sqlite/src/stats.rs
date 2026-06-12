@@ -413,7 +413,7 @@ impl SqliteStatsRepository {
 
         while let Ok(Some(r)) = rows.next().await {
             out.push(StatsCategoriaRow {
-                ID_Categoria: v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0),
+                ID_Categoria: v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default(),
             });
         }
@@ -506,8 +506,8 @@ impl SqliteStatsRepository {
                 None => None,
             };
 
-        let top_filter_sql = if let Some(idc) = args.categoria_top_id {
-            if idc > 0 {
+        let top_filter_sql = if let Some(idc) = args.categoria_top_id.as_deref() {
+            if !idc.trim().is_empty() {
                 "AND pr.ID_Categoria = ?1".to_string()
             } else {
                 "".to_string()
@@ -542,9 +542,9 @@ impl SqliteStatsRepository {
 
         let mut params_top: Vec<Value> = Vec::new();
 
-        if let Some(idc) = args.categoria_top_id {
-            if idc > 0 {
-                params_top.push(Value::Integer(idc));
+        if let Some(idc) = args.categoria_top_id.as_deref() {
+            if !idc.trim().is_empty() {
+                params_top.push(Value::Text(idc.to_string()));
             }
         }
 
@@ -562,8 +562,8 @@ impl SqliteStatsRepository {
             top_values.push(v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0));
         }
 
-        let worst_filter_sql = if let Some(idc) = args.categoria_worst_id {
-            if idc > 0 {
+        let worst_filter_sql = if let Some(idc) = args.categoria_worst_id.as_deref() {
+            if !idc.trim().is_empty() {
                 "AND pr.ID_Categoria = ?1".to_string()
             } else {
                 "".to_string()
@@ -600,9 +600,9 @@ impl SqliteStatsRepository {
 
         let mut params_worst: Vec<Value> = Vec::new();
 
-        if let Some(idc) = args.categoria_worst_id {
-            if idc > 0 {
-                params_worst.push(Value::Integer(idc));
+        if let Some(idc) = args.categoria_worst_id.as_deref() {
+            if !idc.trim().is_empty() {
+                params_worst.push(Value::Text(idc.to_string()));
             }
         }
 
@@ -874,8 +874,8 @@ impl SqliteStatsRepository {
 
         #[derive(Clone)]
         struct BaseW {
-            id_trabajador: i64,
-            id_usuario: i64,
+            id_trabajador: String,
+            id_usuario: String,
             nombre: String,
             rol: String,
         }
@@ -903,10 +903,10 @@ impl SqliteStatsRepository {
             .map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_w.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
-            let id_user = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
+            let id_user = v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default();
 
-            if id_trab <= 0 || id_user <= 0 {
+            if id_trab.is_empty() || id_user.is_empty() {
                 continue;
             }
 
@@ -946,18 +946,18 @@ impl SqliteStatsRepository {
             });
         }
 
-        let mut tareas_asig: HashMap<i64, i64> = HashMap::new();
-        let mut tareas_fin: HashMap<i64, i64> = HashMap::new();
+        let mut tareas_asig: HashMap<String, i64> = HashMap::new();
+        let mut tareas_fin: HashMap<String, i64> = HashMap::new();
 
-        let mut coc_comandas_por_user: HashMap<i64, i64> = HashMap::new();
+        let mut coc_comandas_por_user: HashMap<String, i64> = HashMap::new();
 
-        let mut cam_comandas_tomadas: HashMap<i64, i64> = HashMap::new();
-        let mut cam_cobros: HashMap<i64, i64> = HashMap::new();
-        let mut cam_ticket_medio: HashMap<i64, f64> = HashMap::new();
-        let mut cam_ventas_total: HashMap<i64, f64> = HashMap::new();
+        let mut cam_comandas_tomadas: HashMap<String, i64> = HashMap::new();
+        let mut cam_cobros: HashMap<String, i64> = HashMap::new();
+        let mut cam_ticket_medio: HashMap<String, f64> = HashMap::new();
+        let mut cam_ventas_total: HashMap<String, f64> = HashMap::new();
 
-        let mut puntualidad_map: HashMap<i64, PuntualidadInfo> = HashMap::new();
-        let mut horas_map: HashMap<i64, f64> = HashMap::new();
+        let mut puntualidad_map: HashMap<String, PuntualidadInfo> = HashMap::new();
+        let mut horas_map: HashMap<String, f64> = HashMap::new();
 
         let sql_tareas = format!(
             r#"
@@ -986,16 +986,16 @@ impl SqliteStatsRepository {
         let mut rows_t = db.query(&sql_tareas, ()).await.map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_t.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
 
-            if id_trab <= 0 {
+            if id_trab.is_empty() {
                 continue;
             }
 
             let a = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
             let f = v_i64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0);
 
-            tareas_asig.insert(id_trab, a);
+            tareas_asig.insert(id_trab.clone(), a);
             tareas_fin.insert(id_trab, f);
         }
 
@@ -1019,10 +1019,10 @@ impl SqliteStatsRepository {
         let mut rows_c = db.query(&sql_coc, ()).await.map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_c.next().await {
-            let id_user = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_user = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
-            if id_user > 0 {
+            if !id_user.is_empty() {
                 coc_comandas_por_user.insert(id_user, n);
             }
         }
@@ -1049,10 +1049,10 @@ impl SqliteStatsRepository {
             .map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_cc.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
-            if id_trab > 0 {
+            if !id_trab.is_empty() {
                 cam_comandas_tomadas.insert(id_trab, n);
             }
         }
@@ -1081,10 +1081,10 @@ impl SqliteStatsRepository {
         let mut rows_p = db.query(&sql_cobros, ()).await.map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_p.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let n = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
 
-            if id_trab > 0 {
+            if !id_trab.is_empty() {
                 cam_cobros.insert(id_trab, n);
             }
         }
@@ -1127,12 +1127,12 @@ impl SqliteStatsRepository {
         let mut rows_s = db.query(&sql_sales, ()).await.map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_s.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
             let ventas = v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0);
             let ticket = v_f64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0.0);
 
-            if id_trab > 0 {
-                cam_ventas_total.insert(id_trab, ventas);
+            if !id_trab.is_empty() {
+                cam_ventas_total.insert(id_trab.clone(), ventas);
                 cam_ticket_medio.insert(id_trab, ticket);
             }
         }
@@ -1215,10 +1215,10 @@ impl SqliteStatsRepository {
             let mut rows_h = db.query(&sql_horas, ()).await.map_err(|e| e.to_string())?;
 
             while let Ok(Some(r)) = rows_h.next().await {
-                let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+                let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
                 let horas = v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0);
 
-                if id_trab > 0 {
+                if !id_trab.is_empty() {
                     horas_map.insert(id_trab, (horas * 100.0).round() / 100.0);
                 }
             }
@@ -1294,9 +1294,9 @@ impl SqliteStatsRepository {
             .map_err(|e| e.to_string())?;
 
         while let Ok(Some(r)) = rows_pt.next().await {
-            let id_trab = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
+            let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
 
-            if id_trab <= 0 {
+            if id_trab.is_empty() {
                 continue;
             }
 
@@ -1332,7 +1332,7 @@ impl SqliteStatsRepository {
                 let comandas = *coc_comandas_por_user.get(&w.id_usuario).unwrap_or(&0);
 
                 cocineros.push(TrabajadorCardStats {
-                    id_trabajador: w.id_trabajador,
+                    id_trabajador: w.id_trabajador.clone(),
                     nombre: w.nombre.clone(),
                     rol: "Cocinero".into(),
                     tareas_asignadas: asig,
@@ -1350,7 +1350,7 @@ impl SqliteStatsRepository {
                 let ticket = *cam_ticket_medio.get(&w.id_trabajador).unwrap_or(&0.0);
 
                 camareros.push(TrabajadorCardStats {
-                    id_trabajador: w.id_trabajador,
+                    id_trabajador: w.id_trabajador.clone(),
                     nombre: w.nombre.clone(),
                     rol: "Camarero".into(),
                     tareas_asignadas: asig,
@@ -1364,7 +1364,7 @@ impl SqliteStatsRepository {
                 });
             } else {
                 limpieza.push(TrabajadorCardStats {
-                    id_trabajador: w.id_trabajador,
+                    id_trabajador: w.id_trabajador.clone(),
                     nombre: w.nombre.clone(),
                     rol: "Limpieza".into(),
                     tareas_asignadas: asig,

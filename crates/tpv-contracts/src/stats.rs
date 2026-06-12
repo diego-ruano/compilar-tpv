@@ -97,8 +97,7 @@ pub struct MesasStatsResponse {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct StatsCategoriaRow {
-    #[ts(type = "number")]
-    pub ID_Categoria: i64,
+    pub ID_Categoria: String,
     pub Nombre: String,
 }
 
@@ -106,10 +105,8 @@ pub struct StatsCategoriaRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ProductosStatsArgs {
     pub range: StatsRange,
-    #[ts(type = "number | null")]
-    pub categoria_top_id: Option<i64>,
-    #[ts(type = "number | null")]
-    pub categoria_worst_id: Option<i64>,
+    pub categoria_top_id: Option<String>,
+    pub categoria_worst_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -178,8 +175,7 @@ pub struct TrabajadoresStatsArgs {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct TrabajadorCardStats {
-    #[ts(type = "number")]
-    pub id_trabajador: i64,
+    pub id_trabajador: String,
     pub nombre: String,
     pub rol: String,
 
