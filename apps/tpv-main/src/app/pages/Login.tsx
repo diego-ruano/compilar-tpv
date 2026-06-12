@@ -21,6 +21,7 @@ import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useToast } from "../../shared/toast";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useMode } from "../../shared/stores/useMode";
 import { Button, IconButton, ThemeToggle } from "../../shared/ui";
 
 import {
@@ -70,6 +71,7 @@ export default function Login() {
     const setSession = useAuth((s) => s.setSession);
     const navigate = useNavigate();
     const toast = useToast();
+    const deviceMode = useMode((s) => s.mode);
     const { businessName, logoDataUrl } = useBusinessSettings();
 
     const [users, setUsers] = useState<DbUser[]>([]);
@@ -365,7 +367,11 @@ export default function Login() {
                 throw new Error("Login sin datos de sesión válidos");
             }
 
-            if (ok.requiere_setup === 1) {
+            // El setup inicial (cambiar PIN/email del admin) es responsabilidad de la MAIN.
+            // En un Handy NO entramos al flujo de /setup: hacerlo provoca un bucle de
+            // redirección (el guard fuerza /setup y SetupInicial expulsa al Handy) → pantalla
+            // en blanco. Ignoramos requiere_setup en Handy y entramos como un login normal.
+            if (ok.requiere_setup === 1 && deviceMode !== "handy") {
                 setSession({
                     role: ok.rol,
                     idUsuario: ok.id_usuario,
