@@ -55,17 +55,20 @@ impl ClientesRepository for HttpClientesRepository {
             .await
     }
 
-    async fn form(&self, id_cliente: i64) -> AppResult<Option<ClienteForm>> {
+    async fn form(&self, id_cliente: &str) -> AppResult<Option<ClienteForm>> {
         self.client
             .get_json(&format!("/v1/clientes/{id_cliente}/form"))
             .await
     }
 
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool> {
-        // POST /v1/clientes — el `id_cliente` va en el cuerpo (opcional); si falta, lo asigna
-        // el worker (MAX+1 dentro de la transacción del DO).
+        // POST /v1/clientes — el `id_cliente` (UUIDv7) lo genera el cliente: si no viene, lo
+        // creamos aquí. El worker lo persiste tal cual (no recalcula ids).
+        let id_cliente = nuevo
+            .id
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
-            "id_cliente": nuevo.id,
+            "id_cliente": id_cliente,
             "nombre": nuevo.nombre,
             "email": nuevo.email,
             "telefono": nuevo.telefono,

@@ -16,6 +16,7 @@ use tpv_contracts::clientes::{ClienteForm, ClienteOverview};
 use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
 
 use crate::mapping::{norm_opt_string, opt_text, v_f64, v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteClientesRepository {
     conn: Arc<Connection>,
@@ -98,19 +99,6 @@ fn sql_overview_base() -> &'static str {
     "#
 }
 
-async fn next_table_id(conn: &Connection, table: &str, column: &str) -> AppResult<i64> {
-    let sql = format!("SELECT COALESCE(MAX({column}), 0) + 1 FROM {table};");
-
-    let mut rows = conn.query(&sql, ()).await.map_err(db_err)?;
-
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Ok(1);
-    };
-
-    let v = row.get_value(0).map_err(db_err)?;
-    Ok(v_i64(v).unwrap_or(1).max(1))
-}
-
 #[async_trait]
 impl ClientesRepository for SqliteClientesRepository {
     async fn overview(&self, ranking: ClienteRanking) -> AppResult<Vec<ClienteOverview>> {
@@ -144,7 +132,7 @@ impl ClientesRepository for SqliteClientesRepository {
             let pend = row.get_value(11).map_err(db_err)?;
 
             out.push(ClienteOverview {
-                id_cliente: v_i64(id_cliente).unwrap_or(0),
+                id_cliente: v_string(id_cliente).unwrap_or_default(),
                 nombre: v_string(nombre).unwrap_or_default(),
                 email: norm_opt_string(email),
                 telefono: norm_opt_string(telefono),
@@ -165,7 +153,7 @@ impl ClientesRepository for SqliteClientesRepository {
         Ok(out)
     }
 
-    async fn form(&self, id_cliente: i64) -> AppResult<Option<ClienteForm>> {
+    async fn form(&self, id_cliente: &str) -> AppResult<Option<ClienteForm>> {
         let sql = r#"
           SELECT Nombre, Email, Telefono, Notas
           FROM Clientes
@@ -175,7 +163,7 @@ impl ClientesRepository for SqliteClientesRepository {
 
         let mut rows = self
             .conn
-            .query(sql, vec![Value::Integer(id_cliente)])
+            .query(sql, vec![Value::Text(id_cliente.to_string())])
             .await
             .map_err(db_err)?;
 
@@ -197,10 +185,7 @@ impl ClientesRepository for SqliteClientesRepository {
     }
 
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool> {
-        let id_cliente = match nuevo.id {
-            Some(id) => id,
-            None => next_table_id(&self.conn, "Clientes", "ID_Cliente").await?,
-        };
+        let id_cliente = nuevo.id.unwrap_or_else(new_id);
 
         self.conn
             .execute(
@@ -228,7 +213,7 @@ impl ClientesRepository for SqliteClientesRepository {
                     Notas = excluded.Notas;
                 "#,
                 vec![
-                    Value::Integer(id_cliente),
+                    Value::Text(id_cliente),
                     Value::Text(nuevo.nombre),
                     opt_text(nuevo.telefono),
                     opt_text(nuevo.email),
@@ -259,7 +244,7 @@ impl ClientesRepository for SqliteClientesRepository {
                     opt_text(cliente.telefono),
                     opt_text(cliente.email),
                     opt_text(cliente.notas),
-                    Value::Integer(cliente.id),
+                    Value::Text(cliente.id),
                 ],
             )
             .await

@@ -12,8 +12,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ClienteOverview {
-    #[ts(type = "number")]
-    pub id_cliente: i64,
+    pub id_cliente: String,
     pub nombre: String,
     pub email: Option<String>,
     pub telefono: Option<String>,
@@ -54,8 +53,7 @@ pub struct ClientesOverviewArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ClienteIdArgs {
-    #[ts(type = "number")]
-    pub id_cliente: i64,
+    pub id_cliente: String,
 }
 
 /// Entrada para crear un cliente (Local-First: sin op_id ni outbox).
@@ -63,8 +61,8 @@ pub struct ClienteIdArgs {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CreateClienteInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_cliente: Option<i64>,
+    #[ts(optional)]
+    pub id_cliente: Option<String>,
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]
@@ -81,8 +79,7 @@ pub struct CreateClienteInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UpdateClienteInput {
-    #[ts(type = "number")]
-    pub id_cliente: i64,
+    pub id_cliente: String,
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]

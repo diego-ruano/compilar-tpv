@@ -25,7 +25,7 @@ impl ClienteRanking {
 /// Entidad de negocio Cliente (campos editables/persistibles).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cliente {
-    pub id: i64,
+    pub id: String,
     pub nombre: String,
     pub email: Option<String>,
     pub telefono: Option<String>,
@@ -36,7 +36,7 @@ pub struct Cliente {
 /// persistencia (siguiente ID libre).
 #[derive(Debug, Clone)]
 pub struct NuevoCliente {
-    pub id: Option<i64>,
+    pub id: Option<String>,
     pub nombre: String,
     pub email: Option<String>,
     pub telefono: Option<String>,
@@ -51,7 +51,7 @@ fn limpia_opcional(v: Option<String>) -> Option<String> {
 impl NuevoCliente {
     /// Normaliza y valida. `nombre` es obligatorio.
     pub fn validar(
-        id: Option<i64>,
+        id: Option<String>,
         nombre: String,
         email: Option<String>,
         telefono: Option<String>,
@@ -62,7 +62,7 @@ impl NuevoCliente {
             return Err("nombre required".to_string());
         }
         Ok(NuevoCliente {
-            id: id.filter(|n| *n > 0),
+            id: id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre,
             email: limpia_opcional(email),
             telefono: limpia_opcional(telefono),
@@ -74,13 +74,14 @@ impl NuevoCliente {
 impl Cliente {
     /// Normaliza y valida una edición. `id` debe ser válido y `nombre` obligatorio.
     pub fn validar_edicion(
-        id: i64,
+        id: String,
         nombre: String,
         email: Option<String>,
         telefono: Option<String>,
         notas: Option<String>,
     ) -> Result<Self, String> {
-        if id <= 0 {
+        let id = id.trim().to_string();
+        if id.is_empty() {
             return Err("ID_Cliente inválido.".to_string());
         }
         let nombre = nombre.trim().to_string();

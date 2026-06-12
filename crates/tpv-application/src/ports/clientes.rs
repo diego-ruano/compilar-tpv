@@ -14,7 +14,7 @@ pub trait ClientesRepository: Send + Sync {
     async fn overview(&self, ranking: ClienteRanking) -> AppResult<Vec<ClienteOverview>>;
 
     /// Datos de formulario de un cliente, o `None` si no existe.
-    async fn form(&self, id_cliente: i64) -> AppResult<Option<ClienteForm>>;
+    async fn form(&self, id_cliente: &str) -> AppResult<Option<ClienteForm>>;
 
     /// Crea (o upserta por id) un cliente. Devuelve `true` si quedó persistido.
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool>;

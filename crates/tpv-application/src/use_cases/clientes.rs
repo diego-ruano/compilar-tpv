@@ -19,9 +19,10 @@ pub async fn listar_overview(
 /// Formulario de un cliente. Id no positivo => `None` (sin tocar el repo).
 pub async fn obtener_form(
     repo: &dyn ClientesRepository,
-    id_cliente: i64,
+    id_cliente: String,
 ) -> AppResult<Option<ClienteForm>> {
-    if id_cliente <= 0 {
+    let id_cliente = id_cliente.trim();
+    if id_cliente.is_empty() {
         return Ok(None);
     }
     repo.form(id_cliente).await
