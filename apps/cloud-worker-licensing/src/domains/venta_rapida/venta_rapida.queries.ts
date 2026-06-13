@@ -80,7 +80,7 @@ function productosSql(where: string, suffix = "") {
 
 export async function productosByCategoria(
 	db: Client,
-	idCategoria: number,
+	idCategoria: string,
 ): Promise<ProductoRow[]> {
 	const rs = await db.execute({
 		sql: productosSql("p.ID_Categoria = ?1"),
@@ -102,7 +102,7 @@ export async function searchProductos(
 	return rows(rs) as ProductoRow[];
 }
 
-export async function barraMesaId(db: Client): Promise<number> {
+export async function barraMesaId(db: Client): Promise<string> {
 	const rs = await db.execute(`
 		SELECT ID_Mesa AS id
 		FROM Mesas
@@ -110,33 +110,33 @@ export async function barraMesaId(db: Client): Promise<number> {
 		ORDER BY ID_Mesa ASC
 		LIMIT 1;
 	`);
-	return Number(rows(rs)[0]?.id ?? 0);
+	return String(rows(rs)[0]?.id ?? "");
 }
 
 export async function openBarraComanda(
 	db: Client,
-	idMesaBarra: number,
-): Promise<number> {
-	if (idMesaBarra <= 0) return 0;
+	idMesaBarra: string,
+): Promise<string> {
+	if (!idMesaBarra.trim()) return "";
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Comanda AS id
 			FROM Comandas
 			WHERE ID_Mesa = ?1
 				AND Estado = 'Abierta'
-			ORDER BY ID_Comanda DESC
+			ORDER BY datetime(Fecha_Hora_Apertura) DESC
 			LIMIT 1;
 		`,
 		args: [idMesaBarra],
 	});
-	return Number(rows(rs)[0]?.id ?? 0);
+	return String(rows(rs)[0]?.id ?? "");
 }
 
 export async function resolveTrabajadorId(
 	db: Client,
-	idMaybe: number | null,
-): Promise<number | null> {
-	if (!idMaybe || idMaybe <= 0) return null;
+	idMaybe: string | null,
+): Promise<string | null> {
+	if (!idMaybe || !idMaybe.trim()) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(
@@ -146,8 +146,8 @@ export async function resolveTrabajadorId(
 		`,
 		args: [idMaybe],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? id : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? id : null;
 }
 
 export async function listComandas(
@@ -156,7 +156,7 @@ export async function listComandas(
 	limit: number,
 ): Promise<ComandaBarraRow[]> {
 	const idMesaBarra = await barraMesaId(db);
-	if (idMesaBarra <= 0) return [];
+	if (!idMesaBarra.trim()) return [];
 	const whereClause = includePagadas
 		? "EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)"
 		: `(${PENDING_EXPR}) > 0
@@ -197,7 +197,7 @@ export async function listComandas(
 
 export async function lineas(
 	db: Client,
-	idComanda: number,
+	idComanda: string,
 ): Promise<LineaComandaRow[]> {
 	const rs = await db.execute({
 		sql: `
@@ -223,7 +223,7 @@ export async function lineas(
 	return rows(rs) as LineaComandaRow[];
 }
 
-export async function indexRows(db: Client, ids: number[]): Promise<IndexRow[]> {
+export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> {
 	if (!ids.length) return [];
 	const placeholders = ids.map((_, i) => `?${i + 1}`).join(",");
 	const rs = await db.execute({
@@ -260,7 +260,7 @@ export async function indexRows(db: Client, ids: number[]): Promise<IndexRow[]> 
 
 export async function detallesVerTicket(
 	db: Client,
-	idComanda: number,
+	idComanda: string,
 ): Promise<VerTicketsDetalleRow[]> {
 	const rs = await db.execute({
 		sql: `
@@ -286,38 +286,29 @@ export async function detallesVerTicket(
 }
 
 export type StockAllocation = {
-	id_lote: number;
+	id_lote: string;
 	take: number;
-	id_detalle?: number;
+	id_detalle?: string;
 };
 
 export type CobroPlan =
 	| {
 			ok: true;
-			id_pago: number;
+			id_pago: string;
 			importe_total: number;
-			id_usuario_cobrador: number | null;
-			id_trabajador_cobrador: number | null;
+			id_usuario_cobrador: string | null;
+			id_trabajador_cobrador: string | null;
 			allocations: StockAllocation[];
 		}
 	| {
 			ok: false;
 			error: string;
-			productoId?: number;
+			productoId?: string;
 			requested?: number;
 			available?: number;
 		};
 
-export async function nextId(
-	db: Client,
-	table: string,
-	column: string,
-): Promise<number> {
-	const rs = await db.execute(`SELECT COALESCE(MAX(${column}), 0) + 1 AS id FROM ${table};`);
-	return Math.max(1, Number(rows(rs)[0]?.id ?? 1));
-}
-
-async function lotRows(db: Client, productoId: number) {
+async function lotRows(db: Client, productoId: string) {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -335,7 +326,7 @@ async function lotRows(db: Client, productoId: number) {
 		args: [productoId],
 	});
 	return rows(rs).map((r) => ({
-		id_lote: Number(r.id_lote ?? 0),
+		id_lote: String(r.id_lote ?? ""),
 		stock: Number(r.stock ?? 0),
 	}));
 }
@@ -384,13 +375,13 @@ export async function cobrarPlan(
 	});
 	const charged = rows(chargedRs)
 		.map((r) => ({
-			id_detalle: Number(r.id_detalle ?? 0),
-			id_producto: Number(r.id_producto ?? 0),
+			id_detalle: String(r.id_detalle ?? ""),
+			id_producto: String(r.id_producto ?? ""),
 			cantidad: Number(r.cantidad ?? 0),
 		}))
-		.filter((r) => r.id_detalle > 0 && r.id_producto > 0 && r.cantidad > 0);
+		.filter((r) => r.id_detalle.length > 0 && r.id_producto.length > 0 && r.cantidad > 0);
 
-	const requestedByProduct = new Map<number, number>();
+	const requestedByProduct = new Map<string, number>();
 	for (const c of charged) {
 		requestedByProduct.set(
 			c.id_producto,
@@ -434,11 +425,11 @@ export async function cobrarPlan(
 		sql: "SELECT ID_Trabajador AS id FROM Comandas WHERE ID_Comanda = ?1 LIMIT 1;",
 		args: [input.id_comanda],
 	});
-	const idTrabComanda = Number(rows(comandaRs)[0]?.id ?? 0) || null;
+	const idTrabComanda = String(rows(comandaRs)[0]?.id ?? "").trim() || null;
 
 	return {
 		ok: true,
-		id_pago: await nextId(db, "Pagos", "ID_Pago"),
+		id_pago: crypto.randomUUID(),
 		importe_total: Number(resumen.importe ?? 0),
 		id_usuario_cobrador: idUsuario,
 		id_trabajador_cobrador:
@@ -452,7 +443,7 @@ export type RestarStockPlan =
 	| {
 			ok: false;
 			error: string;
-			productoId?: number;
+			productoId?: string;
 			requested?: number;
 			available?: number;
 		};
@@ -489,7 +480,7 @@ export async function restarStockPlan(
 	return { ok: true, allocations };
 }
 
-export async function hasPaidLines(db: Client, idComanda: number): Promise<boolean> {
+export async function hasPaidLines(db: Client, idComanda: string): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `
 			SELECT EXISTS(

@@ -50,7 +50,7 @@ export async function listProveedoresMini(db: Client): Promise<ProveedorMiniDto[
 
 export async function listProductosByCategoria(
 	db: Client,
-	idCategoria: number,
+	idCategoria: string,
 ): Promise<ProductoListDto[]> {
 	const rs = await db.execute({
 		sql: `
@@ -118,7 +118,7 @@ export async function listAlergenos(db: Client): Promise<AlergenoInvDto[]> {
 
 export async function alergenosProducto(
 	db: Client,
-	idProducto: number,
+	idProducto: string,
 ): Promise<number[]> {
 	const rs = await db.execute({
 		sql: "SELECT ID_Alergeno FROM Producto_Alergenos WHERE ID_Producto=?1 ORDER BY ID_Alergeno ASC;",
@@ -131,7 +131,7 @@ export async function alergenosProducto(
 
 export async function productDetail(
 	db: Client,
-	idProducto: number,
+	idProducto: string,
 ): Promise<ProductDetailResponse> {
 	const prodRs = await db.execute({
 		sql: `SELECT ${PRODUCTO_BASE_COLS} FROM Productos WHERE ID_Producto=?1 LIMIT 1;`,
@@ -158,7 +158,7 @@ export async function productDetail(
 
 export async function listLotesByProducto(
 	db: Client,
-	idProducto: number,
+	idProducto: string,
 ): Promise<LoteDto[]> {
 	const rs = await db.execute({
 		sql: `

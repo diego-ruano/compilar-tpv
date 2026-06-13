@@ -56,7 +56,7 @@ export async function getAll(db: Client): Promise<ProveedorDto[]> {
 
 export async function getProductos(
 	db: Client,
-	idProveedor: number,
+	idProveedor: string,
 ): Promise<ProductoProveedorDto[]> {
 	const rs = await db.execute({
 		sql: `SELECT ${PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 ORDER BY p.Nombre ASC;`,

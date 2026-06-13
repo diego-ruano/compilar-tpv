@@ -70,7 +70,7 @@ export async function getTareasAdmin(db: Client): Promise<TareaAdminRow[]> {
 
 export async function getTareaById(
 	db: Client,
-	idTarea: number,
+	idTarea: string,
 ): Promise<TareaRow | null> {
 	const rs = await db.execute({
 		sql: `
@@ -86,7 +86,7 @@ export async function getTareaById(
 
 export async function getTareaAsignados(
 	db: Client,
-	idTarea: number,
+	idTarea: string,
 ): Promise<TareaAsignadoRow[]> {
 	const rs = await db.execute({
 		sql: `
@@ -111,7 +111,7 @@ export async function getTareaAsignados(
 
 export async function getMisTareas(
 	db: Client,
-	idTrabajador: number,
+	idTrabajador: string,
 ): Promise<MisTareasRow[]> {
 	const rs = await db.execute({
 		sql: `

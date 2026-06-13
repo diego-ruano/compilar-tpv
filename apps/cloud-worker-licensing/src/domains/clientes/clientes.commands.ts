@@ -16,14 +16,10 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
-function nextIdStep(provided?: number) {
-	return provided && provided > 0
-		? { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [provided] }
-		: {
-				kind: "value",
-				saveAs: "id",
-				sql: "SELECT COALESCE(MAX(ID_Cliente), 0) + 1 FROM Clientes;",
-			};
+// Local-First/UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno.
+function idStep(provided?: string) {
+	const id = (provided ?? "").trim() || crypto.randomUUID();
+	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
 export function createCliente(input: CreateClienteInput): BuiltCommand {
@@ -36,7 +32,7 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 	};
 
 	const steps = [
-		nextIdStep(input.id_cliente),
+		idStep(input.id_cliente),
 		{
 			kind: "execute",
 			sql: `
@@ -79,7 +75,7 @@ export function createCliente(input: CreateClienteInput): BuiltCommand {
 	};
 }
 
-export function updateCliente(idCliente: number, input: UpdateClienteInput): BuiltCommand {
+export function updateCliente(idCliente: string, input: UpdateClienteInput): BuiltCommand {
 	const cloudPayload = {
 		id_cliente: idCliente,
 		nombre: input.nombre.trim(),

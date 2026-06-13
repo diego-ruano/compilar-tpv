@@ -22,9 +22,9 @@ function badRequest(c: any, error: string, err?: z.ZodError) {
 	return c.json({ error, issues: err?.issues }, 400);
 }
 
-function parseId(raw: string | undefined): number | null {
-	const n = Number(raw);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function parseId(raw: string | undefined): string | null {
+	const t = (raw ?? "").trim();
+	return t.length ? t : null;
 }
 
 async function parseBody<S extends z.ZodTypeAny>(
@@ -144,7 +144,7 @@ ventaRapidaRoutes.post("/comandas/barra", async (c) => {
 			const idMesa = await q.barraMesaId(db);
 			return q.openBarraComanda(db, idMesa);
 		});
-		if (existing > 0) return c.json({ ok: true, id_comanda: existing });
+		if (existing) return c.json({ ok: true, id_comanda: existing });
 	}
 
 	const idTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
@@ -206,7 +206,7 @@ ventaRapidaRoutes.post("/restar-stock", async (c) => {
 });
 
 ventaRapidaRoutes.post("/comandas/delete-if-safe", async (c) => {
-	const p = await parseBody(c, z.object({ id_comanda: z.coerce.number().int().positive() }));
+	const p = await parseBody(c, z.object({ id_comanda: z.coerce.string().trim().min(1) }));
 	if (!p.ok) return p.res;
 	const hasPaid = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.hasPaidLines(db, p.data.id_comanda),

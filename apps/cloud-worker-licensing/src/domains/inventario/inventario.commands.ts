@@ -37,16 +37,16 @@ function numOrNull(v: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
-function posOrNull(v: unknown): number | null {
-	const n = numOrNull(v);
-	return n != null && n > 0 ? Math.trunc(n) : null;
+function idOrNull(v: unknown): string | null {
+	const s = (v ?? "").toString().trim();
+	return s.length ? s : null;
 }
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
 	);
-	return Array.from(set).sort((a, b) => a - b);
+	return Array.from(set).sort();
 }
 
 const SQL_UPSERT_PRODUCTO = `
@@ -92,16 +92,16 @@ const SQL_INSERT_LOTE = `
 		Notas = excluded.Notas;
 `;
 
-// Paso que deja en `id` el ID efectivo: el provisto (si >0) o MAX(col)+1.
-function nextIdStep(table: string, column: string, provided?: number) {
-	return provided && provided > 0
-		? { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [provided] }
-		: { kind: "value", saveAs: "id", sql: `SELECT COALESCE(MAX(${column}), 0) + 1 FROM ${table};` };
+// UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
+// Queda en `id` para que viaje en el broadcast y la Main lo aplique con el mismo id.
+function idStep(provided?: string) {
+	const id = (provided ?? "").trim() || crypto.randomUUID();
+	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
 export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
 	const steps: any[] = [
-		nextIdStep("Categorias_Producto", "ID_Categoria", input.id_categoria),
+		idStep(input.id_categoria),
 		{
 			kind: "execute",
 			sql: SQL_UPSERT_CATEGORIA,
@@ -124,14 +124,14 @@ export function createCategoria(input: UpsertCategoriaInput): BuiltCommand {
 
 export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 	const steps: any[] = [
-		nextIdStep("Productos", "ID_Producto", input.id_producto),
+		idStep(input.id_producto),
 		{
 			kind: "execute",
 			sql: SQL_UPSERT_PRODUCTO,
 			args: [
 				REF_ID,
 				input.id_categoria,
-				posOrNull(input.id_proveedor),
+				idOrNull(input.id_proveedor),
 				input.nombre.trim(),
 				numOrNull(input.precio_venta),
 				numOrNull(input.stock_minimo),
@@ -159,7 +159,7 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 	};
 }
 
-export function deleteProducto(idProducto: number): BuiltCommand {
+export function deleteProducto(idProducto: string): BuiltCommand {
 	const steps = [
 		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
 		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
@@ -174,7 +174,7 @@ export function deleteProducto(idProducto: number): BuiltCommand {
 }
 
 export function setAlergenosProducto(
-	idProducto: number,
+	idProducto: string,
 	input: SetAlergenosInput,
 ): BuiltCommand {
 	const ids = normalizeIds(input.ids_alergenos);
@@ -202,7 +202,7 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 		input.stock_disponible == null ? input.cantidad_inicial : input.stock_disponible;
 
 	const steps: any[] = [
-		nextIdStep("Lotes_Producto", "ID_Lote", input.id_lote),
+		idStep(input.id_lote),
 		{
 			kind: "execute",
 			sql: SQL_INSERT_LOTE,
@@ -215,7 +215,7 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 				input.cantidad_inicial,
 				stock,
 				numOrNull(input.coste_unitario),
-				posOrNull(input.id_proveedor),
+				idOrNull(input.id_proveedor),
 				cleanOrNull(input.notas),
 			],
 		},
@@ -227,7 +227,7 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 	};
 }
 
-export function ajustarLote(idLote: number, input: AjusteLoteInput): BuiltCommand {
+export function ajustarLote(idLote: string, input: AjusteLoteInput): BuiltCommand {
 	return {
 		commandName: "inventario_ajustar_lote",
 		command: {

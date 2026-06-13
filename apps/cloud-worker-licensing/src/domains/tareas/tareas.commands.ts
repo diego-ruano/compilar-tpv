@@ -20,11 +20,11 @@ export type BuiltCommand = {
 
 const REF_ID_TAREA = { $ref: "id_tarea" } as const;
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
 	);
-	return Array.from(set).sort((a, b) => a - b);
+	return Array.from(set).sort();
 }
 
 function cleanOrNull(s: unknown): string | null {
@@ -32,7 +32,7 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
-function assignmentSteps(idTarea: number | typeof REF_ID_TAREA, idsRaw: number[]): any[] {
+function assignmentSteps(idTarea: string | typeof REF_ID_TAREA, idsRaw: string[]): any[] {
 	const ids = normalizeIds(idsRaw);
 	const steps: any[] = [];
 
@@ -91,21 +91,28 @@ export function createTarea(input: CreateTareaInput): BuiltCommand {
 
 	const steps: any[] = [
 		{
+			kind: "value",
+			saveAs: "id_tarea",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
+		},
+		{
 			kind: "execute",
 			sql: `
 				INSERT INTO Tareas (
+					ID_Tarea,
 					Titulo,
 					Descripcion,
 					Fecha_Limite
 				)
-				VALUES (?1, ?2, ?3);
+				VALUES (?1, ?2, ?3, ?4);
 			`,
-			args: [cloudPayload.titulo, cloudPayload.descripcion, cloudPayload.fecha_limite],
-		},
-		{
-			kind: "value",
-			saveAs: "id_tarea",
-			sql: "SELECT last_insert_rowid();",
+			args: [
+				REF_ID_TAREA,
+				cloudPayload.titulo,
+				cloudPayload.descripcion,
+				cloudPayload.fecha_limite,
+			],
 		},
 		...assignmentSteps(REF_ID_TAREA, ids),
 	];
@@ -117,7 +124,7 @@ export function createTarea(input: CreateTareaInput): BuiltCommand {
 	};
 }
 
-export function updateTarea(idTarea: number, input: UpdateTareaInput): BuiltCommand {
+export function updateTarea(idTarea: string, input: UpdateTareaInput): BuiltCommand {
 	const cloudPayload = {
 		id_tarea: idTarea,
 		titulo: input.titulo.trim(),
@@ -151,7 +158,7 @@ export function updateTarea(idTarea: number, input: UpdateTareaInput): BuiltComm
 }
 
 export function setAsignacionesTarea(
-	idTarea: number,
+	idTarea: string,
 	input: SetAsignacionesTareaInput,
 ): BuiltCommand {
 	const ids = normalizeIds(input.ids_trabajadores);
@@ -164,7 +171,7 @@ export function setAsignacionesTarea(
 	};
 }
 
-export function deleteTarea(idTarea: number): BuiltCommand {
+export function deleteTarea(idTarea: string): BuiltCommand {
 	const steps: any[] = [
 		{
 			kind: "execute",
@@ -187,7 +194,7 @@ export function deleteTarea(idTarea: number): BuiltCommand {
 }
 
 export function marcarFinalizada(
-	idTarea: number,
+	idTarea: string,
 	input: FinalizarTareaInput,
 ): BuiltCommand {
 	const cloudPayload = {

@@ -31,7 +31,7 @@ export async function listLoginUsers(db: Client): Promise<UserListItem[]> {
 	return rows(rs) as UserListItem[];
 }
 
-export async function getLoginRecord(db: Client, idUsuario: number): Promise<any | null> {
+export async function getLoginRecord(db: Client, idUsuario: string): Promise<any | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -54,12 +54,12 @@ export async function getLoginRecord(db: Client, idUsuario: number): Promise<any
 	return rows(rs)[0] ?? null;
 }
 
-export async function loginOk(db: Client, idUsuario: number): Promise<LoginOk | null> {
+export async function loginOk(db: Client, idUsuario: string): Promise<LoginOk | null> {
 	const r = await getLoginRecord(db, idUsuario);
 	if (!r) return null;
 	return {
-		id_usuario: Number(r.id_usuario),
-		id_trabajador: r.id_trabajador == null ? null : Number(r.id_trabajador),
+		id_usuario: String(r.id_usuario ?? ""),
+		id_trabajador: r.id_trabajador == null ? null : String(r.id_trabajador),
 		nombre: String(r.nombre ?? ""),
 		apellido: r.apellido == null ? null : String(r.apellido),
 		rol: String(r.rol ?? "Sin rol"),
@@ -75,7 +75,7 @@ export async function loginOk(db: Client, idUsuario: number): Promise<LoginOk | 
  */
 export async function applyInitialSetupDirect(
 	db: Client,
-	input: { idUsuario: number; email: string; passwordHash: string },
+	input: { idUsuario: string; email: string; passwordHash: string },
 ): Promise<void> {
 	await db.execute({
 		sql: `
@@ -90,7 +90,7 @@ export async function applyInitialSetupDirect(
 export async function emailInUse(
 	db: Client,
 	email: string,
-	excludeId: number,
+	excludeId: string,
 ): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `
@@ -103,7 +103,7 @@ export async function emailInUse(
 	return Number(rows(rs)[0]?.count ?? 0) > 0;
 }
 
-export async function punchStatus(db: Client, idUsuario: number): Promise<PunchStatus> {
+export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
 	const fechaRs = await db.execute("SELECT date('now','localtime') AS fecha;");
 	const fecha = String(rows(fechaRs)[0]?.fecha ?? "");
 	return punchStatusForDate(db, idUsuario, fecha);
@@ -111,7 +111,7 @@ export async function punchStatus(db: Client, idUsuario: number): Promise<PunchS
 
 export async function punchStatusForDate(
 	db: Client,
-	idUsuario: number,
+	idUsuario: string,
 	fecha: string,
 ): Promise<PunchStatus> {
 	const turnoRs = await db.execute({
@@ -148,7 +148,7 @@ export async function punchStatusForDate(
 	};
 }
 
-export async function getOpenPunch(db: Client, idUsuario: number, fecha: string) {
+export async function getOpenPunch(db: Client, idUsuario: string, fecha: string) {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Fichaje AS id_fichaje, Parte AS parte
@@ -165,7 +165,7 @@ export async function getOpenPunch(db: Client, idUsuario: number, fecha: string)
 	return rows(rs)[0] ?? null;
 }
 
-export async function nextPunchPart(db: Client, idUsuario: number, fecha: string) {
+export async function nextPunchPart(db: Client, idUsuario: string, fecha: string) {
 	const status = await punchStatusForDate(db, idUsuario, fecha);
 	const open = status.partes.find((p) => p.estado === "ABIERTO" && p.entrada && !p.salida);
 	if (open) throw new Error("Tienes un fichaje abierto. Ficha salida antes de fichar entrada.");

@@ -160,8 +160,8 @@ export async function listCategorias(db: Client): Promise<StatsCategoriaRow[]> {
 export async function productos(
 	db: Client,
 	range: StatsRange,
-	categoriaTopId: number | null,
-	categoriaWorstId: number | null,
+	categoriaTopId: string | null,
+	categoriaWorstId: string | null,
 ): Promise<ProductosStatsResponse> {
 	const { start, end } = rangeBounds(range);
 	const base = `
@@ -188,9 +188,9 @@ export async function productos(
 		 GROUP BY pr.ID_Producto
 		 ORDER BY unidades ASC, pr.Nombre ASC LIMIT 1;`,
 	);
-	const topFilter = categoriaTopId && categoriaTopId > 0 ? "AND pr.ID_Categoria = ?1" : "";
+	const topFilter = categoriaTopId && categoriaTopId.trim() ? "AND pr.ID_Categoria = ?1" : "";
 	const worstFilter =
-		categoriaWorstId && categoriaWorstId > 0 ? "AND pr.ID_Categoria = ?1" : "";
+		categoriaWorstId && categoriaWorstId.trim() ? "AND pr.ID_Categoria = ?1" : "";
 	const topRs = await db.execute({
 		sql: `SELECT pr.Nombre AS label, CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS value
 		      ${base} ${topFilter}
@@ -286,7 +286,7 @@ export async function trabajadores(
 		ORDER BY nombre ASC;
 	`);
 	const cards = rows(rs).map((r) => ({
-		id_trabajador: num(r.id),
+		id_trabajador: String(r.id ?? ""),
 		nombre: String(r.nombre ?? ""),
 		rol: String(r.rol ?? ""),
 		tareas_asignadas: 0,

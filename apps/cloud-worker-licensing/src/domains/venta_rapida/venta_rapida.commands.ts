@@ -23,6 +23,10 @@ const REF_ID_MESA_BARRA = { $ref: "id_mesa_barra" } as const;
 const REF_ID_COMANDA = { $ref: "id_comanda" } as const;
 const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 
+// UUIDs fijos (idénticos en local y nube; sembrados en schema.sql).
+const BARRA_ZONA_ID = "00000000-0000-7000-8000-000000000303";
+const BARRA_MESA_ID = "00000000-0000-7000-8000-000000000401";
+
 const UPDATE_TOTAL = `
 	UPDATE Comandas
 	SET Total_Comanda = (
@@ -38,19 +42,22 @@ function ensureBarraSteps() {
 		{
 			kind: "execute",
 			sql: `
-				INSERT OR IGNORE INTO Zonas (Nombre_Zona, Room_Points, Updated_At)
-				VALUES ('Salon', '[]', datetime('now','localtime'));
+				INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
+				VALUES (?1, 'BARRA', '[]', datetime('now','localtime'));
 			`,
+			args: [BARRA_ZONA_ID],
 		},
 		{
 			kind: "value",
 			saveAs: "id_zona",
-			sql: "SELECT ID_Zona FROM Zonas ORDER BY ID_Zona ASC LIMIT 1;",
+			sql: "SELECT ?1;",
+			args: [BARRA_ZONA_ID],
 		},
 		{
 			kind: "execute",
 			sql: `
 				INSERT OR IGNORE INTO Mesas (
+					ID_Mesa,
 					ID_Zona,
 					Numero_Mesa,
 					Capacidad,
@@ -63,28 +70,30 @@ function ensureBarraSteps() {
 					Updated_At,
 					Es_Sistema
 				)
-				VALUES (?1, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'), 1);
+				VALUES (?1, ?2, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'), 1);
 			`,
-			args: [REF_ID_ZONA],
+			args: [BARRA_MESA_ID, REF_ID_ZONA],
 		},
 		{
 			kind: "value",
 			saveAs: "id_mesa_barra",
-			sql: "SELECT ID_Mesa FROM Mesas WHERE Numero_Mesa = 'BARRA' ORDER BY ID_Mesa ASC LIMIT 1;",
+			sql: "SELECT ?1;",
+			args: [BARRA_MESA_ID],
 		},
 	];
 }
 
 export function createComandaBarra(
 	input: CreateComandaBarraInput,
-	idTrabajadorReal: number | null,
+	idTrabajadorReal: string | null,
 ): BuiltCommand {
 	const steps: any[] = [
 		...ensureBarraSteps(),
 		{
 			kind: "value",
 			saveAs: "id_comanda",
-			sql: "SELECT COALESCE(MAX(ID_Comanda), 0) + 1 FROM Comandas;",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
 		},
 		{
 			kind: "execute",
@@ -144,7 +153,8 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 					{
 						kind: "value",
 						saveAs: "id_detalle",
-						sql: "SELECT COALESCE(MAX(ID_Detalle), 0) + 1 FROM Detalle_Comanda;",
+						sql: "SELECT ?1;",
+							args: [crypto.randomUUID()],
 					},
 					{
 						kind: "execute",
@@ -412,7 +422,7 @@ export function restarStock(
 	};
 }
 
-export function deleteComandaIfSafe(idComanda: number): BuiltCommand {
+export function deleteComandaIfSafe(idComanda: string): BuiltCommand {
 	return {
 		commandName: "vr_delete_comanda_if_safe",
 		command: {

@@ -15,14 +15,10 @@ export type BuiltCommand = {
 
 const REF_ID = { $ref: "id" } as const;
 
-function nextGastoIdStep(provided?: number | null) {
-	return provided && provided > 0
-		? { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [provided] }
-		: {
-				kind: "value",
-				saveAs: "id",
-				sql: "SELECT COALESCE(MAX(ID_Gasto), 0) + 1 FROM Cuentas_Gastos;",
-			};
+// UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
+function idStep(provided?: string | null) {
+	const id = (provided ?? "").trim() || crypto.randomUUID();
+	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
 export function createGasto(input: CreateGastoInput): BuiltCommand {
@@ -35,7 +31,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 		proveedor_id: input.proveedor_id ?? null,
 	};
 	const steps = [
-		nextGastoIdStep(cloudPayload.id_gasto),
+		idStep(cloudPayload.id_gasto),
 		{
 			kind: "execute",
 			sql: `
@@ -65,7 +61,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 	};
 }
 
-export function updateGasto(idGasto: number, input: UpdateGastoInput): BuiltCommand {
+export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltCommand {
 	const cloudPayload = { id_gasto: idGasto, ...input };
 	return {
 		commandName: "cuentas_update_gasto",
@@ -91,7 +87,7 @@ export function updateGasto(idGasto: number, input: UpdateGastoInput): BuiltComm
 	};
 }
 
-export function deleteGasto(idGasto: number): BuiltCommand {
+export function deleteGasto(idGasto: string): BuiltCommand {
 	return {
 		commandName: "cuentas_delete_gasto",
 		command: {
@@ -105,7 +101,7 @@ export function deleteGasto(idGasto: number): BuiltCommand {
 	};
 }
 
-export function updatePago(idPago: number, input: UpdatePagoInput): BuiltCommand {
+export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand {
 	const cloudPayload = { id_pago: idPago, ...input };
 	return {
 		commandName: "cuentas_update_pago",
@@ -124,7 +120,7 @@ export function updatePago(idPago: number, input: UpdatePagoInput): BuiltCommand
 	};
 }
 
-export function deletePago(idPago: number): BuiltCommand {
+export function deletePago(idPago: string): BuiltCommand {
 	const steps = [
 		{
 			kind: "execute",

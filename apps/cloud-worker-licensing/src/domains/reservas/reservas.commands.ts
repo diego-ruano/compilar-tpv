@@ -13,7 +13,7 @@ const REF_ID_CLIENTE = { $ref: "id_cliente" } as const;
 const REF_ID_RESERVA = { $ref: "id_reserva" } as const;
 
 export type ClienteReservaExistente = {
-	id_cliente: number;
+	id_cliente: string;
 	email: string | null;
 } | null;
 
@@ -72,9 +72,16 @@ function clienteSteps(input: ReservaSaveInput, cliente: ClienteReservaExistente)
 
 	return [
 		{
+			kind: "value",
+			saveAs: "id_cliente",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
+		},
+		{
 			kind: "execute",
 			sql: `
 				INSERT INTO Clientes (
+					ID_Cliente,
 					Nombre,
 					Telefono,
 					Email,
@@ -86,20 +93,17 @@ function clienteSteps(input: ReservaSaveInput, cliente: ClienteReservaExistente)
 					?2,
 					?3,
 					?4,
+					?5,
 					datetime('now','localtime')
 				);
 			`,
 			args: [
+				REF_ID_CLIENTE,
 				input.nombre_cliente,
 				input.telefono,
 				input.email,
 				input.notas_cliente,
 			],
-		},
-		{
-			kind: "value",
-			saveAs: "id_cliente",
-			sql: "SELECT last_insert_rowid();",
 		},
 	];
 }
@@ -175,9 +179,16 @@ export function saveReserva(
 		});
 	} else {
 		steps.push({
+			kind: "value",
+			saveAs: "id_reserva",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
+		});
+		steps.push({
 			kind: "execute",
 			sql: `
 				INSERT INTO Reservas (
+					ID_Reserva,
 					ID_Cliente,
 					ID_Mesa,
 					Dia_YMD,
@@ -195,15 +206,11 @@ export function saveReserva(
 					?5,
 					?6,
 					?7,
-					?8
+					?8,
+					?9
 				);
 			`,
-			args: reservaArgs(input, false),
-		});
-		steps.push({
-			kind: "value",
-			saveAs: "id_reserva",
-			sql: "SELECT last_insert_rowid();",
+			args: [REF_ID_RESERVA, ...reservaArgs(input, false)],
 		});
 	}
 
@@ -217,7 +224,7 @@ export function saveReserva(
 	};
 }
 
-export function deleteReserva(idReserva: number): BuiltCommand {
+export function deleteReserva(idReserva: string): BuiltCommand {
 	const cloudPayload = { id_reserva: idReserva };
 	return {
 		commandName: "reservas_delete",

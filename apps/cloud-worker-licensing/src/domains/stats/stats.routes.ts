@@ -19,9 +19,9 @@ function parseRange(raw: string | undefined) {
 	return rangeSchema.parse(raw || "hoy");
 }
 
-function parseId(raw: string | undefined): number | null {
-	const n = Number(raw);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function parseId(raw: string | undefined): string | null {
+	const t = (raw ?? "").trim();
+	return t.length ? t : null;
 }
 
 statsRoutes.get("/mesas", async (c) => {

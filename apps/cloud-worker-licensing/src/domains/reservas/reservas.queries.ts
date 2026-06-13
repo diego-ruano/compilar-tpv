@@ -93,7 +93,7 @@ export async function findClienteReserva(
 	db: Client,
 	email: string | null,
 	telefono: string | null,
-): Promise<{ id_cliente: number; email: string | null } | null> {
+): Promise<{ id_cliente: string; email: string | null } | null> {
 	if (email) {
 		const rs = await db.execute({
 			sql: `
@@ -108,7 +108,7 @@ export async function findClienteReserva(
 			args: [email],
 		});
 		const row = rows(rs)[0];
-		if (row) return row as { id_cliente: number; email: string | null };
+		if (row) return row as { id_cliente: string; email: string | null };
 	}
 
 	if (telefono) {
@@ -125,7 +125,7 @@ export async function findClienteReserva(
 			args: [telefono],
 		});
 		const row = rows(rs)[0];
-		if (row) return row as { id_cliente: number; email: string | null };
+		if (row) return row as { id_cliente: string; email: string | null };
 	}
 
 	return null;

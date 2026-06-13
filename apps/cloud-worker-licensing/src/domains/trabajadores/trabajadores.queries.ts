@@ -87,7 +87,7 @@ export async function all(db: Client): Promise<TrabajadorRow[]> {
 
 export async function detail(
 	db: Client,
-	idTrabajador: number,
+	idTrabajador: string,
 ): Promise<TrabajadorDetailRow | null> {
 	const rs = await db.execute({
 		sql: `
@@ -118,7 +118,7 @@ export async function detail(
 
 export async function idByUsuario(
 	db: Client,
-	idUsuario: number,
+	idUsuario: string,
 ): Promise<number | null> {
 	const rs = await db.execute({
 		sql: `
@@ -199,14 +199,14 @@ export async function asignacionesSemana(
 		const fecha = addDays(fechaLunes, dayOffset);
 		const weekday = dayOffset + 1;
 		for (const d of defs) {
-			const idTrab = Number(d.ID_Trabajador ?? 0);
-			if (Number(d.Weekday ?? 0) !== weekday || idTrab <= 0) continue;
+			const idTrab = String(d.ID_Trabajador ?? "");
+			if (Number(d.Weekday ?? 0) !== weekday || !idTrab) continue;
 			if (realCells.has(`${idTrab}:${fecha}`)) continue;
 			out.push({
-				ID_Asignacion: 0,
+				ID_Asignacion: "",
 				ID_Trabajador: idTrab,
 				Fecha: fecha,
-				ID_Turno: Number(d.ID_Turno ?? 0),
+				ID_Turno: String(d.ID_Turno ?? ""),
 				Area: String(d.Area ?? "Sala"),
 				Hora_Inicio: d.Hora_Inicio ?? null,
 				Hora_Fin: d.Hora_Fin ?? null,
@@ -219,17 +219,17 @@ export async function asignacionesSemana(
 	out.sort((a: any, b: any) =>
 		String(a.Fecha)
 			.localeCompare(String(b.Fecha))
-			|| Number(a.ID_Trabajador) - Number(b.ID_Trabajador)
+			|| String(a.ID_Trabajador).localeCompare(String(b.ID_Trabajador))
 			|| hhmm(a.Hora_Inicio).localeCompare(hhmm(b.Hora_Inicio)),
 	);
 	return out;
 }
 
 export type PredeterminadoItem = {
-	id_trabajador: number;
+	id_trabajador: string;
 	weekday: number;
 	orden: number;
-	id_turno: number;
+	id_turno: string;
 	area: string;
 	hora_inicio: string | null;
 	hora_fin: string | null;
@@ -261,7 +261,7 @@ export async function predeterminadoDesdeSemanaItems(
 	const counters = new Map<string, number>();
 	return rows(rs)
 		.map((r) => {
-			const idTrab = Number(r.id_trabajador ?? 0);
+			const idTrab = String(r.id_trabajador ?? "");
 			const fecha = String(r.fecha ?? "");
 			const weekday = weekday1To7(fecha);
 			const key = `${idTrab}:${weekday}`;
@@ -271,7 +271,7 @@ export async function predeterminadoDesdeSemanaItems(
 				id_trabajador: idTrab,
 				weekday,
 				orden,
-				id_turno: Number(r.id_turno ?? 0),
+				id_turno: String(r.id_turno ?? ""),
 				area: String(r.area ?? "Sala"),
 				hora_inicio: r.hora_inicio ?? null,
 				hora_fin: r.hora_fin ?? null,
@@ -280,9 +280,9 @@ export async function predeterminadoDesdeSemanaItems(
 		})
 		.filter(
 			(r) =>
-				r.id_trabajador > 0
+				r.id_trabajador.trim().length > 0
 				&& r.weekday >= 1
 				&& r.weekday <= 7
-				&& r.id_turno > 0,
+				&& r.id_turno.trim().length > 0,
 		);
 }

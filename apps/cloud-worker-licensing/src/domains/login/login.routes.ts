@@ -24,9 +24,9 @@ function badRequest(c: any, error: string, err?: z.ZodError) {
 	return c.json({ error, issues: err?.issues }, 400);
 }
 
-function parseId(raw: string | undefined): number | null {
-	const n = Number(raw);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function parseId(raw: string | undefined): string | null {
+	const t = (raw ?? "").trim();
+	return t.length ? t : null;
 }
 
 async function parseBody<S extends z.ZodTypeAny>(
@@ -217,7 +217,7 @@ loginRoutes.post("/punch", async (c) => {
 				id_usuario: p.data.id_usuario,
 				fecha,
 				hora_evento: p.data.hora_evento,
-				id_fichaje: Number(open.id_fichaje),
+				id_fichaje: String(open.id_fichaje),
 			}),
 		);
 	}

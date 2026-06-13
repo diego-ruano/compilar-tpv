@@ -9,13 +9,13 @@ import type {
 	MesasSaveLayoutInput,
 } from "@tpv/contracts";
 
-function positiveInt(field: string) {
-	return z.coerce.number().int(`${field} invalido`).positive(`${field} invalido`);
+function idField(field: string) {
+	return z.coerce.string().trim().min(1, `${field} invalido`);
 }
 
-function optPositiveInt(v: unknown): number | null {
-	const n = Number(v);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function optIdStr(v: unknown): string | null {
+	const s = String(v ?? "").trim();
+	return s.length ? s : null;
 }
 
 function cleanOrNull(v: unknown): string | null {
@@ -33,14 +33,13 @@ function cocina(v: unknown): string {
 		: "PENDIENTE";
 }
 
-function ids(values: unknown): number[] {
+function idArray(values: unknown): string[] {
 	if (!Array.isArray(values)) return [];
 	return Array.from(
 		new Set(
 			values
-				.map(Number)
-				.filter((n) => Number.isInteger(n) && n > 0)
-				.map((n) => Math.trunc(n)),
+				.map((s) => String(s ?? "").trim())
+				.filter((s) => s.length > 0),
 		),
 	);
 }
@@ -76,7 +75,7 @@ export const saveLayoutSchema = z.object({
 });
 
 export const setReservaEstadoSchema = z.object({
-	id_reserva: positiveInt("id_reserva"),
+	id_reserva: idField("id_reserva"),
 	estado: z
 		.string()
 		.transform((s) => s.trim().toUpperCase())
@@ -85,7 +84,7 @@ export const setReservaEstadoSchema = z.object({
 
 export const abrirComandaSchema = z
 	.object({
-		id_mesa: positiveInt("id_mesa"),
+		id_mesa: idField("id_mesa"),
 		id_trabajador: z.any().optional().nullable(),
 		id_usuario: z.any().optional().nullable(),
 		id_reserva: z.any().optional().nullable(),
@@ -93,31 +92,31 @@ export const abrirComandaSchema = z
 	.transform((v) => ({
 		id_mesa: v.id_mesa,
 		id_trabajador_o_usuario:
-			optPositiveInt(v.id_trabajador) ?? optPositiveInt(v.id_usuario),
-		id_reserva: optPositiveInt(v.id_reserva),
+			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
+		id_reserva: optIdStr(v.id_reserva),
 	}));
 
 export const setTrabajadorSchema = z
 	.object({
-		id_comanda: positiveInt("id_comanda"),
+		id_comanda: idField("id_comanda"),
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})
 	.transform((v) => ({
 		id_comanda: v.id_comanda,
 		id_trabajador_o_usuario:
-			optPositiveInt(v.id_trabajador) ?? optPositiveInt(v.id_usuario),
+			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
 
 export const cerrarComandaSchema = z.object({
-	id_comanda: positiveInt("id_comanda"),
+	id_comanda: idField("id_comanda"),
 	total: z.coerce.number().min(0),
 });
 
 export const addLineaSchema = z
 	.object({
-		id_comanda: positiveInt("id_comanda"),
-		id_producto: positiveInt("id_producto"),
+		id_comanda: idField("id_comanda"),
+		id_producto: idField("id_producto"),
 		cantidad: z.coerce.number().positive(),
 		precio: z.coerce.number().min(0),
 		id_usuario: z.any().optional().nullable(),
@@ -126,28 +125,28 @@ export const addLineaSchema = z
 	.transform((v) => ({
 		...v,
 		id_trabajador_o_usuario:
-			optPositiveInt(v.id_trabajador) ?? optPositiveInt(v.id_usuario),
+			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
 
 export const removeOneDetalleSchema = z.object({
-	id_comanda: positiveInt("id_comanda"),
-	id_producto: positiveInt("id_producto"),
+	id_comanda: idField("id_comanda"),
+	id_producto: idField("id_producto"),
 });
 
 export const deleteDetalleSchema = z.object({
-	id_detalle: positiveInt("id_detalle"),
+	id_detalle: idField("id_detalle"),
 });
 
 export const updateNotaSchema = z
 	.object({
-		id_detalle: positiveInt("id_detalle"),
+		id_detalle: idField("id_detalle"),
 		nota: z.any().optional().nullable(),
 	})
 	.transform((v) => ({ ...v, nota: cleanOrNull(v.nota) }));
 
 export const cobrarDetallesSchema = z
 	.object({
-		id_comanda: positiveInt("id_comanda"),
+		id_comanda: idField("id_comanda"),
 		metodo: z.any(),
 		tipo: z.any(),
 		detalle_ids: z.any(),
@@ -159,8 +158,8 @@ export const cobrarDetallesSchema = z
 		tipo: String(v.tipo ?? "TOTAL").trim().toUpperCase() === "FRACCIONADO"
 			? "FRACCIONADO"
 			: "TOTAL",
-		detalle_ids: ids(v.detalle_ids),
-		id_usuario: optPositiveInt(v.id_usuario),
+		detalle_ids: idArray(v.detalle_ids),
+		id_usuario: optIdStr(v.id_usuario),
 	}))
 	.refine((v) => v.detalle_ids.length > 0, {
 		path: ["detalle_ids"],
@@ -168,8 +167,8 @@ export const cobrarDetallesSchema = z
 	});
 
 export const kitchenStateSchema = z.object({
-	id_detalle: positiveInt("id_detalle"),
-	id_usuario_cocinero: positiveInt("id_usuario_cocinero"),
+	id_detalle: idField("id_detalle"),
+	id_usuario_cocinero: idField("id_usuario_cocinero"),
 	estado: z.any().transform(cocina),
 });
 
@@ -184,27 +183,27 @@ export const searchSchema = z.object({
 export type SaveLayoutInput = MesasSaveLayoutInput;
 
 export type AbrirComandaInput = Pick<MesasAbrirComandaInput, "id_mesa"> & {
-	id_trabajador_o_usuario: number | null;
-	id_reserva: number | null;
+	id_trabajador_o_usuario: string | null;
+	id_reserva: string | null;
 };
 
 export type SetTrabajadorInput = Pick<
 	MesasComandaSetTrabajadorInput,
 	"id_comanda"
 > & {
-	id_trabajador_o_usuario: number | null;
+	id_trabajador_o_usuario: string | null;
 };
 
 export type AddLineaInput = Pick<
 	MesasAddLineaComandaInput,
 	"id_comanda" | "id_producto" | "cantidad" | "precio"
 > & {
-	id_trabajador_o_usuario: number | null;
+	id_trabajador_o_usuario: string | null;
 };
 
 export type CobrarDetallesInput = Omit<
 	ContractMesasCobrarDetallesInput,
 	"id_usuario"
 > & {
-	id_usuario: number | null;
+	id_usuario: string | null;
 };

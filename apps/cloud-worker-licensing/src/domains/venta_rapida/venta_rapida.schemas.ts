@@ -11,17 +11,17 @@ import type {
 	VrUpdateNotaDetalleInput,
 } from "@tpv/contracts";
 
-function positiveInt(field: string) {
-	return z.coerce.number().int(`${field} invalido`).positive(`${field} invalido`);
+function idField(field: string) {
+	return z.coerce.string().trim().min(1, `${field} invalido`);
 }
 
 function positiveNumber(field: string) {
 	return z.coerce.number().positive(`${field} invalido`);
 }
 
-function optPositiveInt(v: unknown): number | null {
-	const n = Number(v);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function optIdStr(v: unknown): string | null {
+	const s = String(v ?? "").trim();
+	return s.length ? s : null;
 }
 
 function cleanOrNull(v: unknown): string | null {
@@ -29,16 +29,15 @@ function cleanOrNull(v: unknown): string | null {
 	return s.length ? s : null;
 }
 
-function normalizeIds(values: unknown): number[] {
+function normalizeIds(values: unknown): string[] {
 	if (!Array.isArray(values)) return [];
 	return Array.from(
 		new Set(
 			values
-				.map(Number)
-				.filter((n) => Number.isInteger(n) && n > 0)
-				.map((n) => Math.trunc(n)),
+				.map((s) => String(s ?? "").trim())
+				.filter((s) => s.length > 0),
 		),
-	).sort((a, b) => a - b);
+	).sort();
 }
 
 function normalizeMetodo(v: unknown): string {
@@ -73,37 +72,37 @@ export const createComandaBarraSchema = z
 		get_or_create: z.boolean().optional().default(false),
 	})
 	.transform((v) => ({
-		id_trabajador: optPositiveInt(v.id_trabajador),
+		id_trabajador: optIdStr(v.id_trabajador),
 		get_or_create: Boolean(v.get_or_create),
 	}));
 
 export const addLineaSchema = z.object({
-	id_comanda: positiveInt("id_comanda"),
-	id_producto: positiveInt("id_producto"),
+	id_comanda: idField("id_comanda"),
+	id_producto: idField("id_producto"),
 	cantidad: positiveNumber("cantidad"),
 	precio_unitario: z.coerce.number().min(0, "precio_unitario invalido"),
 });
 
 export const removeLastLineaSchema = z.object({
-	id_comanda: positiveInt("id_comanda"),
-	id_producto: positiveInt("id_producto"),
+	id_comanda: idField("id_comanda"),
+	id_producto: idField("id_producto"),
 });
 
 export const deleteLineaSchema = z.object({
-	id_comanda: positiveInt("id_comanda"),
-	id_detalle: positiveInt("id_detalle"),
+	id_comanda: idField("id_comanda"),
+	id_detalle: idField("id_detalle"),
 });
 
 export const updateNotaSchema = z
 	.object({
-		id_detalle: positiveInt("id_detalle"),
+		id_detalle: idField("id_detalle"),
 		nota: z.any().optional().nullable(),
 	})
 	.transform((v) => ({ ...v, nota: cleanOrNull(v.nota) }));
 
 export const cobrarFraccionadoSchema = z
 	.object({
-		id_comanda: positiveInt("id_comanda"),
+		id_comanda: idField("id_comanda"),
 		metodo: z.any(),
 		importe_total: z.coerce.number().min(0),
 		id_usuario_cobrador: z.any().optional().nullable(),
@@ -114,8 +113,8 @@ export const cobrarFraccionadoSchema = z
 		id_comanda: v.id_comanda,
 		metodo: normalizeMetodo(v.metodo),
 		importe_total: v.importe_total,
-		id_usuario_cobrador: optPositiveInt(v.id_usuario_cobrador),
-		id_trabajador_cobrador: optPositiveInt(v.id_trabajador_cobrador),
+		id_usuario_cobrador: optIdStr(v.id_usuario_cobrador),
+		id_trabajador_cobrador: optIdStr(v.id_trabajador_cobrador),
 		detalles: normalizeIds(v.detalles),
 	}))
 	.refine((v) => v.detalles.length > 0, {
@@ -129,13 +128,12 @@ export const restarStockSchema = z
 		lineas: Array.isArray(v.lineas)
 			? v.lineas
 					.map((it: any) => ({
-						producto_id: Number(it?.producto_id),
+						producto_id: String(it?.producto_id ?? "").trim(),
 						cantidad: Number(it?.cantidad),
 					}))
 					.filter(
 						(it) =>
-							Number.isInteger(it.producto_id)
-							&& it.producto_id > 0
+							it.producto_id.length > 0
 							&& Number.isFinite(it.cantidad)
 							&& it.cantidad > 0,
 					)
@@ -146,7 +144,7 @@ export type CreateComandaBarraInput = Omit<
 	VrCreateComandaBarraInput,
 	"id_trabajador" | "get_or_create"
 > & {
-	id_trabajador: number | null;
+	id_trabajador: string | null;
 	get_or_create: boolean;
 };
 
@@ -162,8 +160,8 @@ export type CobrarFraccionadoInput = Omit<
 	ContractVrCobrarFraccionadoInput,
 	"id_usuario_cobrador" | "id_trabajador_cobrador"
 > & {
-	id_usuario_cobrador: number | null;
-	id_trabajador_cobrador: number | null;
+	id_usuario_cobrador: string | null;
+	id_trabajador_cobrador: string | null;
 };
 
 export type RestarStockInput = VrRestarStockInput;

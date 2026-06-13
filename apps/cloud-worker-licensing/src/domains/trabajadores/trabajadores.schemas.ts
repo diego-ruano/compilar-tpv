@@ -21,8 +21,8 @@ function requiredString(field: string) {
 		.refine((s) => s.length > 0, `${field} required`);
 }
 
-function positiveInt(field: string) {
-	return z.coerce.number().int(`${field} invalido`).positive(`${field} invalido`);
+function idField(field: string) {
+	return z.coerce.string().trim().min(1, `${field} invalido`);
 }
 
 function normalizeEstado(v: unknown): string {
@@ -50,7 +50,7 @@ function normalizeOptionalTime(raw: unknown): string | null {
 
 export const trabajadorCreateSchema = z
 	.object({
-		id_rol: positiveInt("id_rol"),
+		id_rol: idField("id_rol"),
 		email: requiredString("email"),
 		password_hash: requiredString("password_hash"),
 		nombre: requiredString("nombre"),
@@ -79,9 +79,9 @@ export const trabajadorCreateSchema = z
 
 export const trabajadorUpdateSchema = z
 	.object({
-		id_trabajador: positiveInt("id_trabajador"),
-		id_usuario: positiveInt("id_usuario"),
-		id_rol: positiveInt("id_rol"),
+		id_trabajador: idField("id_trabajador"),
+		id_usuario: idField("id_usuario"),
+		id_rol: idField("id_rol"),
 		email: requiredString("email"),
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
@@ -111,9 +111,9 @@ export const trabajadorUpdateSchema = z
 
 export const asignacionCreateSchema = z
 	.object({
-		id_trabajador: positiveInt("id_trabajador"),
+		id_trabajador: idField("id_trabajador"),
 		fecha: z.any().transform((v) => normalizeYmd(v)),
-		id_turno: positiveInt("id_turno"),
+		id_turno: idField("id_turno"),
 		area: requiredString("area"),
 		hora_inicio: z.any().optional().nullable(),
 		hora_fin: z.any().optional().nullable(),
@@ -128,8 +128,8 @@ export const asignacionCreateSchema = z
 
 export const asignacionUpdateSchema = z
 	.object({
-		id_asignacion: positiveInt("id_asignacion"),
-		id_turno: positiveInt("id_turno"),
+		id_asignacion: idField("id_asignacion"),
+		id_turno: idField("id_turno"),
 		area: requiredString("area"),
 		hora_inicio: z.any().optional().nullable(),
 		hora_fin: z.any().optional().nullable(),

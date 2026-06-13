@@ -97,7 +97,7 @@ export async function overview(
 
 export async function form(
 	db: Client,
-	idCliente: number,
+	idCliente: string,
 ): Promise<ClienteForm | null> {
 	const rs = await db.execute({
 		sql: `

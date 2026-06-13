@@ -7,7 +7,7 @@ import type {
 	ProveedoresSetVinculosInput,
 } from "@tpv/contracts";
 
-const posInt = z.number().int().positive();
+const idStr = z.string().trim().min(1);
 const optNum = z.number().finite().min(0).nullish();
 
 function cleanOptional(v: unknown): string | null {
@@ -15,17 +15,17 @@ function cleanOptional(v: unknown): string | null {
 	return t.length ? t : null;
 }
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
 	);
-	return Array.from(set).sort((a, b) => a - b);
+	return Array.from(set).sort();
 }
 
 const optStr = z.string().nullish().transform(cleanOptional);
 
 export const proveedorSaveSchema = z.object({
-	id_proveedor: posInt.optional().nullish(),
+	id_proveedor: idStr.optional().nullish(),
 	nombre_empresa: z.string().trim().min(1, "nombre_empresa required"),
 	contacto: optStr,
 	telefono: optStr,
@@ -37,13 +37,13 @@ export const proveedorSaveSchema = z.object({
 });
 
 export const setVinculosSchema = z.object({
-	producto_ids: z.array(z.number()).default([]).transform(normalizeIds),
+	producto_ids: z.array(z.string()).default([]).transform(normalizeIds),
 });
 
 export const createProductoSchema = z.object({
-	id_producto: posInt.optional().nullish(),
-	id_categoria: posInt,
-	id_proveedor: posInt,
+	id_producto: idStr.optional().nullish(),
+	id_categoria: idStr,
+	id_proveedor: idStr,
 	nombre: z.string().trim().min(1, "nombre required"),
 	precio_venta: optNum,
 	stock_actual: optNum,
@@ -64,7 +64,7 @@ export type ProveedorSaveInput = Omit<
 	ContractProveedorSaveInput,
 	"id_proveedor" | NullableProveedorFields
 > & {
-	id_proveedor?: number | null;
+	id_proveedor?: string | null;
 } & {
 	[K in NullableProveedorFields]?: ContractProveedorSaveInput[K] | null;
 };
@@ -75,7 +75,7 @@ export type CreateProductoInput = Omit<
 	ProveedoresCreateProductoInput,
 	"id_producto" | "precio_venta" | "stock_actual" | "stock_minimo" | "unidad_medida"
 > & {
-	id_producto?: number | null;
+	id_producto?: string | null;
 	precio_venta?: number | null;
 	stock_actual?: number | null;
 	stock_minimo?: number | null;

@@ -181,7 +181,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	};
 }
 
-export function setReservaEstado(idReserva: number, estado: string): BuiltCommand {
+export function setReservaEstado(idReserva: string, estado: string): BuiltCommand {
 	return {
 		commandName: "set_reserva_estado",
 		command: {
@@ -197,8 +197,8 @@ export function setReservaEstado(idReserva: number, estado: string): BuiltComman
 
 export function abrirComanda(
 	input: AbrirComandaInput,
-	idTrabajador: number | null,
-	idReserva: number | null,
+	idTrabajador: string | null,
+	idReserva: string | null,
 ): BuiltCommand {
 	return {
 		commandName: "abrir_comanda",
@@ -207,9 +207,16 @@ export function abrirComanda(
 			payload: {
 				steps: [
 					{
+						kind: "value",
+						saveAs: "id_comanda",
+						sql: "SELECT ?1;",
+						args: [crypto.randomUUID()],
+					},
+					{
 						kind: "execute",
 						sql: `
 							INSERT INTO Comandas (
+								ID_Comanda,
 								ID_Mesa,
 								ID_Trabajador,
 								ID_Reserva,
@@ -217,11 +224,10 @@ export function abrirComanda(
 								Total_Comanda,
 								Estado
 							)
-							VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
+							VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta');
 						`,
-						args: [input.id_mesa, idTrabajador, idReserva],
+						args: [REF_ID_COMANDA, input.id_mesa, idTrabajador, idReserva],
 					},
-					{ kind: "value", saveAs: "id_comanda", sql: "SELECT last_insert_rowid();" },
 					{
 						kind: "row",
 						saveAs: "comanda",
@@ -251,7 +257,7 @@ export function abrirComanda(
 
 export function setTrabajadorIfNull(
 	input: SetTrabajadorInput,
-	idTrabajador: number | null,
+	idTrabajador: string | null,
 ): BuiltCommand {
 	return {
 		commandName: "comanda_set_trabajador_if_null",
@@ -275,7 +281,7 @@ export function setTrabajadorIfNull(
 	};
 }
 
-export function cerrarComanda(idComanda: number, total: number): BuiltCommand {
+export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 	return {
 		commandName: "cerrar_comanda",
 		command: {
@@ -297,7 +303,7 @@ export function cerrarComanda(idComanda: number, total: number): BuiltCommand {
 
 export function addLinea(
 	input: AddLineaInput,
-	idTrabajador: number | null,
+	idTrabajador: string | null,
 	pasaCocina: boolean,
 ): BuiltCommand {
 	const steps: any[] = [];
@@ -343,7 +349,7 @@ export function addLinea(
 	};
 }
 
-export function removeOnePendingDetalle(idComanda: number, idProducto: number): BuiltCommand {
+export function removeOnePendingDetalle(idComanda: string, idProducto: string): BuiltCommand {
 	return {
 		commandName: "remove_one_pending_detalle",
 		command: {
@@ -375,7 +381,7 @@ export function removeOnePendingDetalle(idComanda: number, idProducto: number): 
 	};
 }
 
-export function deleteDetalle(idDetalle: number, idComanda: number | null): BuiltCommand {
+export function deleteDetalle(idDetalle: string, idComanda: string | null): BuiltCommand {
 	const steps: any[] = [
 		{
 			kind: "execute",
@@ -397,7 +403,7 @@ export function deleteDetalle(idDetalle: number, idComanda: number | null): Buil
 	};
 }
 
-export function updateDetalleNota(idDetalle: number, nota: string | null): BuiltCommand {
+export function updateDetalleNota(idDetalle: string, nota: string | null): BuiltCommand {
 	return {
 		commandName: "update_detalle_nota",
 		command: {
@@ -430,9 +436,16 @@ export function cobrarDetalles(
 			payload: {
 				steps: [
 					{
+						kind: "value",
+						saveAs: "id_pago",
+						sql: "SELECT ?1;",
+						args: [crypto.randomUUID()],
+					},
+					{
 						kind: "execute",
 						sql: `
 							INSERT INTO Pagos (
+								ID_Pago,
 								ID_Comanda,
 								Fecha_Hora,
 								Metodo_Pago,
@@ -441,9 +454,10 @@ export function cobrarDetalles(
 								ID_Usuario_Cobrador,
 								ID_Trabajador_Cobrador
 							)
-							VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6);
+							VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7);
 						`,
 						args: [
+							REF_ID_PAGO,
 							input.id_comanda,
 							input.metodo,
 							plan.total,
@@ -452,7 +466,6 @@ export function cobrarDetalles(
 							plan.id_trabajador,
 						],
 					},
-					{ kind: "value", saveAs: "id_pago", sql: "SELECT last_insert_rowid();" },
 					{
 						kind: "execute",
 						sql: `
@@ -512,8 +525,8 @@ export function cobrarDetalles(
 }
 
 export function kitchenSetLineState(
-	idDetalle: number,
-	idUsuarioCocinero: number,
+	idDetalle: string,
+	idUsuarioCocinero: string,
 	estado: string,
 ): BuiltCommand {
 	return {

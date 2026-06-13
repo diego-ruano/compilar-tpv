@@ -37,9 +37,9 @@ function parsePoints(raw: any): number[] {
 
 export async function resolveTrabajadorId(
 	db: Client,
-	idMaybe: number | null,
-): Promise<number | null> {
-	if (!idMaybe || idMaybe <= 0) return null;
+	idMaybe: string | null,
+): Promise<string | null> {
+	if (!idMaybe || !idMaybe.trim()) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT COALESCE(
@@ -49,8 +49,8 @@ export async function resolveTrabajadorId(
 		`,
 		args: [idMaybe],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? id : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? id : null;
 }
 
 export async function loadLayout(db: Client): Promise<SalonOut[]> {
@@ -127,7 +127,7 @@ export async function mesasOcupadas(db: Client): Promise<Record<string, boolean>
 
 export async function readComanda(
 	db: Client,
-	idComanda: number,
+	idComanda: string,
 ): Promise<ComandaRow | null> {
 	const rs = await db.execute({
 		sql: `
@@ -151,7 +151,7 @@ export async function readComanda(
 
 export async function comandaAbiertaByMesa(
 	db: Client,
-	idMesa: number,
+	idMesa: string,
 ): Promise<ComandaRow | null> {
 	const rs = await db.execute({
 		sql: `
@@ -163,14 +163,14 @@ export async function comandaAbiertaByMesa(
 		`,
 		args: [idMesa],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? readComanda(db, id) : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? readComanda(db, id) : null;
 }
 
 export async function activeReservaForMesa(
 	db: Client,
-	idMesa: number,
-): Promise<number | null> {
+	idMesa: string,
+): Promise<string | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Reserva AS id
@@ -181,13 +181,13 @@ export async function activeReservaForMesa(
 		`,
 		args: [idMesa],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? id : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? id : null;
 }
 
 export async function lineas(
 	db: Client,
-	idComanda: number,
+	idComanda: string,
 ): Promise<MesaLineaComandaRow[]> {
 	const rs = await db.execute({
 		sql: `
@@ -248,8 +248,8 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 	`);
 	const out: Record<string, MesaMetaOut> = {};
 	for (const r of rows(rs)) {
-		const idMesa = Number(r.id_mesa ?? 0);
-		const idComanda = Number(r.id_comanda ?? 0);
+		const idMesa = String(r.id_mesa ?? "");
+		const idComanda = String(r.id_comanda ?? "");
 		const totalPendiente = Number(r.total_pendiente ?? 0);
 		const pendientesPago = Number(r.pendientes_pago ?? 0);
 		const meta: MesaMetaOut = {
@@ -281,7 +281,7 @@ export async function categorias(db: Client): Promise<CategoriaVendibleOut[]> {
 
 export async function productosByCategoria(
 	db: Client,
-	idCategoria: number,
+	idCategoria: string,
 ): Promise<ProductoVendibleOut[]> {
 	const rs = await db.execute({
 		sql: `
@@ -325,7 +325,7 @@ export async function searchProductos(
 
 export async function productoPasaCocina(
 	db: Client,
-	idProducto: number,
+	idProducto: string,
 ): Promise<boolean> {
 	const rs = await db.execute({
 		sql: `
@@ -342,8 +342,8 @@ export async function productoPasaCocina(
 
 export async function idComandaByDetalle(
 	db: Client,
-	idDetalle: number,
-): Promise<number | null> {
+	idDetalle: string,
+): Promise<string | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Comanda AS id
@@ -353,12 +353,12 @@ export async function idComandaByDetalle(
 		`,
 		args: [idDetalle],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? id : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? id : null;
 }
 
 export type CobroDetallesPlan =
-	| { ok: true; total: number; id_trabajador: number | null }
+	| { ok: true; total: number; id_trabajador: string | null }
 	| { ok: false; error: string };
 
 export async function cobrarDetallesPlan(

@@ -6,7 +6,7 @@ import type {
 	UpdateClienteInput as ContractUpdateClienteInput,
 } from "@tpv/contracts";
 
-const posInt = z.number().int().positive();
+const idStr = z.string().trim().min(1);
 
 function cleanOptional(v: unknown): string | null {
 	const t = (v ?? "").toString().trim();
@@ -18,7 +18,7 @@ const optStr = z.string().nullish().transform(cleanOptional);
 export const createClienteSchema = z.object({
 	// ID autogenerado por el backend: el cliente HTTP lo envía como `null` cuando no lo
 	// conoce. Lo aceptamos y lo normalizamos a `undefined` (compat con @tpv/contracts).
-	id_cliente: posInt.nullish().transform((v) => (v == null ? undefined : v)),
+	id_cliente: idStr.nullish().transform((v) => (v == null ? undefined : v)),
 	nombre: z.string().trim().min(1, "nombre required"),
 	email: optStr,
 	telefono: optStr,

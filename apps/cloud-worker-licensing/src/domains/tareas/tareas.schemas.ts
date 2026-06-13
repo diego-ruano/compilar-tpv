@@ -12,22 +12,22 @@ import type {
 	UpdateTareaInput as ContractUpdateTareaInput,
 } from "@tpv/contracts";
 
-const posInt = z.number().int().positive();
+const idStr = z.string().trim().min(1);
 
 function cleanOptional(v: unknown): string | null {
 	const t = (v ?? "").toString().trim();
 	return t.length ? t : null;
 }
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
 	);
-	return Array.from(set).sort((a, b) => a - b);
+	return Array.from(set).sort();
 }
 
 const optStr = z.string().nullish().transform(cleanOptional);
-const idsTrabajadores = z.array(z.number()).default([]).transform(normalizeIds);
+const idsTrabajadores = z.array(z.string()).default([]).transform(normalizeIds);
 
 export const createTareaSchema = z.object({
 	titulo: z.string().trim().min(1, "titulo required"),
@@ -49,7 +49,7 @@ export const setAsignacionesTareaSchema = z.object({
 });
 
 export const finalizarTareaSchema = z.object({
-	id_trabajador: posInt,
+	id_trabajador: idStr,
 });
 
 type NullableTareaFields = "descripcion" | "fecha_limite";

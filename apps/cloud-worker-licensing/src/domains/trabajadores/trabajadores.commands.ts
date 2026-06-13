@@ -22,9 +22,16 @@ const REF_ID_TRABAJADOR = { $ref: "id_trabajador" } as const;
 export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 	const steps = [
 		{
+			kind: "value",
+			saveAs: "id_usuario",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
+		},
+		{
 			kind: "execute",
 			sql: `
 				INSERT INTO Usuarios (
+					ID_Usuario,
 					ID_Rol,
 					Email,
 					Password_Hash,
@@ -32,9 +39,10 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 					Apellido,
 					Estado
 				)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
 			`,
 			args: [
+				REF_ID_USUARIO,
 				input.id_rol,
 				input.email,
 				input.password_hash,
@@ -45,13 +53,15 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 		},
 		{
 			kind: "value",
-			saveAs: "id_usuario",
-			sql: "SELECT last_insert_rowid();",
+			saveAs: "id_trabajador",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
 		},
 		{
 			kind: "execute",
 			sql: `
 				INSERT INTO Trabajadores (
+					ID_Trabajador,
 					ID_Usuario,
 					DNI,
 					Telefono,
@@ -61,9 +71,10 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 					Fecha_Inicio_Contrato,
 					Fecha_Fin_Contrato
 				)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
 			`,
 			args: [
+				REF_ID_TRABAJADOR,
 				REF_ID_USUARIO,
 				input.dni,
 				input.telefono,
@@ -73,11 +84,6 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 				input.fecha_inicio_contrato,
 				input.fecha_fin_contrato,
 			],
-		},
-		{
-			kind: "value",
-			saveAs: "id_trabajador",
-			sql: "SELECT last_insert_rowid();",
 		},
 	];
 
@@ -92,7 +98,7 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 }
 
 export function updateTrabajador(
-	idTrabajador: number,
+	idTrabajador: string,
 	input: TrabajadorUpdateInput,
 ): BuiltCommand {
 	const updateUsuario = input.password_hash
@@ -181,6 +187,7 @@ export function updateTrabajador(
 }
 
 export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
+	const idAsignacion = crypto.randomUUID();
 	return {
 		commandName: "horarios_create_asignacion",
 		command: {
@@ -191,6 +198,7 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 						kind: "execute",
 						sql: `
 							INSERT INTO Asignacion_Turnos (
+								ID_Asignacion,
 								ID_Trabajador,
 								Fecha,
 								ID_Turno,
@@ -199,9 +207,10 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 								Hora_Fin,
 								Notas
 							)
-							VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7);
+							VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
 						`,
 						args: [
+							idAsignacion,
 							input.id_trabajador,
 							input.fecha,
 							input.id_turno,
@@ -214,7 +223,8 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 					{
 						kind: "value",
 						saveAs: "id_asignacion",
-						sql: "SELECT last_insert_rowid();",
+						sql: "SELECT ?1;",
+						args: [idAsignacion],
 					},
 				],
 				resultKey: "id_asignacion",
@@ -225,7 +235,7 @@ export function createAsignacion(input: AsignacionCreateInput): BuiltCommand {
 }
 
 export function updateAsignacion(
-	idAsignacion: number,
+	idAsignacion: string,
 	input: AsignacionUpdateInput,
 ): BuiltCommand {
 	return {
@@ -257,7 +267,7 @@ export function updateAsignacion(
 	};
 }
 
-export function deleteAsignacion(idAsignacion: number): BuiltCommand {
+export function deleteAsignacion(idAsignacion: string): BuiltCommand {
 	return {
 		commandName: "horarios_delete_asignacion",
 		command: {
@@ -289,6 +299,7 @@ export function copySemana(input: CopySemanaInput): BuiltCommand {
 		saveAs: "inserted",
 		sql: `
 			INSERT INTO Asignacion_Turnos (
+				ID_Asignacion,
 				ID_Trabajador,
 				Fecha,
 				ID_Turno,
@@ -298,6 +309,7 @@ export function copySemana(input: CopySemanaInput): BuiltCommand {
 				Notas
 			)
 			SELECT
+				lower(hex(randomblob(16))),
 				a.ID_Trabajador,
 				date(a.Fecha, printf('%+d day',
 					CAST((julianday(date(?2)) - julianday(date(?1))) AS INTEGER)
@@ -344,7 +356,7 @@ export function setPredeterminadoDesdeSemana(
 
 	const trabajadores = Array.from(
 		new Set(items.map((it) => it.id_trabajador)),
-	).sort((a, b) => a - b);
+	).sort();
 
 	const steps: any[] = trabajadores.map((idTrabajador) => ({
 		kind: "execute",
@@ -357,6 +369,7 @@ export function setPredeterminadoDesdeSemana(
 			kind: "execute",
 			sql: `
 				INSERT INTO Horario_Predeterminado (
+					ID_Default,
 					ID_Trabajador,
 					Weekday,
 					Orden,
@@ -366,9 +379,10 @@ export function setPredeterminadoDesdeSemana(
 					Hora_Fin,
 					Notas
 				)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
+				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
 			`,
 			args: [
+				crypto.randomUUID(),
 				it.id_trabajador,
 				it.weekday,
 				it.orden,

@@ -26,17 +26,17 @@ function numOrNull(v: unknown): number | null {
 	return Number.isFinite(n) ? n : null;
 }
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
 	const set = new Set(
-		(ids ?? []).map(Number).filter((n) => Number.isFinite(n) && n > 0).map(Math.trunc),
+		(ids ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0),
 	);
-	return Array.from(set).sort((a, b) => a - b);
+	return Array.from(set).sort();
 }
 
-function nextIdStep(table: string, column: string, provided?: number | null) {
-	return provided && provided > 0
-		? { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [provided] }
-		: { kind: "value", saveAs: "id", sql: `SELECT COALESCE(MAX(${column}), 0) + 1 FROM ${table};` };
+// UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
+function idStep(provided?: string | null) {
+	const id = (provided ?? "").trim() || crypto.randomUUID();
+	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
 export function guardarProveedor(input: ProveedorSaveInput): BuiltCommand {
@@ -53,7 +53,7 @@ export function guardarProveedor(input: ProveedorSaveInput): BuiltCommand {
 	};
 
 	const steps = [
-		nextIdStep("Proveedores", "ID_Proveedor", cloudPayload.id_proveedor),
+		idStep(cloudPayload.id_proveedor),
 		{
 			kind: "execute",
 			sql: `
@@ -90,7 +90,7 @@ export function guardarProveedor(input: ProveedorSaveInput): BuiltCommand {
 	};
 }
 
-export function eliminarProveedor(idProveedor: number): BuiltCommand {
+export function eliminarProveedor(idProveedor: string): BuiltCommand {
 	const steps = [
 		{
 			kind: "execute",
@@ -116,7 +116,7 @@ export function eliminarProveedor(idProveedor: number): BuiltCommand {
 	};
 }
 
-export function setVinculos(idProveedor: number, input: SetVinculosInput): BuiltCommand {
+export function setVinculos(idProveedor: string, input: SetVinculosInput): BuiltCommand {
 	const productoIds = normalizeIds(input.producto_ids);
 	const steps: any[] = [
 		{
@@ -151,7 +151,7 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 	};
 
 	const steps: any[] = [
-		nextIdStep("Productos", "ID_Producto", cloudPayload.id_producto),
+		idStep(cloudPayload.id_producto),
 		{
 			kind: "execute",
 			sql: `
@@ -182,11 +182,12 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 			kind: "execute",
 			sql: `
 				INSERT OR IGNORE INTO Lotes_Producto
-					(ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+					(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
 				VALUES
-					(?1, ?2, datetime('now','localtime'), NULL, ?3, ?4, NULL, ?5, ?6);
+					(?1, ?2, ?3, datetime('now','localtime'), NULL, ?4, ?5, NULL, ?6, ?7);
 			`,
 			args: [
+				crypto.randomUUID(),
 				REF_ID,
 				{ $ref: "codigo_lote" },
 				stock,

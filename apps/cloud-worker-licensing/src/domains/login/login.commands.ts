@@ -9,7 +9,7 @@ export type BuiltCommand = {
 };
 
 export function setTurnoPartido(input: {
-	id_usuario: number;
+	id_usuario: string;
 	fecha: string | null;
 	turno_partido: boolean;
 }): BuiltCommand {
@@ -32,7 +32,7 @@ export function setTurnoPartido(input: {
 }
 
 export function completeInitialSetup(input: {
-	id_usuario: number;
+	id_usuario: string;
 	email_nuevo: string;
 	password_hash: string;
 }): BuiltCommand {
@@ -54,7 +54,7 @@ export function completeInitialSetup(input: {
 }
 
 export function punchEntrada(input: {
-	id_usuario: number;
+	id_usuario: string;
 	fecha: string | null;
 	hora_evento: string | null;
 	parte: number;
@@ -78,10 +78,10 @@ export function punchEntrada(input: {
 }
 
 export function punchSalida(input: {
-	id_usuario: number;
+	id_usuario: string;
 	fecha: string | null;
 	hora_evento: string | null;
-	id_fichaje: number;
+	id_fichaje: string;
 }): BuiltCommand {
 	return {
 		commandName: "punch",

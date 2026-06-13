@@ -16,13 +16,12 @@ import type {
 
 const optNum = z.number().finite().nullish();
 const optStr = z.string().nullish();
-const posInt = z.number().int().positive();
-const idList = z.array(z.number()).default([]);
+const idStr = z.string().trim().min(1);
+const idList = z.array(z.string().trim().min(1)).default([]);
 
-// ID autogenerado por el backend (MAX+1 en el DO). El cliente HTTP de la Main/Handy lo
-// envía como `null` cuando no lo conoce; lo aceptamos y lo normalizamos a `undefined` para
-// no romper los tipos de @tpv/contracts (que esperan `number | undefined`).
-const optId = posInt.nullish().transform((v) => (v == null ? undefined : v));
+// UUIDv7: el id lo genera el cliente y lo envía. Si lo envía `null` (no lo conoce),
+// lo normalizamos a `undefined` para no romper los tipos de @tpv/contracts (string | undefined).
+const optId = idStr.nullish().transform((v) => (v == null ? undefined : v));
 
 export const upsertCategoriaSchema = z.object({
 	id_categoria: optId,
@@ -35,8 +34,8 @@ export const upsertCategoriaSchema = z.object({
 
 export const upsertProductoSchema = z.object({
 	id_producto: optId,
-	id_categoria: posInt,
-	id_proveedor: posInt.nullish(),
+	id_categoria: idStr,
+	id_proveedor: idStr.nullish(),
 	nombre: z.string().trim().min(1, "nombre required"),
 	precio_venta: optNum,
 	stock_minimo: optNum,
@@ -53,14 +52,14 @@ export const setAlergenosSchema = z.object({
 
 export const createLoteSchema = z.object({
 	id_lote: optId,
-	id_producto: posInt,
+	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
 	caducidad: optStr,
 	cantidad_inicial: z.number().finite().min(0, "Cantidad_Inicial inválida"),
 	stock_disponible: z.number().finite().min(0).nullish(),
 	fecha_entrada: optStr,
 	coste_unitario: optNum,
-	id_proveedor: posInt.nullish(),
+	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });
 
@@ -81,7 +80,7 @@ export type UpsertProductoInput = Omit<
 	| "ruta_imagen"
 	| "cantidad_pedido_esperada"
 > & {
-	id_proveedor?: number | null;
+	id_proveedor?: string | null;
 	precio_venta?: number | null;
 	stock_minimo?: number | null;
 	unidad_medida?: string | null;
@@ -105,7 +104,7 @@ export type CreateLoteInput = Omit<
 	stock_disponible?: number | null;
 	fecha_entrada?: string | null;
 	coste_unitario?: number | null;
-	id_proveedor?: number | null;
+	id_proveedor?: string | null;
 	notas?: string | null;
 };
 

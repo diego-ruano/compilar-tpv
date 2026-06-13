@@ -8,7 +8,7 @@ import type {
 	SetTurnoPartidoInput as ContractSetTurnoPartidoInput,
 } from "@tpv/contracts";
 
-const posInt = z.number().int().positive();
+const idStr = z.string().trim().min(1);
 
 function cleanOptional(v: unknown): string | null {
 	const t = (v ?? "").toString().trim();
@@ -16,18 +16,18 @@ function cleanOptional(v: unknown): string | null {
 }
 
 export const loginUserSchema = z.object({
-	id_usuario: posInt,
+	id_usuario: idStr,
 	pin: z.string().trim().min(1, "pin required"),
 });
 
 export const setTurnoPartidoSchema = z.object({
-	id_usuario: posInt,
+	id_usuario: idStr,
 	turno_partido: z.boolean(),
 	fecha: z.string().nullish().transform(cleanOptional),
 });
 
 export const completeInitialSetupSchema = z.object({
-	id_usuario: posInt,
+	id_usuario: idStr,
 	pin_actual: z.string().trim().min(1, "pin_actual required"),
 	pin_nuevo: z.string().trim().min(4, "PIN demasiado corto"),
 	email_nuevo: z.string().trim().email("email invalid"),
@@ -37,13 +37,13 @@ export const completeInitialSetupSchema = z.object({
 // Main ya lo hizo en local y la petición va firmada como dispositivo TPV (la autoriza el
 // device-proof + el chequeo de rol). El `pin` viaja para hashearlo aquí (como complete-setup).
 export const syncInitialSetupSchema = z.object({
-	id_usuario: posInt,
+	id_usuario: idStr,
 	email: z.string().trim().email("email invalid"),
 	pin: z.string().trim().min(4, "PIN demasiado corto"),
 });
 
 export const punchSchema = z.object({
-	id_usuario: posInt,
+	id_usuario: idStr,
 	pin: z.string().trim().min(1, "pin required"),
 	tipo: z.enum(["entrada", "salida"]),
 	fecha: z.string().nullish().transform(cleanOptional),

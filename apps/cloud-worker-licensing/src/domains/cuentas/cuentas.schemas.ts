@@ -7,7 +7,7 @@ import type {
 	UpdatePagoInput as ContractUpdatePagoInput,
 } from "@tpv/contracts";
 
-const posInt = z.number().int().positive();
+const idStr = z.string().trim().min(1);
 const money = z.number().finite().min(0);
 
 function clean(v: unknown): string {
@@ -20,12 +20,12 @@ function cleanOptional(v: unknown): string | null {
 }
 
 export const createGastoSchema = z.object({
-	id_gasto: posInt.optional().nullish(),
+	id_gasto: idStr.optional().nullish(),
 	fecha: z.string().transform(clean).refine(Boolean, "fecha required"),
 	tipo_gasto: z.string().transform(clean).refine(Boolean, "tipo_gasto required"),
 	concepto: z.string().transform(clean).refine(Boolean, "concepto required"),
 	importe: money,
-	proveedor_id: posInt.optional().nullish(),
+	proveedor_id: idStr.optional().nullish(),
 });
 
 export const updateGastoSchema = createGastoSchema.omit({ id_gasto: true });
@@ -45,15 +45,15 @@ export type CreateGastoInput = Omit<
 	ContractCreateGastoInput,
 	"id_gasto" | "proveedor_id"
 > & {
-	id_gasto?: number | null;
-	proveedor_id?: number | null;
+	id_gasto?: string | null;
+	proveedor_id?: string | null;
 };
 
 export type UpdateGastoInput = Omit<
 	ContractUpdateGastoInput,
 	"id_gasto" | "proveedor_id"
 > & {
-	proveedor_id?: number | null;
+	proveedor_id?: string | null;
 };
 
 export type UpdatePagoInput = Omit<ContractUpdatePagoInput, "id_pago">;

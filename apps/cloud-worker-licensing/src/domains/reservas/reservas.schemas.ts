@@ -68,16 +68,20 @@ function positiveInt(name: string) {
 		.positive(`${name} invalido`);
 }
 
+function idField(name: string) {
+	return z.coerce.string().trim().min(1, `${name} invalido`);
+}
+
 export const reservaSaveSchema = z
 	.object({
-		id_reserva: z.coerce.number().int().positive().nullable().optional(),
+		id_reserva: z.coerce.string().trim().min(1).nullable().optional(),
 		dia_ymd: z.any(),
 		hora: z.any(),
 		turno: z.any().optional().nullable(),
 		comensales: positiveInt("comensales"),
 		nota: z.any().optional().nullable(),
 		estado: z.any().optional().nullable(),
-		id_mesa: positiveInt("id_mesa"),
+		id_mesa: idField("id_mesa"),
 		nombre_cliente: z.string().transform((s) => s.trim()),
 		telefono: z.any().optional().nullable(),
 		email: z.any().optional().nullable(),
@@ -114,7 +118,8 @@ export const reservaSaveSchema = z
 			});
 		}
 
-		const id_reserva = v.id_reserva && v.id_reserva > 0 ? v.id_reserva : null;
+		const id_reserva =
+			v.id_reserva && v.id_reserva.trim().length > 0 ? v.id_reserva : null;
 		const estado = id_reserva ? normalizeEstado(v.estado) : "PROXIMA";
 		const turno = hora ? normalizeTurno(v.turno, hora) : "DESAYUNO";
 
