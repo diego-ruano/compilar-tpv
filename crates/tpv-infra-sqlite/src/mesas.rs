@@ -21,7 +21,8 @@ use tpv_contracts::mesas::{
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
 
-use crate::mapping::{v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::util::{new_id, BARRA_MESA_ID};
 
 /// Secuencia para generar etiquetas de lote VR únicas (sustituye al batch derivado de op_id).
 static VR_BATCH_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -48,13 +49,15 @@ fn now_ms() -> i64 {
     }
 }
 
-fn parse_db_id(id: &str, prefix: &str) -> Option<i64> {
+/// Extrae el id (UUID) embebido en un id de UI con prefijo (`db-mesa-<uuid>`).
+fn parse_db_id(id: &str, prefix: &str) -> Option<String> {
     let s = id.trim();
-    let rest = s.strip_prefix(prefix)?;
-    if rest.is_empty() || !rest.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+    let rest = s.strip_prefix(prefix)?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest.to_string())
     }
-    rest.parse::<i64>().ok()
 }
 
 fn build_in_placeholders(start: i64, count: usize) -> String {
@@ -84,6 +87,19 @@ async fn select_one_i64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppRe
     Ok(None)
 }
 
+/// Igual que `select_one_i64` pero para columnas de id (TEXT/UUID).
+async fn select_one_string(
+    conn: &Connection,
+    sql: &str,
+    args: Vec<Value>,
+) -> AppResult<Option<String>> {
+    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
+    if let Some(row) = rows.next().await.map_err(db_err)? {
+        return Ok(norm_opt_string(row.get_value(0).map_err(db_err)?));
+    }
+    Ok(None)
+}
+
 async fn select_one_f64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
     let mut rows = conn.query(sql, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
@@ -107,39 +123,39 @@ async fn try_exec(db: &Connection, sql: &str, args: Vec<Value>) -> AppResult<boo
     }
 }
 
-async fn exists_by_id(conn: &Connection, table: &str, id_col: &str, id: i64) -> AppResult<bool> {
-    if id <= 0 {
+async fn exists_by_id(conn: &Connection, table: &str, id_col: &str, id: &str) -> AppResult<bool> {
+    if id.trim().is_empty() {
         return Ok(false);
     }
     let sql = format!("SELECT 1 FROM {table} WHERE {id_col}=?1 LIMIT 1;");
-    Ok(select_one_i64(conn, &sql, vec![Value::Integer(id)])
+    Ok(select_one_i64(conn, &sql, vec![Value::Text(id.to_string())])
         .await?
         .is_some())
 }
 
 async fn trabajador_id_from_usuario(
     db: &Connection,
-    id_usuario: Option<i64>,
-) -> AppResult<Option<i64>> {
-    let Some(idu) = id_usuario.filter(|n| *n > 0) else {
+    id_usuario: Option<String>,
+) -> AppResult<Option<String>> {
+    let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
         return Ok(None);
     };
-    select_one_i64(
+    select_one_string(
         db,
         "SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario=?1 LIMIT 1;",
-        vec![Value::Integer(idu)],
+        vec![Value::Text(idu)],
     )
     .await
 }
 
 async fn resolve_trabajador_id_input(
     db: &Connection,
-    id_maybe: Option<i64>,
-) -> AppResult<Option<i64>> {
-    let Some(x) = id_maybe.filter(|n| *n > 0) else {
+    id_maybe: Option<String>,
+) -> AppResult<Option<String>> {
+    let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
         return Ok(None);
     };
-    if exists_by_id(db, "Trabajadores", "ID_Trabajador", x).await? {
+    if exists_by_id(db, "Trabajadores", "ID_Trabajador", &x).await? {
         return Ok(Some(x));
     }
     trabajador_id_from_usuario(db, Some(x)).await
@@ -147,7 +163,7 @@ async fn resolve_trabajador_id_input(
 
 async fn sumar_gasto_cliente_por_comanda(
     db: &Connection,
-    id_comanda: i64,
+    id_comanda: &str,
     importe: f64,
 ) -> AppResult<()> {
     if !importe.is_finite() || importe <= 0.0 {
@@ -155,15 +171,15 @@ async fn sumar_gasto_cliente_por_comanda(
     }
     let importe = (importe * 100.0).round() / 100.0;
 
-    let mut id_reserva = select_one_i64(
+    let mut id_reserva = select_one_string(
         db,
         "SELECT ID_Reserva FROM Comandas WHERE ID_Comanda=?1 LIMIT 1;",
-        vec![Value::Integer(id_comanda)],
+        vec![Value::Text(id_comanda.to_string())],
     )
     .await?;
 
     if id_reserva.is_none() {
-        id_reserva = select_one_i64(
+        id_reserva = select_one_string(
             db,
             r#"
             SELECT r.ID_Reserva
@@ -174,15 +190,15 @@ async fn sumar_gasto_cliente_por_comanda(
             ORDER BY r.ID_Reserva DESC
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_comanda)],
+            vec![Value::Text(id_comanda.to_string())],
         )
         .await?;
 
-        if let Some(rid) = id_reserva {
+        if let Some(rid) = id_reserva.clone() {
             let _ = db
                 .execute(
                     "UPDATE Comandas SET ID_Reserva=?2 WHERE ID_Comanda=?1;",
-                    vec![Value::Integer(id_comanda), Value::Integer(rid)],
+                    vec![Value::Text(id_comanda.to_string()), Value::Text(rid)],
                 )
                 .await;
         }
@@ -192,10 +208,10 @@ async fn sumar_gasto_cliente_por_comanda(
         return Ok(());
     };
 
-    let Some(id_cliente) = select_one_i64(
+    let Some(id_cliente) = select_one_string(
         db,
         "SELECT ID_Cliente FROM Reservas WHERE ID_Reserva=?1 LIMIT 1;",
-        vec![Value::Integer(id_reserva)],
+        vec![Value::Text(id_reserva)],
     )
     .await?
     else {
@@ -209,124 +225,63 @@ async fn sumar_gasto_cliente_por_comanda(
         SET Total_Gastado = COALESCE(Total_Gastado,0) + ?2
         WHERE ID_Cliente = ?1;
         "#,
-        vec![Value::Integer(id_cliente), Value::Real(importe)],
+        vec![Value::Text(id_cliente), Value::Real(importe)],
     )
     .await?;
 
     Ok(())
 }
 
-async fn get_or_create_mesa_barra_inner(db: &Connection) -> AppResult<i64> {
-    if let Some(id) = select_one_i64(
-        db,
-        "SELECT ID_Mesa FROM Mesas WHERE Numero_Mesa='BARRA' LIMIT 1;",
-        vec![],
-    )
-    .await?
-    {
-        return Ok(id);
-    }
-
-    let mut id_zona = select_one_i64(
-        db,
-        "SELECT ID_Zona FROM Zonas ORDER BY ID_Zona ASC LIMIT 1;",
-        vec![],
-    )
-    .await?;
-
-    if id_zona.is_none() {
-        db.execute(
-            "INSERT INTO Zonas (Nombre_Zona, Room_Points, Updated_At) VALUES ('Salon','[]', datetime('now','localtime'));",
-            (),
-        )
-        .await
-        .map_err(db_err)?;
-
-        id_zona = select_one_i64(
-            db,
-            "SELECT ID_Zona FROM Zonas ORDER BY ID_Zona ASC LIMIT 1;",
-            vec![],
-        )
-        .await?;
-    }
-
-    let id_zona =
-        id_zona.ok_or_else(|| AppError::repository("No se pudo resolver ID_Zona para crear BARRA."))?;
-
-    db.execute(
-        r#"
-        INSERT INTO Mesas (
-          ID_Zona, Numero_Mesa, Capacidad,
-          Ubicacion_X, Ubicacion_Y,
-          Shape, Width, Height, Radius,
-          Updated_At, Es_Sistema
-        )
-        VALUES (
-          ?1, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'), 1
-        )
-        ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
-          Es_Sistema = 1,
-          Updated_At = excluded.Updated_At;
-        "#,
-        vec![Value::Integer(id_zona)],
-    )
-    .await
-    .map_err(db_err)?;
-
-    select_one_i64(
-        db,
-        "SELECT ID_Mesa FROM Mesas WHERE Numero_Mesa='BARRA' LIMIT 1;",
-        vec![],
-    )
-    .await?
-    .ok_or_else(|| AppError::repository("No se pudo crear/encontrar la mesa BARRA."))
+/// La mesa BARRA se siembra con un id fijo (idéntico en local y nube), así que basta devolverlo.
+async fn get_or_create_mesa_barra_inner(_db: &Connection) -> AppResult<String> {
+    Ok(BARRA_MESA_ID.to_string())
 }
 
-/// Get-or-create de la comanda de barra abierta (Local-First: id local autoincrement).
+/// Get-or-create de la comanda de barra abierta (Local-First: id UUIDv7 explícito).
 async fn get_or_create_comanda_barra_inner(
     db: &Connection,
-    id_trabajador: Option<i64>,
-) -> AppResult<i64> {
+    id_trabajador: Option<String>,
+) -> AppResult<String> {
     let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
 
-    if let Some(idc) = select_one_i64(
+    if let Some(idc) = select_one_string(
         db,
         r#"
         SELECT ID_Comanda
         FROM Comandas
         WHERE ID_Mesa=?1 AND Estado='Abierta'
-        ORDER BY ID_Comanda DESC
+        ORDER BY datetime(Fecha_Hora_Apertura) DESC
         LIMIT 1;
         "#,
-        vec![Value::Integer(id_mesa_barra)],
+        vec![Value::Text(id_mesa_barra.clone())],
     )
     .await?
     {
         return Ok(idc);
     }
 
+    let id_comanda = new_id();
     db.execute(
         r#"
         INSERT INTO Comandas (
-          ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
+          ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
         )
-        VALUES (?1, ?2, datetime('now','localtime'), 0, 'Abierta');
+        VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
         "#,
         vec![
-            Value::Integer(id_mesa_barra),
-            id_trabajador.map(Value::Integer).unwrap_or(Value::Null),
+            Value::Text(id_comanda.clone()),
+            Value::Text(id_mesa_barra),
+            id_trabajador.map(Value::Text).unwrap_or(Value::Null),
         ],
     )
     .await
     .map_err(db_err)?;
 
-    select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-        .await?
-        .ok_or_else(|| AppError::repository("No se pudo abrir comanda para BARRA."))
+    Ok(id_comanda)
 }
 
-async fn read_comanda_by_id(db: &Connection, id_comanda: i64) -> AppResult<Option<ComandaRow>> {
-    if id_comanda <= 0 {
+async fn read_comanda_by_id(db: &Connection, id_comanda: &str) -> AppResult<Option<ComandaRow>> {
+    if id_comanda.trim().is_empty() {
         return Ok(None);
     }
     let mut rows = db
@@ -339,7 +294,7 @@ async fn read_comanda_by_id(db: &Connection, id_comanda: i64) -> AppResult<Optio
             WHERE ID_Comanda = ?1
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_comanda)],
+            vec![Value::Text(id_comanda.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -349,10 +304,10 @@ async fn read_comanda_by_id(db: &Connection, id_comanda: i64) -> AppResult<Optio
     };
 
     Ok(Some(ComandaRow {
-        id_comanda: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-        id_mesa: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
-        id_trabajador: v_i64(r.get_value(2).map_err(db_err)?),
-        id_reserva: v_i64(r.get_value(3).map_err(db_err)?),
+        id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+        id_mesa: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+        id_trabajador: norm_opt_string(r.get_value(2).map_err(db_err)?),
+        id_reserva: norm_opt_string(r.get_value(3).map_err(db_err)?),
         fecha_hora_apertura: v_string(r.get_value(4).map_err(db_err)?).unwrap_or_default(),
         fecha_hora_cierre: v_string(r.get_value(5).map_err(db_err)?),
         total_comanda: v_f64(r.get_value(6).map_err(db_err)?).unwrap_or(0.0),
@@ -377,7 +332,7 @@ impl MesasRepository for SqliteMesasRepository {
                 let points_json = serde_json::to_string(&z.room.points).map_err(db_err)?;
                 let id_zona_opt = parse_db_id(&z.id, "db-zona-");
 
-                let zone_id: i64 = if let Some(id_zona) = id_zona_opt {
+                let zone_id: String = if let Some(id_zona) = id_zona_opt {
                     db.execute(
                         r#"
                         INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
@@ -388,7 +343,7 @@ impl MesasRepository for SqliteMesasRepository {
                           Updated_At  = excluded.Updated_At;
                         "#,
                         vec![
-                            Value::Integer(id_zona),
+                            Value::Text(id_zona.clone()),
                             Value::Text(zone_name.clone()),
                             Value::Text(points_json.clone()),
                         ],
@@ -397,20 +352,25 @@ impl MesasRepository for SqliteMesasRepository {
                     .map_err(db_err)?;
                     id_zona
                 } else {
+                    // Alta de zona nueva: id UUIDv7 explícito; si el nombre ya existe, se recupera.
                     db.execute(
                         r#"
-                        INSERT INTO Zonas (Nombre_Zona, Room_Points, Updated_At)
-                        VALUES (?1, ?2, datetime('now','localtime'))
+                        INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
+                        VALUES (?1, ?2, ?3, datetime('now','localtime'))
                         ON CONFLICT(Nombre_Zona) DO UPDATE SET
                           Room_Points = excluded.Room_Points,
                           Updated_At  = excluded.Updated_At;
                         "#,
-                        vec![Value::Text(zone_name.clone()), Value::Text(points_json.clone())],
+                        vec![
+                            Value::Text(new_id()),
+                            Value::Text(zone_name.clone()),
+                            Value::Text(points_json.clone()),
+                        ],
                     )
                     .await
                     .map_err(db_err)?;
 
-                    select_one_i64(
+                    select_one_string(
                         db,
                         "SELECT ID_Zona FROM Zonas WHERE Nombre_Zona=?1 LIMIT 1;",
                         vec![Value::Text(zone_name.clone())],
@@ -419,10 +379,10 @@ impl MesasRepository for SqliteMesasRepository {
                     .ok_or_else(|| AppError::repository("No se pudo resolver ID_Zona"))?
                 };
 
-                let mut kept: Vec<i64> = vec![];
+                let mut kept: Vec<String> = vec![];
                 for t in z.tables.iter() {
                     if let Some(idm) = parse_db_id(&t.id, "db-mesa-") {
-                        if idm > 0 {
+                        if !idm.trim().is_empty() {
                             kept.push(idm);
                         }
                     }
@@ -435,7 +395,7 @@ impl MesasRepository for SqliteMesasRepository {
                       AND Es_Sistema = 0
                     "#,
                 );
-                let mut sql_args: Vec<Value> = vec![Value::Integer(zone_id)];
+                let mut sql_args: Vec<Value> = vec![Value::Text(zone_id.clone())];
 
                 if !kept.is_empty() {
                     sql.push_str(" AND ID_Mesa NOT IN (");
@@ -445,7 +405,7 @@ impl MesasRepository for SqliteMesasRepository {
                             sql.push_str(", ");
                         }
                         sql.push_str(&format!("?{idx}"));
-                        sql_args.push(Value::Integer(*idm));
+                        sql_args.push(Value::Text(idm.clone()));
                     }
                     sql.push(')');
                 }
@@ -489,7 +449,7 @@ impl MesasRepository for SqliteMesasRepository {
                             WHERE ID_Mesa = ?10;
                             "#,
                             vec![
-                                Value::Integer(zone_id),
+                                Value::Text(zone_id.clone()),
                                 Value::Text(numero_mesa),
                                 Value::Integer(capacidad),
                                 Value::Integer(x),
@@ -498,7 +458,7 @@ impl MesasRepository for SqliteMesasRepository {
                                 Value::Integer(width),
                                 Value::Integer(height),
                                 radius.map(Value::Integer).unwrap_or(Value::Null),
-                                Value::Integer(id_mesa),
+                                Value::Text(id_mesa),
                             ],
                         )
                         .await
@@ -507,13 +467,13 @@ impl MesasRepository for SqliteMesasRepository {
                         db.execute(
                             r#"
                             INSERT INTO Mesas (
-                              ID_Zona, Numero_Mesa, Capacidad,
+                              ID_Mesa, ID_Zona, Numero_Mesa, Capacidad,
                               Ubicacion_X, Ubicacion_Y,
                               Shape, Width, Height, Radius,
                               Updated_At, Es_Sistema
                             )
                             VALUES (
-                              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+                              ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                               datetime('now','localtime'), 0
                             )
                             ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
@@ -527,7 +487,8 @@ impl MesasRepository for SqliteMesasRepository {
                               Updated_At  = excluded.Updated_At;
                             "#,
                             vec![
-                                Value::Integer(zone_id),
+                                Value::Text(new_id()),
+                                Value::Text(zone_id.clone()),
                                 Value::Text(numero_mesa),
                                 Value::Integer(capacidad),
                                 Value::Integer(x),
@@ -584,15 +545,15 @@ impl MesasRepository for SqliteMesasRepository {
             .await
             .map_err(db_err)?;
 
-        let mut by_zona: HashMap<i64, Vec<TableOut>> = HashMap::new();
+        let mut by_zona: HashMap<String, Vec<TableOut>> = HashMap::new();
 
         while let Some(r) = mesas_rows.next().await.map_err(db_err)? {
             let id_mesa = match r.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             let id_zona = match r.get_value(1).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             let numero = match r.get_value(2).map_err(db_err)? {
@@ -645,7 +606,7 @@ impl MesasRepository for SqliteMesasRepository {
 
         while let Some(z) = zonas.next().await.map_err(db_err)? {
             let id_zona = match z.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             let nombre = match z.get_value(1).map_err(db_err)? {
@@ -690,11 +651,11 @@ impl MesasRepository for SqliteMesasRepository {
         let mut map: HashMap<String, bool> = HashMap::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             let id_zona = match r.get_value(0).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             let id_mesa = match r.get_value(1).map_err(db_err)? {
-                Value::Integer(n) => n,
+                Value::Text(s) => s,
                 _ => continue,
             };
             map.insert(format!("db-zona-{id_zona}:db-mesa-{id_mesa}"), true);
@@ -704,14 +665,14 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== RESERVAS ===== */
 
-    async fn set_reserva_estado(&self, id_reserva: i64, estado: String) -> AppResult<()> {
+    async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
         let db = &self.conn;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             db.execute(
                 "UPDATE Reservas SET Estado=?2 WHERE ID_Reserva=?1;",
-                vec![Value::Integer(id_reserva), Value::Text(estado.clone())],
+                vec![Value::Text(id_reserva.to_string()), Value::Text(estado.clone())],
             )
             .await
             .map_err(db_err)?;
@@ -719,7 +680,7 @@ impl MesasRepository for SqliteMesasRepository {
             if estado == "FINALIZADA" || estado == "CANCELADA" || estado == "NO_SHOW" {
                 db.execute(
                     "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
-                    vec![Value::Integer(id_reserva)],
+                    vec![Value::Text(id_reserva.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -742,23 +703,23 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== COMANDAS (mesa) ===== */
 
-    async fn get_comanda_abierta_by_mesa(&self, id_mesa: i64) -> AppResult<Option<ComandaRow>> {
+    async fn get_comanda_abierta_by_mesa(&self, id_mesa: &str) -> AppResult<Option<ComandaRow>> {
         let db = &self.conn;
-        if id_mesa <= 0 {
+        if id_mesa.trim().is_empty() {
             return Ok(None);
         }
-        let id = select_one_i64(
+        let id = select_one_string(
             db,
             r#"
             SELECT ID_Comanda FROM Comandas
             WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
-            ORDER BY ID_Comanda DESC LIMIT 1;
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
             "#,
-            vec![Value::Integer(id_mesa)],
+            vec![Value::Text(id_mesa.to_string())],
         )
         .await?;
         match id {
-            Some(id_comanda) => read_comanda_by_id(db, id_comanda).await,
+            Some(id_comanda) => read_comanda_by_id(db, &id_comanda).await,
             None => Ok(None),
         }
     }
@@ -767,51 +728,49 @@ impl MesasRepository for SqliteMesasRepository {
         let db = &self.conn;
         let id_trabajador_real =
             resolve_trabajador_id_input(db, data.id_trabajador_o_usuario).await?;
-        let id_reserva = data.id_reserva.filter(|n| *n > 0);
+        let id_reserva = data.id_reserva.filter(|s| !s.trim().is_empty());
 
         let id_reserva_final = match id_reserva {
             Some(rid) => Some(rid),
             None => {
-                select_one_i64(
+                select_one_string(
                     db,
                     r#"
                     SELECT ID_Reserva FROM Reservas
                     WHERE ID_Mesa = ?1 AND Estado='ACTIVA'
-                    ORDER BY ID_Reserva DESC LIMIT 1;
+                    ORDER BY datetime(Created_At) DESC LIMIT 1;
                     "#,
-                    vec![Value::Integer(data.id_mesa)],
+                    vec![Value::Text(data.id_mesa.clone())],
                 )
                 .await?
             }
         };
 
+        let id_comanda_new = new_id();
         db.execute(
             r#"
             INSERT INTO Comandas (
-              ID_Mesa, ID_Trabajador, ID_Reserva, Fecha_Hora_Apertura, Total_Comanda, Estado
+              ID_Comanda, ID_Mesa, ID_Trabajador, ID_Reserva, Fecha_Hora_Apertura, Total_Comanda, Estado
             )
-            VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
+            VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta');
             "#,
             vec![
-                Value::Integer(data.id_mesa),
-                id_trabajador_real.map(Value::Integer).unwrap_or(Value::Null),
-                id_reserva_final.map(Value::Integer).unwrap_or(Value::Null),
+                Value::Text(id_comanda_new.clone()),
+                Value::Text(data.id_mesa.clone()),
+                id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
+                id_reserva_final.map(Value::Text).unwrap_or(Value::Null),
             ],
         )
         .await
         .map_err(db_err)?;
 
-        let id_comanda_new = select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-            .await?
-            .ok_or_else(|| AppError::repository("No se pudo obtener ID_Comanda"))?;
-
-        read_comanda_by_id(db, id_comanda_new).await
+        read_comanda_by_id(db, &id_comanda_new).await
     }
 
     async fn comanda_set_trabajador_if_null(
         &self,
-        id_comanda: i64,
-        id_trab_o_usuario: Option<i64>,
+        id_comanda: &str,
+        id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool> {
         let db = &self.conn;
         let Some(idt) = resolve_trabajador_id_input(db, id_trab_o_usuario).await? else {
@@ -830,7 +789,7 @@ impl MesasRepository for SqliteMesasRepository {
                     SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1
                   );
                 "#,
-                vec![Value::Integer(id_comanda), Value::Integer(idt)],
+                vec![Value::Text(id_comanda.to_string()), Value::Text(idt)],
             )
             .await
             .map_err(db_err)?;
@@ -838,7 +797,7 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(changed > 0)
     }
 
-    async fn cerrar_comanda(&self, id_comanda: i64, total: f64) -> AppResult<()> {
+    async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()> {
         let db = &self.conn;
         db.execute(
             r#"
@@ -846,14 +805,14 @@ impl MesasRepository for SqliteMesasRepository {
             SET Estado = 'Pagada', Total_Comanda = ?2, Fecha_Hora_Cierre = datetime('now','localtime')
             WHERE ID_Comanda = ?1;
             "#,
-            vec![Value::Integer(id_comanda), Value::Real(total)],
+            vec![Value::Text(id_comanda.to_string()), Value::Real(total)],
         )
         .await
         .map_err(db_err)?;
         Ok(())
     }
 
-    async fn get_lineas_comanda(&self, id_comanda: i64) -> AppResult<Vec<MesaLineaComandaRow>> {
+    async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         let db = &self.conn;
         let mut rows = db
             .query(
@@ -873,21 +832,21 @@ impl MesasRepository for SqliteMesasRepository {
                 WHERE D.ID_Comanda = ?1
                 ORDER BY D.ID_Detalle ASC;
                 "#,
-                vec![Value::Integer(id_comanda)],
+                vec![Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
 
         let mut out: Vec<MesaLineaComandaRow> = vec![];
         while let Some(r) = rows.next().await.map_err(db_err)? {
-            let id_detalle = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-            if id_detalle <= 0 {
+            let id_detalle = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+            if id_detalle.is_empty() {
                 continue;
             }
             out.push(MesaLineaComandaRow {
                 id_detalle,
-                id_comanda: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
-                id_producto: v_i64(r.get_value(2).map_err(db_err)?).unwrap_or(0),
+                id_comanda: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                id_producto: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
                 precio_unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
                 notas: v_string(r.get_value(5).map_err(db_err)?),
@@ -902,11 +861,11 @@ impl MesasRepository for SqliteMesasRepository {
 
     async fn add_linea_comanda(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
         cantidad: f64,
         precio: f64,
-        id_trab_o_usuario: Option<i64>,
+        id_trab_o_usuario: Option<String>,
     ) -> AppResult<()> {
         let db = &self.conn;
 
@@ -922,7 +881,7 @@ impl MesasRepository for SqliteMesasRepository {
                       AND Estado = 'Abierta'
                       AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
                     "#,
-                    vec![Value::Integer(id_comanda), Value::Integer(idt)],
+                    vec![Value::Text(id_comanda.to_string()), Value::Text(idt)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -936,7 +895,7 @@ impl MesasRepository for SqliteMesasRepository {
                 JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
                 WHERE p.ID_Producto = ?1 LIMIT 1;
                 "#,
-                vec![Value::Integer(id_producto)],
+                vec![Value::Text(id_producto.to_string())],
             )
             .await?
             .unwrap_or(0)
@@ -951,13 +910,14 @@ impl MesasRepository for SqliteMesasRepository {
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda (
-                  ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina
+                  ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5);
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6);
                 "#,
                 vec![
-                    Value::Integer(id_comanda),
-                    Value::Integer(id_producto),
+                    Value::Text(new_id()),
+                    Value::Text(id_comanda.to_string()),
+                    Value::Text(id_producto.to_string()),
                     Value::Real(cantidad),
                     Value::Real(precio),
                     estado_cocina,
@@ -966,7 +926,7 @@ impl MesasRepository for SqliteMesasRepository {
             .await
             .map_err(db_err)?;
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
             Ok(())
@@ -987,12 +947,16 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== BARRA ===== */
 
-    async fn get_or_create_mesa_barra(&self) -> AppResult<i64> {
+    async fn get_or_create_mesa_barra(&self) -> AppResult<String> {
         get_or_create_mesa_barra_inner(&self.conn).await
     }
 
-    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<i64>) -> AppResult<i64> {
-        get_or_create_comanda_barra_inner(&self.conn, id_trabajador.filter(|n| *n > 0)).await
+    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
+        get_or_create_comanda_barra_inner(
+            &self.conn,
+            id_trabajador.filter(|s| !s.trim().is_empty()),
+        )
+        .await
     }
 
     async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()> {
@@ -1004,14 +968,14 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            let id_trabajador_cobrador = match data.id_trabajador_cobrador {
-                Some(n) if n > 0 => Some(n),
-                _ => trabajador_id_from_usuario(db, data.id_usuario_cobrador).await?,
+            let id_trabajador_cobrador = match data.id_trabajador_cobrador.clone() {
+                Some(s) if !s.trim().is_empty() => Some(s),
+                _ => trabajador_id_from_usuario(db, data.id_usuario_cobrador.clone()).await?,
             };
 
-            let id_comanda = match data.id_comanda {
-                Some(idc) if exists_by_id(db, "Comandas", "ID_Comanda", idc).await? => idc,
-                _ => get_or_create_comanda_barra_inner(db, id_trabajador_cobrador).await?,
+            let id_comanda = match data.id_comanda.clone() {
+                Some(idc) if exists_by_id(db, "Comandas", "ID_Comanda", &idc).await? => idc,
+                _ => get_or_create_comanda_barra_inner(db, id_trabajador_cobrador.clone()).await?,
             };
 
             let seq = VR_BATCH_SEQ.fetch_add(1, Ordering::Relaxed);
@@ -1024,19 +988,20 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
-                      ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina
+                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina
                     )
                     SELECT
-                      ?1, ?2, 1, ?3, ?4,
+                      ?1, ?2, ?3, 1, ?4, ?5,
                       CASE WHEN COALESCE(cat.Pasa_Cocina, 0) = 1 THEN 'PENDIENTE' ELSE NULL END
                     FROM Productos p
                     JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                    WHERE p.ID_Producto = ?2
+                    WHERE p.ID_Producto = ?3
                     LIMIT 1;
                     "#,
                     vec![
-                        Value::Integer(id_comanda),
-                        Value::Integer(*producto_id),
+                        Value::Text(new_id()),
+                        Value::Text(id_comanda.to_string()),
+                        Value::Text(producto_id.clone()),
                         Value::Real(*precio),
                         Value::Text(batch.clone()),
                     ],
@@ -1045,25 +1010,27 @@ impl MesasRepository for SqliteMesasRepository {
                 .map_err(db_err)?;
             }
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
 
+            let id_pago = new_id();
             let ok = try_exec(
                 db,
                 r#"
                 INSERT INTO Pagos (
-                  ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                   ID_Usuario_Cobrador, ID_Trabajador_Cobrador
                 )
-                VALUES (?1, datetime('now','localtime'), ?2, ?3, 'FRACCIONADO', ?4, ?5);
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6);
                 "#,
                 vec![
-                    Value::Integer(id_comanda),
+                    Value::Text(id_pago.clone()),
+                    Value::Text(id_comanda.to_string()),
                     Value::Text(data.metodo.clone()),
                     Value::Real(importe_total),
-                    data.id_usuario_cobrador.map(Value::Integer).unwrap_or(Value::Null),
-                    id_trabajador_cobrador.map(Value::Integer).unwrap_or(Value::Null),
+                    data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
+                    id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
                 ],
             )
             .await?;
@@ -1072,24 +1039,21 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
-                      ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
+                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
                     )
-                    VALUES (?1, datetime('now','localtime'), ?2, ?3, 'FRACCIONADO', ?4);
+                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5);
                     "#,
                     vec![
-                        Value::Integer(id_comanda),
+                        Value::Text(id_pago.clone()),
+                        Value::Text(id_comanda.to_string()),
                         Value::Text(data.metodo.clone()),
                         Value::Real(importe_total),
-                        data.id_usuario_cobrador.map(Value::Integer).unwrap_or(Value::Null),
+                        data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
                     ],
                 )
                 .await
                 .map_err(db_err)?;
             }
-
-            let id_pago = select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-                .await?
-                .ok_or_else(|| AppError::repository("No se pudo obtener ID_Pago"))?;
 
             db.execute(
                 r#"
@@ -1099,8 +1063,8 @@ impl MesasRepository for SqliteMesasRepository {
                 WHERE dc.ID_Comanda = ?2 AND dc.Notas = ?3;
                 "#,
                 vec![
-                    Value::Integer(id_pago),
-                    Value::Integer(id_comanda),
+                    Value::Text(id_pago),
+                    Value::Text(id_comanda.to_string()),
                     Value::Text(batch),
                 ],
             )
@@ -1123,32 +1087,32 @@ impl MesasRepository for SqliteMesasRepository {
         }
     }
 
-    async fn create_comanda_barra(&self, id_trabajador: Option<i64>) -> AppResult<i64> {
+    async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
         let db = &self.conn;
-        let id_trabajador = id_trabajador.filter(|n| *n > 0);
+        let id_trabajador = id_trabajador.filter(|s| !s.trim().is_empty());
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<i64> = async {
+        let res: AppResult<String> = async {
             let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
+            let id_comanda = new_id();
 
             db.execute(
                 r#"
                 INSERT INTO Comandas (
-                  ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
+                  ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
                 )
-                VALUES (?1, ?2, datetime('now','localtime'), 0, 'Abierta');
+                VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
                 "#,
                 vec![
-                    Value::Integer(id_mesa_barra),
-                    id_trabajador.map(Value::Integer).unwrap_or(Value::Null),
+                    Value::Text(id_comanda.clone()),
+                    Value::Text(id_mesa_barra),
+                    id_trabajador.map(Value::Text).unwrap_or(Value::Null),
                 ],
             )
             .await
             .map_err(db_err)?;
 
-            select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-                .await?
-                .ok_or_else(|| AppError::repository("No se pudo crear comanda BARRA."))
+            Ok(id_comanda)
         }
         .await;
 
@@ -1221,14 +1185,14 @@ impl MesasRepository for SqliteMesasRepository {
         );
 
         let mut rows = db
-            .query(&sql, vec![Value::Integer(id_mesa_barra)])
+            .query(&sql, vec![Value::Text(id_mesa_barra)])
             .await
             .map_err(db_err)?;
 
         let mut out = vec![];
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(ComandaBarraListItem {
-                id_comanda: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 fecha_hora_apertura: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 estado: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 total_pendiente: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
@@ -1240,7 +1204,7 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(out)
     }
 
-    async fn delete_comanda_barra_if_safe(&self, id_comanda: i64) -> AppResult<bool> {
+    async fn delete_comanda_barra_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
         let db = &self.conn;
 
         let paid = select_one_i64(
@@ -1251,7 +1215,7 @@ impl MesasRepository for SqliteMesasRepository {
             JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
             WHERE dc.ID_Comanda = ?1 LIMIT 1;
             "#,
-            vec![Value::Integer(id_comanda)],
+            vec![Value::Text(id_comanda.to_string())],
         )
         .await?
         .is_some();
@@ -1264,7 +1228,7 @@ impl MesasRepository for SqliteMesasRepository {
         let res: AppResult<bool> = async {
             db.execute(
                 "DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1;",
-                vec![Value::Integer(id_comanda)],
+                vec![Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -1272,7 +1236,7 @@ impl MesasRepository for SqliteMesasRepository {
             let affected = db
                 .execute(
                     "DELETE FROM Comandas WHERE ID_Comanda = ?1;",
-                    vec![Value::Integer(id_comanda)],
+                    vec![Value::Text(id_comanda.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1295,7 +1259,7 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== META + CATÁLOGO ===== */
 
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<i64, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
         let db = &self.conn;
 
         let mut rows = db
@@ -1334,11 +1298,11 @@ impl MesasRepository for SqliteMesasRepository {
             .await
             .map_err(db_err)?;
 
-        let mut map: HashMap<i64, MesaMetaOut> = HashMap::new();
+        let mut map: HashMap<String, MesaMetaOut> = HashMap::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
-            let id_mesa = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-            let id_comanda = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
-            if id_mesa <= 0 || id_comanda <= 0 {
+            let id_mesa = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+            let id_comanda = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
+            if id_mesa.is_empty() || id_comanda.is_empty() {
                 continue;
             }
             let total_pendiente = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
@@ -1355,8 +1319,8 @@ impl MesasRepository for SqliteMesasRepository {
                 id_mesa,
                 MesaMetaOut {
                     ocupada: true,
+                    idComanda: id_comanda.clone(),
                     id_comanda,
-                    idComanda: id_comanda,
                     totalPendiente: total_pendiente,
                     pendientesPago: pendientes_pago,
                     pendientesCocina: pendientes_cocina,
@@ -1381,18 +1345,18 @@ impl MesasRepository for SqliteMesasRepository {
             .map_err(db_err)?;
 
         let now = Local::now();
-        let mut best: HashMap<i64, ReservaMesaOut> = HashMap::new();
+        let mut best: HashMap<String, ReservaMesaOut> = HashMap::new();
 
         while let Some(r) = rrows.next().await.map_err(db_err)? {
-            let id_mesa = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-            let id_reserva = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
+            let id_mesa = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+            let id_reserva = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
             let dia_ymd = v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default();
             let hora = v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default();
             let estado_db =
                 v_string(r.get_value(4).map_err(db_err)?).unwrap_or_else(|| "PROXIMA".into());
             let cliente = v_string(r.get_value(5).map_err(db_err)?).unwrap_or_default();
 
-            if id_mesa <= 0 || id_reserva <= 0 {
+            if id_mesa.is_empty() || id_reserva.is_empty() {
                 continue;
             }
 
@@ -1442,7 +1406,7 @@ impl MesasRepository for SqliteMesasRepository {
                 minutos_para,
             };
 
-            let replace = match best.get(&id_mesa) {
+            let replace = match best.get(id_mesa.as_str()) {
                 None => true,
                 Some(prev) => {
                     if item.estado == "ACTIVA" && prev.estado != "ACTIVA" {
@@ -1466,8 +1430,8 @@ impl MesasRepository for SqliteMesasRepository {
                 .and_modify(|m| m.reserva = Some(reserva.clone()))
                 .or_insert_with(|| MesaMetaOut {
                     ocupada: false,
-                    id_comanda: 0,
-                    idComanda: 0,
+                    id_comanda: String::new(),
+                    idComanda: String::new(),
                     totalPendiente: 0.0,
                     pendientesPago: 0,
                     pendientesCocina: 0,
@@ -1499,7 +1463,7 @@ impl MesasRepository for SqliteMesasRepository {
         let mut out = vec![];
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(CategoriaVendibleOut {
-                id_categoria: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_categoria: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 nombre: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 ruta_imagen: v_string(r.get_value(2).map_err(db_err)?),
                 pasa_cocina: v_i64(r.get_value(3).map_err(db_err)?).unwrap_or(0),
@@ -1510,7 +1474,7 @@ impl MesasRepository for SqliteMesasRepository {
 
     async fn list_productos_by_categoria(
         &self,
-        id_categoria: i64,
+        id_categoria: &str,
     ) -> AppResult<Vec<ProductoVendibleOut>> {
         let db = &self.conn;
         let sql1 = r#"
@@ -1521,7 +1485,7 @@ impl MesasRepository for SqliteMesasRepository {
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), NULL as Ruta_Imagen
             FROM Productos WHERE ID_Categoria = ?1 ORDER BY Nombre ASC;
         "#;
-        productos_query(db, sql1, sql2, vec![Value::Integer(id_categoria)]).await
+        productos_query(db, sql1, sql2, vec![Value::Text(id_categoria.to_string())]).await
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
@@ -1542,8 +1506,8 @@ impl MesasRepository for SqliteMesasRepository {
 
     async fn remove_one_pending_detalle(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
     ) -> AppResult<()> {
         let db = &self.conn;
 
@@ -1561,12 +1525,12 @@ impl MesasRepository for SqliteMesasRepository {
                   ORDER BY dc.ID_Detalle DESC LIMIT 1
                 );
                 "#,
-                vec![Value::Integer(id_comanda), Value::Integer(id_producto)],
+                vec![Value::Text(id_comanda.to_string()), Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
             Ok(())
@@ -1585,7 +1549,7 @@ impl MesasRepository for SqliteMesasRepository {
         }
     }
 
-    async fn delete_detalle(&self, id_detalle: i64) -> AppResult<()> {
+    async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()> {
         let db = &self.conn;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -1593,7 +1557,7 @@ impl MesasRepository for SqliteMesasRepository {
             let id_comanda = select_one_i64(
                 db,
                 "SELECT ID_Comanda FROM Detalle_Comanda WHERE ID_Detalle=?1 LIMIT 1;",
-                vec![Value::Integer(id_detalle)],
+                vec![Value::Text(id_detalle.to_string())],
             )
             .await?;
 
@@ -1605,7 +1569,7 @@ impl MesasRepository for SqliteMesasRepository {
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
                   );
                 "#,
-                vec![Value::Integer(id_detalle)],
+                vec![Value::Text(id_detalle.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -1631,7 +1595,7 @@ impl MesasRepository for SqliteMesasRepository {
         }
     }
 
-    async fn update_detalle_nota(&self, id_detalle: i64, nota: Option<String>) -> AppResult<()> {
+    async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()> {
         let db = &self.conn;
         db.execute(
             r#"
@@ -1643,7 +1607,7 @@ impl MesasRepository for SqliteMesasRepository {
               );
             "#,
             vec![
-                Value::Integer(id_detalle),
+                Value::Text(id_detalle.to_string()),
                 nota.map(Value::Text).unwrap_or(Value::Null),
             ],
         )
@@ -1658,13 +1622,13 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            let id_trabajador_cobrador = resolve_trabajador_id_input(db, data.id_usuario).await?;
+            let id_trabajador_cobrador = resolve_trabajador_id_input(db, data.id_usuario.clone()).await?;
 
             let in_sql = build_in_placeholders(2, ids.len());
             let mut count_args: Vec<Value> = Vec::with_capacity(1 + ids.len());
-            count_args.push(Value::Integer(data.id_comanda));
+            count_args.push(Value::Text(data.id_comanda.clone()));
             for id in ids.iter() {
-                count_args.push(Value::Integer(*id));
+                count_args.push(Value::Text(id.clone()));
             }
 
             let sql_count = format!(
@@ -1702,22 +1666,24 @@ impl MesasRepository for SqliteMesasRepository {
                 .unwrap_or(0.0);
             let total = (total * 100.0).round() / 100.0;
 
+            let id_pago = new_id();
             let ok = try_exec(
                 db,
                 r#"
                 INSERT INTO Pagos (
-                  ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                  ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                   ID_Usuario_Cobrador, ID_Trabajador_Cobrador
                 )
-                VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6);
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7);
                 "#,
                 vec![
-                    Value::Integer(data.id_comanda),
+                    Value::Text(id_pago.clone()),
+                    Value::Text(data.id_comanda.clone()),
                     Value::Text(data.metodo.clone()),
                     Value::Real(total),
                     Value::Text(data.tipo.clone()),
-                    data.id_usuario.map(Value::Integer).unwrap_or(Value::Null),
-                    id_trabajador_cobrador.map(Value::Integer).unwrap_or(Value::Null),
+                    data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
+                    id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
                 ],
             )
             .await?;
@@ -1726,35 +1692,32 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
-                      ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
+                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
                     )
-                    VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5);
+                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6);
                     "#,
                     vec![
-                        Value::Integer(data.id_comanda),
+                        Value::Text(id_pago.clone()),
+                        Value::Text(data.id_comanda.clone()),
                         Value::Text(data.metodo.clone()),
                         Value::Real(total),
                         Value::Text(data.tipo.clone()),
-                        data.id_usuario.map(Value::Integer).unwrap_or(Value::Null),
+                        data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
                     ],
                 )
                 .await
                 .map_err(db_err)?;
             }
 
-            let id_pago = select_one_i64(db, "SELECT last_insert_rowid();", vec![])
-                .await?
-                .ok_or_else(|| AppError::repository("No se pudo obtener ID_Pago"))?;
-
-            if let Err(e) = sumar_gasto_cliente_por_comanda(db, data.id_comanda, total).await {
+            if let Err(e) = sumar_gasto_cliente_por_comanda(db, &data.id_comanda, total).await {
                 eprintln!("[WARN] sumar_gasto_cliente_por_comanda error: {}", e);
             }
 
             let mut insert_args: Vec<Value> = Vec::with_capacity(2 + ids.len());
-            insert_args.push(Value::Integer(id_pago));
-            insert_args.push(Value::Integer(data.id_comanda));
+            insert_args.push(Value::Text(id_pago));
+            insert_args.push(Value::Text(data.id_comanda.clone()));
             for id in ids.iter() {
-                insert_args.push(Value::Integer(*id));
+                insert_args.push(Value::Text(id.clone()));
             }
             let in_sql2 = build_in_placeholders(3, ids.len());
 
@@ -1779,7 +1742,7 @@ impl MesasRepository for SqliteMesasRepository {
                 LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL;
                 "#,
-                vec![Value::Integer(data.id_comanda)],
+                vec![Value::Text(data.id_comanda.clone())],
             )
             .await?
             .unwrap_or(0);
@@ -1797,12 +1760,12 @@ impl MesasRepository for SqliteMesasRepository {
                       Fecha_Hora_Cierre = datetime('now','localtime')
                     WHERE ID_Comanda = ?1;
                     "#,
-                    vec![Value::Integer(data.id_comanda)],
+                    vec![Value::Text(data.id_comanda.clone())],
                 )
                 .await
                 .map_err(db_err)?;
             } else {
-                db.execute(update_total_comanda_sql(), vec![Value::Integer(data.id_comanda)])
+                db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
                     .await
                     .map_err(db_err)?;
             }
@@ -1863,10 +1826,10 @@ impl MesasRepository for SqliteMesasRepository {
         let mut out: Vec<KitchenRow> = vec![];
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(KitchenRow {
-                id_comanda: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 numero_mesa: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 fecha_hora_apertura: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                id_detalle: v_i64(r.get_value(3).map_err(db_err)?).unwrap_or(0),
+                id_detalle: v_string(r.get_value(3).map_err(db_err)?).unwrap_or_default(),
                 cantidad: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(1.0),
                 nombre_producto: v_string(r.get_value(5).map_err(db_err)?).unwrap_or_default(),
                 notas: v_string(r.get_value(6).map_err(db_err)?),
@@ -1879,8 +1842,8 @@ impl MesasRepository for SqliteMesasRepository {
 
     async fn kitchen_set_line_state(
         &self,
-        id_detalle: i64,
-        id_usuario_cocinero: i64,
+        id_detalle: &str,
+        id_usuario_cocinero: &str,
         estado: String,
     ) -> AppResult<()> {
         let db = &self.conn;
@@ -1896,14 +1859,14 @@ impl MesasRepository for SqliteMesasRepository {
                   Fecha_Hora_Cocina   = COALESCE(Fecha_Hora_Cocina, datetime('now','localtime'))
                 WHERE ID_Detalle = ?1;
                 "#,
-                vec![Value::Integer(id_detalle), Value::Integer(id_usuario_cocinero)],
+                vec![Value::Text(id_detalle.to_string()), Value::Text(id_usuario_cocinero.to_string())],
             )
             .await?;
 
             if !ok {
                 db.execute(
                     "UPDATE Detalle_Comanda SET Estado_Cocina = 'PREPARADO' WHERE ID_Detalle = ?1;",
-                    vec![Value::Integer(id_detalle)],
+                    vec![Value::Text(id_detalle.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1916,14 +1879,14 @@ impl MesasRepository for SqliteMesasRepository {
                 SET Estado_Cocina = 'PENDIENTE', ID_Usuario_Cocinero = NULL, Fecha_Hora_Cocina = NULL
                 WHERE ID_Detalle = ?1;
                 "#,
-                vec![Value::Integer(id_detalle)],
+                vec![Value::Text(id_detalle.to_string())],
             )
             .await?;
 
             if !ok {
                 db.execute(
                     "UPDATE Detalle_Comanda SET Estado_Cocina = 'PENDIENTE' WHERE ID_Detalle = ?1;",
-                    vec![Value::Integer(id_detalle)],
+                    vec![Value::Text(id_detalle.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1948,8 +1911,8 @@ async fn productos_query(
     let mut out = vec![];
     while let Some(r) = rows.next().await.map_err(db_err)? {
         out.push(ProductoVendibleOut {
-            id_producto: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-            id_categoria: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+            id_producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            id_categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
             nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
             precio_venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
             ruta_imagen: v_string(r.get_value(4).map_err(db_err)?),

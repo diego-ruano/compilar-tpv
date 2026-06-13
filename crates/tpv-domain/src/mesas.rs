@@ -42,28 +42,28 @@ pub fn normalize_estado_cocina(input: &str) -> String {
 /// Datos para abrir una comanda de mesa (ya validados).
 #[derive(Debug, Clone)]
 pub struct AbrirComandaData {
-    pub id_mesa: i64,
+    pub id_mesa: String,
     /// Trabajador/usuario que abre (se resuelve a ID_Trabajador en infraestructura).
-    pub id_trabajador_o_usuario: Option<i64>,
-    pub id_reserva: Option<i64>,
+    pub id_trabajador_o_usuario: Option<String>,
+    pub id_reserva: Option<String>,
 }
 
 /// Datos de un cobro fraccionado de venta rápida (legacy de mesas).
 #[derive(Debug, Clone)]
 pub struct CobroVentaRapida {
     pub metodo: String,
-    pub items: Vec<(i64, f64)>, // (producto_id, precio)
-    pub id_usuario_cobrador: Option<i64>,
-    pub id_trabajador_cobrador: Option<i64>,
-    pub id_comanda: Option<i64>,
+    pub items: Vec<(String, f64)>, // (producto_id, precio)
+    pub id_usuario_cobrador: Option<String>,
+    pub id_trabajador_cobrador: Option<String>,
+    pub id_comanda: Option<String>,
 }
 
 /// Datos de un cobro de detalles concretos de una comanda de mesa.
 #[derive(Debug, Clone)]
 pub struct CobroDetalles {
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub metodo: String,
     pub tipo: String,
-    pub detalle_ids: Vec<i64>,
-    pub id_usuario: Option<i64>,
+    pub detalle_ids: Vec<String>,
+    pub id_usuario: Option<String>,
 }

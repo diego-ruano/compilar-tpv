@@ -57,7 +57,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Reservas */
-    async fn set_reserva_estado(&self, id_reserva: i64, estado: String) -> AppResult<()> {
+    async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .put_json(
@@ -69,7 +69,7 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Comandas de mesa */
-    async fn get_comanda_abierta_by_mesa(&self, id_mesa: i64) -> AppResult<Option<ComandaRow>> {
+    async fn get_comanda_abierta_by_mesa(&self, id_mesa: &str) -> AppResult<Option<ComandaRow>> {
         self.client
             .get_json(&format!("/v1/mesas/comandas/mesa/{id_mesa}/abierta"))
             .await
@@ -86,8 +86,8 @@ impl MesasRepository for HttpMesasRepository {
 
     async fn comanda_set_trabajador_if_null(
         &self,
-        id_comanda: i64,
-        id_trab_o_usuario: Option<i64>,
+        id_comanda: &str,
+        id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool> {
         let body = json!({ "id_comanda": id_comanda, "id_trabajador": id_trab_o_usuario });
         self.client
@@ -95,7 +95,7 @@ impl MesasRepository for HttpMesasRepository {
             .await
     }
 
-    async fn cerrar_comanda(&self, id_comanda: i64, total: f64) -> AppResult<()> {
+    async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .put_json(
@@ -106,7 +106,7 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
-    async fn get_lineas_comanda(&self, id_comanda: i64) -> AppResult<Vec<MesaLineaComandaRow>> {
+    async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
         self.client
             .get_json(&format!("/v1/mesas/comandas/{id_comanda}/lineas"))
             .await
@@ -114,11 +114,11 @@ impl MesasRepository for HttpMesasRepository {
 
     async fn add_linea_comanda(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
         cantidad: f64,
         precio: f64,
-        id_trab_o_usuario: Option<i64>,
+        id_trab_o_usuario: Option<String>,
     ) -> AppResult<()> {
         let body = json!({
             "id_comanda": id_comanda,
@@ -132,11 +132,11 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Barra — sin endpoint en el dominio `mesas` del worker (lo cubre venta_rapida) */
-    async fn get_or_create_mesa_barra(&self) -> AppResult<i64> {
+    async fn get_or_create_mesa_barra(&self) -> AppResult<String> {
         Err(barra_no_disponible("get_or_create_mesa_barra"))
     }
 
-    async fn get_or_create_comanda_barra(&self, _id_trabajador: Option<i64>) -> AppResult<i64> {
+    async fn get_or_create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
         Err(barra_no_disponible("get_or_create_comanda_barra"))
     }
 
@@ -144,7 +144,7 @@ impl MesasRepository for HttpMesasRepository {
         Err(barra_no_disponible("cobrar_venta_rapida"))
     }
 
-    async fn create_comanda_barra(&self, _id_trabajador: Option<i64>) -> AppResult<i64> {
+    async fn create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
         Err(barra_no_disponible("create_comanda_barra"))
     }
 
@@ -156,12 +156,12 @@ impl MesasRepository for HttpMesasRepository {
         Err(barra_no_disponible("list_comandas_barra"))
     }
 
-    async fn delete_comanda_barra_if_safe(&self, _id_comanda: i64) -> AppResult<bool> {
+    async fn delete_comanda_barra_if_safe(&self, _id_comanda: &str) -> AppResult<bool> {
         Err(barra_no_disponible("delete_comanda_barra_if_safe"))
     }
 
     /* Meta + catálogo */
-    async fn mesas_meta_all(&self) -> AppResult<HashMap<i64, MesaMetaOut>> {
+    async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
         self.client.get_json("/v1/mesas/meta").await
     }
 
@@ -171,7 +171,7 @@ impl MesasRepository for HttpMesasRepository {
 
     async fn list_productos_by_categoria(
         &self,
-        id_categoria: i64,
+        id_categoria: &str,
     ) -> AppResult<Vec<ProductoVendibleOut>> {
         self.client
             .get_json(&format!("/v1/mesas/productos/{id_categoria}"))
@@ -187,8 +187,8 @@ impl MesasRepository for HttpMesasRepository {
     /* Detalles (ticket) */
     async fn remove_one_pending_detalle(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
     ) -> AppResult<()> {
         let body = json!({ "id_comanda": id_comanda, "id_producto": id_producto });
         let _: JsonValue = self
@@ -198,7 +198,7 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
-    async fn delete_detalle(&self, id_detalle: i64) -> AppResult<()> {
+    async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/mesas/lineas/{id_detalle}"))
@@ -206,7 +206,7 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
-    async fn update_detalle_nota(&self, id_detalle: i64, nota: Option<String>) -> AppResult<()> {
+    async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .put_json(
@@ -236,8 +236,8 @@ impl MesasRepository for HttpMesasRepository {
 
     async fn kitchen_set_line_state(
         &self,
-        id_detalle: i64,
-        id_usuario_cocinero: i64,
+        id_detalle: &str,
+        id_usuario_cocinero: &str,
         estado: String,
     ) -> AppResult<()> {
         let body = json!({

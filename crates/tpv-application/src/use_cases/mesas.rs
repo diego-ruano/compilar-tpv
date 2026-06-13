@@ -21,6 +21,11 @@ use tpv_domain::mesas::{
 use crate::error::{AppError, AppResult};
 use crate::ports::mesas::MesasRepository;
 
+/// Normaliza un id opcional: recorta y descarta vacíos.
+fn opt_id(o: Option<String>) -> Option<String> {
+    o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
 /* Layout */
 
 pub async fn save_layout(repo: &dyn MesasRepository, input: MesasSaveLayoutInput) -> AppResult<()> {
@@ -46,10 +51,10 @@ pub async fn set_reserva_estado(
     let estado = requerido(&input.estado, "estado")
         .map_err(AppError::validation)?
         .to_uppercase();
-    if input.id_reserva <= 0 {
+    if input.id_reserva.trim().is_empty() {
         return Err(AppError::validation("ID_Reserva inválido"));
     }
-    repo.set_reserva_estado(input.id_reserva, estado).await
+    repo.set_reserva_estado(&input.id_reserva, estado).await
 }
 
 /* Comandas de mesa */
@@ -58,23 +63,23 @@ pub async fn get_comanda_abierta_by_mesa(
     repo: &dyn MesasRepository,
     args: MesasIdMesaArgs,
 ) -> AppResult<Option<ComandaRow>> {
-    if args.id_mesa <= 0 {
+    if args.id_mesa.trim().is_empty() {
         return Ok(None);
     }
-    repo.get_comanda_abierta_by_mesa(args.id_mesa).await
+    repo.get_comanda_abierta_by_mesa(&args.id_mesa).await
 }
 
 pub async fn abrir_comanda(
     repo: &dyn MesasRepository,
     input: MesasAbrirComandaInput,
 ) -> AppResult<Option<ComandaRow>> {
-    if input.id_mesa <= 0 {
+    if input.id_mesa.trim().is_empty() {
         return Err(AppError::validation("id_mesa inválido"));
     }
     let data = AbrirComandaData {
         id_mesa: input.id_mesa,
-        id_trabajador_o_usuario: input.id_usuario.or(input.id_trabajador).filter(|n| *n > 0),
-        id_reserva: input.id_reserva.filter(|n| *n > 0),
+        id_trabajador_o_usuario: opt_id(input.id_usuario.or(input.id_trabajador)),
+        id_reserva: opt_id(input.id_reserva),
     };
     repo.abrir_comanda(data).await
 }
@@ -83,41 +88,41 @@ pub async fn comanda_set_trabajador_if_null(
     repo: &dyn MesasRepository,
     input: MesasComandaSetTrabajadorInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 {
+    if input.id_comanda.trim().is_empty() {
         return Ok(false);
     }
-    let id = input.id_usuario.or(input.id_trabajador).filter(|n| *n > 0);
-    repo.comanda_set_trabajador_if_null(input.id_comanda, id).await
+    let id = opt_id(input.id_usuario.or(input.id_trabajador));
+    repo.comanda_set_trabajador_if_null(&input.id_comanda, id).await
 }
 
 pub async fn cerrar_comanda(
     repo: &dyn MesasRepository,
     input: MesasCerrarComandaInput,
 ) -> AppResult<()> {
-    if input.id_comanda <= 0 {
+    if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda inválido"));
     }
     if !input.total.is_finite() || input.total < 0.0 {
         return Err(AppError::validation("total inválido"));
     }
-    repo.cerrar_comanda(input.id_comanda, input.total).await
+    repo.cerrar_comanda(&input.id_comanda, input.total).await
 }
 
 pub async fn get_lineas_comanda(
     repo: &dyn MesasRepository,
     args: MesasIdComandaArgs,
 ) -> AppResult<Vec<MesaLineaComandaRow>> {
-    if args.id_comanda <= 0 {
+    if args.id_comanda.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.get_lineas_comanda(args.id_comanda).await
+    repo.get_lineas_comanda(&args.id_comanda).await
 }
 
 pub async fn add_linea_comanda(
     repo: &dyn MesasRepository,
     input: MesasAddLineaComandaInput,
 ) -> AppResult<()> {
-    if input.id_comanda <= 0 || input.id_producto <= 0 {
+    if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_producto inválidos"));
     }
     if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
@@ -126,10 +131,10 @@ pub async fn add_linea_comanda(
     if !input.precio.is_finite() {
         return Err(AppError::validation("precio inválido"));
     }
-    let id = input.id_usuario.or(input.id_trabajador).filter(|n| *n > 0);
+    let id = opt_id(input.id_usuario.or(input.id_trabajador));
     repo.add_linea_comanda(
-        input.id_comanda,
-        input.id_producto,
+        &input.id_comanda,
+        &input.id_producto,
         input.cantidad,
         input.precio,
         id,
@@ -139,15 +144,15 @@ pub async fn add_linea_comanda(
 
 /* Barra */
 
-pub async fn get_or_create_mesa_barra(repo: &dyn MesasRepository) -> AppResult<i64> {
+pub async fn get_or_create_mesa_barra(repo: &dyn MesasRepository) -> AppResult<String> {
     repo.get_or_create_mesa_barra().await
 }
 
 pub async fn get_or_create_comanda_barra(
     repo: &dyn MesasRepository,
     input: MesasGetOrCreateComandaBarraInput,
-) -> AppResult<i64> {
-    repo.get_or_create_comanda_barra(input.id_trabajador.filter(|n| *n > 0))
+) -> AppResult<String> {
+    repo.get_or_create_comanda_barra(opt_id(input.id_trabajador))
         .await
 }
 
@@ -155,19 +160,19 @@ pub async fn cobrar_venta_rapida(
     repo: &dyn MesasRepository,
     input: MesasCobrarVentaRapidaInput,
 ) -> AppResult<()> {
-    let items: Vec<(i64, f64)> = input
+    let items: Vec<(String, f64)> = input
         .items
         .into_iter()
-        .filter(|it| it.producto_id > 0 && it.precio.is_finite())
+        .filter(|it| !it.producto_id.trim().is_empty() && it.precio.is_finite())
         .map(|it| (it.producto_id, it.precio))
         .collect();
 
     let data = CobroVentaRapida {
         metodo: normalize_metodo(&input.metodo),
         items,
-        id_usuario_cobrador: input.id_usuario_cobrador.filter(|n| *n > 0),
-        id_trabajador_cobrador: input.id_trabajador_cobrador.filter(|n| *n > 0),
-        id_comanda: input.id_comanda.filter(|n| *n > 0),
+        id_usuario_cobrador: opt_id(input.id_usuario_cobrador),
+        id_trabajador_cobrador: opt_id(input.id_trabajador_cobrador),
+        id_comanda: opt_id(input.id_comanda),
     };
     repo.cobrar_venta_rapida(data).await
 }
@@ -175,8 +180,8 @@ pub async fn cobrar_venta_rapida(
 pub async fn create_comanda_barra(
     repo: &dyn MesasRepository,
     input: MesasCreateComandaBarraInput,
-) -> AppResult<i64> {
-    repo.create_comanda_barra(input.id_trabajador.filter(|n| *n > 0))
+) -> AppResult<String> {
+    repo.create_comanda_barra(opt_id(input.id_trabajador))
         .await
 }
 
@@ -193,17 +198,17 @@ pub async fn delete_comanda_barra_if_safe(
     repo: &dyn MesasRepository,
     input: MesasDeleteComandaBarraIfSafeInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 {
+    if input.id_comanda.trim().is_empty() {
         return Ok(false);
     }
-    repo.delete_comanda_barra_if_safe(input.id_comanda).await
+    repo.delete_comanda_barra_if_safe(&input.id_comanda).await
 }
 
 /* Meta + catálogo */
 
 pub async fn mesas_meta_all(
     repo: &dyn MesasRepository,
-) -> AppResult<HashMap<i64, MesaMetaOut>> {
+) -> AppResult<HashMap<String, MesaMetaOut>> {
     repo.mesas_meta_all().await
 }
 
@@ -217,7 +222,7 @@ pub async fn list_productos_by_categoria(
     repo: &dyn MesasRepository,
     args: MesasIdCategoriaArgs,
 ) -> AppResult<Vec<ProductoVendibleOut>> {
-    repo.list_productos_by_categoria(args.id_categoria).await
+    repo.list_productos_by_categoria(&args.id_categoria).await
 }
 
 pub async fn search_productos_by_nombre(
@@ -234,10 +239,10 @@ pub async fn remove_one_pending_detalle(
     repo: &dyn MesasRepository,
     input: MesasRemoveOnePendingDetalleInput,
 ) -> AppResult<()> {
-    if input.id_comanda <= 0 || input.id_producto <= 0 {
+    if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
         return Ok(());
     }
-    repo.remove_one_pending_detalle(input.id_comanda, input.id_producto)
+    repo.remove_one_pending_detalle(&input.id_comanda, &input.id_producto)
         .await
 }
 
@@ -245,20 +250,20 @@ pub async fn delete_detalle(
     repo: &dyn MesasRepository,
     input: MesasDeleteDetalleInput,
 ) -> AppResult<()> {
-    if input.id_detalle <= 0 {
+    if input.id_detalle.trim().is_empty() {
         return Ok(());
     }
-    repo.delete_detalle(input.id_detalle).await
+    repo.delete_detalle(&input.id_detalle).await
 }
 
 pub async fn update_detalle_nota(
     repo: &dyn MesasRepository,
     input: MesasUpdateDetalleNotaInput,
 ) -> AppResult<()> {
-    if input.id_detalle <= 0 {
+    if input.id_detalle.trim().is_empty() {
         return Ok(());
     }
-    repo.update_detalle_nota(input.id_detalle, limpiar_opcional(input.nota))
+    repo.update_detalle_nota(&input.id_detalle, limpiar_opcional(input.nota))
         .await
 }
 
@@ -266,12 +271,16 @@ pub async fn cobrar_detalles(
     repo: &dyn MesasRepository,
     input: MesasCobrarDetallesInput,
 ) -> AppResult<()> {
-    let mut ids = input.detalle_ids.clone();
+    let mut ids: Vec<String> = input
+        .detalle_ids
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     ids.sort_unstable();
     ids.dedup();
-    ids.retain(|n| *n > 0);
 
-    if input.id_comanda <= 0 || ids.is_empty() {
+    if input.id_comanda.trim().is_empty() || ids.is_empty() {
         return Ok(());
     }
 
@@ -283,7 +292,7 @@ pub async fn cobrar_detalles(
         metodo,
         tipo,
         detalle_ids: ids,
-        id_usuario: input.id_usuario.filter(|n| *n > 0),
+        id_usuario: opt_id(input.id_usuario),
     };
     repo.cobrar_detalles(data).await
 }
@@ -300,15 +309,15 @@ pub async fn kitchen_set_line_state(
     repo: &dyn MesasRepository,
     input: MesasKitchenSetLineStateInput,
 ) -> AppResult<()> {
-    if input.id_detalle <= 0 {
+    if input.id_detalle.trim().is_empty() {
         return Err(AppError::validation("ID_Detalle inválido"));
     }
-    if input.id_usuario_cocinero <= 0 {
+    if input.id_usuario_cocinero.trim().is_empty() {
         return Err(AppError::validation("ID_Usuario_Cocinero inválido"));
     }
     // Fidelidad con el monolito: estado vacío/espacios es error (no se normaliza a PENDIENTE).
     let estado_raw = requerido(&input.estado, "estado").map_err(AppError::validation)?;
     let estado = normalize_estado_cocina(&estado_raw);
-    repo.kitchen_set_line_state(input.id_detalle, input.id_usuario_cocinero, estado)
+    repo.kitchen_set_line_state(&input.id_detalle, &input.id_usuario_cocinero, estado)
         .await
 }

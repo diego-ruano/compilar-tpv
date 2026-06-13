@@ -84,14 +84,10 @@ pub struct SalonOut {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ComandaRow {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_mesa: i64,
-    #[ts(type = "number | null")]
-    pub id_trabajador: Option<i64>,
-    #[ts(type = "number | null")]
-    pub id_reserva: Option<i64>,
+    pub id_comanda: String,
+    pub id_mesa: String,
+    pub id_trabajador: Option<String>,
+    pub id_reserva: Option<String>,
     pub fecha_hora_apertura: String,
     pub fecha_hora_cierre: Option<String>,
     pub total_comanda: f64,
@@ -104,14 +100,11 @@ pub struct ComandaRow {
 #[allow(non_snake_case)]
 pub struct MesaLineaComandaRow {
     #[serde(rename = "ID_Detalle")]
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_detalle: String,
     #[serde(rename = "ID_Comanda")]
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     #[serde(rename = "ID_Producto")]
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
     #[serde(rename = "Cantidad")]
     pub cantidad: f64,
     #[serde(rename = "Precio_Unitario")]
@@ -133,8 +126,7 @@ pub struct MesaLineaComandaRow {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ComandaBarraListItem {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub fecha_hora_apertura: String,
     pub estado: String,
     pub total_pendiente: f64,
@@ -154,8 +146,7 @@ pub struct ComandaBarraListItem {
 #[allow(non_snake_case)]
 pub struct ReservaMesaOut {
     #[serde(rename = "idReserva")]
-    #[ts(type = "number")]
-    pub id_reserva: i64,
+    pub id_reserva: String,
     #[serde(rename = "clienteNombre")]
     pub cliente_nombre: String,
     #[serde(rename = "diaYMD")]
@@ -172,10 +163,8 @@ pub struct ReservaMesaOut {
 #[allow(non_snake_case)]
 pub struct MesaMetaOut {
     pub ocupada: bool,
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub idComanda: i64,
+    pub id_comanda: String,
+    pub idComanda: String,
     pub totalPendiente: f64,
     #[ts(type = "number")]
     pub pendientesPago: i64,
@@ -196,8 +185,7 @@ pub struct MesaMetaOut {
 #[allow(non_snake_case)]
 pub struct CategoriaVendibleOut {
     #[serde(rename = "ID_Categoria")]
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Ruta_Imagen")]
@@ -212,11 +200,9 @@ pub struct CategoriaVendibleOut {
 #[allow(non_snake_case)]
 pub struct ProductoVendibleOut {
     #[serde(rename = "ID_Producto")]
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_producto: String,
     #[serde(rename = "ID_Categoria")]
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Precio_Venta")]
@@ -234,15 +220,13 @@ pub struct ProductoVendibleOut {
 #[allow(non_snake_case)]
 pub struct KitchenRow {
     #[serde(rename = "ID_Comanda")]
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     #[serde(rename = "Numero_Mesa")]
     pub numero_mesa: String,
     #[serde(rename = "Fecha_Hora_Apertura")]
     pub fecha_hora_apertura: String,
     #[serde(rename = "ID_Detalle")]
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_detalle: String,
     #[serde(rename = "Cantidad")]
     pub cantidad: f64,
     #[serde(rename = "Nombre_Producto")]
@@ -263,8 +247,7 @@ pub struct KitchenRow {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CobroVRItem {
-    #[ts(type = "number")]
-    pub producto_id: i64,
+    pub producto_id: String,
     pub precio: f64,
 }
 
@@ -281,93 +264,85 @@ pub struct MesasSaveLayoutInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasSetReservaEstadoInput {
-    #[ts(type = "number")]
-    pub id_reserva: i64,
+    pub id_reserva: String,
     pub estado: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasIdMesaArgs {
-    #[ts(type = "number")]
-    pub id_mesa: i64,
+    pub id_mesa: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasIdComandaArgs {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasAbrirComandaInput {
-    #[ts(type = "number")]
-    pub id_mesa: i64,
+    pub id_mesa: String,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_reserva: Option<i64>,
+    #[ts(optional)]
+    pub id_reserva: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasComandaSetTrabajadorInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCerrarComandaInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub total: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasAddLineaComandaInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_comanda: String,
+    pub id_producto: String,
     pub cantidad: f64,
     pub precio: f64,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasGetOrCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -376,15 +351,15 @@ pub struct MesasCobrarVentaRapidaInput {
     pub metodo: String,
     pub items: Vec<CobroVRItem>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario_cobrador: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario_cobrador: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador_cobrador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador_cobrador: Option<String>,
     /// Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_comanda: Option<i64>,
+    #[ts(optional)]
+    pub id_comanda: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -401,15 +376,13 @@ pub struct MesasListComandasBarraArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasDeleteComandaBarraIfSafeInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasIdCategoriaArgs {
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -429,24 +402,20 @@ pub struct MesasSearchProductosArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasRemoveOnePendingDetalleInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_comanda: String,
+    pub id_producto: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasDeleteDetalleInput {
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_detalle: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasUpdateDetalleNotaInput {
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_detalle: String,
     #[serde(default)]
     #[ts(optional)]
     pub nota: Option<String>,
@@ -455,23 +424,19 @@ pub struct MesasUpdateDetalleNotaInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCobrarDetallesInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub metodo: String,
     pub tipo: String,
-    #[ts(type = "Array<number>")]
-    pub detalle_ids: Vec<i64>,
+    pub detalle_ids: Vec<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasKitchenSetLineStateInput {
-    #[ts(type = "number")]
-    pub id_detalle: i64,
-    #[ts(type = "number")]
-    pub id_usuario_cocinero: i64,
+    pub id_detalle: String,
+    pub id_usuario_cocinero: String,
     pub estado: String,
 }

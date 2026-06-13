@@ -117,7 +117,7 @@ pub async fn add_linea_comanda(
 /* ===== BARRA ===== */
 
 #[tauri::command]
-pub async fn get_or_create_mesa_barra(state: State<'_, AppState>) -> Result<i64, String> {
+pub async fn get_or_create_mesa_barra(state: State<'_, AppState>) -> Result<String, String> {
     let repo = state.mesas_repo().await?;
     Ok(uc::get_or_create_mesa_barra(repo.as_ref()).await?)
 }
@@ -126,7 +126,7 @@ pub async fn get_or_create_mesa_barra(state: State<'_, AppState>) -> Result<i64,
 pub async fn get_or_create_comanda_barra(
     state: State<'_, AppState>,
     args: MesasGetOrCreateComandaBarraInput,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let repo = state.mesas_repo().await?;
     Ok(uc::get_or_create_comanda_barra(repo.as_ref(), args).await?)
 }
@@ -145,7 +145,7 @@ pub async fn cobrar_venta_rapida(
 pub async fn create_comanda_barra(
     state: State<'_, AppState>,
     args: MesasCreateComandaBarraInput,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let repo = state.mesas_repo().await?;
     Ok(uc::create_comanda_barra(repo.as_ref(), args).await?)
 }
@@ -173,7 +173,7 @@ pub async fn delete_comanda_barra_if_safe(
 #[tauri::command]
 pub async fn mesas_meta_all(
     state: State<'_, AppState>,
-) -> Result<HashMap<i64, MesaMetaOut>, String> {
+) -> Result<HashMap<String, MesaMetaOut>, String> {
     let repo = state.mesas_repo().await?;
     Ok(uc::mesas_meta_all(repo.as_ref()).await?)
 }
