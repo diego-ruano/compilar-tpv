@@ -4,6 +4,8 @@
 // (remoto + local + outbox + op_id + afterRemoteOk) por invocación directa del comando
 // Tauri vía @tpv/client. Las firmas exportadas y los tipos NO cambian; los 5 componentes
 // consumidores siguen igual. Se conservan los nombres de comando del backend hexagonal.
+//
+// UUIDv7: todos los IDs de negocio son `string` (idénticos en local y nube).
 
 import { invokeClient } from "@tpv/client";
 import type { Salon, MesaMeta } from "./types";
@@ -13,22 +15,22 @@ import type { Salon, MesaMeta } from "./types";
 ========================= */
 
 export type CategoriaDTO = {
-    ID_Categoria: number;
+    ID_Categoria: string;
     Nombre: string;
     Ruta_Imagen: string | null;
 };
 
 export type ProductoDTO = {
-    ID_Producto: number;
-    ID_Categoria: number;
+    ID_Producto: string;
+    ID_Categoria: string;
     Nombre: string;
     Precio_Venta: number | null;
     Ruta_Imagen: string | null;
 };
 
 export type KitchenRow = {
-    ID_Comanda: number;
-    ID_Detalle: number;
+    ID_Comanda: string;
+    ID_Detalle: string;
     Cantidad: number;
     Nombre_Producto: string;
     Notas: string | null;
@@ -59,23 +61,25 @@ function toStr(v: any, fallback = ""): string {
     return String(v);
 }
 
+function toId(v: any): string {
+    return String(v ?? "").trim();
+}
+
 function toNullableStr(v: any): string | null {
     if (v == null) return null;
     const s = String(v).trim();
     return s ? s : null;
 }
 
-function parseAnyMesaId(k: string): number | null {
-    const direct = Number(k);
-    if (Number.isFinite(direct) && direct > 0) return direct;
+// Acepta el id crudo (UUID) o la clave de UI `db-mesa-<uuid>`. Devuelve el id o null.
+function parseAnyMesaId(k: string): string | null {
+    const s = String(k ?? "").trim();
+    if (!s) return null;
 
-    const m1 = String(k).match(/db-mesa-(\d+)/);
-    if (m1) return Number(m1[1]);
+    const m = s.match(/^db-mesa-(.+)$/);
+    if (m) return m[1].trim() || null;
 
-    const m2 = String(k).match(/(\d+)(?!.*\d)/);
-    if (m2) return Number(m2[1]);
-
-    return null;
+    return s;
 }
 
 /* =========================
@@ -84,7 +88,7 @@ function parseAnyMesaId(k: string): number | null {
 
 function normalizeCategoria(r: any): CategoriaDTO {
     return {
-        ID_Categoria: toNum(
+        ID_Categoria: toStr(
             pick(r, [
                 "ID_Categoria",
                 "id_categoria",
@@ -92,7 +96,7 @@ function normalizeCategoria(r: any): CategoriaDTO {
                 "IdCategoria",
                 "IDcategoria",
             ]),
-            0,
+            "",
         ),
         Nombre: toStr(pick(r, ["Nombre", "nombre"]), ""),
         Ruta_Imagen: toNullableStr(
@@ -105,13 +109,13 @@ function normalizeProducto(r: any): ProductoDTO {
     const precioRaw = pick(r, ["Precio_Venta", "precio_venta", "precioVenta"]);
 
     return {
-        ID_Producto: toNum(
+        ID_Producto: toStr(
             pick(r, ["ID_Producto", "id_producto", "idProducto", "IdProducto"]),
-            0,
+            "",
         ),
-        ID_Categoria: toNum(
+        ID_Categoria: toStr(
             pick(r, ["ID_Categoria", "id_categoria", "idCategoria", "IdCategoria"]),
-            0,
+            "",
         ),
         Nombre: toStr(pick(r, ["Nombre", "nombre"]), ""),
         Precio_Venta:
@@ -215,10 +219,10 @@ export async function mesasLoadMesaMeta(): Promise<Record<any, MesaMeta>> {
 ========================= */
 
 async function reservaSetEstado(
-    idReserva: number,
+    idReserva: string,
     estado: "ACTIVA" | "FINALIZADA",
 ): Promise<void> {
-    const id = toNum(idReserva, 0);
+    const id = toId(idReserva);
     if (!id) throw new Error("id_reserva inválido");
 
     await invokeClient<string>("set_reserva_estado", {
@@ -227,12 +231,12 @@ async function reservaSetEstado(
 }
 
 export async function reservaMarcarActivaAhora(
-    idReserva: number,
+    idReserva: string,
 ): Promise<void> {
     await reservaSetEstado(idReserva, "ACTIVA");
 }
 
-export async function reservaFinalizar(idReserva: number): Promise<void> {
+export async function reservaFinalizar(idReserva: string): Promise<void> {
     await reservaSetEstado(idReserva, "FINALIZADA");
 }
 
@@ -241,27 +245,26 @@ export async function reservaFinalizar(idReserva: number): Promise<void> {
 ========================= */
 
 export async function mesasEnsureOpenComanda(params: {
-    idMesa: number;
-    idUsuario: number | null;
-    idReserva: number | null;
-}): Promise<number> {
-    const idMesa = toNum(params.idMesa, 0);
+    idMesa: string;
+    idUsuario: string | null;
+    idReserva: string | null;
+}): Promise<string> {
+    const idMesa = toId(params.idMesa);
     if (!idMesa) throw new Error("id_mesa inválido");
 
     const idUsuario =
-        params.idUsuario != null ? toNum(params.idUsuario, 0) : null;
+        params.idUsuario != null ? toId(params.idUsuario) || null : null;
 
     const abierta = await invokeClient<any>("get_comanda_abierta_by_mesa", {
         args: { id_mesa: idMesa },
     });
 
-    const idAbierta = toNum(
+    const idAbierta = toId(
         pick(abierta, ["id_comanda", "ID_Comanda", "idComanda", "id"]),
-        0,
     );
 
-    if (idAbierta > 0) {
-        if (idUsuario && idUsuario > 0) {
+    if (idAbierta) {
+        if (idUsuario) {
             try {
                 await invokeClient<boolean>("comanda_set_trabajador_if_null", {
                     args: {
@@ -279,7 +282,7 @@ export async function mesasEnsureOpenComanda(params: {
     }
 
     const idReserva =
-        params.idReserva != null ? toNum(params.idReserva, 0) : null;
+        params.idReserva != null ? toId(params.idReserva) || null : null;
 
     const creada = await invokeClient<any>("abrir_comanda", {
         args: {
@@ -290,17 +293,16 @@ export async function mesasEnsureOpenComanda(params: {
         },
     });
 
-    const idCreada = toNum(
+    const idCreada = toId(
         pick(creada, ["id_comanda", "ID_Comanda", "idComanda", "id"]),
-        0,
     );
 
     if (!idCreada) throw new Error("ID_Comanda inválido");
     return idCreada;
 }
 
-export async function mesasLoadTicket(idComanda: number): Promise<any[]> {
-    const id = toNum(idComanda, 0);
+export async function mesasLoadTicket(idComanda: string): Promise<any[]> {
+    const id = toId(idComanda);
     if (!id) return [];
 
     const rows = await invokeClient<any[]>("get_lineas_comanda", {
@@ -310,18 +312,18 @@ export async function mesasLoadTicket(idComanda: number): Promise<any[]> {
 }
 
 export async function mesasAddDetalle(params: {
-    idComanda: number;
-    idProducto: number;
+    idComanda: string;
+    idProducto: string;
     cantidad?: number;
     precio: number;
-    idUsuario?: number | null;
+    idUsuario?: string | null;
 }): Promise<void> {
-    const idComanda = toNum(params.idComanda, 0);
-    const idProducto = toNum(params.idProducto, 0);
+    const idComanda = toId(params.idComanda);
+    const idProducto = toId(params.idProducto);
     const cantidad = toNum(params.cantidad ?? 1, 1);
     const precio = Number(params.precio);
     const idUsuario =
-        params.idUsuario != null ? toNum(params.idUsuario, 0) : null;
+        params.idUsuario != null ? toId(params.idUsuario) || null : null;
 
     if (!idComanda) throw new Error("id_comanda inválido");
     if (!idProducto) throw new Error("id_producto inválido");
@@ -349,13 +351,13 @@ export async function productosListCategoriasVendibles(): Promise<
     const rows = await invokeClient<any[]>("list_categorias_vendibles");
     return (rows ?? [])
         .map(normalizeCategoria)
-        .filter((c) => c.ID_Categoria > 0);
+        .filter((c) => c.ID_Categoria.length > 0);
 }
 
 export async function productosListByCategoria(
-    idCategoria: number,
+    idCategoria: string,
 ): Promise<ProductoDTO[]> {
-    const idCat = toNum(idCategoria, 0);
+    const idCat = toId(idCategoria);
     if (!idCat) throw new Error("id_categoria inválido");
 
     const rows = await invokeClient<any[]>("list_productos_by_categoria", {
@@ -363,7 +365,7 @@ export async function productosListByCategoria(
     });
     return (rows ?? [])
         .map(normalizeProducto)
-        .filter((p) => p.ID_Producto > 0);
+        .filter((p) => p.ID_Producto.length > 0);
 }
 
 export async function productosSearchByNombre(
@@ -377,7 +379,7 @@ export async function productosSearchByNombre(
     });
     return (rows ?? [])
         .map(normalizeProducto)
-        .filter((p) => p.ID_Producto > 0);
+        .filter((p) => p.ID_Producto.length > 0);
 }
 
 /* =========================
@@ -385,11 +387,11 @@ export async function productosSearchByNombre(
 ========================= */
 
 export async function mesasRemoveOnePendingDetalle(params: {
-    idComanda: number;
-    idProducto: number;
+    idComanda: string;
+    idProducto: string;
 }): Promise<void> {
-    const idComanda = toNum(params.idComanda, 0);
-    const idProducto = toNum(params.idProducto, 0);
+    const idComanda = toId(params.idComanda);
+    const idProducto = toId(params.idProducto);
     if (!idComanda || !idProducto) return;
 
     await invokeClient<string>("remove_one_pending_detalle", {
@@ -397,8 +399,8 @@ export async function mesasRemoveOnePendingDetalle(params: {
     });
 }
 
-export async function mesasDeleteDetalle(idDetalle: number): Promise<void> {
-    const id = toNum(idDetalle, 0);
+export async function mesasDeleteDetalle(idDetalle: string): Promise<void> {
+    const id = toId(idDetalle);
     if (!id) return;
 
     await invokeClient<string>("delete_detalle", {
@@ -407,10 +409,10 @@ export async function mesasDeleteDetalle(idDetalle: number): Promise<void> {
 }
 
 export async function mesasUpdateDetalleNota(params: {
-    idDetalle: number;
+    idDetalle: string;
     nota: string | null;
 }): Promise<void> {
-    const id = toNum(params.idDetalle, 0);
+    const id = toId(params.idDetalle);
     if (!id) return;
 
     await invokeClient<string>("update_detalle_nota", {
@@ -419,19 +421,19 @@ export async function mesasUpdateDetalleNota(params: {
 }
 
 export async function mesasCobrarDetalles(params: {
-    idComanda: number;
+    idComanda: string;
     metodo: "Tarjeta" | "Efectivo";
     tipo: "TOTAL" | "FRACCIONADO";
-    detalleIds: number[];
-    idUsuario: number | null;
+    detalleIds: string[];
+    idUsuario: string | null;
 }): Promise<void> {
-    const idComanda = toNum(params.idComanda, 0);
+    const idComanda = toId(params.idComanda);
     const detalleIds = (params.detalleIds ?? [])
-        .map((x) => toNum(x, 0))
-        .filter((n) => n > 0);
+        .map((x) => toId(x))
+        .filter((s) => s.length > 0);
 
     const idUsuario =
-        params.idUsuario != null ? toNum(params.idUsuario, 0) : null;
+        params.idUsuario != null ? toId(params.idUsuario) || null : null;
 
     if (!idComanda || !detalleIds.length) return;
 
@@ -454,8 +456,8 @@ export async function cocinaListHoyPendientes(): Promise<KitchenRow[]> {
     const rows = await invokeClient<any[]>("kitchen_list_today_pending");
 
     return (rows ?? []).map((r: any) => ({
-        ID_Comanda: toNum(pick(r, ["ID_Comanda", "id_comanda", "idComanda"]), 0),
-        ID_Detalle: toNum(pick(r, ["ID_Detalle", "id_detalle", "idDetalle"]), 0),
+        ID_Comanda: toStr(pick(r, ["ID_Comanda", "id_comanda", "idComanda"]), ""),
+        ID_Detalle: toStr(pick(r, ["ID_Detalle", "id_detalle", "idDetalle"]), ""),
         Cantidad: toNum(pick(r, ["Cantidad", "cantidad"]), 1),
         Nombre_Producto: toStr(
             pick(r, ["Nombre_Producto", "productoNombre", "Nombre", "nombre"]),
@@ -482,15 +484,13 @@ export async function cocinaListHoyPendientes(): Promise<KitchenRow[]> {
 }
 
 export async function cocinaSetLineaEstado(params: {
-    idDetalle: number;
-    idUsuarioCocinero: number | null;
+    idDetalle: string;
+    idUsuarioCocinero: string | null;
     estado: "PENDIENTE" | "PREPARADO";
 }): Promise<void> {
-    const idDetalle = toNum(params.idDetalle, 0);
+    const idDetalle = toId(params.idDetalle);
     const idUsuarioCocinero =
-        params.idUsuarioCocinero != null
-            ? toNum(params.idUsuarioCocinero, 0)
-            : 0;
+        params.idUsuarioCocinero != null ? toId(params.idUsuarioCocinero) : "";
 
     if (!idDetalle || !idUsuarioCocinero) return;
 

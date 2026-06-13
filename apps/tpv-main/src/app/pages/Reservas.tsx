@@ -37,16 +37,16 @@ import type { Salon, MesaMeta } from "../../features/mesasComponents/types";
 ========================= */
 type Turno = "DESAYUNO" | "COMIDA" | "CAFE" | "CENA";
 
-type Zona = { idZona: number; nombre: string };
+type Zona = { idZona: string; nombre: string };
 type Mesa = {
-  idMesa: number;
-  idZona: number;
+  idMesa: string;
+  idZona: string;
   nombre: string;
   capacidad: number;
 };
 
 type ReservaUI = {
-  id: number;
+  id: string;
   diaYMD: string;
   hora: string;
 
@@ -59,10 +59,10 @@ type ReservaUI = {
 
   turno: Turno;
 
-  idZona: number;
+  idZona: string;
   zonaNombre: string;
 
-  idMesa: number;
+  idMesa: string;
   mesaNombre: string;
   capacidadMesa: number;
 
@@ -162,30 +162,28 @@ function estadoBloqueaMesa(estadoRaw: string | null | undefined) {
   return true;
 }
 
-function parseDbZonaId(raw: unknown): number | null {
+function parseDbZonaId(raw: unknown): string | null {
   const s = String(raw ?? "").trim();
   if (!s) return null;
 
   if (s.startsWith("db-zona-")) {
-    const n = Number(s.replace("db-zona-", ""));
-    return Number.isFinite(n) && n > 0 ? n : null;
+    const id = s.replace("db-zona-", "").trim();
+    return id || null;
   }
 
-  const n = Number(s);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return s;
 }
 
-function parseDbMesaId(raw: unknown): number | null {
+function parseDbMesaId(raw: unknown): string | null {
   const s = String(raw ?? "").trim();
   if (!s) return null;
 
   if (s.startsWith("db-mesa-")) {
-    const n = Number(s.replace("db-mesa-", ""));
-    return Number.isFinite(n) && n > 0 ? n : null;
+    const id = s.replace("db-mesa-", "").trim();
+    return id || null;
   }
 
-  const n = Number(s);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return s;
 }
 
 export default function Reservas() {
@@ -234,7 +232,7 @@ export default function Reservas() {
       const turno: Turno = turnoPorHora(hora);
 
       return {
-        id: Number(r?.ID_Reserva ?? 0),
+        id: String(r?.ID_Reserva ?? ""),
         diaYMD: String(r?.Dia_YMD ?? ""),
         hora,
 
@@ -246,10 +244,10 @@ export default function Reservas() {
         nota: String(r?.Nota ?? ""),
         turno,
 
-        idZona: Number(r?.ID_Zona ?? 0),
+        idZona: String(r?.ID_Zona ?? ""),
         zonaNombre: String(r?.Nombre_Zona ?? ""),
 
-        idMesa: Number(r?.ID_Mesa ?? 0),
+        idMesa: String(r?.ID_Mesa ?? ""),
         mesaNombre: String(r?.Numero_Mesa ?? ""),
         capacidadMesa: Number(r?.Capacidad ?? 0),
 
@@ -259,17 +257,26 @@ export default function Reservas() {
   }, [reservasMesQuery.data]);
 
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
-  const [reservaEditandoId, setReservaEditandoId] = useState<number | null>(null);
+  const [reservaEditandoId, setReservaEditandoId] = useState<string | null>(null);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{
+    nombreCliente: string;
+    telefono: string;
+    email: string;
+    hora: string;
+    comensales: number;
+    nota: string;
+    idZona: string;
+    idMesa: string;
+  }>({
     nombreCliente: "",
     telefono: "",
     email: "",
     hora: "14:00",
     comensales: 2,
     nota: "",
-    idZona: 0,
-    idMesa: 0,
+    idZona: "",
+    idMesa: "",
   });
 
   const nombreInputRef = useRef<HTMLInputElement>(null);
@@ -302,10 +309,10 @@ export default function Reservas() {
 
         setSalonsLayout(layout ?? []);
 
-        if ((!form.idZona || form.idZona === 0) && layout?.length) {
+        if (!form.idZona && layout?.length) {
           const idZona = parseDbZonaId(layout[0]?.id);
           if (idZona) {
-            setForm((p) => ({ ...p, idZona, idMesa: 0 }));
+            setForm((p) => ({ ...p, idZona, idMesa: "" }));
           }
         }
       } catch (e) {
@@ -326,8 +333,8 @@ export default function Reservas() {
      Seed del salón por defecto cuando llega la meta (zonas)
   ========================================================= */
   useEffect(() => {
-    if (zonas.length > 0 && (!form.idZona || form.idZona === 0)) {
-      setForm((p) => ({ ...p, idZona: zonas[0].idZona, idMesa: 0 }));
+    if (zonas.length > 0 && !form.idZona) {
+      setForm((p) => ({ ...p, idZona: zonas[0].idZona, idMesa: "" }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zonas]);
@@ -412,7 +419,7 @@ export default function Reservas() {
       hora: "14:00",
       comensales: 2,
       nota: "",
-      idMesa: 0,
+      idMesa: "",
     }));
   }
 
@@ -494,7 +501,7 @@ export default function Reservas() {
         nota: notaTrim ? notaTrim : null,
         estado: "ACTIVA",
 
-        idMesa: Number(form.idMesa),
+        idMesa: form.idMesa,
 
         nombreCliente: nombreTrim,
         telefono: telTrim || null,
@@ -514,9 +521,9 @@ export default function Reservas() {
     }
   }
 
-  async function borrarReserva(idReserva: number) {
+  async function borrarReserva(idReserva: string) {
     try {
-      const ok = await deleteReserva.mutateAsync({ idReserva: Number(idReserva) });
+      const ok = await deleteReserva.mutateAsync({ idReserva });
       if (!ok) return toast.error("Error", "No se pudo borrar.");
 
       toast.success?.("OK", "Reserva borrada.");
@@ -754,8 +761,8 @@ export default function Reservas() {
                           required
                           value={form.idZona || ""}
                           onChange={(e) => {
-                            const idZona = Number(e.target.value);
-                            setForm((p) => ({ ...p, idZona, idMesa: 0 }));
+                            const idZona = e.target.value;
+                            setForm((p) => ({ ...p, idZona, idMesa: "" }));
                           }}
                           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
                         >
@@ -827,7 +834,7 @@ export default function Reservas() {
                         console.error("ID de salón inválido desde mapa:", salonIdRaw);
                         return;
                       }
-                      setForm((p) => ({ ...p, idZona: zonaId, idMesa: 0 }));
+                      setForm((p) => ({ ...p, idZona: zonaId, idMesa: "" }));
                     }}
                     mesaMetaById={emptyMesaMetaById}
                     onSelectMesa={(mesaIdRaw) => {

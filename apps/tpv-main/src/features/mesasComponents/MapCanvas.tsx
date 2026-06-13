@@ -20,7 +20,7 @@ export default function MapCanvas({
     mapSize: { width: number; height: number };
     view: { x: number; y: number; scale: number };
     mesaMetaById: Record<number, MesaMeta>;
-    onOpenMesa: (mesaId: number, mesaNombre: string) => void;
+    onOpenMesa: (mesaId: string, mesaNombre: string) => void;
 }) {
     const dark = useTheme((s) => s.theme === "dark");
 

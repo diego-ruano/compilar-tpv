@@ -11,7 +11,7 @@ import {
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
 
 export type VentaRapidaComandaBarraRow = {
-  ID_Comanda: number;
+  ID_Comanda: string;
   Fecha_Hora_Apertura: string;
   Estado: "Abierta" | "Pagada" | string;
 
@@ -83,9 +83,9 @@ export default function VerTicketsModal({
   onDeleteTicket: (idComanda: string) => void;
   onCobrarTicket: (idComanda: string) => void | Promise<void>;
 }) {
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [detallesByComanda, setDetallesByComanda] = useState<Record<number, LineaDetalleUI[]>>({});
-  const [loadingDetallesId, setLoadingDetallesId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detallesByComanda, setDetallesByComanda] = useState<Record<string, LineaDetalleUI[]>>({});
+  const [loadingDetallesId, setLoadingDetallesId] = useState<string | null>(null);
 
   const [filtro, setFiltro] = useState<Filtro>("RECIENTES");
 
@@ -100,7 +100,7 @@ export default function VerTicketsModal({
 
   const [loadingIndex, setLoadingIndex] = useState(false);
   const [showIndexHint, setShowIndexHint] = useState(false);
-  const [indexByComanda, setIndexByComanda] = useState<Record<number, IndexRow>>({});
+  const [indexByComanda, setIndexByComanda] = useState<Record<string, IndexRow>>({});
   const indexRunIdRef = useRef(0);
 
   useEffect(() => {
@@ -145,7 +145,7 @@ export default function VerTicketsModal({
   }, [comandas]);
 
   const prefetchIndex = useCallback(
-    async (idsHoy: number[]) => {
+    async (idsHoy: string[]) => {
       if (!idsHoy.length) return;
       if (loadingIndex) return;
 
@@ -158,10 +158,10 @@ export default function VerTicketsModal({
 
         if (indexRunIdRef.current !== runId) return;
 
-        const map: Record<number, IndexRow> = {};
+        const map: Record<string, IndexRow> = {};
         for (const r of safeRows) {
-          map[Number(r.ID_Comanda)] = {
-            ID_Comanda: Number(r.ID_Comanda),
+          map[String(r.ID_Comanda ?? "")] = {
+            ID_Comanda: String(r.ID_Comanda ?? ""),
             Productos: r.Productos ?? null,
             NumLineas: Number((r as any).NumLineas ?? 0),
             Unidades: Number((r as any).Unidades ?? 0),
@@ -196,13 +196,13 @@ export default function VerTicketsModal({
     if (!s) return;
 
     const idsHoy = baseRows
-      .map((r) => Number(r.c.ID_Comanda))
+      .map((r) => String(r.c.ID_Comanda ?? ""))
       .filter((n) => Number.isFinite(n));
 
     void prefetchIndex(idsHoy);
   }, [open, s, baseRows, prefetchIndex]);
 
-  const loadDetalles = useCallback(async (idComanda: number) => {
+  const loadDetalles = useCallback(async (idComanda: string) => {
     setLoadingDetallesId(idComanda);
     try {
       const det = await vrGetDetallesVerTicket(idComanda);
@@ -236,7 +236,7 @@ export default function VerTicketsModal({
   }, [open, expandedId, loadDetalles]);
 
   const toggleDetalles = useCallback(
-    async (idComanda: number) => {
+    async (idComanda: string) => {
       if (expandedId === idComanda) {
         setExpandedId(null);
         return;
@@ -268,7 +268,7 @@ export default function VerTicketsModal({
       const needle = s.toLowerCase();
 
       out = out.filter((r) => {
-        const id = Number(r.c.ID_Comanda);
+        const id = String(r.c.ID_Comanda ?? "");
         const idx = indexByComanda[id];
 
         const baseText = [

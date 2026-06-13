@@ -64,13 +64,13 @@ type LoadTicketOpts = {
 
 type PendingCobroIntent = {
   id: string;
-  idComanda: number;
+  idComanda: string;
   metodo: "tarjeta" | "efectivo";
   ticketItemIds: string[];
-  detalleIds: number[];
+  detalleIds: string[];
   importeTotal: number;
-  idUsuarioCobrador: number | null;
-  idTrabajadorCobrador: number | null;
+  idUsuarioCobrador: string | null;
+  idTrabajadorCobrador: string | null;
   opIdCobro: string;
   createdAtMs: number;
 };
@@ -104,16 +104,15 @@ function makeTempTicketId(): string {
   return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function makeDetalleTicketId(idDetalle: number): string {
-  return `detalle-${Number(idDetalle)}`;
+function makeDetalleTicketId(idDetalle: string): string {
+  return `detalle-${String(idDetalle ?? "").trim()}`;
 }
 
-function parseDetalleIdFromTicketItemId(ticketItemId: string): number {
+function parseDetalleIdFromTicketItemId(ticketItemId: string): string {
   const raw = String(ticketItemId || "").trim();
-  if (!raw.startsWith("detalle-")) return 0;
+  if (!raw.startsWith("detalle-")) return "";
 
-  const id = Number(raw.slice("detalle-".length));
-  return Number.isFinite(id) && id > 0 ? id : 0;
+  return raw.slice("detalle-".length).trim();
 }
 
 function makeStableCobroOpId(intentId: string): string {
@@ -127,14 +126,14 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
 
   const obj = value as Record<string, unknown>;
   const id = String(obj.id ?? "").trim();
-  const idComanda = Number(obj.idComanda ?? obj.id_comanda ?? 0);
+  const idComanda = String(obj.idComanda ?? obj.id_comanda ?? "").trim();
   const metodoRaw = String(obj.metodo ?? "").trim().toLowerCase();
   const ticketItemIds = Array.isArray(obj.ticketItemIds)
     ? obj.ticketItemIds.map((x) => String(x || "").trim()).filter(Boolean)
     : [];
 
   const detalleIds = Array.isArray(obj.detalleIds)
-    ? obj.detalleIds.map((x) => Number(x || 0)).filter((n) => Number.isFinite(n) && n > 0)
+    ? obj.detalleIds.map((x) => String(x ?? "").trim()).filter((s) => s.length > 0)
     : [];
 
   const importeTotal = Number(obj.importeTotal ?? 0);
@@ -142,7 +141,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
   const opIdCobro = String(obj.opIdCobro ?? obj.op_id_cobro ?? "").trim() || makeStableCobroOpId(id);
 
   if (!id) return null;
-  if (!Number.isFinite(idComanda) || idComanda <= 0) return null;
+  if (!idComanda) return null;
   if (metodoRaw !== "tarjeta" && metodoRaw !== "efectivo") return null;
   if (ticketItemIds.length === 0) return null;
   if (!Number.isFinite(importeTotal) || importeTotal <= 0) return null;
@@ -154,10 +153,8 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     ticketItemIds,
     detalleIds,
     importeTotal,
-    idUsuarioCobrador:
-      Number(obj.idUsuarioCobrador ?? 0) > 0 ? Number(obj.idUsuarioCobrador) : null,
-    idTrabajadorCobrador:
-      Number(obj.idTrabajadorCobrador ?? 0) > 0 ? Number(obj.idTrabajadorCobrador) : null,
+    idUsuarioCobrador: String(obj.idUsuarioCobrador ?? "").trim() || null,
+    idTrabajadorCobrador: String(obj.idTrabajadorCobrador ?? "").trim() || null,
     opIdCobro,
     createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
   };
@@ -225,7 +222,7 @@ export default function VentaRapida() {
   const [openAddProduct, setOpenAddProduct] = useState(false);
 
   const [openProductDetail, setOpenProductDetail] = useState(false);
-  const [productDetailId, setProductDetailId] = useState<number | null>(null);
+  const [productDetailId, setProductDetailId] = useState<string | null>(null);
 
   const [seleccionados, setSeleccionados] = useState<Set<string>>(() => new Set());
   const seleccionadosRef = useRef<Set<string>>(new Set());
@@ -234,14 +231,14 @@ export default function VentaRapida() {
   const [comandasBarra, setComandasBarra] = useState<ComandaBarraRow[]>([]);
   const [loadingComandas, setLoadingComandas] = useState(false);
 
-  const [idComandaActiva, setIdComandaActiva] = useState<number | null>(null);
-  const idComandaActivaRef = useRef<number | null>(null);
-  const ensureComandaPromiseRef = useRef<Promise<number> | null>(null);
+  const [idComandaActiva, setIdComandaActiva] = useState<string | null>(null);
+  const idComandaActivaRef = useRef<string | null>(null);
+  const ensureComandaPromiseRef = useRef<Promise<string> | null>(null);
 
   const didInitRef = useRef(false);
 
-  const [detalleIdByTicketId, setDetalleIdByTicketId] = useState<Record<string, number>>({});
-  const detalleIdByTicketIdRef = useRef<Record<string, number>>({});
+  const [detalleIdByTicketId, setDetalleIdByTicketId] = useState<Record<string, string>>({});
+  const detalleIdByTicketIdRef = useRef<Record<string, string>>({});
 
   const pendingTicketWritesRef = useRef(0);
   const cancelledAddTempIdsRef = useRef<Set<string>>(new Set());
@@ -283,21 +280,21 @@ export default function VentaRapida() {
     );
   }, [toast]);
 
-  const resolveDetallesForCobroIntent = useCallback((intent: PendingCobroIntent): number[] | null => {
+  const resolveDetallesForCobroIntent = useCallback((intent: PendingCobroIntent): string[] | null => {
     const detalleMap = detalleIdByTicketIdRef.current;
 
     const detalles = intent.ticketItemIds.map((ticketItemId, idx) => {
-      const fromMap = Number(detalleMap[ticketItemId] || 0);
-      if (Number.isFinite(fromMap) && fromMap > 0) return fromMap;
+      const fromMap = String(detalleMap[ticketItemId] ?? "").trim();
+      if (fromMap) return fromMap;
 
-      const fromStored = Number(intent.detalleIds?.[idx] || 0);
-      if (Number.isFinite(fromStored) && fromStored > 0) return fromStored;
+      const fromStored = String(intent.detalleIds?.[idx] ?? "").trim();
+      if (fromStored) return fromStored;
 
       return parseDetalleIdFromTicketItemId(ticketItemId);
     });
 
     if (detalles.length !== intent.ticketItemIds.length) return null;
-    if (detalles.some((n) => !Number.isFinite(n) || n <= 0)) return null;
+    if (detalles.some((s) => !s)) return null;
 
     return detalles;
   }, []);
@@ -327,7 +324,7 @@ export default function VentaRapida() {
     setDetalleIdByTicketId((prev) => {
       const next = {
         ...prev,
-        [item.id]: Number(item.detalleId || 0),
+        [item.id]: String(item.detalleId ?? "").trim(),
       };
 
       detalleIdByTicketIdRef.current = next;
@@ -375,7 +372,7 @@ export default function VentaRapida() {
     setDetalleIdByTicketId((prev) => {
       const next = {
         ...prev,
-        [item.id]: Number(item.detalleId || 0),
+        [item.id]: String(item.detalleId ?? "").trim(),
       };
 
       detalleIdByTicketIdRef.current = next;
@@ -402,10 +399,10 @@ export default function VentaRapida() {
   const applyLineasToTicketPanel = useCallback(
     (lineasInput: unknown, opts?: LoadTicketOpts): TicketItem[] => {
       const lineas = asArray<LineaComandaRow>(lineasInput);
-      const map: Record<string, number> = {};
+      const map: Record<string, string> = {};
 
       const ui: TicketItem[] = lineas.map((l) => {
-        const idDetalle = Number(l.ID_Detalle || 0);
+        const idDetalle = String(l.ID_Detalle ?? "").trim();
         const id = makeDetalleTicketId(idDetalle);
 
         map[id] = idDetalle;
@@ -413,7 +410,7 @@ export default function VentaRapida() {
         return {
           id,
           detalleId: idDetalle,
-          productoId: Number(l.ID_Producto),
+          productoId: String(l.ID_Producto ?? ""),
           nombre: String((l as any).Nombre ?? "Producto"),
           precio: Number(l.Precio_Unitario || 0) * Number(l.Cantidad || 1),
           pagado: Number((l as any).Pagado ?? 0) === 1,
@@ -464,7 +461,7 @@ export default function VentaRapida() {
         }
         : nextItem;
 
-      const idDetalle = Number(mergedItem.detalleId || 0);
+      const idDetalle = String(mergedItem.detalleId ?? "").trim();
 
       const nextDetalleMap = {
         ...detalleIdByTicketIdRef.current,
@@ -482,11 +479,11 @@ export default function VentaRapida() {
 
             const ticketItemIds = intent.ticketItemIds.map((id) => (id === oldId ? mergedItem.id : id));
             const detalleIds = ticketItemIds.map((id, idx) => {
-              const mapped = Number(nextDetalleMap[id] || 0);
-              if (Number.isFinite(mapped) && mapped > 0) return mapped;
+              const mapped = String(nextDetalleMap[id] ?? "").trim();
+              if (mapped) return mapped;
 
-              const stored = Number(intent.detalleIds?.[idx] || 0);
-              if (Number.isFinite(stored) && stored > 0) return stored;
+              const stored = String(intent.detalleIds?.[idx] ?? "").trim();
+              if (stored) return stored;
 
               return parseDetalleIdFromTicketItemId(id);
             });
@@ -538,8 +535,8 @@ export default function VentaRapida() {
     };
   }, []);
 
-  const abrirDetalleProducto = useCallback((productId: number) => {
-    setProductDetailId(Number(productId));
+  const abrirDetalleProducto = useCallback((productId: string) => {
+    setProductDetailId(productId);
     setOpenProductDetail(true);
   }, []);
 
@@ -577,7 +574,7 @@ export default function VentaRapida() {
 
     try {
       const baseDir = await appDataDir();
-      const idCat = Number(cat.ID_Categoria);
+      const idCat = cat.ID_Categoria;
       const raw = await vrListProductosByCategoria(idCat);
       const rows = asArray<Producto>(raw);
 
@@ -666,7 +663,7 @@ export default function VentaRapida() {
   );
 
   const cargarComandaEnTicketPanel = useCallback(
-    async (idComanda: number, opts?: LoadTicketOpts): Promise<TicketItem[]> => {
+    async (idComanda: string, opts?: LoadTicketOpts): Promise<TicketItem[]> => {
       try {
         const raw = await vrGetLineasComanda(idComanda);
         return applyLineasToTicketPanel(raw, opts);
@@ -689,7 +686,7 @@ export default function VentaRapida() {
 
   const queueComandaRefresh = useCallback(
     (
-      idComanda: number,
+      idComanda: string,
       opts?: {
         refreshTicket?: boolean;
         refreshComandas?: boolean;
@@ -800,9 +797,9 @@ export default function VentaRapida() {
         })),
       );
 
-      const idComanda = Number(boot.idComanda || boot.id_comanda || 0);
+      const idComanda = String(boot.idComanda || boot.id_comanda || "").trim();
 
-      if (!(idComanda > 0)) {
+      if (!idComanda) {
         throw new Error("bootstrap_id_comanda_missing");
       }
 
@@ -860,13 +857,13 @@ export default function VentaRapida() {
   );
 
   const rollbackTicketItemsPaidLocal = useCallback(
-    (ticketItemIds: string[], detalles: number[]) => {
+    (ticketItemIds: string[], detalles: string[]) => {
       const ids = new Set(ticketItemIds);
-      const detalleIds = new Set(detalles.map((n) => Number(n)).filter((n) => n > 0));
+      const detalleIds = new Set(detalles.map((n) => String(n ?? "").trim()).filter((n) => n.length > 0));
 
       setTicket((prev) => {
         const next = prev.map((t) => {
-          const currentDetalleId = Number(detalleIdByTicketIdRef.current[t.id] ?? t.detalleId ?? 0);
+          const currentDetalleId = String(detalleIdByTicketIdRef.current[t.id] ?? t.detalleId ?? "").trim();
 
           if (ids.has(t.id) || detalleIds.has(currentDetalleId)) {
             return {
@@ -1063,7 +1060,7 @@ export default function VentaRapida() {
   }, [categoriaSeleccionada, showingSearch, paso]);
 
   const onGuardarNota = useCallback(
-    async (detalleId: number, nota: string) => {
+    async (detalleId: string, nota: string) => {
       if (hasPendingTicketWrites()) {
         warnPendingTicketWrites();
         return;
@@ -1077,7 +1074,7 @@ export default function VentaRapida() {
       const clean = nota.trim();
 
       try {
-        const ok = await vrUpdateNotaDetalle(Number(detalleId), clean);
+        const ok = await vrUpdateNotaDetalle(detalleId, clean);
 
         if (!ok) {
           throw new Error("No se pudo guardar la nota.");
@@ -1162,7 +1159,7 @@ export default function VentaRapida() {
   );
 
   const qtyByProductId = useMemo(() => {
-    const m = new Map<number, number>();
+    const m = new Map<string, number>();
 
     for (const t of ticket) {
       if (t.pagado) continue;
@@ -1172,19 +1169,19 @@ export default function VentaRapida() {
     return m;
   }, [ticket]);
 
-  const getQty = useCallback((id: number) => qtyByProductId.get(id) ?? 0, [qtyByProductId]);
+  const getQty = useCallback((id: string) => qtyByProductId.get(id) ?? 0, [qtyByProductId]);
 
-  const getQtyZero = useCallback((_id: number) => 0, []);
+  const getQtyZero = useCallback((_id: string) => 0, []);
 
   const addProductoToTicket = useCallback(
     async (p: ProductoDisplay) => {
-      const idProducto = Number(p.ID_Producto);
+      const idProducto = p.ID_Producto;
       const precio = Number(p.Precio_Venta || 0);
       const tempId = makeTempTicketId();
 
       const tempItem: TicketItem = {
         id: tempId,
-        detalleId: 0,
+        detalleId: "",
         productoId: idProducto,
         nombre: String(p.Nombre ?? "Producto"),
         precio,
@@ -1196,7 +1193,7 @@ export default function VentaRapida() {
       addTicketItemLocal(tempItem);
       beginTicketWrite();
 
-      let idComanda: number | null = null;
+      let idComanda: string | null = null;
       let success = false;
       let needsReconcile = false;
 
@@ -1216,9 +1213,9 @@ export default function VentaRapida() {
           return;
         }
 
-        const idDetalle = Number(result.idDetalle || 0);
+        const idDetalle = String(result.idDetalle ?? "").trim();
 
-        if (idDetalle > 0) {
+        if (idDetalle) {
           replaceTicketItemLocal(tempId, {
             ...tempItem,
             id: makeDetalleTicketId(idDetalle),
@@ -1290,12 +1287,12 @@ export default function VentaRapida() {
   );
 
   const removeProductoFromTicket = useCallback(
-    async (productoId: number) => {
-      const idProducto = Number(productoId);
+    async (productoId: string) => {
+      const idProducto = productoId;
 
       const item = [...ticketRef.current]
         .reverse()
-        .find((t) => !t.pagado && Number(t.productoId) === idProducto);
+        .find((t) => !t.pagado && t.productoId === idProducto);
 
       if (!item) return;
 
@@ -1342,9 +1339,9 @@ export default function VentaRapida() {
       const item = ticketRef.current.find((t) => t.id === ticketItemId);
       if (!item) return;
 
-      const idDetalle = Number(item.detalleId || 0);
+      const idDetalle = String(item.detalleId ?? "").trim();
 
-      if (!(idDetalle > 0)) {
+      if (!idDetalle) {
         cancelledAddTempIdsRef.current.add(item.id);
         removeTicketItemLocal(item.id);
         emitVrChanged();
@@ -1398,23 +1395,23 @@ export default function VentaRapida() {
 
       if (seleccionadosItems.length === 0) return;
 
-      const idUsuarioCobrador: number | null = idUsuarioAuth ?? null;
-      const idTrabajadorCobrador: number | null = idTrabajadorAuth ?? null;
+      const idUsuarioCobrador: string | null = idUsuarioAuth ?? null;
+      const idTrabajadorCobrador: string | null = idTrabajadorAuth ?? null;
 
       try {
         const idComanda = await ensureComandaActiva();
 
         const detalleIds = seleccionadosItems.map((it) => {
-          const fromItem = Number(it.detalleId || 0);
-          if (Number.isFinite(fromItem) && fromItem > 0) return fromItem;
+          const fromItem = String(it.detalleId ?? "").trim();
+          if (fromItem) return fromItem;
 
-          const fromMap = Number(detalleIdByTicketIdRef.current[it.id] || 0);
-          if (Number.isFinite(fromMap) && fromMap > 0) return fromMap;
+          const fromMap = String(detalleIdByTicketIdRef.current[it.id] ?? "").trim();
+          if (fromMap) return fromMap;
 
           return parseDetalleIdFromTicketItemId(it.id);
         });
 
-        if (detalleIds.some((n) => !Number.isFinite(n) || n <= 0)) {
+        if (detalleIds.some((s) => !s)) {
           toast.info(
             "Espera un momento",
             "Todavía se están confirmando líneas del ticket antes de cobrar.",
@@ -1452,10 +1449,10 @@ export default function VentaRapida() {
         setPendingCobrosLocal((prev) => [
           ...prev.filter((x) => {
             const prevIds = new Set(x.ticketItemIds);
-            const prevDetalles = new Set(x.detalleIds.map((n) => Number(n)).filter((n) => n > 0));
+            const prevDetalles = new Set(x.detalleIds.map((n) => String(n ?? "").trim()).filter((n) => n.length > 0));
 
             return !ticketItemIds.some((id, idx) => {
-              const detalleId = Number(detalleIds[idx] || 0);
+              const detalleId = String(detalleIds[idx] ?? "").trim();
               return prevIds.has(id) || prevDetalles.has(detalleId);
             });
           }),
@@ -1641,9 +1638,9 @@ export default function VentaRapida() {
         return;
       }
 
-      const idComanda = Number(id);
+      const idComanda = id;
 
-      if (!Number.isFinite(idComanda)) return;
+      if (!idComanda) return;
 
       setIdComandaActiva(idComanda);
       idComandaActivaRef.current = idComanda;
@@ -1669,9 +1666,9 @@ export default function VentaRapida() {
       }
 
       try {
-        const idComanda = Number(id);
+        const idComanda = id;
 
-        if (!Number.isFinite(idComanda)) return;
+        if (!idComanda) return;
 
         const ok = await vrDeleteComandaIfSafe(idComanda);
 
@@ -1719,9 +1716,9 @@ export default function VentaRapida() {
         return;
       }
 
-      const idComanda = Number(id);
+      const idComanda = id;
 
-      if (!Number.isFinite(idComanda)) return;
+      if (!idComanda) return;
 
       setIdComandaActiva(idComanda);
       idComandaActivaRef.current = idComanda;
@@ -1755,12 +1752,12 @@ export default function VentaRapida() {
   );
 
   const onRemoveProductoCb = useCallback(
-    (id: number) => void removeProductoFromTicket(id),
+    (id: string) => void removeProductoFromTicket(id),
     [removeProductoFromTicket],
   );
 
   const onOpenProductDetailCb = useCallback(
-    (id: number) => abrirDetalleProducto(id),
+    (id: string) => abrirDetalleProducto(id),
     [abrirDetalleProducto],
   );
 
@@ -1903,7 +1900,7 @@ export default function VentaRapida() {
         open={openAddProduct}
         onClose={() => setOpenAddProduct(false)}
         categoriaPreseleccionadaId={
-          categoriaSeleccionada ? Number(categoriaSeleccionada.ID_Categoria) : null
+          categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null
         }
         onSaved={async () => {
           await onProductoGuardado();
@@ -1913,7 +1910,7 @@ export default function VentaRapida() {
       <ProductDetailModal
         open={openProductDetail}
         onClose={cerrarDetalleProducto}
-        productId={productDetailId ?? 0}
+        productId={productDetailId}
       />
 
       <VerTicketsModal

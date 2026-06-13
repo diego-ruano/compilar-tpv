@@ -56,13 +56,13 @@ function toNullableStr(v: any): string | null {
     return s ? s : null;
 }
 
-function normalizeIds(ids: number[]): number[] {
+function normalizeIds(ids: string[]): string[] {
     return (ids ?? [])
-        .map(Number)
-        .filter((n: number) => Number.isFinite(n) && n > 0)
-        .sort((a: number, b: number) => a - b)
+        .map((v) => String(v ?? "").trim())
+        .filter((s: string) => s.length > 0)
+        .sort()
         .filter(
-            (n: number, i: number, arr: number[]) => i === 0 || arr[i - 1] !== n,
+            (s: string, i: number, arr: string[]) => i === 0 || arr[i - 1] !== s,
         );
 }
 
@@ -72,13 +72,13 @@ function normalizeIds(ids: number[]): number[] {
 
 function mapTrabajador(row: any): TrabajadorUI {
     return {
-        ID_Trabajador: toNum(
+        ID_Trabajador: toStr(
             pick(row, ["ID_Trabajador", "id_trabajador", "idTrabajador"]),
-            0,
+            "",
         ),
-        ID_Usuario: toNum(
+        ID_Usuario: toStr(
             pick(row, ["ID_Usuario", "id_usuario", "idUsuario"]),
-            0,
+            "",
         ),
         Nombre: toStr(pick(row, ["Nombre", "nombre"]), ""),
         Apellido: toNullableStr(pick(row, ["Apellido", "apellido"])),
@@ -89,7 +89,7 @@ function mapTrabajador(row: any): TrabajadorUI {
 
 function mapTareaAdmin(row: any): TareaAdminRow {
     return {
-        ID_Tarea: toNum(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), 0),
+        ID_Tarea: toStr(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), ""),
         Titulo: toStr(pick(row, ["Titulo", "titulo"]), ""),
         Descripcion: toNullableStr(pick(row, ["Descripcion", "descripcion"])),
         Fecha_Creacion: toStr(
@@ -116,7 +116,7 @@ function mapTareaAdmin(row: any): TareaAdminRow {
 
 function mapTarea(row: any): TareaRow {
     return {
-        ID_Tarea: toNum(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), 0),
+        ID_Tarea: toStr(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), ""),
         Titulo: toStr(pick(row, ["Titulo", "titulo"]), ""),
         Descripcion: toNullableStr(pick(row, ["Descripcion", "descripcion"])),
         Fecha_Creacion: toStr(
@@ -131,9 +131,9 @@ function mapTarea(row: any): TareaRow {
 
 function mapTareaAsignado(row: any): TareaAsignadoRow {
     return {
-        ID_Trabajador: toNum(
+        ID_Trabajador: toStr(
             pick(row, ["ID_Trabajador", "id_trabajador", "idTrabajador"]),
-            0,
+            "",
         ),
         Nombre: toStr(pick(row, ["Nombre", "nombre"]), ""),
         Apellido: toNullableStr(pick(row, ["Apellido", "apellido"])),
@@ -151,7 +151,7 @@ function mapTareaAsignado(row: any): TareaAsignadoRow {
 
 function mapMisTarea(row: any): MisTareasRow {
     return {
-        ID_Tarea: toNum(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), 0),
+        ID_Tarea: toStr(pick(row, ["ID_Tarea", "id_tarea", "idTarea"]), ""),
         Titulo: toStr(pick(row, ["Titulo", "titulo"]), ""),
         Descripcion: toNullableStr(pick(row, ["Descripcion", "descripcion"])),
         Fecha_Limite: toNullableStr(
@@ -182,7 +182,7 @@ export const tareasApi = {
         titulo: string;
         descripcion?: string | null;
         fechaLimite?: string | null;
-        idsTrabajadores: number[];
+        idsTrabajadores: string[];
     }): Promise<boolean> {
         return await invokeClient<boolean>("tareas_create_tarea", {
             args: {
@@ -199,23 +199,23 @@ export const tareasApi = {
         return (rows ?? []).map(mapTareaAdmin);
     },
 
-    async getTareaById(idTarea: number): Promise<TareaRow | null> {
+    async getTareaById(idTarea: string): Promise<TareaRow | null> {
         const data = await invokeClient<any | null>("tareas_get_tarea_by_id", {
-            args: { id_tarea: Number(idTarea) },
+            args: { id_tarea: idTarea },
         });
 
         return data ? mapTarea(data) : null;
     },
 
     async updateTarea(payload: {
-        idTarea: number;
+        idTarea: string;
         titulo: string;
         descripcion?: string | null;
         fechaLimite?: string | null;
     }): Promise<boolean> {
         return await invokeClient<boolean>("tareas_update_tarea", {
             args: {
-                id_tarea: Number(payload.idTarea),
+                id_tarea: payload.idTarea,
                 titulo: String(payload.titulo ?? "").trim(),
                 descripcion: payload.descripcion ?? null,
                 fecha_limite: payload.fechaLimite ?? null,
@@ -223,48 +223,48 @@ export const tareasApi = {
         });
     },
 
-    async getTareaAsignados(idTarea: number): Promise<TareaAsignadoRow[]> {
+    async getTareaAsignados(idTarea: string): Promise<TareaAsignadoRow[]> {
         const rows = await invokeClient<any[]>("tareas_get_tarea_asignados", {
-            args: { id_tarea: Number(idTarea) },
+            args: { id_tarea: idTarea },
         });
 
         return (rows ?? []).map(mapTareaAsignado);
     },
 
     async setAsignacionesTarea(payload: {
-        idTarea: number;
-        idsTrabajadores: number[];
+        idTarea: string;
+        idsTrabajadores: string[];
     }): Promise<boolean> {
         return await invokeClient<boolean>("tareas_set_asignaciones_tarea", {
             args: {
-                id_tarea: Number(payload.idTarea),
+                id_tarea: payload.idTarea,
                 ids_trabajadores: normalizeIds(payload.idsTrabajadores ?? []),
             },
         });
     },
 
-    async deleteTarea(idTarea: number): Promise<boolean> {
+    async deleteTarea(idTarea: string): Promise<boolean> {
         return await invokeClient<boolean>("tareas_delete_tarea", {
-            args: { id_tarea: Number(idTarea) },
+            args: { id_tarea: idTarea },
         });
     },
 
-    async getMisTareas(idTrabajador: number): Promise<MisTareasRow[]> {
+    async getMisTareas(idTrabajador: string): Promise<MisTareasRow[]> {
         const rows = await invokeClient<any[]>("tareas_get_mis_tareas", {
-            args: { id_trabajador: Number(idTrabajador) },
+            args: { id_trabajador: idTrabajador },
         });
 
         return (rows ?? []).map(mapMisTarea);
     },
 
     async marcarTareaFinalizada(payload: {
-        idTarea: number;
-        idTrabajador: number;
+        idTarea: string;
+        idTrabajador: string;
     }): Promise<boolean> {
         return await invokeClient<boolean>("tareas_marcar_tarea_finalizada", {
             args: {
-                id_tarea: Number(payload.idTarea),
-                id_trabajador: Number(payload.idTrabajador),
+                id_tarea: payload.idTarea,
+                id_trabajador: payload.idTrabajador,
             },
         });
     },

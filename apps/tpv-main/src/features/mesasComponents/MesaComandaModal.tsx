@@ -37,8 +37,8 @@ type Producto = ProductoDTO;
 type ProductoDisplay = Producto & { urlImagen: string };
 
 type TicketItem = {
-    id: number; // ID_Detalle
-    productoId: number;
+    id: string; // ID_Detalle
+    productoId: string;
     nombre: string;
     precio: number;
     pagado: boolean;
@@ -213,10 +213,10 @@ function NotaLineaModal({
 ========================= */
 
 async function ensureOpenComanda(
-    idMesa: number,
-    idUsuario: number | null,
-    reservaActiva?: { idReserva: number } | null,
-): Promise<number> {
+    idMesa: string,
+    idUsuario: string | null,
+    reservaActiva?: { idReserva: string } | null,
+): Promise<string> {
     return await mesasEnsureOpenComanda({
         idMesa,
         idUsuario,
@@ -224,13 +224,13 @@ async function ensureOpenComanda(
     });
 }
 
-async function loadTicketForComanda(idComanda: number): Promise<TicketItem[]> {
+async function loadTicketForComanda(idComanda: string): Promise<TicketItem[]> {
     const rows = await mesasLoadTicket(idComanda);
 
     const mapped: TicketItem[] = (rows ?? []).map((r: any) => {
-        const idDetalle = Number(pick(r, ["id", "ID_Detalle", "idDetalle"]));
-        const idProducto = Number(
-            pick(r, ["productoId", "ID_Producto", "idProducto"]),
+        const idDetalle = String(pick(r, ["id", "ID_Detalle", "idDetalle"]) ?? "");
+        const idProducto = String(
+            pick(r, ["productoId", "ID_Producto", "idProducto"]) ?? "",
         );
 
         const nombre = String(
@@ -277,9 +277,9 @@ async function loadTicketForComanda(idComanda: number): Promise<TicketItem[]> {
 }
 
 async function addDetalle(
-    idComanda: number,
+    idComanda: string,
     p: ProductoDisplay,
-    operadorId: number | null,
+    operadorId: string | null,
 ) {
     await mesasAddDetalle({
         idComanda,
@@ -290,11 +290,11 @@ async function addDetalle(
     });
 }
 
-async function removeOnePendingDetalle(idComanda: number, productoId: number) {
+async function removeOnePendingDetalle(idComanda: string, productoId: string) {
     await mesasRemoveOnePendingDetalle({ idComanda, idProducto: productoId });
 }
 
-async function deleteDetalleById(idDetalle: number) {
+async function deleteDetalleById(idDetalle: string) {
     await mesasDeleteDetalle(idDetalle);
 }
 
@@ -317,7 +317,7 @@ export default function MesaComandaModal({
 }: {
     open: boolean;
     onClose: () => void;
-    mesaId: number;
+    mesaId: string;
     mesaNombre: string;
     mesaMeta?: MesaMeta | null;
     onChanged?: () => void;
@@ -334,7 +334,7 @@ export default function MesaComandaModal({
     const [busqueda, setBusqueda] = useState<ProductoDisplay[]>([]);
     const [loadingBusqueda, setLoadingBusqueda] = useState(false);
 
-    const [idComanda, setIdComanda] = useState<number | null>(null);
+    const [idComanda, setIdComanda] = useState<string | null>(null);
     const [ticket, setTicket] = useState<TicketItem[]>([]);
     const [loadingTicket, setLoadingTicket] = useState(false);
 
@@ -367,7 +367,7 @@ export default function MesaComandaModal({
         setNotaTarget(null);
     };
 
-    const guardarNotaLinea = async (idDetalle: number, nota: string) => {
+    const guardarNotaLinea = async (idDetalle: string, nota: string) => {
         const clean = nota.trim();
         await mesasUpdateDetalleNota({
             idDetalle,
@@ -490,7 +490,7 @@ export default function MesaComandaModal({
             setLoadingProductos(true);
             try {
                 const baseDir = await appDataDir();
-                const idCat = Number(categoriaSeleccionada.ID_Categoria);
+                const idCat = String(categoriaSeleccionada.ID_Categoria ?? "");
 
                 const rows = await productosListByCategoria(idCat);
 
@@ -558,13 +558,13 @@ export default function MesaComandaModal({
         await reloadTicket();
     };
 
-    const removeProductoFromTicket = async (productoId: number) => {
+    const removeProductoFromTicket = async (productoId: string) => {
         if (!idComanda) return;
         await removeOnePendingDetalle(idComanda, productoId);
         await reloadTicket();
     };
 
-    const countEnTicket = (productoId: number) =>
+    const countEnTicket = (productoId: string) =>
         ticket.filter((t) => t.productoId === productoId && !t.pagado).length;
 
     const totalPendiente = useMemo(
@@ -600,7 +600,7 @@ export default function MesaComandaModal({
         );
     };
 
-    const toggleSeleccion = (idDetalle: number) => {
+    const toggleSeleccion = (idDetalle: string) => {
         setTicket((prev) =>
             prev.map((t) =>
                 t.id === idDetalle && !t.pagado
@@ -610,7 +610,7 @@ export default function MesaComandaModal({
         );
     };
 
-    const eliminarLineaTicket = async (idDetalle: number) => {
+    const eliminarLineaTicket = async (idDetalle: string) => {
         const line = ticket.find((t) => t.id === idDetalle);
         if (!line) return;
         if (line.pagado) return;
@@ -841,7 +841,7 @@ export default function MesaComandaModal({
             <ProductDetailModal
                 open={openProductDetail}
                 onClose={cerrarDetalleProducto}
-                productId={productDetailTarget?.ID_Producto ?? 0}
+                productId={productDetailTarget?.ID_Producto ?? null}
             />
 
             <div className="w-full h-full flex flex-col min-h-0">

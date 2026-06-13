@@ -40,7 +40,7 @@ export default function TicketPanel({
   onStartEfectivo: () => void;
   onCancelarCobro: () => void;
 
-  onGuardarNota: (detalleId: number, nota: string) => void | Promise<void>;
+  onGuardarNota: (detalleId: string, nota: string) => void | Promise<void>;
 
   formatMoney: (n: number) => string;
 }) {

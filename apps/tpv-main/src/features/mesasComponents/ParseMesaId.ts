@@ -1,4 +1,4 @@
-export function parseMesaId(tableId: string): number | null {
-  const m = String(tableId).match(/db-mesa-(\d+)/);
-  return m ? Number(m[1]) : null;
+export function parseMesaId(tableId: string): string | null {
+  const m = String(tableId ?? "").trim().match(/^db-mesa-(.+)$/);
+  return m ? m[1].trim() || null : null;
 }

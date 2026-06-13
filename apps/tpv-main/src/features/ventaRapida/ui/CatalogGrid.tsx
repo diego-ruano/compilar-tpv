@@ -19,11 +19,11 @@ type Props = {
   onSelectCategoria: (c: CategoriaDisplay) => void;
 
   onAddProducto: (p: ProductoDisplay) => void;
-  onRemoveProducto: (productoId: number) => void;
-  getQty: (productoId: number) => number;
+  onRemoveProducto: (productoId: string) => void;
+  getQty: (productoId: string) => number;
 
   formatPrice: (n: number) => string;
-  onOpenProductDetail: (productId: number) => void;
+  onOpenProductDetail: (productId: string) => void;
 };
 
 function Wrapper({ children }: { children: React.ReactNode }) {
@@ -61,8 +61,8 @@ function sameCategorias(
 function sameProductosWithQty(
   a: ProductoDisplay[] | null | undefined,
   b: ProductoDisplay[] | null | undefined,
-  getQtyA: (productoId: number) => number,
-  getQtyB: (productoId: number) => number,
+  getQtyA: (productoId: string) => number,
+  getQtyB: (productoId: string) => number,
 ): boolean {
   const aa = Array.isArray(a) ? a : [];
   const bb = Array.isArray(b) ? b : [];
@@ -80,7 +80,7 @@ function sameProductosWithQty(
     if ((x.urlImagen ?? "") !== (y.urlImagen ?? "")) return false;
     if ((x.Ruta_Imagen ?? "") !== (y.Ruta_Imagen ?? "")) return false;
 
-    const id = Number(x.ID_Producto);
+    const id = x.ID_Producto;
     if (getQtyA(id) !== getQtyB(id)) return false;
   }
 

@@ -50,8 +50,11 @@ const AVATAR_COLORS = [
     "bg-cyan-500",
 ];
 
-function avatarColorById(id: number) {
-    const idx = Math.abs(Number(id || 0)) % AVATAR_COLORS.length;
+function avatarColorById(id: string) {
+    // Hash estable del id (UUID string) a un índice de color.
+    let h = 0;
+    for (const ch of String(id || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const idx = h % AVATAR_COLORS.length;
     return AVATAR_COLORS[idx];
 }
 

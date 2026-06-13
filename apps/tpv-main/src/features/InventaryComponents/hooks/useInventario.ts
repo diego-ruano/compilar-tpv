@@ -28,7 +28,7 @@ export function useInventario() {
   const categoriasQuery = useCategorias();
   const resumenQuery = useResumenInventario();
   const productosQuery = useProductosByCategoria(
-    categoriaSeleccionada ? Number(categoriaSeleccionada.ID_Categoria) : null,
+    categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null,
   );
 
   const categorias = useMemo(() => categoriasQuery.data ?? [], [categoriasQuery.data]);
@@ -54,7 +54,7 @@ export function useInventario() {
   useEffect(() => {
     if (!categoriaSeleccionada) return;
     const actualizada = categorias.find(
-      (c) => Number(c.ID_Categoria) === Number(categoriaSeleccionada.ID_Categoria),
+      (c) => c.ID_Categoria === categoriaSeleccionada.ID_Categoria,
     );
     if (actualizada && actualizada !== categoriaSeleccionada) {
       setCategoriaSeleccionada(actualizada);
@@ -67,7 +67,7 @@ export function useInventario() {
     await categoriasQuery.refetch();
   };
 
-  const cargarProductos = async (_idCat: number) => {
+  const cargarProductos = async (_idCat: string) => {
     await productosQuery.refetch();
   };
 

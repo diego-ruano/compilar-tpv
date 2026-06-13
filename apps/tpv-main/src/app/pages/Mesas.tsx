@@ -26,7 +26,7 @@ export default function Mesas() {
 
     const [modalOpen, setModalOpen] = useState(false);
     const [mesaSel, setMesaSel] = useState<{
-        mesaId: number;
+        mesaId: string;
         mesaNombre: string;
     } | null>(null);
 
@@ -80,7 +80,7 @@ export default function Mesas() {
         return fitTransform(activeSalon, mapSize.width, mapSize.height, 26);
     }, [activeSalon, mapSize.width, mapSize.height]);
 
-    const handleOpenMesa = useCallback((mesaId: number, mesaNombre: string) => {
+    const handleOpenMesa = useCallback((mesaId: string, mesaNombre: string) => {
         setMesaSel({ mesaId, mesaNombre });
         setModalOpen(true);
     }, []);

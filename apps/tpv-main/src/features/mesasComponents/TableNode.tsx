@@ -19,7 +19,7 @@ export default function TableNode({
 }: {
     table: Table;
     mesaMetaById: MesaMetaMap;
-    onOpenMesa: (mesaId: number, mesaNombre: string) => void;
+    onOpenMesa: (mesaId: string, mesaNombre: string) => void;
     dark?: boolean;
 }) {
     const idMesa = parseMesaId(table.id);

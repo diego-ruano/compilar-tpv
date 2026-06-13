@@ -8,8 +8,8 @@ export type ProductCardProps = {
   p: ProductoDisplay;
   qty: number;
   onAdd: (p: ProductoDisplay) => void;
-  onRemove: (productoId: number) => void;
-  onInfo: (productId: number) => void;
+  onRemove: (productoId: string) => void;
+  onInfo: (productId: string) => void;
   formatPrice: (n: number) => string;
 };
 

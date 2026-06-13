@@ -25,11 +25,11 @@ export async function trabajadoresGetAll(): Promise<TrabajadorRow[]> {
 }
 
 export async function trabajadoresGetTrabajadorIdByUsuario(
-    idUsuario: number,
-): Promise<number | null> {
-    return await invokeClient<number | null>(
+    idUsuario: string,
+): Promise<string | null> {
+    return await invokeClient<string | null>(
         "trabajadores_get_trabajador_id_by_usuario",
-        { args: { id_usuario: Number(idUsuario) } },
+        { args: { id_usuario: idUsuario } },
     );
 }
 
@@ -53,9 +53,9 @@ export async function horariosGetAsignacionesSemana(
 ========================================================= */
 
 export async function horariosCreateAsignacion(payload: {
-    idTrabajador: number;
+    idTrabajador: string;
     fecha: string;
-    idTurno: number;
+    idTurno: string;
     area: string;
     horaInicio?: string | null;
     horaFin?: string | null;
@@ -63,9 +63,9 @@ export async function horariosCreateAsignacion(payload: {
 }): Promise<boolean> {
     const result = await invokeClient<boolean>("horarios_create_asignacion", {
         args: {
-            id_trabajador: Number(payload.idTrabajador),
+            id_trabajador: payload.idTrabajador,
             fecha: String(payload.fecha ?? ""),
-            id_turno: Number(payload.idTurno),
+            id_turno: payload.idTurno,
             area: String(payload.area ?? ""),
             hora_inicio: payload.horaInicio ?? null,
             hora_fin: payload.horaFin ?? null,
@@ -76,8 +76,8 @@ export async function horariosCreateAsignacion(payload: {
 }
 
 export async function horariosUpdateAsignacion(payload: {
-    idAsignacion: number;
-    idTurno: number;
+    idAsignacion: string;
+    idTurno: string;
     area: string;
     horaInicio?: string | null;
     horaFin?: string | null;
@@ -85,8 +85,8 @@ export async function horariosUpdateAsignacion(payload: {
 }): Promise<boolean> {
     const result = await invokeClient<boolean>("horarios_update_asignacion", {
         args: {
-            id_asignacion: Number(payload.idAsignacion),
-            id_turno: Number(payload.idTurno),
+            id_asignacion: payload.idAsignacion,
+            id_turno: payload.idTurno,
             area: String(payload.area ?? ""),
             hora_inicio: payload.horaInicio ?? null,
             hora_fin: payload.horaFin ?? null,
@@ -97,10 +97,10 @@ export async function horariosUpdateAsignacion(payload: {
 }
 
 export async function horariosDeleteAsignacion(
-    idAsignacion: number,
+    idAsignacion: string,
 ): Promise<boolean> {
     const result = await invokeClient<boolean>("horarios_delete_asignacion", {
-        args: { id_asignacion: Number(idAsignacion) },
+        args: { id_asignacion: idAsignacion },
     });
     return !!result;
 }

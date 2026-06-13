@@ -51,8 +51,11 @@ const AVATAR_PALETTE = [
     "bg-indigo-500/15 text-indigo-500",
 ];
 
-function avatarColor(seed: number): string {
-    const idx = Math.abs(Math.trunc(seed)) % AVATAR_PALETTE.length;
+function avatarColor(seed: string): string {
+    // Hash estable del id (UUID string) a un índice de la paleta.
+    let h = 0;
+    for (const ch of String(seed || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    const idx = h % AVATAR_PALETTE.length;
     return AVATAR_PALETTE[idx];
 }
 
@@ -78,7 +81,7 @@ export default function Login() {
     const [loadingUsers, setLoadingUsers] = useState(true);
 
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
     const selectedUser = useMemo(
         () => users.find((u) => u.id_usuario === selectedUserId) ?? null,
@@ -157,7 +160,7 @@ export default function Login() {
     const ventana = getCurrentWindow();
     const showBottomBlock = Boolean(selectedUser);
 
-    const refreshPunch = async (uid: number) => {
+    const refreshPunch = async (uid: string) => {
         const st = await getTodayPunchStatus({ idUsuario: uid });
         setPunchStatus(st);
     };
@@ -622,7 +625,7 @@ export default function Login() {
                                                     <div
                                                         className={cn(
                                                             "grid size-7 shrink-0 place-items-center rounded-full text-[11px] font-bold",
-                                                            avatarColor(Number(u.id_usuario)),
+                                                            avatarColor(u.id_usuario),
                                                         )}
                                                     >
                                                         {initial}
@@ -695,7 +698,7 @@ export default function Login() {
                                                     <div
                                                         className={cn(
                                                             "grid size-11 shrink-0 place-items-center rounded-full text-base font-bold",
-                                                            avatarColor(Number(u.id_usuario)),
+                                                            avatarColor(u.id_usuario),
                                                         )}
                                                     >
                                                         {initial}

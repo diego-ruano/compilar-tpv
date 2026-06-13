@@ -24,11 +24,11 @@ export type Salida = {
     tipoGasto: string;
     concepto: string;
     importe: number;
-    proveedorId?: number | null;
+    proveedorId?: string | null;
 };
 
 export type ProveedorMini = {
-    id: number;
+    id: string;
     nombre: string;
 };
 
@@ -77,6 +77,11 @@ function toStr(v: any, fallback = ""): string {
     return String(v);
 }
 
+function toIdOrNull(v: any): string | null {
+    const t = String(v ?? "").trim();
+    return t ? t : null;
+}
+
 function cleanString(v: any): string {
     return String(v ?? "").trim();
 }
@@ -110,7 +115,7 @@ function mapSalida(r: any): Salida {
         tipoGasto: toStr(r?.tipoGasto ?? r?.tipo_gasto ?? r?.Tipo_Gasto ?? ""),
         concepto: toStr(r?.concepto ?? r?.Concepto ?? ""),
         importe: toNum(r?.importe ?? r?.Importe ?? 0),
-        proveedorId: toPositiveIntOrNull(
+        proveedorId: toIdOrNull(
             r?.proveedorId ?? r?.proveedor_id ?? r?.id_proveedor ?? r?.ID_Proveedor,
         ),
     };
@@ -125,12 +130,12 @@ export async function cuentasListProveedoresMini(): Promise<ProveedorMini[]> {
 
     return (rows ?? [])
         .map((r) => ({
-            id: Number(r?.id ?? r?.ID_Proveedor ?? r?.id_proveedor ?? 0),
+            id: toStr(r?.id ?? r?.ID_Proveedor ?? r?.id_proveedor, ""),
             nombre: String(
                 r?.nombre ?? r?.Nombre_Empresa ?? r?.nombre_empresa ?? "",
             ),
         }))
-        .filter((p) => p.id > 0 && !!p.nombre);
+        .filter((p) => p.id.length > 0 && !!p.nombre);
 }
 
 /* =========================
@@ -166,7 +171,7 @@ export async function cuentasCreateGasto(payload: {
     tipoGasto: string;
     concepto: string;
     importe: number;
-    proveedorId?: number | null;
+    proveedorId?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_create_gasto", {
         args: {
@@ -174,36 +179,36 @@ export async function cuentasCreateGasto(payload: {
             tipo_gasto: cleanString(payload.tipoGasto),
             concepto: cleanString(payload.concepto),
             importe: Number(payload.importe ?? 0),
-            proveedor_id: toPositiveIntOrNull(payload.proveedorId),
+            proveedor_id: toIdOrNull(payload.proveedorId),
         },
     });
     return typeof r === "boolean" ? r : true;
 }
 
 export async function cuentasUpdateGasto(payload: {
-    idGasto: number;
+    idGasto: string;
     fecha: string;
     tipoGasto: string;
     concepto: string;
     importe: number;
-    proveedorId?: number | null;
+    proveedorId?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_update_gasto", {
         args: {
-            id_gasto: Number(payload.idGasto),
+            id_gasto: payload.idGasto,
             fecha: cleanString(payload.fecha),
             tipo_gasto: cleanString(payload.tipoGasto),
             concepto: cleanString(payload.concepto),
             importe: Number(payload.importe ?? 0),
-            proveedor_id: toPositiveIntOrNull(payload.proveedorId),
+            proveedor_id: toIdOrNull(payload.proveedorId),
         },
     });
     return typeof r === "boolean" ? r : true;
 }
 
-export async function cuentasDeleteGasto(idGasto: number): Promise<boolean> {
+export async function cuentasDeleteGasto(idGasto: string): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_delete_gasto", {
-        args: { id_gasto: Number(idGasto) },
+        args: { id_gasto: idGasto },
     });
     return typeof r === "boolean" ? r : true;
 }
@@ -213,14 +218,14 @@ export async function cuentasDeleteGasto(idGasto: number): Promise<boolean> {
 ========================= */
 
 export async function cuentasUpdatePago(payload: {
-    idPago: number;
+    idPago: string;
     fechaHora: string;
     metodo: "Tarjeta" | "Efectivo";
     importe: number;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_update_pago", {
         args: {
-            id_pago: Number(payload.idPago),
+            id_pago: payload.idPago,
             fecha_hora: cleanString(payload.fechaHora),
             metodo: payload.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
             importe: Number(payload.importe ?? 0),
@@ -229,9 +234,9 @@ export async function cuentasUpdatePago(payload: {
     return typeof r === "boolean" ? r : true;
 }
 
-export async function cuentasDeletePago(idPago: number): Promise<boolean> {
+export async function cuentasDeletePago(idPago: string): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_delete_pago", {
-        args: { id_pago: Number(idPago) },
+        args: { id_pago: idPago },
     });
     return typeof r === "boolean" ? r : true;
 }

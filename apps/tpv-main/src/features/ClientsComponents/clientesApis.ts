@@ -11,7 +11,7 @@ import type { ClienteForm, ClienteOverview } from "@tpv/contracts";
 export type FiltroRanking = "todos" | "reservas" | "gasto";
 
 export type ClienteRow = {
-    ID_Cliente: number;
+    ID_Cliente: string;
     Nombre: string;
     Email: string | null;
     Telefono: string | null;
@@ -52,7 +52,7 @@ function toNullableStr(v: unknown): string | null {
 
 function mapRow(r: ClienteOverview): ClienteRow {
     return {
-        ID_Cliente: toNum(r.id_cliente, 0),
+        ID_Cliente: String(r.id_cliente ?? ""),
         Nombre: String(r.nombre ?? ""),
         Email: toNullableStr(r.email),
         Telefono: toNullableStr(r.telefono),
@@ -94,10 +94,10 @@ export async function clientesGetOverview(params: {
 }
 
 export async function clientesGetClienteForm(params: {
-    idCliente: number;
+    idCliente: string;
 }): Promise<ClienteFormRow | null> {
     const row = await invokeClient<ClienteForm | null>("clientes_get_cliente_form", {
-        args: { id_cliente: Number(params.idCliente) },
+        args: { id_cliente: params.idCliente },
     });
 
     return row ? mapForm(row) : null;
@@ -120,7 +120,7 @@ export async function clientesCreateCliente(params: {
 }
 
 export async function clientesUpdateCliente(params: {
-    idCliente: number;
+    idCliente: string;
     nombre: string;
     email?: string | null;
     telefono?: string | null;
@@ -128,7 +128,7 @@ export async function clientesUpdateCliente(params: {
 }): Promise<boolean> {
     return await invokeClient<boolean>("clientes_update_cliente", {
         args: {
-            id_cliente: Number(params.idCliente),
+            id_cliente: params.idCliente,
             nombre: String(params.nombre ?? "").trim(),
             email: toNullableStr(params.email),
             telefono: toNullableStr(params.telefono),

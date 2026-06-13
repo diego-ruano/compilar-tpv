@@ -36,7 +36,7 @@ import {
 type Vista = "list" | "detail";
 
 type ClienteUI = {
-  ID_Cliente: number;
+  ID_Cliente: string;
   Nombre: string;
   Email: string;
   Telefono: string;
@@ -75,8 +75,10 @@ const AVATAR_PALETTE = [
   "bg-indigo-500/15 text-indigo-500",
 ];
 
-function avatarColor(seed: number): string {
-  const idx = Math.abs(Math.trunc(seed)) % AVATAR_PALETTE.length;
+function avatarColor(seed: string): string {
+  let h = 0;
+  for (const ch of String(seed || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const idx = h % AVATAR_PALETTE.length;
   return AVATAR_PALETTE[idx];
 }
 
@@ -124,7 +126,7 @@ export default function Clientes() {
       Number(r.Total_Gastado_Stored || 0);
 
     return {
-      ID_Cliente: Number(r.ID_Cliente),
+      ID_Cliente: String(r.ID_Cliente ?? ""),
       Nombre: String(r.Nombre ?? ""),
       Email: String(r.Email ?? ""),
       Telefono: String(r.Telefono ?? ""),
@@ -155,8 +157,8 @@ export default function Clientes() {
   // Mantener la selección de detalle sincronizada con la lista recacheada.
   useEffect(() => {
     if (!clienteActivo) return;
-    const id = Number(clienteActivo.ID_Cliente);
-    const updated = clientes.find((x) => Number(x.ID_Cliente) === id);
+    const id = clienteActivo.ID_Cliente;
+    const updated = clientes.find((x) => x.ID_Cliente === id);
     if (updated && updated !== clienteActivo) setClienteActivo(updated);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clientes]);
@@ -185,7 +187,7 @@ export default function Clientes() {
   const idxActivo = useMemo(() => {
     if (!clienteActivo) return -1;
     return clientesFiltrados.findIndex(
-      (c) => Number(c.ID_Cliente) === Number(clienteActivo.ID_Cliente),
+      (c) => c.ID_Cliente === clienteActivo.ID_Cliente,
     );
   }, [clientesFiltrados, clienteActivo]);
 
@@ -252,7 +254,7 @@ export default function Clientes() {
 
     try {
       const r0 = await clientesGetClienteForm({
-        idCliente: Number(clienteActivo.ID_Cliente),
+        idCliente: clienteActivo.ID_Cliente,
       });
 
       setModalClienteModo("editar");
@@ -299,7 +301,7 @@ export default function Clientes() {
       if (!clienteActivo) return;
 
       const ok = await updateCliente.mutateAsync({
-        idCliente: Number(clienteActivo.ID_Cliente),
+        idCliente: clienteActivo.ID_Cliente,
         nombre,
         email: email || null,
         telefono: telefono || null,
@@ -419,7 +421,7 @@ export default function Clientes() {
                         <div
                           className={cn(
                             "grid size-12 shrink-0 place-items-center rounded-full text-base font-bold",
-                            avatarColor(Number(c.ID_Cliente)),
+                            avatarColor(c.ID_Cliente),
                           )}
                         >
                           {inicial(c.Nombre)}
@@ -537,7 +539,7 @@ export default function Clientes() {
                 <div
                   className={cn(
                     "grid size-16 shrink-0 place-items-center rounded-2xl text-2xl font-bold",
-                    avatarColor(Number(clienteActivo.ID_Cliente)),
+                    avatarColor(clienteActivo.ID_Cliente),
                   )}
                 >
                   {inicial(clienteActivo.Nombre)}

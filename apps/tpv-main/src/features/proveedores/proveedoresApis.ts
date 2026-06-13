@@ -10,7 +10,7 @@ import { invokeClient } from "@tpv/client";
 ========================= */
 
 export type ProveedorRow = {
-    ID_Proveedor: number;
+    ID_Proveedor: string;
     Nombre_Empresa: string;
     Contacto: string | null;
     Telefono: string | null;
@@ -22,16 +22,16 @@ export type ProveedorRow = {
 };
 
 export type Categoria = {
-    ID_Categoria: number;
+    ID_Categoria: string;
     Nombre: string;
     Nombre_Imagen: string | null;
     Ruta_Imagen: string | null;
 };
 
 export type ProductoRow = {
-    ID_Producto: number;
-    ID_Categoria: number | null;
-    ID_Proveedor: number | null;
+    ID_Producto: string;
+    ID_Categoria: string | null;
+    ID_Proveedor: string | null;
     Nombre: string;
     Precio_Venta: number | null;
     Stock_Actual: number | null;
@@ -46,7 +46,7 @@ export type ProductoRow = {
 };
 
 export type ProveedorSaveInput = {
-    idProveedor?: number | null;
+    idProveedor?: string | null;
 
     nombreEmpresa: string;
     contacto?: string | null;
@@ -60,8 +60,8 @@ export type ProveedorSaveInput = {
 };
 
 export type ProductoCreateInput = {
-    idCategoria: number;
-    idProveedor: number;
+    idCategoria: string;
+    idProveedor: string;
 
     nombre: string;
     precioVenta?: number | null;
@@ -91,6 +91,10 @@ function toNullableStr(v: any): string | null {
     return s ? s : null;
 }
 
+function toId(v: any): string {
+    return String(v ?? "").trim();
+}
+
 function resolveReturnedId(data: any, keys: string[]): number {
     if (typeof data === "number") {
         return toNum(data, 0);
@@ -110,7 +114,7 @@ function resolveReturnedId(data: any, keys: string[]): number {
 
 function mapProveedor(r: any): ProveedorRow {
     return {
-        ID_Proveedor: toNum(r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor, 0),
+        ID_Proveedor: toId(r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor),
         Nombre_Empresa: String(
             r?.nombre_empresa ?? r?.Nombre_Empresa ?? r?.nombreEmpresa ?? "",
         ),
@@ -134,7 +138,7 @@ function mapProveedor(r: any): ProveedorRow {
 
 function mapCategoria(r: any): Categoria {
     return {
-        ID_Categoria: toNum(r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria, 0),
+        ID_Categoria: toId(r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria),
         Nombre: String(r?.nombre ?? r?.Nombre ?? ""),
         Nombre_Imagen: toNullableStr(
             r?.nombre_imagen ?? r?.Nombre_Imagen ?? r?.nombreImagen,
@@ -147,12 +151,12 @@ function mapCategoria(r: any): Categoria {
 
 function mapProducto(r: any): ProductoRow {
     return {
-        ID_Producto: toNum(r?.id_producto ?? r?.ID_Producto ?? r?.idProducto, 0),
-        ID_Categoria: toNumOrNull(
-            r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria ?? null,
+        ID_Producto: toId(r?.id_producto ?? r?.ID_Producto ?? r?.idProducto),
+        ID_Categoria: toNullableStr(
+            r?.id_categoria ?? r?.ID_Categoria ?? r?.idCategoria,
         ),
-        ID_Proveedor: toNumOrNull(
-            r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor ?? null,
+        ID_Proveedor: toNullableStr(
+            r?.id_proveedor ?? r?.ID_Proveedor ?? r?.idProveedor,
         ),
         Nombre: String(r?.nombre ?? r?.Nombre ?? ""),
         Precio_Venta: toNumOrNull(
@@ -199,10 +203,10 @@ export async function proveedoresGetAll(): Promise<ProveedorRow[]> {
 }
 
 export async function proveedoresGetProductos(params: {
-    idProveedor: number;
+    idProveedor: string;
 }): Promise<ProductoRow[]> {
     const rows = await invokeClient<any[]>("proveedores_get_productos", {
-        args: { id_proveedor: Number(params.idProveedor) },
+        args: { id_proveedor: params.idProveedor },
     });
     return Array.isArray(rows) ? rows.map(mapProducto) : [];
 }
@@ -241,21 +245,21 @@ export async function proveedoresSave(
 }
 
 export async function proveedoresDelete(params: {
-    idProveedor: number;
+    idProveedor: string;
 }): Promise<boolean> {
     const r = await invokeClient<any>("proveedores_delete", {
-        args: { id_proveedor: Number(params.idProveedor) },
+        args: { id_proveedor: params.idProveedor },
     });
     return typeof r === "boolean" ? r : true;
 }
 
 export async function proveedoresSetVinculos(params: {
-    idProveedor: number;
-    productoIds: number[];
+    idProveedor: string;
+    productoIds: string[];
 }): Promise<boolean> {
     const r = await invokeClient<any>("proveedores_set_vinculos", {
         args: {
-            id_proveedor: Number(params.idProveedor),
+            id_proveedor: params.idProveedor,
             producto_ids: (params.productoIds ?? [])
                 .map(Number)
                 .filter((n) => Number.isFinite(n) && n > 0),
@@ -269,8 +273,8 @@ export async function proveedoresCreateProducto(
 ): Promise<number> {
     const r = await invokeClient<any>("proveedores_create_producto", {
         args: {
-            id_categoria: Number(input.idCategoria),
-            id_proveedor: Number(input.idProveedor),
+            id_categoria: input.idCategoria,
+            id_proveedor: input.idProveedor,
             nombre: String(input.nombre ?? ""),
             precio_venta: input.precioVenta ?? null,
             stock_actual: input.stockActual ?? null,

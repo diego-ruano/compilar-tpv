@@ -6,7 +6,7 @@ import {
 } from "./mesasApi";
 
 type KitchenLine = {
-    idDetalle: number;
+    idDetalle: string;
     cantidad: number;
     nombre: string;
     notas: string | null;
@@ -15,7 +15,7 @@ type KitchenLine = {
 };
 
 type KitchenComanda = {
-    idComanda: number;
+    idComanda: string;
     mesa: string;
     apertura: string;
     lines: KitchenLine[];
@@ -37,7 +37,7 @@ function emitVrChanged() {
 export default function KitchenBoard({
     idUsuarioCocinero,
 }: {
-    idUsuarioCocinero: number | null;
+    idUsuarioCocinero: string | null;
 }) {
     const [loading, setLoading] = useState(true);
     const [rows, setRows] = useState<KitchenRow[]>([]);
@@ -110,10 +110,10 @@ export default function KitchenBoard({
     }, []);
 
     const comandas: KitchenComanda[] = useMemo(() => {
-        const map = new Map<number, KitchenComanda>();
+        const map = new Map<string, KitchenComanda>();
 
         for (const r of rows) {
-            const idComanda = Number(r.ID_Comanda);
+            const idComanda = String(r.ID_Comanda ?? "");
             if (!map.has(idComanda)) {
                 map.set(idComanda, {
                     idComanda,
@@ -124,7 +124,7 @@ export default function KitchenBoard({
             }
 
             map.get(idComanda)!.lines.push({
-                idDetalle: Number(r.ID_Detalle),
+                idDetalle: String(r.ID_Detalle ?? ""),
                 cantidad: Number(r.Cantidad ?? 1),
                 nombre: String(r.Nombre_Producto ?? ""),
                 notas: r.Notas ? String(r.Notas) : null,
@@ -146,7 +146,7 @@ export default function KitchenBoard({
     }, [rows]);
 
     const marcarLinea = useCallback(
-        async (idDetalle: number, next: "PREPARADO" | "PENDIENTE") => {
+        async (idDetalle: string, next: "PREPARADO" | "PENDIENTE") => {
             try {
                 if (!idUsuarioCocinero) return;
 
@@ -156,7 +156,7 @@ export default function KitchenBoard({
                 // ✅ optimistic update: NO recargamos toda la lista, así no “sube arriba”
                 setRows((prev) =>
                     prev.map((r) =>
-                        Number(r.ID_Detalle) === idDetalle
+                        String(r.ID_Detalle ?? "") === idDetalle
                             ? { ...r, Estado_Cocina: next }
                             : r,
                     ),

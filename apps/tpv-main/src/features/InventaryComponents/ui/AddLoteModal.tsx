@@ -6,7 +6,7 @@ import { useCreateLote } from "../inventarioQueries";
 type Props = {
     open: boolean;
     onClose: () => void;
-    productId: number | null;
+    productId: string | null;
     onSaved: () => void;
 };
 

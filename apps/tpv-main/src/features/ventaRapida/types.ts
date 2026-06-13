@@ -1,5 +1,5 @@
 export type Categoria = {
-    ID_Categoria: number;
+    ID_Categoria: string;
     Nombre: string;
     Nombre_Imagen: string | null;
     Ruta_Imagen: string | null;
@@ -10,8 +10,8 @@ export type Categoria = {
 export type CategoriaDisplay = Categoria & { urlImagen: string };
 
 export type Producto = {
-    ID_Producto: number;
-    ID_Categoria: number;
+    ID_Producto: string;
+    ID_Categoria: string;
     Nombre: string;
     Precio_Venta: number;
     Stock_Actual: number;
@@ -25,8 +25,8 @@ export type ProductoDisplay = Producto & { urlImagen: string };
 
 export type TicketItem = {
     id: string;
-    detalleId: number;
-    productoId: number;
+    detalleId: string;
+    productoId: string;
     nombre: string;
     precio: number;
     pagado: boolean;

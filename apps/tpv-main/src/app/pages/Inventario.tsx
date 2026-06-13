@@ -39,11 +39,11 @@ export default function Inventario() {
     const [openAddProduct, setOpenAddProduct] = useState(false);
 
     const [openProductDetail, setOpenProductDetail] = useState(false);
-    const [productDetailId, setProductDetailId] = useState<number | null>(null);
+    const [productDetailId, setProductDetailId] = useState<string | null>(null);
 
-    const [productIdToEdit, setProductIdToEdit] = useState<number | null>(null);
+    const [productIdToEdit, setProductIdToEdit] = useState<string | null>(null);
 
-    const deleteProduct = async (id: number) => {
+    const deleteProduct = async (id: string) => {
         try {
             // La invalidación de onSuccess recachea productos y resumen automáticamente.
             await deleteProducto.mutateAsync(id);
@@ -53,7 +53,7 @@ export default function Inventario() {
         }
     };
 
-    const startEditProduct = (id: number) => {
+    const startEditProduct = (id: string) => {
         setProductIdToEdit(id);
         setOpenAddProduct(true);
     };
@@ -106,11 +106,11 @@ export default function Inventario() {
                         setOpenAddProduct(false);
                         setProductIdToEdit(null);
                     }}
-                    categoriaPreseleccionadaId={categoriaSeleccionada ? Number(categoriaSeleccionada.ID_Categoria) : null}
+                    categoriaPreseleccionadaId={categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null}
                     productIdToEdit={productIdToEdit}
                     onSaved={async () => {
                         if (categoriaSeleccionada) {
-                            await cargarProductos(Number(categoriaSeleccionada.ID_Categoria));
+                            await cargarProductos(categoriaSeleccionada.ID_Categoria);
                         } else {
                             await cargarResumenInventario();
                         }

@@ -15,7 +15,7 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { ListChecks, Plus, X, Trash2 } from "lucide-react";
 
 type TareaUI = {
-  ID_Tarea: number;
+  ID_Tarea: string;
   Titulo: string;
   Descripcion: string | null;
   Fecha_Creacion?: string;
@@ -28,8 +28,8 @@ type TareaUI = {
 };
 
 type TrabajadorUI = {
-  ID_Trabajador: number;
-  ID_Usuario: number;
+  ID_Trabajador: string;
+  ID_Usuario: string;
   Nombre: string;
   Apellido: string | null;
   Puesto: string | null;
@@ -209,19 +209,19 @@ export default function Tareas() {
   const [titulo, setTitulo] = useState("");
   const [descripcion, setDescripcion] = useState("");
   const [fechaLimite, setFechaLimite] = useState<string>("");
-  const [idsAsignados, setIdsAsignados] = useState<number[]>([]);
+  const [idsAsignados, setIdsAsignados] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   const [adminEditTitulo, setAdminEditTitulo] = useState("");
   const [adminEditDescripcion, setAdminEditDescripcion] = useState("");
   const [adminEditFechaLimite, setAdminEditFechaLimite] =
     useState<string>("");
-  const [adminEditIdsAsignados, setAdminEditIdsAsignados] = useState<number[]>(
+  const [adminEditIdsAsignados, setAdminEditIdsAsignados] = useState<string[]>(
     [],
   );
   const [adminDetalleAsignados, setAdminDetalleAsignados] = useState<
     Array<{
-      ID_Trabajador: number;
+      ID_Trabajador: string;
       Nombre: string;
       Apellido: string | null;
       Puesto: string | null;
@@ -273,7 +273,7 @@ export default function Tareas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tareasAdmin, misTareas]);
 
-  const toggleAsignado = (id: number) => {
+  const toggleAsignado = (id: string) => {
     setIdsAsignados((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     );
@@ -347,8 +347,8 @@ export default function Tareas() {
       setAdminEditFechaLimite(finalLimite || "");
 
       const ids = (asigs ?? [])
-        .map((a: any) => Number(a.ID_Trabajador))
-        .filter((n: number) => Number.isFinite(n) && n > 0);
+        .map((a: any) => String(a.ID_Trabajador ?? "").trim())
+        .filter((s: string) => s.length > 0);
 
       setAdminEditIdsAsignados(ids);
     } catch {
@@ -360,7 +360,7 @@ export default function Tareas() {
     }
   };
 
-  const toggleAsignadoAdmin = (idTrab: number) => {
+  const toggleAsignadoAdmin = (idTrab: string) => {
     setAdminEditIdsAsignados((prev) =>
       prev.includes(idTrab) ? prev.filter((x) => x !== idTrab) : [...prev, idTrab],
     );

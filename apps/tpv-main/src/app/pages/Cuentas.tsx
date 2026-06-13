@@ -252,13 +252,13 @@ function DenomsGrid({
 }
 
 type SalidaExt = Salida & {
-    proveedorId?: number | null;
+    proveedorId?: string | null;
     proveedorNombre?: string | null;
 };
 
-function normalizeProveedorId(v: unknown): number | null {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : null;
+function normalizeProveedorId(v: unknown): string | null {
+    const s = String(v ?? "").trim();
+    return s ? s : null;
 }
 
 function mapEntradaUI(r: any): Entrada {
@@ -274,7 +274,7 @@ function mapEntradaUI(r: any): Entrada {
 
 function mapSalidaUI(
     r: any,
-    proveedoresMap: Map<number, string>,
+    proveedoresMap: Map<string, string>,
 ): SalidaExt {
     const proveedorId = normalizeProveedorId(
         r?.proveedorId ?? r?.ID_Proveedor ?? r?.idProveedor ?? r?.id_proveedor,
@@ -328,7 +328,7 @@ export default function Cuentas() {
         : null;
 
     const proveedoresMap = useMemo(() => {
-        const m = new Map<number, string>();
+        const m = new Map<string, string>();
         for (const p of proveedores) m.set(p.id, p.nombre);
         return m;
     }, [proveedores]);
@@ -372,7 +372,7 @@ export default function Cuentas() {
     const [pdfError, setPdfError] = useState<string | null>(null);
 
     const [openEditGasto, setOpenEditGasto] = useState(false);
-    const [editGastoId, setEditGastoId] = useState<number | null>(null);
+    const [editGastoId, setEditGastoId] = useState<string | null>(null);
     const [egFecha, setEgFecha] = useState("");
     const [egTipo, setEgTipo] = useState("Suministros");
     const [egConcepto, setEgConcepto] = useState("");
@@ -382,7 +382,7 @@ export default function Cuentas() {
     const [errEditGasto, setErrEditGasto] = useState<string | null>(null);
 
     const [openEditPago, setOpenEditPago] = useState(false);
-    const [editPagoId, setEditPagoId] = useState<number | null>(null);
+    const [editPagoId, setEditPagoId] = useState<string | null>(null);
     const [epFechaHora, setEpFechaHora] = useState("");
     const [epMetodo, setEpMetodo] = useState<"Tarjeta" | "Efectivo">("Efectivo");
     const [epImporte, setEpImporte] = useState<string>("");
@@ -494,7 +494,7 @@ export default function Cuentas() {
 
     const abrirEditarGasto = async (s: SalidaExt) => {
         setErrEditGasto(null);
-        setEditGastoId(Number(s.id));
+        setEditGastoId(s.id);
         setEgFecha(s.fechaHora);
         setEgTipo(s.tipoGasto || "Suministros");
         setEgConcepto(s.concepto || "");
@@ -519,7 +519,7 @@ export default function Cuentas() {
             const importe = Number(String(egImporte).replace(",", "."));
 
             const provRaw = (egProveedorId || "").trim();
-            const proveedorId = provRaw === "" ? null : Number(provRaw);
+            const proveedorId = provRaw === "" ? null : provRaw;
 
             if (!fecha) return setErrEditGasto("La fecha es obligatoria.");
             if (!tipo) return setErrEditGasto("El tipo es obligatorio.");
@@ -529,7 +529,7 @@ export default function Cuentas() {
             }
 
             if (tipo === "Proveedor") {
-                if (!proveedorId || !Number.isFinite(proveedorId) || proveedorId <= 0) {
+                if (!proveedorId) {
                     return setErrEditGasto("Selecciona un proveedor.");
                 }
             }
@@ -563,7 +563,7 @@ export default function Cuentas() {
 
     const abrirEditarPago = (e: Entrada) => {
         setErrEditPago(null);
-        setEditPagoId(Number(e.id));
+        setEditPagoId(e.id);
         setEpFechaHora(e.fechaHora);
         setEpMetodo(e.metodo);
         setEpImporte(String(e.importe ?? ""));
@@ -616,9 +616,9 @@ export default function Cuentas() {
 
         try {
             if (confirmAccion.tipo === "gasto") {
-                await deleteGasto.mutateAsync(Number(confirmAccion.gasto.id));
+                await deleteGasto.mutateAsync(confirmAccion.gasto.id);
             } else {
-                await deletePago.mutateAsync(Number(confirmAccion.entrada.id));
+                await deletePago.mutateAsync(confirmAccion.entrada.id);
             }
 
             setConfirmAccion(null);
@@ -640,7 +640,7 @@ export default function Cuentas() {
             const importe = Number(String(gImporte).replace(",", "."));
 
             const provRaw = (gProveedorId || "").trim();
-            const proveedorId = provRaw === "" ? null : Number(provRaw);
+            const proveedorId = provRaw === "" ? null : provRaw;
 
             if (!fecha) return setErrGasto("La fecha es obligatoria.");
             if (!tipo) return setErrGasto("El tipo es obligatorio.");
@@ -650,7 +650,7 @@ export default function Cuentas() {
             }
 
             if (tipo === "Proveedor") {
-                if (!proveedorId || !Number.isFinite(proveedorId) || proveedorId <= 0) {
+                if (!proveedorId) {
                     return setErrGasto("Selecciona un proveedor.");
                 }
             }
@@ -1167,8 +1167,8 @@ export default function Cuentas() {
         }
     };
 
-    const proveedorLabel = (id: number | null | undefined) => {
-        if (!id || id <= 0) return "";
+    const proveedorLabel = (id: string | null | undefined) => {
+        if (!id) return "";
         return proveedoresMap.get(id) ?? `Proveedor #${id}`;
     };
 

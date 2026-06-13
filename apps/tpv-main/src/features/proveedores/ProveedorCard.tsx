@@ -1,7 +1,7 @@
 import { ArrowRight, ImageOff } from "lucide-react";
 
 type ProveedorUI = {
-	ID_Proveedor: number;
+	ID_Proveedor: string;
 	Nombre_Empresa: string;
 	Email: string | null;
 	urlImagen: string; // ← lo que ya calculas con convertFileSrc

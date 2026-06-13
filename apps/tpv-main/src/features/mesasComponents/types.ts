@@ -31,7 +31,7 @@ export type MesaEstado = "LIBRE" | "PENDIENTE";
 export type ReservaEstado = "PROXIMA" | "ACTIVA";
 export type ReservaMesaMeta = {
     estado: ReservaEstado;
-    idReserva: number;
+    idReserva: string;
     clienteNombre: string;
     diaYMD: string;
     hora: string;

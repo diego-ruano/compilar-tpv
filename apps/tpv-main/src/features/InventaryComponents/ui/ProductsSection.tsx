@@ -10,7 +10,7 @@ export default function ProductsSection({
 }: {
     loading: boolean;
     productos: ProductoDisplay[];
-    onOpenDetail: (id: number) => void;
+    onOpenDetail: (id: string) => void;
 }) {
     return (
         <div className="w-full rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">

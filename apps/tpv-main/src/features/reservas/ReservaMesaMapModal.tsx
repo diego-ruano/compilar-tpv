@@ -15,7 +15,7 @@ type Props = {
 
     mesaMetaById: Record<number, MesaMeta>;
 
-    onSelectMesa: (idMesa: number, nombreMesa: string) => void;
+    onSelectMesa: (idMesa: string, nombreMesa: string) => void;
 
     title?: string;
 };

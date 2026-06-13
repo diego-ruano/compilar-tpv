@@ -20,7 +20,7 @@ import {
 } from "../inventarioQueries";
 import { useMode } from "../../../shared/stores/useMode";
 
-type CategoriaMini = { ID_Categoria: number; Nombre: string };
+type CategoriaMini = { ID_Categoria: string; Nombre: string };
 
 const UNIDADES_MEDIDA = ["UD", "KG", "GR", "MG", "L", "CL", "ML"] as const;
 
@@ -55,8 +55,8 @@ export function AddProductModal({
     open: boolean;
     onClose: () => void;
     onSaved: () => void;
-    categoriaPreseleccionadaId: number | null;
-    productIdToEdit: number | null;
+    categoriaPreseleccionadaId: string | null;
+    productIdToEdit: string | null;
 }) {
     const isEdit = !!productIdToEdit;
 
@@ -72,7 +72,7 @@ export function AddProductModal({
     const categorias: CategoriaMini[] = useMemo(
         () =>
             (categoriasQuery.data ?? []).map((c) => ({
-                ID_Categoria: Number(c.ID_Categoria),
+                ID_Categoria: String(c.ID_Categoria ?? ""),
                 Nombre: c.Nombre,
             })),
         [categoriasQuery.data],
@@ -80,8 +80,8 @@ export function AddProductModal({
     const proveedores: ProveedorMiniRow[] = proveedoresQuery.data ?? [];
     const alergenos: AlergenoRow[] = alergenosQuery.data ?? [];
 
-    const [idCategoria, setIdCategoria] = useState<number | "">("");
-    const [idProveedor, setIdProveedor] = useState<number | "">("");
+    const [idCategoria, setIdCategoria] = useState<string>("");
+    const [idProveedor, setIdProveedor] = useState<string>("");
 
     const [nombre, setNombre] = useState("");
     const [precioVenta, setPrecioVenta] = useState("");
@@ -101,8 +101,8 @@ export function AddProductModal({
     const [cantidadInicialLote, setCantidadInicialLote] = useState("");
 
     const [alergenosOpen, setAlergenosOpen] = useState(false);
-    const [selectedAlergenos, setSelectedAlergenos] = useState<Set<number>>(new Set());
-    const [alergenoImgUrl, setAlergenoImgUrl] = useState<Record<number, string>>({});
+    const [selectedAlergenos, setSelectedAlergenos] = useState<Set<string>>(new Set());
+    const [alergenoImgUrl, setAlergenoImgUrl] = useState<Record<string, string>>({});
 
     const [loading, setLoading] = useState(false);
     const toast = useToast();
@@ -144,7 +144,7 @@ export function AddProductModal({
         let cancelled = false;
 
         (async () => {
-            const urlMap: Record<number, string> = {};
+            const urlMap: Record<string, string> = {};
             await Promise.all(
                 (alergenos ?? []).map(async (a) => {
                     const id = toNum((a as any).ID_Alergeno, 0);
@@ -197,7 +197,7 @@ export function AddProductModal({
             }
 
             // Prefill on-demand del producto a editar (no se cachea: depende del id puntual).
-            const detalle = await inventarioAPI.getProductoDetalle(Number(productIdToEdit));
+            const detalle = await inventarioAPI.getProductoDetalle(productIdToEdit ?? "");
             if (cancelled) return;
 
             setIdCategoria(detalle.ID_Categoria);
@@ -230,8 +230,8 @@ export function AddProductModal({
             setSelectedAlergenos(
                 new Set(
                     (detalle.alergs ?? [])
-                        .map((a) => toNum((a as any).ID_Alergeno, 0))
-                        .filter((x) => x > 0),
+                        .map((a) => String((a as any).ID_Alergeno ?? "").trim())
+                        .filter((x) => x.length > 0),
                 ),
             );
 
@@ -246,7 +246,7 @@ export function AddProductModal({
         };
     }, [open, categoriaPreseleccionadaId, productIdToEdit, toast]);
 
-    const toggleAlergeno = (id: number, checked: boolean) => {
+    const toggleAlergeno = (id: string, checked: boolean) => {
         setSelectedAlergenos((prev) => {
             const next = new Set(prev);
             if (checked) next.add(id);
@@ -306,13 +306,13 @@ export function AddProductModal({
             }
 
             const alergIds = Array.from(selectedAlergenos.values())
-                .map(Number)
-                .filter((n) => Number.isFinite(n) && n > 0);
+                .map((v) => String(v ?? "").trim())
+                .filter((n) => n.length > 0);
 
             const finalProductId =
                 (await upsertProducto.mutateAsync({
-                    id_producto: isEdit ? Number(productIdToEdit) : undefined,
-                    id_categoria: Number(idCategoria),
+                    id_producto: isEdit ? (productIdToEdit ?? undefined) : undefined,
+                    id_categoria: idCategoria,
                     id_proveedor:
                         typeof idProveedor === "number" && idProveedor > 0
                             ? idProveedor
@@ -334,9 +334,9 @@ export function AddProductModal({
                             ? null
                             : Number(cantidadPedidoEsperada.replace(",", ".")),
                     ids_alergenos: alergIds,
-                })) ?? (isEdit ? Number(productIdToEdit) : null);
+                })) ?? (isEdit ? (productIdToEdit ?? null) : null);
 
-            if (!finalProductId || finalProductId <= 0) {
+            if (!finalProductId) {
                 throw new Error("No se pudo obtener el ID del producto.");
             }
 
@@ -392,7 +392,7 @@ export function AddProductModal({
                         <select
                             value={idCategoria}
                             onChange={(e) =>
-                                setIdCategoria(e.target.value ? Number(e.target.value) : "")
+                                setIdCategoria(e.target.value || "")
                             }
                             className="border border-border rounded-xl px-3 py-2 w-full"
                             required
@@ -412,7 +412,7 @@ export function AddProductModal({
                         <select
                             value={idProveedor}
                             onChange={(e) =>
-                                setIdProveedor(e.target.value ? Number(e.target.value) : "")
+                                setIdProveedor(e.target.value || "")
                             }
                             className="border border-border rounded-xl px-3 py-2 w-full"
                             disabled={loading}
@@ -584,7 +584,7 @@ export function AddProductModal({
                                 ) : (
                                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                         {alergenos.map((a: any) => {
-                                            const id = toNum(a.ID_Alergeno, 0);
+                                            const id = String(a.ID_Alergeno ?? "").trim();
                                             const checked = selectedAlergenos.has(id);
                                             const imgUrl = alergenoImgUrl[id] ?? "";
 

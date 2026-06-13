@@ -27,7 +27,7 @@ export const proveedoresKeys = {
   all: ["proveedores"] as const,
   list: () => ["proveedores", "list"] as const,
   categorias: () => ["proveedores", "categorias"] as const,
-  productos: (idProveedor: number) => ["proveedores", "productos", idProveedor] as const,
+  productos: (idProveedor: string) => ["proveedores", "productos", idProveedor] as const,
 };
 
 /** Lista de proveedores (cacheada). */
@@ -47,12 +47,12 @@ export function useProveedoresCategorias() {
 }
 
 /** Productos vinculados a un proveedor (cacheada por id; sólo se consulta si hay id válido). */
-export function useProveedoresProductos(idProveedor: number | null | undefined) {
-  const id = Number(idProveedor ?? 0);
+export function useProveedoresProductos(idProveedor: string | null | undefined) {
+  const id = String(idProveedor ?? "").trim();
   return useQuery({
     queryKey: proveedoresKeys.productos(id),
     queryFn: () => proveedoresGetProductos({ idProveedor: id }),
-    enabled: id > 0,
+    enabled: id.length > 0,
   });
 }
 

@@ -19,7 +19,7 @@ export const tareasKeys = {
   all: ["tareas"] as const,
   trabajadores: () => ["tareas", "trabajadores"] as const,
   admin: () => ["tareas", "admin"] as const,
-  mias: (idTrabajador: number | null | undefined) =>
+  mias: (idTrabajador: string | null | undefined) =>
     ["tareas", "mias", idTrabajador ?? null] as const,
 };
 
@@ -42,10 +42,10 @@ export function useTareasAdmin(enabled = true) {
 }
 
 /** Tareas asignadas al trabajador autenticado (vista no-admin). */
-export function useMisTareas(idTrabajador: number | null | undefined, enabled = true) {
+export function useMisTareas(idTrabajador: string | null | undefined, enabled = true) {
   return useQuery({
     queryKey: tareasKeys.mias(idTrabajador),
-    queryFn: () => tareasApi.getMisTareas(Number(idTrabajador)),
+    queryFn: () => tareasApi.getMisTareas(String(idTrabajador ?? "")),
     enabled: enabled && !!idTrabajador,
   });
 }

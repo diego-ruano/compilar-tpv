@@ -27,9 +27,9 @@ import {
 type Props = {
   open: boolean;
   onClose: () => void;
-  productId: number | null;
-  onEdit?: (id: number) => void;
-  onDeleted?: (id: number) => Promise<void> | void;
+  productId: string | null;
+  onEdit?: (id: string) => void;
+  onDeleted?: (id: string) => Promise<void> | void;
 };
 
 function formatDateES(yyyyMmDd: string | null | undefined) {
@@ -77,7 +77,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const [imgUrl, setImgUrl] = useState<string>("");
 
   const [alergOpen, setAlergOpen] = useState(false);
-  const [alergImgUrl, setAlergImgUrl] = useState<Record<number, string>>({});
+  const [alergImgUrl, setAlergImgUrl] = useState<Record<string, string>>({});
 
   // ✅ lotes
   const [lotesOpen, setLotesOpen] = useState(false);
@@ -115,12 +115,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
     (async () => {
       const url = (p as any)?.Ruta_Imagen ? await toImageUrlMaybe((p as any).Ruta_Imagen) : "";
 
-      const map: Record<number, string> = {};
+      const map: Record<string, string> = {};
       if ((p as any)?.alergs?.length) {
         await Promise.all(
           (p as any).alergs.map(async (a: any) => {
-            const id = Number(a.ID_Alergeno);
-            if (!Number.isFinite(id) || id <= 0) return;
+            const id = String(a.ID_Alergeno ?? "").trim();
+            if (!id) return;
             const u = await toImageUrlMaybe(a.Ruta_Imagen);
             if (u) map[id] = u;
           }),
@@ -168,7 +168,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
         const ea = parseSqliteDateTime(String(a.Fecha_Entrada || ""));
         const eb = parseSqliteDateTime(String(b.Fecha_Entrada || ""));
         if (ea !== eb && Number.isFinite(ea) && Number.isFinite(eb)) return ea - eb;
-        return (Number(a.ID_Lote) || 0) - (Number(b.ID_Lote) || 0);
+        return String(a.ID_Lote ?? "").localeCompare(String(b.ID_Lote ?? ""));
       });
     return arr[0] ?? null;
   }, [lotes]);
@@ -339,7 +339,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {(p as any).alergs.map((a: any) => {
-                          const id = Number(a.ID_Alergeno);
+                          const id = String(a.ID_Alergeno ?? "").trim();
                           const url = alergImgUrl[id] ?? "";
                           return (
                             <div key={a.ID_Alergeno} className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-border bg-surface">

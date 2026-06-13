@@ -26,7 +26,7 @@ export const trabajadoresKeys = {
   all: ["trabajadores"] as const,
   lista: () => ["trabajadores", "lista"] as const,
   turnos: () => ["trabajadores", "turnos"] as const,
-  trabajadorIdByUsuario: (idUsuario: number | null | undefined) =>
+  trabajadorIdByUsuario: (idUsuario: string | null | undefined) =>
     ["trabajadores", "trabajadorIdByUsuario", idUsuario] as const,
   asignacionesSemana: (fechaLunes: string) =>
     ["trabajadores", "asignacionesSemana", fechaLunes] as const,
@@ -57,12 +57,12 @@ export function useTurnos() {
  * Se habilita únicamente cuando `enabled` es true y hay un idUsuario válido.
  */
 export function useTrabajadorIdByUsuario(
-  idUsuario: number | null | undefined,
+  idUsuario: string | null | undefined,
   enabled: boolean,
 ) {
   return useQuery({
     queryKey: trabajadoresKeys.trabajadorIdByUsuario(idUsuario),
-    queryFn: () => trabajadoresGetTrabajadorIdByUsuario(Number(idUsuario)),
+    queryFn: () => trabajadoresGetTrabajadorIdByUsuario(String(idUsuario ?? "")),
     enabled: enabled && idUsuario != null,
   });
 }

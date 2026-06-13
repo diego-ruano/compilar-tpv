@@ -12,7 +12,7 @@
 
 export type ComandaSyncInfo = {
 	/** Comandas afectadas que hemos podido identificar por su ID_Comanda. */
-	ids: number[];
+	ids: string[];
 	/** El lote tocó alguna tabla relacionada con comandas. */
 	touchedComanda: boolean;
 	/** Tocó comanda pero no pudimos identificar el id → recargar por seguridad. */
@@ -38,14 +38,14 @@ const RE_WHERE_ID = /ID_Comanda\s*=\s*\?(\d+)/gi;
 const RE_INSERT_COLS = /INSERT\s+(?:OR\s+\w+\s+)?INTO\s+\w+\s*\(([^)]*)\)/i;
 const RE_INSERT_COMANDAS = /INSERT\s+(?:OR\s+\w+\s+)?INTO\s+Comandas\b/i;
 
-function toPosInt(v: unknown): number | null {
-	const n = typeof v === "bigint" ? Number(v) : Number(v);
-	return Number.isInteger(n) && n > 0 ? n : null;
+function toId(v: unknown): string | null {
+	const s = String(v ?? "").trim();
+	return s ? s : null;
 }
 
 /** Comandas afectadas por un conjunto de sentencias resueltas (sql + args en orden). */
 export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
-	const ids = new Set<number>();
+	const ids = new Set<string>();
 	let touchedComanda = false;
 	let touchedCatalog = false;
 	let uncertain = false;
@@ -65,7 +65,7 @@ export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
 		RE_WHERE_ID.lastIndex = 0;
 		let m: RegExpExecArray | null;
 		while ((m = RE_WHERE_ID.exec(sql)) !== null) {
-			const v = toPosInt(args[Number(m[1]) - 1]);
+			const v = toId(args[Number(m[1]) - 1]);
 			if (v) {
 				ids.add(v);
 				found = true;
@@ -81,7 +81,7 @@ export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
 				.map((c) => c.trim().replace(/["'`\[\]]/g, ""));
 			const ci = cols.findIndex((c) => /^ID_Comanda$/i.test(c));
 			if (ci >= 0) {
-				const v = toPosInt(args[ci]);
+				const v = toId(args[ci]);
 				if (v) {
 					ids.add(v);
 					found = true;
@@ -108,9 +108,9 @@ export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
  */
 export function shouldReloadTicket(
 	info: ComandaSyncInfo,
-	activeId: number | null | undefined,
+	activeId: string | null | undefined,
 ): boolean {
 	if (info.uncertain) return true;
-	if (activeId == null || activeId <= 0) return false;
+	if (!activeId) return false;
 	return info.ids.includes(activeId);
 }

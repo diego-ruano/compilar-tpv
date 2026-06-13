@@ -373,12 +373,12 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<"create" | "edit">("create");
-  const [selectedTrabajadorId, setSelectedTrabajadorId] = useState<number | null>(null);
+  const [selectedTrabajadorId, setSelectedTrabajadorId] = useState<string | null>(null);
   const [selectedFecha, setSelectedFecha] = useState<string>("");
 
-  const [editIdAsignacion, setEditIdAsignacion] = useState<number | null>(null);
+  const [editIdAsignacion, setEditIdAsignacion] = useState<string | null>(null);
 
-  const [idTurno, setIdTurno] = useState<number | "">("");
+  const [idTurno, setIdTurno] = useState<string>("");
   const [area, setArea] = useState<string>("Sala");
   const [notas, setNotas] = useState<string>("");
 
@@ -513,7 +513,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
   };
 
-  const openCreate = (idTrab: number, fecha: string) => {
+  const openCreate = (idTrab: string, fecha: string) => {
     if (!isAdmin) return;
 
     setModalMode("create");
@@ -537,7 +537,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const openEdit = (a: Asignacion) => {
     if (!isAdmin) return;
 
-    if ((a.ID_Asignacion ?? 0) <= 0) {
+    if (!a.ID_Asignacion) {
       toast.info("Predeterminado", "Este turno viene del horario predeterminado. Crea uno real para editarlo.");
       return;
     }
@@ -589,7 +589,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         await createAsignacion.mutateAsync({
           idTrabajador: selectedTrabajadorId,
           fecha: selectedFecha,
-          idTurno: Number(idTurno),
+          idTurno: idTurno,
           area,
           horaInicio: horaInicio1,
           horaFin: horaFin1,
@@ -600,7 +600,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
           await createAsignacion.mutateAsync({
             idTrabajador: selectedTrabajadorId,
             fecha: selectedFecha,
-            idTurno: Number(idTurno),
+            idTurno: idTurno,
             area,
             horaInicio: horaInicio2,
             horaFin: horaFin2,
@@ -611,7 +611,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         if (!editIdAsignacion) return;
         await updateAsignacion.mutateAsync({
           idAsignacion: editIdAsignacion,
-          idTurno: Number(idTurno),
+          idTurno: idTurno,
           area,
           horaInicio: horaInicio1,
           horaFin: horaFin1,
@@ -626,10 +626,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     }
   };
 
-  const borrarAsignacion = async (idAsignacion: number) => {
+  const borrarAsignacion = async (idAsignacion: string) => {
     if (!isAdmin) return;
 
-    if (idAsignacion <= 0) {
+    if (!idAsignacion) {
       toast.info("Predeterminado", "Este turno es predeterminado. Crea uno real y luego podrás borrarlo.");
       return;
     }
@@ -789,7 +789,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                               ? `${ini}-${fin}${crossesMidnight(ini, fin) ? " (+1)" : ""}`
                               : "";
 
-                          const isVirtual = (a.ID_Asignacion ?? 0) <= 0;
+                          const isVirtual = !a.ID_Asignacion;
 
                           return (
                             <div
@@ -895,7 +895,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                 ? `${effIni}-${effFin}${crossesMidnight(effIni, effFin) ? " (+1)" : ""}`
                                 : "";
 
-                            const isVirtual = (a.ID_Asignacion ?? 0) <= 0;
+                            const isVirtual = !a.ID_Asignacion;
 
                             return (
                               <div
@@ -998,7 +998,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 <label className="text-sm font-medium">Turno</label>
                 <select
                   value={idTurno}
-                  onChange={(e) => setIdTurno(e.target.value ? Number(e.target.value) : "")}
+                  onChange={(e) => setIdTurno(e.target.value || "")}
                   className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
                 >
                   <option value="">Selecciona un turno</option>

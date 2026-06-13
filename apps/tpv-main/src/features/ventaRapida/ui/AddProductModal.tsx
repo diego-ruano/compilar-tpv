@@ -14,9 +14,9 @@ import {
 } from "../../InventaryComponents/inventarioQueries";
 import { useMode } from "../../../shared/stores/useMode";
 
-type CategoriaMini = { ID_Categoria: number; Nombre: string };
+type CategoriaMini = { ID_Categoria: string; Nombre: string };
 type ProveedorMini = {
-  ID_Proveedor: number;
+  ID_Proveedor: string;
   Nombre_Empresa: string;
   Email: string | null;
 };
@@ -46,7 +46,7 @@ function toSqlDateTimeOrNull(value: string): string | null {
   return t ? `${t} 00:00:00` : null;
 }
 
-function buildInitialLoteCode(productId: number): string {
+function buildInitialLoteCode(productId: string): string {
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
   return `INI-${productId}-${stamp}`;
 }
@@ -60,7 +60,7 @@ export default function AddProductModal({
   open: boolean;
   onClose: () => void;
   onSaved: () => void;
-  categoriaPreseleccionadaId: number | null;
+  categoriaPreseleccionadaId: string | null;
 }) {
   const toast = useToast();
 
@@ -75,7 +75,7 @@ export default function AddProductModal({
   const categorias: CategoriaMini[] = useMemo(
     () =>
       (categoriasQuery.data ?? []).map((c) => ({
-        ID_Categoria: Number(c.ID_Categoria),
+        ID_Categoria: String(c.ID_Categoria ?? ""),
         Nombre: String(c.Nombre ?? ""),
       })),
     [categoriasQuery.data],
@@ -83,15 +83,15 @@ export default function AddProductModal({
   const proveedores: ProveedorMini[] = useMemo(
     () =>
       (proveedoresQuery.data ?? []).map((p: ProveedorMiniRow) => ({
-        ID_Proveedor: Number(p.ID_Proveedor),
+        ID_Proveedor: String(p.ID_Proveedor ?? ""),
         Nombre_Empresa: String(p.Nombre_Empresa ?? ""),
         Email: p.Email ?? null,
       })),
     [proveedoresQuery.data],
   );
 
-  const [idCategoria, setIdCategoria] = useState<number | "">("");
-  const [idProveedor, setIdProveedor] = useState<number | "">("");
+  const [idCategoria, setIdCategoria] = useState<string>("");
+  const [idProveedor, setIdProveedor] = useState<string>("");
 
   const [nombre, setNombre] = useState("");
   const [precioVenta, setPrecioVenta] = useState("");
@@ -199,8 +199,8 @@ export default function AddProductModal({
       }
 
       const nuevoProductoId = await upsertProducto.mutateAsync({
-        id_categoria: Number(idCategoria),
-        id_proveedor: idProveedor === "" ? null : Number(idProveedor),
+        id_categoria: idCategoria,
+        id_proveedor: idProveedor === "" ? null : idProveedor,
         nombre: nombre.trim(),
         precio_venta: parseNullableNumber(precioVenta),
         stock_minimo: parseNullableNumber(stockMinimo),
@@ -211,7 +211,7 @@ export default function AddProductModal({
         ids_alergenos: [],
       });
 
-      if (!nuevoProductoId || nuevoProductoId <= 0) {
+      if (!nuevoProductoId) {
         throw new Error("No se pudo obtener el ID del producto creado.");
       }
 
@@ -225,7 +225,7 @@ export default function AddProductModal({
           cantidad_inicial: stockInicial,
           stock_disponible: stockInicial,
           fecha_entrada: toSqlDateTimeOrNull(ultimaEntrada),
-          id_proveedor: idProveedor === "" ? null : Number(idProveedor),
+          id_proveedor: idProveedor === "" ? null : idProveedor,
           notas: "Lote inicial creado desde venta rápida",
         });
       }
@@ -269,7 +269,7 @@ export default function AddProductModal({
           <label className="font-semibold">Categoría *</label>
           <select
             value={idCategoria}
-            onChange={(e) => setIdCategoria(e.target.value ? Number(e.target.value) : "")}
+            onChange={(e) => setIdCategoria(e.target.value || "")}
             className="
               border border-negro/20 rounded-xl w-full
               px-3 py-2 sm:py-2.5
@@ -291,7 +291,7 @@ export default function AddProductModal({
           <label className="font-semibold">Proveedor</label>
           <select
             value={idProveedor}
-            onChange={(e) => setIdProveedor(e.target.value ? Number(e.target.value) : "")}
+            onChange={(e) => setIdProveedor(e.target.value || "")}
             className="
               border border-negro/20 rounded-xl w-full
               px-3 py-2 sm:py-2.5

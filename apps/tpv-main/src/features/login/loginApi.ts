@@ -6,15 +6,15 @@
 import { invokeClient } from "@tpv/client";
 
 export type DbUser = {
-    id_usuario: number;
+    id_usuario: string;
     nombre: string;
     apellido: string | null;
     nombre_rol: string;
 };
 
 export type LoginOk = {
-    id_usuario: number;
-    id_trabajador: number | null;
+    id_usuario: string;
+    id_trabajador: string | null;
     nombre: string;
     apellido: string | null;
     rol: string;
@@ -77,7 +77,7 @@ function nowLocalSqlDateTime(): string {
 
 function mapDbUser(r: any): DbUser {
     return {
-        id_usuario: toNum(r?.id_usuario ?? r?.idUsuario ?? r?.ID_Usuario, 0),
+        id_usuario: toStr(r?.id_usuario ?? r?.idUsuario ?? r?.ID_Usuario, ""),
         nombre: toStr(r?.nombre ?? r?.Nombre, ""),
         apellido: toNullableStr(r?.apellido ?? r?.Apellido),
         nombre_rol: toStr(r?.nombre_rol ?? r?.nombreRol ?? r?.Nombre_Rol, ""),
@@ -89,8 +89,8 @@ function mapLoginOk(r: any): LoginOk {
         r?.id_trabajador ?? r?.idTrabajador ?? r?.ID_Trabajador ?? null;
 
     return {
-        id_usuario: toNum(r?.id_usuario ?? r?.idUsuario ?? r?.ID_Usuario, 0),
-        id_trabajador: idTrabajadorRaw == null ? null : toNum(idTrabajadorRaw, 0),
+        id_usuario: toStr(r?.id_usuario ?? r?.idUsuario ?? r?.ID_Usuario, ""),
+        id_trabajador: idTrabajadorRaw == null ? null : toStr(idTrabajadorRaw, ""),
         nombre: toStr(r?.nombre ?? r?.Nombre, ""),
         apellido: toNullableStr(r?.apellido ?? r?.Apellido),
         rol: toStr(r?.rol ?? r?.Rol ?? r?.nombre_rol ?? r?.nombreRol, ""),
@@ -138,12 +138,12 @@ export async function listLoginUsers(): Promise<DbUser[]> {
 }
 
 export async function loginUser(params: {
-    idUsuario: number;
+    idUsuario: string;
     pin: string;
 }): Promise<LoginOk> {
     const data = await invokeClient<any>("login_user", {
         args: {
-            id_usuario: Number(params.idUsuario),
+            id_usuario: params.idUsuario,
             pin: String(params.pin ?? ""),
         },
     });
@@ -151,22 +151,22 @@ export async function loginUser(params: {
 }
 
 export async function getTodayPunchStatus(params: {
-    idUsuario: number;
+    idUsuario: string;
 }): Promise<PunchStatus> {
     const data = await invokeClient<any>("get_today_punch_status", {
-        args: { id_usuario: Number(params.idUsuario) },
+        args: { id_usuario: params.idUsuario },
     });
     return mapPunchStatus(data);
 }
 
 export async function punch(params: {
-    idUsuario: number;
+    idUsuario: string;
     pin: string;
     tipo: "entrada" | "salida";
 }): Promise<PunchStatus> {
     const data = await invokeClient<any>("punch", {
         args: {
-            id_usuario: Number(params.idUsuario),
+            id_usuario: params.idUsuario,
             pin: String(params.pin ?? ""),
             tipo: params.tipo,
             fecha: todayLocalYmd(),
@@ -177,12 +177,12 @@ export async function punch(params: {
 }
 
 export async function setTurnoPartidoHoy(params: {
-    idUsuario: number;
+    idUsuario: string;
     turnoPartido: boolean;
 }): Promise<string> {
     const data = await invokeClient<any>("set_turno_partido_hoy", {
         args: {
-            id_usuario: Number(params.idUsuario),
+            id_usuario: params.idUsuario,
             turno_partido: Boolean(params.turnoPartido),
             fecha: todayLocalYmd(),
         },
@@ -198,13 +198,13 @@ export async function setTurnoPartidoHoy(params: {
  * del seed. No es local-first: invoca el comando que firma y postea al worker.
  */
 export async function uploadInitialSetupToCloud(params: {
-    idUsuario: number;
+    idUsuario: string;
     email: string;
     pin: string;
 }): Promise<void> {
     await invokeClient<string>("config_upload_initial_setup", {
         args: {
-            id_usuario: Number(params.idUsuario),
+            id_usuario: params.idUsuario,
             email: String(params.email ?? ""),
             pin: String(params.pin ?? ""),
         },
@@ -212,14 +212,14 @@ export async function uploadInitialSetupToCloud(params: {
 }
 
 export async function completeInitialSetup(params: {
-    idUsuario: number;
+    idUsuario: string;
     pinActual: string;
     pinNuevo: string;
     emailNuevo: string;
 }): Promise<string> {
     const data = await invokeClient<any>("complete_initial_setup", {
         args: {
-            id_usuario: Number(params.idUsuario),
+            id_usuario: params.idUsuario,
             pin_actual: String(params.pinActual ?? ""),
             pin_nuevo: String(params.pinNuevo ?? ""),
             email_nuevo: String(params.emailNuevo ?? ""),

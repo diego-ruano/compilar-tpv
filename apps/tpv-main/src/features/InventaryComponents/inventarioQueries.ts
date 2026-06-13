@@ -25,12 +25,12 @@ import type { CategoriaDisplay, ProductoDisplay } from "./hooks/useInventario";
 export const inventarioKeys = {
   all: ["inventario"] as const,
   categorias: () => ["inventario", "categorias"] as const,
-  productosByCategoria: (idCategoria: number) =>
+  productosByCategoria: (idCategoria: string) =>
     ["inventario", "productos", idCategoria] as const,
   resumen: () => ["inventario", "resumen"] as const,
-  productoDetalle: (idProducto: number) =>
+  productoDetalle: (idProducto: string) =>
     ["inventario", "producto-detalle", idProducto] as const,
-  lotes: (idProducto: number) => ["inventario", "lotes", idProducto] as const,
+  lotes: (idProducto: string) => ["inventario", "lotes", idProducto] as const,
   proveedoresMini: () => ["inventario", "proveedores-mini"] as const,
   alergenos: () => ["inventario", "alergenos"] as const,
 };
@@ -58,7 +58,7 @@ export function useCategorias() {
       const rows = await inventarioAPI.listCategorias();
       return Promise.all(
         (rows ?? [])
-          .filter((c) => Number.isFinite(c.ID_Categoria) && c.ID_Categoria > 0)
+          .filter((c) => c.ID_Categoria.length > 0)
           .map(async (cat) => {
             const urlImagen = await resolverUrlImagen(cat.Ruta_Imagen);
             return { ...cat, urlImagen };
@@ -72,15 +72,15 @@ export function useCategorias() {
  * Productos "display" (con urlImagen ya resuelta) de una categoría — cacheados.
  * Sólo se ejecuta cuando hay categoría seleccionada (idCategoria > 0).
  */
-export function useProductosByCategoria(idCategoria: number | null) {
+export function useProductosByCategoria(idCategoria: string | null) {
   return useQuery({
-    queryKey: inventarioKeys.productosByCategoria(Number(idCategoria ?? 0)),
-    enabled: idCategoria != null && Number(idCategoria) > 0,
+    queryKey: inventarioKeys.productosByCategoria(idCategoria ?? ""),
+    enabled: !!idCategoria,
     queryFn: async (): Promise<ProductoDisplay[]> => {
-      const rows = await inventarioAPI.listProductosByCategoria(Number(idCategoria));
+      const rows = await inventarioAPI.listProductosByCategoria(idCategoria ?? "");
       return Promise.all(
         (rows ?? [])
-          .filter((p) => Number.isFinite(p.ID_Producto) && p.ID_Producto > 0)
+          .filter((p) => p.ID_Producto.length > 0)
           .map(async (p) => {
             const urlImagen = await resolverUrlImagen(p.Ruta_Imagen);
             return { ...p, urlImagen };
@@ -99,20 +99,20 @@ export function useResumenInventario() {
 }
 
 /** Detalle de un producto (con alérgenos) — cacheado por id. */
-export function useProductoDetalle(idProducto: number | null) {
+export function useProductoDetalle(idProducto: string | null) {
   return useQuery({
-    queryKey: inventarioKeys.productoDetalle(Number(idProducto ?? 0)),
-    enabled: idProducto != null && Number(idProducto) > 0,
-    queryFn: () => inventarioAPI.getProductoDetalle(Number(idProducto)),
+    queryKey: inventarioKeys.productoDetalle(idProducto ?? ""),
+    enabled: !!idProducto,
+    queryFn: () => inventarioAPI.getProductoDetalle(idProducto ?? ""),
   });
 }
 
 /** Lotes de un producto — cacheados por id. */
-export function useLotesByProducto(idProducto: number | null) {
+export function useLotesByProducto(idProducto: string | null) {
   return useQuery({
-    queryKey: inventarioKeys.lotes(Number(idProducto ?? 0)),
-    enabled: idProducto != null && Number(idProducto) > 0,
-    queryFn: () => inventarioAPI.listLotesByProducto(Number(idProducto)),
+    queryKey: inventarioKeys.lotes(idProducto ?? ""),
+    enabled: !!idProducto,
+    queryFn: () => inventarioAPI.listLotesByProducto(idProducto ?? ""),
   });
 }
 
@@ -154,7 +154,7 @@ export function useUpsertProducto() {
 export function useDeleteProducto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (idProducto: number) => inventarioAPI.deleteProducto(idProducto),
+    mutationFn: (idProducto: string) => inventarioAPI.deleteProducto(idProducto),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }

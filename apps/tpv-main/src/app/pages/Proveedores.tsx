@@ -70,10 +70,10 @@ function safeExtFromName(name: string) {
 
 export default function Proveedores() {
   const [openAddProduct, setOpenAddProduct] = useState(false);
-  const [productIdToEdit, setProductIdToEdit] = useState<number | null>(null);
+  const [productIdToEdit, setProductIdToEdit] = useState<string | null>(null);
 
   const [openProductDetail, setOpenProductDetail] = useState(false);
-  const [productDetailId, setProductDetailId] = useState<number | null>(null);
+  const [productDetailId, setProductDetailId] = useState<string | null>(null);
 
   const [vista, setVista] = useState<Vista>("list");
   const [busqueda, setBusqueda] = useState("");
@@ -106,7 +106,7 @@ export default function Proveedores() {
 
   const [confirmAccion, setConfirmAccion] = useState<
     | { tipo: "proveedor"; proveedor: ProveedorUI }
-    | { tipo: "producto"; idProducto: number; nombreProducto?: string; cerrarDetalle?: boolean }
+    | { tipo: "producto"; idProducto: string; nombreProducto?: string; cerrarDetalle?: boolean }
     | null
   >(null);
   const [confirmando, setConfirmando] = useState(false);
@@ -141,15 +141,15 @@ export default function Proveedores() {
 
   const [busquedaProductos, setBusquedaProductos] = useState("");
   const [productosDisponibles, setProductosDisponibles] = useState<ProductoUI[]>([]);
-  const [seleccionProductoIds, setSeleccionProductoIds] = useState<Set<number>>(new Set());
-  const [categoriaActivaId, setCategoriaActivaId] = useState<number | null>(null);
+  const [seleccionProductoIds, setSeleccionProductoIds] = useState<Set<string>>(new Set());
+  const [categoriaActivaId, setCategoriaActivaId] = useState<string | null>(null);
 
   const [pNombre, setPNombre] = useState("");
   const [pPrecio, setPPrecio] = useState("");
   const [pStockActual, setPStockActual] = useState("");
   const [pStockMin, setPStockMin] = useState("");
   const [pUnidad, setPUnidad] = useState("");
-  const [pCategoriaId, setPCategoriaId] = useState<number | "">("");
+  const [pCategoriaId, setPCategoriaId] = useState<string>("");
 
   async function proveedorRutaToUrl(ruta: string | null) {
     if (!ruta) return "";
@@ -206,8 +206,8 @@ export default function Proveedores() {
       setProveedores(ui);
 
       if (proveedorActivo) {
-        const id = Number(proveedorActivo.ID_Proveedor);
-        const updated = ui.find((x) => Number(x.ID_Proveedor) === id);
+        const id = proveedorActivo.ID_Proveedor;
+        const updated = ui.find((x) => x.ID_Proveedor === id);
         if (updated) setProveedorActivo(updated);
       }
     })();
@@ -269,7 +269,7 @@ export default function Proveedores() {
   const productosDisponiblesFiltrados = useMemo(() => {
     let list = productosDisponibles;
     if (categorias.length > 0 && categoriaActivaId !== null) {
-      list = list.filter((p) => Number(p.ID_Categoria) === Number(categoriaActivaId));
+      list = list.filter((p) => p.ID_Categoria === categoriaActivaId);
     }
     const s = busquedaProductos.trim().toLowerCase();
     if (!s) return list;
@@ -377,7 +377,7 @@ export default function Proveedores() {
       }
 
       const ok = await saveProveedor.mutateAsync({
-        idProveedor: modalProveedorModo === "editar" ? Number(proveedorActivo?.ID_Proveedor ?? 0) : null,
+        idProveedor: modalProveedorModo === "editar" ? (proveedorActivo?.ID_Proveedor ?? null) : null,
         nombreEmpresa: nombre,
         contacto: contacto || null,
         telefono: telefono || null,
@@ -408,7 +408,7 @@ export default function Proveedores() {
     setConfirmAccion({ tipo: "proveedor", proveedor: proveedorActivo });
   }
 
-  function eliminarProductoDelProveedor(idProducto: number, cerrarDetalle = false) {
+  function eliminarProductoDelProveedor(idProducto: string, cerrarDetalle = false) {
     if (!proveedorActivo) return;
     const prod = productosProveedor.find((x) => x.ID_Producto === idProducto);
 
@@ -427,7 +427,7 @@ export default function Proveedores() {
     try {
       if (confirmAccion.tipo === "proveedor") {
         try {
-          const id = Number(confirmAccion.proveedor.ID_Proveedor);
+          const id = confirmAccion.proveedor.ID_Proveedor;
           const deleted = await deleteProveedor.mutateAsync({ idProveedor: id });
           if (!deleted) {
             toast.error("Error", "No se pudo eliminar el proveedor.");
@@ -446,11 +446,11 @@ export default function Proveedores() {
 
       if (confirmAccion.tipo === "producto") {
         try {
-          const idProv = Number(proveedorActivo.ID_Proveedor);
+          const idProv = proveedorActivo.ID_Proveedor;
 
           const next = productosProveedor
             .filter((x) => x.ID_Producto !== confirmAccion.idProducto)
-            .map((x) => Number(x.ID_Producto));
+            .map((x) => x.ID_Producto);
 
           const ok = await setVinculos.mutateAsync({
             idProveedor: idProv,
@@ -490,15 +490,15 @@ export default function Proveedores() {
     setLoadingVincular(true);
 
     try {
-      const idProv = Number(proveedorActivo.ID_Proveedor);
+      const idProv = proveedorActivo.ID_Proveedor;
       const rows = await proveedoresGetProductosAll();
       const ui = await mapProductosUI(rows);
 
       setProductosDisponibles(ui);
 
-      const pre = new Set<number>();
+      const pre = new Set<string>();
       for (const p of ui) {
-        if (Number(p.ID_Proveedor) === idProv) pre.add(p.ID_Producto);
+        if (p.ID_Proveedor === idProv) pre.add(p.ID_Producto);
       }
       setSeleccionProductoIds(pre);
     } catch (e) {
@@ -510,7 +510,7 @@ export default function Proveedores() {
     }
   }
 
-  function toggleSeleccion(idProducto: number) {
+  function toggleSeleccion(idProducto: string) {
     setSeleccionProductoIds((prev) => {
       const next = new Set(prev);
       if (next.has(idProducto)) next.delete(idProducto);
@@ -522,13 +522,13 @@ export default function Proveedores() {
   async function guardarVinculos() {
     if (!proveedorActivo) return;
 
-    const idProv = Number(proveedorActivo.ID_Proveedor);
+    const idProv = proveedorActivo.ID_Proveedor;
     const idsSeleccionados = Array.from(seleccionProductoIds);
 
     try {
       const ok = await setVinculos.mutateAsync({
         idProveedor: idProv,
-        productoIds: idsSeleccionados.map(Number),
+        productoIds: idsSeleccionados,
       });
       if (!ok) {
         toast.error("Error", "No se pudieron guardar los vínculos.");
@@ -567,8 +567,8 @@ export default function Proveedores() {
       return;
     }
 
-    const idProv = Number(proveedorActivo.ID_Proveedor);
-    const idCat = Number(pCategoriaId);
+    const idProv = proveedorActivo.ID_Proveedor;
+    const idCat = pCategoriaId;
     const precio = toNumOrNull(pPrecio);
     const stockA = toNumOrNull(pStockActual);
     const stockM = toNumOrNull(pStockMin);
@@ -600,7 +600,7 @@ export default function Proveedores() {
 
   const categoriaActivaNombre = useMemo(() => {
     if (categoriaActivaId === null) return "Todas";
-    const c = categorias.find((x) => Number(x.ID_Categoria) === Number(categoriaActivaId));
+    const c = categorias.find((x) => x.ID_Categoria === categoriaActivaId);
     return c?.Nombre ?? "Categoría";
   }, [categoriaActivaId, categorias]);
 
@@ -997,15 +997,15 @@ export default function Proveedores() {
                   ) : (
                     categorias.map((c) => {
                       const count = productosDisponibles.filter(
-                        (p) => Number(p.ID_Categoria) === Number(c.ID_Categoria),
+                        (p) => p.ID_Categoria === c.ID_Categoria,
                       ).length;
-                      const active = Number(categoriaActivaId) === Number(c.ID_Categoria);
+                      const active = categoriaActivaId === c.ID_Categoria;
 
                       return (
                         <button
                           key={c.ID_Categoria}
                           type="button"
-                          onClick={() => setCategoriaActivaId(Number(c.ID_Categoria))}
+                          onClick={() => setCategoriaActivaId(c.ID_Categoria)}
                           className={cn(
                             "w-full cursor-pointer border-b border-border px-3 py-2 text-left transition",
                             active
@@ -1113,7 +1113,7 @@ export default function Proveedores() {
             <label className="text-sm font-semibold text-fg">Categoría *</label>
             <select
               value={pCategoriaId}
-              onChange={(e) => setPCategoriaId(e.target.value ? Number(e.target.value) : "")}
+              onChange={(e) => setPCategoriaId(e.target.value || "")}
               className="mt-1 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
             >
               {categorias.length === 0 ? (

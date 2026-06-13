@@ -5,18 +5,18 @@ import { create } from "zustand";
 export type AuthState = {
     // Estado de sesión
     role: string; // "" = no logueado
-    idUsuario: number | null;
+    idUsuario: string | null;
     nombre: string | null;
-    idTrabajador: number | null;
+    idTrabajador: string | null;
     requiresSetup: boolean;
     email: string | null;
 
     // Acciones
     setSession: (data: {
         role: string;
-        idUsuario: number;
+        idUsuario: string;
         nombre: string;
-        idTrabajador: number | null;
+        idTrabajador: string | null;
         requiresSetup: boolean;
         email: string | null;
     }) => void;

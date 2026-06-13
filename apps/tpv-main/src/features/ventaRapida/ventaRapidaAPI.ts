@@ -15,7 +15,7 @@ import { invokeClient } from "@tpv/client";
 ========================================================= */
 
 export type CategoriaRow = {
-    ID_Categoria: number;
+    ID_Categoria: string;
     Nombre: string;
     Nombre_Imagen: string | null;
     Ruta_Imagen: string | null;
@@ -23,8 +23,8 @@ export type CategoriaRow = {
 };
 
 export type ProductoRow = {
-    ID_Producto: number;
-    ID_Categoria: number;
+    ID_Producto: string;
+    ID_Categoria: string;
     Nombre: string;
 
     Precio_Venta: number | null;
@@ -37,7 +37,7 @@ export type ProductoRow = {
 };
 
 export type ComandaBarraRow = {
-    ID_Comanda: number;
+    ID_Comanda: string;
     Fecha_Hora_Apertura: string;
     Estado: string;
 
@@ -49,9 +49,9 @@ export type ComandaBarraRow = {
 };
 
 export type LineaComandaRow = {
-    ID_Detalle: number;
-    ID_Comanda: number;
-    ID_Producto: number;
+    ID_Detalle: string;
+    ID_Comanda: string;
+    ID_Producto: string;
     Cantidad: number;
     Precio_Unitario: number;
     Notas: string | null;
@@ -61,8 +61,8 @@ export type LineaComandaRow = {
 };
 
 export type VerTicketsDetalleRow = {
-    ID_Detalle: number;
-    ID_Producto: number;
+    ID_Detalle: string;
+    ID_Producto: string;
     Nombre: string;
     Cantidad: number;
     Precio_Unitario: number;
@@ -72,25 +72,25 @@ export type VerTicketsDetalleRow = {
 };
 
 export type IndexRow = {
-    ID_Comanda: number;
+    ID_Comanda: string;
     Productos: string | null;
     NumLineas: number;
     Unidades: number;
 };
 
 export type StockItem = {
-    productoId: number;
+    productoId: string;
     cantidad: number;
 };
 
 export type VrAddLineaComandaResult = {
     ok: boolean;
-    idDetalle: number | null;
+    idDetalle: string | null;
 };
 
 export type VrCobrarFraccionadoResult = {
     ok: boolean;
-    idPago: number | null;
+    idPago: string | null;
 
     /**
      * Presente cuando el cobro falla por stock insuficiente.
@@ -98,14 +98,14 @@ export type VrCobrarFraccionadoResult = {
      * transacción, así que un fallo de stock implica que NO se creó el pago.
      */
     error?: "insufficient_stock" | string;
-    productoId?: number;
+    productoId?: string;
     requested?: number;
     available?: number;
 };
 
 export type VrBootstrapResult = {
-    idComanda: number;
-    id_comanda: number;
+    idComanda: string;
+    id_comanda: string;
     categorias: CategoriaRow[];
     lineas: LineaComandaRow[];
 };
@@ -114,11 +114,10 @@ export type VrBootstrapResult = {
   Helpers
 ========================================================= */
 
-function normalizePositiveIds(values: number[]): number[] {
+function normalizePositiveIds(values: string[]): string[] {
     return (values ?? [])
-        .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0)
-        .map((n) => Math.trunc(n));
+        .map((v) => String(v ?? "").trim())
+        .filter((s) => s.length > 0);
 }
 
 /*
@@ -128,14 +127,14 @@ function normalizePositiveIds(values: number[]): number[] {
 */
 function parseInsufficientStock(
     err: unknown,
-): { productoId?: number; requested?: number; available?: number } | null {
+): { productoId?: string; requested?: number; available?: number } | null {
     const msg = String((err as any)?.message ?? err ?? "");
     if (!msg.includes("insufficient_stock")) return null;
 
     const local = msg.match(/insufficient_stock:(\d+):([\d.]+):([\d.]+)/);
     if (local) {
         return {
-            productoId: Number(local[1]) || undefined,
+            productoId: local[1] || undefined,
             requested: Number(local[2]) || undefined,
             available: Number(local[3]) || undefined,
         };
@@ -149,16 +148,16 @@ function parseInsufficientStock(
 ========================================================= */
 
 export async function vrBootstrap(
-    idTrabajador: number | null,
+    idTrabajador: string | null,
 ): Promise<VrBootstrapResult> {
-    const idComanda = await invokeClient<number>("vr_create_comanda_barra", {
+    const idComanda = await invokeClient<string>("vr_create_comanda_barra", {
         args: {
-            id_trabajador: idTrabajador == null ? null : Number(idTrabajador),
+            id_trabajador: idTrabajador == null ? null : idTrabajador,
             get_or_create: false,
         },
     });
 
-    if (!(idComanda > 0)) {
+    if (!idComanda) {
         throw new Error("bootstrap_id_comanda_missing");
     }
 
@@ -187,11 +186,11 @@ export async function vrListCategoriasVendibles(): Promise<CategoriaRow[]> {
 }
 
 export async function vrListProductosByCategoria(
-    idCategoria: number,
+    idCategoria: string,
 ): Promise<ProductoRow[]> {
     const rows = await invokeClient<ProductoRow[]>(
         "vr_list_productos_by_categoria",
-        { args: { id_categoria: Number(idCategoria) } },
+        { args: { id_categoria: idCategoria } },
     );
     return rows ?? [];
 }
@@ -223,15 +222,15 @@ export async function vrListComandasBarra(opts: {
 }
 
 export async function vrGetLineasComanda(
-    idComanda: number,
+    idComanda: string,
 ): Promise<LineaComandaRow[]> {
     const rows = await invokeClient<LineaComandaRow[]>("vr_get_lineas_comanda", {
-        args: { id_comanda: Number(idComanda) },
+        args: { id_comanda: idComanda },
     });
     return rows ?? [];
 }
 
-export async function vrGetIndexRows(idsHoy: number[]): Promise<IndexRow[]> {
+export async function vrGetIndexRows(idsHoy: string[]): Promise<IndexRow[]> {
     const ids = normalizePositiveIds(idsHoy);
     if (ids.length === 0) return [];
 
@@ -242,11 +241,11 @@ export async function vrGetIndexRows(idsHoy: number[]): Promise<IndexRow[]> {
 }
 
 export async function vrGetDetallesVerTicket(
-    idComanda: number,
+    idComanda: string,
 ): Promise<VerTicketsDetalleRow[]> {
     const rows = await invokeClient<VerTicketsDetalleRow[]>(
         "vr_get_detalles_ver_ticket",
-        { args: { id_comanda: Number(idComanda) } },
+        { args: { id_comanda: idComanda } },
     );
     return rows ?? [];
 }
@@ -256,16 +255,16 @@ export async function vrGetDetallesVerTicket(
 ========================================================= */
 
 export async function vrGetOrCreateComandaBarra(
-    idTrabajador: number | null,
-): Promise<number> {
-    const id = await invokeClient<number>("vr_create_comanda_barra", {
+    idTrabajador: string | null,
+): Promise<string> {
+    const id = await invokeClient<string>("vr_create_comanda_barra", {
         args: {
-            id_trabajador: idTrabajador == null ? null : Number(idTrabajador),
+            id_trabajador: idTrabajador == null ? null : idTrabajador,
             get_or_create: true,
         },
     });
 
-    if (!(id > 0)) {
+    if (!id) {
         throw new Error("id_comanda_missing");
     }
 
@@ -273,16 +272,16 @@ export async function vrGetOrCreateComandaBarra(
 }
 
 export async function vrCreateComandaBarra(
-    idTrabajador: number | null,
-): Promise<number> {
-    const id = await invokeClient<number>("vr_create_comanda_barra", {
+    idTrabajador: string | null,
+): Promise<string> {
+    const id = await invokeClient<string>("vr_create_comanda_barra", {
         args: {
-            id_trabajador: idTrabajador == null ? null : Number(idTrabajador),
+            id_trabajador: idTrabajador == null ? null : idTrabajador,
             get_or_create: false,
         },
     });
 
-    if (!(id > 0)) {
+    if (!id) {
         throw new Error("id_comanda_missing");
     }
 
@@ -290,15 +289,15 @@ export async function vrCreateComandaBarra(
 }
 
 export async function vrAddLineaComanda(
-    idComanda: number,
-    idProducto: number,
+    idComanda: string,
+    idProducto: string,
     cantidad: number,
     precioUnitario: number,
 ): Promise<VrAddLineaComandaResult> {
-    const idDetalle = await invokeClient<number>("vr_add_linea_comanda", {
+    const idDetalle = await invokeClient<string>("vr_add_linea_comanda", {
         args: {
-            id_comanda: Number(idComanda),
-            id_producto: Number(idProducto),
+            id_comanda: idComanda,
+            id_producto: idProducto,
             cantidad: Number(cantidad),
             precio_unitario: Number(precioUnitario),
         },
@@ -306,69 +305,69 @@ export async function vrAddLineaComanda(
 
     return {
         ok: true,
-        idDetalle: idDetalle > 0 ? idDetalle : null,
+        idDetalle: idDetalle || null,
     };
 }
 
 export async function vrRemoveLastUnpaidLinea(
-    idComanda: number,
-    idProducto: number,
+    idComanda: string,
+    idProducto: string,
 ): Promise<boolean> {
     return await invokeClient<boolean>("vr_remove_last_unpaid_linea", {
         args: {
-            id_comanda: Number(idComanda),
-            id_producto: Number(idProducto),
+            id_comanda: idComanda,
+            id_producto: idProducto,
         },
     });
 }
 
 export async function vrDeleteLineaIfUnpaid(
-    idComanda: number,
-    idDetalle: number,
+    idComanda: string,
+    idDetalle: string,
 ): Promise<boolean> {
     return await invokeClient<boolean>("vr_delete_linea_if_unpaid", {
         args: {
-            id_comanda: Number(idComanda),
-            id_detalle: Number(idDetalle),
+            id_comanda: idComanda,
+            id_detalle: idDetalle,
         },
     });
 }
 
 export async function vrUpdateNotaDetalle(
-    idDetalle: number,
+    idDetalle: string,
     nota: string,
 ): Promise<boolean> {
     return await invokeClient<boolean>("vr_update_nota_detalle", {
         args: {
-            id_detalle: Number(idDetalle),
+            id_detalle: idDetalle,
             nota: String(nota ?? ""),
         },
     });
 }
 
 export async function vrCobrarFraccionado(argsInput: {
-    idComanda: number;
+    idComanda: string;
     metodo: "Tarjeta" | "Efectivo";
     importeTotal: number;
-    idUsuarioCobrador: number | null;
-    idTrabajadorCobrador: number | null;
-    detalles: number[];
+    idUsuarioCobrador: string | null;
+    idTrabajadorCobrador: string | null;
+    detalles: string[];
     opId?: string;
 }): Promise<VrCobrarFraccionadoResult> {
     try {
         const ok = await invokeClient<boolean>("vr_cobrar_fraccionado", {
             args: {
-                id_comanda: Number(argsInput.idComanda),
+                id_comanda: argsInput.idComanda,
                 metodo: argsInput.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
                 importe_total: Number(argsInput.importeTotal),
                 id_usuario_cobrador:
                     argsInput.idUsuarioCobrador == null
                         ? null
-                        : Number(argsInput.idUsuarioCobrador),
+                        : argsInput.idUsuarioCobrador,
                 id_trabajador_cobrador:
                     argsInput.idTrabajadorCobrador == null
                         ? null
-                        : Number(argsInput.idTrabajadorCobrador),
+                        : argsInput.idTrabajadorCobrador,
                 detalles: normalizePositiveIds(argsInput.detalles ?? []),
             },
         });
@@ -406,13 +405,12 @@ export async function vrRestarStock(
 ): Promise<boolean> {
     const lineas = (items ?? [])
         .map((it) => ({
-            producto_id: Number(it.productoId),
+            producto_id: String(it.productoId ?? "").trim(),
             cantidad: Number(it.cantidad),
         }))
         .filter(
             (it) =>
-                Number.isFinite(it.producto_id) &&
-                it.producto_id > 0 &&
+                it.producto_id.length > 0 &&
                 Number.isFinite(it.cantidad) &&
                 it.cantidad > 0,
         );
@@ -427,9 +425,9 @@ export async function vrRestarStock(
 }
 
 export async function vrDeleteComandaIfSafe(
-    idComanda: number,
+    idComanda: string,
 ): Promise<boolean> {
     return await invokeClient<boolean>("vr_delete_comanda_if_safe", {
-        args: { id_comanda: Number(idComanda) },
+        args: { id_comanda: idComanda },
     });
 }

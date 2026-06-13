@@ -11,20 +11,20 @@ import type { ReservaDto, ReservasMetaDto } from "@tpv/contracts";
 export type Turno = "DESAYUNO" | "COMIDA" | "CAFE" | "CENA";
 
 export type Zona = {
-    idZona: number;
+    idZona: string;
     nombre: string;
 };
 
 export type Mesa = {
-    idMesa: number;
-    idZona: number;
+    idMesa: string;
+    idZona: string;
     nombre: string;
     capacidad: number;
 };
 
 export type ReservaRow = {
-    ID_Reserva: number;
-    ID_Mesa: number;
+    ID_Reserva: string;
+    ID_Mesa: string;
     Dia_YMD: string;
     Hora: string;
     Turno: string | null;
@@ -36,7 +36,7 @@ export type ReservaRow = {
     Telefono_Cliente: string | null;
     Email_Cliente: string | null;
 
-    ID_Zona: number;
+    ID_Zona: string;
     Numero_Mesa: string;
     Capacidad: number;
     Nombre_Zona: string;
@@ -48,7 +48,7 @@ export type ReservasMeta = {
 };
 
 export type ReservaSaveInput = {
-    idReserva?: number | null;
+    idReserva?: string | null;
 
     diaYMD: string;
     hora: string;
@@ -57,7 +57,7 @@ export type ReservaSaveInput = {
     nota?: string | null;
     estado?: string | null;
 
-    idMesa: number;
+    idMesa: string;
 
     nombreCliente: string;
     telefono?: string | null;
@@ -78,6 +78,10 @@ function toNullableStr(v: unknown): string | null {
     return s ? s : null;
 }
 
+function toId(v: unknown): string {
+    return String(v ?? "").trim();
+}
+
 function turnoPorHora(hhmm: string): Turno {
     const [hhStr, mmStr] = String(hhmm || "00:00").split(":");
     const h = Number(hhStr ?? 0);
@@ -94,27 +98,27 @@ function turnoPorHora(hhmm: string): Turno {
 function mapMeta(r: ReservasMetaDto): ReservasMeta {
     const zonas: Zona[] = (r.zonas ?? [])
         .map((z): Zona => ({
-            idZona: toNum(z.id_zona, 0),
+            idZona: toId(z.id_zona),
             nombre: String(z.nombre_zona ?? ""),
         }))
-        .filter((z) => z.idZona > 0);
+        .filter((z) => z.idZona.length > 0);
 
     const mesas: Mesa[] = (r.mesas ?? [])
         .map((m): Mesa => ({
-            idMesa: toNum(m.id_mesa, 0),
-            idZona: toNum(m.id_zona, 0),
+            idMesa: toId(m.id_mesa),
+            idZona: toId(m.id_zona),
             nombre: String(m.numero_mesa ?? ""),
             capacidad: toNum(m.capacidad, 0),
         }))
-        .filter((m) => m.idMesa > 0);
+        .filter((m) => m.idMesa.length > 0);
 
     return { zonas, mesas };
 }
 
 function mapReserva(r: ReservaDto): ReservaRow {
     return {
-        ID_Reserva: toNum(r.id_reserva, 0),
-        ID_Mesa: toNum(r.id_mesa, 0),
+        ID_Reserva: toId(r.id_reserva),
+        ID_Mesa: toId(r.id_mesa),
         Dia_YMD: String(r.dia_ymd ?? ""),
         Hora: String(r.hora ?? ""),
         Turno: toNullableStr(r.turno),
@@ -126,7 +130,7 @@ function mapReserva(r: ReservaDto): ReservaRow {
         Telefono_Cliente: toNullableStr(r.telefono_cliente),
         Email_Cliente: toNullableStr(r.email_cliente),
 
-        ID_Zona: toNum(r.id_zona, 0),
+        ID_Zona: toId(r.id_zona),
         Numero_Mesa: String(r.numero_mesa ?? ""),
         Capacidad: toNum(r.capacidad, 0),
         Nombre_Zona: String(r.nombre_zona ?? ""),
@@ -161,7 +165,7 @@ export async function reservasSave(input: ReservaSaveInput): Promise<boolean> {
             comensales: Number(input.comensales),
             nota: input.nota ?? null,
             estado: input.estado ?? null,
-            id_mesa: Number(input.idMesa),
+            id_mesa: input.idMesa,
             nombre_cliente: input.nombreCliente,
             telefono: input.telefono ?? null,
             email: input.email ?? null,
@@ -171,9 +175,9 @@ export async function reservasSave(input: ReservaSaveInput): Promise<boolean> {
 }
 
 export async function reservasDelete(params: {
-    idReserva: number;
+    idReserva: string;
 }): Promise<boolean> {
     return await invokeClient<boolean>("reservas_delete", {
-        args: { id_reserva: Number(params.idReserva) },
+        args: { id_reserva: params.idReserva },
     });
 }
