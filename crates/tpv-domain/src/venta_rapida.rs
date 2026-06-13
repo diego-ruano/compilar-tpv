@@ -24,11 +24,11 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
 /// Datos de un cobro fraccionado ya validados/normalizados (sin op_id/outbox).
 #[derive(Debug, Clone)]
 pub struct CobroFraccionado {
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub metodo: String,
     pub importe_total: f64,
-    pub id_usuario_cobrador: Option<i64>,
-    pub id_trabajador_cobrador: Option<i64>,
-    /// IDs de detalle a cobrar (>0, ordenados y deduplicados).
-    pub detalles: Vec<i64>,
+    pub id_usuario_cobrador: Option<String>,
+    pub id_trabajador_cobrador: Option<String>,
+    /// IDs de detalle a cobrar (no vacíos, ordenados y deduplicados).
+    pub detalles: Vec<String>,
 }

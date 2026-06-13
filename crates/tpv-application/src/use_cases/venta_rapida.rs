@@ -25,10 +25,10 @@ pub async fn list_productos_by_categoria(
     repo: &dyn VentaRapidaRepository,
     args: VrIdCategoriaArgs,
 ) -> AppResult<Vec<ProductoRow>> {
-    if args.id_categoria <= 0 {
+    if args.id_categoria.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.list_productos_by_categoria(args.id_categoria).await
+    repo.list_productos_by_categoria(&args.id_categoria).await
 }
 
 pub async fn search_productos(
@@ -54,17 +54,22 @@ pub async fn get_lineas_comanda(
     repo: &dyn VentaRapidaRepository,
     args: VrIdComandaArgs,
 ) -> AppResult<Vec<LineaComandaRow>> {
-    if args.id_comanda <= 0 {
+    if args.id_comanda.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.get_lineas_comanda(args.id_comanda).await
+    repo.get_lineas_comanda(&args.id_comanda).await
 }
 
 pub async fn get_index_rows(
     repo: &dyn VentaRapidaRepository,
     args: VrIdsArgs,
 ) -> AppResult<Vec<IndexRow>> {
-    let ids: Vec<i64> = args.ids.into_iter().filter(|n| *n > 0).collect();
+    let ids: Vec<String> = args
+        .ids
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     if ids.is_empty() {
         return Ok(vec![]);
     }
@@ -75,10 +80,10 @@ pub async fn get_detalles_ver_ticket(
     repo: &dyn VentaRapidaRepository,
     args: VrIdComandaArgs,
 ) -> AppResult<Vec<VerTicketsDetalleRow>> {
-    if args.id_comanda <= 0 {
+    if args.id_comanda.trim().is_empty() {
         return Ok(vec![]);
     }
-    repo.get_detalles_ver_ticket(args.id_comanda).await
+    repo.get_detalles_ver_ticket(&args.id_comanda).await
 }
 
 /* Escrituras */
@@ -86,8 +91,11 @@ pub async fn get_detalles_ver_ticket(
 pub async fn create_comanda_barra(
     repo: &dyn VentaRapidaRepository,
     input: VrCreateComandaBarraInput,
-) -> AppResult<i64> {
-    let id_trabajador = input.id_trabajador.filter(|n| *n > 0);
+) -> AppResult<String> {
+    let id_trabajador = input
+        .id_trabajador
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
     let get_or_create = input.get_or_create.unwrap_or(false);
     repo.create_comanda_barra(id_trabajador, get_or_create).await
 }
@@ -95,9 +103,9 @@ pub async fn create_comanda_barra(
 pub async fn add_linea_comanda(
     repo: &dyn VentaRapidaRepository,
     input: VrAddLineaComandaInput,
-) -> AppResult<i64> {
-    if input.id_comanda <= 0
-        || input.id_producto <= 0
+) -> AppResult<String> {
+    if input.id_comanda.trim().is_empty()
+        || input.id_producto.trim().is_empty()
         || !input.cantidad.is_finite()
         || input.cantidad <= 0.0
     {
@@ -107,8 +115,8 @@ pub async fn add_linea_comanda(
         return Err(AppError::validation("precio_unitario invalid"));
     }
     repo.add_linea_comanda(
-        input.id_comanda,
-        input.id_producto,
+        &input.id_comanda,
+        &input.id_producto,
         input.cantidad,
         input.precio_unitario,
     )
@@ -119,44 +127,49 @@ pub async fn remove_last_unpaid_linea(
     repo: &dyn VentaRapidaRepository,
     input: VrRemoveLastUnpaidLineaInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 || input.id_producto <= 0 {
+    if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_producto invalid"));
     }
-    repo.remove_last_unpaid_linea(input.id_comanda, input.id_producto).await
+    repo.remove_last_unpaid_linea(&input.id_comanda, &input.id_producto).await
 }
 
 pub async fn delete_linea_if_unpaid(
     repo: &dyn VentaRapidaRepository,
     input: VrDeleteLineaIfUnpaidInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 || input.id_detalle <= 0 {
+    if input.id_comanda.trim().is_empty() || input.id_detalle.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_detalle invalid"));
     }
-    repo.delete_linea_if_unpaid(input.id_comanda, input.id_detalle).await
+    repo.delete_linea_if_unpaid(&input.id_comanda, &input.id_detalle).await
 }
 
 pub async fn update_nota_detalle(
     repo: &dyn VentaRapidaRepository,
     input: VrUpdateNotaDetalleInput,
 ) -> AppResult<bool> {
-    if input.id_detalle <= 0 {
+    if input.id_detalle.trim().is_empty() {
         return Err(AppError::validation("id_detalle invalid"));
     }
-    repo.update_nota_detalle(input.id_detalle, limpiar_opcional(input.nota)).await
+    repo.update_nota_detalle(&input.id_detalle, limpiar_opcional(input.nota)).await
 }
 
 pub async fn cobrar_fraccionado(
     repo: &dyn VentaRapidaRepository,
     input: VrCobrarFraccionadoInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 {
+    if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda invalid"));
     }
     if !input.importe_total.is_finite() || input.importe_total < 0.0 {
         return Err(AppError::validation("importe_total invalid"));
     }
 
-    let mut detalles: Vec<i64> = input.detalles.iter().copied().filter(|d| *d > 0).collect();
+    let mut detalles: Vec<String> = input
+        .detalles
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
     detalles.sort_unstable();
     detalles.dedup();
 
@@ -168,8 +181,14 @@ pub async fn cobrar_fraccionado(
         id_comanda: input.id_comanda,
         metodo: normalize_metodo(&input.metodo),
         importe_total: input.importe_total,
-        id_usuario_cobrador: input.id_usuario_cobrador.filter(|n| *n > 0),
-        id_trabajador_cobrador: input.id_trabajador_cobrador.filter(|n| *n > 0),
+        id_usuario_cobrador: input
+            .id_usuario_cobrador
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        id_trabajador_cobrador: input
+            .id_trabajador_cobrador
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
         detalles,
     };
 
@@ -183,7 +202,7 @@ pub async fn restar_stock(
     let mut norm: Vec<StockLinea> = input
         .lineas
         .into_iter()
-        .filter(|it| it.producto_id > 0 && it.cantidad.is_finite() && it.cantidad > 0.0)
+        .filter(|it| !it.producto_id.trim().is_empty() && it.cantidad.is_finite() && it.cantidad > 0.0)
         .collect();
 
     norm.sort_by(|a, b| a.producto_id.cmp(&b.producto_id));
@@ -210,8 +229,8 @@ pub async fn delete_comanda_if_safe(
     repo: &dyn VentaRapidaRepository,
     input: VrDeleteComandaIfSafeInput,
 ) -> AppResult<bool> {
-    if input.id_comanda <= 0 {
+    if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda invalid"));
     }
-    repo.delete_comanda_if_safe(input.id_comanda).await
+    repo.delete_comanda_if_safe(&input.id_comanda).await
 }

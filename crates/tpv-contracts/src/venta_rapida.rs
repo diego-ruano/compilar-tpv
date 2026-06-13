@@ -14,8 +14,7 @@ use ts_rs::TS;
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct CategoriaRow {
-    #[ts(type = "number")]
-    pub ID_Categoria: i64,
+    pub ID_Categoria: String,
     pub Nombre: String,
     pub Nombre_Imagen: Option<String>,
     pub Ruta_Imagen: Option<String>,
@@ -27,10 +26,8 @@ pub struct CategoriaRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct ProductoRow {
-    #[ts(type = "number")]
-    pub ID_Producto: i64,
-    #[ts(type = "number")]
-    pub ID_Categoria: i64,
+    pub ID_Producto: String,
+    pub ID_Categoria: String,
     pub Nombre: String,
     pub Precio_Venta: f64,
     pub Stock_Actual: f64,
@@ -44,8 +41,7 @@ pub struct ProductoRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct ComandaBarraRow {
-    #[ts(type = "number")]
-    pub ID_Comanda: i64,
+    pub ID_Comanda: String,
     pub Fecha_Hora_Apertura: String,
     pub Estado: String,
     pub Total_Pendiente: f64,
@@ -60,12 +56,9 @@ pub struct ComandaBarraRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct LineaComandaRow {
-    #[ts(type = "number")]
-    pub ID_Detalle: i64,
-    #[ts(type = "number")]
-    pub ID_Comanda: i64,
-    #[ts(type = "number")]
-    pub ID_Producto: i64,
+    pub ID_Detalle: String,
+    pub ID_Comanda: String,
+    pub ID_Producto: String,
     pub Cantidad: f64,
     pub Precio_Unitario: f64,
     pub Notas: Option<String>,
@@ -79,10 +72,8 @@ pub struct LineaComandaRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct VerTicketsDetalleRow {
-    #[ts(type = "number")]
-    pub ID_Detalle: i64,
-    #[ts(type = "number")]
-    pub ID_Producto: i64,
+    pub ID_Detalle: String,
+    pub ID_Producto: String,
     pub Nombre: String,
     pub Cantidad: f64,
     pub Precio_Unitario: f64,
@@ -96,8 +87,7 @@ pub struct VerTicketsDetalleRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 #[allow(non_snake_case)]
 pub struct IndexRow {
-    #[ts(type = "number")]
-    pub ID_Comanda: i64,
+    pub ID_Comanda: String,
     pub Productos: Option<String>,
     #[ts(type = "number")]
     pub NumLineas: i64,
@@ -120,8 +110,7 @@ pub struct VrListComandasArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrIdCategoriaArgs {
-    #[ts(type = "number")]
-    pub id_categoria: i64,
+    pub id_categoria: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -135,23 +124,21 @@ pub struct VrSearchProductosArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrIdComandaArgs {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrIdsArgs {
-    #[ts(type = "Array<number>")]
-    pub ids: Vec<i64>,
+    pub ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrCreateComandaBarraInput {
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador: Option<i64>,
+    #[ts(optional)]
+    pub id_trabajador: Option<String>,
     /// Si es `true`, reutiliza la comanda de barra abierta si existe (get-or-create).
     #[serde(default)]
     #[ts(optional)]
@@ -161,10 +148,8 @@ pub struct VrCreateComandaBarraInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrAddLineaComandaInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_comanda: String,
+    pub id_producto: String,
     pub cantidad: f64,
     pub precio_unitario: f64,
 }
@@ -172,26 +157,21 @@ pub struct VrAddLineaComandaInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrRemoveLastUnpaidLineaInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_producto: i64,
+    pub id_comanda: String,
+    pub id_producto: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrDeleteLineaIfUnpaidInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_comanda: String,
+    pub id_detalle: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrUpdateNotaDetalleInput {
-    #[ts(type = "number")]
-    pub id_detalle: i64,
+    pub id_detalle: String,
     #[serde(default)]
     #[ts(optional)]
     pub nota: Option<String>,
@@ -200,26 +180,23 @@ pub struct VrUpdateNotaDetalleInput {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct StockLinea {
-    #[ts(type = "number")]
-    pub producto_id: i64,
+    pub producto_id: String,
     pub cantidad: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrCobrarFraccionadoInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
     pub metodo: String,
     pub importe_total: f64,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_usuario_cobrador: Option<i64>,
+    #[ts(optional)]
+    pub id_usuario_cobrador: Option<String>,
     #[serde(default)]
-    #[ts(optional, type = "number")]
-    pub id_trabajador_cobrador: Option<i64>,
-    #[ts(type = "Array<number>")]
-    pub detalles: Vec<i64>,
+    #[ts(optional)]
+    pub id_trabajador_cobrador: Option<String>,
+    pub detalles: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -231,6 +208,5 @@ pub struct VrRestarStockInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrDeleteComandaIfSafeInput {
-    #[ts(type = "number")]
-    pub id_comanda: i64,
+    pub id_comanda: String,
 }

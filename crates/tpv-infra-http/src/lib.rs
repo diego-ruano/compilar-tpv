@@ -33,13 +33,3 @@ pub mod venta_rapida;
 
 mod client;
 pub use client::{CloudClient, CLOUD_API_BASE};
-
-use serde_json::Value;
-use tpv_application::error::{AppError, AppResult};
-
-/// Extrae un id entero de una respuesta JSON del worker (p. ej. `{ "id_comanda": 12 }`).
-pub(crate) fn extract_id(v: &Value, key: &str) -> AppResult<i64> {
-    v.get(key)
-        .and_then(Value::as_i64)
-        .ok_or_else(|| AppError::external(format!("respuesta sin '{key}': {v}")))
-}

@@ -17,8 +17,8 @@ use tpv_contracts::venta_rapida::{
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
-use crate::mapping::{v_f64, v_i64, v_string};
-use crate::util::next_table_id;
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::util::{new_id, BARRA_MESA_ID};
 
 pub struct SqliteVentaRapidaRepository {
     conn: Arc<Connection>,
@@ -50,51 +50,55 @@ fn update_total_comanda_sql() -> &'static str {
     "#
 }
 
+#[allow(dead_code)]
 async fn exists_by_id(
     conn: &Connection,
     table: &str,
     column: &str,
-    id: i64,
+    id: &str,
 ) -> AppResult<bool> {
-    if id <= 0 {
+    if id.trim().is_empty() {
         return Ok(false);
     }
     let sql = format!("SELECT 1 FROM {table} WHERE {column} = ?1 LIMIT 1;");
-    let mut rows = conn.query(&sql, vec![Value::Integer(id)]).await.map_err(db_err)?;
+    let mut rows = conn
+        .query(&sql, vec![Value::Text(id.to_string())])
+        .await
+        .map_err(db_err)?;
     Ok(rows.next().await.map_err(db_err)?.is_some())
 }
 
 async fn trabajador_id_from_usuario(
     db: &Connection,
-    id_usuario: Option<i64>,
-) -> AppResult<Option<i64>> {
-    let Some(idu) = id_usuario.filter(|n| *n > 0) else {
+    id_usuario: Option<String>,
+) -> AppResult<Option<String>> {
+    let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
         return Ok(None);
     };
     let mut rows = db
         .query(
             "SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario=?1 LIMIT 1;",
-            vec![Value::Integer(idu)],
+            vec![Value::Text(idu)],
         )
         .await
         .map_err(db_err)?;
     if let Some(r) = rows.next().await.map_err(db_err)? {
-        return Ok(v_i64(r.get_value(0).map_err(db_err)?).filter(|n| *n > 0));
+        return Ok(norm_opt_string(r.get_value(0).map_err(db_err)?));
     }
     Ok(None)
 }
 
 async fn resolve_trabajador_id_input(
     db: &Connection,
-    id_maybe: Option<i64>,
-) -> AppResult<Option<i64>> {
-    let Some(x) = id_maybe.filter(|n| *n > 0) else {
+    id_maybe: Option<String>,
+) -> AppResult<Option<String>> {
+    let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
         return Ok(None);
     };
     let mut rows = db
         .query(
             "SELECT 1 FROM Trabajadores WHERE ID_Trabajador=?1 LIMIT 1;",
-            vec![Value::Integer(x)],
+            vec![Value::Text(x.clone())],
         )
         .await
         .map_err(db_err)?;
@@ -104,130 +108,34 @@ async fn resolve_trabajador_id_input(
     trabajador_id_from_usuario(db, Some(x)).await
 }
 
-async fn trabajador_id_from_comanda(db: &Connection, id_comanda: i64) -> AppResult<Option<i64>> {
-    if id_comanda <= 0 {
+async fn trabajador_id_from_comanda(db: &Connection, id_comanda: &str) -> AppResult<Option<String>> {
+    if id_comanda.trim().is_empty() {
         return Ok(None);
     }
     let mut rows = db
         .query(
             "SELECT ID_Trabajador FROM Comandas WHERE ID_Comanda=?1 LIMIT 1;",
-            vec![Value::Integer(id_comanda)],
+            vec![Value::Text(id_comanda.to_string())],
         )
         .await
         .map_err(db_err)?;
     if let Some(r) = rows.next().await.map_err(db_err)? {
-        return Ok(v_i64(r.get_value(0).map_err(db_err)?).filter(|n| *n > 0));
+        return Ok(norm_opt_string(r.get_value(0).map_err(db_err)?));
     }
     Ok(None)
 }
 
-async fn first_zone_id(db: &Connection) -> AppResult<i64> {
-    let mut rows = db
-        .query(
-            "SELECT ID_Zona FROM Zonas ORDER BY ID_Zona ASC LIMIT 1;",
-            (),
-        )
-        .await
-        .map_err(db_err)?;
-    let Some(r) = rows.next().await.map_err(db_err)? else {
-        return Ok(0);
-    };
-    Ok(v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0))
+/// La mesa BARRA se siembra con un id fijo (idéntico en local y nube).
+async fn ensure_barra_mesa_id(_db: &Connection) -> AppResult<String> {
+    Ok(BARRA_MESA_ID.to_string())
 }
 
-async fn ensure_default_zone_id(db: &Connection) -> AppResult<i64> {
-    let existing = first_zone_id(db).await?;
-    if existing > 0 {
-        return Ok(existing);
-    }
-
-    let insert_full = db
-        .execute(
-            r#"
-            INSERT INTO Zonas (Nombre_Zona, Room_Points, Updated_At)
-            VALUES ('Salon', '[]', datetime('now','localtime'));
-            "#,
-            (),
-        )
-        .await;
-
-    if insert_full.is_err() {
-        db.execute(
-            "INSERT INTO Zonas (Nombre_Zona) VALUES ('Salon');",
-            (),
-        )
-        .await
-        .map_err(db_err)?;
-    }
-
-    let final_id = first_zone_id(db).await?;
-    if final_id <= 0 {
-        return Err(AppError::repository("No se pudo crear/encontrar zona por defecto."));
-    }
-    Ok(final_id)
-}
-
-async fn find_barra_mesa_id_raw(db: &Connection) -> AppResult<i64> {
-    let mut rows = db
-        .query(
-            "SELECT ID_Mesa FROM Mesas WHERE Numero_Mesa = 'BARRA' LIMIT 1;",
-            (),
-        )
-        .await
-        .map_err(db_err)?;
-    let id = match rows.next().await.map_err(db_err)? {
-        Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-        None => 0,
-    };
-    Ok(id)
-}
-
-async fn ensure_barra_mesa_id(db: &Connection) -> AppResult<i64> {
-    let existing = find_barra_mesa_id_raw(db).await?;
-    if existing > 0 {
-        return Ok(existing);
-    }
-
-    let id_zona = ensure_default_zone_id(db).await?;
-
-    let insert_with_es_sistema = db
-        .execute(
-            r#"
-            INSERT INTO Mesas (
-              ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y,
-              Shape, Width, Height, Radius, Updated_At, Es_Sistema
-            )
-            VALUES (?1, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'), 1);
-            "#,
-            vec![Value::Integer(id_zona)],
-        )
-        .await;
-
-    if insert_with_es_sistema.is_err() {
-        db.execute(
-            r#"
-            INSERT INTO Mesas (
-              ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y,
-              Shape, Width, Height, Radius, Updated_At
-            )
-            VALUES (?1, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'));
-            "#,
-            vec![Value::Integer(id_zona)],
-        )
-        .await
-        .map_err(db_err)?;
-    }
-
-    let final_id = find_barra_mesa_id_raw(db).await?;
-    if final_id <= 0 {
-        return Err(AppError::repository("No se pudo crear/encontrar la mesa BARRA."));
-    }
-    Ok(final_id)
-}
-
-async fn find_open_barra_comanda_id(db: &Connection, id_mesa_barra: i64) -> AppResult<i64> {
-    if id_mesa_barra <= 0 {
-        return Ok(0);
+async fn find_open_barra_comanda_id(
+    db: &Connection,
+    id_mesa_barra: &str,
+) -> AppResult<Option<String>> {
+    if id_mesa_barra.trim().is_empty() {
+        return Ok(None);
     }
     let mut rows = db
         .query(
@@ -236,17 +144,17 @@ async fn find_open_barra_comanda_id(db: &Connection, id_mesa_barra: i64) -> AppR
             FROM Comandas
             WHERE ID_Mesa = ?1
               AND Estado = 'Abierta'
-            ORDER BY ID_Comanda DESC
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC
             LIMIT 1;
             "#,
-            vec![Value::Integer(id_mesa_barra)],
+            vec![Value::Text(id_mesa_barra.to_string())],
         )
         .await
         .map_err(db_err)?;
     let Some(r) = rows.next().await.map_err(db_err)? else {
-        return Ok(0);
+        return Ok(None);
     };
-    Ok(v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0))
+    Ok(norm_opt_string(r.get_value(0).map_err(db_err)?))
 }
 
 #[async_trait]
@@ -269,7 +177,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(CategoriaRow {
-                ID_Categoria: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                ID_Categoria: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre_Imagen: v_string(r.get_value(2).map_err(db_err)?),
                 Ruta_Imagen: v_string(r.get_value(3).map_err(db_err)?),
@@ -279,7 +187,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         Ok(out)
     }
 
-    async fn list_productos_by_categoria(&self, id_categoria: i64) -> AppResult<Vec<ProductoRow>> {
+    async fn list_productos_by_categoria(&self, id_categoria: &str) -> AppResult<Vec<ProductoRow>> {
         let db = &self.conn;
         let mut rows = db
             .query(
@@ -301,7 +209,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   AND COALESCE(c.Vendible,1)=1
                 ORDER BY p.Nombre ASC;
                 "#,
-                vec![Value::Integer(id_categoria)],
+                vec![Value::Text(id_categoria.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -309,8 +217,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(ProductoRow {
-                ID_Producto: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                ID_Categoria: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+                ID_Producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                ID_Categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 Precio_Venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
                 Stock_Actual: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
@@ -355,8 +263,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(ProductoRow {
-                ID_Producto: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                ID_Categoria: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+                ID_Producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                ID_Categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 Precio_Venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
                 Stock_Actual: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
@@ -426,14 +334,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let id_mesa_barra = ensure_barra_mesa_id(db).await?;
 
         let mut rows = db
-            .query(&sql, vec![Value::Integer(lim), Value::Integer(id_mesa_barra)])
+            .query(&sql, vec![Value::Integer(lim), Value::Text(id_mesa_barra)])
             .await
             .map_err(db_err)?;
 
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(ComandaBarraRow {
-                ID_Comanda: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                ID_Comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 Fecha_Hora_Apertura: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Estado: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_else(|| "Abierta".into()),
                 Total_Pendiente: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
@@ -445,7 +353,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         Ok(out)
     }
 
-    async fn get_lineas_comanda(&self, id_comanda: i64) -> AppResult<Vec<LineaComandaRow>> {
+    async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<LineaComandaRow>> {
         let db = &self.conn;
         let mut rows = db
             .query(
@@ -467,7 +375,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 WHERE dc.ID_Comanda = ?1
                 ORDER BY dc.ID_Detalle ASC;
                 "#,
-                vec![Value::Integer(id_comanda)],
+                vec![Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -475,9 +383,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(LineaComandaRow {
-                ID_Detalle: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                ID_Comanda: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
-                ID_Producto: v_i64(r.get_value(2).map_err(db_err)?).unwrap_or(0),
+                ID_Detalle: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                ID_Comanda: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                ID_Producto: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 Cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
                 Precio_Unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
                 Notas: v_string(r.get_value(5).map_err(db_err)?),
@@ -489,14 +397,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         Ok(out)
     }
 
-    async fn get_index_rows(&self, ids: Vec<i64>) -> AppResult<Vec<IndexRow>> {
+    async fn get_index_rows(&self, ids: Vec<String>) -> AppResult<Vec<IndexRow>> {
         let db = &self.conn;
         if ids.is_empty() {
             return Ok(vec![]);
         }
 
         let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let params: Vec<Value> = ids.into_iter().map(Value::Integer).collect();
+        let params: Vec<Value> = ids.into_iter().map(Value::Text).collect();
 
         let sql = format!(
             r#"
@@ -546,7 +454,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             };
 
             out.push(IndexRow {
-                ID_Comanda: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                ID_Comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 Productos: productos,
                 NumLineas: v_i64(r.get_value(2).map_err(db_err)?).unwrap_or(0),
                 Unidades: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
@@ -557,7 +465,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
     async fn get_detalles_ver_ticket(
         &self,
-        id_comanda: i64,
+        id_comanda: &str,
     ) -> AppResult<Vec<VerTicketsDetalleRow>> {
         let db = &self.conn;
         let mut rows = db
@@ -578,7 +486,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 WHERE dc.ID_Comanda = ?1
                 ORDER BY dc.ID_Detalle ASC;
                 "#,
-                vec![Value::Integer(id_comanda)],
+                vec![Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -586,8 +494,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let mut out = Vec::new();
         while let Some(r) = rows.next().await.map_err(db_err)? {
             out.push(VerTicketsDetalleRow {
-                ID_Detalle: v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                ID_Producto: v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0),
+                ID_Detalle: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                ID_Producto: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_else(|| "Producto".into()),
                 Cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
                 Precio_Unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
@@ -602,24 +510,23 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
     async fn create_comanda_barra(
         &self,
-        id_trabajador: Option<i64>,
+        id_trabajador: Option<String>,
         get_or_create: bool,
-    ) -> AppResult<i64> {
+    ) -> AppResult<String> {
         let db = &self.conn;
         let id_mesa_barra = ensure_barra_mesa_id(db).await?;
 
         if get_or_create {
-            let existing_open = find_open_barra_comanda_id(db, id_mesa_barra).await?;
-            if existing_open > 0 {
+            if let Some(existing_open) = find_open_barra_comanda_id(db, &id_mesa_barra).await? {
                 return Ok(existing_open);
             }
         }
 
         let id_trabajador_real = resolve_trabajador_id_input(db, id_trabajador).await?;
-        let id_comanda_final = next_table_id(db, "Comandas", "ID_Comanda").await?;
+        let id_comanda_final = new_id();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<i64> = async {
+        let res: AppResult<String> = async {
             db.execute(
                 r#"
                 INSERT INTO Comandas (
@@ -633,9 +540,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   ID_Mesa = excluded.ID_Mesa;
                 "#,
                 vec![
-                    Value::Integer(id_comanda_final),
-                    id_trabajador_real.map(Value::Integer).unwrap_or(Value::Null),
-                    Value::Integer(id_mesa_barra),
+                    Value::Text(id_comanda_final.clone()),
+                    id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(id_mesa_barra.clone()),
                 ],
             )
             .await
@@ -654,7 +561,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     SELECT 1 FROM Pagos p WHERE p.ID_Comanda = Comandas.ID_Comanda
                   );
                 "#,
-                vec![Value::Integer(id_mesa_barra), Value::Integer(id_comanda_final)],
+                vec![Value::Text(id_mesa_barra.clone()), Value::Text(id_comanda_final.clone())],
             )
             .await
             .map_err(db_err)?;
@@ -677,16 +584,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
     async fn add_linea_comanda(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
         cantidad: f64,
         precio_unitario: f64,
-    ) -> AppResult<i64> {
+    ) -> AppResult<String> {
         let db = &self.conn;
-        let id_detalle_final = next_table_id(db, "Detalle_Comanda", "ID_Detalle").await?;
+        let id_detalle_final = new_id();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<i64> = async {
+        let res: AppResult<String> = async {
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda
@@ -701,9 +608,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   Estado_Cocina = COALESCE(Detalle_Comanda.Estado_Cocina, excluded.Estado_Cocina);
                 "#,
                 vec![
-                    Value::Integer(id_detalle_final),
-                    Value::Integer(id_comanda),
-                    Value::Integer(id_producto),
+                    Value::Text(id_detalle_final.clone()),
+                    Value::Text(id_comanda.to_string()),
+                    Value::Text(id_producto.to_string()),
                     Value::Real(cantidad),
                     Value::Real(precio_unitario),
                 ],
@@ -711,7 +618,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             .await
             .map_err(db_err)?;
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
 
@@ -733,8 +640,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
     async fn remove_last_unpaid_linea(
         &self,
-        id_comanda: i64,
-        id_producto: i64,
+        id_comanda: &str,
+        id_producto: &str,
     ) -> AppResult<bool> {
         let db = &self.conn;
 
@@ -754,12 +661,12 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   LIMIT 1
                 );
                 "#,
-                vec![Value::Integer(id_comanda), Value::Integer(id_producto)],
+                vec![Value::Text(id_comanda.to_string()), Value::Text(id_producto.to_string())],
             )
             .await
             .map_err(db_err)?;
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
 
@@ -779,7 +686,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         }
     }
 
-    async fn delete_linea_if_unpaid(&self, id_comanda: i64, id_detalle: i64) -> AppResult<bool> {
+    async fn delete_linea_if_unpaid(&self, id_comanda: &str, id_detalle: &str) -> AppResult<bool> {
         let db = &self.conn;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -793,12 +700,12 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = ?1
                   );
                 "#,
-                vec![Value::Integer(id_detalle), Value::Integer(id_comanda)],
+                vec![Value::Text(id_detalle.to_string()), Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
 
@@ -818,14 +725,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         }
     }
 
-    async fn update_nota_detalle(&self, id_detalle: i64, nota: Option<String>) -> AppResult<bool> {
+    async fn update_nota_detalle(&self, id_detalle: &str, nota: Option<String>) -> AppResult<bool> {
         let db = &self.conn;
 
         let affected = db
             .execute(
                 "UPDATE Detalle_Comanda SET Notas = ?2 WHERE ID_Detalle = ?1;",
                 vec![
-                    Value::Integer(id_detalle),
+                    Value::Text(id_detalle.to_string()),
                     nota.map(Value::Text).unwrap_or(Value::Null),
                 ],
             )
@@ -841,14 +748,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool> {
         let db = &self.conn;
 
-        let id_pago_final = next_table_id(db, "Pagos", "ID_Pago").await?;
+        let id_pago_final = new_id();
 
-        let id_usuario = data.id_usuario_cobrador.filter(|n| *n > 0);
-        let id_trabajador_from_user = trabajador_id_from_usuario(db, id_usuario).await?;
-        let id_trabajador_comanda = trabajador_id_from_comanda(db, data.id_comanda).await?;
+        let id_usuario = data
+            .id_usuario_cobrador
+            .filter(|s| !s.trim().is_empty());
+        let id_trabajador_from_user = trabajador_id_from_usuario(db, id_usuario.clone()).await?;
+        let id_trabajador_comanda = trabajador_id_from_comanda(db, &data.id_comanda).await?;
         let id_trabajador_cobrador = data
             .id_trabajador_cobrador
-            .filter(|n| *n > 0)
+            .filter(|s| !s.trim().is_empty())
             .or(id_trabajador_from_user)
             .or(id_trabajador_comanda);
 
@@ -856,7 +765,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
-            if let Some(idt) = id_trabajador_cobrador {
+            if let Some(idt) = id_trabajador_cobrador.clone() {
                 db.execute(
                     r#"
                     UPDATE Comandas
@@ -864,7 +773,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     WHERE ID_Comanda = ?1
                       AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
                     "#,
-                    vec![Value::Integer(data.id_comanda), Value::Integer(idt)],
+                    vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -885,9 +794,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             );
 
             let mut params: Vec<Value> = Vec::with_capacity(1 + detalles.len());
-            params.push(Value::Integer(data.id_comanda));
+            params.push(Value::Text(data.id_comanda.clone()));
             for d in &detalles {
-                params.push(Value::Integer(*d));
+                params.push(Value::Text(d.clone()));
             }
 
             let mut rows = db.query(&sql, params).await.map_err(db_err)?;
@@ -906,7 +815,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
             // Capturamos los detalles a cobrar (detalle, producto, cantidad) para validar
             // stock y escribir Lote_Consumos por ID_Detalle (trazabilidad FEFO).
-            let mut charged: Vec<(i64, i64, f64)> = Vec::new();
+            let mut charged: Vec<(String, String, f64)> = Vec::new();
             {
                 let mut crows = db
                     .query(
@@ -925,9 +834,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                         ),
                         {
                             let mut p: Vec<Value> = Vec::with_capacity(1 + detalles.len());
-                            p.push(Value::Integer(data.id_comanda));
+                            p.push(Value::Text(data.id_comanda.clone()));
                             for d in &detalles {
-                                p.push(Value::Integer(*d));
+                                p.push(Value::Text(d.clone()));
                             }
                             p
                         },
@@ -936,10 +845,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     .map_err(db_err)?;
 
                 while let Some(r) = crows.next().await.map_err(db_err)? {
-                    let id_det = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-                    let id_prod = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
+                    let id_det = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                    let id_prod = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
                     let qty = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
-                    if id_det > 0 && id_prod > 0 && qty > 0.0 {
+                    if !id_det.is_empty() && !id_prod.is_empty() && qty > 0.0 {
                         charged.push((id_det, id_prod, qty));
                     }
                 }
@@ -948,9 +857,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             // Validación de suficiencia (todo-o-nada): un producto controla stock si tiene
             // lotes; si lo solicitado supera el disponible total, abortamos el cobro.
             {
-                let mut requested_by_product: BTreeMap<i64, f64> = BTreeMap::new();
+                let mut requested_by_product: BTreeMap<String, f64> = BTreeMap::new();
                 for (_d, p, q) in &charged {
-                    *requested_by_product.entry(*p).or_insert(0.0) += *q;
+                    *requested_by_product.entry(p.clone()).or_insert(0.0) += *q;
                 }
 
                 for (producto_id, requested) in &requested_by_product {
@@ -963,7 +872,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                             FROM Lotes_Producto
                             WHERE ID_Producto = ?1;
                             "#,
-                            vec![Value::Integer(*producto_id)],
+                            vec![Value::Text(producto_id.clone())],
                         )
                         .await
                         .map_err(db_err)?;
@@ -1002,12 +911,12 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   ID_Trabajador_Cobrador = excluded.ID_Trabajador_Cobrador;
                 "#,
                 vec![
-                    Value::Integer(id_pago_final),
-                    Value::Integer(data.id_comanda),
+                    Value::Text(id_pago_final.clone()),
+                    Value::Text(data.id_comanda.clone()),
                     Value::Text(data.metodo.clone()),
                     Value::Real(importe_total_db),
-                    id_usuario.map(Value::Integer).unwrap_or(Value::Null),
-                    id_trabajador_cobrador.map(Value::Integer).unwrap_or(Value::Null),
+                    id_usuario.map(Value::Text).unwrap_or(Value::Null),
+                    id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
                 ],
             )
             .await
@@ -1024,9 +933,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                       AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                     "#,
                     vec![
-                        Value::Integer(id_pago_final),
-                        Value::Integer(data.id_comanda),
-                        Value::Integer(*det),
+                        Value::Text(id_pago_final.clone()),
+                        Value::Text(data.id_comanda.clone()),
+                        Value::Text(det.clone()),
                     ],
                 )
                 .await
@@ -1035,7 +944,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
             // Consumo FEFO + trazabilidad por detalle (la suficiencia ya está validada).
             for (id_detalle, producto_id, cantidad) in &charged {
-                let lot_rows: Vec<(i64, f64)> = {
+                let lot_rows: Vec<(String, f64)> = {
                     let mut lots = db
                         .query(
                             r#"
@@ -1049,16 +958,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                               datetime(Fecha_Entrada) ASC,
                               ID_Lote ASC;
                             "#,
-                            vec![Value::Integer(*producto_id)],
+                            vec![Value::Text(producto_id.clone())],
                         )
                         .await
                         .map_err(db_err)?;
 
-                    let mut o: Vec<(i64, f64)> = Vec::new();
+                    let mut o: Vec<(String, f64)> = Vec::new();
                     while let Some(r) = lots.next().await.map_err(db_err)? {
-                        let id_lote = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
+                        let id_lote = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
                         let stock = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-                        if id_lote > 0 && stock > 0.0 {
+                        if !id_lote.is_empty() && stock > 0.0 {
                             o.push((id_lote, stock));
                         }
                     }
@@ -1081,7 +990,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                         SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
                         WHERE ID_Lote = ?1;
                         "#,
-                        vec![Value::Integer(id_lote), Value::Real(take)],
+                        vec![Value::Text(id_lote.clone()), Value::Real(take)],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1092,7 +1001,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                         VALUES (?1, ?2, ?3)
                         ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
                         "#,
-                        vec![Value::Integer(*id_detalle), Value::Integer(id_lote), Value::Real(take)],
+                        vec![Value::Text(id_detalle.clone()), Value::Text(id_lote), Value::Real(take)],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1101,7 +1010,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 }
             }
 
-            db.execute(update_total_comanda_sql(), vec![Value::Integer(data.id_comanda)])
+            db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
                 .await
                 .map_err(db_err)?;
 
@@ -1114,7 +1023,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     WHERE dc.ID_Comanda = ?1
                       AND pd.ID_Detalle IS NULL;
                     "#,
-                    vec![Value::Integer(data.id_comanda)],
+                    vec![Value::Text(data.id_comanda.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1138,7 +1047,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                       Fecha_Hora_Cierre = datetime('now','localtime')
                     WHERE ID_Comanda = ?1;
                     "#,
-                    vec![Value::Integer(data.id_comanda)],
+                    vec![Value::Text(data.id_comanda.clone())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1176,7 +1085,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                         FROM Lotes_Producto
                         WHERE ID_Producto = ?1;
                         "#,
-                        vec![Value::Integer(it.producto_id)],
+                        vec![Value::Text(it.producto_id.clone())],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1214,7 +1123,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                           datetime(Fecha_Entrada) ASC,
                           ID_Lote ASC;
                         "#,
-                        vec![Value::Integer(it.producto_id)],
+                        vec![Value::Text(it.producto_id.clone())],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1223,10 +1132,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     let row = lots.next().await.map_err(db_err)?;
                     let Some(r) = row else { break };
 
-                    let id_lote = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
+                    let id_lote = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
                     let stock = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
 
-                    if id_lote <= 0 || stock <= 0.0 {
+                    if id_lote.is_empty() || stock <= 0.0 {
                         continue;
                     }
 
@@ -1241,7 +1150,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                         END
                         WHERE ID_Lote = ?1;
                         "#,
-                        vec![Value::Integer(id_lote), Value::Real(take)],
+                        vec![Value::Text(id_lote), Value::Real(take)],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1266,7 +1175,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         }
     }
 
-    async fn delete_comanda_if_safe(&self, id_comanda: i64) -> AppResult<bool> {
+    async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
         let db = &self.conn;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -1281,7 +1190,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                       WHERE dc.ID_Comanda = ?1
                     ) AS HasPaid;
                     "#,
-                    vec![Value::Integer(id_comanda)],
+                    vec![Value::Text(id_comanda.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -1299,7 +1208,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
             db.execute(
                 "DELETE FROM Detalle_Comanda WHERE ID_Comanda = ?1;",
-                vec![Value::Integer(id_comanda)],
+                vec![Value::Text(id_comanda.to_string())],
             )
             .await
             .map_err(db_err)?;
@@ -1307,7 +1216,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             let changed = db
                 .execute(
                     "DELETE FROM Comandas WHERE ID_Comanda = ?1;",
-                    vec![Value::Integer(id_comanda)],
+                    vec![Value::Text(id_comanda.to_string())],
                 )
                 .await
                 .map_err(db_err)?;

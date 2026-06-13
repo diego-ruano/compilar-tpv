@@ -82,7 +82,7 @@ pub async fn vr_get_detalles_ver_ticket(
 pub async fn vr_create_comanda_barra(
     state: State<'_, AppState>,
     args: VrCreateComandaBarraInput,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::create_comanda_barra(repo.as_ref(), args).await?)
 }
@@ -91,7 +91,7 @@ pub async fn vr_create_comanda_barra(
 pub async fn vr_add_linea_comanda(
     state: State<'_, AppState>,
     args: VrAddLineaComandaInput,
-) -> Result<i64, String> {
+) -> Result<String, String> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::add_linea_comanda(repo.as_ref(), args).await?)
 }
