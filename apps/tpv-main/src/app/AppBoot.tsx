@@ -791,7 +791,23 @@ export default function AppBoot({ router }: { router: any }) {
                     </div>
                 ) : mode === "handy" ? (
                     handyIsReady ? (
-                        <RouterProvider router={router} />
+                        // En modo Handy mostramos siempre un botón flotante para volver a la zona
+                        // de vinculación (re-emparejar / cambiar de TPV). Solo se renderiza aquí, en
+                        // la rama Handy: en modo TPV este botón no existe.
+                        <div className="relative h-full w-full">
+                            <RouterProvider router={router} />
+
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setHandyPairErr(null);
+                                    setHandyPair({ step: "idle" });
+                                }}
+                                className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
+                            >
+                                ← Vinculación
+                            </button>
+                        </div>
                     ) : (
                         <div className="min-h-full w-full bg-slate-100">
                             <div className="p-4 flex items-center justify-between gap-3">
