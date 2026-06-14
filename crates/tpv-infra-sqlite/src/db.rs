@@ -172,14 +172,21 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
 /// Ajusta una conexión recién abierta: WAL + espera ante locks + FK + durabilidad equilibrada.
 /// `busy_timeout`, `foreign_keys` y `synchronous` son por conexión; `journal_mode=WAL` es de
 /// fichero (persistente) pero repetirlo es inocuo.
+///
+/// Se ejecutan vía `query` (no `execute_batch`): algunas PRAGMA (`journal_mode`, `busy_timeout`)
+/// DEVUELVEN una fila con el valor resultante incluso al fijarlas, y enrutarlas por la vía de
+/// `execute` dispara `Execute returned rows` en libsql. `query` acepta sentencias que devuelven
+/// filas (las descartamos) y también las que no.
 async fn tune(conn: &Connection) -> Result<(), LibsqlError> {
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;\
-         PRAGMA busy_timeout = 5000;\
-         PRAGMA foreign_keys = ON;\
-         PRAGMA synchronous = NORMAL;",
-    )
-    .await
+    for pragma in [
+        "PRAGMA journal_mode = WAL;",
+        "PRAGMA busy_timeout = 5000;",
+        "PRAGMA foreign_keys = ON;",
+        "PRAGMA synchronous = NORMAL;",
+    ] {
+        let _ = conn.query(pragma, ()).await?;
+    }
+    Ok(())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
