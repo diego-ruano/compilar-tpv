@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
+import { useMainPresence } from "../stores/useMainPresence";
 import { queryClient } from "./queryClient";
 import { affectedComandas } from "./syncStatements";
 
@@ -131,6 +132,21 @@ export function useHandySocket() {
 					return;
 				}
 
+				// Presencia de la Main: el worker nos dice si hay una Main activa. Sin Main, el
+				// Handy se bloquea por completo (ver useMainPresence + AppBoot).
+				if (msg.type === "main_status") {
+					useMainPresence.getState().setMainOnline(Boolean(msg.online));
+					return;
+				}
+				if (msg.type === "main_online") {
+					useMainPresence.getState().setMainOnline(true);
+					return;
+				}
+				if (msg.type === "main_offline") {
+					useMainPresence.getState().setMainOnline(false);
+					return;
+				}
+
 				// Cualquier cambio aplicado en la nube por otro dispositivo (típicamente la
 				// Main): refrescamos. No aplicamos SQL (no hay BD local): solo refetch.
 				if (msg.type === "change") {
@@ -151,6 +167,9 @@ export function useHandySocket() {
 					pingTimer = null;
 				}
 				if (ws === socket) ws = null;
+				// Sin WS no podemos confirmar que haya Main: fail-closed (bloquea hasta reconectar
+				// y recibir de nuevo `main_status`).
+				useMainPresence.getState().setMainOnline(null);
 				scheduleReconnect();
 			};
 
@@ -177,6 +196,8 @@ export function useHandySocket() {
 				}
 				ws = null;
 			}
+			// Dejamos de ser Handy (o se desmonta): presencia desconocida.
+			useMainPresence.getState().setMainOnline(null);
 		};
 	}, [deviceMode]);
 }

@@ -1,6 +1,7 @@
 // src/pages/Configuracion.tsx
 
 import React, { useEffect, useMemo, useState } from "react";
+import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 import { invokeClient } from "@tpv/client";
 import type { PairCreateResult } from "@tpv/contracts";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
@@ -239,9 +240,11 @@ export default function Configuracion() {
                 mensajeFooter: draft.mensajeFooter,
                 ivaPercent: draft.ivaPercent,
             });
-            alert("Guardado");
+            await messageDialog("Guardado");
         } catch {
-            alert("No se pudo guardar. Revisa la consola.");
+            await messageDialog("No se pudo guardar. Revisa la consola.", {
+                kind: "error",
+            });
         } finally {
             setSavingBiz(false);
         }
@@ -723,9 +726,11 @@ export default function Configuracion() {
                                                 loading={pairLoading}
                                                 error={pairError}
                                                 onRegenerate={generatePair}
-                                                onShowCode={() =>
-                                                    alert(`Código: ${pairCode}`)
-                                                }
+                                                onShowCode={() => {
+                                                    void messageDialog(
+                                                        `Código: ${pairCode}`,
+                                                    );
+                                                }}
                                             />
                                         ) : null}
 

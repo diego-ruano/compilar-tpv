@@ -26,7 +26,7 @@ import { useToast } from "../../shared/toast";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 // Tauri: guardar en ruta elegida por el usuario
-import { save } from "@tauri-apps/plugin-dialog";
+import { save, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 
 /* =========================
@@ -442,8 +442,9 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     const toMonday = toYMD(weekStart);
     const fromMonday = toYMD(addDays(weekStart, -7));
 
-    const ok = window.confirm(
+    const ok = await confirmDialog(
       `Esto copiara la semana ${fromMonday} a ${toMonday} y sobrescribira la semana destino. Continuar?`,
+      { title: "Copiar semana anterior", kind: "warning" },
     );
     if (!ok) return;
 
@@ -460,9 +461,10 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
     if (!isAdmin) return;
 
     const lunes = toYMD(weekStart);
-    const ok = window.confirm(
+    const ok = await confirmDialog(
       `Guardare como horario predeterminado la semana visible (${lunes}).\n` +
       `Se aplicara automaticamente a la semana actual real y futuras SOLO si no hay nada pintado.\n\nContinuar?`,
+      { title: "Horario predeterminado", kind: "warning" },
     );
     if (!ok) return;
 

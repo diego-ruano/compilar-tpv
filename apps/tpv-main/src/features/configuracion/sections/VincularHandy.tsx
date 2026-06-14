@@ -4,6 +4,7 @@ import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { QRCodeCanvas } from "qrcode.react";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { cloudPost } from "../../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../../shared/lib/deviceFingerprint";
 
@@ -95,9 +96,10 @@ export function VincularHandy({
 
 	async function revoke(deviceId: string) {
 		if (
-			!window.confirm(
+			!(await confirmDialog(
 				"¿Desvincular este dispositivo? Perderá el acceso y tendrá que volver a emparejarse.",
-			)
+				{ title: "Desvincular Handy", kind: "warning" },
+			))
 		)
 			return;
 		setRevokingId(deviceId);

@@ -6,6 +6,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { useMode, type DeviceMode } from "../shared/stores/useMode";
 import { useConnectionMode } from "../shared/stores/useConnectionMode";
+import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
@@ -244,6 +245,38 @@ function BlockedScreen({
                     Si estabas sin internet y se acabó la gracia offline, vuelve
                     a conectar y reintenta.
                 </div>
+            </div>
+        </div>
+    );
+}
+
+function HandyWaitingMain({
+    connecting,
+    onUnlink,
+}: {
+    connecting: boolean;
+    onUnlink: () => void;
+}) {
+    return (
+        <div className="relative min-h-full w-full bg-slate-100 flex items-center justify-center p-6">
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-sm border border-slate-200 p-6 text-center">
+                <div className="mx-auto mb-4 size-12 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin" />
+                <h1 className="text-xl font-semibold text-slate-900">
+                    {connecting ? "Conectando con la Main…" : "La Main no está activa"}
+                </h1>
+                <p className="text-sm text-slate-600 mt-2">
+                    {connecting
+                        ? "Estableciendo conexión con el punto de venta principal."
+                        : "Este Handy no puede usarse mientras el punto de venta principal esté apagado o en modo offline. Volverá a estar disponible en cuanto la Main se active."}
+                </p>
+
+                <button
+                    type="button"
+                    onClick={onUnlink}
+                    className="mt-6 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                >
+                    ← Ir a vinculación
+                </button>
             </div>
         </div>
     );
@@ -680,11 +713,19 @@ export default function AppBoot({ router }: { router: any }) {
         }
     }
 
+    // Presencia de la Main vista por el Handy: sin Main activa, el Handy se bloquea entero
+    // (login incluido). null = aún conectando/sin confirmar (fail-closed).
+    const mainOnline = useMainPresence((s) => s.mainOnline);
+
     const isMainAppReady = mode === "tpv" && gate !== "loading" && gate.allowed;
     const handyIsReady = mode === "handy" && handyPair.step === "paired";
+    const handyMainActive = mainOnline === true;
+    // El Handy solo muestra su app (RouterProvider, con su propia Titlebar) si está emparejado Y
+    // hay una Main activa. Si no, enseñamos la pantalla de espera (que sí necesita la TopBar).
+    const handyShowsApp = handyIsReady && handyMainActive;
     // El layout del Handy (RouterProvider) ya trae su propia barra de título (Titlebar, con el
     // toggle claro/oscuro). No mostramos también la barra de arranque para no duplicarla.
-    const showBootTopBar = !isMainAppReady && !handyIsReady;
+    const showBootTopBar = !isMainAppReady && !handyShowsApp;
 
     const TopBar = (
         <div className="w-full flex justify-between shrink-0 overflow-hidden">
@@ -791,23 +832,34 @@ export default function AppBoot({ router }: { router: any }) {
                     </div>
                 ) : mode === "handy" ? (
                     handyIsReady ? (
-                        // En modo Handy mostramos siempre un botón flotante para volver a la zona
-                        // de vinculación (re-emparejar / cambiar de TPV). Solo se renderiza aquí, en
-                        // la rama Handy: en modo TPV este botón no existe.
-                        <div className="relative h-full w-full">
-                            <RouterProvider router={router} />
+                        handyMainActive ? (
+                            // En modo Handy mostramos siempre un botón flotante para volver a la zona
+                            // de vinculación (re-emparejar / cambiar de TPV). Solo se renderiza aquí, en
+                            // la rama Handy: en modo TPV este botón no existe.
+                            <div className="relative h-full w-full">
+                                <RouterProvider router={router} />
 
-                            <button
-                                type="button"
-                                onClick={() => {
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setHandyPairErr(null);
+                                        setHandyPair({ step: "idle" });
+                                    }}
+                                    className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
+                                >
+                                    ← Vinculación
+                                </button>
+                            </div>
+                        ) : (
+                            // Emparejado pero sin Main activa: bloqueo total (login incluido).
+                            <HandyWaitingMain
+                                connecting={mainOnline === null}
+                                onUnlink={() => {
                                     setHandyPairErr(null);
                                     setHandyPair({ step: "idle" });
                                 }}
-                                className="absolute bottom-3 left-3 z-50 rounded-xl border border-slate-300 bg-white/95 px-3 py-2 text-sm font-semibold text-slate-800 shadow-md backdrop-blur transition hover:bg-white active:scale-[0.98]"
-                            >
-                                ← Vinculación
-                            </button>
-                        </div>
+                            />
+                        )
                     ) : (
                         <div className="min-h-full w-full bg-slate-100">
                             <div className="p-4 flex items-center justify-between gap-3">

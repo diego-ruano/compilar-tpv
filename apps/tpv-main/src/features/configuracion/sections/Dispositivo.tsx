@@ -7,6 +7,7 @@
 
 import React, { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
 import { Panel } from "../ui/Panel";
 import { GhostButton } from "../ui/Buttons";
@@ -19,9 +20,10 @@ export function Dispositivo({ darkMode }: { darkMode: boolean }) {
 
 	async function unpair() {
 		if (
-			!window.confirm(
+			!(await confirmDialog(
 				"¿Desvincular este dispositivo? Volverás al selector Main/Handy y tendrás que emparejarlo de nuevo. La identidad del equipo se conserva.",
-			)
+				{ title: "Desvincular dispositivo", kind: "warning" },
+			))
 		)
 			return;
 
