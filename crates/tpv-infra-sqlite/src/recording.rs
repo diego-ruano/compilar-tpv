@@ -5,8 +5,12 @@
 //! alias de import por archivo (`use crate::recording::TrackedConnection as Connection;`), sin
 //! tocar firmas ni cuerpos.
 //!
-//! Cuando la captura está activa (modo de funcionamiento "online"), registra cada **escritura**
-//! (`INSERT/UPDATE/DELETE/REPLACE`) con sus argumentos **ya resueltos** y agrupa por operación:
+//! La captura está **SIEMPRE activa** (también en modo "offline"): el `_Sync_Outbox` es el *log de
+//! cambios* local de la Main. Mientras se está offline, las operaciones se acumulan; al activar
+//! "online", el WebSocket de la Main las drena en orden a la nube. Así, todo lo que pase en la Main
+//! —creates, updates **y borrados**— sube tal cual cuando hay conexión, sin perder nada de lo hecho
+//! sin red. Registra cada **escritura** (`INSERT/UPDATE/DELETE/REPLACE`) con sus argumentos **ya
+//! resueltos** y agrupa por operación:
 //!   - Entre `BEGIN;` y `COMMIT;` (vía `execute_batch`) acumula un buffer y, **dentro de la misma
 //!     transacción**, vuelca la operación a `_Sync_Outbox` justo antes de confirmar. Así la
 //!     operación se registra si y solo si la escritura se confirmó.
@@ -18,12 +22,11 @@
 //! El aplicador nube→Main (`SqliteSyncRepository`) usa la conexión **cruda** (`raw()`), así que
 //! aplicar cambios remotos NO se vuelve a capturar.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use libsql::{Connection, Error as LibsqlError, Rows, Value};
 use serde_json::json;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use tpv_contracts::sync::SqlStatement;
 
@@ -103,18 +106,28 @@ fn batch_kind(sql: &str) -> BatchKind {
 /// Conexión local con captura de escrituras para el outbox de sincronización.
 pub struct TrackedConnection {
     inner: Arc<Connection>,
-    /// Captura activa (= modo "online"). En "offline" no se registra nada.
-    enabled: AtomicBool,
     /// Buffer de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK).
     tx_buf: Mutex<Option<Vec<SqlStatement>>>,
+    /// **Puerta de transacción.** La conexión libsql es ÚNICA y compartida por todos los
+    /// repositorios y por el aplicador nube→Main. SQLite no admite `BEGIN` dentro de `BEGIN`:
+    /// si dos transacciones (p. ej. `save_layout` y el aplicador de sync) emiten `BEGIN` a la
+    /// vez sobre la misma conexión, la segunda falla con
+    /// "cannot start a transaction within a transaction". Esta puerta serializa cada
+    /// transacción (BEGIN..COMMIT/ROLLBACK) en la conexión. El aplicador de sync adquiere la
+    /// MISMA puerta (vía `tx_gate()`), así que tampoco colisiona con las transacciones de los
+    /// repos.
+    tx_gate: Arc<Mutex<()>>,
+    /// Guard de la transacción en curso (lo retiene quien hizo BEGIN hasta COMMIT/ROLLBACK).
+    tx_guard: Mutex<Option<OwnedMutexGuard<()>>>,
 }
 
 impl TrackedConnection {
     pub fn new(inner: Arc<Connection>) -> Self {
         Self {
             inner,
-            enabled: AtomicBool::new(false),
             tx_buf: Mutex::new(None),
+            tx_gate: Arc::new(Mutex::new(())),
+            tx_guard: Mutex::new(None),
         }
     }
 
@@ -123,9 +136,10 @@ impl TrackedConnection {
         self.inner.clone()
     }
 
-    /// Activa/desactiva la captura (ligado al modo de funcionamiento offline/online).
-    pub fn set_sync_enabled(&self, on: bool) {
-        self.enabled.store(on, Ordering::Relaxed);
+    /// Puerta de transacción compartida (ver `tx_gate`). El aplicador nube→Main la adquiere
+    /// alrededor de su propio BEGIN..COMMIT para serializarse con las transacciones de los repos.
+    pub fn tx_gate(&self) -> Arc<Mutex<()>> {
+        self.tx_gate.clone()
     }
 
     /// Crea (idempotente) las tablas de control de la sincronización. Se llama una vez al
@@ -166,7 +180,7 @@ impl TrackedConnection {
     pub async fn execute(&self, sql: &str, params: impl Bindable) -> Result<u64, LibsqlError> {
         let values = params.into_values();
         let affected = self.inner.execute(sql, values.clone()).await?;
-        if self.enabled.load(Ordering::Relaxed) && is_write_sql(sql) {
+        if is_write_sql(sql) {
             self.capture_write(sql, &values).await?;
         }
         Ok(affected)
@@ -175,24 +189,52 @@ impl TrackedConnection {
     pub async fn execute_batch(&self, sql: &str) -> Result<(), LibsqlError> {
         match batch_kind(sql) {
             BatchKind::Begin => {
+                // Adquirir la puerta ANTES de emitir BEGIN: si otra transacción (o el aplicador
+                // de sync) está en curso, esperamos a que termine en vez de chocar con un
+                // "transaction within a transaction".
+                let guard = self.tx_gate.clone().lock_owned().await;
                 *self.tx_buf.lock().await = Some(Vec::new());
-                self.inner.execute_batch(sql).await.map(|_| ())
+                match self.inner.execute_batch(sql).await {
+                    Ok(_) => {
+                        *self.tx_guard.lock().await = Some(guard);
+                        Ok(())
+                    }
+                    Err(e) => {
+                        // BEGIN falló: no hay transacción abierta, soltamos buffer y puerta.
+                        *self.tx_buf.lock().await = None;
+                        drop(guard);
+                        Err(e)
+                    }
+                }
             }
             BatchKind::Commit => {
                 let buffered = self.tx_buf.lock().await.take();
-                if self.enabled.load(Ordering::Relaxed) {
-                    if let Some(stmts) = buffered {
-                        if !stmts.is_empty() {
-                            // Dentro de la misma transacción (BEGIN ya enviado, COMMIT no aún).
-                            self.write_op(&stmts).await?;
-                        }
+                // Registrar la operación en el outbox DENTRO de la misma transacción (BEGIN ya
+                // enviado, COMMIT no aún). La captura es incondicional: el outbox acumula también
+                // en offline y se drena al activar online.
+                let mut pre: Result<(), LibsqlError> = Ok(());
+                if let Some(stmts) = buffered {
+                    if !stmts.is_empty() {
+                        pre = self.write_op(&stmts).await;
                     }
                 }
-                self.inner.execute_batch(sql).await.map(|_| ())
+                let res = match pre {
+                    Ok(()) => self.inner.execute_batch(sql).await.map(|_| ()),
+                    Err(e) => {
+                        // No se pudo registrar el outbox: abortar para no confirmar a medias.
+                        let _ = self.inner.execute_batch("ROLLBACK;").await;
+                        Err(e)
+                    }
+                };
+                // Soltar la puerta pase lo que pase (la transacción ya quedó cerrada).
+                *self.tx_guard.lock().await = None;
+                res
             }
             BatchKind::Rollback => {
                 *self.tx_buf.lock().await = None;
-                self.inner.execute_batch(sql).await.map(|_| ())
+                let res = self.inner.execute_batch(sql).await.map(|_| ());
+                *self.tx_guard.lock().await = None;
+                res
             }
             BatchKind::Other => self.inner.execute_batch(sql).await.map(|_| ()),
         }

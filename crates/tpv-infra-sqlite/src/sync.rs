@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::{Connection, Value};
+use tokio::sync::Mutex;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
@@ -19,11 +20,14 @@ use crate::mapping::v_i64;
 
 pub struct SqliteSyncRepository {
     conn: Arc<Connection>,
+    /// Puerta de transacción compartida con `TrackedConnection` (ver allí). El aplicador la
+    /// adquiere alrededor de su BEGIN..COMMIT para no chocar con las transacciones de los repos.
+    tx_gate: Arc<Mutex<()>>,
 }
 
 impl SqliteSyncRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(conn: Arc<Connection>, tx_gate: Arc<Mutex<()>>) -> Self {
+        Self { conn, tx_gate }
     }
 }
 
@@ -176,6 +180,10 @@ impl SyncRepository for SqliteSyncRepository {
         ensure_tables(conn).await?;
 
         for ch in &changes {
+            // Serializar con las transacciones de los repos (misma conexión libsql única): sin
+            // esta puerta, el BEGIN del aplicador podría chocar con el de, p. ej., `save_layout`
+            // ("cannot start a transaction within a transaction").
+            let _gate = self.tx_gate.lock().await;
             // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up o eco de
             // las propias escrituras de la Main) se ignora, pero igualmente avanza el checkpoint.
             if op_already_applied(conn, &ch.op_id).await? {

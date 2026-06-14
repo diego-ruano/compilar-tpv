@@ -30,6 +30,27 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 	const mode = useConnectionMode((s) => s.mode);
 	const setMode = useConnectionMode((s) => s.setMode);
 
+	const [busy, setBusy] = React.useState(false);
+	const [error, setError] = React.useState<string | null>(null);
+
+	const onSelect = async (value: ConnectionMode) => {
+		if (busy || value === mode) return;
+		setError(null);
+		setBusy(true);
+		try {
+			await setMode(value);
+		} catch (e) {
+			const msg = String((e as any)?.message ?? e ?? "");
+			setError(
+				msg.includes("licencia")
+					? "No se pudo activar el modo online: la licencia no es válida o no se pudo verificar. Revisa tu licencia e inténtalo de nuevo."
+					: `No se pudo cambiar de modo: ${msg}`,
+			);
+		} finally {
+			setBusy(false);
+		}
+	};
+
 	return (
 		<div className="flex flex-col gap-4">
 			<Panel
@@ -43,9 +64,11 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 							<button
 								key={opt.value}
 								type="button"
-								onClick={() => setMode(opt.value)}
+								disabled={busy}
+								onClick={() => onSelect(opt.value)}
 								className={cn(
 									"text-left rounded-2xl border p-4 transition",
+									busy && "opacity-60 cursor-wait",
 									selected
 										? "border-accent bg-accent-soft"
 										: darkMode
@@ -85,6 +108,12 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 						);
 					})}
 				</div>
+
+				{error && (
+					<div className="mt-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
+						{error}
+					</div>
+				)}
 
 				<p className="mt-4 text-[11px] text-fg-muted">
 					El modo se aplica solo en este dispositivo. En "Con conexión" la app sigue

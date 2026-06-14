@@ -24,7 +24,7 @@ type ConnectionModeStore = {
 	setMode: (mode: ConnectionMode) => Promise<void>;
 };
 
-export const useConnectionMode = create<ConnectionModeStore>((set) => ({
+export const useConnectionMode = create<ConnectionModeStore>((set, get) => ({
 	mode: "offline",
 	hydrated: false,
 	hydrate: async () => {
@@ -36,11 +36,17 @@ export const useConnectionMode = create<ConnectionModeStore>((set) => ({
 		}
 	},
 	setMode: async (mode) => {
-		set({ mode });
+		// El backend puede RECHAZAR pasar a "online" (p. ej. licencia no válida): solo
+		// confirmamos el modo en el store si la llamada tiene éxito, y propagamos el error
+		// para que la UI lo muestre y no quede un estado mentiroso.
+		const prev = get().mode;
 		try {
 			await invoke("set_connection_mode", { args: { mode } });
+			set({ mode });
 		} catch (e) {
+			set({ mode: prev });
 			console.warn("set_connection_mode falló:", e);
+			throw e;
 		}
 	},
 }));

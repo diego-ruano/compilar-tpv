@@ -29,7 +29,7 @@ use tpv_infra_http::{
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
 };
-use tpv_infra_licensing::PairingAdapter;
+use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
@@ -270,8 +270,10 @@ impl AppState {
             .cloned()
             .ok_or_else(|| "DB no inicializada (sync requiere modo Main)".to_string())?;
         // El aplicador usa la conexión CRUDA (sin captura): aplicar cambios de la nube no debe
-        // re-encolarse en el outbox.
-        Ok(Arc::new(SqliteSyncRepository::new(conn.raw())) as Arc<dyn SyncRepository>)
+        // re-encolarse en el outbox. Comparte la PUERTA de transacción de `TrackedConnection`
+        // para no chocar (BEGIN-dentro-de-BEGIN) con las transacciones de los repos.
+        Ok(Arc::new(SqliteSyncRepository::new(conn.raw(), conn.tx_gate()))
+            as Arc<dyn SyncRepository>)
     }
 }
 
@@ -302,12 +304,12 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, Strin
     Ok(load_config(&app_data_dir).connectivity)
 }
 
-/// Persiste el modo de funcionamiento (offline/online) en `device_config.json` y activa/desactiva
-/// la captura de escrituras para el outbox (solo se captura en "online").
+/// Persiste el modo de funcionamiento (offline/online) en `device_config.json`. La captura de
+/// escrituras para el outbox está SIEMPRE activa (el outbox es el log de cambios local); este
+/// modo solo decide si, ADEMÁS, el frontend abre el WebSocket para drenar/recibir de la nube.
 #[tauri::command]
 async fn set_connection_mode(
     app: AppHandle,
-    state: State<'_, AppState>,
     args: SetConnectionModeArgs,
 ) -> Result<String, String> {
     let app_data_dir = app
@@ -315,13 +317,19 @@ async fn set_connection_mode(
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
 
+    // Activar la nube exige una licencia válida AHORA: forzamos una validación contra el worker
+    // (no nos fiamos del estado cacheado). Si no es válida, no activamos online.
+    if args.mode == ConnectivityMode::Online {
+        let svc = LicensingAdapter::new(app_data_dir.clone());
+        let gate = tpv_application::use_cases::licensing::check_now(&svc).await?;
+        if !gate.allowed {
+            return Err(format!("licencia_no_valida: {}", gate.reason));
+        }
+    }
+
     let mut cfg = load_config(&app_data_dir);
     cfg.connectivity = Some(args.mode);
     save_config(&app_data_dir, &cfg)?;
-
-    if let Some(conn) = state.db.lock().await.as_ref() {
-        conn.set_sync_enabled(args.mode == ConnectivityMode::Online);
-    }
 
     Ok("OK".into())
 }
@@ -394,8 +402,8 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         .init_sync_tables()
         .await
         .map_err(|e| format!("Error init_sync_tables: {e}"))?;
-    // Captura de escrituras activa solo si el modo de funcionamiento es "online".
-    tracked.set_sync_enabled(load_config(&app_data_dir).connectivity == Some(ConnectivityMode::Online));
+    // La captura de escrituras al outbox está SIEMPRE activa (también offline): el outbox es el
+    // log de cambios local; se drena a la nube cuando el modo es "online".
     let db = Arc::new(tracked);
 
     let mut guard = state.db.lock().await;
@@ -520,8 +528,7 @@ pub fn run() {
                 let tracked = TrackedConnection::new(Arc::new(raw));
                 tauri::async_runtime::block_on(tracked.init_sync_tables())
                     .expect("Error init_sync_tables");
-                // Captura de escrituras activa solo si el modo de funcionamiento es "online".
-                tracked.set_sync_enabled(cfg.connectivity == Some(ConnectivityMode::Online));
+                // La captura al outbox está SIEMPRE activa (también offline); se drena en "online".
                 Some(Arc::new(tracked))
             } else {
                 None
