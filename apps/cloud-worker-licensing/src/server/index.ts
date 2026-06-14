@@ -350,15 +350,23 @@ async function tenantQuerySingleNumber(
 	return rowNumber(row, firstKey, 0);
 }
 
-async function ensureTenantInitialAdmin(client: Client): Promise<void> {
-	await client.execute({
-		sql: `
-			INSERT OR IGNORE INTO Roles (Nombre_Rol)
-			VALUES ('Administrador');
-		`,
-		args: [],
-	});
+async function tenantQuerySingleString(
+	client: Client,
+	sql: string,
+	args: any[] = []
+): Promise<string | null> {
+	const r = await client.execute({ sql, args });
+	const row = r.rows?.[0] as any | undefined;
+	if (!row) return null;
 
+	const firstKey = Object.keys(row)[0] || "";
+	const v = row?.[firstKey] ?? row?.[0];
+	return v == null ? null : String(v);
+}
+
+async function ensureTenantInitialAdmin(client: Client): Promise<void> {
+	// Los roles ya los siembra schema.sql con sus UUIDv7 fijos; aquí sólo creamos
+	// el usuario admin inicial si la tabla Usuarios está vacía.
 	const usersCount = await tenantQuerySingleNumber(
 		client,
 		`SELECT COUNT(*) AS count FROM Usuarios;`
@@ -368,7 +376,7 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 		return;
 	}
 
-	const adminRoleId = await tenantQuerySingleNumber(
+	const adminRoleId = await tenantQuerySingleString(
 		client,
 		`
 			SELECT ID_Rol AS id
@@ -378,7 +386,7 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 		`
 	);
 
-	if (adminRoleId <= 0) {
+	if (!adminRoleId) {
 		throw new Error("initial_admin_role_missing");
 	}
 
@@ -387,6 +395,7 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 	await client.execute({
 		sql: `
 			INSERT INTO Usuarios (
+				ID_Usuario,
 				ID_Rol,
 				Email,
 				Password_Hash,
@@ -401,11 +410,13 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 				?,
 				?,
 				?,
+				?,
 				'Activo',
 				1
 			);
 		`,
 		args: [
+			crypto.randomUUID(),
 			adminRoleId,
 			"admin@local",
 			hash,
