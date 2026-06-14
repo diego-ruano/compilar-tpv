@@ -181,7 +181,9 @@ export function useMainSocket() {
 						const ok = await sendApply(socket, entry);
 						if (!ok) break;
 						try {
-							await invoke("sync_outbox_mark_sent", { op_id: entry.op_id });
+							// Tauri v2 camelCasea los nombres de argumento en la frontera JS↔Rust:
+							// el comando `sync_outbox_mark_sent(op_id)` se invoca como `opId`.
+							await invoke("sync_outbox_mark_sent", { opId: entry.op_id });
 							progressed = true;
 						} catch (e) {
 							console.warn("sync_outbox_mark_sent falló:", e);
