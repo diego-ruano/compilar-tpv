@@ -7,8 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::{
@@ -17,16 +15,17 @@ use tpv_contracts::venta_rapida::{
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
 use crate::util::{new_id, BARRA_MESA_ID};
 
 pub struct SqliteVentaRapidaRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteVentaRapidaRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -51,8 +50,8 @@ fn update_total_comanda_sql() -> &'static str {
 }
 
 #[allow(dead_code)]
-async fn exists_by_id(
-    conn: &Connection,
+async fn exists_by_id<C: Reader>(
+    conn: &C,
     table: &str,
     column: &str,
     id: &str,
@@ -68,8 +67,8 @@ async fn exists_by_id(
     Ok(rows.next().await.map_err(db_err)?.is_some())
 }
 
-async fn trabajador_id_from_usuario(
-    db: &Connection,
+async fn trabajador_id_from_usuario<C: Reader>(
+    db: &C,
     id_usuario: Option<String>,
 ) -> AppResult<Option<String>> {
     let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
@@ -88,8 +87,8 @@ async fn trabajador_id_from_usuario(
     Ok(None)
 }
 
-async fn resolve_trabajador_id_input(
-    db: &Connection,
+async fn resolve_trabajador_id_input<C: Reader>(
+    db: &C,
     id_maybe: Option<String>,
 ) -> AppResult<Option<String>> {
     let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
@@ -108,7 +107,7 @@ async fn resolve_trabajador_id_input(
     trabajador_id_from_usuario(db, Some(x)).await
 }
 
-async fn trabajador_id_from_comanda(db: &Connection, id_comanda: &str) -> AppResult<Option<String>> {
+async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<String>> {
     if id_comanda.trim().is_empty() {
         return Ok(None);
     }
@@ -126,12 +125,12 @@ async fn trabajador_id_from_comanda(db: &Connection, id_comanda: &str) -> AppRes
 }
 
 /// La mesa BARRA se siembra con un id fijo (idéntico en local y nube).
-async fn ensure_barra_mesa_id(_db: &Connection) -> AppResult<String> {
+async fn ensure_barra_mesa_id<C>(_db: &C) -> AppResult<String> {
     Ok(BARRA_MESA_ID.to_string())
 }
 
-async fn find_open_barra_comanda_id(
-    db: &Connection,
+async fn find_open_barra_comanda_id<C: Reader>(
+    db: &C,
     id_mesa_barra: &str,
 ) -> AppResult<Option<String>> {
     if id_mesa_barra.trim().is_empty() {
@@ -160,7 +159,8 @@ async fn find_open_barra_comanda_id(
 #[async_trait]
 impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -188,7 +188,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn list_productos_by_categoria(&self, id_categoria: &str) -> AppResult<Vec<ProductoRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -232,7 +233,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn search_productos(&self, query: String, limit: i64) -> AppResult<Vec<ProductoRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let like = format!("%{}%", query);
         let mut rows = db
             .query(
@@ -282,7 +284,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         include_pagadas: bool,
         limit: Option<i64>,
     ) -> AppResult<Vec<ComandaBarraRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let lim = limit.unwrap_or(60).clamp(1, 200);
 
         let pending_expr = clamp_pending_sql(
@@ -354,7 +357,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<LineaComandaRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -398,7 +402,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn get_index_rows(&self, ids: Vec<String>) -> AppResult<Vec<IndexRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         if ids.is_empty() {
             return Ok(vec![]);
         }
@@ -467,7 +472,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         &self,
         id_comanda: &str,
     ) -> AppResult<Vec<VerTicketsDetalleRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -513,7 +519,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         id_trabajador: Option<String>,
         get_or_create: bool,
     ) -> AppResult<String> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let id_mesa_barra = ensure_barra_mesa_id(db).await?;
 
         if get_or_create {
@@ -589,7 +596,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         cantidad: f64,
         precio_unitario: f64,
     ) -> AppResult<String> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let id_detalle_final = new_id();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -643,7 +651,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         id_comanda: &str,
         id_producto: &str,
     ) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
@@ -687,7 +696,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn delete_linea_if_unpaid(&self, id_comanda: &str, id_detalle: &str) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
@@ -726,7 +736,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn update_nota_detalle(&self, id_detalle: &str, nota: Option<String>) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         let affected = db
             .execute(
@@ -746,7 +757,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         let id_pago_final = new_id();
 
@@ -1070,7 +1082,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
@@ -1176,7 +1189,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     }
 
     async fn delete_comanda_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {

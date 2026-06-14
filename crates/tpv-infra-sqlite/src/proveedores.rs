@@ -5,23 +5,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::{Row, Value};
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, ProveedorDto};
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteProveedoresRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteProveedoresRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -87,7 +86,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
           FROM Proveedores
           ORDER BY Nombre_Empresa ASC;
         "#;
-        let mut rows = self.conn.query(sql, ()).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(sql, ()).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
@@ -110,8 +110,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
         let sql = format!(
             "SELECT {SQL_PRODUCTO_COLS} FROM Productos p WHERE p.ID_Proveedor = ?1 ORDER BY p.Nombre ASC;"
         );
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(&sql, vec![Value::Text(id_proveedor.to_string())])
             .await
             .map_err(db_err)?;
@@ -124,7 +124,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
 
     async fn get_categorias(&self) -> AppResult<Vec<CategoriaProveedorDto>> {
         let sql = "SELECT ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen FROM Categorias_Producto ORDER BY Nombre ASC;";
-        let mut rows = self.conn.query(sql, ()).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(sql, ()).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
@@ -140,7 +141,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
 
     async fn get_productos_all(&self) -> AppResult<Vec<ProductoProveedorDto>> {
         let sql = format!("SELECT {SQL_PRODUCTO_COLS} FROM Productos p ORDER BY p.Nombre ASC;");
-        let mut rows = self.conn.query(&sql, ()).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(&sql, ()).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             out.push(map_producto(&row)?);
@@ -151,8 +153,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     async fn guardar(&self, p: ProveedorValidado) -> AppResult<bool> {
         let id = p.id.unwrap_or_else(new_id);
 
-        self.conn
-            .execute(
+        let db = self.db.write().await;
+        db.execute(
                 r#"
                 INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Contacto, Telefono, Email, CIF, Informacion_adicional, Nombre_Imagen, Ruta_Imagen)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -184,7 +186,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     }
 
     async fn eliminar(&self, id_proveedor: &str) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
@@ -222,7 +225,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     }
 
     async fn set_vinculos(&self, id_proveedor: &str, producto_ids: Vec<String>) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(
@@ -255,7 +259,8 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
     }
 
     async fn crear_producto(&self, p: ProductoNuevo) -> AppResult<String> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         let id_producto = p.id.unwrap_or_else(new_id);
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;

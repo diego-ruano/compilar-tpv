@@ -1,16 +1,19 @@
 //! Conexión y arranque (schema + seed) de la base de datos **SQLite local (libsql)**.
 //!
 //! Antes vivía en el shell Tauri (`main.rs`). El shell ahora sólo aporta la ruta de
-//! datos (AppData) y el contenido del `schema.sql`; este módulo construye la conexión a
-//! `data.db`, aplica el esquema y siembra el administrador inicial si la BD está vacía.
+//! datos (AppData) y el contenido del `schema.sql`; este módulo abre la BD (`Db`: escritor
+//! único + pool de lectura, WAL), aplica el esquema y siembra el administrador inicial si la
+//! BD está vacía.
 
 use std::path::Path;
+use std::sync::Arc;
 
-use libsql::{Builder, Connection, Value};
+use libsql::{Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
 
+use crate::db::Db;
 use crate::util::new_id;
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
@@ -93,26 +96,23 @@ async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-/// Construye la conexión local a `data.db` dentro de `app_data_dir`, aplica `schema`
-/// (el contenido de `schema.sql`) y siembra el administrador inicial.
-pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Connection> {
+/// Abre la BD local `data.db` dentro de `app_data_dir` (escritor único + pool de lectura, WAL),
+/// aplica `schema` (el contenido de `schema.sql`) y siembra el administrador inicial.
+pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Arc<Db>> {
     let db_path = app_data_dir.join("data.db");
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
 
-    let db = Builder::new_local(db_path_str)
-        .build()
+    let db = Db::open(db_path_str, schema)
         .await
-        .map_err(db_err)?;
+        .map_err(|e| AppError::repository(format!("Error abriendo la BD: {e}")))?;
 
-    let c = db.connect().map_err(db_err)?;
+    // El seed corre sobre la conexión de escritura (exclusiva) tras abrir.
+    {
+        let w = db.write().await;
+        seed_admin_if_empty(w.raw()).await?;
+    }
 
-    c.execute_batch(schema)
-        .await
-        .map_err(|e| AppError::repository(format!("Error ejecutando schema.sql: {e}")))?;
-
-    seed_admin_if_empty(&c).await?;
-
-    Ok(c)
+    Ok(db)
 }

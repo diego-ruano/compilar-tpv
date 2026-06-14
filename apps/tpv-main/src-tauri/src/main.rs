@@ -4,9 +4,8 @@
 mod commands;
 
 use base64::prelude::*;
-use libsql::Connection;
 use serde::{Deserialize, Serialize};
-use tpv_infra_sqlite::recording::TrackedConnection;
+use tpv_infra_sqlite::db::Db;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -146,7 +145,7 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
 // ──────────────────────────────────────────────────────────────────────────────
 
 pub(crate) struct AppState {
-    db: Arc<Mutex<Option<Arc<TrackedConnection>>>>,
+    db: Arc<Mutex<Option<Arc<Db>>>>,
     cloud: Arc<Mutex<Option<Arc<CloudClient>>>>,
     mode: Arc<Mutex<Option<DeviceMode>>>,
 }
@@ -269,11 +268,9 @@ impl AppState {
             .as_ref()
             .cloned()
             .ok_or_else(|| "DB no inicializada (sync requiere modo Main)".to_string())?;
-        // El aplicador usa la conexión CRUDA (sin captura): aplicar cambios de la nube no debe
-        // re-encolarse en el outbox. Comparte la PUERTA de transacción de `TrackedConnection`
-        // para no chocar (BEGIN-dentro-de-BEGIN) con las transacciones de los repos.
-        Ok(Arc::new(SqliteSyncRepository::new(conn.raw(), conn.tx_gate()))
-            as Arc<dyn SyncRepository>)
+        // El aplicador aplica los cambios remotos sobre la conexión de escritura exclusiva del
+        // `Db` (serializado con los repos, sin re-capturar en el outbox).
+        Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
     }
 }
 
@@ -393,18 +390,16 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     ensure_folders(&app_data_dir)?;
 
-    let conn = tpv_infra_sqlite::connection::init_main_db(&app_data_dir, include_str!("../../../../packages/database/schema.sql"))
-        .await
-        .map_err(String::from)?;
-
-    let tracked = TrackedConnection::new(Arc::new(conn));
-    tracked
-        .init_sync_tables()
-        .await
-        .map_err(|e| format!("Error init_sync_tables: {e}"))?;
-    // La captura de escrituras al outbox está SIEMPRE activa (también offline): el outbox es el
-    // log de cambios local; se drena a la nube cuando el modo es "online".
-    let db = Arc::new(tracked);
+    // `init_main_db` devuelve el `Db` ya montado: escritor único serializado + pool de lectura
+    // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
+    // SIEMPRE activa (también offline): el outbox es el log de cambios local; se drena a la nube
+    // cuando el modo es "online".
+    let db = tpv_infra_sqlite::connection::init_main_db(
+        &app_data_dir,
+        include_str!("../../../../packages/database/schema.sql"),
+    )
+    .await
+    .map_err(String::from)?;
 
     let mut guard = state.db.lock().await;
     *guard = Some(db);
@@ -516,8 +511,10 @@ pub fn run() {
             let cfg = load_config(&app_data_dir);
             let mode = cfg.mode;
 
-            let db_opt: Option<Arc<TrackedConnection>> = if mode == Some(DeviceMode::Tpv) {
-                let raw: Connection = tauri::async_runtime::block_on(async {
+            let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) {
+                // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
+                // está SIEMPRE activa (también offline); se drena en "online".
+                let db = tauri::async_runtime::block_on(async {
                     tpv_infra_sqlite::connection::init_main_db(
                         &app_data_dir,
                         include_str!("../../../../packages/database/schema.sql"),
@@ -525,11 +522,7 @@ pub fn run() {
                     .await
                     .expect("Error init_main_db")
                 });
-                let tracked = TrackedConnection::new(Arc::new(raw));
-                tauri::async_runtime::block_on(tracked.init_sync_tables())
-                    .expect("Error init_sync_tables");
-                // La captura al outbox está SIEMPRE activa (también offline); se drena en "online".
-                Some(Arc::new(tracked))
+                Some(db)
             } else {
                 None
             };

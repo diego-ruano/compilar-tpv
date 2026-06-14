@@ -6,22 +6,21 @@ use async_trait::async_trait;
 use libsql::Value;
 use serde_json::Value as JsonValue;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
 use tpv_domain::configuracion::clamp_paper_width_mm;
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_f64, v_i64, v_string};
 
 pub struct SqliteConfiguracionRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteConfiguracionRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -94,7 +93,7 @@ fn patch_bool(patch: &JsonValue, key: &str) -> Option<bool> {
     }
 }
 
-async fn ensure_config_rows(conn: &Connection) -> AppResult<()> {
+async fn ensure_config_rows<C: Writer>(conn: &C) -> AppResult<()> {
     conn.execute("INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);", ())
         .await
         .map_err(db_err)?;
@@ -107,7 +106,8 @@ async fn ensure_config_rows(conn: &Connection) -> AppResult<()> {
 #[async_trait]
 impl ConfiguracionRepository for SqliteConfiguracionRepository {
     async fn get_business(&self) -> AppResult<BusinessSettings> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
@@ -134,7 +134,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     }
 
     async fn get_ticket(&self) -> AppResult<TicketSettings> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
@@ -169,7 +170,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     }
 
     async fn patch_business(&self, patch: &JsonValue) -> AppResult<()> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         ensure_config_rows(conn).await?;
 
         let mut sets: Vec<&str> = Vec::new();
@@ -243,7 +245,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     }
 
     async fn patch_ticket(&self, patch: &JsonValue) -> AppResult<()> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         ensure_config_rows(conn).await?;
 
         let mut sets: Vec<&str> = Vec::new();

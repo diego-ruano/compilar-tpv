@@ -2,32 +2,34 @@
 //! operaciones que llegan de la nube (Opción 3: sentencias ya resueltas), de forma idempotente
 //! (por `op_id`) y llevando un checkpoint (`seq`).
 //!
-//! Tablas de control locales (creadas on-demand, prefijo `_Sync_`):
-//!   - `_Sync_Applied_Ops`: op_id ya aplicados (dedupe).
-//!   - `_Sync_State`: último `seq` aplicado (checkpoint del catch-up).
+//! Tras el refactor de conexiones (`db.rs`): el aplicador corre sobre la **conexión de escritura
+//! exclusiva** (vía `Db::write()`), usando su conexión CRUDA (`raw()`) para NO re-capturar los
+//! cambios remotos en el outbox. Como el escritor es único, queda serializado con las
+//! transacciones de los repos sin necesidad de la antigua "puerta de transacción". Las lecturas
+//! del outbox / checkpoint usan el pool de lectura (`Db::read()`).
+//!
+//! Las tablas de control (`_Sync_*`) las crea `Db::open` al arrancar, así que aquí no hace falta
+//! asegurarlas en cada llamada.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use libsql::{Connection, Value};
-use tokio::sync::Mutex;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_contracts::sync::{OutboxEntry, SqlStatement, SyncChange};
 
+use crate::db::Db;
 use crate::mapping::v_i64;
 
 pub struct SqliteSyncRepository {
-    conn: Arc<Connection>,
-    /// Puerta de transacción compartida con `TrackedConnection` (ver allí). El aplicador la
-    /// adquiere alrededor de su BEGIN..COMMIT para no chocar con las transacciones de los repos.
-    tx_gate: Arc<Mutex<()>>,
+    db: Arc<Db>,
 }
 
 impl SqliteSyncRepository {
-    pub fn new(conn: Arc<Connection>, tx_gate: Arc<Mutex<()>>) -> Self {
-        Self { conn, tx_gate }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -62,32 +64,6 @@ fn json_to_value(v: &serde_json::Value) -> Value {
         // arrays/objetos no deberían llegar como args; los guardamos como texto JSON.
         other => Value::Text(other.to_string()),
     }
-}
-
-async fn ensure_tables(conn: &Connection) -> AppResult<()> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
-            Op_Id TEXT PRIMARY KEY,
-            Seq INTEGER NOT NULL,
-            Applied_At_Ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS _Sync_State (
-            Id INTEGER PRIMARY KEY CHECK (Id = 1),
-            Last_Seq INTEGER NOT NULL
-        );
-        INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
-        CREATE TABLE IF NOT EXISTS _Sync_Outbox (
-            Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-            Op_Id TEXT NOT NULL UNIQUE,
-            Command_Name TEXT NOT NULL,
-            Statements_Json TEXT NOT NULL,
-            Created_At_Ms INTEGER NOT NULL
-        );
-        "#,
-    )
-    .await
-    .map_err(db_err)
 }
 
 async fn checkpoint(conn: &Connection) -> AppResult<i64> {
@@ -127,7 +103,7 @@ async fn advance_checkpoint(conn: &Connection, seq: i64) -> AppResult<()> {
 
 /// Aplica una operación de forma atómica: sus sentencias + el registro de idempotencia + el
 /// avance del checkpoint, todo dentro de una transacción. `defer_foreign_keys` evita fallos por
-/// orden dentro de la propia operación.
+/// orden dentro de la propia operación. Corre sobre la conexión CRUDA de escritura (sin captura).
 async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
     conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
         .await
@@ -176,14 +152,12 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
 #[async_trait]
 impl SyncRepository for SqliteSyncRepository {
     async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<i64> {
-        let conn = &self.conn;
-        ensure_tables(conn).await?;
+        // Acceso EXCLUSIVO de escritura durante todo el lote: serializa con las transacciones de
+        // los repos (un único escritor). Conexión CRUDA → no se re-captura en el outbox.
+        let w = self.db.write().await;
+        let conn: &Connection = w.raw();
 
         for ch in &changes {
-            // Serializar con las transacciones de los repos (misma conexión libsql única): sin
-            // esta puerta, el BEGIN del aplicador podría chocar con el de, p. ej., `save_layout`
-            // ("cannot start a transaction within a transaction").
-            let _gate = self.tx_gate.lock().await;
             // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up o eco de
             // las propias escrituras de la Main) se ignora, pero igualmente avanza el checkpoint.
             if op_already_applied(conn, &ch.op_id).await? {
@@ -197,13 +171,13 @@ impl SyncRepository for SqliteSyncRepository {
     }
 
     async fn get_checkpoint(&self) -> AppResult<i64> {
-        ensure_tables(&self.conn).await?;
-        checkpoint(&self.conn).await
+        let r = self.db.read().await;
+        checkpoint(r.conn()).await
     }
 
     async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>> {
-        let conn = &self.conn;
-        ensure_tables(conn).await?;
+        let r = self.db.read().await;
+        let conn = r.conn();
 
         let mut rows = conn
             .query(
@@ -244,7 +218,10 @@ impl SyncRepository for SqliteSyncRepository {
     }
 
     async fn outbox_mark_sent(&self, op_id: &str) -> AppResult<()> {
-        self.conn
+        // DELETE sobre la tabla de control `_Sync_Outbox`: va por la conexión CRUDA de escritura
+        // (no debe capturarse como cambio de negocio) y queda serializado por el escritor único.
+        let w = self.db.write().await;
+        w.raw()
             .execute(
                 "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
                 vec![Value::Text(op_id.to_string())],

@@ -1,9 +1,8 @@
 //! Utilidades compartidas por los repositorios SQLite.
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 
+use crate::db::Reader;
 use crate::mapping::v_i64;
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
@@ -12,7 +11,7 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 
 /// Siguiente ID libre para `table.column` (= `MAX(col)+1`, mínimo 1).
 /// Reemplaza el patrón `next_table_id` que estaba duplicado por módulo.
-pub async fn next_table_id(conn: &Connection, table: &str, column: &str) -> AppResult<i64> {
+pub async fn next_table_id<C: Reader>(conn: &C, table: &str, column: &str) -> AppResult<i64> {
     let sql = format!("SELECT COALESCE(MAX({column}), 0) + 1 FROM {table};");
 
     let mut rows = conn.query(&sql, ()).await.map_err(db_err)?;

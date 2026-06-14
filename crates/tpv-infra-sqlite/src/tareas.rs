@@ -7,8 +7,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_contracts::tareas::{
@@ -16,16 +14,17 @@ use tpv_contracts::tareas::{
 };
 use tpv_domain::tareas::TareaData;
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteTareasRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteTareasRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -40,8 +39,8 @@ fn build_in_placeholders(start: i64, count: usize) -> String {
         .join(", ")
 }
 
-async fn select_one_i64(
-    conn: &Connection,
+async fn select_one_i64<C: Reader>(
+    conn: &C,
     sql: &str,
     args: Vec<Value>,
 ) -> AppResult<Option<i64>> {
@@ -52,7 +51,7 @@ async fn select_one_i64(
     Ok(None)
 }
 
-async fn exists_tarea(conn: &Connection, id_tarea: &str) -> AppResult<bool> {
+async fn exists_tarea<C: Reader>(conn: &C, id_tarea: &str) -> AppResult<bool> {
     if id_tarea.trim().is_empty() {
         return Ok(false);
     }
@@ -67,8 +66,8 @@ async fn exists_tarea(conn: &Connection, id_tarea: &str) -> AppResult<bool> {
 
 /// Sustituye el conjunto de asignaciones de una tarea (borra las que sobran e inserta
 /// las nuevas con estado PENDIENTE). No abre transacción: el llamador la gestiona.
-async fn apply_set_asignaciones_core(
-    conn: &Connection,
+async fn apply_set_asignaciones_core<C: Writer>(
+    conn: &C,
     id_tarea: &str,
     ids_trabajadores: &[String],
 ) -> AppResult<()> {
@@ -128,7 +127,8 @@ async fn apply_set_asignaciones_core(
 #[async_trait]
 impl TareasRepository for SqliteTareasRepository {
     async fn get_trabajadores(&self) -> AppResult<Vec<TrabajadorUI>> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         let sql = r#"
             SELECT
@@ -162,7 +162,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn get_tareas_admin(&self) -> AppResult<Vec<TareaAdminRow>> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         let sql = r#"
             SELECT
@@ -206,7 +207,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn get_tarea_by_id(&self, id_tarea: &str) -> AppResult<Option<TareaRow>> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         if id_tarea.trim().is_empty() {
             return Ok(None);
@@ -239,7 +241,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn get_tarea_asignados(&self, id_tarea: &str) -> AppResult<Vec<TareaAsignadoRow>> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         if id_tarea.trim().is_empty() {
             return Ok(vec![]);
@@ -285,7 +288,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn get_mis_tareas(&self, id_trabajador: &str) -> AppResult<Vec<MisTareasRow>> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         if id_trabajador.trim().is_empty() {
             return Ok(vec![]);
@@ -342,7 +346,8 @@ impl TareasRepository for SqliteTareasRepository {
         data: TareaData,
         ids_trabajadores: Vec<String>,
     ) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
@@ -387,7 +392,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn update_tarea(&self, id_tarea: &str, data: TareaData) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
 
         let affected = conn
             .execute(
@@ -421,7 +427,8 @@ impl TareasRepository for SqliteTareasRepository {
         id_tarea: &str,
         ids_trabajadores: Vec<String>,
     ) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
 
         if !exists_tarea(conn, id_tarea).await? {
             return Err(AppError::not_found("Tarea no encontrada"));
@@ -447,7 +454,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn delete_tarea(&self, id_tarea: &str) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
 
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
@@ -487,7 +495,8 @@ impl TareasRepository for SqliteTareasRepository {
     }
 
     async fn marcar_finalizada(&self, id_tarea: &str, id_trabajador: &str) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
 
         let affected = conn
             .execute(

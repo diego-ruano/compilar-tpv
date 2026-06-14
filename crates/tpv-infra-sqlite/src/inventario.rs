@@ -5,8 +5,6 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::{Row, Value};
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_contracts::inventario::{
@@ -16,16 +14,17 @@ use tpv_contracts::inventario::{
 };
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteInventarioRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteInventarioRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -108,7 +107,10 @@ fn map_lote(row: &Row) -> AppResult<LoteDto> {
 
 const SQL_PRODUCTO_BASE_COLS: &str = "ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada";
 
-async fn fetch_producto(conn: &Connection, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
+async fn fetch_producto<C: Reader>(
+    conn: &C,
+    id_producto: &str,
+) -> AppResult<Option<ProductoBaseDto>> {
     let sql = format!("SELECT {SQL_PRODUCTO_BASE_COLS} FROM Productos WHERE ID_Producto=?1 LIMIT 1;");
     let mut rows = conn
         .query(&sql, vec![Value::Text(id_producto.to_string())])
@@ -124,8 +126,8 @@ async fn fetch_producto(conn: &Connection, id_producto: &str) -> AppResult<Optio
 #[async_trait]
 impl InventarioRepository for SqliteInventarioRepository {
     async fn list_categorias(&self) -> AppResult<Vec<CategoriaInvDto>> {
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(
                 "SELECT ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina FROM Categorias_Producto ORDER BY Nombre ASC;",
                 (),
@@ -148,8 +150,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn list_proveedores_mini(&self) -> AppResult<Vec<ProveedorMiniDto>> {
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(
                 "SELECT ID_Proveedor, Nombre_Empresa, Email FROM Proveedores ORDER BY Nombre_Empresa ASC;",
                 (),
@@ -184,8 +186,8 @@ impl InventarioRepository for SqliteInventarioRepository {
           WHERE p.ID_Categoria = ?1
           ORDER BY p.Nombre ASC;
         "#;
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(sql, vec![Value::Text(id_categoria.to_string())])
             .await
             .map_err(db_err)?;
@@ -197,8 +199,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn resumen(&self, limit: i64) -> AppResult<InventarioResumenResponse> {
-        let mut cad = self
-            .conn
+        let db = self.db.read().await;
+        let mut cad = db
             .query(
                 r#"
                 SELECT p.Nombre, l.Stock_Disponible AS Stock_Actual, p.Unidad_Medida, l.Caducidad AS Caducidad_Proxima, l.Codigo_Lote AS Lote, p.Precio_Venta
@@ -217,8 +219,7 @@ impl InventarioRepository for SqliteInventarioRepository {
             proximos.push(map_resumen(&row)?);
         }
 
-        let mut low = self
-            .conn
+        let mut low = db
             .query(
                 r#"
                 WITH base AS (
@@ -249,8 +250,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn list_alergenos(&self) -> AppResult<Vec<AlergenoInvDto>> {
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(
                 "SELECT ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen FROM Alergenos ORDER BY Nombre ASC;",
                 (),
@@ -271,8 +272,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn alergenos_producto(&self, id_producto: &str) -> AppResult<Vec<String>> {
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(
                 "SELECT ID_Alergeno FROM Producto_Alergenos WHERE ID_Producto=?1 ORDER BY ID_Alergeno ASC;",
                 vec![Value::Text(id_producto.to_string())],
@@ -290,13 +291,14 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn get_producto(&self, id_producto: &str) -> AppResult<Option<ProductoBaseDto>> {
-        fetch_producto(&self.conn, id_producto).await
+        let db = self.db.read().await;
+        fetch_producto(&db, id_producto).await
     }
 
     async fn product_detail(&self, id_producto: &str) -> AppResult<ProductDetailResponse> {
-        let producto = fetch_producto(&self.conn, id_producto).await?;
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let producto = fetch_producto(&db, id_producto).await?;
+        let mut rows = db
             .query(
                 r#"
                 SELECT a.ID_Alergeno, a.Nombre, a.Nombre_Imagen, a.Ruta_Imagen
@@ -323,11 +325,11 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn producto_detalle(&self, id_producto: &str) -> AppResult<Option<ProductoDetalleDto>> {
-        let Some(producto) = fetch_producto(&self.conn, id_producto).await? else {
+        let db = self.db.read().await;
+        let Some(producto) = fetch_producto(&db, id_producto).await? else {
             return Ok(None);
         };
-        let mut rows = self
-            .conn
+        let mut rows = db
             .query(
                 r#"
                 SELECT a.ID_Alergeno, a.Nombre, a.Ruta_Imagen
@@ -359,8 +361,8 @@ impl InventarioRepository for SqliteInventarioRepository {
           WHERE ID_Producto=?1
           ORDER BY (Caducidad IS NULL) ASC, date(Caducidad) ASC, datetime(Fecha_Entrada) DESC, ID_Lote DESC;
         "#;
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(sql, vec![Value::Text(id_producto.to_string())])
             .await
             .map_err(db_err)?;
@@ -373,8 +375,8 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn create_categoria(&self, c: CategoriaUpsert) -> AppResult<()> {
         let id = c.id.unwrap_or_else(new_id);
-        self.conn
-            .execute(
+        let db = self.db.write().await;
+        db.execute(
                 r#"
                 INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -400,7 +402,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             conn.execute(
@@ -424,7 +427,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             for sql in [
@@ -443,7 +447,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn upsert_producto(&self, p: ProductoUpsert) -> AppResult<String> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         let id_producto = p.id.unwrap_or_else(new_id);
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -504,8 +509,8 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn create_lote(&self, l: LoteNuevo) -> AppResult<()> {
         let id_lote = l.id.unwrap_or_else(new_id);
-        self.conn
-            .execute(
+        let db = self.db.write().await;
+        db.execute(
                 r#"
                 INSERT INTO Lotes_Producto
                   (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
@@ -544,8 +549,8 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {
-        self.conn
-            .execute(
+        let db = self.db.write().await;
+        db.execute(
                 "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
                 vec![
                     Value::Real(a.stock_disponible),
@@ -559,7 +564,7 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 }
 
-async fn finish_tx(conn: &Connection, res: AppResult<()>) -> AppResult<()> {
+async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {
     match res {
         Ok(()) => {
             conn.execute_batch("COMMIT;").await.map_err(db_err)?;

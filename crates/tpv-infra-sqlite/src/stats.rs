@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
+use crate::db::{Db, Reader};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::stats::StatsRepository;
@@ -26,12 +26,12 @@ use tpv_contracts::stats::{
 use crate::mapping::{v_f64, v_i64, v_string};
 
 pub struct SqliteStatsRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteStatsRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -39,7 +39,7 @@ impl SqliteStatsRepository {
    Helpers de introspección y de rango/bucket
 ========================================================= */
 
-async fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<bool, String> {
+async fn table_has_column<C: Reader>(db: &C, table: &str, column: &str) -> Result<bool, String> {
     let sql = format!("PRAGMA table_info({});", table);
     let mut rows = db.query(&sql, ()).await.map_err(|e| e.to_string())?;
 
@@ -54,7 +54,7 @@ async fn table_has_column(db: &Connection, table: &str, column: &str) -> Result<
     Ok(false)
 }
 
-async fn table_exists(db: &Connection, table: &str) -> Result<bool, String> {
+async fn table_exists<C: Reader>(db: &C, table: &str) -> Result<bool, String> {
     let mut rows = db
         .query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1;",
@@ -188,7 +188,8 @@ impl SqliteStatsRepository {
         let (start_expr, end_expr) = range_bounds_sql(range);
         let bucket_expr = bucket_sql(range);
 
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut rows_total = db
             .query(
@@ -394,7 +395,8 @@ impl SqliteStatsRepository {
     }
 
     async fn list_categorias_impl(&self) -> Result<Vec<StatsCategoriaRow>, String> {
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut rows = db
             .query(
@@ -426,7 +428,8 @@ impl SqliteStatsRepository {
         args: ProductosStatsArgs,
     ) -> Result<ProductosStatsResponse, String> {
         let (start_expr, end_expr) = range_bounds_sql(args.range);
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let ctes = format!(
             r#"
@@ -640,7 +643,8 @@ impl SqliteStatsRepository {
         let (start_expr, end_expr) = range_bounds_sql_reservas(args.range);
         let bucket_expr = bucket_sql_reservas(args.range);
 
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut rows_total_mesas = db
             .query(
@@ -863,7 +867,8 @@ impl SqliteStatsRepository {
         args: TrabajadoresStatsArgs,
     ) -> Result<TrabajadoresStatsResponse, String> {
         let (start_expr, end_expr) = range_bounds_sql(args.range);
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         fn fichaje_dt_sql(col: &str) -> String {
             format!(
@@ -1416,7 +1421,8 @@ impl SqliteStatsRepository {
         args: ClientesStatsArgs,
     ) -> Result<ClientesStatsResponse, String> {
         let (start_expr, end_expr) = range_bounds_sql(args.range);
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         if !table_exists(db, "Clientes").await? {
             return Ok(ClientesStatsResponse {
@@ -1659,7 +1665,8 @@ impl SqliteStatsRepository {
         args: ProveedoresStatsArgs,
     ) -> Result<ProveedoresStatsResponse, String> {
         let (start_expr, end_expr) = range_bounds_sql(args.range);
-        let db = &*self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         if !table_exists(db, "Cuentas_Gastos").await? {
             return Ok(ProveedoresStatsResponse {

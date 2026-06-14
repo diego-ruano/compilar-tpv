@@ -5,23 +5,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_contracts::reservas::{MesaDto, ReservaDto, ReservasMetaDto, ZonaDto};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteReservasRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteReservasRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -37,8 +36,8 @@ fn i(v: Value) -> i64 {
     v_i64(v).unwrap_or(0)
 }
 
-async fn select_one_i64(
-    conn: &Connection,
+async fn select_one_i64<C: Reader>(
+    conn: &C,
     sql: &str,
     args: Vec<Value>,
 ) -> AppResult<Option<i64>> {
@@ -50,7 +49,7 @@ async fn select_one_i64(
 }
 
 /// Busca o crea el cliente asociado a la reserva (por email, luego por teléfono).
-async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<String> {
+async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<String> {
     let nombre = c.nombre.clone();
     let email = c.email.clone();
     let telefono = c.telefono.clone();
@@ -145,7 +144,8 @@ async fn upsert_cliente(conn: &Connection, c: &ClienteReserva) -> AppResult<Stri
 #[async_trait]
 impl ReservasRepository for SqliteReservasRepository {
     async fn meta(&self) -> AppResult<ReservasMetaDto> {
-        let conn = &self.conn;
+        let g = self.db.read().await;
+        let conn = &g;
 
         // Zonas
         let mut zrows = conn
@@ -196,8 +196,8 @@ impl ReservasRepository for SqliteReservasRepository {
           ORDER BY R.Dia_YMD ASC, R.Hora ASC, R.ID_Reserva ASC;
         "#;
 
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(sql, vec![Value::Text(desde.to_string()), Value::Text(hasta.to_string())])
             .await
             .map_err(db_err)?;
@@ -227,7 +227,8 @@ impl ReservasRepository for SqliteReservasRepository {
     }
 
     async fn guardar(&self, r: ReservaValidada) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
@@ -296,7 +297,8 @@ impl ReservasRepository for SqliteReservasRepository {
     }
 
     async fn eliminar(&self, id_reserva: &str) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {

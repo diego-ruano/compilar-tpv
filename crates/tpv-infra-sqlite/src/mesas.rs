@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
+use crate::db::{Db, Reader, Writer};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::mesas::MesasRepository;
@@ -28,12 +28,12 @@ use crate::util::{new_id, BARRA_MESA_ID};
 static VR_BATCH_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub struct SqliteMesasRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteMesasRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -79,7 +79,7 @@ fn update_total_comanda_sql() -> &'static str {
     "#
 }
 
-async fn select_one_i64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
+async fn select_one_i64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<i64>> {
     let mut rows = conn.query(sql, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
         return Ok(v_i64(row.get_value(0).map_err(db_err)?));
@@ -88,8 +88,8 @@ async fn select_one_i64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppRe
 }
 
 /// Igual que `select_one_i64` pero para columnas de id (TEXT/UUID).
-async fn select_one_string(
-    conn: &Connection,
+async fn select_one_string<C: Reader>(
+    conn: &C,
     sql: &str,
     args: Vec<Value>,
 ) -> AppResult<Option<String>> {
@@ -100,7 +100,7 @@ async fn select_one_string(
     Ok(None)
 }
 
-async fn select_one_f64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
+async fn select_one_f64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
     let mut rows = conn.query(sql, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
         return Ok(v_f64(row.get_value(0).map_err(db_err)?));
@@ -109,7 +109,7 @@ async fn select_one_f64(conn: &Connection, sql: &str, args: Vec<Value>) -> AppRe
 }
 
 /// Ejecuta tolerando columnas/tablas inexistentes (devuelve false en ese caso).
-async fn try_exec(db: &Connection, sql: &str, args: Vec<Value>) -> AppResult<bool> {
+async fn try_exec<C: Writer>(db: &C, sql: &str, args: Vec<Value>) -> AppResult<bool> {
     match db.execute(sql, args).await {
         Ok(_) => Ok(true),
         Err(e) => {
@@ -123,7 +123,7 @@ async fn try_exec(db: &Connection, sql: &str, args: Vec<Value>) -> AppResult<boo
     }
 }
 
-async fn exists_by_id(conn: &Connection, table: &str, id_col: &str, id: &str) -> AppResult<bool> {
+async fn exists_by_id<C: Reader>(conn: &C, table: &str, id_col: &str, id: &str) -> AppResult<bool> {
     if id.trim().is_empty() {
         return Ok(false);
     }
@@ -133,8 +133,8 @@ async fn exists_by_id(conn: &Connection, table: &str, id_col: &str, id: &str) ->
         .is_some())
 }
 
-async fn trabajador_id_from_usuario(
-    db: &Connection,
+async fn trabajador_id_from_usuario<C: Reader>(
+    db: &C,
     id_usuario: Option<String>,
 ) -> AppResult<Option<String>> {
     let Some(idu) = id_usuario.filter(|s| !s.trim().is_empty()) else {
@@ -148,8 +148,8 @@ async fn trabajador_id_from_usuario(
     .await
 }
 
-async fn resolve_trabajador_id_input(
-    db: &Connection,
+async fn resolve_trabajador_id_input<C: Reader>(
+    db: &C,
     id_maybe: Option<String>,
 ) -> AppResult<Option<String>> {
     let Some(x) = id_maybe.filter(|s| !s.trim().is_empty()) else {
@@ -161,8 +161,8 @@ async fn resolve_trabajador_id_input(
     trabajador_id_from_usuario(db, Some(x)).await
 }
 
-async fn sumar_gasto_cliente_por_comanda(
-    db: &Connection,
+async fn sumar_gasto_cliente_por_comanda<C: Writer>(
+    db: &C,
     id_comanda: &str,
     importe: f64,
 ) -> AppResult<()> {
@@ -233,13 +233,13 @@ async fn sumar_gasto_cliente_por_comanda(
 }
 
 /// La mesa BARRA se siembra con un id fijo (idéntico en local y nube), así que basta devolverlo.
-async fn get_or_create_mesa_barra_inner(_db: &Connection) -> AppResult<String> {
+async fn get_or_create_mesa_barra_inner<C>(_db: &C) -> AppResult<String> {
     Ok(BARRA_MESA_ID.to_string())
 }
 
 /// Get-or-create de la comanda de barra abierta (Local-First: id UUIDv7 explícito).
-async fn get_or_create_comanda_barra_inner(
-    db: &Connection,
+async fn get_or_create_comanda_barra_inner<C: Writer>(
+    db: &C,
     id_trabajador: Option<String>,
 ) -> AppResult<String> {
     let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
@@ -280,7 +280,7 @@ async fn get_or_create_comanda_barra_inner(
     Ok(id_comanda)
 }
 
-async fn read_comanda_by_id(db: &Connection, id_comanda: &str) -> AppResult<Option<ComandaRow>> {
+async fn read_comanda_by_id<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Option<ComandaRow>> {
     if id_comanda.trim().is_empty() {
         return Ok(None);
     }
@@ -320,7 +320,8 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== LAYOUT ===== */
 
     async fn save_layout(&self, salons: Vec<SalonInput>) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -521,7 +522,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn load_layout(&self) -> AppResult<Vec<SalonOut>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut zonas = db
             .query(
@@ -634,7 +636,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn get_mesas_ocupadas(&self) -> AppResult<HashMap<String, bool>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -666,7 +669,8 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== RESERVAS ===== */
 
     async fn set_reserva_estado(&self, id_reserva: &str, estado: String) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -704,7 +708,8 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== COMANDAS (mesa) ===== */
 
     async fn get_comanda_abierta_by_mesa(&self, id_mesa: &str) -> AppResult<Option<ComandaRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         if id_mesa.trim().is_empty() {
             return Ok(None);
         }
@@ -725,7 +730,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn abrir_comanda(&self, data: AbrirComandaData) -> AppResult<Option<ComandaRow>> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let id_trabajador_real =
             resolve_trabajador_id_input(db, data.id_trabajador_o_usuario).await?;
         let id_reserva = data.id_reserva.filter(|s| !s.trim().is_empty());
@@ -772,7 +778,8 @@ impl MesasRepository for SqliteMesasRepository {
         id_comanda: &str,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let Some(idt) = resolve_trabajador_id_input(db, id_trab_o_usuario).await? else {
             return Ok(false);
         };
@@ -798,7 +805,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         db.execute(
             r#"
             UPDATE Comandas
@@ -813,7 +821,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -867,7 +876,8 @@ impl MesasRepository for SqliteMesasRepository {
         precio: f64,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -948,19 +958,22 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== BARRA ===== */
 
     async fn get_or_create_mesa_barra(&self) -> AppResult<String> {
-        get_or_create_mesa_barra_inner(&self.conn).await
+        let db = self.db.read().await;
+        get_or_create_mesa_barra_inner(&db).await
     }
 
     async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
+        let db = self.db.write().await;
         get_or_create_comanda_barra_inner(
-            &self.conn,
+            &db,
             id_trabajador.filter(|s| !s.trim().is_empty()),
         )
         .await
     }
 
     async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         if data.items.is_empty() {
             return Ok(());
@@ -1088,7 +1101,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let id_trabajador = id_trabajador.filter(|s| !s.trim().is_empty());
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -1133,7 +1147,8 @@ impl MesasRepository for SqliteMesasRepository {
         include_pagadas: bool,
         limit: i64,
     ) -> AppResult<Vec<ComandaBarraListItem>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
 
         let sql = format!(
@@ -1205,7 +1220,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn delete_comanda_barra_if_safe(&self, id_comanda: &str) -> AppResult<bool> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         let paid = select_one_i64(
             db,
@@ -1260,7 +1276,8 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== META + CATÁLOGO ===== */
 
     async fn mesas_meta_all(&self) -> AppResult<HashMap<String, MesaMetaOut>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut rows = db
             .query(
@@ -1444,7 +1461,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaVendibleOut>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let sql1 = r#"
             SELECT ID_Categoria, Nombre, Ruta_Imagen, COALESCE(Pasa_Cocina,0)
@@ -1476,7 +1494,8 @@ impl MesasRepository for SqliteMesasRepository {
         &self,
         id_categoria: &str,
     ) -> AppResult<Vec<ProductoVendibleOut>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let sql1 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
             FROM Productos WHERE ID_Categoria = ?1 ORDER BY Nombre ASC;
@@ -1489,7 +1508,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let needle = format!("%{}%", q.trim().to_lowercase());
         let sql1 = r#"
             SELECT ID_Producto, ID_Categoria, Nombre, COALESCE(Precio_Venta,0), Ruta_Imagen
@@ -1509,7 +1529,8 @@ impl MesasRepository for SqliteMesasRepository {
         id_comanda: &str,
         id_producto: &str,
     ) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -1550,7 +1571,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
@@ -1596,7 +1618,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         db.execute(
             r#"
             UPDATE Detalle_Comanda
@@ -1617,7 +1640,8 @@ impl MesasRepository for SqliteMesasRepository {
     }
 
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
         let ids = data.detalle_ids.clone();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -1788,7 +1812,8 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== COCINA ===== */
 
     async fn kitchen_list_today_pending(&self) -> AppResult<Vec<KitchenRow>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
         let mut rows = db
             .query(
                 r#"
@@ -1846,7 +1871,8 @@ impl MesasRepository for SqliteMesasRepository {
         id_usuario_cocinero: &str,
         estado: String,
     ) -> AppResult<()> {
-        let db = &self.conn;
+        let g = self.db.write().await;
+        let db = &g;
 
         if estado == "PREPARADO" {
             let ok = try_exec(
@@ -1897,8 +1923,8 @@ impl MesasRepository for SqliteMesasRepository {
 }
 
 /// Helper de catálogo con fallback de columna `Ruta_Imagen` inexistente.
-async fn productos_query(
-    db: &Connection,
+async fn productos_query<C: Reader>(
+    db: &C,
     sql1: &str,
     sql2: &str,
     args: Vec<Value>,

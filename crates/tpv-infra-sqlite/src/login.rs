@@ -11,23 +11,22 @@ use async_trait::async_trait;
 use chrono::Local;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::login::LoginRepository;
 use tpv_contracts::login::{LoginOk, PunchParte, PunchStatus, UserListItem};
 use tpv_domain::login::{hash_pin, verify_pin, LoginUserRecord, SetupInfo};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::v_i64;
 use crate::util::new_id;
 
 pub struct SqliteLoginRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteLoginRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -43,8 +42,8 @@ fn now_iso() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
-async fn get_turno_partido_for(
-    conn: &Connection,
+async fn get_turno_partido_for<C: Reader>(
+    conn: &C,
     id_usuario: &str,
     fecha: &str,
 ) -> AppResult<i64> {
@@ -71,8 +70,8 @@ async fn get_turno_partido_for(
     Ok(0)
 }
 
-async fn build_punch_status(
-    conn: &Connection,
+async fn build_punch_status<C: Reader>(
+    conn: &C,
     id_usuario: &str,
     fecha: &str,
 ) -> AppResult<PunchStatus> {
@@ -132,8 +131,8 @@ async fn build_punch_status(
    Consultas finas (privadas): las operaciones gruesas del trait las componen.
 ========================================================= */
 
-async fn query_login_record(
-    conn: &Connection,
+async fn query_login_record<C: Reader>(
+    conn: &C,
     id_usuario: &str,
 ) -> AppResult<Option<LoginUserRecord>> {
     let mut rows = conn
@@ -202,7 +201,7 @@ async fn query_login_record(
     }))
 }
 
-async fn query_password_hash(conn: &Connection, id_usuario: &str) -> AppResult<Option<String>> {
+async fn query_password_hash<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<Option<String>> {
     let mut rows = conn
         .query(
             r#"
@@ -225,7 +224,7 @@ async fn query_password_hash(conn: &Connection, id_usuario: &str) -> AppResult<O
     }
 }
 
-async fn query_setup_info(conn: &Connection, id_usuario: &str) -> AppResult<Option<SetupInfo>> {
+async fn query_setup_info<C: Reader>(conn: &C, id_usuario: &str) -> AppResult<Option<SetupInfo>> {
     let mut rows = conn
         .query(
             r#"
@@ -256,8 +255,8 @@ async fn query_setup_info(conn: &Connection, id_usuario: &str) -> AppResult<Opti
     }))
 }
 
-async fn query_email_in_use(
-    conn: &Connection,
+async fn query_email_in_use<C: Reader>(
+    conn: &C,
     email: &str,
     exclude_id: &str,
 ) -> AppResult<bool> {
@@ -280,8 +279,8 @@ async fn query_email_in_use(
     Ok(count > 0)
 }
 
-async fn exec_apply_initial_setup(
-    conn: &Connection,
+async fn exec_apply_initial_setup<C: Writer>(
+    conn: &C,
     id_usuario: &str,
     email: String,
     new_hash: String,
@@ -303,8 +302,8 @@ async fn exec_apply_initial_setup(
     Ok(())
 }
 
-async fn exec_punch(
-    conn: &Connection,
+async fn exec_punch<C: Writer>(
+    conn: &C,
     id_usuario: &str,
     tipo: &str,
     fecha: Option<String>,
@@ -480,7 +479,8 @@ async fn exec_punch(
 #[async_trait]
 impl LoginRepository for SqliteLoginRepository {
     async fn list_login_users(&self) -> AppResult<Vec<UserListItem>> {
-        let db = &self.conn;
+        let g = self.db.read().await;
+        let db = &g;
 
         let mut rows = db
             .query(
@@ -527,11 +527,13 @@ impl LoginRepository for SqliteLoginRepository {
     }
 
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
-        build_punch_status(&self.conn, id_usuario, &today_ymd()).await
+        let db = self.db.read().await;
+        build_punch_status(&db, id_usuario, &today_ymd()).await
     }
 
     async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
-        let rec = query_login_record(&self.conn, id_usuario)
+        let db = self.db.read().await;
+        let rec = query_login_record(&db, id_usuario)
             .await?
             .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?;
 
@@ -555,7 +557,8 @@ impl LoginRepository for SqliteLoginRepository {
         pin_nuevo: &str,
         email_nuevo: &str,
     ) -> AppResult<()> {
-        let info = query_setup_info(&self.conn, id_usuario)
+        let db = self.db.write().await;
+        let info = query_setup_info(&db, id_usuario)
             .await?
             .ok_or_else(|| AppError::not_found("Usuario no encontrado"))?;
 
@@ -565,13 +568,13 @@ impl LoginRepository for SqliteLoginRepository {
 
         verify_pin(pin_actual, &info.password_hash).map_err(AppError::validation)?;
 
-        if query_email_in_use(&self.conn, email_nuevo, id_usuario).await? {
+        if query_email_in_use(&db, email_nuevo, id_usuario).await? {
             return Err(AppError::conflict("Ese email ya está en uso"));
         }
 
         let new_hash = hash_pin(pin_nuevo).map_err(AppError::validation)?;
 
-        exec_apply_initial_setup(&self.conn, id_usuario, email_nuevo.to_string(), new_hash).await
+        exec_apply_initial_setup(&db, id_usuario, email_nuevo.to_string(), new_hash).await
     }
 
     async fn punch(
@@ -582,13 +585,14 @@ impl LoginRepository for SqliteLoginRepository {
         fecha: Option<String>,
         hora_evento: Option<String>,
     ) -> AppResult<PunchStatus> {
-        let hash = query_password_hash(&self.conn, id_usuario)
+        let db = self.db.write().await;
+        let hash = query_password_hash(&db, id_usuario)
             .await?
             .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?;
 
         verify_pin(pin, &hash).map_err(AppError::validation)?;
 
-        exec_punch(&self.conn, id_usuario, tipo, fecha, hora_evento).await
+        exec_punch(&db, id_usuario, tipo, fecha, hora_evento).await
     }
 
     async fn set_turno_partido(
@@ -597,7 +601,7 @@ impl LoginRepository for SqliteLoginRepository {
         fecha: Option<String>,
         turno_partido: bool,
     ) -> AppResult<()> {
-        let db = &self.conn;
+        let db = self.db.write().await;
         let fecha = fecha.unwrap_or_else(today_ymd);
 
         db.execute(

@@ -8,23 +8,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_contracts::clientes::{ClienteForm, ClienteOverview};
 use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_text, v_f64, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteClientesRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteClientesRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -114,7 +113,8 @@ impl ClientesRepository for SqliteClientesRepository {
             ClienteRanking::Reciente => format!("{base}\nORDER BY c.ID_Cliente DESC;"),
         };
 
-        let mut rows = self.conn.query(&sql, ()).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(&sql, ()).await.map_err(db_err)?;
         let mut out: Vec<ClienteOverview> = Vec::new();
 
         while let Some(row) = rows.next().await.map_err(db_err)? {
@@ -161,8 +161,8 @@ impl ClientesRepository for SqliteClientesRepository {
           LIMIT 1;
         "#;
 
-        let mut rows = self
-            .conn
+        let db = self.db.read().await;
+        let mut rows = db
             .query(sql, vec![Value::Text(id_cliente.to_string())])
             .await
             .map_err(db_err)?;
@@ -187,9 +187,9 @@ impl ClientesRepository for SqliteClientesRepository {
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool> {
         let id_cliente = nuevo.id.unwrap_or_else(new_id);
 
-        self.conn
-            .execute(
-                r#"
+        let db = self.db.write().await;
+        db.execute(
+            r#"
                 INSERT INTO Clientes (
                     ID_Cliente,
                     Nombre,
@@ -212,23 +212,23 @@ impl ClientesRepository for SqliteClientesRepository {
                     Email = excluded.Email,
                     Notas = excluded.Notas;
                 "#,
-                vec![
-                    Value::Text(id_cliente),
-                    Value::Text(nuevo.nombre),
-                    opt_text(nuevo.telefono),
-                    opt_text(nuevo.email),
-                    opt_text(nuevo.notas),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
+            vec![
+                Value::Text(id_cliente),
+                Value::Text(nuevo.nombre),
+                opt_text(nuevo.telefono),
+                opt_text(nuevo.email),
+                opt_text(nuevo.notas),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
 
         Ok(true)
     }
 
     async fn update(&self, cliente: Cliente) -> AppResult<bool> {
-        let affected = self
-            .conn
+        let db = self.db.write().await;
+        let affected = db
             .execute(
                 r#"
                 UPDATE Clientes

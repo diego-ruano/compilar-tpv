@@ -8,8 +8,6 @@ use async_trait::async_trait;
 use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
@@ -19,16 +17,17 @@ use tpv_domain::trabajadores::{
     limpiar_opcional, AsignacionCambios, AsignacionNueva, TrabajadorCambios, TrabajadorNuevo,
 };
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteTrabajadoresRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteTrabajadoresRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -61,7 +60,7 @@ fn opt_text(o: Option<String>) -> Value {
 #[async_trait]
 impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     async fn get_roles(&self) -> AppResult<Vec<RolRow>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         let sql = r#"
           SELECT ID_Rol, Nombre_Rol
@@ -83,7 +82,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn get_all(&self) -> AppResult<Vec<TrabajadorRow>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         let sql = r#"
           SELECT
@@ -124,7 +123,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn get_detail(&self, id_trabajador: &str) -> AppResult<Option<TrabajadorDetailRow>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         if id_trabajador.trim().is_empty() {
             return Err(AppError::validation("id_trabajador required"));
@@ -182,7 +181,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn get_id_by_usuario(&self, id_usuario: &str) -> AppResult<Option<String>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         if id_usuario.trim().is_empty() {
             return Ok(None);
@@ -215,7 +214,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn turnos_get_all(&self) -> AppResult<Vec<TurnoRow>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         let sql = r#"
           SELECT ID_Turno, Nombre_Turno
@@ -239,7 +238,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn get_asignaciones_semana(&self, fecha_lunes: String) -> AppResult<Vec<AsignacionRow>> {
-        let db = &self.conn;
+        let db = self.db.read().await;
 
         let sql = r#"
           SELECT
@@ -401,7 +400,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn create_trabajador(&self, data: TrabajadorNuevo) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
 
@@ -470,7 +469,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         id_trabajador: &str,
         cambios: TrabajadorCambios,
     ) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
 
@@ -556,7 +555,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         db.execute(
             r#"
@@ -603,7 +602,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         id_asignacion: &str,
         cambios: AsignacionCambios,
     ) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         let affected = db
             .execute(
@@ -637,7 +636,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn delete_asignacion(&self, id_asignacion: &str) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         let affected = db
             .execute(
@@ -660,7 +659,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
         to_monday: String,
         overwrite: bool,
     ) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         // Desplazamiento en días entre la semana origen y la destino.
         let from_d = NaiveDate::parse_from_str(&from_monday, "%Y-%m-%d")
@@ -766,7 +765,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     }
 
     async fn set_predeterminado_desde_semana(&self, fecha_lunes: String) -> AppResult<bool> {
-        let db = &self.conn;
+        let db = self.db.write().await;
 
         // 1) Recolectar el mapa (id_trabajador, weekday) -> items, leyendo la semana.
         let sql = r#"

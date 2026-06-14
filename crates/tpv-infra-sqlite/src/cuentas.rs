@@ -5,23 +5,22 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use libsql::Value;
 
-use crate::recording::TrackedConnection as Connection;
-
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cuentas::CuentasRepository;
 use tpv_contracts::cuentas::{EntradaDto, SalidaDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
-    conn: Arc<Connection>,
+    db: Arc<Db>,
 }
 
 impl SqliteCuentasRepository {
-    pub fn new(conn: Arc<Connection>) -> Self {
-        Self { conn }
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
     }
 }
 
@@ -101,7 +100,8 @@ impl CuentasRepository for SqliteCuentasRepository {
             "#
         );
 
-        let mut rows = self.conn.query(sql.as_str(), params).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(sql.as_str(), params).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
@@ -142,7 +142,8 @@ impl CuentasRepository for SqliteCuentasRepository {
             "#
         );
 
-        let mut rows = self.conn.query(sql.as_str(), params).await.map_err(db_err)?;
+        let db = self.db.read().await;
+        let mut rows = db.query(sql.as_str(), params).await.map_err(db_err)?;
         let mut out = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
@@ -165,8 +166,8 @@ impl CuentasRepository for SqliteCuentasRepository {
 
     async fn crear_gasto(&self, id: Option<String>, g: GastoData) -> AppResult<bool> {
         let id_gasto = id.unwrap_or_else(new_id);
-        self.conn
-            .execute(
+        let db = self.db.write().await;
+        db.execute(
                 r#"
                 INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor)
                 VALUES (?1, date(?2), ?3, ?4, ?5, ?6)
@@ -195,8 +196,8 @@ impl CuentasRepository for SqliteCuentasRepository {
     }
 
     async fn actualizar_gasto(&self, id_gasto: &str, g: GastoData) -> AppResult<bool> {
-        let affected = self
-            .conn
+        let db = self.db.write().await;
+        let affected = db
             .execute(
                 r#"
                 UPDATE Cuentas_Gastos
@@ -221,8 +222,8 @@ impl CuentasRepository for SqliteCuentasRepository {
     }
 
     async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool> {
-        let affected = self
-            .conn
+        let db = self.db.write().await;
+        let affected = db
             .execute(
                 "DELETE FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
                 vec![Value::Text(id_gasto.to_string())],
@@ -233,8 +234,8 @@ impl CuentasRepository for SqliteCuentasRepository {
     }
 
     async fn actualizar_pago(&self, id_pago: &str, p: PagoData) -> AppResult<bool> {
-        let affected = self
-            .conn
+        let db = self.db.write().await;
+        let affected = db
             .execute(
                 r#"
                 UPDATE Pagos
@@ -254,7 +255,8 @@ impl CuentasRepository for SqliteCuentasRepository {
     }
 
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
-        let conn = &self.conn;
+        let g = self.db.write().await;
+        let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
             conn.execute(

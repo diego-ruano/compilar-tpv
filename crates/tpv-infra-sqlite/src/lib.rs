@@ -13,13 +13,16 @@ pub mod mapping;
 // Utilidades compartidas por repositorios (next_table_id, now_ms, …):
 pub mod util;
 
+// Manejo de conexiones: escritor único serializado + pool de lectura (WAL).
+// Incluye la captura de escrituras al outbox (antes en `recording.rs`).
+pub mod db;
+
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 pub mod connection;
 
-// Capa de captura de escrituras (outbox Main → nube):
-pub mod recording;
-
-// Repositorios concretos (uno por agregado/módulo):
+// Repositorios concretos (uno por agregado/módulo). Cada uno pide `db.read()` (pool de lectura)
+// o `db.write()` (escritor único) según la operación; los helpers son genéricos sobre los traits
+// `Reader`/`Writer` de `db.rs`.
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
@@ -33,6 +36,3 @@ pub mod sync;
 pub mod tareas;
 pub mod trabajadores;
 pub mod venta_rapida;
-// pub mod mesas;
-// pub mod inventario;
-// ...
