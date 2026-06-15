@@ -99,7 +99,7 @@ export function useMainSocket() {
 		let authed = false;
 		let draining = false;
 		let drainTimer: number | null = null;
-		const acks = new Map<string, (ok: boolean) => void>();
+		const acks = new Map<string, (ok: boolean, error?: string) => void>();
 
 		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
 		function enqueue(changes: ChangeArg[]) {
@@ -126,21 +126,21 @@ export function useMainSocket() {
 		}
 
 		// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
-		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<boolean> {
-			return new Promise<boolean>((resolve) => {
+		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<{ ok: boolean; error?: string }> {
+			return new Promise<{ ok: boolean; error?: string }>((resolve) => {
 				if (socket.readyState !== WebSocket.OPEN) {
-					resolve(false);
+					resolve({ ok: false, error: "socket_not_open" });
 					return;
 				}
 				const timer = window.setTimeout(() => {
 					acks.delete(entry.op_id);
-					resolve(false);
+					resolve({ ok: false, error: "ack_timeout" });
 				}, ACK_TIMEOUT_MS);
 
-				acks.set(entry.op_id, (ok) => {
+				acks.set(entry.op_id, (ok, error) => {
 					window.clearTimeout(timer);
 					acks.delete(entry.op_id);
-					resolve(ok);
+					resolve({ ok, error });
 				});
 
 				socket.send(
@@ -174,12 +174,16 @@ export function useMainSocket() {
 						limit: OUTBOX_BATCH,
 					})) as OutboxEntry[];
 					if (!pending.length) break;
+					console.log(`[outbox] ${pending.length} op(s) pendientes`);
 
 					let progressed = false;
 					for (const entry of pending) {
 						if (cancelled || socket.readyState !== WebSocket.OPEN) break;
-						const ok = await sendApply(socket, entry);
-						if (!ok) break;
+						const { ok, error } = await sendApply(socket, entry);
+						if (!ok) {
+							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
+							break;
+						}
 						try {
 							// Tauri v2 camelCasea los nombres de argumento en la frontera JS↔Rust:
 							// el comando `sync_outbox_mark_sent(op_id)` se invoca como `opId`.
@@ -311,7 +315,7 @@ export function useMainSocket() {
 				if (msg.type === "apply_ack") {
 					const opId = String(msg.opId ?? msg.op_id ?? "");
 					const cb = acks.get(opId);
-					if (cb) cb(Boolean(msg.ok));
+					if (cb) cb(Boolean(msg.ok), msg.ok ? undefined : String(msg.error ?? "unknown"));
 					return;
 				}
 

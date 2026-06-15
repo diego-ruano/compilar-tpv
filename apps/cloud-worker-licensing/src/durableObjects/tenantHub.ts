@@ -675,8 +675,8 @@ export class TenantHub {
 		const dbCentral = this.getCentralDb();
 		const now = nowMs();
 		await dbCentral.execute({
-			sql: `UPDATE devices SET last_seen_at_ms=?, updated_at_ms=? WHERE tenant_id=? AND device_id=?`,
-			args: [now, now, tenantId, deviceId],
+			sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
+			args: [now, tenantId, deviceId],
 		});
 	}
 
