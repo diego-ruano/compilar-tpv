@@ -4,6 +4,8 @@ import {
     mesasLoadLayout,
     mesasSaveLayout,
 } from "../../../features/mesasComponents/mesasApi";
+import { mesasKeys } from "../../../features/mesasComponents/mesasQueries";
+import { queryClient } from "../../../shared/lib/queryClient";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../../../shared/stores/useTheme";
 
@@ -1451,6 +1453,7 @@ export default function EditTables() {
                                 onClick={async () => {
                                     try {
                                         await mesasSaveLayout(salonsRef.current as any);
+                                        queryClient.invalidateQueries({ queryKey: mesasKeys.layout() });
 
                                         const fresh = await mesasLoadLayout();
                                         setSalons(fresh as Salon[]);
