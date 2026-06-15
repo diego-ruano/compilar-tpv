@@ -76,11 +76,11 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 		ORDER BY ID_Zona ASC, ID_Mesa ASC;
 	`);
 
-	const byZona = new Map<number, any[]>();
+	const byZona = new Map<string, any[]>();
 	for (const m of rows(mesasRs)) {
-		const idZona = Number(m.ID_Zona ?? 0);
-		const idMesa = Number(m.ID_Mesa ?? 0);
-		if (idZona <= 0 || idMesa <= 0) continue;
+		const idZona = String(m.ID_Zona ?? "").trim();
+		const idMesa = String(m.ID_Mesa ?? "").trim();
+		if (!idZona || !idMesa) continue;
 		const list = byZona.get(idZona) ?? [];
 		list.push({
 			id: `db-mesa-${idMesa}`,
@@ -97,7 +97,7 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 	}
 
 	return rows(zonasRs).map((z) => {
-		const idZona = Number(z.ID_Zona ?? 0);
+		const idZona = String(z.ID_Zona ?? "").trim();
 		return {
 			id: `db-zona-${idZona}`,
 			name: String(z.Nombre_Zona ?? `Zona ${idZona}`),
@@ -116,11 +116,12 @@ export async function mesasOcupadas(db: Client): Promise<Record<string, boolean>
 	`);
 	const out: Record<string, boolean> = {};
 	for (const r of rows(rs)) {
-		const idZona = Number(r.ID_Zona ?? 0);
-		const idMesa = Number(r.ID_Mesa ?? 0);
-		out[`z${idZona}:m${idMesa}`] = true;
+		const idZona = String(r.ID_Zona ?? "").trim();
+		const idMesa = String(r.ID_Mesa ?? "").trim();
+		if (!idZona || !idMesa) continue;
+		out[`db-zona-${idZona}:db-mesa-${idMesa}`] = true;
 		out[`db-mesa-${idMesa}`] = true;
-		out[String(idMesa)] = true;
+		out[idMesa] = true;
 	}
 	return out;
 }
