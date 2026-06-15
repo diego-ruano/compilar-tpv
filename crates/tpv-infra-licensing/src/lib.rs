@@ -644,7 +644,7 @@ impl PairingService for PairingAdapter {
 impl CloudSyncService for PairingAdapter {
     async fn upload_initial_setup(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         email: &str,
         pin: &str,
     ) -> AppResult<()> {

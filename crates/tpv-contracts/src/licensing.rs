@@ -181,8 +181,8 @@ pub struct TpvServerPostJsonArgs {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct UploadInitialSetupArgs {
-    #[ts(type = "number")]
-    pub id_usuario: i64,
+    // ID UUIDv7 (texto), igual que en el resto del sistema y en el worker (`idStr`).
+    pub id_usuario: String,
     pub email: String,
     pub pin: String,
 }

@@ -415,7 +415,7 @@ export type UpdateTareaInput = { id_tarea: string, titulo: string, descripcion?:
  * Args para subir el setup inicial de la Main a la nube (tras "Guardar y continuar" en el
  * panel de configuración inicial). El `pin` viaja firmado y se hashea en el worker.
  */
-export type UploadInitialSetupArgs = { id_usuario: number, email: string, pin: string, };
+export type UploadInitialSetupArgs = { id_usuario: string, email: string, pin: string, };
 
 export type UpsertCategoriaInput = { id_categoria?: string, nombre: string, nombre_imagen: string, ruta_imagen: string, vendible: boolean, pasa_cocina: boolean, };
 

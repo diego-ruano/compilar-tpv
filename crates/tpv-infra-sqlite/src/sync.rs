@@ -110,9 +110,16 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
         .map_err(db_err)?;
 
     let res: AppResult<()> = async {
-        for st in &ch.statements {
+        for (i, st) in ch.statements.iter().enumerate() {
             let args: Vec<Value> = st.args.iter().map(json_to_value).collect();
-            conn.execute(&st.sql, args).await.map_err(db_err)?;
+            conn.execute(&st.sql, args).await.map_err(|e| {
+                AppError::repository(format!(
+                    "op {} (seq {}) sentencia #{i}: {e} :: SQL={}",
+                    ch.op_id,
+                    ch.seq,
+                    st.sql.split_whitespace().collect::<Vec<_>>().join(" ")
+                ))
+            })?;
         }
 
         conn.execute(
@@ -138,10 +145,24 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
     .await;
 
     match res {
-        Ok(()) => {
-            conn.execute_batch("COMMIT;").await.map_err(db_err)?;
-            Ok(())
-        }
+        Ok(()) => match conn.execute_batch("COMMIT;").await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Con `defer_foreign_keys`, las violaciones de FK saltan AQUÍ (en el COMMIT), no
+                // en la sentencia. Volcamos el op_id + sus sentencias para identificar qué fila
+                // hija quedó sin padre en la BD local.
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                let sqls: Vec<String> = ch
+                    .statements
+                    .iter()
+                    .map(|s| s.sql.split_whitespace().collect::<Vec<_>>().join(" "))
+                    .collect();
+                Err(AppError::repository(format!(
+                    "COMMIT op {} (seq {}) falló: {e} :: sentencias={sqls:?}",
+                    ch.op_id, ch.seq
+                )))
+            }
+        },
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK;").await;
             Err(e)

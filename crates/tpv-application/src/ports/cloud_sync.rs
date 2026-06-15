@@ -17,7 +17,7 @@ pub trait CloudSyncService: Send + Sync {
     /// el login de la Handy funcione contra datos reales y no contra el seed.
     async fn upload_initial_setup(
         &self,
-        id_usuario: i64,
+        id_usuario: &str,
         email: &str,
         pin: &str,
     ) -> AppResult<()>;
