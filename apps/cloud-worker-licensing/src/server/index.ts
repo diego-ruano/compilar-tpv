@@ -416,7 +416,10 @@ async function ensureTenantInitialAdmin(client: Client): Promise<void> {
 			);
 		`,
 		args: [
-			crypto.randomUUID(),
+			// UUID FIJO: debe coincidir con el admin que siembra la Main (ADMIN_USUARIO_ID en
+			// crates/tpv-infra-sqlite/src/util.rs). Si difiere, la Handy referencia un admin que
+			// la Main no tiene y los fichajes/comandas revientan con FOREIGN KEY al sincronizar.
+			"00000000-0000-7000-8000-000000000501",
 			adminRoleId,
 			"admin@local",
 			hash,

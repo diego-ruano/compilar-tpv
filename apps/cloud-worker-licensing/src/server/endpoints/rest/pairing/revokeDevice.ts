@@ -139,6 +139,10 @@ export async function handleRevokeDevice(
 	} catch (e: any) {
 		const msg = String(e?.message || e);
 
+		// Visible en `wrangler tail` / logs de CF: el front solo recibe el código, así que sin
+		// esto el motivo real del 500 quedaba oculto.
+		console.error("revoke_device failed:", e?.stack || msg);
+
 		if (isAuthError(msg)) {
 			return unauthorized(req, msg);
 		}

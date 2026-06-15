@@ -14,7 +14,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
 
 use crate::db::Db;
-use crate::util::new_id;
+use crate::util::ADMIN_USUARIO_ID;
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
@@ -82,7 +82,9 @@ async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'Activo', 1);
         "#,
         vec![
-            Value::Text(new_id()),
+            // UUID FIJO (no aleatorio): debe coincidir con el admin que siembra la nube, o la
+            // Handy referenciaría un admin que la Main no tiene → FOREIGN KEY al sincronizar.
+            Value::Text(ADMIN_USUARIO_ID.to_string()),
             Value::Text(id_admin),
             Value::Text("admin@local".to_string()),
             Value::Text(hash),

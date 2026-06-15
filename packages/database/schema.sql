@@ -585,9 +585,9 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
   ('00000000-0000-7000-8000-00000000020d', 'Altramuces', 'altramuces.png', '/alergenos/altramuces.png'),
   ('00000000-0000-7000-8000-00000000020e', 'Moluscos', 'moluscos.png', '/alergenos/moluscos.png');
 
+-- Solo se siembra la zona BARRA: es el ancla de la venta rápida (id fijo, idéntico en local y
+-- nube). Las zonas de ejemplo (Salon/Terraza) se eliminaron del seed; el usuario crea las suyas.
 INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At) VALUES
-  ('00000000-0000-7000-8000-000000000301', 'Salon', '[]', datetime('now')),
-  ('00000000-0000-7000-8000-000000000302', 'Terraza', '[]', datetime('now')),
   ('00000000-0000-7000-8000-000000000303', 'BARRA', '[]', datetime('now'));
 
 INSERT OR IGNORE INTO Mesas (

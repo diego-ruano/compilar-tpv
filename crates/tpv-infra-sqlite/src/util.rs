@@ -36,6 +36,12 @@ pub fn new_id() -> String {
 pub const BARRA_MESA_ID: &str = "00000000-0000-7000-8000-000000000401";
 pub const BARRA_ZONA_ID: &str = "00000000-0000-7000-8000-000000000303";
 
+/// UUID FIJO del administrador inicial. DEBE ser idéntico en la Main (`seed_admin_if_empty`) y en
+/// la nube (`ensureTenantInitialAdmin`): cada lado siembra su admin por separado, así que si el id
+/// difiere acaban siendo usuarios distintos y cualquier fila de la Handy que referencie al admin de
+/// la nube (fichajes, comandas…) revienta con FOREIGN KEY al aplicarse en la Main.
+pub const ADMIN_USUARIO_ID: &str = "00000000-0000-7000-8000-000000000501";
+
 /// Epoch en milisegundos (para columnas `*_At_Ms`).
 pub fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
