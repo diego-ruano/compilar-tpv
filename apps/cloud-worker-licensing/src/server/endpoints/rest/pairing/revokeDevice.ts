@@ -103,7 +103,7 @@ export async function handleRevokeDevice(
 			sql: `
 				UPDATE devices
 				SET revoked_at_ms=?,
-				    updated_at_ms=?
+				    last_seen_at_ms=?
 				WHERE tenant_id=?
 				  AND device_id=?
 				  AND (revoked_at_ms IS NULL OR revoked_at_ms=0);
