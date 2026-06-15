@@ -48,6 +48,7 @@ async function apply(
 	return applyViaHub(c.env, {
 		tenantId: c.get("tenantId"),
 		deviceId: c.get("deviceId"),
+		clientNow: c.req.header("X-Client-Now") || undefined,
 		opId,
 		commandName: built.commandName,
 		command: built.command,

@@ -568,6 +568,14 @@ impl PairingService for PairingAdapter {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
+        // El reloj lo pone el dispositivo emisor (Main o Handy), NO el servidor: el worker usa
+        // esta hora local para resolver los `datetime('now')` de las escrituras a un literal fijo,
+        // de modo que la fila sea idéntica en nube/Main/Handy (replicación determinista).
+        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        if let Ok(v) = HeaderValue::from_str(&client_now) {
+            headers.insert("x-client-now", v);
+        }
+
         if mode == "tpv" || mode == "handy" {
             let signed = self.signed_headers_inner(mode, "POST", path)?;
 

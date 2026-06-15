@@ -21,6 +21,8 @@ export type ApplyParams = {
 	commandName: string;
 	command: ApplyCommand;
 	cloudPayload?: any;
+	/** Hora local del dispositivo emisor (`YYYY-MM-DD HH:MM:SS`) para resolver `datetime('now')`. */
+	clientNow?: string;
 };
 
 /** Error con código y status HTTP, para que el router lo traduzca a JSON. */
@@ -31,7 +33,8 @@ export class HubError extends Error {
 }
 
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
-	const { tenantId, deviceId, opId, commandName, command, cloudPayload } = params;
+	const { tenantId, deviceId, opId, commandName, command, cloudPayload, clientNow } =
+		params;
 
 	const id = env.TenantHub.idFromName(tenantId);
 	const stub = env.TenantHub.get(id);
@@ -42,6 +45,7 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 			"content-type": "application/json",
 			"x-tenant-id": tenantId,
 			"x-device-id": deviceId,
+			...(clientNow ? { "x-client-now": clientNow } : {}),
 		},
 		body: JSON.stringify({
 			type: command.type,
@@ -50,6 +54,7 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 			commandName,
 			deviceId,
 			cloud_payload: cloudPayload ?? null,
+			client_now: clientNow ?? null,
 		}),
 	});
 

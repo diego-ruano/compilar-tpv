@@ -209,6 +209,64 @@ function stringifyJsonValue(v: any): string {
 	return s === undefined ? "null" : s;
 }
 
+// ---- Determinismo del tiempo en las escrituras ------------------------------
+// El reloj lo pone el dispositivo emisor (Main o Handy) vía la cabecera
+// `X-Client-Now`, NO el servidor: una sentencia que viajara con `datetime('now')`
+// se reevaluaría aquí (UTC) y en cada re-apply, divergiendo entre Main/nube/Handy.
+// Resolvemos el `datetime('now','localtime')` a un literal fijo antes de ejecutar y
+// de registrarlo en `Sync_Changes`. Si el cliente no mandó hora, se fija una del
+// servidor UNA sola vez (sigue siendo determinista, solo que en UTC).
+
+const CLIENT_NOW_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function serverNowFixed(): string {
+	return new Date().toISOString().slice(0, 19).replace("T", " ");
+}
+
+function resolveClientNow(raw: unknown): string {
+	const s = String(raw ?? "").trim();
+	return CLIENT_NOW_RE.test(s) ? s : serverNowFixed();
+}
+
+// Reemplaza SOLO las formas exactas (no las que llevan modificador, que acaban en
+// `,'…')`). El literal está validado por `CLIENT_NOW_RE`, así que no hay inyección.
+function rewriteNowInSql(sql: string, dt: string): string {
+	if (typeof sql !== "string" || !sql.includes("('now'")) return sql;
+	const d = dt.slice(0, 10);
+	return sql
+		.split("datetime('now','localtime')").join(`'${dt}'`)
+		.split("date('now','localtime')").join(`'${d}'`);
+}
+
+function rewriteCmdNowLiterals(
+	cmd: InternalApplyCommand,
+	dt: string,
+): InternalApplyCommand {
+	switch (cmd.type) {
+		case "tenantDb.exec":
+		case "tenantDb.value":
+		case "tenantDb.row":
+		case "tenantDb.rows":
+			return {
+				type: cmd.type,
+				payload: { ...cmd.payload, sql: rewriteNowInSql(cmd.payload.sql, dt) },
+			} as InternalApplyCommand;
+		case "tenantDb.transaction":
+			return {
+				type: cmd.type,
+				payload: {
+					...cmd.payload,
+					steps: (cmd.payload.steps ?? []).map((s: any) => ({
+						...s,
+						sql: rewriteNowInSql(s.sql, dt),
+					})),
+				},
+			} as InternalApplyCommand;
+		default:
+			return cmd;
+	}
+}
+
 function optionalJsonFieldToStableString(
 	value: unknown,
 	fieldName: string,
@@ -499,6 +557,11 @@ export class TenantHub {
 	}
 
 	private async probeTenantDb(db: Client): Promise<void> {
+		// Activamos las FOREIGN KEYS en la conexión del tenant: la BD local de la Main las
+		// aplica (`PRAGMA foreign_keys=ON`), así que la nube debe enforcearlas igual para no
+		// aceptar estados que luego la Main rechace al reproducir (y para que CASCADE/SET NULL
+		// se comporten idénticamente en ambos lados).
+		await db.execute({ sql: "PRAGMA foreign_keys = ON;", args: [] });
 		await db.execute({
 			sql: "SELECT 1 AS ok;",
 			args: [],
@@ -764,6 +827,8 @@ export class TenantHub {
 			const tx = await db.transaction(txMode);
 
 			try {
+				// FK diferidas al COMMIT (espejo de la Main): el orden interno no importa.
+				await tx.execute("PRAGMA defer_foreign_keys = ON;");
 				const out = await this.runTransactionStepsOnExecutor(tx, payload);
 				await tx.commit();
 				return out;
@@ -868,16 +933,21 @@ export class TenantHub {
 		deviceId?: string | null;
 		requestPayloadJson: string;
 		cloudPayloadJson: string;
+		clientNow?: string | null;
 	}): Promise<any> {
 		const {
 			tenantId,
-			cmd,
 			opId,
 			commandName,
 			deviceId,
 			requestPayloadJson,
 			cloudPayloadJson,
 		} = params;
+
+		// El tiempo lo fija el dispositivo emisor (cabecera X-Client-Now); resolvemos los
+		// `datetime('now')` del comando a literal ANTES de ejecutar y de registrar el cambio,
+		// para que la fila sea idéntica en nube, Main y Handy (replicación determinista).
+		const cmd = rewriteCmdNowLiterals(params.cmd, resolveClientNow(params.clientNow));
 
 		const op = opId.trim();
 		const command = commandName.trim();
@@ -904,6 +974,10 @@ export class TenantHub {
 			const tx = await db.transaction("write");
 
 			try {
+				// Espejo de la Main: diferimos la comprobación de FK al COMMIT, de modo que el
+				// orden de las sentencias dentro de la operación no importe (solo el estado final).
+				await tx.execute("PRAGMA defer_foreign_keys = ON;");
+
 				const existing = await tx.execute({
 					sql: `
 						SELECT
@@ -1269,6 +1343,12 @@ export class TenantHub {
 				payload: body.payload,
 			} as InternalApplyCommand;
 
+			const clientNow = String(
+				request.headers.get("x-client-now") ||
+				getFirstOwnValue(body, ["client_now", "clientNow"]) ||
+				"",
+			);
+
 			const fallbackPayloadForHash = buildInternalPayloadForHash(cmd);
 			const requestPayloadJson = readRequestPayloadJson(
 				body,
@@ -1290,6 +1370,7 @@ export class TenantHub {
 					deviceId,
 					requestPayloadJson,
 					cloudPayloadJson,
+					clientNow,
 				});
 
 				return jsonResponse({ ok: true, data: result }, 200);
@@ -1493,6 +1574,11 @@ export class TenantHub {
 					commandName,
 					fallbackPayloadForHash: fallback,
 				});
+				// La Main ya manda sus sentencias con el tiempo resuelto a literal; aun así
+				// honramos un X-Client-Now si viniera (no hace daño: el rewrite es no-op).
+				const clientNow = String(
+					getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
+				);
 
 				this.state.waitUntil(
 					(async () => {
@@ -1505,6 +1591,7 @@ export class TenantHub {
 								deviceId,
 								requestPayloadJson,
 								cloudPayloadJson,
+								clientNow,
 							});
 							this.send(server, {
 								type: "apply_ack",

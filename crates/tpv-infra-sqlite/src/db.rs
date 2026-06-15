@@ -102,6 +102,25 @@ fn value_to_json(v: &Value) -> serde_json::Value {
     }
 }
 
+/// Sustituye en una sentencia **a replicar** las funciones de tiempo NO deterministas por el
+/// instante local del dispositivo ya resuelto a literal. Imprescindible para la replicación a
+/// nivel de sentencia: si la SQL viajara con `datetime('now')`, la nube (y un re-apply) la
+/// reevaluarían en otro instante/zona y la fila divergiría entre Main, nube y Handy.
+///
+/// Solo toca las formas exactas `datetime('now','localtime')` y `date('now','localtime')`. No son
+/// subcadena de las variantes con modificador (`…,'localtime','-2 days')`), que acaban en `,'…')`,
+/// así que el reemplazo literal es seguro y no las corrompe. La ejecución local ya ocurrió con la
+/// hora real del motor; aquí solo se ajusta la copia que se captura para el outbox.
+fn rewrite_now_literals(sql: &str) -> String {
+    if !sql.contains("('now'") {
+        return sql.to_string();
+    }
+    let dt = crate::util::now_local_datetime();
+    let d = crate::util::now_local_date();
+    sql.replace("datetime('now','localtime')", &format!("'{dt}'"))
+        .replace("date('now','localtime')", &format!("'{d}'"))
+}
+
 fn is_write_sql(sql: &str) -> bool {
     let head: String = sql
         .trim_start()
@@ -296,7 +315,9 @@ impl<'a> WriteGuard<'a> {
 
     async fn capture_write(&self, sql: &str, values: &[Value]) -> Result<(), LibsqlError> {
         let stmt = SqlStatement {
-            sql: sql.to_string(),
+            // La copia replicada lleva el tiempo ya resuelto a literal (determinismo); la
+            // ejecución local de arriba conservó su `datetime('now')` real.
+            sql: rewrite_now_literals(sql),
             args: values.iter().map(value_to_json).collect(),
         };
         let mut buf = self.tx_buf.lock().await;
@@ -433,6 +454,16 @@ impl Db {
     /// curso). Mantén el guard vivo durante toda la transacción.
     pub async fn write(&self) -> WriteGuard<'_> {
         let lock = self.write.lock.lock().await;
+        // Red de seguridad: la conexión de escritura es ÚNICA y compartida entre operaciones.
+        // Si una operación previa dejó una transacción abierta (un COMMIT que falló, un lock por
+        // `busy_timeout`, o un panic que saltó el COMMIT/ROLLBACK explícito), la conexión queda
+        // "envenenada" y todo `BEGIN` posterior revienta con "cannot start a transaction within a
+        // transaction". `WriteGuard::Drop` no puede hacer rollback (es síncrono), así que lo
+        // saneamos aquí: si no estamos en autocommit, hay una transacción colgada → la abortamos
+        // para arrancar limpios.
+        if !self.write.conn.is_autocommit() {
+            let _ = self.write.conn.execute_batch("ROLLBACK;").await;
+        }
         WriteGuard {
             conn: &self.write.conn,
             tx_buf: Mutex::new(None),

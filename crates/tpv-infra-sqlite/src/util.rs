@@ -44,3 +44,13 @@ pub fn now_ms() -> i64 {
         Err(_) => 0,
     }
 }
+
+/// Fecha-hora local del dispositivo `YYYY-MM-DD HH:MM:SS` (mismo formato que `datetime('now')`).
+pub fn now_local_datetime() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Fecha local del dispositivo `YYYY-MM-DD` (mismo formato que `date('now')`).
+pub fn now_local_date() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
