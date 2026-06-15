@@ -29,10 +29,11 @@ const UPDATE_TOTAL = `
 	WHERE ID_Comanda = ?1;
 `;
 
-function parseDbId(raw: string, prefix: string): number | null {
-	const m = String(raw || "").match(new RegExp(`^${prefix}(\\d+)$`));
-	const n = m ? Number(m[1]) : 0;
-	return Number.isInteger(n) && n > 0 ? n : null;
+function parseDbId(raw: string, prefix: string): string | null {
+	const s = String(raw || "").trim();
+	if (!s.startsWith(prefix)) return null;
+	const id = s.slice(prefix.length).trim();
+	return id || null;
 }
 
 export function saveLayout(input: SaveLayoutInput): BuiltCommand {
@@ -70,7 +71,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 
 		const kept = z.tables
 			.map((t) => parseDbId(t.id, "db-mesa-"))
-			.filter((n): n is number => !!n);
+			.filter((n): n is string => !!n);
 		const keptClause = kept.length
 			? `AND ID_Mesa NOT IN (${kept.map((_, i) => `?${i + 3}`).join(",")})`
 			: "";
@@ -195,11 +196,17 @@ export function setReservaEstado(idReserva: string, estado: string): BuiltComman
 	};
 }
 
+function stripPrefix(raw: string, prefix: string): string {
+	const s = String(raw || "").trim();
+	return s.startsWith(prefix) ? s.slice(prefix.length).trim() : s;
+}
+
 export function abrirComanda(
 	input: AbrirComandaInput,
 	idTrabajador: string | null,
 	idReserva: string | null,
 ): BuiltCommand {
+	const bareIdMesa = stripPrefix(input.id_mesa, "db-mesa-");
 	return {
 		commandName: "abrir_comanda",
 		command: {
@@ -226,7 +233,7 @@ export function abrirComanda(
 							)
 							VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta');
 						`,
-						args: [REF_ID_COMANDA, input.id_mesa, idTrabajador, idReserva],
+						args: [REF_ID_COMANDA, bareIdMesa, idTrabajador, idReserva],
 					},
 					{
 						kind: "row",

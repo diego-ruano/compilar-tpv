@@ -150,10 +150,17 @@ export async function readComanda(
 	return (rows(rs)[0] ?? null) as ComandaRow | null;
 }
 
+function stripMesaPrefix(id: string): string {
+	const s = String(id || "").trim();
+	return s.startsWith("db-mesa-") ? s.slice("db-mesa-".length).trim() : s;
+}
+
 export async function comandaAbiertaByMesa(
 	db: Client,
 	idMesa: string,
 ): Promise<ComandaRow | null> {
+	const bareId = stripMesaPrefix(idMesa);
+	if (!bareId) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Comanda AS id
@@ -162,7 +169,7 @@ export async function comandaAbiertaByMesa(
 			ORDER BY ID_Comanda DESC
 			LIMIT 1;
 		`,
-		args: [idMesa],
+		args: [bareId],
 	});
 	const id = String(rows(rs)[0]?.id ?? "").trim();
 	return id ? readComanda(db, id) : null;
@@ -172,6 +179,8 @@ export async function activeReservaForMesa(
 	db: Client,
 	idMesa: string,
 ): Promise<string | null> {
+	const bareId = stripMesaPrefix(idMesa);
+	if (!bareId) return null;
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Reserva AS id
@@ -180,7 +189,7 @@ export async function activeReservaForMesa(
 			ORDER BY ID_Reserva DESC
 			LIMIT 1;
 		`,
-		args: [idMesa],
+		args: [bareId],
 	});
 	const id = String(rows(rs)[0]?.id ?? "").trim();
 	return id ? id : null;
