@@ -1473,10 +1473,8 @@ export default function EditTables() {
 
                                         setDirty(false);
                                     } catch (e) {
-                                        console.error(
-                                            "No se pudo guardar el layout en API/local fallback:",
-                                            e,
-                                        );
+                                        console.error("No se pudo guardar el layout:", e);
+                                        alert(`No se pudo guardar el layout:\n${String(e)}`);
                                     }
                                 }}
                             >

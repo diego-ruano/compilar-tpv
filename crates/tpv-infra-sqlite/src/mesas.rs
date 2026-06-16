@@ -320,48 +320,92 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== LAYOUT ===== */
 
     async fn save_layout(&self, salons: Vec<SalonInput>) -> AppResult<()> {
-        // Pre-carga del mapa nombre→ID de zonas con una conexión de LECTURA limpia, antes de
-        // abrir la transacción de escritura. Evita cualquier SELECT dentro de la transacción,
-        // que en libsql WAL no ve las escrituras no confirmadas de la misma transacción.
-        let zona_nombre_a_id: HashMap<String, String> = {
-            let r = self.db.read().await;
-            let mut rows = r
-                .query("SELECT Nombre_Zona, ID_Zona FROM Zonas;", ())
-                .await
-                .map_err(db_err)?;
-            let mut map = HashMap::new();
-            while let Some(row) = rows.next().await.map_err(db_err)? {
-                let nombre = match row.get_value(0).map_err(db_err)? {
-                    Value::Text(s) => s,
-                    _ => continue,
-                };
-                let id = match row.get_value(1).map_err(db_err)? {
-                    Value::Text(s) => s,
-                    _ => continue,
-                };
-                if !nombre.is_empty() && !id.is_empty() {
-                    map.insert(nombre, id);
+        // Validación: nombres de zona no vacíos y únicos en el lote (la BD impone UNIQUE).
+        {
+            let mut seen = std::collections::HashSet::new();
+            for z in salons.iter() {
+                let name = z.name.trim();
+                if name.is_empty() {
+                    return Err(AppError::validation("zone_name required"));
+                }
+                if !seen.insert(name.to_string()) {
+                    return Err(AppError::validation(format!(
+                        "Nombre de zona duplicado: «{name}»"
+                    )));
                 }
             }
-            map
+        }
+
+        // IDs de zonas existentes que el editor conserva (llegan con prefijo "db-zona-").
+        let kept_zone_ids: Vec<String> = salons
+            .iter()
+            .filter_map(|z| parse_db_id(&z.id, "db-zona-"))
+            .collect();
+
+        // Cláusula reutilizable "... AND ID_Zona NOT IN (?1, ?2, …)" + sus argumentos.
+        let not_in_clause = if kept_zone_ids.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " AND ID_Zona NOT IN ({})",
+                build_in_placeholders(1, kept_zone_ids.len())
+            )
         };
+        let kept_args: Vec<Value> = kept_zone_ids.iter().cloned().map(Value::Text).collect();
 
         let g = self.db.write().await;
         let db = &g;
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
+            // ── 1. Eliminar las zonas borradas en el editor (las que ya no llegan) ──────
+            // Primero sus mesas libres; las de sistema y las con comanda/reserva quedan, y
+            // esas mesas residuales impiden borrar su zona (así BARRA queda protegida).
+            db.execute(
+                &format!(
+                    r#"DELETE FROM Mesas
+                       WHERE Es_Sistema = 0{not_in_clause}
+                         AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
+                         AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);"#
+                ),
+                kept_args.clone(),
+            )
+            .await
+            .map_err(db_err)?;
+
+            db.execute(
+                &format!(
+                    r#"DELETE FROM Zonas
+                       WHERE 1 = 1{not_in_clause}
+                         AND NOT EXISTS (SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona);"#
+                ),
+                kept_args.clone(),
+            )
+            .await
+            .map_err(db_err)?;
+
+            // ── 2. Aparcar los nombres de las zonas conservadas a un valor temporal único ──
+            // Libera los nombres reales para que los UPDATE de la fase 3 no choquen de forma
+            // transitoria con el UNIQUE(Nombre_Zona) al renombrar/intercambiar zonas existentes.
+            if !kept_zone_ids.is_empty() {
+                let in_sql = build_in_placeholders(1, kept_zone_ids.len());
+                db.execute(
+                    &format!(
+                        "UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona WHERE ID_Zona IN ({in_sql});"
+                    ),
+                    kept_args.clone(),
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // ── 3. Upsert de cada zona del editor + reconciliación de sus mesas ──────────
             for z in salons.iter() {
                 let zone_name = z.name.trim().to_string();
-                if zone_name.is_empty() {
-                    return Err(AppError::validation("zone_name required"));
-                }
                 let points_json = serde_json::to_string(&z.room.points).map_err(db_err)?;
-                let id_zona_opt = parse_db_id(&z.id, "db-zona-");
 
-                let zone_id: String = if let Some(id_zona) = id_zona_opt {
-                    // Zona existente (tiene prefijo "db-zona-"): UPDATE por ID.
-                    // UPDATE puro evita conflictos de UNIQUE en Nombre_Zona.
+                let zone_id: String = if let Some(id_zona) = parse_db_id(&z.id, "db-zona-") {
+                    // Zona existente (aparcada en la fase 2): fija su nombre real y los puntos.
                     db.execute(
                         r#"
                         UPDATE Zonas
@@ -377,22 +421,8 @@ impl MesasRepository for SqliteMesasRepository {
                     .await
                     .map_err(db_err)?;
                     id_zona
-                } else if let Some(existing_id) = zona_nombre_a_id.get(&zone_name) {
-                    // Zona "nueva" en el frontend pero ya existe en BD (misma nombre):
-                    // actualizar solo Room_Points (sin tocar ID ni Nombre).
-                    db.execute(
-                        r#"
-                        UPDATE Zonas
-                        SET Room_Points = ?2, Updated_At = datetime('now','localtime')
-                        WHERE ID_Zona = ?1;
-                        "#,
-                        vec![Value::Text(existing_id.clone()), Value::Text(points_json.clone())],
-                    )
-                    .await
-                    .map_err(db_err)?;
-                    existing_id.clone()
                 } else {
-                    // Zona verdaderamente nueva: INSERT con UUID pregenerado (sin SELECT posterior).
+                    // Zona nueva: INSERT con UUID nuevo.
                     let new_zone_id = new_id();
                     db.execute(
                         r#"
