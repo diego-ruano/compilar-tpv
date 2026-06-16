@@ -320,6 +320,32 @@ impl MesasRepository for SqliteMesasRepository {
     /* ===== LAYOUT ===== */
 
     async fn save_layout(&self, salons: Vec<SalonInput>) -> AppResult<()> {
+        // Pre-carga del mapa nombre→ID de zonas con una conexión de LECTURA limpia, antes de
+        // abrir la transacción de escritura. Evita cualquier SELECT dentro de la transacción,
+        // que en libsql WAL no ve las escrituras no confirmadas de la misma transacción.
+        let zona_nombre_a_id: HashMap<String, String> = {
+            let r = self.db.read().await;
+            let mut rows = r
+                .query("SELECT Nombre_Zona, ID_Zona FROM Zonas;", ())
+                .await
+                .map_err(db_err)?;
+            let mut map = HashMap::new();
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                let nombre = match row.get_value(0).map_err(db_err)? {
+                    Value::Text(s) => s,
+                    _ => continue,
+                };
+                let id = match row.get_value(1).map_err(db_err)? {
+                    Value::Text(s) => s,
+                    _ => continue,
+                };
+                if !nombre.is_empty() && !id.is_empty() {
+                    map.insert(nombre, id);
+                }
+            }
+            map
+        };
+
         let g = self.db.write().await;
         let db = &g;
 
@@ -334,14 +360,13 @@ impl MesasRepository for SqliteMesasRepository {
                 let id_zona_opt = parse_db_id(&z.id, "db-zona-");
 
                 let zone_id: String = if let Some(id_zona) = id_zona_opt {
+                    // Zona existente (tiene prefijo "db-zona-"): UPDATE por ID.
+                    // UPDATE puro evita conflictos de UNIQUE en Nombre_Zona.
                     db.execute(
                         r#"
-                        INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
-                        VALUES (?1, ?2, ?3, datetime('now','localtime'))
-                        ON CONFLICT(ID_Zona) DO UPDATE SET
-                          Nombre_Zona = excluded.Nombre_Zona,
-                          Room_Points = excluded.Room_Points,
-                          Updated_At  = excluded.Updated_At;
+                        UPDATE Zonas
+                        SET Nombre_Zona = ?2, Room_Points = ?3, Updated_At = datetime('now','localtime')
+                        WHERE ID_Zona = ?1;
                         "#,
                         vec![
                             Value::Text(id_zona.clone()),
@@ -352,47 +377,37 @@ impl MesasRepository for SqliteMesasRepository {
                     .await
                     .map_err(db_err)?;
                     id_zona
-                } else {
-                    // Zona nueva desde el frontend (id temporal sin prefijo "db-zona-").
-                    // Comprobamos primero si ya existe un zona con ese nombre para reutilizar su ID;
-                    // si no existe, generamos el UUID ahora y lo usamos directamente en el INSERT
-                    // (evita el SELECT-after-INSERT que falla dentro de la transacción en libsql).
-                    let existing_id = select_one_string(
-                        db,
-                        "SELECT ID_Zona FROM Zonas WHERE Nombre_Zona=?1 LIMIT 1;",
-                        vec![Value::Text(zone_name.clone())],
+                } else if let Some(existing_id) = zona_nombre_a_id.get(&zone_name) {
+                    // Zona "nueva" en el frontend pero ya existe en BD (misma nombre):
+                    // actualizar solo Room_Points (sin tocar ID ni Nombre).
+                    db.execute(
+                        r#"
+                        UPDATE Zonas
+                        SET Room_Points = ?2, Updated_At = datetime('now','localtime')
+                        WHERE ID_Zona = ?1;
+                        "#,
+                        vec![Value::Text(existing_id.clone()), Value::Text(points_json.clone())],
                     )
-                    .await?;
-
-                    if let Some(eid) = existing_id {
-                        db.execute(
-                            r#"
-                            UPDATE Zonas
-                            SET Room_Points = ?2, Updated_At = datetime('now','localtime')
-                            WHERE ID_Zona = ?1;
-                            "#,
-                            vec![Value::Text(eid.clone()), Value::Text(points_json.clone())],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                        eid
-                    } else {
-                        let new_zone_id = new_id();
-                        db.execute(
-                            r#"
-                            INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
-                            VALUES (?1, ?2, ?3, datetime('now','localtime'));
-                            "#,
-                            vec![
-                                Value::Text(new_zone_id.clone()),
-                                Value::Text(zone_name.clone()),
-                                Value::Text(points_json.clone()),
-                            ],
-                        )
-                        .await
-                        .map_err(db_err)?;
-                        new_zone_id
-                    }
+                    .await
+                    .map_err(db_err)?;
+                    existing_id.clone()
+                } else {
+                    // Zona verdaderamente nueva: INSERT con UUID pregenerado (sin SELECT posterior).
+                    let new_zone_id = new_id();
+                    db.execute(
+                        r#"
+                        INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
+                        VALUES (?1, ?2, ?3, datetime('now','localtime'));
+                        "#,
+                        vec![
+                            Value::Text(new_zone_id.clone()),
+                            Value::Text(zone_name.clone()),
+                            Value::Text(points_json.clone()),
+                        ],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                    new_zone_id
                 };
 
                 let mut kept: Vec<String> = vec![];
