@@ -713,6 +713,7 @@ impl MesasRepository for SqliteMesasRepository {
         if id_mesa.trim().is_empty() {
             return Ok(None);
         }
+        let bare_id = parse_db_id(id_mesa, "db-mesa-").unwrap_or_else(|| id_mesa.to_string());
         let id = select_one_string(
             db,
             r#"
@@ -720,7 +721,7 @@ impl MesasRepository for SqliteMesasRepository {
             WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
             ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
             "#,
-            vec![Value::Text(id_mesa.to_string())],
+            vec![Value::Text(bare_id)],
         )
         .await?;
         match id {
@@ -735,6 +736,8 @@ impl MesasRepository for SqliteMesasRepository {
         let id_trabajador_real =
             resolve_trabajador_id_input(db, data.id_trabajador_o_usuario).await?;
         let id_reserva = data.id_reserva.filter(|s| !s.trim().is_empty());
+        let bare_id_mesa =
+            parse_db_id(&data.id_mesa, "db-mesa-").unwrap_or_else(|| data.id_mesa.clone());
 
         let id_reserva_final = match id_reserva {
             Some(rid) => Some(rid),
@@ -746,7 +749,7 @@ impl MesasRepository for SqliteMesasRepository {
                     WHERE ID_Mesa = ?1 AND Estado='ACTIVA'
                     ORDER BY datetime(Created_At) DESC LIMIT 1;
                     "#,
-                    vec![Value::Text(data.id_mesa.clone())],
+                    vec![Value::Text(bare_id_mesa.clone())],
                 )
                 .await?
             }
@@ -762,7 +765,7 @@ impl MesasRepository for SqliteMesasRepository {
             "#,
             vec![
                 Value::Text(id_comanda_new.clone()),
-                Value::Text(data.id_mesa.clone()),
+                Value::Text(bare_id_mesa),
                 id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
                 id_reserva_final.map(Value::Text).unwrap_or(Value::Null),
             ],
