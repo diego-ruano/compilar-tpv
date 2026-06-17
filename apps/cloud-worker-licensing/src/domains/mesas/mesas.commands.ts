@@ -127,10 +127,12 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 					],
 				});
 			} else {
+				const newMesaId = crypto.randomUUID();
 				steps.push({
 					kind: "execute",
 					sql: `
 						INSERT INTO Mesas (
+							ID_Mesa,
 							ID_Zona,
 							Numero_Mesa,
 							Capacidad,
@@ -144,6 +146,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 							Es_Sistema
 						)
 						SELECT
+							?11,
 							COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1)),
 							?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
 							datetime('now','localtime'),
@@ -169,6 +172,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 						width,
 						height,
 						t.radius ?? null,
+						newMesaId,
 					],
 				});
 			}
