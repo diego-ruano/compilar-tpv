@@ -39,6 +39,40 @@ function parseDbId(raw: string, prefix: string): string | null {
 export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	const steps: any[] = [];
 
+	// Zonas que el editor conserva (tienen prefijo db-zona-)
+	const keptZoneIds = input.salons
+		.map((z) => parseDbId(z.id, "db-zona-"))
+		.filter((id): id is string => !!id);
+
+	const zoneNotInClause = keptZoneIds.length
+		? `AND ID_Zona NOT IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")})`
+		: "";
+
+	// Borra mesas de zonas eliminadas (las no-sistema sin comanda/reserva activa)
+	steps.push({
+		kind: "execute",
+		sql: `
+			DELETE FROM Mesas
+			WHERE Es_Sistema = 0
+				${zoneNotInClause}
+				AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
+				AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
+		`,
+		args: [...keptZoneIds],
+	});
+
+	// Borra las propias zonas eliminadas (solo si ya quedaron sin mesas)
+	steps.push({
+		kind: "execute",
+		sql: `
+			DELETE FROM Zonas
+			WHERE 1 = 1
+				${zoneNotInClause}
+				AND NOT EXISTS (SELECT 1 FROM Mesas M WHERE M.ID_Zona = Zonas.ID_Zona);
+		`,
+		args: [...keptZoneIds],
+	});
+
 	for (const z of input.salons) {
 		const idZona = parseDbId(z.id, "db-zona-");
 		const points = JSON.stringify(z.room.points ?? []);
