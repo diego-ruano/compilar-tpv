@@ -90,16 +90,17 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 				args: [idZona, z.name, points],
 			});
 		} else {
+			const newZonaId = crypto.randomUUID();
 			steps.push({
 				kind: "execute",
 				sql: `
-					INSERT INTO Zonas (Nombre_Zona, Room_Points, Updated_At)
-					VALUES (?1, ?2, datetime('now','localtime'))
+					INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
+					VALUES (?1, ?2, ?3, datetime('now','localtime'))
 					ON CONFLICT(Nombre_Zona) DO UPDATE SET
 						Room_Points = excluded.Room_Points,
 						Updated_At = excluded.Updated_At;
 				`,
-				args: [z.name, points],
+				args: [newZonaId, z.name, points],
 			});
 		}
 
