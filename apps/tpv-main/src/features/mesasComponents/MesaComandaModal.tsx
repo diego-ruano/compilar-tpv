@@ -954,24 +954,6 @@ export default function MesaComandaModal({
                     </div>
                 ) : null}
 
-                <div className="flex items-center justify-between gap-3 mb-4">
-                    <div className="text-sm text-fg-muted">
-                        {loadingTicket
-                            ? "Cargando ticket…"
-                            : idComanda
-                                ? `Comanda #${idComanda}`
-                                : "Sin comanda"}
-                    </div>
-
-                    <button
-                        className="px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
-                        onClick={reloadTicket}
-                        type="button"
-                    >
-                        Recargar
-                    </button>
-                </div>
-
                 <div className="flex flex-1 min-h-0 gap-4">
                     <div className="flex-1 min-h-0 bg-surface rounded-xl border border-border p-4 flex flex-col">
                         <div className="flex items-center justify-between gap-3">
