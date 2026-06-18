@@ -96,8 +96,8 @@ function Modal({
 }) {
     if (!open) return null;
     return (
-        <div className="fixed inset-0 z-[9999] bg-black/50 p-4 grid place-items-center">
-            <div className="w-full max-w-[1200px] h-[86vh] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden flex flex-col">
+        <div className="fixed inset-0 z-[9999] bg-black/50 p-2 grid place-items-center">
+            <div className="w-full max-w-375 h-[90vh] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden flex flex-col">
                 <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
                     <div className="text-lg font-extrabold text-fg">
                         {title}
