@@ -1,6 +1,6 @@
 // components/mesasComponents/MesaComandaModal.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { Printer, X } from "lucide-react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useAuth } from "../../shared/stores/useAuth";
@@ -9,6 +9,7 @@ import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
+import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
 
 import {
     mesasEnsureOpenComanda,
@@ -88,11 +89,13 @@ function Modal({
     title,
     children,
     onClose,
+    headerRight,
 }: {
     open: boolean;
     title: string;
     children: React.ReactNode;
     onClose: () => void;
+    headerRight?: React.ReactNode;
 }) {
     if (!open) return null;
     return (
@@ -102,13 +105,16 @@ function Modal({
                     <div className="text-lg font-extrabold text-fg">
                         {title}
                     </div>
-                    <button
-                        onClick={onClose}
-                        aria-label="Cerrar"
-                        className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-                    >
-                        <X className="size-4" aria-hidden />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        {headerRight}
+                        <button
+                            onClick={onClose}
+                            aria-label="Cerrar"
+                            className="grid size-10 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+                        >
+                            <X className="size-4" aria-hidden />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="p-4 flex-1 min-h-0">{children}</div>
@@ -436,6 +442,7 @@ export default function MesaComandaModal({
 
     const [paso, setPaso] = useState<Paso>("categorias");
     const [cashCount, setCashCount] = useState<Record<string, number>>({});
+    const [printOpen, setPrintOpen] = useState(false);
 
     const { idUsuario, idTrabajador, role } = useAuth();
     const isAdmin = (role || "").toLowerCase().includes("admin");
@@ -842,6 +849,23 @@ export default function MesaComandaModal({
         <Modal
             open={open}
             title={modalTitle}
+            headerRight={
+                <button
+                    type="button"
+                    onClick={() => setPrintOpen(true)}
+                    disabled={ticket.length === 0}
+                    className={cn(
+                        "flex items-center gap-2 rounded-xl border px-3 h-10 text-sm font-semibold transition",
+                        ticket.length === 0
+                            ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                            : "border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer",
+                    )}
+                    title="Imprimir ticket"
+                >
+                    <Printer className="size-4" aria-hidden />
+                    Imprimir
+                </button>
+            }
             onClose={() => {
                 setPaso("categorias");
                 setCategoriaSeleccionada(null);
@@ -854,6 +878,11 @@ export default function MesaComandaModal({
                 onClose();
             }}
         >
+            <PrintTicketModal
+                open={printOpen}
+                onClose={() => setPrintOpen(false)}
+                items={ticket}
+            />
             <NotaLineaModal
                 open={openNota}
                 productoNombre={notaTarget?.nombre ?? ""}
