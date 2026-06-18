@@ -1,5 +1,5 @@
 // components/mesasComponents/MesaComandaModal.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { appDataDir, join } from "@tauri-apps/api/path";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -307,6 +307,102 @@ function fmtReserva(res: NonNullable<MesaMeta["reserva"]>) {
     return `Reserva en ${Math.max(0, min)} min`;
 }
 
+/* =========================
+   Tarjeta de producto (a nivel de módulo: evita que se desmonte/remonte
+   —y se recarguen sus imágenes— en cada re-render del modal de comanda)
+========================= */
+const ProductCard = React.memo(function ProductCard({
+    p,
+    qty,
+    onAdd,
+    onRemove,
+    onInfo,
+}: {
+    p: ProductoDisplay;
+    qty: number;
+    onAdd: (p: ProductoDisplay) => void;
+    onRemove: (productoId: string) => void;
+    onInfo: (p: ProductoDisplay) => void;
+}) {
+    return (
+        <div className="rounded-xl border border-border bg-surface p-3 text-left">
+            <div
+                role="button"
+                tabIndex={0}
+                onClick={() => onAdd(p)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onAdd(p);
+                    }
+                }}
+                className="w-full text-left hover:opacity-95 transition cursor-pointer outline-none"
+            >
+                <div className="relative">
+                    <img
+                        src={p.urlImagen}
+                        alt={p.Nombre}
+                        className="w-full h-28 object-cover rounded-lg border border-border"
+                    />
+
+                    <button
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onInfo(p);
+                        }}
+                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-surface/90 border border-border shadow-sm flex items-center justify-center text-fg-muted hover:bg-surface transition"
+                        title="Info"
+                        aria-label={`Info de ${p.Nombre}`}
+                    >
+                        ℹ️
+                    </button>
+
+                    {qty > 0 ? (
+                        <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold border-2 border-border">
+                            {qty}
+                        </div>
+                    ) : null}
+                </div>
+
+                <div className="mt-2 flex items-start justify-between gap-2">
+                    <p className="font-semibold leading-tight">{p.Nombre}</p>
+                    <span className="text-sm font-bold">
+                        {eur(Number(p.Precio_Venta || 0))}
+                    </span>
+                </div>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-2">
+                <button
+                    type="button"
+                    onClick={() => onRemove(p.ID_Producto)}
+                    className={cn(
+                        "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
+                        qty === 0 && "opacity-40 cursor-not-allowed",
+                    )}
+                    disabled={qty === 0}
+                >
+                    −
+                </button>
+
+                <div className="flex-1 text-center rounded-xl border border-border bg-surface-2 py-2">
+                    <p className="text-xs text-fg-muted">Cantidad</p>
+                    <p className="text-lg font-bold">{qty}</p>
+                </div>
+
+                <button
+                    type="button"
+                    onClick={() => onAdd(p)}
+                    className="w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
+                >
+                    +
+                </button>
+            </div>
+        </div>
+    );
+});
+
 export default function MesaComandaModal({
     open,
     onClose,
@@ -346,13 +442,21 @@ export default function MesaComandaModal({
     const operador = isAdmin ? null : (idTrabajador ?? idUsuario ?? null);
     const reserva = mesaMeta?.reserva ?? null;
 
-    const notifyChanged = () => {
+    // `onChanged` llega como arrow nueva en cada render del padre; la guardamos en un ref
+    // para que `notifyChanged` (y, en cascada, reloadTicket/addProducto…) sea estable y
+    // React.memo de ProductCard pueda evitar re-renders de las tarjetas no afectadas.
+    const onChangedRef = useRef(onChanged);
+    useEffect(() => {
+        onChangedRef.current = onChanged;
+    });
+
+    const notifyChanged = useCallback(() => {
         try {
-            onChanged?.();
+            onChangedRef.current?.();
         } finally {
             window.dispatchEvent(new CustomEvent("mesas:changed"));
         }
-    };
+    }, []);
 
     const [openNota, setOpenNota] = useState(false);
     const [notaTarget, setNotaTarget] = useState<TicketItem | null>(null);
@@ -387,10 +491,10 @@ export default function MesaComandaModal({
     const [productDetailTarget, setProductDetailTarget] =
         useState<ProductoDisplay | null>(null);
 
-    const abrirDetalleProducto = (p: ProductoDisplay) => {
+    const abrirDetalleProducto = useCallback((p: ProductoDisplay) => {
         setProductDetailTarget(p);
         setOpenProductDetail(true);
-    };
+    }, []);
 
     const cerrarDetalleProducto = () => {
         setOpenProductDetail(false);
@@ -458,7 +562,7 @@ export default function MesaComandaModal({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open, mesaId, idUsuario, reserva?.estado, reserva?.idReserva]);
 
-    async function reloadTicket() {
+    const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
         setLoadingTicket(true);
         try {
@@ -468,7 +572,7 @@ export default function MesaComandaModal({
         } finally {
             setLoadingTicket(false);
         }
-    }
+    }, [idComanda, notifyChanged]);
 
     // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
     // abierta, recargar el ticket SOLO si el cambio afecta a esta comanda (no a otra que edite
@@ -550,19 +654,25 @@ export default function MesaComandaModal({
         return () => window.clearTimeout(t);
     }, [open, q]);
 
-    const addProductoToTicket = async (p: ProductoDisplay) => {
-        if (!idComanda) return;
-        if (!isAdmin && operador == null) return;
+    const addProductoToTicket = useCallback(
+        async (p: ProductoDisplay) => {
+            if (!idComanda) return;
+            if (!isAdmin && operador == null) return;
 
-        await addDetalle(idComanda, p, operador);
-        await reloadTicket();
-    };
+            await addDetalle(idComanda, p, operador);
+            await reloadTicket();
+        },
+        [idComanda, isAdmin, operador, reloadTicket],
+    );
 
-    const removeProductoFromTicket = async (productoId: string) => {
-        if (!idComanda) return;
-        await removeOnePendingDetalle(idComanda, productoId);
-        await reloadTicket();
-    };
+    const removeProductoFromTicket = useCallback(
+        async (productoId: string) => {
+            if (!idComanda) return;
+            await removeOnePendingDetalle(idComanda, productoId);
+            await reloadTicket();
+        },
+        [idComanda, reloadTicket],
+    );
 
     const countEnTicket = (productoId: string) =>
         ticket.filter((t) => t.productoId === productoId && !t.pagado).length;
@@ -721,88 +831,6 @@ export default function MesaComandaModal({
         if (!categoriaSeleccionada && !showingSearch && paso === "productos")
             setPaso("categorias");
     }, [categoriaSeleccionada, showingSearch]);
-
-    const ProductCard = ({ p }: { p: ProductoDisplay }) => {
-        const qty = countEnTicket(p.ID_Producto);
-
-        return (
-            <div className="rounded-xl border border-border bg-surface p-3 text-left">
-                <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => addProductoToTicket(p)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            addProductoToTicket(p);
-                        }
-                    }}
-                    className="w-full text-left hover:opacity-95 transition cursor-pointer outline-none"
-                >
-                    <div className="relative">
-                        <img
-                            src={p.urlImagen}
-                            alt={p.Nombre}
-                            className="w-full h-28 object-cover rounded-lg border border-border"
-                        />
-
-                        <button
-                            type="button"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                abrirDetalleProducto(p);
-                            }}
-                            className="absolute top-2 right-2 w-8 h-8 rounded-full bg-surface/90 border border-border shadow-sm flex items-center justify-center text-fg-muted hover:bg-surface transition"
-                            title="Info"
-                            aria-label={`Info de ${p.Nombre}`}
-                        >
-                            ℹ️
-                        </button>
-
-                        {qty > 0 ? (
-                            <div className="absolute -top-2 -left-2 w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center text-sm font-bold border-2 border-border">
-                                {qty}
-                            </div>
-                        ) : null}
-                    </div>
-
-                    <div className="mt-2 flex items-start justify-between gap-2">
-                        <p className="font-semibold leading-tight">{p.Nombre}</p>
-                        <span className="text-sm font-bold">
-                            {eur(Number(p.Precio_Venta || 0))}
-                        </span>
-                    </div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between gap-2">
-                    <button
-                        type="button"
-                        onClick={() => removeProductoFromTicket(p.ID_Producto)}
-                        className={cn(
-                            "w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold",
-                            qty === 0 && "opacity-40 cursor-not-allowed",
-                        )}
-                        disabled={qty === 0}
-                    >
-                        −
-                    </button>
-
-                    <div className="flex-1 text-center rounded-xl border border-border bg-surface-2 py-2">
-                        <p className="text-xs text-fg-muted">Cantidad</p>
-                        <p className="text-lg font-bold">{qty}</p>
-                    </div>
-
-                    <button
-                        type="button"
-                        onClick={() => addProductoToTicket(p)}
-                        className="w-11 h-11 rounded-xl border border-border bg-surface hover:bg-surface-2 font-bold"
-                    >
-                        +
-                    </button>
-                </div>
-            </div>
-        );
-    };
 
     const modalTitle = useMemo(() => {
         if (reserva?.estado === "ACTIVA")
@@ -1137,6 +1165,10 @@ export default function MesaComandaModal({
                                                     <ProductCard
                                                         key={p.ID_Producto}
                                                         p={p}
+                                                        qty={countEnTicket(p.ID_Producto)}
+                                                        onAdd={addProductoToTicket}
+                                                        onRemove={removeProductoFromTicket}
+                                                        onInfo={abrirDetalleProducto}
                                                     />
                                                 ))}
                                             </div>
@@ -1173,6 +1205,10 @@ export default function MesaComandaModal({
                                                 <ProductCard
                                                     key={p.ID_Producto}
                                                     p={p}
+                                                    qty={countEnTicket(p.ID_Producto)}
+                                                    onAdd={addProductoToTicket}
+                                                    onRemove={removeProductoFromTicket}
+                                                    onInfo={abrirDetalleProducto}
                                                 />
                                             ))}
                                         </div>
