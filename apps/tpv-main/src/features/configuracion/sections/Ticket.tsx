@@ -1,11 +1,14 @@
 // src/features/configuracion/sections/Ticket.tsx
 import React, { useMemo, useState } from "react";
 import TicketPreviewModal from "../../../shared/ticket/PreviewModal";
+import { useToast } from "../../../shared/toast";
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { TextArea, TextInput } from "../ui/Inputs";
 import { Checkbox } from "../ui/Toggles";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
+import { PrinterPanel } from "./PrinterPanel";
+import { buildTicketPayload, printerPrintTicket } from "../api/printerApis";
 
 // ✅ PreviewModal solo acepta 384 | 576
 type PreviewWidth = 384 | 576;
@@ -83,6 +86,22 @@ export function Ticket({
     canSaveBusiness: boolean;
 }) {
     const [previewOpen, setPreviewOpen] = useState(false);
+    const toast = useToast();
+
+    // Imprime el ticket previsualizado en la impresora seleccionada, respetando la
+    // personalización actual (los mismos flags/ancho que usa la previsualización).
+    const imprimirPreview = async () => {
+        try {
+            await printerPrintTicket(buildTicketPayload(previewItems));
+            toast.success("Ticket", "Enviado a la impresora.");
+        } catch (e) {
+            console.error("printerPrintTicket error:", e);
+            toast.error(
+                "Ticket",
+                typeof e === "string" ? e : "No se pudo imprimir el ticket.",
+            );
+        }
+    };
 
     // ✅ ancho guardado en Ticket_Settings (si aún no existe, cae a 80)
     const ticketWidthMm: 58 | 80 | 112 = normalizeTicketWidthMm(
@@ -265,11 +284,15 @@ export function Ticket({
                 </div>
             </Panel>
 
+            {/* ✅ NUEVO: selección de impresora de tickets */}
+            <PrinterPanel />
+
             <TicketPreviewModal
                 open={previewOpen}
                 onClose={() => setPreviewOpen(false)}
                 items={previewItems}
                 width={widthOpt.previewWidthPx} // ✅ 384 | 576
+                onPrint={imprimirPreview}
             />
         </div>
     );

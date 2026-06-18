@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod printing;
 
 use base64::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,11 @@ struct DeviceConfig {
     mode: Option<DeviceMode>,
     #[serde(default)]
     connectivity: Option<ConnectivityMode>,
+    /// Impresora de tickets seleccionada en este dispositivo físico. Es una preferencia LOCAL
+    /// (la impresora está conectada a esta máquina), por eso vive en `device_config.json` y no
+    /// en la BD (que se sincroniza entre dispositivos).
+    #[serde(default)]
+    printer_name: Option<String>,
 }
 
 /* =========================================================
@@ -84,6 +90,11 @@ struct SaveImageArgs {
     subfolder: String,
     filename: String,
     base64_data: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SetPrinterArgs {
+    name: String,
 }
 
 /* =========================================================
@@ -490,6 +501,85 @@ fn get_app_data_path(app: AppHandle) -> Result<String, String> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Comandos: impresión (host/Windows) — ver `printing.rs`
+// ──────────────────────────────────────────────────────────────────────────────
+
+fn app_data_dir_of(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))
+}
+
+/// Lista las impresoras visibles por el SO (locales + conexiones de red/WiFi). Se ejecuta en un
+/// hilo bloqueante para no congelar el runtime async (la API de Windows es síncrona).
+#[tauri::command]
+async fn printer_list() -> Result<Vec<printing::PrinterInfo>, String> {
+    tokio::task::spawn_blocking(printing::list_printers)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Devuelve la impresora seleccionada en este dispositivo (o `None`).
+#[tauri::command]
+fn printer_get_selected(app: AppHandle) -> Result<Option<String>, String> {
+    let dir = app_data_dir_of(&app)?;
+    Ok(load_config(&dir).printer_name)
+}
+
+/// Persiste la impresora seleccionada en `device_config.json` (nombre vacío => deselecciona).
+#[tauri::command]
+fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, String> {
+    let dir = app_data_dir_of(&app)?;
+    let mut cfg = load_config(&dir);
+    let name = args.name.trim();
+    cfg.printer_name = if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    };
+    save_config(&dir, &cfg)?;
+    Ok("OK".into())
+}
+
+/// Resuelve la impresora a usar: la del payload/args si viene, si no la seleccionada en config.
+fn resolve_printer(app: &AppHandle, explicit: Option<String>) -> Result<String, String> {
+    let chosen = explicit
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| load_config(&app_data_dir_of(app).ok()?).printer_name);
+    chosen
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| "No hay impresora seleccionada".to_string())
+}
+
+/// Imprime un ticket real construido en ESC/POS respetando la personalización del front.
+#[tauri::command]
+async fn printer_print_ticket(
+    app: AppHandle,
+    payload: printing::PrintTicketPayload,
+) -> Result<String, String> {
+    let printer = resolve_printer(&app, payload.printer_name.clone())?;
+    let bytes = printing::build_ticket(&payload);
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Ticket TPV", &bytes))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok("OK".into())
+}
+
+/// Imprime un ticket de prueba en la impresora indicada (o la seleccionada) para verificarla.
+#[tauri::command]
+async fn printer_print_test(
+    app: AppHandle,
+    args: Option<SetPrinterArgs>,
+) -> Result<String, String> {
+    let printer = resolve_printer(&app, args.map(|a| a.name))?;
+    let bytes = printing::build_test_ticket(&printer);
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Prueba TPV", &bytes))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok("OK".into())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Builder (único) + registro de comandos
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -556,6 +646,12 @@ pub fn run() {
             // genéricos
             save_image,
             get_app_data_path,
+            // impresión (host/Windows — printing.rs)
+            printer_list,
+            printer_get_selected,
+            printer_set_selected,
+            printer_print_ticket,
+            printer_print_test,
             // auth / login
             commands::login::list_login_users,
             commands::login::login_user,
