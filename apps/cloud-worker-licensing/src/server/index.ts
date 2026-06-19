@@ -264,28 +264,6 @@ async function lemonActivate(licenseKey: string, instanceName: string) {
 	return { ok: r.ok, status: r.status, data, text };
 }
 
-async function lemonValidate(licenseKey: string, instanceId?: string | null) {
-	const body = new URLSearchParams();
-	body.set("license_key", licenseKey);
-	if (instanceId) body.set("instance_id", instanceId);
-
-	const r = await fetch("https://api.lemonsqueezy.com/v1/licenses/validate", {
-		method: "POST",
-		headers: {
-			Accept: "application/json",
-			"content-type": "application/x-www-form-urlencoded",
-		},
-		body,
-	});
-
-	const text = await r.text();
-	let data: any = null;
-	try {
-		data = JSON.parse(text);
-	} catch { }
-	return { ok: r.ok, status: r.status, data, text };
-}
-
 // ---------------- Initial tenant admin bootstrap ----------------
 
 const PBKDF2_PREFIX = "$pbkdf2-sha256$";
@@ -1186,69 +1164,6 @@ export default {
 				},
 				serverTime: Date.now(),
 			});
-		}
-
-		// 4) VALIDATE (re-check con Lemon)
-		if (url.pathname === "/v1/license/validate" && request.method === "POST") {
-			const miss = assertEnv(env, [
-				"LICENSE_JWT_SECRET",
-				"LICENSE_STORE_KEY",
-				"TURSO_DATABASE_URL",
-				"TURSO_AUTH_TOKEN",
-			]);
-			if (miss) return json({ ok: false, error: miss }, 500);
-
-			const h = request.headers.get("authorization") || "";
-			const m = h.match(/^Bearer\s+(.+)$/i);
-			if (!m) return json({ ok: false, error: "missing_token" }, 401);
-
-			let claims: { tenantId: string; deviceId: string; licHash: string };
-			try {
-				claims = await verifyToken(env, m[1]);
-			} catch {
-				return json({ ok: false, error: "invalid_token" }, 401);
-			}
-
-			const dbi = get();
-			await ensureExtraSchema(dbi);
-
-			const proof = await verifyDeviceProof(request, dbi, { tenantId: claims.tenantId, deviceId: claims.deviceId });
-			if (!proof.ok) return json({ ok: false, error: proof.error }, 401);
-
-			const dec = await getDecryptedLicenseKey(dbi, env.LICENSE_STORE_KEY, claims.licHash);
-			if (!dec) return json({ ok: false, error: "not_found" }, 404);
-
-			const licenseKey = dec.licenseKey;
-
-			const val = await lemonValidate(licenseKey, null);
-			if (!val.ok) {
-				return json({ ok: false, error: "lemon_validate_failed", details: val.data || val.text }, 400);
-			}
-
-			const status = (val.data?.license_key?.status || "active") as LicenseStatus;
-			const expiresAt = val.data?.license_key?.expires_at ? String(val.data.license_key.expires_at) : null;
-
-			await upsertLicenseFromEventOrActivation({
-				db: dbi,
-				storeKeyB64: env.LICENSE_STORE_KEY,
-				licenseKeyPlain: licenseKey,
-				tenantId: dec.lic.tenant_id,
-				status,
-				expiresAt,
-				testMode: Boolean(val.data?.meta?.test_mode),
-				instances_count:
-					typeof val.data?.license_key?.instances_count === "number"
-						? val.data.license_key.instances_count
-						: null,
-				activation_limit:
-					typeof val.data?.license_key?.activation_limit === "number"
-						? val.data.license_key.activation_limit
-						: null,
-				lemon_updated_at: val.data?.license_key?.updated_at ? String(val.data.license_key.updated_at) : null,
-				meta: val.data?.meta || null,
-			});
-
-			return json({ ok: true, status, expiresAt, valid: val.data?.valid, meta: val.data?.meta });
 		}
 
 		return new Response("Not found", { status: 404 });

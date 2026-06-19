@@ -12,7 +12,6 @@ import { useTheme } from "../../shared/stores/useTheme";
 import { Settings } from "lucide-react";
 import { cn } from "../../features/configuracion/utils";
 import type {
-    LicenseInfo,
     NavItem,
     SectionKey,
 } from "../../features/configuracion/types";
@@ -65,14 +64,6 @@ export default function Configuracion() {
     const darkMode = useTheme((s) => s.theme === "dark");
     const setDarkMode = (v: boolean) =>
         useTheme.getState().setTheme(v ? "dark" : "light");
-
-    const [license] = useState<LicenseInfo>({
-        plan: "PRO",
-        status: "ACTIVA",
-        nextPaymentDate: "2026-02-15",
-        seats: 3,
-        devices: 5,
-    });
 
     const [section, setSection] = useState<SectionKey>("NEGOCIO");
     const [navQuery, setNavQuery] = useState("");
@@ -710,10 +701,7 @@ export default function Configuracion() {
                                         ) : null}
 
                                         {section === "LICENCIA" ? (
-                                            <Licencia
-                                                darkMode={darkMode}
-                                                license={license}
-                                            />
+                                            <Licencia darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "VINCULAR_HANDY" &&

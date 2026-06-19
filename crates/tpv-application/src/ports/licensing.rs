@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
+    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
     LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
 };
 
@@ -21,8 +21,6 @@ pub trait LicensingService: Send + Sync {
     fn get_state(&self) -> AppResult<Option<LicenseLocalState>>;
     /// Borra el estado local de licencia.
     fn clear_state(&self) -> AppResult<()>;
-    /// Cabeceras de auth firmadas para el worker de licencias.
-    fn auth_headers(&self, method: &str, path: &str) -> AppResult<ApiAuthHeaders>;
     /// Activa la licencia contra el worker y persiste el estado.
     async fn activate(&self, input: LicenseActivateInput) -> AppResult<LicenseLocalState>;
     /// Verifica la licencia (gate). `force_network` fuerza la comprobación online.

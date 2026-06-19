@@ -48,16 +48,6 @@ pub struct LicenseGateResult {
    Cabeceras firmadas / identidad
 ========================================================= */
 
-/// Cabeceras de auth para el worker de licencias (campos snake_case).
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct ApiAuthHeaders {
-    pub token: String,
-    #[ts(type = "number")]
-    pub device_ts: i64,
-    pub device_sig: String,
-}
-
 /// Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -111,13 +101,6 @@ pub struct HandyWsAuth {
 /* =========================================================
    Args / Inputs
 ========================================================= */
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct ApiGetAuthHeadersArgs {
-    pub method: String,
-    pub path: String,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

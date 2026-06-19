@@ -786,7 +786,6 @@ pub fn run() {
             commands::licensing::license_clear_state,
             commands::licensing::license_gate,
             commands::licensing::license_check_now,
-            commands::licensing::api_get_auth_headers,
             // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
             commands::pairing::tpv_server_signed_headers,
             commands::pairing::license_read_state_for_ui,

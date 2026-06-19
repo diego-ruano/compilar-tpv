@@ -1,8 +1,7 @@
 //! Casos de uso de **licensing**. Validan la entrada e invocan el `LicensingService`.
 
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiGetAuthHeadersArgs, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState,
+    LicenseActivateInput, LicenseGateResult, LicenseLocalState,
 };
 
 use crate::error::{AppError, AppResult};
@@ -22,15 +21,6 @@ pub fn get_state(svc: &dyn LicensingService) -> AppResult<Option<LicenseLocalSta
 
 pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
     svc.clear_state()
-}
-
-pub fn auth_headers(
-    svc: &dyn LicensingService,
-    args: ApiGetAuthHeadersArgs,
-) -> AppResult<ApiAuthHeaders> {
-    let method = requerido(&args.method, "method")?;
-    let path = requerido(&args.path, "path")?;
-    svc.auth_headers(&method, &path)
 }
 
 pub async fn activate(

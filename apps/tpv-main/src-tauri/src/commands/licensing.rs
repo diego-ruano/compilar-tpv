@@ -8,8 +8,7 @@ use tauri::{AppHandle, Manager};
 
 use tpv_application::use_cases::licensing as uc;
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiGetAuthHeadersArgs, LicenseActivateInput, LicenseGateResult,
-    LicenseLocalState,
+    LicenseActivateInput, LicenseGateResult, LicenseLocalState,
 };
 use tpv_infra_licensing::LicensingAdapter;
 
@@ -21,14 +20,6 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
 
 fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
     Ok(LicensingAdapter::new(app_data_dir(app)?))
-}
-
-#[tauri::command]
-pub fn api_get_auth_headers(
-    app: AppHandle,
-    args: ApiGetAuthHeadersArgs,
-) -> Result<ApiAuthHeaders, String> {
-    Ok(uc::auth_headers(&svc(&app)?, args)?)
 }
 
 #[tauri::command]

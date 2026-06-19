@@ -23,7 +23,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
 use tpv_contracts::licensing::{
-    ApiAuthHeaders, ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
+    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
     LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
 };
 
@@ -329,26 +329,6 @@ impl LicensingService for LicensingAdapter {
 
     fn clear_state(&self) -> AppResult<()> {
         delete_state(&self.app_data_dir)
-    }
-
-    fn auth_headers(&self, method: &str, path: &str) -> AppResult<ApiAuthHeaders> {
-        let st = load_state(&self.app_data_dir)
-            .ok_or_else(|| AppError::not_found("missing_license_state"))?;
-
-        let path_only = path.split('?').next().unwrap_or("").trim().to_string();
-        if path_only.is_empty() {
-            return Err(AppError::validation("bad_path"));
-        }
-
-        let ts = now_ms();
-        let (sk, _) = get_or_create_device_keypair(&st.device_id).map_err(ext)?;
-        let sig = sign_device_proof(&sk, ts, method, &path_only, &st.token).map_err(ext)?;
-
-        Ok(ApiAuthHeaders {
-            token: st.token,
-            device_ts: ts,
-            device_sig: sig,
-        })
     }
 
     async fn activate(&self, input: LicenseActivateInput) -> AppResult<LicenseLocalState> {
