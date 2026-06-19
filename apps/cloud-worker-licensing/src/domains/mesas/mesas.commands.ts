@@ -18,6 +18,7 @@ export type BuiltCommand = {
 
 const REF_ID_COMANDA = { $ref: "id_comanda" } as const;
 const REF_ID_PAGO = { $ref: "id_pago" } as const;
+const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 
 const UPDATE_TOTAL = `
 	UPDATE Comandas
@@ -367,18 +368,26 @@ export function addLinea(
 		});
 	}
 	steps.push({
+		kind: "value",
+		saveAs: "id_detalle",
+		sql: "SELECT ?1;",
+		args: [crypto.randomUUID()],
+	});
+	steps.push({
 		kind: "execute",
 		sql: `
 			INSERT INTO Detalle_Comanda (
+				ID_Detalle,
 				ID_Comanda,
 				ID_Producto,
 				Cantidad,
 				Precio_Unitario,
 				Estado_Cocina
 			)
-			VALUES (?1, ?2, ?3, ?4, ?5);
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6);
 		`,
 		args: [
+			REF_ID_DETALLE,
 			input.id_comanda,
 			input.id_producto,
 			input.cantidad,
