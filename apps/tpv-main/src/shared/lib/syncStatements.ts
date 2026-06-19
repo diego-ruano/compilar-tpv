@@ -90,8 +90,8 @@ export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
 		}
 
 		// Tocó comanda pero no pudimos sacar el id. No marcamos incertidumbre cuando es un
-		// alta de comanda nueva (INSERT INTO Comandas con id autoincremental): esa comanda no
-		// puede ser la que ya está abierta en el POS.
+		// alta de comanda nueva (INSERT INTO Comandas con UUID generado en cliente): esa comanda
+		// no puede ser la que ya está abierta en el POS.
 		if (!found && !RE_INSERT_COMANDAS.test(sql)) {
 			uncertain = true;
 		}

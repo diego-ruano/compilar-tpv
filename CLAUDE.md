@@ -2,12 +2,13 @@
 
 > **Estado:** la refactorización profunda está **completada**. El TPV (Terminal Punto de Venta) es
 > ahora un **monorepo híbrido JS/Rust** con **arquitectura hexagonal** en Rust, **generación
-> automática de tipos** a TypeScript con `ts-rs`, y un frontend **Local-First puro de un solo
-> dispositivo** reestructurado en `app/ · features/ · shared/`.
+> automática de tipos** a TypeScript con `ts-rs`, y un frontend **Local-First** (modo TPV) con
+> **sincronización WebSocket** (modo online / Handy) reestructurado en `app/ · features/ · shared/`.
 >
-> Todos los dominios están migrados (monolito desmontado), la capa `dualCall`/sync eliminada y la
-> verificación final (`cargo build` + `tsc` + `pnpm generate-types`) pasa. Para el detalle por capa
-> y el patrón de referencia, mira [**Estado de la migración**](#estado-de-la-migración).
+> Todos los dominios están migrados (monolito desmontado). La capa antigua `dualCall` fue eliminada y
+> reemplazada por el sistema outbox + WS + TenantHub (§9). La verificación final (`cargo build` +
+> `tsc` + `pnpm generate-types`) pasa. Para el detalle por capa y el patrón de referencia, mira
+> [**Estado de la migración**](#estado-de-la-migración).
 
 ---
 
@@ -31,9 +32,9 @@ Dominios de negocio: `mesas`, `venta_rapida`, `inventario`, `cuentas` (caja), `c
    en crates por capa (dominio / aplicación / infraestructura).
 3. **`ts-rs`**: las structs que cruzan la frontera UI↔Rust se anotan con `#[derive(TS)]` y se
    autogeneran en `packages/contracts/src/generated/bindings.ts`.
-4. **Local-First puro de un solo dispositivo**: se elimina el patrón síncrono dual
-   (`dualCall.ts`). El frontend invoca **directamente** comandos Tauri, asumiendo latencia cero
-   y éxito instantáneo contra el SQLite local.
+4. **Local-First en modo TPV**: se elimina el patrón síncrono dual (`dualCall.ts`). El frontend
+   (modo TPV) invoca **directamente** comandos Tauri contra el SQLite local. En modo **online /
+   Handy** existe una capa de sincronización WebSocket con replicación de sentencias SQL (ver §9).
 
 ---
 
@@ -120,11 +121,14 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   ⚠️ **IDs**: los ID `i64` se mapean a `bigint`. Como los ID de SQLite del TPV no superan 2^53, en los DTOs se
   anota `#[ts(type = "number")]` en los campos ID/contadores para mantener compatibilidad con el frontend (que usa `number`).
 
-### 4.4 Frontend Local-First y limpieza
-- **Eliminado** el patrón `dualCall.ts` (y toda la capa de red/sync que lo acompañaba).
+### 4.4 Frontend Local-First (TPV) y capa de sync (Handy/online)
+- **Eliminado** el patrón `dualCall.ts` y sus auxiliares antiguos (`net/cloudSync`, `net/outboxSync`,
+  `net/realtimeSocket`, `net/healthCheck`, stores `useNet`/`useSync`).
 - **`packages/client/src/invokeClient.ts`**: cliente unificado que envuelve `invoke()` de
-  `@tauri-apps/api/core`. Sin red, sin outbox, sin fallback. El frontend lee/muta directamente contra Tauri.
+  `@tauri-apps/api/core`. En modo TPV, el frontend lee/muta directamente contra Tauri (SQLite local).
 - Hooks y componentes de `apps/tpv-main/src/features/` consumen `@tpv/client`.
+- **Modo online / Handy**: existe una capa de sincronización activa (outbox + WebSocket + DO TenantHub).
+  El detalle completo está en **§9**. Los hooks clave son `useMainSocket` (Main) y `useHandySocket` (Handy).
 
 ### 4.5 Worker único `tpv-api`
 - Los dos Cloudflare Workers se **fusionaron en uno solo**: `apps/cloud-worker-licensing/` (nombre
@@ -144,13 +148,14 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
    se **respaldaron fuera del monorepo** (`../tpv-git-backup-pre-monorepo/`) y se eliminaron de las
    carpetas. El monorepo arranca con **git nuevo y limpio** en la raíz. No se hacen commits en los repos antiguos.
 2. **Sync / Handy / Pairing:**
-   - **ELIMINAR** todo lo atado a `dualCall` y a la sincronización en tiempo real (que en el futuro
-     será WebSockets): `cloud_sync.rs`, `sync_manager.rs`, `fallback_local.rs`, los comandos
-     `*_after_remote_ok`, y en frontend `net/*` (`dualCall.ts`, `cloudSync.ts`, `outboxSync.ts`,
-     `realtimeSocket.ts`, `healthCheck.ts`) + stores `useNet` / `useSync`.
-   - **MANTENER** (adaptado a hexagonal, latente para el futuro): selección de **modo Handy**,
-     **emparejamiento** (`pairing.rs`), el enum `DeviceMode` y el store `useMode`. No se vuelve a
-     implementar desde cero más adelante; se deja preparado.
+   - **ELIMINADO** ✅ el patrón `dualCall` antiguo y sus auxiliares: `cloud_sync.rs`,
+     `sync_manager.rs`, `fallback_local.rs`, los comandos `*_after_remote_ok`, y en frontend `net/*`
+     (`dualCall.ts`, `cloudSync.ts`, `outboxSync.ts`, `realtimeSocket.ts`, `healthCheck.ts`) +
+     stores `useNet` / `useSync`.
+   - **IMPLEMENTADO** ✅ el sistema de sync nuevo (outbox + WebSocket + TenantHub) que sustituye al
+     anterior. Ver §9 para la arquitectura completa.
+   - **MANTENIDO**: selección de **modo Handy**, **emparejamiento** (`pairing.rs`), el enum
+     `DeviceMode` y el store `useMode`.
 3. **Licensing:** la cripto de bajo nivel (ed25519) y las llamadas HTTP se mueven a
    `tpv-infra-licensing`; sus interfaces (traits) se definen en `tpv-application`; y
    `apps/tpv-main/src-tauri/src/commands/licensing.rs` deja únicamente comandos Tauri finos que
@@ -199,7 +204,7 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ `pnpm install` ejecutado (workspace enlazado). Frontend pasa `tsc` (la antigua duda de `lucide-react` en `Carousel.tsx` ya no bloquea: el componente quedó sin uso y el type-check es verde).
 - ✅ **Todos los dominios migrados** siguiendo el patrón de `clientes` (monolito estrangulado por completo): `clientes`, `stats`, `tareas`, `trabajadores`, `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `configuracion`, `login`; y `licensing`/`pairing` (a `tpv-infra-licensing`). `apps/tpv-main/src-tauri/src/` ya sólo contiene `main.rs` (shell), `lib.rs` y `commands/` (capa fina). Alta/edición local de trabajador añadida (`trabajadores_create`/`trabajadores_update`).
 - ✅ Auditoría de fidelidad multi-agente de `licensing`/`pairing`; bug detectado y corregido (`AppError::Raw` para propagar verbatim los códigos de negocio del worker, p. ej. `not_approved` del pairing Handy).
-- ✅ Eliminada la capa `dualCall` + sync: frontend `net/*` (`dualCall`, `cloudSync`, `outboxSync`, `realtimeSocket`, `healthCheck`) y stores `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + wiring y comandos `*_after_remote_ok`. (Pairing Handy se conserva, latente.)
+- ✅ Eliminada la capa `dualCall` antigua + auxiliares: frontend `net/*` (`dualCall`, `cloudSync`, `outboxSync`, `realtimeSocket`, `healthCheck`) y stores `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + wiring y comandos `*_after_remote_ok`. Reemplazada por el sistema outbox + WebSocket + TenantHub (§9). Pairing Handy se conserva activo.
 - ✅ Conexión/seed de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db(app_data_dir, schema)`); el shell `main.rs` sólo aporta ruta AppData + `schema.sql`.
 - ✅ Reestructuración del frontend a `app/ · features/ · shared/` (+ `assets/`). `pages/` y `layoutComponent` viven bajo `app/`; los dominios bajo `features/`; stores/ui/toast/ticket/lib bajo `shared/`. Entry `index.html` → `/src/app/main.tsx`.
 - ✅ Verificación final: `cargo build` (workspace completo) + `cargo test -p tpv-contracts` (176 ok) + `tsc` frontend + `pnpm generate-types` (turbo) OK. Reparado el pipeline turbo (claves `"//"` inline y `packageManager` ausente).
@@ -226,7 +231,7 @@ y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a `String` en la frontera Tauri.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
-- El frontend NUNCA hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`.
+- El frontend en **modo TPV** no hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`. En **modo Handy**, las lecturas van por REST al worker y las escrituras también (no hay BD local).
 
 ### Capa de datos del frontend (TanStack Query)
 
@@ -244,3 +249,51 @@ y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates
   (comanda/cobro/cocina de `mesas` y todo `venta_rapida`, cuyo `vrBootstrap` entrelaza el catálogo con
   el estado de la comanda), `configuracion` (se carga una vez en stores Zustand) y `login` (flujo de
   arranque/auth). Cachearlas aportaba poco y arriesgaba el núcleo de ventas.
+
+---
+
+## 9. Arquitectura de sincronización (Main ↔ Nube ↔ Handy)
+
+> **Contexto:** la refactorización eliminó el `dualCall` antiguo e implementó a continuación el
+> sistema descrito aquí. Los dos modos coexisten: **TPV/offline** opera 100 % Local-First;
+> **TPV/online** y **Handy** añaden la capa de replicación.
+
+```
+┌─────────────────────────┐      WebSocket (/ws)       ┌──────────────────────────────────┐
+│  MAIN (Tauri + Rust)    │──── apply (outbox) ───────►│                                  │
+│  SQLite local (libsql)  │◄─── change (live) ─────────│   Durable Object TenantHub       │
+│  _Sync_Outbox           │                             │   (Cloudflare DO)                │
+│  _Sync_Applied_Ops      │   REST /v1/sync/changes     │   · applyInternalCommand         │
+│  _Sync_State (Last_Seq) │◄─── catch-up ──────────────│   · idempotente (Applied_Ops)    │
+└─────────────────────────┘                             │   · broadcast a dispositivos     │
+                                                        └──────────────┬───────────────────┘
+┌─────────────────────────┐   REST /v1/<dominio>                      │
+│  HANDY (sin BD local)   │──── escrituras ────────────────►          │
+│  lee por REST, refetch  │◄─── change (WS) ────────────              │
+└─────────────────────────┘                                            ▼
+                                                            ┌──────────────────────┐
+                                                            │  Turso (BD tenant)   │
+                                                            └──────────────────────┘
+```
+
+### Archivos clave
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Captura del outbox | `crates/tpv-infra-sqlite/src/db.rs` | Cada escritura local (Main) se serializa a JSON en `_Sync_Outbox` |
+| Determinismo temporal | `db.rs:114-122` + `tenantHub.ts:212-268` | `datetime('now','localtime')` → literal antes de capturar/replicar |
+| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox, aplica cambios remotos, hace catch-up al reconectar |
+| WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
+| Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
+| Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast |
+| Escrituras Handy | `lib/hub.ts` → `/internal/apply` | Cada dominio construye un comando y lo aplica vía DO |
+| Constructores de comandos | `domains/*/*.commands.ts` | Construyen la transacción SQL replicable con UUIDs deterministas |
+| Catch-up | `domains/sync/sync.routes.ts` | La Main pide lo perdido desde su `Last_Seq` al autenticarse |
+
+### Reglas del sistema
+
+- **Escritor único (Main):** todas las escrituras locales pasan por `db.rs` (no por `raw()`), que captura en `_Sync_Outbox`.
+- **Idempotencia:** `Op_Id` en la nube (`Applied_Operations`) + `_Sync_Applied_Ops` en la Main evitan duplicados en catch-up/live y ecos de las propias escrituras.
+- **IDs deterministas:** los `*.commands.ts` generan el UUID en un paso `kind:"value"` (`crypto.randomUUID()`) **antes** del INSERT, para que nube y Main tengan la misma fila. **Toda columna `TEXT PRIMARY KEY` debe seguir este patrón** (sin DEFAULT ni trigger en el esquema).
+- **Freeze:** si no hay una Main conectada al DO, las Handy reciben `main_offline` y bloquean su UI. El modo por defecto de la Main es `offline` (se activa en Configuración → Conectividad).
+- **Modo offline puro:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al volver a online.

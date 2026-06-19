@@ -539,8 +539,8 @@ export default function AppBoot({ router }: { router: any }) {
         }
     }
 
-    // Local-First puro: se elimina toda la capa de sync (outbox / healthcheck /
-    // cloudSync / realtime). El emparejamiento Handy se conserva (no usa net/*).
+    // La capa antigua dualCall/cloudSync fue eliminada. La sync activa corre en
+    // useMainSocket / useHandySocket (montados al inicio del componente, ver §9 en CLAUDE.md).
 
     useEffect(() => {
         (async () => {
