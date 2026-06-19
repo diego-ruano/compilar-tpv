@@ -37,13 +37,24 @@ pub async fn sync_outbox_pending(
     Ok(uc::outbox_pending(repo.as_ref(), limit).await?)
 }
 
-/// Marca una operación del outbox como enviada (tras el `apply_ack` de la nube).
+/// Marca una operación del outbox como enviada (tras el `apply_ack` de la nube). `seq` es el cursor
+/// que la nube asignó a la operación (0 si no pudo devolverlo); se usa para ascender el anti-eco.
 #[tauri::command]
 pub async fn sync_outbox_mark_sent(
     state: State<'_, AppState>,
     op_id: String,
+    seq: i64,
 ) -> Result<(), String> {
     let repo = state.sync_repo().await?;
-    uc::outbox_mark_sent(repo.as_ref(), &op_id).await?;
+    uc::outbox_mark_sent(repo.as_ref(), &op_id, seq).await?;
+    Ok(())
+}
+
+/// Purga de mantenimiento de `_Sync_Applied_Ops` (solo registros antiguos ya subidos a la nube).
+/// El frontend la invoca cuando el outbox queda vacío tras drenar.
+#[tauri::command]
+pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), String> {
+    let repo = state.sync_repo().await?;
+    uc::purge_applied_ops(repo.as_ref()).await?;
     Ok(())
 }

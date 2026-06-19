@@ -805,6 +805,7 @@ pub fn run() {
             // sincronización Main → nube (outbox de escrituras locales)
             commands::sync::sync_outbox_pending,
             commands::sync::sync_outbox_mark_sent,
+            commands::sync::sync_purge_applied_ops,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

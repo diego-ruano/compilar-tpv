@@ -45,6 +45,14 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Margen (en nº de operaciones) que la purga por cursor deja SIN borrar por debajo del checkpoint.
+/// Cubre el solape catch-up/live al reconectar: una op con `Seq` ya superado por `Last_Seq` solo
+/// puede re-llegar dentro de esa ventana de reconexión, mucho más estrecha que este margen.
+const PURGE_CURSOR_MARGIN: i64 = 500;
+
+/// Antigüedad mínima (ms) para que la purga TTL retire un registro ya confirmado en la nube.
+const PURGE_TTL_MS: i64 = 72 * 60 * 60 * 1000;
+
 /// Convierte un escalar JSON al `Value` de libsql para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
     use serde_json::Value as J;
@@ -95,6 +103,21 @@ async fn advance_checkpoint(conn: &Connection, seq: i64) -> AppResult<()> {
     conn.execute(
         "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1 AND Last_Seq < ?1;",
         vec![Value::Integer(seq)],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Purga por cursor de `_Sync_Applied_Ops`: retira los registros cuyo `Seq` ya quedó superado por
+/// el checkpoint con holgura (`PURGE_CURSOR_MARGIN`). Solo afecta a `Seq > 0` (remotos aplicados o
+/// anti-ecos ya ascendidos a su Seq real tras el `apply_ack`); los anti-ecos sin ascender (`Seq=0`)
+/// quedan intactos —los retira la purga TTL una vez subidos—. Es seguro: un `Seq` por debajo del
+/// margen ya no puede volver a llegar (el catch-up pide solo `Seq > Last_Seq`).
+async fn purge_by_cursor(conn: &Connection, last_seq: i64) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM _Sync_Applied_Ops WHERE Seq > 0 AND Seq <= ?1;",
+        vec![Value::Integer(last_seq - PURGE_CURSOR_MARGIN)],
     )
     .await
     .map_err(db_err)?;
@@ -188,7 +211,12 @@ impl SyncRepository for SqliteSyncRepository {
             apply_one(conn, ch).await?;
         }
 
-        checkpoint(conn).await
+        // Cada vez que el checkpoint avanza (por catch-up o por cambios en vivo) intentamos retirar
+        // los registros de idempotencia ya superados. Coste despreciable (DELETE indexado) y solo
+        // borra filas seguras.
+        let last_seq = checkpoint(conn).await?;
+        purge_by_cursor(conn, last_seq).await?;
+        Ok(last_seq)
     }
 
     async fn get_checkpoint(&self) -> AppResult<i64> {
@@ -238,14 +266,59 @@ impl SyncRepository for SqliteSyncRepository {
         Ok(out)
     }
 
-    async fn outbox_mark_sent(&self, op_id: &str) -> AppResult<()> {
-        // DELETE sobre la tabla de control `_Sync_Outbox`: va por la conexión CRUDA de escritura
-        // (no debe capturarse como cambio de negocio) y queda serializado por el escritor único.
+    async fn outbox_mark_sent(&self, op_id: &str, seq: i64) -> AppResult<()> {
+        // Tras el `apply_ack`: (1) ascendemos el anti-eco de `_Sync_Applied_Ops` a su `Seq` real
+        // (la nube ya ordenó la op) para que la purga por cursor pueda retirarlo más tarde; y
+        // (2) borramos la fila del outbox (ya subida). Ambas tablas de control van por la conexión
+        // CRUDA de escritura (no deben capturarse como cambio de negocio) y quedan serializadas por
+        // el escritor único; las hacemos en una transacción para que el upgrade y el borrado sean
+        // atómicos (un anti-eco con Seq>0 implica invariablemente "ya no está en el outbox").
+        let w = self.db.write().await;
+        let conn = w.raw();
+
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            if seq > 0 {
+                conn.execute(
+                    "UPDATE _Sync_Applied_Ops SET Seq = ?1 WHERE Op_Id = ?2 AND Seq = 0;",
+                    vec![Value::Integer(seq), Value::Text(op_id.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+            conn.execute(
+                "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+
+        match res {
+            Ok(()) => conn.execute_batch("COMMIT;").await.map_err(db_err),
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn purge_applied_ops(&self) -> AppResult<()> {
+        // Red de seguridad para los anti-ecos que no se ascendieron por cursor (p. ej. `apply_ack`
+        // sin `seq` por cache-hit de idempotencia): retira los registros ANTIGUOS (TTL) cuyo
+        // `Op_Id` YA NO está pendiente en el outbox (es decir, ya confirmados en la nube). El
+        // filtro `NOT IN (_Sync_Outbox)` es la garantía de "solo borrar lo subido": jamás retira
+        // un anti-eco cuya op siga sin enviarse (lo que provocaría su re-aplicación tras catch-up).
+        let cutoff = now_ms() - PURGE_TTL_MS;
         let w = self.db.write().await;
         w.raw()
             .execute(
-                "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
-                vec![Value::Text(op_id.to_string())],
+                "DELETE FROM _Sync_Applied_Ops \
+                 WHERE Applied_At_Ms < ?1 \
+                   AND Op_Id NOT IN (SELECT Op_Id FROM _Sync_Outbox);",
+                vec![Value::Integer(cutoff)],
             )
             .await
             .map_err(db_err)?;

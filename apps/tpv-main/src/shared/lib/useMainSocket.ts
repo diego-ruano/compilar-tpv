@@ -99,7 +99,7 @@ export function useMainSocket() {
 		let authed = false;
 		let draining = false;
 		let drainTimer: number | null = null;
-		const acks = new Map<string, (ok: boolean, error?: string) => void>();
+		const acks = new Map<string, (ok: boolean, error?: string, seq?: number) => void>();
 
 		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
 		function enqueue(changes: ChangeArg[]) {
@@ -126,8 +126,8 @@ export function useMainSocket() {
 		}
 
 		// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
-		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<{ ok: boolean; error?: string }> {
-			return new Promise<{ ok: boolean; error?: string }>((resolve) => {
+		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<{ ok: boolean; error?: string; seq?: number }> {
+			return new Promise<{ ok: boolean; error?: string; seq?: number }>((resolve) => {
 				if (socket.readyState !== WebSocket.OPEN) {
 					resolve({ ok: false, error: "socket_not_open" });
 					return;
@@ -137,10 +137,10 @@ export function useMainSocket() {
 					resolve({ ok: false, error: "ack_timeout" });
 				}, ACK_TIMEOUT_MS);
 
-				acks.set(entry.op_id, (ok, error) => {
+				acks.set(entry.op_id, (ok, error, seq) => {
 					window.clearTimeout(timer);
 					acks.delete(entry.op_id);
-					resolve({ ok, error });
+					resolve({ ok, error, seq });
 				});
 
 				socket.send(
@@ -168,6 +168,7 @@ export function useMainSocket() {
 		async function drainOutbox(socket: WebSocket) {
 			if (draining || !authed || socket.readyState !== WebSocket.OPEN) return;
 			draining = true;
+			let drainedAny = false;
 			try {
 				for (let i = 0; i < 1000 && !cancelled && authed; i++) {
 					const pending = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
@@ -179,22 +180,40 @@ export function useMainSocket() {
 					let progressed = false;
 					for (const entry of pending) {
 						if (cancelled || socket.readyState !== WebSocket.OPEN) break;
-						const { ok, error } = await sendApply(socket, entry);
+						const { ok, error, seq } = await sendApply(socket, entry);
 						if (!ok) {
 							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
 							break;
 						}
 						try {
 							// Tauri v2 camelCasea los nombres de argumento en la frontera JS↔Rust:
-							// el comando `sync_outbox_mark_sent(op_id)` se invoca como `opId`.
-							await invoke("sync_outbox_mark_sent", { opId: entry.op_id });
+							// el comando `sync_outbox_mark_sent(op_id, seq)` se invoca con `opId`/`seq`.
+							// El `seq` (cursor que la nube asignó) asciende el anti-eco a su valor real
+							// para que la purga por cursor pueda retirarlo cuando el checkpoint lo supere.
+							await invoke("sync_outbox_mark_sent", {
+								opId: entry.op_id,
+								seq: Number(seq ?? 0),
+							});
 							progressed = true;
+							drainedAny = true;
 						} catch (e) {
 							console.warn("sync_outbox_mark_sent falló:", e);
 							break;
 						}
 					}
 					if (!progressed) break;
+				}
+
+				// Si esta pasada subió algo, el outbox quedó (todo lo confirmado) vacío: aprovechamos
+				// para purgar los registros de idempotencia antiguos ya subidos (red de seguridad
+				// para anti-ecos que no se ascendieron por `seq`). Es idempotente y solo borra lo que
+				// ya no está pendiente en el outbox, así que nunca pierde una escritura sin sincronizar.
+				if (drainedAny && !cancelled && authed) {
+					try {
+						await invoke("sync_purge_applied_ops");
+					} catch (e) {
+						console.warn("sync_purge_applied_ops falló:", e);
+					}
 				}
 			} catch (e) {
 				console.warn("drenado del outbox falló:", e);
@@ -315,7 +334,12 @@ export function useMainSocket() {
 				if (msg.type === "apply_ack") {
 					const opId = String(msg.opId ?? msg.op_id ?? "");
 					const cb = acks.get(opId);
-					if (cb) cb(Boolean(msg.ok), msg.ok ? undefined : String(msg.error ?? "unknown"));
+					if (cb)
+						cb(
+							Boolean(msg.ok),
+							msg.ok ? undefined : String(msg.error ?? "unknown"),
+							Number(msg.seq ?? 0),
+						);
 					return;
 				}
 

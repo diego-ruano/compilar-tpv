@@ -934,7 +934,7 @@ export class TenantHub {
 		requestPayloadJson: string;
 		cloudPayloadJson: string;
 		clientNow?: string | null;
-	}): Promise<any> {
+	}): Promise<{ result: any; seq: number }> {
 		const {
 			tenantId,
 			opId,
@@ -1011,8 +1011,12 @@ export class TenantHub {
 					if (status === "APPLIED") {
 						const raw = String(existingRow.result_json ?? "null");
 						const parsed = safeJsonParse(raw);
+						// Reintento idempotente: la op ya estaba aplicada. Recuperamos el `Seq` que
+						// se le asignó en el log para que la Main pueda ascender su anti-eco igual
+						// que en la primera aplicación (si no hay registro, 0 → lo limpia el TTL).
+						const seq = await this.lookupChangeSeq(tx, op);
 						await tx.commit();
-						return parsed;
+						return { result: parsed, seq };
 					}
 
 					if (status === "PROCESSING") {
@@ -1132,7 +1136,7 @@ export class TenantHub {
 					deviceId || undefined,
 				);
 
-				return result;
+				return { result, seq };
 			} catch (e) {
 				try {
 					await tx.rollback();
@@ -1140,6 +1144,21 @@ export class TenantHub {
 				throw e;
 			}
 		});
+	}
+
+	// Recupera el `Seq` que el log de cambios asignó a una op ya aplicada (reintentos
+	// idempotentes). Devuelve 0 si no hay registro.
+	private async lookupChangeSeq(executor: any, opId: string): Promise<number> {
+		try {
+			await this.ensureSyncChangesTable(executor);
+			const r = await executor.execute({
+				sql: "SELECT Seq AS seq FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
+				args: [opId],
+			});
+			return Number((r.rows?.[0] as any)?.seq ?? 0);
+		} catch {
+			return 0;
+		}
 	}
 
 	private send(ws: WebSocket, obj: any) {
@@ -1362,7 +1381,7 @@ export class TenantHub {
 			});
 
 			try {
-				const result = await this.applyInternalCommandIdempotent({
+				const { result } = await this.applyInternalCommandIdempotent({
 					tenantId,
 					cmd,
 					opId,
@@ -1583,7 +1602,7 @@ export class TenantHub {
 				this.state.waitUntil(
 					(async () => {
 						try {
-							const result = await this.applyInternalCommandIdempotent({
+							const { result, seq } = await this.applyInternalCommandIdempotent({
 								tenantId,
 								cmd,
 								opId,
@@ -1598,6 +1617,8 @@ export class TenantHub {
 								opId,
 								ok: true,
 								result,
+								// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
+								seq,
 							});
 						} catch (e: any) {
 							this.send(server, {

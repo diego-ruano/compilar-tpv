@@ -27,7 +27,14 @@ pub async fn outbox_pending(repo: &dyn SyncRepository, limit: i64) -> AppResult<
     repo.outbox_pending(limit).await
 }
 
-/// Marca una operación del outbox como enviada tras el `apply_ack` de la nube.
-pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str) -> AppResult<()> {
-    repo.outbox_mark_sent(op_id).await
+/// Marca una operación del outbox como enviada tras el `apply_ack` de la nube. `seq` es el cursor
+/// que la nube le asignó (0 si no lo pudo devolver); se usa para ascender el anti-eco a su Seq real.
+pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str, seq: i64) -> AppResult<()> {
+    repo.outbox_mark_sent(op_id, seq).await
+}
+
+/// Purga de mantenimiento de `_Sync_Applied_Ops` (solo lo ya subido a la nube). Se invoca cuando el
+/// outbox queda vacío tras drenar.
+pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
+    repo.purge_applied_ops().await
 }

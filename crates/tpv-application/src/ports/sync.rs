@@ -23,5 +23,17 @@ pub trait SyncRepository: Send + Sync {
     async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>>;
 
     /// Marca una operación del outbox como enviada (la nube confirmó con `apply_ack`).
-    async fn outbox_mark_sent(&self, op_id: &str) -> AppResult<()>;
+    ///
+    /// `seq` es el cursor que la nube asignó a la operación en su log (`Sync_Changes`). Sirve para
+    /// "ascender" el registro anti-eco de `_Sync_Applied_Ops` (que se insertó con `Seq=0`) a su
+    /// `Seq` real, de modo que la purga por cursor pueda retirarlo cuando el checkpoint lo supere.
+    /// Si la nube no pudo devolver un `seq` (p. ej. cache-hit de idempotencia sin log), llega `0`
+    /// y el anti-eco se queda en `Seq=0` (lo retirará la purga TTL una vez subido).
+    async fn outbox_mark_sent(&self, op_id: &str, seq: i64) -> AppResult<()>;
+
+    /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
+    /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para
+    /// llamarse cuando el outbox queda vacío tras drenar (todo subido). Es segura por diseño: nunca
+    /// borra un anti-eco cuya operación siga sin enviarse (evitaría su re-aplicación tras catch-up).
+    async fn purge_applied_ops(&self) -> AppResult<()>;
 }
