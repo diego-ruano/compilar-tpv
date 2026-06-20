@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { RouterProvider } from "react-router-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
-import { useMode, type DeviceMode } from "../shared/stores/useMode";
+import { useMode, type DeviceMode, type ModeStateValue } from "../shared/stores/useMode";
 import { useConnectionMode } from "../shared/stores/useConnectionMode";
 import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
@@ -13,6 +13,7 @@ import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
 import { useMainSocket } from "../shared/lib/useMainSocket";
 import { useHandySocket } from "../shared/lib/useHandySocket";
+import { queryClient } from "../shared/lib/queryClient";
 
 import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
@@ -314,6 +315,17 @@ export default function AppBoot({ router }: { router: any }) {
 
     const mode = useMode((s) => s.mode);
     const setMode = useMode((s) => s.setMode);
+
+    // Al cambiar de modo (tpv ↔ handy) las URLs de imagen cambian (AppData vs CDN).
+    // Limpiamos el caché de React Query para que los datos se refresquen con el modo nuevo.
+    const prevModeRef = useRef<ModeStateValue>("loading");
+    useEffect(() => {
+        const prev = prevModeRef.current;
+        prevModeRef.current = mode;
+        if (mode !== "loading" && prev !== "loading" && prev !== mode) {
+            queryClient.clear();
+        }
+    }, [mode]);
 
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState<string | null>(null);
