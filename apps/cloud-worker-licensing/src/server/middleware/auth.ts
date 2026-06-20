@@ -12,6 +12,18 @@ export type AuthClaims = {
 	licHash: string;
 };
 
+// Cache de pubkeys de dispositivos (scope de isolate de CF Worker).
+// La pubkey no cambia tras el pairing, así que 60 s de TTL es suficiente para
+// eliminar el round-trip a la central DB en cada petición sin riesgo real
+// (la revocación puede tardar hasta 60 s en hacer efecto, aceptable en un TPV).
+type DeviceCacheEntry = { pubB64: string; expiresAtMs: number };
+const devicePubkeyCache = new Map<string, DeviceCacheEntry>();
+const DEVICE_CACHE_TTL_MS = 60_000;
+
+function deviceCacheKey(tenantId: string, deviceId: string): string {
+	return `${tenantId}:${deviceId}`;
+}
+
 function readBearer(req: Request): string {
 	const h = req.headers.get("authorization") || "";
 	const m = h.match(/^Bearer\s+(.+)$/i);
@@ -34,6 +46,10 @@ export async function verifyJwt(env: any, req: Request): Promise<{ token: string
 }
 
 async function getDevicePubKeyB64(dbCentral: Client, tenantId: string, deviceId: string): Promise<string | null> {
+	const key = deviceCacheKey(tenantId, deviceId);
+	const hit = devicePubkeyCache.get(key);
+	if (hit && hit.expiresAtMs > Date.now()) return hit.pubB64;
+
 	const r = await dbCentral.execute({
 		sql: `
       SELECT device_pubkey_b64
@@ -47,7 +63,17 @@ async function getDevicePubKeyB64(dbCentral: Client, tenantId: string, deviceId:
 
 	const row = r.rows?.[0] as any | undefined;
 	const v = row ? String(row.device_pubkey_b64 || "").trim() : "";
-	return v ? v : null;
+	const pubB64 = v ? v : null;
+
+	if (pubB64) {
+		devicePubkeyCache.set(key, { pubB64, expiresAtMs: Date.now() + DEVICE_CACHE_TTL_MS });
+	} else {
+		// No cachear null: si el dispositivo fue revocado o aún no existe,
+		// la comprobación vuelve a la BD en la siguiente petición.
+		devicePubkeyCache.delete(key);
+	}
+
+	return pubB64;
 }
 
 /**

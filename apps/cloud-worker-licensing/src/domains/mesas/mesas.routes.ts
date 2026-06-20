@@ -98,11 +98,15 @@ mesasRoutes.get("/comandas/mesa/:idMesa/abierta", async (c) => {
 mesasRoutes.post("/comandas", async (c) => {
 	const p = await parseBody(c, S.abrirComandaSchema);
 	if (!p.ok) return p.res;
-	const resolved = await tenantQuery(c.env, c.get("tenantId"), async (db) => ({
-		idTrabajador: await q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
-		idReserva:
-			p.data.id_reserva ?? (await q.activeReservaForMesa(db, p.data.id_mesa)),
-	}));
+	const resolved = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		const [idTrabajador, idReservaFromDb] = await Promise.all([
+			q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
+			p.data.id_reserva != null
+				? Promise.resolve(null)
+				: q.activeReservaForMesa(db, p.data.id_mesa),
+		]);
+		return { idTrabajador, idReserva: p.data.id_reserva ?? idReservaFromDb };
+	});
 	const row = await apply(
 		c,
 		cmd.abrirComanda(p.data, resolved.idTrabajador, resolved.idReserva),
@@ -137,10 +141,13 @@ mesasRoutes.get("/comandas/:id/lineas", async (c) => {
 mesasRoutes.post("/lineas", async (c) => {
 	const p = await parseBody(c, S.addLineaSchema);
 	if (!p.ok) return p.res;
-	const info = await tenantQuery(c.env, c.get("tenantId"), async (db) => ({
-		idTrabajador: await q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
-		pasaCocina: await q.productoPasaCocina(db, p.data.id_producto),
-	}));
+	const info = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		const [idTrabajador, pasaCocina] = await Promise.all([
+			q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
+			q.productoPasaCocina(db, p.data.id_producto),
+		]);
+		return { idTrabajador, pasaCocina };
+	});
 	await apply(c, cmd.addLinea(p.data, info.idTrabajador, info.pasaCocina));
 	return c.json({ ok: true });
 });
