@@ -7,13 +7,6 @@ export type AlergenoInvDto = { ID_Alergeno: string, Nombre: string, Nombre_Image
 export type AlergenoMiniDto = { ID_Alergeno: string, Nombre: string, Ruta_Imagen: string | null, };
 
 /**
- * Cabeceras de auth para el worker de licencias (campos snake_case).
- */
-export type ApiAuthHeaders = { token: string, device_ts: number, device_sig: string, };
-
-export type ApiGetAuthHeadersArgs = { method: string, path: string, };
-
-/**
  * Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
  */
 export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };

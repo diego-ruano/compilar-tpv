@@ -4,7 +4,7 @@ import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 
 import { convertirABase64 } from "../utils/inventarioFormat";
-import { fileUrlFromAppData } from "../utils/inventarioImages";
+import { resolveImageUrl, triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
 import {
     inventarioAPI,
@@ -18,7 +18,6 @@ import {
     useProveedoresMini,
     useUpsertProducto,
 } from "../inventarioQueries";
-import { useMode } from "../../../shared/stores/useMode";
 
 type CategoriaMini = { ID_Categoria: string; Nombre: string };
 
@@ -29,21 +28,7 @@ function toNum(v: any, fallback = 0) {
     return Number.isFinite(n) ? n : fallback;
 }
 
-async function toImageUrlMaybe(ruta: string | null | undefined): Promise<string> {
-    const r = String(ruta ?? "").trim();
-    if (!r) return "";
-
-    if (
-        r.startsWith("http://") ||
-        r.startsWith("https://") ||
-        r.startsWith("asset://") ||
-        r.startsWith("tauri://")
-    ) {
-        return r;
-    }
-
-    return await fileUrlFromAppData(r);
-}
+const toImageUrlMaybe = resolveImageUrl;
 
 export function AddProductModal({
     open,
@@ -67,7 +52,6 @@ export function AddProductModal({
 
     const upsertProducto = useUpsertProducto();
     const createLote = useCreateLote();
-    const deviceMode = useMode((s) => s.mode);
 
     const categorias: CategoriaMini[] = useMemo(
         () =>
@@ -281,14 +265,15 @@ export function AddProductModal({
         try {
             let nombreArchivo = existingImageName;
             let rutaParaBD = existingImagePath;
+            // Ruta de la imagen anterior, para limpiarla del bucket tras un reemplazo.
+            const rutaAnterior = isEdit ? existingImagePath : null;
 
-            // En modo Handy NO guardamos la imagen: el comando `save_image` escribe en el
-            // AppData local del Handy y esos bytes no se sincronizan (no hay bucket todavía).
-            // Subimos el producto sin imagen (cadena vacía → placeholder).
-            if (image && deviceMode !== "handy") {
+            // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (bucket por tenant).
+            // Funciona igual en Main y Handy: la subida la drena `images_drain_pending`.
+            if (image) {
                 const uuid = crypto.randomUUID();
-                const extension = image.name.split(".").pop() || "png";
-                nombreArchivo = `${uuid}.${extension}`;
+                // Siempre .jpg: `save_image` recomprime a JPEG.
+                nombreArchivo = `${uuid}.jpg`;
 
                 const subcarpeta = "productos";
                 rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
@@ -338,6 +323,16 @@ export function AddProductModal({
 
             if (!finalProductId) {
                 throw new Error("No se pudo obtener el ID del producto.");
+            }
+
+            // Si se subió una imagen nueva, drenar la cola hacia R2 y limpiar la anterior.
+            if (image) {
+                triggerImageUploadDrain();
+                if (rutaAnterior && rutaAnterior !== rutaParaBD) {
+                    void invoke("images_delete", {
+                        args: { rel_path: rutaAnterior },
+                    }).catch(() => {});
+                }
             }
 
             if (!isEdit && crearLoteInicial) {
@@ -426,55 +421,64 @@ export function AddProductModal({
                         </select>
                     </div>
 
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Precio venta"
-                        value={precioVenta}
-                        onChange={(e) => setPrecioVenta(e.target.value)}
-                        className="border border-border rounded-xl px-3 py-2"
-                        disabled={loading}
-                    />
+                    <div>
+                        <label className="font-semibold">Precio venta</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            value={precioVenta}
+                            onChange={(e) => setPrecioVenta(e.target.value)}
+                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            disabled={loading}
+                        />
+                    </div>
 
-                    <select
-                        value={unidadMedida}
-                        onChange={(e) => setUnidadMedida(e.target.value)}
-                        className="border border-border rounded-xl px-3 py-2"
-                        disabled={loading}
-                    >
-                        <option value="">Unidad (selecciona)</option>
+                    <div>
+                        <label className="font-semibold">Unidad de medida</label>
+                        <select
+                            value={unidadMedida}
+                            onChange={(e) => setUnidadMedida(e.target.value)}
+                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            disabled={loading}
+                        >
+                            <option value="">Selecciona</option>
 
-                        {unidadMedida.trim() !== "" &&
-                            !(UNIDADES_MEDIDA as readonly string[]).includes(unidadMedida) && (
-                                <option value={unidadMedida}>Actual: {unidadMedida}</option>
-                            )}
+                            {unidadMedida.trim() !== "" &&
+                                !(UNIDADES_MEDIDA as readonly string[]).includes(unidadMedida) && (
+                                    <option value={unidadMedida}>Actual: {unidadMedida}</option>
+                                )}
 
-                        {UNIDADES_MEDIDA.map((u) => (
-                            <option key={u} value={u}>
-                                {u}
-                            </option>
-                        ))}
-                    </select>
+                            {UNIDADES_MEDIDA.map((u) => (
+                                <option key={u} value={u}>
+                                    {u}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
 
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Stock mínimo"
-                        value={stockMinimo}
-                        onChange={(e) => setStockMinimo(e.target.value)}
-                        className="border border-border rounded-xl px-3 py-2"
-                        disabled={loading}
-                    />
+                    <div>
+                        <label className="font-semibold">Stock mínimo</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            value={stockMinimo}
+                            onChange={(e) => setStockMinimo(e.target.value)}
+                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            disabled={loading}
+                        />
+                    </div>
 
-                    <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Cantidad pedido esperada"
-                        value={cantidadPedidoEsperada}
-                        onChange={(e) => setCantidadPedidoEsperada(e.target.value)}
-                        className="border border-border rounded-xl px-3 py-2"
-                        disabled={loading}
-                    />
+                    <div>
+                        <label className="font-semibold">Cantidad pedido esperada</label>
+                        <input
+                            type="number"
+                            step="0.01"
+                            value={cantidadPedidoEsperada}
+                            onChange={(e) => setCantidadPedidoEsperada(e.target.value)}
+                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            disabled={loading}
+                        />
+                    </div>
 
                     {!isEdit && (
                         <div className="md:col-span-2 rounded-2xl border border-border bg-surface-2 p-4">

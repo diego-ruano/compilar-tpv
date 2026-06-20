@@ -618,6 +618,73 @@ impl PairingService for PairingAdapter {
             .await?;
         serde_json::from_value(parsed).map_err(|e| ext(format!("bad_pair_create_response:{e}")))
     }
+
+    async fn upload_image(
+        &self,
+        mode: &str,
+        path: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> AppResult<()> {
+        // PUT firmado (device-proof sobre el path canónico, sin query). El tenant lo deriva el
+        // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
+        // escritura directa a R2 (no pasa por el hub).
+        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let signed = self.signed_headers_inner(mode, "PUT", path)?;
+        let client = http_client()?;
+
+        let resp = client
+            .put(&url)
+            .header(AUTHORIZATION, signed.authorization)
+            .header("x-device-ts", signed.x_device_ts)
+            .header("x-device-sig", signed.x_device_sig)
+            .header(CONTENT_TYPE, content_type)
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| ext(format!("image_upload_send_failed:{e}")))?;
+
+        let status = resp.status().as_u16();
+        if (200..300).contains(&status) {
+            return Ok(());
+        }
+        let text = resp.text().await.unwrap_or_default();
+        if let Some(err) = serde_json::from_str::<JsonValue>(&text)
+            .ok()
+            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
+        {
+            return Err(AppError::raw(err));
+        }
+        Err(AppError::external(format!(
+            "image_upload_http_{}: {}",
+            status, text
+        )))
+    }
+
+    async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
+        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let signed = self.signed_headers_inner(mode, "DELETE", path)?;
+        let client = http_client()?;
+
+        let resp = client
+            .delete(&url)
+            .header(AUTHORIZATION, signed.authorization)
+            .header("x-device-ts", signed.x_device_ts)
+            .header("x-device-sig", signed.x_device_sig)
+            .send()
+            .await
+            .map_err(|e| ext(format!("image_delete_send_failed:{e}")))?;
+
+        let status = resp.status().as_u16();
+        if (200..300).contains(&status) {
+            return Ok(());
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(AppError::external(format!(
+            "image_delete_http_{}: {}",
+            status, text
+        )))
+    }
 }
 
 #[async_trait]

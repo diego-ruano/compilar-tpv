@@ -54,4 +54,18 @@ pub trait PairingService: Send + Sync {
     /// Solicita al worker un nuevo código de emparejamiento (modo `tpv`, firmado).
     /// Lo expone tipado a la UI para que el Main lo muestre (QR + código).
     async fn pair_create(&self) -> AppResult<PairCreateResult>;
+
+    /// Sube los bytes de una imagen al worker (PUT firmado) → bucket R2. `path` es el path
+    /// canónico (`/v1/images/images/{subcarpeta}/{archivo}`); el tenant lo deriva el worker
+    /// del token, no del cliente. `mode` es el de firma (`tpv`|`handy`).
+    async fn upload_image(
+        &self,
+        mode: &str,
+        path: &str,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> AppResult<()>;
+
+    /// Borra una imagen del bucket R2 (DELETE firmado). `path` igual que en `upload_image`.
+    async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()>;
 }

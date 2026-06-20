@@ -320,13 +320,16 @@ export function useMainSocket() {
 				}
 
 				if (msg.type === "hello_ok") {
-					// Autenticados: ponerse al día (nube→Main) y drenar el outbox (Main→nube).
+					// Autenticados: ponerse al día (nube→Main), drenar el outbox (Main→nube) y
+					// subir a R2 las imágenes pendientes (canal aparte del outbox SQL).
 					authed = true;
 					void catchUpThenLive();
 					void drainOutbox(socket);
+					void invoke("images_drain_pending").catch(() => {});
 					if (drainTimer) clearInterval(drainTimer);
 					drainTimer = window.setInterval(() => {
 						void drainOutbox(socket);
+						void invoke("images_drain_pending").catch(() => {});
 					}, DRAIN_INTERVAL_MS);
 					return;
 				}

@@ -71,12 +71,6 @@ export default function Configuracion() {
     const [animKey, setAnimKey] = useState(0);
     useEffect(() => setAnimKey((k) => k + 1), [section]);
 
-    const statusTone = useMemo(() => {
-        if (license.status === "ACTIVA") return "good";
-        if (license.status === "EN_GRACIA") return "warn";
-        return "bad";
-    }, [license.status]);
-
     const baseNavItems: NavItem[] = [
         {
             key: "NEGOCIO",
@@ -328,24 +322,6 @@ export default function Configuracion() {
                             </div>
 
                             <div className="flex flex-wrap items-center gap-2">
-                                <Badge>
-                                    Plan:{" "}
-                                    <span className="font-bold ml-1">
-                                        {license.plan}
-                                    </span>
-                                </Badge>
-                                <Badge tone={statusTone}>
-                                    Estado:{" "}
-                                    <span className="font-bold ml-1">
-                                        {license.status}
-                                    </span>
-                                </Badge>
-                                <Badge>
-                                    Próximo pago:{" "}
-                                    <span className="font-bold ml-1">
-                                        {license.nextPaymentDate}
-                                    </span>
-                                </Badge>
                                 {dirty ? (
                                     <Badge tone="warn">
                                         Cambios sin guardar

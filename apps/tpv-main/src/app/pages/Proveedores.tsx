@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { appDataDir, join } from "@tauri-apps/api/path";
+import { invoke } from "@tauri-apps/api/core";
 import {
   Truck,
   Plus,
@@ -13,7 +12,8 @@ import {
 import { useToast } from "../../shared/toast";
 import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
-import { useMode } from "../../shared/stores/useMode";
+import { resolveImageUrl, triggerImageUploadDrain } from "../../shared/lib/imageUrl";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 
 import Product from "../../features/InventaryComponents/Product";
 import Modal from "../../features/proveedores/Modal";
@@ -58,16 +58,6 @@ function toNumOrNull(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function safeExtFromName(name: string) {
-  const dot = name.lastIndexOf(".");
-  if (dot === -1) return "png";
-  const ext = name
-    .slice(dot + 1)
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-  return ext || "png";
-}
-
 export default function Proveedores() {
   const [openAddProduct, setOpenAddProduct] = useState(false);
   const [productIdToEdit, setProductIdToEdit] = useState<string | null>(null);
@@ -79,7 +69,6 @@ export default function Proveedores() {
   const [busqueda, setBusqueda] = useState("");
 
   const [loadingLocal, setLoadingLocal] = useState(false);
-  const deviceMode = useMode((s) => s.mode);
   const [proveedores, setProveedores] = useState<ProveedorUI[]>([]);
   const [proveedorActivo, setProveedorActivo] = useState<ProveedorUI | null>(null);
   const toast = useToast();
@@ -151,30 +140,22 @@ export default function Proveedores() {
   const [pUnidad, setPUnidad] = useState("");
   const [pCategoriaId, setPCategoriaId] = useState<string>("");
 
-  async function proveedorRutaToUrl(ruta: string | null) {
-    if (!ruta) return "";
-    const base = await appDataDir();
-    return convertFileSrc(await join(base, ruta));
-  }
-
   async function mapProveedoresUI(rows: ProveedorRow[]): Promise<ProveedorUI[]> {
     const out: ProveedorUI[] = [];
     for (const r of rows) {
       out.push({
         ...r,
-        urlImagen: await proveedorRutaToUrl(r.Ruta_Imagen),
+        urlImagen: await resolveImageUrl(r.Ruta_Imagen),
       });
     }
     return out;
   }
 
   async function mapProductosUI(rows: ProductoRow[]): Promise<ProductoUI[]> {
-    const baseDir = await appDataDir();
-
     return await Promise.all(
       (rows ?? []).map(async (p) => ({
         ...p,
-        urlImagen: p.Ruta_Imagen ? convertFileSrc(await join(baseDir, p.Ruta_Imagen)) : "",
+        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
       })),
     );
   }
@@ -342,14 +323,14 @@ export default function Proveedores() {
     try {
       let nombreImagen: string | null = null;
       let rutaImagen: string | null = null;
+      // Ruta de la imagen anterior, para limpiarla del bucket tras reemplazo/eliminación.
+      const rutaAnterior =
+        modalProveedorModo === "editar" ? (proveedorActivo?.Ruta_Imagen ?? null) : null;
 
-      // En modo Handy NO guardamos la imagen: `save_image` escribe en el AppData local
-      // del Handy y esos bytes no se sincronizan (no hay bucket todavía). El proveedor se
-      // sube sin imagen (null → placeholder).
-      if (fotoNuevaFile && deviceMode !== "handy") {
+      // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
+      if (fotoNuevaFile) {
         const uuid = crypto.randomUUID();
-        const ext = safeExtFromName(fotoNuevaFile.name);
-        nombreImagen = `prov_${uuid}.${ext}`;
+        nombreImagen = `prov_${uuid}.jpg`;
 
         const subcarpeta = "proveedores";
         rutaImagen = `images/${subcarpeta}/${nombreImagen}`;
@@ -391,6 +372,12 @@ export default function Proveedores() {
       if (!ok) {
         toast.error("Error", "No se pudo guardar. Revisa si el Email o el CIF ya existen.");
         return;
+      }
+
+      // Subir la imagen nueva a R2 y limpiar la anterior (reemplazo o eliminación).
+      if (fotoNuevaFile) triggerImageUploadDrain();
+      if (rutaAnterior && rutaAnterior !== rutaImagen) {
+        void invoke("images_delete", { args: { rel_path: rutaAnterior } }).catch(() => {});
       }
 
       // La invalidación en onSuccess recachea la lista; el efecto re-deriva y re-sincroniza el activo.
@@ -685,19 +672,17 @@ export default function Proveedores() {
         <>
           <div className="flex w-full flex-col gap-6 rounded-2xl border border-border bg-surface p-4 shadow-sm sm:flex-row">
             <div className="flex h-[240px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-[280px] sm:w-[280px] sm:shrink-0">
-              {proveedorActivo.urlImagen ? (
-                <img
-                  src={proveedorActivo.urlImagen}
-                  alt={proveedorActivo.Nombre_Empresa}
-                  className="h-full w-full object-cover"
-                  draggable={false}
-                />
-              ) : (
-                <div className="flex flex-col items-center gap-1 px-4 text-center text-fg-subtle">
-                  <ImageOff className="size-8" aria-hidden />
-                  <span className="text-sm font-bold">{proveedorActivo.Nombre_Empresa}</span>
-                </div>
-              )}
+              <ImageWithFallback
+                src={proveedorActivo.urlImagen}
+                alt={proveedorActivo.Nombre_Empresa}
+                className="h-full w-full object-cover"
+                fallback={
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-1 px-4 text-center text-fg-subtle">
+                    <ImageOff className="size-8" aria-hidden />
+                    <span className="text-sm font-bold">{proveedorActivo.Nombre_Empresa}</span>
+                  </div>
+                }
+              />
             </div>
 
             <div className="flex flex-1 flex-col gap-3 text-fg">

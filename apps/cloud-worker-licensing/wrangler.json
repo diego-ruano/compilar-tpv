@@ -27,6 +27,12 @@
 			}
 		]
 	},
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "tpv-images"
+		}
+	],
 	"vars": {
 		"TURSO_DATABASE_URL": "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io",
 		"TURSO_ORG_SLUG": "altarialights"

@@ -4,7 +4,7 @@ import { useToast } from "../../../shared/toast";
 import { invoke } from "@tauri-apps/api/core";
 import { convertirABase64 } from "../utils/inventarioFormat";
 import { useCreateCategoria } from "../inventarioQueries";
-import { useMode } from "../../../shared/stores/useMode";
+import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -31,7 +31,6 @@ export default function AddCategoryModal({
     const fileInputRef = useRef<HTMLInputElement | null>(null);
 
     const createCategoria = useCreateCategoria();
-    const deviceMode = useMode((s) => s.mode);
 
     const nameError = useMemo(() => {
         if (!touched) return "";
@@ -95,13 +94,10 @@ export default function AddCategoryModal({
             let nombreArchivo = "";
             let rutaParaBD = "";
 
-            // En modo Handy NO guardamos la imagen: el comando `save_image` escribe en el
-            // AppData local del Handy y esos bytes no se sincronizan (no hay bucket todavía).
-            // Subimos la categoría sin imagen (cadena vacía → placeholder).
-            if (image && deviceMode !== "handy") {
+            // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
+            if (image) {
                 const uuid = crypto.randomUUID();
-                const extension = image.name.split(".").pop() || "png";
-                nombreArchivo = `${uuid}.${extension}`;
+                nombreArchivo = `${uuid}.jpg`;
 
                 const subcarpeta = "categorias";
                 rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
@@ -125,6 +121,8 @@ export default function AddCategoryModal({
                 vendible: !!vendible,
                 pasa_cocina: !!pasaCocina,
             });
+
+            if (image) triggerImageUploadDrain();
 
             await onSaved();
             onClose();

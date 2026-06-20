@@ -567,6 +567,18 @@ export default function AppBoot({ router }: { router: any }) {
         });
     }, [mode, bizInit, ticketInit]);
 
+    // Imágenes → R2: una sola vez, encolar las imágenes locales pre-existentes (Mains anteriores
+    // a R2) y drenar la cola. El backfill se auto-protege con un marcador; el drenado es no-op si
+    // no hay nada o si está offline (se reintentará por el WebSocket cuando haya conexión).
+    useEffect(() => {
+        if (mode !== "tpv") return;
+        void invoke("images_backfill")
+            .then(() => invoke("images_drain_pending"))
+            .catch(() => {
+                // offline / sin permisos: se reintenta más tarde
+            });
+    }, [mode]);
+
     useEffect(() => {
         if (mode !== "handy") return;
 

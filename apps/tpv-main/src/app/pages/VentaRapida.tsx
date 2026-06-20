@@ -1,8 +1,7 @@
 // src/pages/VentaRapida.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { appDataDir, join } from "@tauri-apps/api/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { Plus, ReceiptText, ArrowLeft } from "lucide-react";
+import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
@@ -546,17 +545,14 @@ export default function VentaRapida() {
   }, []);
 
   const cargarCategorias = useCallback(async () => {
-    try {
-      const baseDir = await appDataDir();
+    try {
       const raw = await vrListCategoriasVendibles();
       const rows = asArray<Categoria>(raw);
 
       const procesadas: CategoriaDisplay[] = await Promise.all(
         rows.map(async (cat) => ({
           ...cat,
-          urlImagen: cat.Ruta_Imagen
-            ? convertFileSrc(await join(baseDir, cat.Ruta_Imagen))
-            : "",
+          urlImagen: await resolveImageUrl(cat.Ruta_Imagen),
         })),
       );
 
@@ -572,8 +568,7 @@ export default function VentaRapida() {
 
     setLoadingProductos(true);
 
-    try {
-      const baseDir = await appDataDir();
+    try {
       const idCat = cat.ID_Categoria;
       const raw = await vrListProductosByCategoria(idCat);
       const rows = asArray<Producto>(raw);
@@ -581,9 +576,7 @@ export default function VentaRapida() {
       const procesados: ProductoDisplay[] = await Promise.all(
         rows.map(async (p) => ({
           ...p,
-          urlImagen: p.Ruta_Imagen
-            ? convertFileSrc(await join(baseDir, p.Ruta_Imagen))
-            : "",
+          urlImagen: await resolveImageUrl(p.Ruta_Imagen),
         })),
       );
 
@@ -606,17 +599,14 @@ export default function VentaRapida() {
 
     setLoadingBusqueda(true);
 
-    try {
-      const baseDir = await appDataDir();
+    try {
       const raw = await vrSearchProductos(safeQ, 60);
       const rows = asArray<Producto>(raw);
 
       const procesados: ProductoDisplay[] = await Promise.all(
         rows.map(async (p) => ({
           ...p,
-          urlImagen: p.Ruta_Imagen
-            ? convertFileSrc(await join(baseDir, p.Ruta_Imagen))
-            : "",
+          urlImagen: await resolveImageUrl(p.Ruta_Imagen),
         })),
       );
 
@@ -784,16 +774,13 @@ export default function VentaRapida() {
   }, [idTrabajadorAuth]);
 
   const cargarBootstrapInicial = useCallback(async () => {
-    try {
-      const baseDir = await appDataDir();
+    try {
       const boot = await vrBootstrap(idTrabajadorAuth ?? null);
 
       const categoriasProcesadas: CategoriaDisplay[] = await Promise.all(
         asArray<Categoria>(boot.categorias).map(async (cat) => ({
           ...cat,
-          urlImagen: cat.Ruta_Imagen
-            ? convertFileSrc(await join(baseDir, cat.Ruta_Imagen))
-            : "",
+          urlImagen: await resolveImageUrl(cat.Ruta_Imagen),
         })),
       );
 

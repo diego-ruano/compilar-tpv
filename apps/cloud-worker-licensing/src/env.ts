@@ -34,4 +34,10 @@ export interface Env {
 
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace;
+
+	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
+	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.
+	// Las LECTURAS (GET) se sirven públicas + Cache API (CDN edge); las ESCRITURAS
+	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el tenant del token.
+	IMAGES: R2Bucket;
 }

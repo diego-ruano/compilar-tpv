@@ -1,4 +1,5 @@
 import { ArrowRight, ImageOff } from "lucide-react";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 
 type ProveedorUI = {
 	ID_Proveedor: string;
@@ -23,21 +24,19 @@ export default function ProveedorCard({
 			<div className="rounded-2xl border border-border bg-surface p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
 				{/* IMAGEN */}
 				<div className="flex h-[120px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
-					{proveedor.urlImagen ? (
-						<img
-							src={proveedor.urlImagen}
-							alt={proveedor.Nombre_Empresa}
-							className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-							draggable={false}
-						/>
-					) : (
-						<div className="flex flex-col items-center gap-1 text-fg-subtle">
-							<ImageOff className="size-6" aria-hidden />
-							<span className="px-2 text-center text-xs font-semibold">
-								{proveedor.Nombre_Empresa}
-							</span>
-						</div>
-					)}
+					<ImageWithFallback
+						src={proveedor.urlImagen}
+						alt={proveedor.Nombre_Empresa}
+						className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+						fallback={
+							<div className="flex h-full w-full flex-col items-center justify-center gap-1 text-fg-subtle">
+								<ImageOff className="size-6" aria-hidden />
+								<span className="px-2 text-center text-xs font-semibold">
+									{proveedor.Nombre_Empresa}
+								</span>
+							</div>
+						}
+					/>
 				</div>
 
 				{/* NOMBRE */}

@@ -87,3 +87,24 @@ pub async fn tpv_server_post_json(
 pub async fn pair_create(svc: &dyn PairingService) -> AppResult<PairCreateResult> {
     svc.pair_create().await
 }
+
+/// Sube una imagen al bucket R2 vía el worker (PUT firmado). `mode` = `tpv`|`handy`.
+pub async fn upload_image(
+    svc: &dyn PairingService,
+    mode: &str,
+    path: &str,
+    content_type: &str,
+    bytes: Vec<u8>,
+) -> AppResult<()> {
+    let mode = normalize_mode(mode)?;
+    let path = normalize_path(path)?;
+    let content_type = requerido(content_type, "content_type")?;
+    svc.upload_image(&mode, &path, &content_type, bytes).await
+}
+
+/// Borra una imagen del bucket R2 vía el worker (DELETE firmado). `mode` = `tpv`|`handy`.
+pub async fn delete_image(svc: &dyn PairingService, mode: &str, path: &str) -> AppResult<()> {
+    let mode = normalize_mode(mode)?;
+    let path = normalize_path(path)?;
+    svc.delete_image(&mode, &path).await
+}

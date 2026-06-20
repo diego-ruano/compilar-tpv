@@ -18,7 +18,7 @@ import {
   type CreateLoteArgs,
   type UpsertProductoArgs,
 } from "./api/inventarioAPI";
-import { fileUrlFromAppData } from "./utils/inventarioImages";
+import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import type { CategoriaDisplay, ProductoDisplay } from "./hooks/useInventario";
 
 /** Prefijo de claves de la feature; invalidar esto refresca todas sus listas. */
@@ -35,20 +35,8 @@ export const inventarioKeys = {
   alergenos: () => ["inventario", "alergenos"] as const,
 };
 
-/** Resuelve una ruta de imagen a URL utilizable (o la deja tal cual si ya es URL). */
-async function resolverUrlImagen(ruta: string | null | undefined): Promise<string> {
-  const r = (ruta ?? "").trim();
-  if (!r) return "";
-  if (
-    r.startsWith("http://") ||
-    r.startsWith("https://") ||
-    r.startsWith("asset://") ||
-    r.startsWith("tauri://")
-  ) {
-    return r;
-  }
-  return await fileUrlFromAppData(r);
-}
+/** Resuelve una ruta de imagen a URL utilizable (local en Main, CDN en Handy). */
+const resolverUrlImagen = resolveImageUrl;
 
 /** Categorías "display" (con urlImagen ya resuelta) — cacheadas. */
 export function useCategorias() {

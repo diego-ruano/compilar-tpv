@@ -1,6 +1,7 @@
 // src/features/InventaryComponents/Product.tsx
 import React from "react";
 import { ChevronRight, ImageOff } from "lucide-react";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 
 type Props = {
   img: string;
@@ -8,25 +9,24 @@ type Props = {
   onSelect: () => void;
 };
 
+const Placeholder = (
+  <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-surface-2 text-fg-subtle">
+    <ImageOff className="size-6" aria-hidden />
+    <span className="text-xs font-semibold">Sin imagen</span>
+  </div>
+);
+
 export default function Product({ img, name, onSelect }: Props) {
   return (
     <button type="button" onClick={onSelect} className="group block w-full text-left">
       <div className="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm transition-all duration-200 group-hover:-translate-y-0.5 group-hover:border-border-strong group-hover:shadow-md">
         <div className="relative flex aspect-[4/3] w-full items-center justify-center overflow-hidden bg-surface-2">
-          {img ? (
-            <img
-              src={img}
-              alt={name}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-              loading="lazy"
-              draggable={false}
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-1 text-fg-subtle">
-              <ImageOff className="size-6" aria-hidden />
-              <span className="text-xs font-semibold">Sin imagen</span>
-            </div>
-          )}
+          <ImageWithFallback
+            src={img}
+            alt={name}
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            fallback={Placeholder}
+          />
         </div>
 
         <div className="flex flex-col gap-2 p-4">

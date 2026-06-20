@@ -5,13 +5,17 @@ mod commands;
 mod printing;
 
 use base64::prelude::*;
+use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage};
 use serde::{Deserialize, Serialize};
 use tpv_infra_sqlite::db::Db;
 use std::fs;
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 use tokio::sync::Mutex;
+
+use tpv_application::use_cases::pairing as uc_pairing;
 
 use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
@@ -93,6 +97,12 @@ struct SaveImageArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct DeleteImageArgs {
+    /// Ruta relativa tal cual se guarda en BD: `images/{subcarpeta}/{archivo}`.
+    rel_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SetPrinterArgs {
     name: String,
 }
@@ -149,6 +159,107 @@ fn normalize_required(input: &str, field: &str) -> Result<String, String> {
     }
 
     Ok(out)
+}
+
+/* =========================================================
+   Imágenes: procesado (resize + recompresión JPEG) + cola de subida a R2
+========================================================= */
+
+/// Lado máximo (px) al que se redimensiona la imagen antes de guardarla/subirla. Las fotos de
+/// móviles modernos (varios MB / 4000px) se reducen a algo razonable para un catálogo de TPV.
+const IMAGE_MAX_SIDE: u32 = 1024;
+/// Calidad JPEG (0-100). 80 da buen equilibrio tamaño/calidad para fotos de producto.
+const IMAGE_JPEG_QUALITY: u8 = 80;
+
+/// Decodifica unos bytes de imagen (jpeg/png/webp), redimensiona si excede `IMAGE_MAX_SIDE`
+/// (sólo reduce, nunca amplía, preservando proporción) y recodifica a JPEG optimizado.
+/// Devuelve los bytes JPEG resultantes. Así una foto de 10 MB acaba en decenas de KB.
+fn process_image(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let img =
+        image::load_from_memory(bytes).map_err(|e| format!("Imagen no válida: {e}"))?;
+
+    let resized = if img.width() > IMAGE_MAX_SIDE || img.height() > IMAGE_MAX_SIDE {
+        img.resize(IMAGE_MAX_SIDE, IMAGE_MAX_SIDE, FilterType::Lanczos3)
+    } else {
+        img
+    };
+
+    // A RGB8 (JPEG no soporta alfa) y codificación con control de calidad.
+    let rgb = DynamicImage::ImageRgb8(resized.to_rgb8());
+    let mut out = Cursor::new(Vec::new());
+    rgb.write_with_encoder(JpegEncoder::new_with_quality(&mut out, IMAGE_JPEG_QUALITY))
+        .map_err(|e| format!("Error codificando JPEG: {e}"))?;
+
+    Ok(out.into_inner())
+}
+
+/// Una imagen pendiente de subir al bucket R2. `rel_path` es la ruta relativa idéntica a la de
+/// BD (`images/{subcarpeta}/{archivo}`); los bytes se leen del disco en el momento de subir.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PendingImage {
+    rel_path: String,
+    content_type: String,
+}
+
+fn image_queue_path(app_data_dir: &Path) -> PathBuf {
+    app_data_dir.join("image_uploads.json")
+}
+
+fn read_image_queue(app_data_dir: &Path) -> Vec<PendingImage> {
+    let Ok(txt) = fs::read_to_string(image_queue_path(app_data_dir)) else {
+        return Vec::new();
+    };
+    serde_json::from_str::<Vec<PendingImage>>(&txt).unwrap_or_default()
+}
+
+fn write_image_queue(app_data_dir: &Path, queue: &[PendingImage]) -> Result<(), String> {
+    let p = image_queue_path(app_data_dir);
+    let txt = serde_json::to_string_pretty(queue).map_err(|e| e.to_string())?;
+    fs::write(&p, txt).map_err(|e| format!("Error escribiendo cola de imágenes {:?}: {e}", p))
+}
+
+/// Encola una imagen para subir (dedup por `rel_path`).
+fn enqueue_image(app_data_dir: &Path, rel_path: &str, content_type: &str) -> Result<(), String> {
+    let mut queue = read_image_queue(app_data_dir);
+    if queue.iter().any(|q| q.rel_path == rel_path) {
+        return Ok(());
+    }
+    queue.push(PendingImage {
+        rel_path: rel_path.to_string(),
+        content_type: content_type.to_string(),
+    });
+    write_image_queue(app_data_dir, &queue)
+}
+
+/// Valida que una ruta relativa de imagen tenga la forma esperada y no escape de `images/`
+/// (evita borrar/leer ficheros arbitrarios desde el frontend).
+fn is_safe_image_rel_path(rel: &str) -> bool {
+    if rel.contains("..") || rel.contains('\\') {
+        return false;
+    }
+    let parts: Vec<&str> = rel.split('/').collect();
+    if parts.len() != 3 || parts[0] != "images" {
+        return false;
+    }
+    matches!(parts[1], "productos" | "categorias" | "proveedores" | "alergenos")
+        && !parts[2].is_empty()
+}
+
+fn content_type_for(rel_path: &str) -> &'static str {
+    match rel_path.rsplit('.').next().map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        _ => "image/jpeg",
+    }
+}
+
+/// Modo de firma ("tpv"|"handy") según el modo del dispositivo, o `None` si no hay modo.
+fn signing_mode(mode: Option<DeviceMode>) -> Option<&'static str> {
+    match mode {
+        Some(DeviceMode::Tpv) => Some("tpv"),
+        Some(DeviceMode::Handy) => Some("handy"),
+        None => None,
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -462,6 +573,15 @@ async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result
 // Comandos genéricos
 // ──────────────────────────────────────────────────────────────────────────────
 
+/// Guarda una imagen en el disco local (AppData) y la **encola** para subir al bucket R2.
+///
+/// Antes de escribir, la imagen se **redimensiona y recomprime a JPEG** (ver `process_image`),
+/// de modo que tanto la copia local como la del bucket pesen poco (fotos de móvil de varios MB
+/// acaban en decenas de KB). El `filename` debe terminar en `.jpg` (lo fija el frontend).
+///
+/// La subida a R2 NO se hace aquí: se encola y la drena `images_drain_pending` cuando hay red
+/// (el frontend lo dispara tras guardar y, en la Main online, también periódicamente). Esto
+/// hace la subida resiliente a estar offline en el momento de crear la imagen.
 #[tauri::command]
 async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, String> {
     let app_data_dir = app
@@ -478,16 +598,158 @@ async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, Strin
     fs::create_dir_all(&dir_path)
         .map_err(|e| format!("Error creando carpeta {:?}: {e}", dir_path))?;
 
-    let file_path = dir_path.join(&filename);
-
-    let image_bytes = BASE64_STANDARD
+    let raw_bytes = BASE64_STANDARD
         .decode(&base64_data)
         .map_err(|e| format!("Error al decodificar Base64: {e}"))?;
 
-    fs::write(&file_path, image_bytes)
+    // Redimensionar + recomprimir a JPEG (en un hilo bloqueante: es CPU-bound).
+    let processed = tokio::task::spawn_blocking(move || process_image(&raw_bytes))
+        .await
+        .map_err(|e| format!("Error en el procesado de imagen: {e}"))??;
+
+    let file_path = dir_path.join(&filename);
+    fs::write(&file_path, processed)
         .map_err(|e| format!("Error escribiendo el archivo en {:?}: {e}", file_path))?;
 
+    // Encolar la subida a R2 (la ruta relativa es idéntica a la que se guarda en BD).
+    let rel_path = format!("images/{}/{}", subfolder, filename);
+    let content_type = content_type_for(&rel_path);
+    enqueue_image(&app_data_dir, &rel_path, content_type)?;
+
     Ok("Imagen guardada correctamente".to_string())
+}
+
+/// Drena la cola de imágenes pendientes: por cada entrada, lee el fichero del disco y lo sube
+/// al bucket R2 (PUT firmado, según el modo del dispositivo). Las subidas confirmadas se quitan
+/// de la cola; si una falla (típicamente offline), se conserva y se reintenta en la próxima
+/// pasada. Es idempotente: subir dos veces la misma clave simplemente la sobrescribe.
+#[tauri::command]
+async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let Some(mode_str) = signing_mode(*state.mode.lock().await) else {
+        return Ok("sin_modo".into());
+    };
+
+    let pending = read_image_queue(&app_data_dir);
+    if pending.is_empty() {
+        return Ok("vacio".into());
+    }
+
+    let svc = PairingAdapter::new(app_data_dir.clone());
+    let mut remaining: Vec<PendingImage> = Vec::new();
+    let mut failed = false;
+    let mut subidas = 0u32;
+
+    for item in pending {
+        if failed {
+            remaining.push(item);
+            continue;
+        }
+
+        let file_path = app_data_dir.join(&item.rel_path);
+        let bytes = match fs::read(&file_path) {
+            Ok(b) => b,
+            // El fichero ya no existe (borrado/reemplazado): descartamos la entrada.
+            Err(_) => continue,
+        };
+
+        let path = format!("/v1/images/{}", item.rel_path);
+        match uc_pairing::upload_image(&svc, mode_str, &path, &item.content_type, bytes).await {
+            Ok(_) => subidas += 1,
+            Err(_) => {
+                // Probablemente offline: paramos y conservamos el resto para reintentar.
+                failed = true;
+                remaining.push(item);
+            }
+        }
+    }
+
+    write_image_queue(&app_data_dir, &remaining)?;
+    Ok(format!("subidas={subidas} pendientes={}", remaining.len()))
+}
+
+/// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
+/// imagen de un producto/categoría/proveedor para no dejar huérfanos ni servir caché obsoleta.
+#[tauri::command]
+async fn images_delete(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: DeleteImageArgs,
+) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let rel_path = normalize_required(&args.rel_path, "rel_path")?;
+    if !is_safe_image_rel_path(&rel_path) {
+        return Err("rel_path inválido".into());
+    }
+
+    // Borrado local (ignoramos si ya no existe).
+    let _ = fs::remove_file(app_data_dir.join(&rel_path));
+
+    // Borrado remoto (best-effort: si falla por estar offline, el huérfano es inocuo).
+    if let Some(mode_str) = signing_mode(*state.mode.lock().await) {
+        let svc = PairingAdapter::new(app_data_dir.clone());
+        let path = format!("/v1/images/{}", rel_path);
+        let _ = uc_pairing::delete_image(&svc, mode_str, &path).await;
+    }
+
+    Ok("OK".into())
+}
+
+/// Backfill único: encola todas las imágenes existentes en disco que aún no estén en el bucket.
+/// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
+/// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
+#[tauri::command]
+async fn images_backfill(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let marker = app_data_dir.join("image_backfill_done");
+    if marker.exists() {
+        return Ok("ya_hecho".into());
+    }
+
+    // Sólo la Main tiene imágenes locales pre-existentes; en Handy marcamos y salimos.
+    let is_main = matches!(*state.mode.lock().await, Some(DeviceMode::Tpv));
+    if !is_main {
+        let _ = fs::write(&marker, b"handy");
+        return Ok("no_aplica".into());
+    }
+
+    let mut encoladas = 0u32;
+    for sub in ["productos", "categorias", "proveedores", "alergenos"] {
+        let dir = app_data_dir.join("images").join(sub);
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if !entry.path().is_file() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(String::from) else {
+                continue;
+            };
+            let rel_path = format!("images/{}/{}", sub, name);
+            if !is_safe_image_rel_path(&rel_path) {
+                continue;
+            }
+            if enqueue_image(&app_data_dir, &rel_path, content_type_for(&rel_path)).is_ok() {
+                encoladas += 1;
+            }
+        }
+    }
+
+    let _ = fs::write(&marker, b"done");
+    Ok(format!("encoladas={encoladas}"))
 }
 
 #[tauri::command]
@@ -645,6 +907,9 @@ pub fn run() {
             device_reset_mode,
             // genéricos
             save_image,
+            images_drain_pending,
+            images_delete,
+            images_backfill,
             get_app_data_path,
             // impresión (host/Windows — printing.rs)
             printer_list,

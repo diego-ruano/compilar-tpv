@@ -16,7 +16,8 @@ import {
   ImageOff,
 } from "lucide-react";
 import { type ProductoDetalle, type LoteRow } from "./api/inventarioAPI";
-import { fileUrlFromAppData } from "./utils/inventarioImages";
+import { resolveImageUrl } from "../../shared/lib/imageUrl";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import AddLoteModal from "./ui/AddLoteModal";
 import {
   useAjustarLote,
@@ -62,16 +63,7 @@ function parseSqliteDateTime(s: string) {
   return Number.isFinite(t) ? t : NaN;
 }
 
-async function toImageUrlMaybe(ruta: string | null | undefined): Promise<string> {
-  const r = String(ruta ?? "").trim();
-  if (!r) return "";
-
-  if (r.startsWith("http://") || r.startsWith("https://") || r.startsWith("asset://") || r.startsWith("tauri://")) {
-    return r;
-  }
-
-  return await fileUrlFromAppData(r);
-}
+const toImageUrlMaybe = resolveImageUrl;
 
 export default function ProductDetailModal({ open, onClose, productId, onEdit, onDeleted }: Props) {
   const [imgUrl, setImgUrl] = useState<string>("");
@@ -221,11 +213,16 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
             <>
               <div className="flex items-center gap-4">
                 <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2">
-                  {imgUrl ? (
-                    <img src={imgUrl} alt={(p as any).Nombre} className="h-full w-full object-cover" draggable={false} />
-                  ) : (
-                    <ImageOff className="size-7 text-fg-subtle" aria-hidden />
-                  )}
+                  <ImageWithFallback
+                    src={imgUrl}
+                    alt={(p as any).Nombre}
+                    className="h-full w-full object-cover"
+                    fallback={
+                      <div className="flex h-full w-full items-center justify-center">
+                        <ImageOff className="size-7 text-fg-subtle" aria-hidden />
+                      </div>
+                    }
+                  />
                 </div>
 
                 <div className="min-w-0">

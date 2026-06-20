@@ -12,7 +12,7 @@ import {
   useProveedoresMini,
   useUpsertProducto,
 } from "../../InventaryComponents/inventarioQueries";
-import { useMode } from "../../../shared/stores/useMode";
+import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
 
 type CategoriaMini = { ID_Categoria: string; Nombre: string };
 type ProveedorMini = {
@@ -70,7 +70,6 @@ export default function AddProductModal({
 
   const upsertProducto = useUpsertProducto();
   const createLote = useCreateLote();
-  const deviceMode = useMode((s) => s.mode);
 
   const categorias: CategoriaMini[] = useMemo(
     () =>
@@ -159,16 +158,9 @@ export default function AddProductModal({
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    // En Handy la imagen NO es obligatoria: no hay bucket y `save_image` solo escribiría
-    // en el AppData local del Handy (no se sincroniza). En la Main sigue siendo obligatoria.
-    const requiereImagen = deviceMode !== "handy";
-    if (!nombre.trim() || idCategoria === "" || (requiereImagen && !image)) {
-      toast.info(
-        "Validación",
-        requiereImagen
-          ? "Nombre, categoría e imagen son obligatorios."
-          : "Nombre y categoría son obligatorios.",
-      );
+    // La imagen es obligatoria (ahora se sube a R2 también desde Handy).
+    if (!nombre.trim() || idCategoria === "" || !image) {
+      toast.info("Validación", "Nombre, categoría e imagen son obligatorios.");
       return;
     }
 
@@ -178,11 +170,10 @@ export default function AddProductModal({
       let nombreArchivo = "";
       let rutaParaBD = "";
 
-      // En Handy subimos el producto sin imagen (cadena vacía → placeholder).
-      if (image && deviceMode !== "handy") {
+      // La imagen se procesa (resize + JPEG) en Rust y se sube a R2 (Main y Handy).
+      if (image) {
         const uuid = crypto.randomUUID();
-        const extension = image.name.split(".").pop() || "png";
-        nombreArchivo = `${uuid}.${extension}`;
+        nombreArchivo = `${uuid}.jpg`;
         const subcarpeta = "productos";
         rutaParaBD = `images/${subcarpeta}/${nombreArchivo}`;
 
@@ -214,6 +205,8 @@ export default function AddProductModal({
       if (!nuevoProductoId) {
         throw new Error("No se pudo obtener el ID del producto creado.");
       }
+
+      if (image) triggerImageUploadDrain();
 
       const stockInicial = parseNullableNumber(stockActual) ?? 0;
 

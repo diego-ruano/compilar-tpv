@@ -1,8 +1,8 @@
 // components/mesasComponents/MesaComandaModal.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Printer, X } from "lucide-react";
-import { appDataDir, join } from "@tauri-apps/api/path";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { Printer, X, ImageOff } from "lucide-react";
+import { resolveImageUrl } from "../../shared/lib/imageUrl";
+import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
@@ -345,10 +345,15 @@ const ProductCard = React.memo(function ProductCard({
                 className="w-full text-left hover:opacity-95 transition cursor-pointer outline-none"
             >
                 <div className="relative">
-                    <img
+                    <ImageWithFallback
                         src={p.urlImagen}
                         alt={p.Nombre}
                         className="w-full h-28 object-cover rounded-lg border border-border"
+                        fallback={
+                            <div className="flex h-28 w-full items-center justify-center rounded-lg border border-border bg-surface-2 text-fg-subtle">
+                                <ImageOff className="size-6" aria-hidden />
+                            </div>
+                        }
                     />
 
                     <button
@@ -513,15 +518,12 @@ export default function MesaComandaModal({
 
         const cargarCategorias = async () => {
             try {
-                const baseDir = await appDataDir();
                 const rows = await productosListCategoriasVendibles();
 
                 const procesadas: CategoriaDisplay[] = await Promise.all(
                     (rows ?? []).map(async (cat) => ({
                         ...cat,
-                        urlImagen: convertFileSrc(
-                            await join(baseDir, cat.Ruta_Imagen || ""),
-                        ),
+                        urlImagen: await resolveImageUrl(cat.Ruta_Imagen),
                     })),
                 );
 
@@ -600,7 +602,6 @@ export default function MesaComandaModal({
 
             setLoadingProductos(true);
             try {
-                const baseDir = await appDataDir();
                 const idCat = String(categoriaSeleccionada.ID_Categoria ?? "");
 
                 const rows = await productosListByCategoria(idCat);
@@ -608,9 +609,7 @@ export default function MesaComandaModal({
                 const procesados: ProductoDisplay[] = await Promise.all(
                     (rows ?? []).map(async (p) => ({
                         ...p,
-                        urlImagen: convertFileSrc(
-                            await join(baseDir, p.Ruta_Imagen || ""),
-                        ),
+                        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
                     })),
                 );
 
@@ -636,15 +635,12 @@ export default function MesaComandaModal({
             }
             setLoadingBusqueda(true);
             try {
-                const baseDir = await appDataDir();
                 const rows = await productosSearchByNombre(q);
 
                 const procesados: ProductoDisplay[] = await Promise.all(
                     (rows ?? []).map(async (p) => ({
                         ...p,
-                        urlImagen: convertFileSrc(
-                            await join(baseDir, p.Ruta_Imagen || ""),
-                        ),
+                        urlImagen: await resolveImageUrl(p.Ruta_Imagen),
                     })),
                 );
 
@@ -1193,10 +1189,15 @@ export default function MesaComandaModal({
                                                     className="rounded-xl border border-border bg-surface hover:bg-surface-2 p-3 text-left transition"
                                                     type="button"
                                                 >
-                                                    <img
+                                                    <ImageWithFallback
                                                         src={c.urlImagen}
                                                         alt={c.Nombre}
                                                         className="w-full h-28 object-cover rounded-lg border border-border"
+                                                        fallback={
+                                                            <div className="flex h-28 w-full items-center justify-center rounded-lg border border-border bg-surface-2 text-fg-subtle">
+                                                                <ImageOff className="size-6" aria-hidden />
+                                                            </div>
+                                                        }
                                                     />
                                                     <p className="mt-2 font-bold">{c.Nombre}</p>
                                                 </button>

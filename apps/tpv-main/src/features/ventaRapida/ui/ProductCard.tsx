@@ -3,6 +3,7 @@ import React, { useCallback } from "react";
 import { Info, Minus, Plus, ImageOff } from "lucide-react";
 import { ProductoDisplay } from "../types";
 import { cn } from "../utils";
+import ImageWithFallback from "../../../shared/ui/ImageWithFallback";
 
 export type ProductCardProps = {
   p: ProductoDisplay;
@@ -40,19 +41,21 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
         className="w-full cursor-pointer select-none text-left transition hover:opacity-95"
       >
         <div className="relative">
-          {p.urlImagen ? (
-            <img
-              src={p.urlImagen}
-              alt={p.Nombre}
-              loading="lazy"
-              className="h-24 w-full rounded-xl border border-border object-cover sm:h-28"
-              draggable={false}
-            />
-          ) : (
-            <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
-              <ImageOff className="size-6" aria-hidden />
-            </div>
-          )}
+          <ImageWithFallback
+            src={p.urlImagen}
+            alt={p.Nombre}
+            className="h-24 w-full rounded-xl border border-border object-cover sm:h-28"
+            fallback={
+              <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
+                <ImageOff className="size-6" aria-hidden />
+              </div>
+            }
+            loadingFallback={
+              <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
+                <ImageOff className="size-6 animate-pulse" aria-hidden />
+              </div>
+            }
+          />
 
           {hasQty && (
             <span className="absolute left-2 top-2 grid min-w-6 place-items-center rounded-full bg-accent px-1.5 py-0.5 text-xs font-bold text-accent-fg shadow-sm">
