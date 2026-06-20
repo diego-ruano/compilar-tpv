@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
 
 type Rol = {
-  ID_Rol: number;
+  ID_Rol: string;
   Nombre_Rol: string;
 };
 
@@ -114,7 +114,7 @@ function getErrorMessage(e: unknown) {
  * (crea Usuario + Trabajador en el SQLite local de forma atómica).
  */
 async function createTrabajadorRemote(payload: {
-  idRol: number;
+  idRol: string;
   email: string;
   passwordHash: string;
   nombre: string;
@@ -184,7 +184,7 @@ function AddTrabajador() {
   const navigate = useNavigate();
 
   const [roles, setRoles] = useState<Rol[]>([]);
-  const [idRol, setIdRol] = useState<number | "">("");
+  const [idRol, setIdRol] = useState<string>("");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -253,7 +253,7 @@ function AddTrabajador() {
       });
 
       const ok = await createTrabajadorRemote({
-        idRol: Number(idRol),
+        idRol: idRol,
         email: email.trim(),
         passwordHash,
         nombre: nombre.trim(),
@@ -337,7 +337,7 @@ function AddTrabajador() {
               <label className="text-sm font-medium">Rol *</label>
               <select
                 value={idRol}
-                onChange={(e) => setIdRol(e.target.value ? Number(e.target.value) : "")}
+                onChange={(e) => setIdRol(e.target.value)}
                 disabled={loadingRoles}
                 className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent disabled:opacity-60 disabled:cursor-not-allowed"
               >

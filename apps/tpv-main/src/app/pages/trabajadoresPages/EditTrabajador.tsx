@@ -5,15 +5,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
 
 type Rol = {
-  ID_Rol: number;
+  ID_Rol: string;
   Nombre_Rol: string;
 };
 
 type TrabajadorDetail = {
-  ID_Trabajador: number;
-  ID_Usuario: number;
+  ID_Trabajador: string;
+  ID_Usuario: string;
 
-  ID_Rol: number;
+  ID_Rol: string;
   Email: string;
   Nombre: string;
   Apellido: string | null;
@@ -87,10 +87,10 @@ async function getRolesLocal(): Promise<Rol[]> {
   return Array.isArray(data) ? data : [];
 }
 
-async function getTrabajadorDetailLocal(idTrabajador: number): Promise<TrabajadorDetail | null> {
+async function getTrabajadorDetailLocal(idTrabajador: string): Promise<TrabajadorDetail | null> {
   const body = {
-    idTrabajador: Number(idTrabajador),
-    id_trabajador: Number(idTrabajador),
+    idTrabajador,
+    id_trabajador: idTrabajador,
   };
 
   const raw = await invokeLocalSmart<TrabajadorDetail | null>(
@@ -155,9 +155,9 @@ function getErrorMessage(e: unknown) {
  * (actualiza Usuario + Trabajador de forma atómica). El PIN sólo se cambia si llega hash.
  */
 async function updateTrabajadorRemote(payload: {
-  idTrabajador: number;
-  idUsuario: number;
-  idRol: number;
+  idTrabajador: string;
+  idUsuario: string;
+  idRol: string;
   email: string;
   nombre: string;
   apellido?: string | null;
@@ -235,13 +235,13 @@ async function updateTrabajadorRemote(payload: {
 function EditTrabajador() {
   const navigate = useNavigate();
   const params = useParams();
-  const idTrabajador = Number(params.id);
+  const idTrabajador = params.id ?? "";
 
   const [roles, setRoles] = useState<Rol[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [idUsuario, setIdUsuario] = useState<number | null>(null);
-  const [idRol, setIdRol] = useState<number | "">("");
+  const [idUsuario, setIdUsuario] = useState<string | null>(null);
+  const [idRol, setIdRol] = useState<string>("");
 
   const [email, setEmail] = useState("");
   const [pinNuevo, setPinNuevo] = useState("");
@@ -272,7 +272,7 @@ function EditTrabajador() {
     const cargar = async () => {
       setError(null);
 
-      if (!Number.isFinite(idTrabajador) || idTrabajador <= 0) {
+      if (!idTrabajador || !idTrabajador.trim()) {
         setError("ID de trabajador inválido");
         setLoading(false);
         return;
@@ -354,7 +354,7 @@ function EditTrabajador() {
       const ok = await updateTrabajadorRemote({
         idTrabajador,
         idUsuario,
-        idRol: Number(idRol),
+        idRol: idRol,
         email: email.trim(),
         nombre: nombre.trim(),
         apellido: normalizeNullable(apellido),
@@ -444,7 +444,7 @@ function EditTrabajador() {
               <label className="text-sm font-medium">Rol *</label>
               <select
                 value={idRol}
-                onChange={(e) => setIdRol(e.target.value ? Number(e.target.value) : "")}
+                onChange={(e) => setIdRol(e.target.value)}
                 className="border border-border rounded-xl px-3 py-2 bg-surface outline-none focus:border-accent"
               >
                 <option value="">Selecciona un rol</option>
