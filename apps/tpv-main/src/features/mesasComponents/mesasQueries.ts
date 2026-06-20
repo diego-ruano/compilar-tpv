@@ -17,17 +17,19 @@ export const mesasKeys = {
 };
 
 /** Layout de salones/mesas (cacheado; refetch manual para los botones de recarga). */
-export function useMesasLayout() {
+export function useMesasLayout(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: mesasKeys.layout(),
     queryFn: mesasLoadLayout,
+    enabled: options?.enabled ?? true,
   });
 }
 
 /** Metadatos por mesa (estado de comanda, etc.); cacheado y refetcheable. */
-export function useMesasMesaMeta() {
+export function useMesasMesaMeta(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: mesasKeys.meta(),
     queryFn: mesasLoadMesaMeta,
+    enabled: options?.enabled ?? true,
   });
 }

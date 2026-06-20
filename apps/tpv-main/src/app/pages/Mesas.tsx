@@ -37,8 +37,11 @@ export default function Mesas() {
     const canEditMesas = !(role === "Cocinero" || role === "Camarero");
 
     // Layout/meta cacheados con TanStack Query (se recargan vía refetch).
-    const layoutQuery = useMesasLayout();
-    const metaQuery = useMesasMesaMeta();
+    // Se deshabilitan mientras el modal del ticket está abierto: el floor view
+    // no es visible, y evitamos refetches innecesarios por cada cambio de línea.
+    // Al cerrar el modal, las queries se reactivan y hacen un único refetch.
+    const layoutQuery = useMesasLayout({ enabled: !modalOpen });
+    const metaQuery = useMesasMesaMeta({ enabled: !modalOpen });
 
     const salons = useMemo<Salon[]>(
         () => layoutQuery.data ?? [],
