@@ -11,19 +11,23 @@
 // La `Ruta_Imagen` que guarda la BD es siempre relativa (`images/{subcarpeta}/{uuid}.jpg`) y se
 // usa idéntica en los tres lados (disco local, clave R2 y URL del CDN).
 //
-// NOTA de despliegue: por defecto las lecturas del Handy van al endpoint del worker
-// (`/v1/images`), que ya cachea en el edge con la Cache API. Si en el futuro conectas un dominio
-// propio al bucket R2 (R2 → Custom Domain), basta con apuntar `CDN_IMAGES_BASE` a ese dominio
-// para servir 100% desde el CDN sin invocar el worker.
+// NOTA de despliegue: las lecturas del Handy van directas a la URL pública del bucket R2
+// (r2.dev), servida y cacheada por la red de Cloudflare → sin invocar el worker en cada imagen.
+// La SUBIDA sigue yendo firmada por el worker (PUT /v1/images). Si en el futuro conectas un
+// dominio propio al bucket, basta con cambiar `CDN_IMAGES_BASE` por ese dominio.
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 
 import { useMode } from "../stores/useMode";
 
-/** Base pública desde la que el Handy carga las imágenes (worker + CDN edge). */
+/**
+ * Base pública desde la que el Handy carga las imágenes: la URL r2.dev del bucket.
+ * La clave del objeto en R2 es `{tenant}/images/{subcarpeta}/{archivo}`, así que la URL
+ * final queda `{CDN_IMAGES_BASE}/{tenant}/{Ruta_Imagen}`.
+ */
 export const CDN_IMAGES_BASE =
-  "https://tpv-api.altarialights.workers.dev/v1/images";
+  "https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev";
 
 // El tenant del Handy no cambia en una sesión: lo resolvemos una vez y lo cacheamos.
 let handyTenantPromise: Promise<string> | null = null;

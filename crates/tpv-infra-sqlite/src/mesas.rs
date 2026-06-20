@@ -422,12 +422,18 @@ impl MesasRepository for SqliteMesasRepository {
                     .map_err(db_err)?;
                     id_zona
                 } else {
-                    // Zona nueva: INSERT con UUID nuevo.
+                    // Zona nueva: upsert por NOMBRE. Si el nombre ya existe (p. ej. una zona
+                    // que sobrevivió a un borrado por tener mesas), NO choca con el UNIQUE:
+                    // reutiliza esa zona en vez de crashear ("no pasa nada"). Mismo criterio
+                    // que la nube (mesas.commands.ts).
                     let new_zone_id = new_id();
                     db.execute(
                         r#"
                         INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
-                        VALUES (?1, ?2, ?3, datetime('now','localtime'));
+                        VALUES (?1, ?2, ?3, datetime('now','localtime'))
+                        ON CONFLICT(Nombre_Zona) DO UPDATE SET
+                          Room_Points = excluded.Room_Points,
+                          Updated_At = excluded.Updated_At;
                         "#,
                         vec![
                             Value::Text(new_zone_id.clone()),
@@ -437,7 +443,23 @@ impl MesasRepository for SqliteMesasRepository {
                     )
                     .await
                     .map_err(db_err)?;
-                    new_zone_id
+
+                    // Resolver el ID real por nombre: si hubo conflicto es el de la zona
+                    // existente (así las mesas se cuelgan de un ID_Zona que sí existe → sin FK rota).
+                    let mut rows = db
+                        .query(
+                            "SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?1 LIMIT 1;",
+                            vec![Value::Text(zone_name.clone())],
+                        )
+                        .await
+                        .map_err(db_err)?;
+                    match rows.next().await.map_err(db_err)? {
+                        Some(r) => match r.get_value(0).map_err(db_err)? {
+                            Value::Text(s) => s,
+                            _ => new_zone_id,
+                        },
+                        None => new_zone_id,
+                    }
                 };
 
                 let mut kept: Vec<String> = vec![];

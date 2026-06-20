@@ -9,14 +9,18 @@
 	"rules": [
 		{
 			"type": "Text",
-			"globs": ["**/*.sql"],
+			"globs": [
+				"**/*.sql"
+			],
 			"fallthrough": true
 		}
 	],
 	"migrations": [
 		{
 			"tag": "v1",
-			"new_sqlite_classes": ["TenantHub"]
+			"new_sqlite_classes": [
+				"TenantHub"
+			]
 		}
 	],
 	"durable_objects": {
@@ -31,6 +35,11 @@
 		{
 			"binding": "IMAGES",
 			"bucket_name": "tpv-images"
+		},
+		{
+			"bucket_name": "tpv-images",
+			"binding": "tpv_images",
+			"remote": true
 		}
 	],
 	"vars": {

@@ -74,6 +74,20 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		args: [...keptZoneIds],
 	});
 
+	// Aparca los nombres de las zonas conservadas a un valor temporal único, para que los
+	// UPDATE de nombre de abajo no choquen transitoriamente con UNIQUE(Nombre_Zona) al
+	// renombrar/intercambiar zonas. Mismo criterio EXACTO que la app local (tpv-infra-sqlite).
+	if (keptZoneIds.length) {
+		steps.push({
+			kind: "execute",
+			sql: `
+				UPDATE Zonas SET Nombre_Zona = '__tmp_zona_' || ID_Zona
+				WHERE ID_Zona IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")});
+			`,
+			args: [...keptZoneIds],
+		});
+	}
+
 	for (const z of input.salons) {
 		const idZona = parseDbId(z.id, "db-zona-");
 		const points = JSON.stringify(z.room.points ?? []);

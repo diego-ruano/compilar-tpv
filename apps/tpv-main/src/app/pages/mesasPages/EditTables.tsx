@@ -723,7 +723,9 @@ export default function EditTables() {
         if (prev.length > 0) pushHistory(prev);
 
         const id = `zona-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        const name = `Zona ${prev.length + 1}`;
+        // Nombre vacío a propósito: es obligatorio que el usuario lo escriba antes de guardar
+        // (evita nombres autogenerados que chocaban con el UNIQUE de Zonas).
+        const name = "";
         const defaultRoom: RoomPoly = {
             type: "poly",
             points: [...defaultRoomPoints],
@@ -1452,6 +1454,18 @@ export default function EditTables() {
                                 disabled={!activeSalon}
                                 onClick={async () => {
                                     try {
+                                        // Nombre de zona obligatorio: bloquear el guardado si alguna está vacía.
+                                        const sinNombre = salonsRef.current.find(
+                                            (s) => !s.name.trim(),
+                                        );
+                                        if (sinNombre) {
+                                            setActiveSalonId(sinNombre.id);
+                                            alert(
+                                                "Cada zona necesita un nombre antes de guardar.",
+                                            );
+                                            return;
+                                        }
+
                                         await mesasSaveLayout(salonsRef.current as any);
                                         queryClient.invalidateQueries({ queryKey: mesasKeys.layout() });
 
