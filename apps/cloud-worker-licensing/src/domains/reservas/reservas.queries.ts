@@ -16,17 +16,6 @@ function rows(rs: any): any[] {
 	});
 }
 
-async function tableHasColumn(
-	db: Client,
-	table: string,
-	column: string,
-): Promise<boolean> {
-	const rs = await db.execute({ sql: `PRAGMA table_info(${table});` });
-	return rows(rs).some(
-		(r) => String(r.name ?? "").toLowerCase() === column.toLowerCase(),
-	);
-}
-
 export async function meta(db: Client): Promise<ReservasMetaDto> {
 	const zonasRs = await db.execute(`
 		SELECT
@@ -36,17 +25,31 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 		ORDER BY ID_Zona ASC;
 	`);
 
-	const hasEsSistema = await tableHasColumn(db, "Mesas", "Es_Sistema");
-	const mesasRs = await db.execute(`
-		SELECT
-			ID_Mesa AS id_mesa,
-			ID_Zona AS id_zona,
-			Numero_Mesa AS numero_mesa,
-			Capacidad AS capacidad
-		FROM Mesas
-		${hasEsSistema ? "WHERE COALESCE(Es_Sistema, 0) = 0" : ""}
-		ORDER BY ID_Zona ASC, ID_Mesa ASC;
-	`);
+	// Espejo del comportamiento local (SqliteReservasRepository::meta):
+	// intenta excluir mesas de sistema; si la columna no existe, trae todas.
+	let mesasRs: any;
+	try {
+		mesasRs = await db.execute(`
+			SELECT
+				ID_Mesa AS id_mesa,
+				ID_Zona AS id_zona,
+				Numero_Mesa AS numero_mesa,
+				Capacidad AS capacidad
+			FROM Mesas
+			WHERE COALESCE(Es_Sistema, 0) = 0
+			ORDER BY ID_Zona ASC, ID_Mesa ASC;
+		`);
+	} catch {
+		mesasRs = await db.execute(`
+			SELECT
+				ID_Mesa AS id_mesa,
+				ID_Zona AS id_zona,
+				Numero_Mesa AS numero_mesa,
+				Capacidad AS capacidad
+			FROM Mesas
+			ORDER BY ID_Zona ASC, ID_Mesa ASC;
+		`);
+	}
 
 	return {
 		zonas: rows(zonasRs) as ReservasMetaDto["zonas"],
