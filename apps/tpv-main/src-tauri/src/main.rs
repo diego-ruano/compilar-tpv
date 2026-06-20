@@ -643,6 +643,13 @@ async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Res
     let mut remaining: Vec<PendingImage> = Vec::new();
     let mut failed = false;
     let mut subidas = 0u32;
+    let mut ultimo_error: Option<String> = None;
+
+    eprintln!("[image_drain] modo={mode_str} en_cola={}", pending.len());
+
+    for item in &pending {
+        eprintln!("[image_drain]   pendiente: {} ({})", item.rel_path, item.content_type);
+    }
 
     for item in pending {
         if failed {
@@ -653,15 +660,25 @@ async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Res
         let file_path = app_data_dir.join(&item.rel_path);
         let bytes = match fs::read(&file_path) {
             Ok(b) => b,
-            // El fichero ya no existe (borrado/reemplazado): descartamos la entrada.
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("[image_drain] fichero no encontrado '{}': {e}", item.rel_path);
+                continue;
+            },
         };
 
         let path = format!("/v1/images/{}", item.rel_path);
+        eprintln!("[image_drain] subiendo '{}' → PUT {}", item.rel_path, path);
         match uc_pairing::upload_image(&svc, mode_str, &path, &item.content_type, bytes).await {
-            Ok(_) => subidas += 1,
-            Err(_) => {
-                // Probablemente offline: paramos y conservamos el resto para reintentar.
+            Ok(_) => {
+                eprintln!("[image_drain] ✓ subida OK: {}", item.rel_path);
+                subidas += 1;
+            },
+            Err(e) => {
+                let msg = format!("{e:?}");
+                eprintln!("[image_drain] ✗ FALLO '{}': {}", item.rel_path, msg);
+                if ultimo_error.is_none() {
+                    ultimo_error = Some(msg);
+                }
                 failed = true;
                 remaining.push(item);
             }
@@ -669,7 +686,12 @@ async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Res
     }
 
     write_image_queue(&app_data_dir, &remaining)?;
-    Ok(format!("subidas={subidas} pendientes={}", remaining.len()))
+    let resultado = match &ultimo_error {
+        Some(err) => format!("subidas={subidas} pendientes={} error={err}", remaining.len()),
+        None => format!("subidas={subidas} pendientes={}", remaining.len()),
+    };
+    eprintln!("[image_drain] resultado: {resultado}");
+    Ok(resultado)
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la

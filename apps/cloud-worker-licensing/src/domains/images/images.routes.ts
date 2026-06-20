@@ -83,9 +83,23 @@ imagesRoutes.get("/:tenant/*", async (c) => {
 
 // ───────────────── ESCRITURA (firmada) ─────────────────
 
+/** Extrae `relPath` del pathname completo de la petición, eliminando el prefijo `/v1/images/`.
+ *  Más robusto que `c.req.param("*")` en subrouters de Hono, que puede incluir o excluir
+ *  la barra inicial dependiendo de la versión y del modo de montaje. */
+function relPathFromUrl(url: string): string {
+	try {
+		const pathname = new URL(url).pathname; // /v1/images/images/productos/uuid.jpg
+		return pathname.replace(/^\/v1\/images\//, "").trim();
+	} catch {
+		return "";
+	}
+}
+
 imagesRoutes.put("/*", tenantAuth, async (c) => {
-	const relPath = (c.req.param("*") || "").trim();
+	const relPath = relPathFromUrl(c.req.url);
+	console.log("[images PUT] relPath:", relPath);
 	if (!REL_PATH_RE.test(relPath)) {
+		console.log("[images PUT] bad_image_path para:", relPath);
 		return c.json({ error: "bad_image_path" }, 400);
 	}
 
@@ -96,6 +110,7 @@ imagesRoutes.put("/*", tenantAuth, async (c) => {
 	const contentType = contentTypeFor(relPath, c.req.header("Content-Type"));
 	// El tenant SIEMPRE sale del token (no del cliente): aislamiento por tenant garantizado.
 	const key = `${c.get("tenantId")}/${relPath}`;
+	console.log("[images PUT] R2 key:", key);
 
 	await c.env.IMAGES.put(key, body, {
 		httpMetadata: { contentType, cacheControl: CACHE_CONTROL },
@@ -105,7 +120,7 @@ imagesRoutes.put("/*", tenantAuth, async (c) => {
 });
 
 imagesRoutes.delete("/*", tenantAuth, async (c) => {
-	const relPath = (c.req.param("*") || "").trim();
+	const relPath = relPathFromUrl(c.req.url);
 	if (!REL_PATH_RE.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}

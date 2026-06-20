@@ -72,7 +72,15 @@ export async function resolveImageUrl(
  * Se llama tras guardar una imagen; en la Main online el WebSocket además lo reintenta.
  */
 export function triggerImageUploadDrain(): void {
-  void invoke("images_drain_pending").catch(() => {
-    /* offline o sin modo: se reintentará luego */
-  });
+  invoke<string>("images_drain_pending")
+    .then((r) => {
+      if (r && r !== "vacio" && r !== "sin_modo") {
+        if (r.includes("error=")) {
+          console.warn("[images_drain]", r);
+        } else {
+          console.log("[images_drain]", r);
+        }
+      }
+    })
+    .catch((e) => console.error("[images_drain] Tauri error:", e));
 }

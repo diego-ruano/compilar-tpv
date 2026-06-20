@@ -325,11 +325,15 @@ export function useMainSocket() {
 					authed = true;
 					void catchUpThenLive();
 					void drainOutbox(socket);
-					void invoke("images_drain_pending").catch(() => {});
+					void invoke<string>("images_drain_pending")
+						.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/hello_ok]", r); })
+						.catch((e) => console.error("[images_drain/hello_ok] error:", e));
 					if (drainTimer) clearInterval(drainTimer);
 					drainTimer = window.setInterval(() => {
 						void drainOutbox(socket);
-						void invoke("images_drain_pending").catch(() => {});
+						void invoke<string>("images_drain_pending")
+							.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/interval]", r); })
+							.catch((e) => console.error("[images_drain/interval] error:", e));
 					}, DRAIN_INTERVAL_MS);
 					return;
 				}

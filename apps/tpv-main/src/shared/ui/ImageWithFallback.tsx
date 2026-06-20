@@ -25,7 +25,7 @@ type Props = {
   retries?: number;
   retryDelayMs?: number;
   draggable?: boolean;
-  loading?: "lazy" | "eager";
+  loading?: "lazy" | "eager"; // usa "eager" (default) si el img empieza hidden
 };
 
 const DefaultLoading = (
@@ -44,7 +44,7 @@ export default function ImageWithFallback({
   retries = 5,
   retryDelayMs = 3000,
   draggable = false,
-  loading = "lazy",
+  loading = "eager",
 }: Props) {
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState(false);
