@@ -18,7 +18,6 @@ export type BuiltCommand = {
 
 const REF_ID_COMANDA = { $ref: "id_comanda" } as const;
 const REF_ID_PAGO = { $ref: "id_pago" } as const;
-const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 
 const UPDATE_TOTAL = `
 	UPDATE Comandas
@@ -364,6 +363,9 @@ export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 
 export function addLinea(input: AddLineaInput): BuiltCommand {
 	const steps: any[] = [];
+	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
+	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
+	const idDetalle = crypto.randomUUID();
 
 	// Resolución de trabajador embebida en la propia UPDATE para evitar un round-trip
 	// previo a Turso. El EXISTS garantiza que solo se actualiza si hay match real.
@@ -388,13 +390,6 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 		});
 	}
 
-	steps.push({
-		kind: "value",
-		saveAs: "id_detalle",
-		sql: "SELECT ?1;",
-		args: [crypto.randomUUID()],
-	});
-
 	// Estado_Cocina resuelto como subquery dentro del INSERT, sin pre-query separada.
 	steps.push({
 		kind: "execute",
@@ -416,7 +411,7 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 				 LIMIT 1)
 			);
 		`,
-		args: [REF_ID_DETALLE, input.id_comanda, input.id_producto, input.cantidad, input.precio],
+		args: [idDetalle, input.id_comanda, input.id_producto, input.cantidad, input.precio],
 	});
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });

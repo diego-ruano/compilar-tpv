@@ -566,6 +566,19 @@ export class TenantHub {
 			sql: "SELECT 1 AS ok;",
 			args: [],
 		});
+		// Garantizamos la tabla de log de sync UNA vez al resolver la conexión (autocommit,
+		// caché de 6 h) en lugar de un CREATE TABLE IF NOT EXISTS por cada escritura. La tabla
+		// persiste en Turso, así que las escrituras dentro del TTL ya la encuentran creada.
+		await db.execute(`
+			CREATE TABLE IF NOT EXISTS Sync_Changes (
+				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+				Op_Id TEXT NOT NULL,
+				Command_Name TEXT,
+				Statements_Json TEXT NOT NULL,
+				Device_Id TEXT,
+				Created_At_Ms INTEGER NOT NULL
+			);
+		`);
 	}
 
 	private clearTenantDbCache() {
@@ -1100,8 +1113,8 @@ export class TenantHub {
 				// Log ordenado de cambios para que la Main los aplique a su SQLite local
 				// (Opción 3: sentencias ya resueltas). Va en la MISMA transacción que la
 				// escritura, así el cambio se registra si y solo si se aplicó. El `Seq`
-				// autoincremental es el cursor del catch-up al reconectar.
-				await this.ensureSyncChangesTable(tx);
+				// autoincremental es el cursor del catch-up al reconectar. La tabla se garantiza
+				// al resolver la conexión (probeTenantDb), no aquí, para ahorrar un round trip.
 				const seqRes = await tx.execute({
 					sql: `
 						INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
@@ -1150,7 +1163,6 @@ export class TenantHub {
 	// idempotentes). Devuelve 0 si no hay registro.
 	private async lookupChangeSeq(executor: any, opId: string): Promise<number> {
 		try {
-			await this.ensureSyncChangesTable(executor);
 			const r = await executor.execute({
 				sql: "SELECT Seq AS seq FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
 				args: [opId],
@@ -1196,21 +1208,6 @@ export class TenantHub {
 			if (this.roles.get(did) === "tpv") return true;
 		}
 		return false;
-	}
-
-	// Crea (idempotente) la tabla de log de cambios para la sincronización con la Main.
-	// El `Seq` autoincremental es el cursor monotono que usa el catch-up.
-	private async ensureSyncChangesTable(executor: any) {
-		await executor.execute(`
-			CREATE TABLE IF NOT EXISTS Sync_Changes (
-				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-				Op_Id TEXT NOT NULL,
-				Command_Name TEXT,
-				Statements_Json TEXT NOT NULL,
-				Device_Id TEXT,
-				Created_At_Ms INTEGER NOT NULL
-			);
-		`);
 	}
 
 	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
