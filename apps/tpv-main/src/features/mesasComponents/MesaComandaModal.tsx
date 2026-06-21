@@ -671,7 +671,14 @@ export default function MesaComandaModal({
 
             try {
                 const t = await addDetalle(idComanda, p, operador);
-                setTicket(t);
+                // Mezclar los ítems reales con los optimistas todavía en vuelo
+                // (otras adiciones concurrentes que aún no tienen respuesta del servidor)
+                setTicket((prev) => {
+                    const enVuelo = prev.filter(
+                        (item) => item.id.startsWith("opt-") && item.id !== optimisticId,
+                    );
+                    return [...t, ...enVuelo];
+                });
                 notifyChanged();
             } catch (e) {
                 // Revertir el ítem optimista si la escritura falló
