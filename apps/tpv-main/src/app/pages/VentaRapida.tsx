@@ -545,7 +545,7 @@ export default function VentaRapida() {
   }, []);
 
   const cargarCategorias = useCallback(async () => {
-    try {
+    try {
       const raw = await vrListCategoriasVendibles();
       const rows = asArray<Categoria>(raw);
 
@@ -568,7 +568,7 @@ export default function VentaRapida() {
 
     setLoadingProductos(true);
 
-    try {
+    try {
       const idCat = cat.ID_Categoria;
       const raw = await vrListProductosByCategoria(idCat);
       const rows = asArray<Producto>(raw);
@@ -599,7 +599,7 @@ export default function VentaRapida() {
 
     setLoadingBusqueda(true);
 
-    try {
+    try {
       const raw = await vrSearchProductos(safeQ, 60);
       const rows = asArray<Producto>(raw);
 
@@ -774,7 +774,7 @@ export default function VentaRapida() {
   }, [idTrabajadorAuth]);
 
   const cargarBootstrapInicial = useCallback(async () => {
-    try {
+    try {
       const boot = await vrBootstrap(idTrabajadorAuth ?? null);
 
       const categoriasProcesadas: CategoriaDisplay[] = await Promise.all(
@@ -1571,11 +1571,18 @@ export default function VentaRapida() {
       return;
     }
 
-    try {
-      const idNew = await vrCreateComandaBarra(idTrabajadorAuth ?? null);
-
+    // Nulificar la ref antes del await: si el usuario toca un producto mientras Rust procesa,
+    // ensureComandaActiva esperará esta promesa en vez de usar la ref obsoleta (race → FK error).
+    idComandaActivaRef.current = null;
+    const p = vrCreateComandaBarra(idTrabajadorAuth ?? null).then((idNew) => {
       setIdComandaActiva(idNew);
       idComandaActivaRef.current = idNew;
+      return idNew;
+    });
+    ensureComandaPromiseRef.current = p;
+
+    try {
+      await p;
 
       clearTicketLocal();
 
@@ -1589,6 +1596,8 @@ export default function VentaRapida() {
     } catch (e) {
       console.error(e);
       toast.error("Error", "No se pudo crear un nuevo ticket.");
+    } finally {
+      ensureComandaPromiseRef.current = null;
     }
   }, [
     clearTicketLocal,
