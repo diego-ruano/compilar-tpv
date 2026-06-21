@@ -685,8 +685,27 @@ export default function MesaComandaModal({
     const removeProductoFromTicket = useCallback(
         async (productoId: string) => {
             if (!idComanda) return;
-            await removeOnePendingDetalle(idComanda, productoId);
-            await reloadTicket();
+
+            // Optimistic: quitar el primer ítem pendiente que coincida
+            let removed: TicketItem | undefined;
+            setTicket((prev) => {
+                const idx = prev.findIndex(
+                    (t) => t.productoId === productoId && !t.pagado,
+                );
+                if (idx === -1) return prev;
+                removed = prev[idx];
+                return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+            });
+
+            try {
+                await removeOnePendingDetalle(idComanda, productoId);
+                void reloadTicket();
+            } catch (e) {
+                if (removed !== undefined) {
+                    setTicket((prev) => [...prev, removed!]);
+                }
+                console.error("Error eliminando detalle:", e);
+            }
         },
         [idComanda, reloadTicket],
     );
