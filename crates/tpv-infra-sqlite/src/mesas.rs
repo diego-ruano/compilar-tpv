@@ -960,7 +960,8 @@ impl MesasRepository for SqliteMesasRepository {
         cantidad: f64,
         precio: f64,
         id_trab_o_usuario: Option<String>,
-    ) -> AppResult<()> {
+    ) -> AppResult<Vec<MesaLineaComandaRow>> {
+        {
         let g = self.db.write().await;
         let db = &g;
 
@@ -1031,13 +1032,14 @@ impl MesasRepository for SqliteMesasRepository {
         match res {
             Ok(()) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
-                Err(e)
+                return Err(e);
             }
         }
+        } // WriteGuard se suelta aquí → la pool de lectura puede actuar
+        self.get_lineas_comanda(id_comanda).await
     }
 
     /* ===== BARRA ===== */

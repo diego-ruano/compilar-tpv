@@ -230,39 +230,30 @@ async function ensureOpenComanda(
     });
 }
 
-async function loadTicketForComanda(idComanda: string): Promise<TicketItem[]> {
-    const rows = await mesasLoadTicket(idComanda);
-
+function mapTicketRows(rows: any[]): TicketItem[] {
     const mapped: TicketItem[] = (rows ?? []).map((r: any) => {
         const idDetalle = String(pick(r, ["id", "ID_Detalle", "idDetalle"]) ?? "");
         const idProducto = String(
             pick(r, ["productoId", "ID_Producto", "idProducto"]) ?? "",
         );
-
         const nombre = String(
             pick(r, ["nombre", "Nombre_Producto", "Nombre"]) ?? "",
         );
-
         const precio = Number(
             pick(r, ["precio", "Precio_Unitario", "precioUnitario"]) ?? 0,
         );
-
         const pagadoNum = Number(pick(r, ["pagado", "Pagado"]) ?? 0);
         const pagado = pagadoNum === 1;
-
         const pasaNum = Number(
             pick(r, ["pasaCocina", "Pasa_Cocina", "pasa_cocina"]) ?? 0,
         );
         const pasa = pasaNum === 1;
-
         const estadoDb = String(
             pick(r, ["estadoCocina", "Estado_Cocina", "estado_cocina"]) ??
             "PENDIENTE",
         );
-
         const estadoCocina = pasa ? estadoDb || "PENDIENTE" : "NO_COCINA";
         const notas = (pick(r, ["notas", "Notas"]) ?? null) as string | null;
-
         return {
             id: idDetalle,
             productoId: idProducto,
@@ -275,25 +266,29 @@ async function loadTicketForComanda(idComanda: string): Promise<TicketItem[]> {
             notas: notas ? String(notas) : null,
         };
     });
-
     const hayPendientes = mapped.some((t) => !t.pagado);
     if (!hayPendientes) return [];
-
     return mapped;
+}
+
+async function loadTicketForComanda(idComanda: string): Promise<TicketItem[]> {
+    const rows = await mesasLoadTicket(idComanda);
+    return mapTicketRows(rows);
 }
 
 async function addDetalle(
     idComanda: string,
     p: ProductoDisplay,
     operadorId: string | null,
-) {
-    await mesasAddDetalle({
+): Promise<TicketItem[]> {
+    const rows = await mesasAddDetalle({
         idComanda,
         idProducto: p.ID_Producto,
         cantidad: 1,
         precio: Number(p.Precio_Venta ?? 0),
         idUsuario: operadorId,
     });
+    return mapTicketRows(rows);
 }
 
 async function removeOnePendingDetalle(idComanda: string, productoId: string) {
@@ -662,10 +657,34 @@ export default function MesaComandaModal({
             if (!idComanda) return;
             if (!isAdmin && operador == null) return;
 
-            await addDetalle(idComanda, p, operador);
-            await reloadTicket();
+            // Actualización optimista: el ítem aparece al instante sin esperar la red
+            const optimisticId = `opt-${Date.now()}`;
+            setTicket((prev) => [
+                ...prev,
+                {
+                    id: optimisticId,
+                    productoId: p.ID_Producto,
+                    nombre: p.Nombre,
+                    precio: Number(p.Precio_Venta ?? 0),
+                    pagado: false,
+                    seleccionado: false,
+                    estadoCocina: "PENDIENTE",
+                    pasaCocina: false,
+                    notas: null,
+                },
+            ]);
+
+            try {
+                const t = await addDetalle(idComanda, p, operador);
+                setTicket(t);
+                notifyChanged();
+            } catch (e) {
+                // Revertir el ítem optimista si la escritura falló
+                setTicket((prev) => prev.filter((item) => item.id !== optimisticId));
+                console.error("Error añadiendo detalle:", e);
+            }
         },
-        [idComanda, isAdmin, operador, reloadTicket],
+        [idComanda, isAdmin, operador, notifyChanged],
     );
 
     const removeProductoFromTicket = useCallback(

@@ -119,7 +119,7 @@ impl MesasRepository for HttpMesasRepository {
         cantidad: f64,
         precio: f64,
         id_trab_o_usuario: Option<String>,
-    ) -> AppResult<()> {
+    ) -> AppResult<Vec<MesaLineaComandaRow>> {
         let body = json!({
             "id_comanda": id_comanda,
             "id_producto": id_producto,
@@ -127,8 +127,9 @@ impl MesasRepository for HttpMesasRepository {
             "precio": precio,
             "id_trabajador": id_trab_o_usuario,
         });
-        let _: JsonValue = self.client.post_json("/v1/mesas/lineas", &body).await?;
-        Ok(())
+        let resp: JsonValue = self.client.post_json("/v1/mesas/lineas", &body).await?;
+        serde_json::from_value(resp["lineas"].clone())
+            .map_err(|e| AppError::external(format!("bad_lineas: {e}")))
     }
 
     /* Barra — sin endpoint en el dominio `mesas` del worker (lo cubre venta_rapida) */

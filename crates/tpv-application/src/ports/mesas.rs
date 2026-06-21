@@ -39,7 +39,7 @@ pub trait MesasRepository: Send + Sync {
         cantidad: f64,
         precio: f64,
         id_trab_o_usuario: Option<String>,
-    ) -> AppResult<()>;
+    ) -> AppResult<Vec<MesaLineaComandaRow>>;
 
     /* Barra */
     async fn get_or_create_mesa_barra(&self) -> AppResult<String>;

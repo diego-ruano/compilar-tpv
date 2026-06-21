@@ -121,7 +121,7 @@ pub async fn get_lineas_comanda(
 pub async fn add_linea_comanda(
     repo: &dyn MesasRepository,
     input: MesasAddLineaComandaInput,
-) -> AppResult<()> {
+) -> AppResult<Vec<tpv_contracts::mesas::MesaLineaComandaRow>> {
     if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_producto inválidos"));
     }

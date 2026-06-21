@@ -108,10 +108,9 @@ pub async fn get_lineas_comanda(
 pub async fn add_linea_comanda(
     state: State<'_, AppState>,
     args: MesasAddLineaComandaInput,
-) -> Result<String, String> {
+) -> Result<Vec<MesaLineaComandaRow>, String> {
     let repo = state.mesas_repo().await?;
-    uc::add_linea_comanda(repo.as_ref(), args).await?;
-    Ok("OK".to_string())
+    Ok(uc::add_linea_comanda(repo.as_ref(), args).await?)
 }
 
 /* ===== BARRA ===== */

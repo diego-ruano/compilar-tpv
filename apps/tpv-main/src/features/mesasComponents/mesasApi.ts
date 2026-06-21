@@ -317,7 +317,7 @@ export async function mesasAddDetalle(params: {
     cantidad?: number;
     precio: number;
     idUsuario?: string | null;
-}): Promise<void> {
+}): Promise<any[]> {
     const idComanda = toId(params.idComanda);
     const idProducto = toId(params.idProducto);
     const cantidad = toNum(params.cantidad ?? 1, 1);
@@ -329,16 +329,18 @@ export async function mesasAddDetalle(params: {
     if (!idProducto) throw new Error("id_producto inválido");
     if (!Number.isFinite(precio)) throw new Error("precio inválido");
 
-    await invokeClient<string>("add_linea_comanda", {
-        args: {
-            id_comanda: idComanda,
-            id_producto: idProducto,
-            cantidad,
-            precio,
-            id_usuario: idUsuario,
-            id_trabajador: null,
-        },
-    });
+    return (
+        (await invokeClient<any[]>("add_linea_comanda", {
+            args: {
+                id_comanda: idComanda,
+                id_producto: idProducto,
+                cantidad,
+                precio,
+                id_usuario: idUsuario,
+                id_trabajador: null,
+            },
+        })) ?? []
+    );
 }
 
 /* =========================

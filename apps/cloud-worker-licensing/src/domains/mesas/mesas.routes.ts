@@ -149,7 +149,10 @@ mesasRoutes.post("/lineas", async (c) => {
 		return { idTrabajador, pasaCocina };
 	});
 	await apply(c, cmd.addLinea(p.data, info.idTrabajador, info.pasaCocina));
-	return c.json({ ok: true });
+	const lineas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.lineas(db, p.data.id_comanda),
+	);
+	return c.json({ ok: true, lineas });
 });
 
 mesasRoutes.post("/lineas/remove-one-pending", async (c) => {
