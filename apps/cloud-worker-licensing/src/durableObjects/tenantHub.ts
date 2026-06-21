@@ -472,6 +472,29 @@ function toLibsqlTxMode(
 	return "write";
 }
 
+// Evalúa en JS un paso `value` para no gastar un round trip a Turso por cada uno.
+// Cubre el set CERRADO de formas que generan los *.commands.ts (echo de un literal,
+// constante numérica, o concatenación 'prefijo' || ?N). Cualquier otra forma lanza,
+// para no resolver mal en silencio (fail-fast: lo detectarían los tests).
+function evalValueStep(sql: string, args: SqlScalar[]): SqlScalar {
+	const s = String(sql || "").trim().replace(/;+\s*$/, "").trim();
+	let m = s.match(/^SELECT\s+\?(\d+)$/i);
+	if (m) return args[Number(m[1]) - 1] ?? null;
+	m = s.match(/^SELECT\s+(-?\d+(?:\.\d+)?)$/i);
+	if (m) return Number(m[1]);
+	m = s.match(/^SELECT\s+'([^']*)'\s*\|\|\s*\?(\d+)$/i);
+	if (m) return m[1] + String(args[Number(m[2]) - 1] ?? "");
+	throw new Error(`value_step_no_evaluable_en_batch: ${sql}`);
+}
+
+// ¿El error de un batch es una violación de UNIQUE(Op_Id) en Applied_Operations?
+// Es la señal de que la op ya estaba aplicada (reintento idempotente): el gate sin
+// ON CONFLICT viola la constraint y hace rollback de TODO el batch automáticamente.
+function isUniqueOpIdViolation(e: any): boolean {
+	const m = String(e?.message ?? e ?? "").toLowerCase();
+	return m.includes("unique constraint failed") && m.includes("op_id");
+}
+
 function toHex(bytes: Uint8Array): string {
 	return Array.from(bytes)
 		.map((b) => b.toString(16).padStart(2, "0"))
@@ -983,180 +1006,199 @@ export class TenantHub {
 		const requestHash = await sha256Hex(requestPayloadJson);
 		const createdAtMs = nowMs();
 
+		// Aplanamos el comando a un único batch atómico (1 round trip a Turso en lugar de ~7
+		// awaits secuenciales de la transacción interactiva).
+		const built = this.buildApplyBatch(cmd);
+
 		return await this.withTenantDbRetry(tenantId, async (db) => {
-			const tx = await db.transaction("write");
+			// Batch atómico = [PRAGMA defer FK] + [gate idempotente] + [trabajo] + [log de sync].
+			// El gate va SIN ON CONFLICT: en un reintento (mismo Op_Id) viola UNIQUE(Op_Id) y hace
+			// rollback de TODO el batch → ni se duplica el trabajo ni el log. No existe estado
+			// PROCESSING/FAILED intermedio: la op está APPLIED (commit) o ausente (rollback).
+			const gate: ResolvedStmt = {
+				sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
+				args: [op, command, requestHash, deviceId || null, stringifyJsonValue(built.storageResult), createdAtMs],
+			};
+			const syncLog: ResolvedStmt = {
+				sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
+				args: [op, command, stableStringify(built.replicated), deviceId || null, createdAtMs],
+			};
 
+			// Índices del batch: 0=PRAGMA, 1=gate, 2..=middle (trabajo+lecturas), último=syncLog.
+			const MIDDLE_OFFSET = 2;
+			const batchStmts: ResolvedStmt[] = [
+				{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] },
+				gate,
+				...built.middle,
+				syncLog,
+			];
+
+			let batchResults: any[];
 			try {
-				// Espejo de la Main: diferimos la comprobación de FK al COMMIT, de modo que el
-				// orden de las sentencias dentro de la operación no importe (solo el estado final).
-				await tx.execute("PRAGMA defer_foreign_keys = ON;");
-
-				const existing = await tx.execute({
-					sql: `
-						SELECT
-						  Command_Name AS command_name,
-						  Request_Hash AS request_hash,
-						  Status AS status,
-						  Result_Json AS result_json,
-						  Error_Text AS error_text
-						FROM Applied_Operations
-						WHERE Op_Id = ?1
-						LIMIT 1;
-					`,
-					args: [op],
-				});
-
-				const existingRow = existing.rows?.[0] as any | undefined;
-
-				if (existingRow) {
-					const existingCommand = String(existingRow.command_name || "");
-					const existingHash = String(existingRow.request_hash || "");
-					const status = String(existingRow.status || "");
-
-					if (existingCommand !== command) {
-						throw new Error("idempotency_command_mismatch");
-					}
-
-					if (existingHash !== requestHash) {
-						throw new Error("idempotency_payload_mismatch");
-					}
-
-					if (status === "APPLIED") {
-						const raw = String(existingRow.result_json ?? "null");
-						const parsed = safeJsonParse(raw);
-						// Reintento idempotente: la op ya estaba aplicada. Recuperamos el `Seq` que
-						// se le asignó en el log para que la Main pueda ascender su anti-eco igual
-						// que en la primera aplicación (si no hay registro, 0 → lo limpia el TTL).
-						const seq = await this.lookupChangeSeq(tx, op);
-						await tx.commit();
-						return { result: parsed, seq };
-					}
-
-					if (status === "PROCESSING") {
-						throw new Error("idempotency_operation_processing");
-					}
-
-					if (status === "FAILED") {
-						throw new Error(
-							`idempotency_operation_failed:${String(
-								existingRow.error_text || "unknown_error",
-							)}`,
-						);
-					}
-
-					throw new Error(`idempotency_bad_status:${status}`);
+				batchResults = await db.batch(batchStmts as any, "write");
+			} catch (e: any) {
+				if (isUniqueOpIdViolation(e)) {
+					// Reintento idempotente: la op ya estaba aplicada. Recuperamos result + seq.
+					return await this.recoverAppliedOp(db, op, command, requestHash);
 				}
-
-				await tx.execute({
-					sql: `
-						INSERT INTO Applied_Operations (
-						  Op_Id,
-						  Command_Name,
-						  Request_Hash,
-						  Device_Id,
-						  Status,
-						  Result_Json,
-						  Error_Text,
-						  Created_At_Ms,
-						  Applied_At_Ms,
-						  Updated_At_Ms
-						)
-						VALUES (
-						  ?1,
-						  ?2,
-						  ?3,
-						  ?4,
-						  'PROCESSING',
-						  NULL,
-						  NULL,
-						  ?5,
-						  NULL,
-						  ?6
-						);
-					`,
-					args: [
-						op,
-						command,
-						requestHash,
-						deviceId || null,
-						createdAtMs,
-						createdAtMs,
-					],
-				});
-
-				const statements: ResolvedStmt[] = [];
-				const result = await this.applyInternalCommandOnExecutor(
-					tenantId,
-					tx,
-					cmd,
-					statements,
-				);
-
-				const appliedAtMs = nowMs();
-				const resultJson = stringifyJsonValue(result);
-
-				await tx.execute({
-					sql: `
-						UPDATE Applied_Operations
-						SET
-						  Status = 'APPLIED',
-						  Result_Json = ?3,
-						  Error_Text = NULL,
-						  Applied_At_Ms = ?4,
-						  Updated_At_Ms = ?5
-						WHERE Op_Id = ?1
-						  AND Command_Name = ?2;
-					`,
-					args: [op, command, resultJson, appliedAtMs, appliedAtMs],
-				});
-
-				// Log ordenado de cambios para que la Main los aplique a su SQLite local
-				// (Opción 3: sentencias ya resueltas). Va en la MISMA transacción que la
-				// escritura, así el cambio se registra si y solo si se aplicó. El `Seq`
-				// autoincremental es el cursor del catch-up al reconectar. La tabla se garantiza
-				// al resolver la conexión (probeTenantDb), no aquí, para ahorrar un round trip.
-				const seqRes = await tx.execute({
-					sql: `
-						INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms)
-						VALUES (?1, ?2, ?3, ?4, ?5);
-					`,
-					args: [
-						op,
-						command,
-						stableStringify(statements),
-						deviceId || null,
-						appliedAtMs,
-					],
-				});
-				const seq = Number(seqRes?.lastInsertRowid ?? 0);
-
-				await tx.commit();
-
-				// Tras confirmar en Turso, propagamos el cambio (payload + resultado)
-				// al resto de dispositivos autenticados. El originador queda excluido
-				// (ya tiene su resultado por el 200 REST o el apply_ack del WS). Nadie
-				// hace refetch: la Main aplica el payload directo a su SQLite local.
-				this.broadcastChange(
-					{
-						command,
-						opId: op,
-						deviceId: deviceId || null,
-						payloadJson: cloudPayloadJson,
-						result,
-						seq,
-						statements,
-					},
-					deviceId || undefined,
-				);
-
-				return { result, seq };
-			} catch (e) {
-				try {
-					await tx.rollback();
-				} catch { }
 				throw e;
 			}
+
+			const seq = Number(batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0);
+			const result = built.resolveResult(batchResults, MIDDLE_OFFSET);
+
+			// Tras confirmar en Turso, propagamos el cambio (payload + resultado) al resto de
+			// dispositivos autenticados. El originador queda excluido. La Main aplica el payload
+			// directo a su SQLite local (no hay refetch).
+			this.broadcastChange(
+				{
+					command,
+					opId: op,
+					deviceId: deviceId || null,
+					payloadJson: cloudPayloadJson,
+					result,
+					seq,
+					statements: built.replicated,
+				},
+				deviceId || undefined,
+			);
+
+			return { result, seq };
 		});
+	}
+
+	// Aplana un InternalApplyCommand a las piezas del batch atómico:
+	//  - middle:     sentencias a EJECUTAR en orden (execute + lecturas row/rows).
+	//  - replicated: solo las escrituras (execute), con args ya literales, que se capturan para
+	//                que la Main las aplique a su SQLite local (formato idéntico al de hoy).
+	//  - resolveResult(batchResults, offset): el resultado real tras ejecutar (lee rowsAffected /
+	//                filas del array de resultados del batch).
+	//  - storageResult: best-effort en build-time (literales sí; lo derivado de la DB → null)
+	//                para el Result_Json cacheado, que solo se devuelve en el reintento idempotente
+	//                (path que únicamente alcanza la Main por reenvío WS, y solo usa el `seq`).
+	//
+	// Los `value` (SELECT ?1 / constante / 'pref' || ?N) se evalúan en JS (sin round trip). Los IDs
+	// son UUID de JS y `now()` ya se resolvió a literal, así que ningún paso necesita leer la DB
+	// para alimentar un write posterior (las lecturas row/rows son solo de retorno).
+	private buildApplyBatch(cmd: InternalApplyCommand): {
+		middle: ResolvedStmt[];
+		replicated: ResolvedStmt[];
+		resolveResult: (batchResults: any[], offset: number) => any;
+		storageResult: any;
+	} {
+		if (cmd.type === "tenantDb.exec") {
+			const stmt: ResolvedStmt = {
+				sql: normalizeSql(cmd.payload.sql),
+				args: resolveSqlArgs(cmd.payload.args, {}),
+			};
+			return {
+				middle: [stmt],
+				replicated: [stmt],
+				resolveResult: (res, off) => Number(res?.[off]?.rowsAffected ?? 0),
+				storageResult: null,
+			};
+		}
+
+		if (cmd.type === "tenantDb.transaction") {
+			const steps = Array.isArray(cmd.payload.steps) ? cmd.payload.steps : [];
+			if (!steps.length) throw new Error("missing_transaction_steps");
+			const resultKey = cmd.payload.resultKey;
+
+			const bag: Record<string, any> = {};          // literales de pasos `value` (para $ref)
+			const middle: ResolvedStmt[] = [];
+			const replicated: ResolvedStmt[] = [];
+			const literalResults: Record<string, SqlScalar> = {};
+			const rowsAffectedAt: Record<string, number> = {};               // saveAs -> idx en middle
+			const rowReadAt: Record<string, { idx: number; many: boolean }> = {};
+
+			for (const step of steps) {
+				if (!step || typeof step !== "object") throw new Error("invalid_transaction_step");
+
+				if (step.kind === "value") {
+					const v = evalValueStep(step.sql, resolveSqlArgs(step.args, bag));
+					bag[step.saveAs] = v;
+					literalResults[step.saveAs] = v;
+					continue;
+				}
+
+				if (step.kind === "execute") {
+					const stmt: ResolvedStmt = {
+						sql: normalizeSql(step.sql),
+						args: resolveSqlArgs(step.args, bag),
+					};
+					middle.push(stmt);
+					replicated.push(stmt);
+					if (step.saveAs) rowsAffectedAt[step.saveAs] = middle.length - 1;
+					continue;
+				}
+
+				if (step.kind === "row" || step.kind === "rows") {
+					// Lectura: se ejecuta en el batch pero NO se replica (no es escritura). Su
+					// resultado solo se devuelve (resultKey); nunca alimenta un write posterior.
+					middle.push({
+						sql: normalizeSql(step.sql),
+						args: resolveSqlArgs(step.args, bag),
+					});
+					rowReadAt[step.saveAs] = { idx: middle.length - 1, many: step.kind === "rows" };
+					continue;
+				}
+
+				throw new Error(`batch_unsupported_step_kind:${(step as any).kind}`);
+			}
+
+			const lookup = (name: string, res: any[] | null, offset: number): any => {
+				if (name in literalResults) return literalResults[name];
+				if (name in rowsAffectedAt) {
+					return res ? Number(res[offset + rowsAffectedAt[name]]?.rowsAffected ?? 0) : null;
+				}
+				if (name in rowReadAt) {
+					if (!res) return null;
+					const r = res[offset + rowReadAt[name].idx];
+					return rowReadAt[name].many ? allRowsFromResult(r) : firstRowFromResult(r);
+				}
+				return null;
+			};
+
+			const compute = (res: any[] | null, offset: number): any => {
+				if (resultKey) return lookup(resultKey, res, offset);
+				// Sin resultKey: el resultado es el bag completo de nombres conocidos (como hoy).
+				const out: Record<string, any> = {};
+				for (const k of Object.keys(literalResults)) out[k] = literalResults[k];
+				for (const k of Object.keys(rowsAffectedAt)) out[k] = lookup(k, res, offset);
+				for (const k of Object.keys(rowReadAt)) out[k] = lookup(k, res, offset);
+				return out;
+			};
+
+			return {
+				middle,
+				replicated,
+				resolveResult: (res, offset) => compute(res, offset),
+				storageResult: compute(null, 0),
+			};
+		}
+
+		throw new Error(`batch_unsupported_command_type:${(cmd as any).type}`);
+	}
+
+	// Reintento idempotente: la op ya existe (violación UNIQUE en el gate). Recuperamos el
+	// resultado cacheado y el `seq` del log, validando que no haya mismatch de comando/payload.
+	private async recoverAppliedOp(
+		db: any,
+		op: string,
+		command: string,
+		requestHash: string,
+	): Promise<{ result: any; seq: number }> {
+		const r = await db.execute({
+			sql: `SELECT Command_Name AS command_name, Request_Hash AS request_hash, Result_Json AS result_json FROM Applied_Operations WHERE Op_Id = ?1 LIMIT 1;`,
+			args: [op],
+		});
+		const row = r.rows?.[0] as any | undefined;
+		if (!row) throw new Error("idempotency_operation_processing");
+		if (String(row.command_name || "") !== command) throw new Error("idempotency_command_mismatch");
+		if (String(row.request_hash || "") !== requestHash) throw new Error("idempotency_payload_mismatch");
+		const result = safeJsonParse(String(row.result_json ?? "null"));
+		const seq = await this.lookupChangeSeq(db, op);
+		return { result, seq };
 	}
 
 	// Recupera el `Seq` que el log de cambios asignó a una op ya aplicada (reintentos
