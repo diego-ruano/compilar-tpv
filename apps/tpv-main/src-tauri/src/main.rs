@@ -12,7 +12,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
 use tpv_application::use_cases::pairing as uc_pairing;
@@ -523,6 +523,15 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     .await
     .map_err(String::from)?;
 
+    // Drenado inmediato: cada escritura local que confirma en el outbox emite este evento; el
+    // WS (useMainSocket) lo escucha y drena la nube al instante (sin esperar al poll de seguridad).
+    {
+        let h = app.clone();
+        db.set_outbox_notifier(move || {
+            let _ = h.emit("outbox:pending", ());
+        });
+    }
+
     let mut guard = state.db.lock().await;
     *guard = Some(db);
 
@@ -895,6 +904,11 @@ pub fn run() {
                     )
                     .await
                     .expect("Error init_main_db")
+                });
+                // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
+                let h = handle.clone();
+                db.set_outbox_notifier(move || {
+                    let _ = h.emit("outbox:pending", ());
                 });
                 Some(db)
             } else {

@@ -15,6 +15,7 @@
 
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import { useConnectionMode } from "../stores/useConnectionMode";
 import { useMode } from "../stores/useMode";
@@ -28,7 +29,10 @@ const RECONNECT_MS = 3000;
 const PING_MS = 30000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
-const DRAIN_INTERVAL_MS = 4000;
+// Red de seguridad: el drenado inmediato lo dispara el evento Tauri `outbox:pending` (emitido por
+// Rust al confirmar cada escritura local). Este poll solo cubre reintentos de ops que fallaron al
+// subir y el arranque; por eso puede ser holgado (no es el camino de latencia normal).
+const DRAIN_INTERVAL_MS = 3000;
 
 type ChangeArg = { op_id: string; seq: number; statements: unknown[] };
 type OutboxEntry = {
@@ -89,6 +93,7 @@ export function useMainSocket() {
 		let ws: WebSocket | null = null;
 		let retryTimer: number | null = null;
 		let pingTimer: number | null = null;
+		let unlistenOutbox: (() => void) | null = null;
 
 		// Estado de aplicación (compartido entre reconexiones dentro de este efecto).
 		let caughtUp = false;
@@ -389,9 +394,20 @@ export function useMainSocket() {
 
 		void open();
 
+		// Drenado inmediato dirigido por evento: Rust emite `outbox:pending` al confirmar cada
+		// escritura local. Drenamos al instante (sin esperar al poll de seguridad). `drainOutbox`
+		// ya es no-op si no hay socket abierto/autenticado o si ya hay un drenado en curso.
+		void listen("outbox:pending", () => {
+			if (!cancelled && ws) void drainOutbox(ws);
+		}).then((un) => {
+			if (cancelled) un();
+			else unlistenOutbox = un;
+		});
+
 		return () => {
 			cancelled = true;
 			authed = false;
+			if (unlistenOutbox) unlistenOutbox();
 			if (retryTimer) clearTimeout(retryTimer);
 			if (pingTimer) clearInterval(pingTimer);
 			if (drainTimer) clearInterval(drainTimer);

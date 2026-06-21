@@ -19,7 +19,7 @@
 //! genéricos y los cuerpos de los métodos apenas cambian.
 
 use std::future::Future;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use libsql::{Builder, Connection, Database, Error as LibsqlError, Rows, Value};
 use serde_json::json;
@@ -296,6 +296,11 @@ struct WriteConn {
     lock: Mutex<()>,
 }
 
+/// Callback que el shell Tauri inyecta para avisar de que hay una operación nueva en el outbox
+/// (escritura local confirmada). Permite drenar la nube AL INSTANTE en vez de esperar al poll.
+/// Se mantiene fuera del crate (no hay dependencia de Tauri aquí): el shell pasa el cierre.
+type OutboxNotify = Arc<OnceLock<Box<dyn Fn() + Send + Sync>>>;
+
 /// Acceso EXCLUSIVO a la conexión de escritura, retenido durante toda una operación/transacción.
 /// Implementa `Writer` (y `Reader`): los repos lo usan igual que la antigua `Connection`.
 pub struct WriteGuard<'a> {
@@ -303,6 +308,8 @@ pub struct WriteGuard<'a> {
     /// Buffer de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK). Es LOCAL a este
     /// guard (solo hay uno vivo), así que no hay estado global compartido ni carreras.
     tx_buf: Mutex<Option<Vec<SqlStatement>>>,
+    /// Notificador del outbox (ver `OutboxNotify`). Se dispara tras confirmar la operación.
+    outbox_notify: OutboxNotify,
     _lock: tokio::sync::MutexGuard<'a, ()>,
 }
 
@@ -311,6 +318,13 @@ impl<'a> WriteGuard<'a> {
     /// cambios remotos sin re-encolarlos en el outbox, manteniendo igualmente la exclusión.
     pub fn raw(&self) -> &Arc<Connection> {
         self.conn
+    }
+
+    /// Avisa (si hay notificador inyectado) de que el outbox tiene una operación nueva confirmada.
+    fn fire_outbox_notify(&self) {
+        if let Some(cb) = self.outbox_notify.get() {
+            cb();
+        }
     }
 
     async fn capture_write(&self, sql: &str, values: &[Value]) -> Result<(), LibsqlError> {
@@ -330,7 +344,10 @@ impl<'a> WriteGuard<'a> {
             None => {
                 // Escritura suelta (autocommit): operación de una sola sentencia.
                 drop(buf);
-                write_op(self.conn, std::slice::from_ref(&stmt)).await
+                write_op(self.conn, std::slice::from_ref(&stmt)).await?;
+                // Outbox confirmado (autocommit): drenar la nube ya.
+                self.fire_outbox_notify();
+                Ok(())
             }
         }
     }
@@ -374,6 +391,7 @@ impl<'a> Writer for WriteGuard<'a> {
                 }
                 BatchKind::Commit => {
                     let buffered = self.tx_buf.lock().await.take();
+                    let had_writes = buffered.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
                     // Registrar la operación en el outbox DENTRO de la misma transacción (BEGIN
                     // ya enviado, COMMIT no aún). La captura es incondicional: el outbox acumula
                     // también en offline y se drena al activar online.
@@ -384,7 +402,14 @@ impl<'a> Writer for WriteGuard<'a> {
                         }
                     }
                     match pre {
-                        Ok(()) => self.conn.execute_batch(&sql).await,
+                        Ok(()) => {
+                            let r = self.conn.execute_batch(&sql).await;
+                            // Solo tras confirmar el COMMIT y si hubo escrituras: drenar la nube ya.
+                            if r.is_ok() && had_writes {
+                                self.fire_outbox_notify();
+                            }
+                            r
+                        }
                         Err(e) => {
                             // No se pudo registrar el outbox: abortar para no confirmar a medias.
                             let _ = self.conn.execute_batch("ROLLBACK;").await;
@@ -410,6 +435,9 @@ impl<'a> Writer for WriteGuard<'a> {
 pub struct Db {
     write: WriteConn,
     reads: Arc<ReadPool>,
+    /// Notificador del outbox (lo inyecta el shell con `set_outbox_notifier`). Compartido (Arc)
+    /// con cada `WriteGuard` para dispararlo tras confirmar una operación.
+    outbox_notify: OutboxNotify,
     /// Mantiene viva la `Database` mientras existan conexiones derivadas.
     _database: Database,
 }
@@ -441,8 +469,16 @@ impl Db {
                 lock: Mutex::new(()),
             },
             reads: Arc::new(ReadPool::new(read_conns)),
+            outbox_notify: Arc::new(OnceLock::new()),
             _database: database,
         }))
+    }
+
+    /// Inyecta (una vez) el callback que se dispara cuando una escritura local confirma una
+    /// operación en el outbox. El shell Tauri lo usa para emitir un evento y drenar la nube al
+    /// instante. Idempotente: una segunda llamada se ignora.
+    pub fn set_outbox_notifier(&self, cb: impl Fn() + Send + Sync + 'static) {
+        let _ = self.outbox_notify.set(Box::new(cb));
     }
 
     /// Presta una conexión de solo-lectura del pool (espera si están todas en uso).
@@ -467,6 +503,7 @@ impl Db {
         WriteGuard {
             conn: &self.write.conn,
             tx_buf: Mutex::new(None),
+            outbox_notify: self.outbox_notify.clone(),
             _lock: lock,
         }
     }
