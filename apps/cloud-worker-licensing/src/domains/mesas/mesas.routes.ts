@@ -141,14 +141,7 @@ mesasRoutes.get("/comandas/:id/lineas", async (c) => {
 mesasRoutes.post("/lineas", async (c) => {
 	const p = await parseBody(c, S.addLineaSchema);
 	if (!p.ok) return p.res;
-	const info = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-		const [idTrabajador, pasaCocina] = await Promise.all([
-			q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
-			q.productoPasaCocina(db, p.data.id_producto),
-		]);
-		return { idTrabajador, pasaCocina };
-	});
-	await apply(c, cmd.addLinea(p.data, info.idTrabajador, info.pasaCocina));
+	await apply(c, cmd.addLinea(p.data));
 	const lineas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.lineas(db, p.data.id_comanda),
 	);

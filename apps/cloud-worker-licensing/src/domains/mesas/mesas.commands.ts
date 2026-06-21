@@ -362,31 +362,40 @@ export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 	};
 }
 
-export function addLinea(
-	input: AddLineaInput,
-	idTrabajador: string | null,
-	pasaCocina: boolean,
-): BuiltCommand {
+export function addLinea(input: AddLineaInput): BuiltCommand {
 	const steps: any[] = [];
-	if (idTrabajador) {
+
+	// Resolución de trabajador embebida en la propia UPDATE para evitar un round-trip
+	// previo a Turso. El EXISTS garantiza que solo se actualiza si hay match real.
+	if (input.id_trabajador_o_usuario) {
 		steps.push({
 			kind: "execute",
 			sql: `
 				UPDATE Comandas
-				SET ID_Trabajador = ?2
+				SET ID_Trabajador = COALESCE(
+					(SELECT ID_Trabajador FROM Trabajadores WHERE ID_Trabajador = ?2 LIMIT 1),
+					(SELECT ID_Trabajador FROM Trabajadores WHERE ID_Usuario = ?2 LIMIT 1)
+				)
 				WHERE ID_Comanda = ?1
 					AND Estado = 'Abierta'
-					AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
+					AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0)
+					AND EXISTS (
+						SELECT 1 FROM Trabajadores
+						WHERE ID_Trabajador = ?2 OR ID_Usuario = ?2
+					);
 			`,
-			args: [input.id_comanda, idTrabajador],
+			args: [input.id_comanda, input.id_trabajador_o_usuario],
 		});
 	}
+
 	steps.push({
 		kind: "value",
 		saveAs: "id_detalle",
 		sql: "SELECT ?1;",
 		args: [crypto.randomUUID()],
 	});
+
+	// Estado_Cocina resuelto como subquery dentro del INSERT, sin pre-query separada.
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -398,23 +407,24 @@ export function addLinea(
 				Precio_Unitario,
 				Estado_Cocina
 			)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+			VALUES (
+				?1, ?2, ?3, ?4, ?5,
+				(SELECT CASE WHEN COALESCE(cat.Pasa_Cocina, 0) = 1 THEN 'PENDIENTE' ELSE NULL END
+				 FROM Productos p
+				 JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
+				 WHERE p.ID_Producto = ?3
+				 LIMIT 1)
+			);
 		`,
-		args: [
-			REF_ID_DETALLE,
-			input.id_comanda,
-			input.id_producto,
-			input.cantidad,
-			input.precio,
-			pasaCocina ? "PENDIENTE" : null,
-		],
+		args: [REF_ID_DETALLE, input.id_comanda, input.id_producto, input.cantidad, input.precio],
 	});
+
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });
 
 	return {
 		commandName: "add_linea_comanda",
 		command: { type: "tenantDb.transaction", payload: { steps } },
-		cloudPayload: { ...input, id_trabajador: idTrabajador, pasa_cocina: pasaCocina },
+		cloudPayload: { ...input },
 	};
 }
 
