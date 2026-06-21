@@ -568,14 +568,9 @@ export default function MesaComandaModal({
 
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
-        setLoadingTicket(true);
-        try {
-            const t = await loadTicketForComanda(idComanda);
-            setTicket(t);
-            notifyChanged();
-        } finally {
-            setLoadingTicket(false);
-        }
+        const t = await loadTicketForComanda(idComanda);
+        setTicket(t);
+        notifyChanged();
     }, [idComanda, notifyChanged]);
 
     // Sincronización nube → Main: si llega un cambio por WebSocket mientras la comanda está
