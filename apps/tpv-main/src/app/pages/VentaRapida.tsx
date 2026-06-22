@@ -1217,14 +1217,7 @@ export default function VentaRapida() {
         success = true;
         emitVrChanged();
       } catch (e) {
-        console.error("[VR] add_linea_comanda FAILED", {
-          idComanda,
-          idProducto,
-          precio,
-          idComandaActivaRef: idComandaActivaRef.current,
-          error: String(e),
-          errorRaw: e,
-        });
+        console.error(e);
 
         if (!cancelledAddTempIdsRef.current.has(tempId)) {
           removeTicketItemLocal(tempId);

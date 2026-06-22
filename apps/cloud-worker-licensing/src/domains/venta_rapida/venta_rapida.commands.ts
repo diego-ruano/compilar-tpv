@@ -157,6 +157,27 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 							args: [crypto.randomUUID()],
 					},
 					{
+						// Garantía idempotente: la comanda de barra es efímera hasta que tiene
+						// líneas, así que un create(get_or_create=false) concurrente (nuevo ticket
+						// o bootstrap de otro dispositivo) puede haberla barrido por "vacía" justo
+						// antes de este add. Con defer_foreign_keys ON, re-crearla aquí en la misma
+						// transacción evita el FK constraint failed en Detalle_Comanda.ID_Comanda.
+						kind: "execute",
+						sql: `
+							INSERT INTO Comandas (
+								ID_Comanda,
+								Fecha_Hora_Apertura,
+								Estado,
+								Total_Comanda,
+								ID_Trabajador,
+								ID_Mesa
+							)
+							VALUES (?1, datetime('now','localtime'), 'Abierta', 0, NULL, ?2)
+							ON CONFLICT(ID_Comanda) DO NOTHING;
+						`,
+						args: [input.id_comanda, BARRA_MESA_ID],
+					},
+					{
 						kind: "execute",
 						sql: `
 							INSERT INTO Detalle_Comanda (
