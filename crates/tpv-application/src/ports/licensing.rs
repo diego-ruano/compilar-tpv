@@ -68,4 +68,9 @@ pub trait PairingService: Send + Sync {
 
     /// Borra una imagen del bucket R2 (DELETE firmado). `path` igual que en `upload_image`.
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()>;
+
+    /// Descarga los bytes de una imagen desde R2 (POST firmado a `/v1/images/download`). El
+    /// tenant lo deriva el worker del token; `rel_path` es la ruta relativa de BD
+    /// (`images/{subcarpeta}/{archivo}`). Devuelve `None` si el objeto aún no existe (404).
+    async fn download_image(&self, mode: &str, rel_path: &str) -> AppResult<Option<Vec<u8>>>;
 }

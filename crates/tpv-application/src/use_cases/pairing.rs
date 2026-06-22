@@ -108,3 +108,15 @@ pub async fn delete_image(svc: &dyn PairingService, mode: &str, path: &str) -> A
     let path = normalize_path(path)?;
     svc.delete_image(&mode, &path).await
 }
+
+/// Descarga los bytes de una imagen de R2 (R2 → Main). `mode` = `tpv`|`handy`; `rel_path` es la
+/// ruta relativa de BD (`images/{subcarpeta}/{archivo}`). Devuelve `None` si aún no existe (404).
+pub async fn download_image(
+    svc: &dyn PairingService,
+    mode: &str,
+    rel_path: &str,
+) -> AppResult<Option<Vec<u8>>> {
+    let mode = normalize_mode(mode)?;
+    let rel_path = requerido(rel_path, "rel_path")?;
+    svc.download_image(&mode, &rel_path).await
+}

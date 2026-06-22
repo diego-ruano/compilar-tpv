@@ -61,7 +61,12 @@ export default function ImageWithFallback({
 
   const handleError = () => {
     if (attempt < retries) {
-      window.setTimeout(() => setAttempt((a) => a + 1), retryDelayMs);
+      // El primer reintento es casi inmediato: en el Handy la imagen suele estar en R2/edge a
+      // los pocos cientos de ms (un 404 inicial es por propagación, no por ausencia real). Así
+      // se evita el efecto "placeholder hasta que navego y vuelvo". Los siguientes reintentos sí
+      // espacian (retryDelayMs) para no martillear cuando la imagen tarda de verdad.
+      const delay = attempt === 0 ? 400 : retryDelayMs;
+      window.setTimeout(() => setAttempt((a) => a + 1), delay);
     } else {
       setFailed(true);
     }

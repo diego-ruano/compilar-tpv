@@ -62,7 +62,15 @@ export async function resolveImageUrl(
     return `${CDN_IMAGES_BASE}/${tenant}/${r}`;
   }
 
-  // Main: fichero local en AppData.
+  // Main: fichero local en AppData. Si falta (imagen creada en otra Handy: la fila llegó por
+  // sync, pero el binario solo vive en R2), se baja de R2 a disco de forma perezosa. Es
+  // best-effort: si no se puede (offline / aún no subida), seguimos y el <img> hará fallback.
+  try {
+    await invoke<boolean>("images_ensure_local", { args: { rel_path: r } });
+  } catch {
+    /* ignorado: el UI degrada al placeholder y reintenta en la próxima recarga */
+  }
+
   const baseDir = await appDataDir();
   return convertFileSrc(await join(baseDir, r));
 }

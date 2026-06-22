@@ -119,6 +119,32 @@ imagesRoutes.put("/*", tenantAuth, async (c) => {
 	return c.json({ ok: true, key });
 });
 
+// ───────────────── DESCARGA (firmada, R2 → Main) ─────────────────
+//
+// La Main sirve las imágenes desde su disco local, así que necesita BAJAR de R2 las que se
+// crearon en otra Handy (cuya fila ya le llegó por sync, pero cuyo binario solo vive en R2).
+// Es un POST firmado (no el GET público): el tenant sale del token, no del path, así la Main
+// no necesita conocer su propio tenant. El `rel_path` viaja en el cuerpo.
+imagesRoutes.post("/download", tenantAuth, async (c) => {
+	const body = await c.req.json().catch(() => null);
+	const relPath = String(body?.rel_path ?? "").trim();
+	if (!REL_PATH_RE.test(relPath)) {
+		return c.json({ error: "bad_image_path" }, 400);
+	}
+
+	const key = `${c.get("tenantId")}/${relPath}`;
+	const obj = await c.env.IMAGES.get(key);
+	if (!obj) {
+		// 404: el binario aún no se ha subido (la subida va por otro canal). La Main reintenta.
+		return c.json({ error: "not_found" }, 404);
+	}
+
+	const headers = new Headers();
+	headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
+	if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
+	return new Response(obj.body, { headers });
+});
+
 imagesRoutes.delete("/*", tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
 	if (!REL_PATH_RE.test(relPath)) {

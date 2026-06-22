@@ -685,6 +685,45 @@ impl PairingService for PairingAdapter {
             status, text
         )))
     }
+
+    async fn download_image(&self, mode: &str, rel_path: &str) -> AppResult<Option<Vec<u8>>> {
+        // POST firmado a `/v1/images/download`. El tenant lo deriva el worker del token, así que
+        // la Main no necesita conocerlo; `rel_path` viaja en el cuerpo (no entra en la firma, que
+        // es sobre método+path). 404 → None (el binario aún no está en R2).
+        let path = "/v1/images/download";
+        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let signed = self.signed_headers_inner(mode, "POST", path)?;
+        let client = http_client()?;
+
+        let resp = client
+            .post(&url)
+            .header(AUTHORIZATION, signed.authorization)
+            .header("x-device-ts", signed.x_device_ts)
+            .header("x-device-sig", signed.x_device_sig)
+            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
+            .json(&serde_json::json!({ "rel_path": rel_path }))
+            .send()
+            .await
+            .map_err(|e| ext(format!("image_download_send_failed:{e}")))?;
+
+        let status = resp.status().as_u16();
+        if status == 404 {
+            return Ok(None);
+        }
+        if !(200..300).contains(&status) {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(AppError::external(format!(
+                "image_download_http_{}: {}",
+                status, text
+            )));
+        }
+
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ext(format!("image_download_body_failed:{e}")))?;
+        Ok(Some(bytes.to_vec()))
+    }
 }
 
 #[async_trait]

@@ -103,6 +103,12 @@ struct DeleteImageArgs {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct EnsureImageArgs {
+    /// Ruta relativa tal cual se guarda en BD: `images/{subcarpeta}/{archivo}`.
+    rel_path: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct SetPrinterArgs {
     name: String,
 }
@@ -734,6 +740,59 @@ async fn images_delete(
     Ok("OK".into())
 }
 
+/// Garantiza que la imagen `rel_path` exista en el disco local, bajándola de R2 si falta
+/// (camino R2 → Main). La Main sirve las imágenes desde disco, pero las creadas en otra Handy
+/// solo viven en R2: su fila llega por sync, pero el binario no. Este comando lo resuelve de
+/// forma perezosa y auto-curativa: lo llama el frontend al resolver la URL de una imagen.
+///
+/// Devuelve `true` si tras la llamada el fichero está en local (ya estaba o se bajó), `false`
+/// si no se pudo (sin modo, aún no está en R2, u offline). Nunca es un error "duro": el UI
+/// degrada al placeholder y reintenta en la siguiente recarga.
+#[tauri::command]
+async fn images_ensure_local(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: EnsureImageArgs,
+) -> Result<bool, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let rel_path = normalize_required(&args.rel_path, "rel_path")?;
+    if !is_safe_image_rel_path(&rel_path) {
+        return Err("rel_path inválido".into());
+    }
+
+    let file_path = app_data_dir.join(&rel_path);
+    if file_path.exists() {
+        return Ok(true);
+    }
+
+    let Some(mode_str) = signing_mode(*state.mode.lock().await) else {
+        return Ok(false);
+    };
+
+    let svc = PairingAdapter::new(app_data_dir.clone());
+    match uc_pairing::download_image(&svc, mode_str, &rel_path).await {
+        Ok(Some(bytes)) => {
+            if let Some(parent) = file_path.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|e| format!("Error creando carpeta {:?}: {e}", parent))?;
+            }
+            fs::write(&file_path, bytes)
+                .map_err(|e| format!("Error escribiendo {:?}: {e}", file_path))?;
+            Ok(true)
+        }
+        // Aún no está en R2 (404) o falló la red: no es un error duro, el UI reintentará.
+        Ok(None) => Ok(false),
+        Err(e) => {
+            eprintln!("[images_ensure_local] fallo bajando '{}': {e:?}", rel_path);
+            Ok(false)
+        }
+    }
+}
+
 /// Backfill único: encola todas las imágenes existentes en disco que aún no estén en el bucket.
 /// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
 /// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
@@ -945,6 +1004,7 @@ pub fn run() {
             save_image,
             images_drain_pending,
             images_delete,
+            images_ensure_local,
             images_backfill,
             get_app_data_path,
             // impresión (host/Windows — printing.rs)
