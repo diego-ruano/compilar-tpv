@@ -6,7 +6,7 @@
 //  - Los hooks envuelven las funciones de `inventarioAPI` sin tocar su firma.
 //
 // Nota: las lecturas de categorías/productos resuelven además la URL de imagen
-// (fileUrlFromAppData) DENTRO del queryFn, de modo que la caché ya guarda las filas
+// (resolveImageUrl) DENTRO del queryFn, de modo que la caché ya guarda las filas
 // "display" listas para pintar (mismo comportamiento que tenía `useInventario`).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
