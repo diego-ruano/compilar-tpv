@@ -23,7 +23,7 @@ export default function ProveedorCard({
 		>
 			<div className="rounded-2xl border border-border bg-surface p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
 				{/* IMAGEN */}
-				<div className="flex h-16 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
+				<div className="flex h-20 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
 					<ImageWithFallback
 						src={proveedor.urlImagen}
 						alt={proveedor.Nombre_Empresa}
@@ -39,24 +39,24 @@ export default function ProveedorCard({
 					/>
 				</div>
 
-				{/* NOMBRE */}
-				<h5 className="mt-2 mb-0 truncate text-base font-semibold tracking-tight text-fg">
-					{proveedor.Nombre_Empresa}
-				</h5>
+				{/* NOMBRE + VER DETALLE */}
+				<div className="mt-2 flex items-center justify-between gap-1">
+					<h5 className="min-w-0 truncate text-base font-semibold tracking-tight text-fg">
+						{proveedor.Nombre_Empresa}
+					</h5>
+					<div className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-fg-muted transition group-hover:text-accent">
+						<span>Ver detalle</span>
+						<ArrowRight
+							className="size-3.5 transition group-hover:translate-x-0.5"
+							aria-hidden
+						/>
+					</div>
+				</div>
 
 				{/* EMAIL */}
 				<p className="truncate text-xs text-fg-muted">
 					{proveedor.Email ?? "Sin email"}
 				</p>
-
-				{/* CTA */}
-				<div className="mt-2 flex items-center gap-1 text-xs font-medium text-fg-muted transition group-hover:text-accent">
-					<span>Ver detalle</span>
-					<ArrowRight
-						className="size-3.5 transition group-hover:translate-x-0.5"
-						aria-hidden
-					/>
-				</div>
 			</div>
 		</button>
 	);

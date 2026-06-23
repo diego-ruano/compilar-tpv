@@ -260,9 +260,7 @@ export async function proveedoresSetVinculos(params: {
     const r = await invokeClient<any>("proveedores_set_vinculos", {
         args: {
             id_proveedor: params.idProveedor,
-            producto_ids: (params.productoIds ?? [])
-                .map(Number)
-                .filter((n) => Number.isFinite(n) && n > 0),
+            producto_ids: params.productoIds ?? [],
         },
     });
     return typeof r === "boolean" ? r : true;
@@ -270,8 +268,8 @@ export async function proveedoresSetVinculos(params: {
 
 export async function proveedoresCreateProducto(
     input: ProductoCreateInput,
-): Promise<number> {
-    const r = await invokeClient<any>("proveedores_create_producto", {
+): Promise<string> {
+    return invokeClient<string>("proveedores_create_producto", {
         args: {
             id_categoria: input.idCategoria,
             id_proveedor: input.idProveedor,
@@ -282,5 +280,4 @@ export async function proveedoresCreateProducto(
             unidad_medida: input.unidadMedida ?? null,
         },
     });
-    return resolveReturnedId(r, ["id_producto", "idProducto", "ID_Producto"]);
 }
