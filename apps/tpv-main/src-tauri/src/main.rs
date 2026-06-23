@@ -21,7 +21,8 @@ use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
-    mesas::MesasRepository, proveedores::ProveedoresRepository, reservas::ReservasRepository,
+    mesas::MesasRepository, pedidos_proveedor::PedidoProveedorRepository,
+    proveedores::ProveedoresRepository, reservas::ReservasRepository,
     stats::StatsRepository, sync::SyncRepository, tareas::TareasRepository,
     trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
 };
@@ -38,9 +39,10 @@ use tpv_infra_sqlite::{
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
-    proveedores::SqliteProveedoresRepository, reservas::SqliteReservasRepository,
-    stats::SqliteStatsRepository, sync::SqliteSyncRepository, tareas::SqliteTareasRepository,
-    trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
+    pedidos_proveedor::SqlitePedidoProveedorRepository, proveedores::SqliteProveedoresRepository,
+    reservas::SqliteReservasRepository, stats::SqliteStatsRepository, sync::SqliteSyncRepository,
+    tareas::SqliteTareasRepository, trabajadores::SqliteTrabajadoresRepository,
+    venta_rapida::SqliteVentaRapidaRepository,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -396,9 +398,21 @@ impl AppState {
             .as_ref()
             .cloned()
             .ok_or_else(|| "DB no inicializada (sync requiere modo Main)".to_string())?;
-        // El aplicador aplica los cambios remotos sobre la conexión de escritura exclusiva del
-        // `Db` (serializado con los repos, sin re-capturar en el outbox).
         Ok(Arc::new(SqliteSyncRepository::new(conn)) as Arc<dyn SyncRepository>)
+    }
+
+    /// Pedidos a proveedores: Local-First, solo disponible en modo Main (SQLite).
+    pub(crate) async fn pedidos_proveedor_repo(
+        &self,
+    ) -> Result<Arc<dyn PedidoProveedorRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (pedidos requieren modo Main)".to_string())?;
+        Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn)) as Arc<dyn PedidoProveedorRepository>)
     }
 }
 
@@ -1117,6 +1131,11 @@ pub fn run() {
             commands::proveedores::proveedores_get_productos_all,
             commands::proveedores::proveedores_set_vinculos,
             commands::proveedores::proveedores_create_producto,
+            // pedidos a proveedores (Local-First, modo Main)
+            commands::pedidos_proveedor::pedidos_proveedor_get_all,
+            commands::pedidos_proveedor::pedidos_proveedor_crear,
+            commands::pedidos_proveedor::pedidos_proveedor_actualizar,
+            commands::pedidos_proveedor::pedidos_proveedor_cambiar_estado,
             // venta rápida
             commands::venta_rapida::vr_list_categorias_vendibles,
             commands::venta_rapida::vr_list_productos_by_categoria,

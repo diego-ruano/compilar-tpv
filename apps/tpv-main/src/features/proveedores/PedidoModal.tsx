@@ -13,6 +13,7 @@ type Props = {
   onSave: (pedido: PedidoRow) => void;
   onCancelarPedido: (pedidoId: string) => void;
   onMandarPedido: (pedido: PedidoRow) => void;
+  isBusy?: boolean;
 };
 
 const ESTADO_LABEL: Record<PedidoEstado, string> = {
@@ -35,6 +36,7 @@ export default function PedidoModal({
   onSave,
   onCancelarPedido,
   onMandarPedido,
+  isBusy = false,
 }: Props) {
   const [idProveedor, setIdProveedor] = useState("");
   const [emailDestino, setEmailDestino] = useState("");
@@ -264,7 +266,8 @@ export default function PedidoModal({
             <button
               type="button"
               onClick={() => onCancelarPedido(pedido.id)}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger transition hover:opacity-90"
+              disabled={isBusy}
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger transition hover:opacity-90 disabled:opacity-50"
             >
               <XCircle className="size-4" />
               Cancelar pedido
@@ -286,18 +289,20 @@ export default function PedidoModal({
               <button
                 type="button"
                 onClick={() => onSave(buildPedido())}
-                className="cursor-pointer rounded-xl border border-border bg-surface-2 px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
+                disabled={isBusy}
+                className="cursor-pointer rounded-xl border border-border bg-surface-2 px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 disabled:opacity-50"
               >
-                Guardar
+                {isBusy ? "Guardando…" : "Guardar"}
               </button>
 
               <button
                 type="button"
                 onClick={() => onMandarPedido(buildPedido())}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                disabled={isBusy}
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:opacity-50"
               >
                 <Send className="size-4" />
-                Mandar pedido
+                {isBusy ? "Enviando…" : "Mandar pedido"}
               </button>
             </>
           )}

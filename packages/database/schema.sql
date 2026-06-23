@@ -182,6 +182,34 @@ ON Lotes_Producto(ID_Producto, Stock_Disponible);
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_entrada
 ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 
+CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
+  ID_Pedido TEXT PRIMARY KEY,
+  ID_Proveedor TEXT,
+  Email_Destino TEXT,
+  Estado TEXT NOT NULL DEFAULT 'borrador',
+  Fecha_Creacion TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  Fecha_Envio TEXT,
+  Notas TEXT,
+  FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL,
+  CHECK (Estado IN ('borrador', 'enviado', 'cancelado'))
+);
+
+CREATE TABLE IF NOT EXISTS Lineas_Pedido_Proveedor (
+  ID_Linea TEXT PRIMARY KEY,
+  ID_Pedido TEXT NOT NULL,
+  Nombre_Producto TEXT NOT NULL,
+  Cantidad REAL NOT NULL DEFAULT 1,
+  Precio_Unitario REAL,
+  Unidad TEXT,
+  FOREIGN KEY (ID_Pedido) REFERENCES Pedidos_Proveedor(ID_Pedido) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_pedidos_prov_proveedor
+ON Pedidos_Proveedor(ID_Proveedor);
+
+CREATE INDEX IF NOT EXISTS idx_lineas_pedido_prov_pedido
+ON Lineas_Pedido_Proveedor(ID_Pedido);
+
 /* =========================================================
    4. Alérgenos
 ========================================================= */

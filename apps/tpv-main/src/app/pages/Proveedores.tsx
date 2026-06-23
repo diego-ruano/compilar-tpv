@@ -672,10 +672,12 @@ export default function Proveedores() {
                 <p className="text-xs text-fg-muted">No hay proveedores con ese filtro.</p>
               </div>
             ) : (
-              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-                {proveedoresFiltrados.map((p) => (
-                  <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
-                ))}
+              <div className="max-h-88 overflow-y-auto">
+                <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+                  {proveedoresFiltrados.map((p) => (
+                    <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
+                  ))}
+                </div>
               </div>
             )}
           </div>

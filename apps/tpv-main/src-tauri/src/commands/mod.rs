@@ -10,6 +10,7 @@ pub mod licensing;
 pub mod login;
 pub mod mesas;
 pub mod pairing;
+pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reservas;
 pub mod stats;

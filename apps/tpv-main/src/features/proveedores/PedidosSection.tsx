@@ -4,8 +4,16 @@ import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import { useToast } from "../../shared/toast";
 import PedidoModal from "./PedidoModal";
-import type { PedidoEstado, PedidoRow } from "./pedidosApis";
+import type { PedidoEstado, PedidoRow, PedidoCrearInput, PedidoActualizarInput, LineaPedido } from "./pedidosApis";
+import type { LineaPedidoInput } from "./pedidosApis";
 import type { ProveedorRow } from "./proveedoresApis";
+import {
+  usePedidosAll,
+  useCrearPedido,
+  useActualizarPedido,
+  useCancelarPedido,
+  useEnviarPedido,
+} from "./pedidosQueries";
 
 type Props = {
   proveedores: ProveedorRow[];
@@ -23,26 +31,64 @@ const ESTADO_CLASS: Record<PedidoEstado, string> = {
   cancelado: "bg-danger-soft text-danger",
 };
 
-function nuevoPedido(): PedidoRow {
+function buildPedidoVacio(): PedidoRow {
   return {
     id: crypto.randomUUID(),
     idProveedor: null,
     nombreProveedor: null,
     emailDestino: null,
     estado: "borrador",
-    fechaCreacion: new Date().toLocaleDateString("es-ES"),
+    fechaCreacion: new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" }),
     fechaEnvio: null,
     notas: null,
     lineas: [],
   };
 }
 
+function toLineasInput(lineas: LineaPedido[]): LineaPedidoInput[] {
+  return lineas.map((l) => ({
+    idLinea: l.id || crypto.randomUUID(),
+    nombreProducto: l.nombreProducto,
+    cantidad: l.cantidad,
+    precioUnitario: l.precioUnitario,
+    unidad: l.unidad,
+  }));
+}
+
+function toCrearInput(p: PedidoRow): PedidoCrearInput {
+  return {
+    idPedido: p.id,
+    idProveedor: p.idProveedor,
+    emailDestino: p.emailDestino,
+    notas: p.notas,
+    lineas: toLineasInput(p.lineas),
+  };
+}
+
+function toActualizarInput(p: PedidoRow): PedidoActualizarInput {
+  return {
+    idPedido: p.id,
+    idProveedor: p.idProveedor,
+    emailDestino: p.emailDestino,
+    notas: p.notas,
+    lineas: toLineasInput(p.lineas),
+  };
+}
+
 export default function PedidosSection({ proveedores }: Props) {
   const toast = useToast();
-  const [pedidos, setPedidos] = useState<PedidoRow[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [pedidoAbierto, setPedidoAbierto] = useState<PedidoRow | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [isNewPedido, setIsNewPedido] = useState(false);
+
+  const query = usePedidosAll();
+  const crearMutation = useCrearPedido();
+  const actualizarMutation = useActualizarPedido();
+  const cancelarMutation = useCancelarPedido();
+  const enviarMutation = useEnviarPedido();
+
+  const pedidos = query.data ?? [];
 
   const pedidosFiltrados = useMemo(() => {
     const s = busqueda.trim().toLowerCase();
@@ -57,40 +103,71 @@ export default function PedidosSection({ proveedores }: Props) {
   }, [pedidos, busqueda]);
 
   function abrirNuevoPedido() {
-    const p = nuevoPedido();
-    setPedidos((prev) => [p, ...prev]);
+    const p = buildPedidoVacio();
     setPedidoAbierto(p);
+    setIsNewPedido(true);
     setModalOpen(true);
   }
 
   function abrirPedido(p: PedidoRow) {
     setPedidoAbierto(p);
+    setIsNewPedido(false);
     setModalOpen(true);
   }
 
-  function handleSave(updated: PedidoRow) {
-    setPedidos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  function cerrarModal() {
     setModalOpen(false);
+    setIsNewPedido(false);
   }
 
-  function handleCancelar(id: string) {
-    setPedidos((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, estado: "cancelado" } : p)),
-    );
-    setModalOpen(false);
+  async function handleSave(updated: PedidoRow) {
+    try {
+      if (isNewPedido) {
+        await crearMutation.mutateAsync(toCrearInput(updated));
+      } else {
+        await actualizarMutation.mutateAsync(toActualizarInput(updated));
+      }
+      cerrarModal();
+    } catch (e: any) {
+      toast.error("Error", String(e?.message ?? e));
+    }
   }
 
-  function handleMandar(updated: PedidoRow) {
-    const enviado: PedidoRow = {
-      ...updated,
-      estado: "enviado",
-      fechaEnvio: new Date().toLocaleDateString("es-ES"),
-    };
-    setPedidos((prev) => prev.map((p) => (p.id === enviado.id ? enviado : p)));
-    setModalOpen(false);
-    const dest = enviado.emailDestino;
-    toast.success("Pedido enviado", dest ? `Enviado a ${dest}` : "Sin correo destino configurado");
+  async function handleCancelar(id: string) {
+    if (isNewPedido) {
+      cerrarModal();
+      return;
+    }
+    try {
+      await cancelarMutation.mutateAsync(id);
+      cerrarModal();
+    } catch (e: any) {
+      toast.error("Error", String(e?.message ?? e));
+    }
   }
+
+  async function handleMandar(updated: PedidoRow) {
+    try {
+      if (isNewPedido) {
+        await crearMutation.mutateAsync(toCrearInput(updated));
+      } else {
+        await actualizarMutation.mutateAsync(toActualizarInput(updated));
+      }
+      const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
+      await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
+      cerrarModal();
+      const dest = updated.emailDestino;
+      toast.success("Pedido enviado", dest ? `Enviado a ${dest}` : "Sin correo destino configurado");
+    } catch (e: any) {
+      toast.error("Error", String(e?.message ?? e));
+    }
+  }
+
+  const isBusy =
+    crearMutation.isPending ||
+    actualizarMutation.isPending ||
+    cancelarMutation.isPending ||
+    enviarMutation.isPending;
 
   return (
     <>
@@ -129,8 +206,12 @@ export default function PedidosSection({ proveedores }: Props) {
           </button>
         </div>
 
-        {/* Lista */}
-        {pedidosFiltrados.length === 0 ? (
+        {/* Lista con scroll */}
+        {query.isLoading ? (
+          <div className="flex items-center justify-center py-6">
+            <p className="text-sm text-fg-muted">Cargando pedidos…</p>
+          </div>
+        ) : pedidosFiltrados.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 py-8 text-center">
             <ShoppingCart className="size-7 text-fg-subtle" aria-hidden />
             <p className="text-sm font-medium text-fg">Sin pedidos</p>
@@ -141,7 +222,7 @@ export default function PedidosSection({ proveedores }: Props) {
             </p>
           </div>
         ) : (
-          <div className="flex flex-col overflow-hidden rounded-xl border border-border">
+          <div className="max-h-90 overflow-y-auto rounded-xl border border-border">
             {pedidosFiltrados.map((p, i) => (
               <button
                 key={p.id}
@@ -182,12 +263,13 @@ export default function PedidosSection({ proveedores }: Props) {
 
       <PedidoModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={cerrarModal}
         pedido={pedidoAbierto}
         proveedores={proveedores}
         onSave={handleSave}
         onCancelarPedido={handleCancelar}
         onMandarPedido={handleMandar}
+        isBusy={isBusy}
       />
     </>
   );
