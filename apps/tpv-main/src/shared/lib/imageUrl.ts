@@ -32,6 +32,16 @@ export const CDN_IMAGES_BASE =
 // El tenant del Handy no cambia en una sesión: lo resolvemos una vez y lo cacheamos.
 let handyTenantPromise: Promise<string> | null = null;
 
+// Caché de URLs resueltas (por `Ruta_Imagen`). Una `Ruta_Imagen` (uuid en el nombre) es inmutable:
+// al reemplazar la imagen de un producto/categoría cambia el nombre del fichero, así que cambia la
+// clave y la entrada vieja simplemente queda huérfana (inocua). Cachear aquí evita:
+//   - reinvocar `images_ensure_local` (un IPC a Rust) en cada refetch de TanStack Query, y
+//   - devolver URLs distintas para la misma imagen, lo que rompería el cacheo del webview/CDN.
+// En modo Main solo se cachea cuando el fichero YA está en disco (ensure_local => true); si aún no
+// está (creada en otra Handy, pendiente de bajar de R2) NO se cachea, para reintentar la bajada en
+// la siguiente resolución.
+const urlCache = new Map<string, string>();
+
 async function getHandyTenant(): Promise<string> {
   if (!handyTenantPromise) {
     handyTenantPromise = invoke<string | null>("handy_get_tenant")
@@ -56,23 +66,33 @@ export async function resolveImageUrl(
   if (!r) return "";
   if (isAbsoluteUrl(r)) return r;
 
+  const cached = urlCache.get(r);
+  if (cached) return cached;
+
   if (useMode.getState().mode === "handy") {
     const tenant = await getHandyTenant();
     if (!tenant) return "";
-    return `${CDN_IMAGES_BASE}/${tenant}/${r}`;
+    const url = `${CDN_IMAGES_BASE}/${tenant}/${r}`;
+    urlCache.set(r, url);
+    return url;
   }
 
   // Main: fichero local en AppData. Si falta (imagen creada en otra Handy: la fila llegó por
   // sync, pero el binario solo vive en R2), se baja de R2 a disco de forma perezosa. Es
   // best-effort: si no se puede (offline / aún no subida), seguimos y el <img> hará fallback.
+  let present = false;
   try {
-    await invoke<boolean>("images_ensure_local", { args: { rel_path: r } });
+    present = await invoke<boolean>("images_ensure_local", { args: { rel_path: r } });
   } catch {
     /* ignorado: el UI degrada al placeholder y reintenta en la próxima recarga */
   }
 
   const baseDir = await appDataDir();
-  return convertFileSrc(await join(baseDir, r));
+  const url = convertFileSrc(await join(baseDir, r));
+  // Solo memoizamos cuando el fichero ya está en disco: así, si aún no estaba, la próxima
+  // resolución vuelve a intentar `images_ensure_local` (bajada de R2).
+  if (present) urlCache.set(r, url);
+  return url;
 }
 
 /**
