@@ -19,6 +19,7 @@ import Product from "../../features/InventaryComponents/Product";
 import Modal from "../../features/proveedores/Modal";
 import Campo from "../../features/proveedores/Campo";
 import ProveedorCard from "../../features/proveedores/ProveedorCard";
+import PedidosSection from "../../features/proveedores/PedidosSection";
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 import { AddProductModal } from "../../features/InventaryComponents/ui/AddProductModal";
 
@@ -594,9 +595,9 @@ export default function Proveedores() {
   return (
     <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
       <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          {vista === "list" ? (
-            <div className="flex min-w-0 items-center gap-3">
+        {vista === "list" ? (
+          <div className="flex items-center gap-3">
+            <div className="flex min-w-0 shrink-0 items-center gap-3">
               <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                 <Truck className="size-6" aria-hidden />
               </div>
@@ -608,18 +609,16 @@ export default function Proveedores() {
                 </p>
               </div>
             </div>
-          ) : (
-            <button
-              type="button"
-              onClick={volverALista}
-              className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
-            >
-              <ArrowLeft className="size-4 shrink-0" aria-hidden />
-              <span className="truncate">{proveedorActivo?.Nombre_Empresa ?? "Volver"}</span>
-            </button>
-          )}
 
-          {vista === "list" ? (
+            <div className="flex flex-1 justify-center">
+              <SearchInput
+                value={busqueda}
+                onValueChange={setBusqueda}
+                placeholder="Buscar proveedor..."
+                className="w-full max-w-xs"
+              />
+            </div>
+
             <button
               type="button"
               onClick={abrirNuevoProveedorModal}
@@ -628,44 +627,61 @@ export default function Proveedores() {
               <Plus className="size-4" aria-hidden />
               <span className="hidden xs:inline">Nuevo proveedor</span>
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setBusqueda("")}
-              className="inline-flex shrink-0 cursor-pointer items-center rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
-            >
-              Limpiar búsqueda
-            </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={volverALista}
+                className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
+              >
+                <ArrowLeft className="size-4 shrink-0" aria-hidden />
+                <span className="truncate">{proveedorActivo?.Nombre_Empresa ?? "Volver"}</span>
+              </button>
 
-        <SearchInput
-          value={busqueda}
-          onValueChange={setBusqueda}
-          placeholder={vista === "list" ? "Buscar proveedor..." : "Buscar producto vinculado..."}
-        />
+              <button
+                type="button"
+                onClick={() => setBusqueda("")}
+                className="inline-flex shrink-0 cursor-pointer items-center rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+              >
+                Limpiar búsqueda
+              </button>
+            </div>
+
+            <SearchInput
+              value={busqueda}
+              onValueChange={setBusqueda}
+              placeholder="Buscar producto vinculado..."
+            />
+          </>
+        )}
       </div>
 
       {vista === "list" && (
-        <div className="w-full">
-          {loading ? (
-            <p className="text-fg-muted">Cargando proveedores...</p>
-          ) : proveedoresFiltrados.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
-              <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
-                <Truck className="size-6" aria-hidden />
+        <>
+          <div className="w-full">
+            {loading ? (
+              <p className="text-fg-muted">Cargando proveedores...</p>
+            ) : proveedoresFiltrados.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
+                <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+                  <Truck className="size-6" aria-hidden />
+                </div>
+                <p className="text-sm font-medium text-fg">Sin proveedores</p>
+                <p className="text-xs text-fg-muted">No hay proveedores con ese filtro.</p>
               </div>
-              <p className="text-sm font-medium text-fg">Sin proveedores</p>
-              <p className="text-xs text-fg-muted">No hay proveedores con ese filtro.</p>
-            </div>
-          ) : (
-            <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
-              {proveedoresFiltrados.map((p) => (
-                <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
-              ))}
-            </div>
-          )}
-        </div>
+            ) : (
+              <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+                {proveedoresFiltrados.map((p) => (
+                  <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <PedidosSection proveedores={proveedores} />
+        </>
       )}
 
       {vista === "detail" && proveedorActivo && (
