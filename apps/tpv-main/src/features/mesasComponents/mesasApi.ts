@@ -138,8 +138,25 @@ export async function mesasLoadLayout(): Promise<Salon[]> {
 }
 
 export async function mesasSaveLayout(salons: Salon[]): Promise<void> {
+    // El contrato Rust (TableInput) tipa x/y/width/height/radius como i64. El editor
+    // produce coordenadas de mundo fraccionarias al arrastrar con zoom ≠ 100 %, así que
+    // redondeamos a entero aquí (chokepoint único de guardado) para no romper la
+    // deserialización serde en la frontera Tauri.
+    const list = Array.isArray(salons) ? salons : [];
+    const safe = list.map((s) => ({
+        ...s,
+        tables: (s.tables ?? []).map((t) => ({
+            ...t,
+            x: Math.round(t.x),
+            y: Math.round(t.y),
+            width: Math.round(t.width),
+            height: Math.round(t.height),
+            radius: t.radius == null ? t.radius : Math.round(t.radius),
+        })),
+    }));
+
     await invokeClient<string>("save_layout", {
-        args: { salons: Array.isArray(salons) ? salons : [] },
+        args: { salons: safe },
     });
 }
 
