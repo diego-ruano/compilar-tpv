@@ -2,7 +2,26 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RouterProvider } from "react-router-dom";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+    ArrowRight,
+    Building2,
+    Check,
+    Database,
+    Fingerprint,
+    KeyRound,
+    Link2,
+    Mail,
+    MapPin,
+    Monitor,
+    Phone,
+    QrCode,
+    RotateCcw,
+    ScanLine,
+    ShieldCheck,
+    Smartphone,
+    Store,
+    Wifi,
+} from "lucide-react";
 
 import { useMode, type DeviceMode, type ModeStateValue } from "../shared/stores/useMode";
 import { useConnectionMode } from "../shared/stores/useConnectionMode";
@@ -14,11 +33,10 @@ import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
 import { useMainSocket } from "../shared/lib/useMainSocket";
 import { useHandySocket } from "../shared/lib/useHandySocket";
 import { queryClient } from "../shared/lib/queryClient";
+import { Badge, Button, Card, Input } from "../shared/ui";
+import Titlebar from "./layoutComponent/Titlebar";
 
 import LogoAltaria from "../assets/img/logo.png";
-import CerrarVentana from "../assets/svg/CerrarVentana.svg";
-import MinimizarVentana from "../assets/svg/MinimizarVentana.svg";
-import PantallaCompleta from "../assets/svg/PantallaCompleta.svg";
 
 /* =========================
    Pairing helpers
@@ -78,134 +96,6 @@ function cn(...classes: Array<string | false | undefined | null>) {
 
 function isDeviceMode(value: unknown): value is DeviceMode | null {
     return value === "tpv" || value === "handy" || value === null;
-}
-
-function Field({
-    label,
-    hint,
-    children,
-}: {
-    label: string;
-    hint?: string;
-    children: React.ReactNode;
-}) {
-    return (
-        <label className="block">
-            <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-semibold text-slate-900">
-                    {label}
-                </span>
-                {hint ? (
-                    <span className="text-xs font-medium text-slate-400">
-                        {hint}
-                    </span>
-                ) : null}
-            </div>
-            <div className="mt-2">{children}</div>
-        </label>
-    );
-}
-
-function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
-    return (
-        <input
-            {...props}
-            className={cn(
-                "w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none",
-                "placeholder:text-slate-400 focus:border-slate-300",
-                props.className,
-            )}
-        />
-    );
-}
-
-function PrimaryButton({
-    children,
-    type = "button",
-    onClick,
-    disabled,
-}: {
-    children: React.ReactNode;
-    type?: "button" | "submit";
-    onClick?: () => void;
-    disabled?: boolean;
-}) {
-    return (
-        <button
-            type={type}
-            onClick={onClick}
-            disabled={disabled}
-            className={cn(
-                "h-10 px-4 rounded-xl border border-slate-900 bg-slate-900 text-sm font-bold text-white shadow-sm transition",
-                "hover:bg-slate-800 active:scale-[0.98]",
-                disabled
-                    ? "opacity-50 cursor-not-allowed hover:bg-slate-900 active:scale-100"
-                    : "",
-            )}
-        >
-            {children}
-        </button>
-    );
-}
-
-function GhostButton({
-    children,
-    onClick,
-    disabled,
-}: {
-    children: React.ReactNode;
-    onClick?: () => void;
-    disabled?: boolean;
-}) {
-    return (
-        <button
-            type="button"
-            onClick={onClick}
-            disabled={disabled}
-            className={cn(
-                "h-10 px-4 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-800 shadow-sm transition",
-                "hover:bg-slate-50 active:scale-[0.98]",
-                disabled
-                    ? "opacity-50 cursor-not-allowed hover:bg-white active:scale-100"
-                    : "",
-            )}
-        >
-            {children}
-        </button>
-    );
-}
-
-function Panel({
-    title,
-    subtitle,
-    right,
-    children,
-}: {
-    title: string;
-    subtitle?: string;
-    right?: React.ReactNode;
-    children: React.ReactNode;
-}) {
-    return (
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-            <div className="px-5 py-4 border-b border-slate-200">
-                <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                        <h2 className="text-base font-semibold text-slate-900 truncate">
-                            {title}
-                        </h2>
-                        {subtitle ? (
-                            <p className="text-sm text-slate-600 mt-0.5">
-                                {subtitle}
-                            </p>
-                        ) : null}
-                    </div>
-                    {right ? <div className="shrink-0">{right}</div> : null}
-                </div>
-            </div>
-            <div className="px-5 py-5">{children}</div>
-        </section>
-    );
 }
 
 function BlockedScreen({
@@ -305,8 +195,6 @@ type HandyPairState =
     | { step: "paired"; tenantId: string; token: string; deviceId: string };
 
 export default function AppBoot({ router }: { router: any }) {
-    const ventana = getCurrentWindow();
-
     const businessName = useBusinessSettings((s) => s.businessName);
     const logoDataUrl = useBusinessSettings((s) => s.logoDataUrl);
 
@@ -751,63 +639,9 @@ export default function AppBoot({ router }: { router: any }) {
     // toggle claro/oscuro). No mostramos también la barra de arranque para no duplicarla.
     const showBootTopBar = !isMainAppReady && !handyShowsApp;
 
-    const TopBar = (
-        <div className="w-full flex justify-between shrink-0 overflow-hidden">
-            <div
-                className="flex bg-white w-full p-1.5 items-center gap-3"
-                data-tauri-drag-region
-            >
-                <img
-                    src={logoDataUrl ?? LogoAltaria}
-                    className="size-5 rounded-sm object-cover"
-                    data-tauri-drag-region
-                    alt="logo"
-                />
-                <p data-tauri-drag-region className="truncate max-w-60 text-sm">
-                    {businessName || "TPV"}
-                </p>
-            </div>
-
-            <div className="flex gap-4 w-fit p-1 px-2 bg-white">
-                <button
-                    data-tauri-drag-region
-                    className="hover:scale-140 transition-all cursor-pointer"
-                    onClick={() => ventana.minimize()}
-                    type="button"
-                >
-                    <img
-                        src={MinimizarVentana}
-                        className="size-8"
-                        alt="minimizar"
-                    />
-                </button>
-                <button
-                    data-tauri-drag-region
-                    className="hover:scale-140 transition-all cursor-pointer"
-                    onClick={() => ventana.toggleMaximize()}
-                    type="button"
-                >
-                    <img
-                        src={PantallaCompleta}
-                        className="size-5"
-                        alt="maximizar"
-                    />
-                </button>
-                <button
-                    data-tauri-drag-region
-                    className="hover:scale-140 transition-all cursor-pointer"
-                    onClick={() => ventana.close()}
-                    type="button"
-                >
-                    <img src={CerrarVentana} className="size-8" alt="cerrar" />
-                </button>
-            </div>
-        </div>
-    );
-
     return (
         <div className="w-screen h-screen flex flex-col overflow-hidden">
-            {showBootTopBar ? TopBar : null}
+            {showBootTopBar ? <Titlebar /> : null}
 
             <div
                 className={cn(
@@ -820,38 +654,166 @@ export default function AppBoot({ router }: { router: any }) {
                         Cargando...
                     </div>
                 ) : mode === null ? (
-                    <div className="min-h-full w-full bg-slate-100 p-6 font-sans flex items-center justify-center">
-                        <div className="w-full max-w-lg rounded-2xl bg-white shadow-sm border border-slate-200 p-6">
-                            <h2 className="text-2xl font-semibold text-slate-900">
-                                Selecciona modo
-                            </h2>
-                            <p className="text-sm text-slate-600 mt-1">
-                                Esto solo se elige la primera vez.
-                            </p>
+                    <div className="relative flex min-h-full w-full items-center justify-center overflow-hidden bg-bg px-4 py-6 font-sans text-fg sm:px-6 lg:px-10">
+                        <div
+                            className="pointer-events-none absolute -left-24 -top-24 size-80 rounded-full bg-accent-soft blur-3xl"
+                            aria-hidden
+                        />
+                        <div
+                            className="pointer-events-none absolute -bottom-32 -right-16 size-96 rounded-full bg-accent-soft opacity-70 blur-3xl"
+                            aria-hidden
+                        />
 
-                            <div className="flex gap-3 mt-5">
-                                <button
-                                    disabled={busy}
-                                    onClick={() => choose("tpv")}
-                                    className="flex-1 rounded-xl bg-indigo-600 text-white py-3 font-semibold hover:bg-indigo-700 disabled:opacity-50"
-                                >
-                                    TPV (punto de venta principal)
-                                </button>
+                        <div className="relative w-full max-w-5xl">
+                            <div className="mb-5 flex items-center justify-between gap-4">
+                                <div className="flex min-w-0 items-center gap-3">
+                                    <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+                                        <img
+                                            src={logoDataUrl ?? LogoAltaria}
+                                            className="size-8 rounded-lg object-cover"
+                                            alt=""
+                                        />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-bold text-fg">
+                                            {businessName || "TPV"}
+                                        </p>
+                                        <p className="text-xs text-fg-muted">
+                                            Configuración del dispositivo
+                                        </p>
+                                    </div>
+                                </div>
 
-                                <button
-                                    disabled={busy}
-                                    onClick={() => choose("handy")}
-                                    className="flex-1 rounded-xl border border-slate-300 bg-white py-3 font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
-                                >
-                                    Handy (camarero)
-                                </button>
                             </div>
 
-                            {err && (
-                                <pre className="mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 whitespace-pre-wrap">
-                                    {err}
-                                </pre>
-                            )}
+                            <Card
+                                padded={false}
+                                className="overflow-hidden rounded-3xl shadow-xl"
+                            >
+                                <div className="border-b border-border px-5 py-5 sm:px-7 sm:py-6">
+                                    <Badge tone="accent">Primer inicio</Badge>
+                                    <h1 className="mt-3 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                                        ¿Cómo vas a usar este dispositivo?
+                                    </h1>
+                                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-fg-muted sm:text-base">
+                                        Elige el tipo de equipo que estás configurando.
+                                        Podrás restablecerlo más adelante desde la propia aplicación.
+                                    </p>
+                                </div>
+
+                                <div className="grid gap-4 p-4 sm:p-6 md:grid-cols-2">
+                                    <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => choose("tpv")}
+                                        className={cn(
+                                            "group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
+                                            "transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
+                                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                            "disabled:pointer-events-none disabled:opacity-50 sm:p-6",
+                                        )}
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                                <Monitor className="size-7" aria-hidden />
+                                            </div>
+                                            <Badge tone="accent">Principal</Badge>
+                                        </div>
+
+                                        <h2 className="mt-5 text-xl font-bold text-fg">
+                                            TPV principal
+                                        </h2>
+                                        <p className="mt-2 text-sm leading-relaxed text-fg-muted">
+                                            El equipo central del negocio. Guarda los datos
+                                            localmente y puede trabajar aunque no haya conexión.
+                                        </p>
+
+                                        <ul className="mt-5 space-y-2.5 text-sm text-fg-muted">
+                                            <li className="flex items-center gap-2">
+                                                <Database className="size-4 text-accent" aria-hidden />
+                                                Base de datos local
+                                            </li>
+                                            <li className="flex items-center gap-2">
+                                                <Check className="size-4 text-success" aria-hidden />
+                                                Gestión completa del negocio
+                                            </li>
+                                        </ul>
+
+                                        <span className="mt-auto flex items-center justify-between border-t border-border pt-5 font-semibold text-accent">
+                                            Configurar como TPV
+                                            <ArrowRight
+                                                className="size-5 transition-transform group-hover:translate-x-1"
+                                                aria-hidden
+                                            />
+                                        </span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => choose("handy")}
+                                        className={cn(
+                                            "group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
+                                            "transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
+                                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                            "disabled:pointer-events-none disabled:opacity-50 sm:p-6",
+                                        )}
+                                    >
+                                        <div className="flex items-start justify-between gap-4">
+                                            <div className="grid size-14 place-items-center rounded-2xl bg-surface-2 text-fg">
+                                                <Smartphone className="size-7" aria-hidden />
+                                            </div>
+                                            <Badge>Dispositivo auxiliar</Badge>
+                                        </div>
+
+                                        <h2 className="mt-5 text-xl font-bold text-fg">
+                                            Handy
+                                        </h2>
+                                        <p className="mt-2 text-sm leading-relaxed text-fg-muted">
+                                            Un dispositivo para camareros conectado al TPV
+                                            principal. Necesitarás vincularlo después.
+                                        </p>
+
+                                        <ul className="mt-5 space-y-2.5 text-sm text-fg-muted">
+                                            <li className="flex items-center gap-2">
+                                                <Wifi className="size-4 text-accent" aria-hidden />
+                                                Conexión con la Main
+                                            </li>
+                                            <li className="flex items-center gap-2">
+                                                <Check className="size-4 text-success" aria-hidden />
+                                                Uso móvil en sala
+                                            </li>
+                                        </ul>
+
+                                        <span className="mt-auto flex items-center justify-between border-t border-border pt-5 font-semibold text-accent">
+                                            Configurar como Handy
+                                            <ArrowRight
+                                                className="size-5 transition-transform group-hover:translate-x-1"
+                                                aria-hidden
+                                            />
+                                        </span>
+                                    </button>
+                                </div>
+
+                                {busy ? (
+                                    <div
+                                        className="border-t border-border bg-surface-2 px-6 py-3 text-center text-sm font-medium text-fg-muted"
+                                        role="status"
+                                    >
+                                        Preparando el dispositivo…
+                                    </div>
+                                ) : null}
+
+                                {err && (
+                                    <pre className="mx-4 mb-4 whitespace-pre-wrap rounded-xl border border-danger bg-danger-soft p-3 text-sm text-danger sm:mx-6 sm:mb-6">
+                                        {err}
+                                    </pre>
+                                )}
+                            </Card>
+
+                            <p className="mt-4 text-center text-xs text-fg-subtle">
+                                El TPV principal debe configurarse antes de vincular dispositivos Handy.
+                            </p>
                         </div>
                     </div>
                 ) : mode === "handy" ? (
@@ -885,106 +847,220 @@ export default function AppBoot({ router }: { router: any }) {
                             />
                         )
                     ) : (
-                        <div className="min-h-full w-full bg-slate-100">
-                            <div className="p-4 flex items-center justify-between gap-3">
-                                <button
-                                    type="button"
-                                    onClick={goBackToModePicker}
-                                    disabled={busy}
-                                    className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                        <div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">
+                            <div
+                                className="pointer-events-none absolute -left-24 -top-24 size-80 rounded-full bg-accent-soft blur-3xl"
+                                aria-hidden
+                            />
+                            <div
+                                className="pointer-events-none absolute -bottom-32 -right-16 size-96 rounded-full bg-accent-soft opacity-70 blur-3xl"
+                                aria-hidden
+                            />
+
+                            <div className="relative w-full max-w-5xl">
+                                <div className="mb-4 flex items-center justify-between gap-3">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={busy || handyPairBusy}
+                                        onClick={goBackToModePicker}
+                                    >
+                                        ← Volver
+                                    </Button>
+                                    <Badge>Modo Handy</Badge>
+                                </div>
+
+                                <Card
+                                    padded={false}
+                                    className="grid overflow-hidden rounded-3xl shadow-xl lg:grid-cols-[0.9fr_1.1fr]"
                                 >
-                                    ← Volver
-                                </button>
-
-                                <span className="text-xs text-slate-500">
-                                    Handy (camarero)
-                                </span>
-                            </div>
-
-                            <div className="px-4 pb-4">
-                                <Panel
-                                    title="Vincular Handy"
-                                    subtitle="Pega el QR o introduce el código y solicita vinculación."
-                                >
-                                    <div className="flex flex-col gap-3">
-                                        <div className="rounded-xl border border-slate-200 bg-white p-4">
-                                            <div className="text-sm font-semibold text-slate-900">
-                                                Vincular dispositivo
-                                            </div>
-                                            <div className="text-xs text-slate-600 mt-1">
-                                                Escanea el QR (pega el contenido
-                                                aquí) o introduce el código
-                                                manual.
+                                    <section className="flex flex-col justify-between border-b border-border bg-surface-2 p-6 sm:p-8 lg:border-b-0 lg:border-r">
+                                        <div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                                    <Smartphone className="size-7" aria-hidden />
+                                                </div>
+                                                <Badge tone="accent">Vinculación segura</Badge>
                                             </div>
 
-                                            {handyFingerprint ? (
-                                                <div className="mt-2 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600">
-                                                    Huella de este dispositivo:{" "}
-                                                    <span className="font-mono font-semibold text-slate-900">
-                                                        {handyFingerprint}
-                                                    </span>
-                                                    <div className="mt-0.5 text-[11px] text-slate-500">
-                                                        Si usas solo el código, comprueba que esta
-                                                        huella coincide con la que ve el Main antes
-                                                        de aceptar.
+                                            <h1 className="mt-6 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                                                Conecta este Handy
+                                            </h1>
+                                            <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
+                                                Genera una solicitud desde este dispositivo y
+                                                apruébala en el TPV principal para empezar a
+                                                trabajar en sala.
+                                            </p>
+
+                                            <div className="mt-7 space-y-4">
+                                                <div className="flex gap-3">
+                                                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                                        <QrCode className="size-4" aria-hidden />
                                                     </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-fg">
+                                                            Usa el QR del TPV
+                                                        </p>
+                                                        <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                                            Pega aquí el contenido leído del código QR.
+                                                        </p>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex gap-3">
+                                                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                                        <ShieldCheck className="size-4" aria-hidden />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-fg">
+                                                            Aprueba en la Main
+                                                        </p>
+                                                        <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                                            El TPV principal debe aceptar este dispositivo.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {handyFingerprint ? (
+                                            <div className="mt-8 rounded-2xl border border-border bg-surface p-4">
+                                                <div className="flex items-center gap-2 text-xs font-semibold text-fg">
+                                                    <Fingerprint className="size-4 text-accent" aria-hidden />
+                                                    Huella del dispositivo
+                                                </div>
+                                                <p className="mt-2 break-all font-mono text-sm font-bold text-fg">
+                                                    {handyFingerprint}
+                                                </p>
+                                                <p className="mt-2 text-xs leading-relaxed text-fg-muted">
+                                                    Si usas el código manual, comprueba que
+                                                    coincide con la huella mostrada en el TPV.
+                                                </p>
+                                            </div>
+                                        ) : null}
+                                    </section>
+
+                                    <section className="p-6 sm:p-8">
+                                        <div className="flex items-center gap-3">
+                                            <div className="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">
+                                                <Link2 className="size-5" aria-hidden />
+                                            </div>
+                                            <div>
+                                                <h2 className="text-lg font-bold text-fg">
+                                                    Datos de vinculación
+                                                </h2>
+                                                <p className="text-sm text-fg-muted">
+                                                    Utiliza una de las dos opciones.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-6 grid gap-5">
+                                            <div>
+                                                <label
+                                                    htmlFor="handy-qr-payload"
+                                                    className="flex items-center gap-2 text-sm font-semibold text-fg"
+                                                >
+                                                    <ScanLine className="size-4 text-accent" aria-hidden />
+                                                    Contenido del QR
+                                                </label>
+                                                <Input
+                                                    id="handy-qr-payload"
+                                                    value={handyUriInput}
+                                                    onChange={(e) =>
+                                                        setHandyUriInput(e.target.value)
+                                                    }
+                                                    disabled={handyPairBusy}
+                                                    className="mt-2 h-12 px-4 font-mono"
+                                                    placeholder="tpv://pair?code=123456&secret=..."
+                                                    autoComplete="off"
+                                                />
+                                                <p className="mt-2 text-xs text-fg-subtle">
+                                                    Pega la dirección completa obtenida al escanear el QR.
+                                                </p>
+                                            </div>
+
+                                            <div className="flex items-center gap-3">
+                                                <div className="h-px flex-1 bg-border" />
+                                                <span className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">
+                                                    o
+                                                </span>
+                                                <div className="h-px flex-1 bg-border" />
+                                            </div>
+
+                                            <div>
+                                                <label
+                                                    htmlFor="handy-pair-code"
+                                                    className="text-sm font-semibold text-fg"
+                                                >
+                                                    Código manual
+                                                </label>
+                                                <Input
+                                                    id="handy-pair-code"
+                                                    value={handyCodeInput}
+                                                    onChange={(e) =>
+                                                        setHandyCodeInput(
+                                                            e.target.value
+                                                                .replace(/[^\d]/g, "")
+                                                                .slice(0, 6),
+                                                        )
+                                                    }
+                                                    disabled={handyPairBusy}
+                                                    className="mt-2 h-14 px-4 text-center font-mono text-xl font-bold tracking-[0.35em]"
+                                                    placeholder="123456"
+                                                    inputMode="numeric"
+                                                    autoComplete="one-time-code"
+                                                    maxLength={6}
+                                                />
+                                            </div>
+
+                                            {handyPair.step === "waiting_approval" ? (
+                                                <div
+                                                    className="rounded-2xl border border-warning bg-warning-soft px-4 py-3 text-sm text-fg"
+                                                    role="status"
+                                                >
+                                                    <p className="font-semibold">
+                                                        Esperando aprobación en el TPV…
+                                                    </p>
+                                                    <p className="mt-1 text-xs text-fg-muted">
+                                                        Código{" "}
+                                                        <span className="font-mono font-bold text-fg">
+                                                            {handyPair.pairCode}
+                                                        </span>
+                                                    </p>
                                                 </div>
                                             ) : null}
 
-                                            <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                <div>
-                                                    <div className="text-xs font-semibold text-slate-700">
-                                                        QR payload
-                                                    </div>
-                                                    <input
-                                                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                                        value={handyUriInput}
-                                                        onChange={(e) =>
-                                                            setHandyUriInput(
-                                                                e.target.value,
-                                                            )
-                                                        }
-                                                        placeholder="tpv://pair?code=123456&secret=..."
-                                                    />
+                                            {handyPair.step === "paired" ? (
+                                                <div
+                                                    className="rounded-2xl border border-success bg-success-soft px-4 py-3 text-sm text-success"
+                                                    role="status"
+                                                >
+                                                    Dispositivo vinculado correctamente.
                                                 </div>
+                                            ) : null}
 
-                                                <div>
-                                                    <div className="text-xs font-semibold text-slate-700">
-                                                        Código manual
-                                                    </div>
-                                                    <input
-                                                        className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                                        value={handyCodeInput}
-                                                        onChange={(e) =>
-                                                            setHandyCodeInput(
-                                                                e.target.value
-                                                                    .replace(
-                                                                        /[^\d]/g,
-                                                                        "",
-                                                                    )
-                                                                    .slice(
-                                                                        0,
-                                                                        6,
-                                                                    ),
-                                                            )
-                                                        }
-                                                        placeholder="123456"
-                                                    />
+                                            {handyPairErr ? (
+                                                <div
+                                                    className="rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger"
+                                                    role="alert"
+                                                >
+                                                    {handyPairErr}
                                                 </div>
-                                            </div>
+                                            ) : null}
 
-                                            <div className="mt-3 flex flex-wrap gap-2">
-                                                <PrimaryButton
+                                            <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                                                <Button
+                                                    size="lg"
+                                                    fullWidth
+                                                    loading={handyPairBusy}
                                                     disabled={handyPairBusy}
+                                                    leftIcon={<Link2 className="size-5" aria-hidden />}
                                                     onClick={() => {
                                                         const parsed =
-                                                            parsePairUri(
-                                                                handyUriInput,
-                                                            ) ||
+                                                            parsePairUri(handyUriInput) ||
                                                             (handyCodeInput
-                                                                ? parsePairUri(
-                                                                    handyCodeInput,
-                                                                )
+                                                                ? parsePairUri(handyCodeInput)
                                                                 : null);
 
                                                         if (!parsed) {
@@ -1000,13 +1076,19 @@ export default function AppBoot({ router }: { router: any }) {
                                                         );
                                                     }}
                                                 >
-                                                    {handyPairBusy
-                                                        ? "Vinculando..."
-                                                        : "Vincular"}
-                                                </PrimaryButton>
+                                                    Vincular dispositivo
+                                                </Button>
 
-                                                <GhostButton
+                                                <Button
+                                                    variant="secondary"
+                                                    size="lg"
                                                     disabled={handyPairBusy}
+                                                    leftIcon={
+                                                        <RotateCcw
+                                                            className="size-4"
+                                                            aria-hidden
+                                                        />
+                                                    }
                                                     onClick={() => {
                                                         setHandyUriInput("");
                                                         setHandyCodeInput("");
@@ -1017,44 +1099,16 @@ export default function AppBoot({ router }: { router: any }) {
                                                     }}
                                                 >
                                                     Limpiar
-                                                </GhostButton>
+                                                </Button>
                                             </div>
 
-                                            {handyPair.step ===
-                                                "waiting_approval" ? (
-                                                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-                                                    Pendiente de aprobación en
-                                                    el TPV… (código{" "}
-                                                    <span className="font-mono">
-                                                        {handyPair.pairCode}
-                                                    </span>
-                                                    )
-                                                </div>
-                                            ) : null}
-
-                                            {handyPair.step === "paired" ? (
-                                                <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                                                    Vinculado ✅ Tenant:{" "}
-                                                    <span className="font-mono">
-                                                        {handyPair.tenantId}
-                                                    </span>
-                                                </div>
-                                            ) : null}
-
-                                            {handyPairErr ? (
-                                                <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                                                    {handyPairErr}
-                                                </div>
-                                            ) : null}
+                                            <p className="text-center text-xs text-fg-subtle">
+                                                El Handy no podrá utilizarse hasta que el TPV
+                                                principal apruebe la solicitud.
+                                            </p>
                                         </div>
-
-                                        <div className="text-xs text-slate-500">
-                                            Nota: el TPV debe aprobar la
-                                            solicitud para que el Handy reciba
-                                            el token.
-                                        </div>
-                                    </div>
-                                </Panel>
+                                    </section>
+                                </Card>
                             </div>
                         </div>
                     )
@@ -1064,196 +1118,301 @@ export default function AppBoot({ router }: { router: any }) {
                             Comprobando licencia...
                         </div>
                     ) : !gate.allowed && gate.reason === "needs_activation" ? (
-                        <div className="min-h-full w-full bg-slate-100 flex items-center justify-center p-6 relative">
-                            <div className="fixed left-3 top-[52px] z-50">
-                                <button
-                                    type="button"
-                                    onClick={goBackToModePicker}
-                                    disabled={busy}
-                                    className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50 shadow-sm"
-                                >
-                                    ← Volver
-                                </button>
-                            </div>
+                        <div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">
+                            <div
+                                className="pointer-events-none absolute -left-24 -top-24 size-80 rounded-full bg-accent-soft blur-3xl"
+                                aria-hidden
+                            />
+                            <div
+                                className="pointer-events-none absolute -bottom-32 -right-16 size-96 rounded-full bg-accent-soft opacity-70 blur-3xl"
+                                aria-hidden
+                            />
 
-                            <div className="w-full max-w-3xl">
-                                <Panel
-                                    title="Activación"
-                                    subtitle="Introduce la licencia y los datos del negocio."
-                                    right={
-                                        <span
-                                            className={cn(
-                                                "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium",
-                                                activationValid
-                                                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                                                    : "border-amber-200 bg-amber-50 text-amber-900",
-                                            )}
-                                        >
-                                            {activationValid
-                                                ? "Completo"
-                                                : "Faltan datos"}
-                                        </span>
-                                    }
-                                >
-                                    <form
-                                        onSubmit={submitActivation}
-                                        className="flex flex-col gap-4"
+                            <div className="relative w-full max-w-6xl">
+                                <div className="mb-4 flex items-center justify-between gap-3">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={busy}
+                                        onClick={goBackToModePicker}
                                     >
-                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                <div className="md:col-span-2">
-                                                    <Field
-                                                        label="Clave de la Licencia"
-                                                        hint="Obligatorio"
-                                                    >
-                                                        <TextInput
-                                                            autoFocus
-                                                            value={
-                                                                act.licenseKey
-                                                            }
-                                                            onChange={(e) =>
-                                                                setAct((s) => ({
-                                                                    ...s,
-                                                                    licenseKey:
-                                                                        e.target
-                                                                            .value,
-                                                                }))
-                                                            }
-                                                            placeholder="XXXX-XXXX-XXXX"
-                                                        />
-                                                    </Field>
+                                        ← Volver
+                                    </Button>
+                                    <Badge tone={activationValid ? "success" : "warning"}>
+                                        {activationValid
+                                            ? "Datos completos"
+                                            : "Completa todos los campos"}
+                                    </Badge>
+                                </div>
+
+                                <Card
+                                    padded={false}
+                                    className="grid overflow-hidden rounded-3xl shadow-xl lg:grid-cols-[0.8fr_1.2fr]"
+                                >
+                                    <section className="flex flex-col justify-between border-b border-border bg-surface-2 p-6 sm:p-8 lg:border-b-0 lg:border-r">
+                                        <div>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                                    <ShieldCheck className="size-7" aria-hidden />
+                                                </div>
+                                                <Badge tone="accent">TPV principal</Badge>
+                                            </div>
+
+                                            <h1 className="mt-6 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                                                Activa tu TPV
+                                            </h1>
+                                            <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
+                                                Introduce tu licencia y los datos principales
+                                                del negocio para preparar este equipo como
+                                                punto de venta principal.
+                                            </p>
+
+                                            <div className="mt-7 space-y-4">
+                                                <div className="flex gap-3">
+                                                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                                        <KeyRound className="size-4" aria-hidden />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-fg">
+                                                            Valida tu licencia
+                                                        </p>
+                                                        <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                                            La clave identifica la suscripción de tu negocio.
+                                                        </p>
+                                                    </div>
                                                 </div>
 
-                                                <Field
-                                                    label="Nombre legal"
-                                                    hint="Obligatorio"
+                                                <div className="flex gap-3">
+                                                    <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                                        <Building2 className="size-4" aria-hidden />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-fg">
+                                                            Registra el establecimiento
+                                                        </p>
+                                                        <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                                            Estos datos identificarán el negocio dentro del TPV.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div className="mt-8 flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-fg-muted">
+                                            <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
+                                            La activación requiere conexión a internet.
+                                        </div>
+                                    </section>
+
+                                    <section className="p-6 sm:p-8">
+                                        <div className="flex items-center gap-3">
+                                            <div className="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">
+                                                <Store className="size-5" aria-hidden />
+                                            </div>
+                                            <div>
+                                                <h2 className="text-lg font-bold text-fg">
+                                                    Licencia y negocio
+                                                </h2>
+                                                <p className="text-sm text-fg-muted">
+                                                    Todos los campos son obligatorios.
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <form
+                                            onSubmit={submitActivation}
+                                            className="mt-6 grid gap-5"
+                                        >
+                                            <div>
+                                                <label
+                                                    htmlFor="activation-license-key"
+                                                    className="text-sm font-semibold text-fg"
                                                 >
-                                                    <TextInput
+                                                    Clave de licencia
+                                                </label>
+                                                <Input
+                                                    id="activation-license-key"
+                                                    autoFocus
+                                                    value={act.licenseKey}
+                                                    onChange={(e) =>
+                                                        setAct((s) => ({
+                                                            ...s,
+                                                            licenseKey: e.target.value,
+                                                        }))
+                                                    }
+                                                    className="mt-2 h-12 px-4 font-mono uppercase tracking-wider"
+                                                    placeholder="XXXX-XXXX-XXXX"
+                                                    autoComplete="off"
+                                                />
+                                            </div>
+
+                                            <div className="grid gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label
+                                                        htmlFor="activation-legal-name"
+                                                        className="text-sm font-semibold text-fg"
+                                                    >
+                                                        Nombre legal
+                                                    </label>
+                                                    <Input
+                                                        id="activation-legal-name"
                                                         value={act.legal_name}
                                                         onChange={(e) =>
                                                             setAct((s) => ({
                                                                 ...s,
-                                                                legal_name:
-                                                                    e.target
-                                                                        .value,
+                                                                legal_name: e.target.value,
                                                             }))
                                                         }
-                                                        placeholder="Ej: ALTARIA LIGHTS S.L."
+                                                        className="mt-2 h-12 px-4"
+                                                        placeholder="ALTARIA LIGHTS S.L."
+                                                        autoComplete="organization"
                                                     />
-                                                </Field>
+                                                </div>
 
-                                                <Field
-                                                    label="Nombre del negocio"
-                                                    hint="Obligatorio"
-                                                >
-                                                    <TextInput
+                                                <div>
+                                                    <label
+                                                        htmlFor="activation-display-name"
+                                                        className="text-sm font-semibold text-fg"
+                                                    >
+                                                        Nombre del negocio
+                                                    </label>
+                                                    <Input
+                                                        id="activation-display-name"
                                                         value={act.display_name}
                                                         onChange={(e) =>
                                                             setAct((s) => ({
                                                                 ...s,
-                                                                display_name:
-                                                                    e.target
-                                                                        .value,
+                                                                display_name: e.target.value,
                                                             }))
                                                         }
-                                                        placeholder="Ej: Bar La Plaza"
+                                                        className="mt-2 h-12 px-4"
+                                                        placeholder="Bar La Plaza"
+                                                        autoComplete="organization"
                                                     />
-                                                </Field>
+                                                </div>
+                                            </div>
 
-                                                <Field
-                                                    label="Correo electrónico"
-                                                    hint="Obligatorio"
-                                                >
-                                                    <TextInput
+                                            <div className="grid gap-4 sm:grid-cols-2">
+                                                <div>
+                                                    <label
+                                                        htmlFor="activation-email"
+                                                        className="flex items-center gap-2 text-sm font-semibold text-fg"
+                                                    >
+                                                        <Mail className="size-4 text-accent" aria-hidden />
+                                                        Correo electrónico
+                                                    </label>
+                                                    <Input
+                                                        id="activation-email"
                                                         type="email"
                                                         value={act.email}
                                                         onChange={(e) =>
                                                             setAct((s) => ({
                                                                 ...s,
-                                                                email: e.target
-                                                                    .value,
+                                                                email: e.target.value,
                                                             }))
                                                         }
+                                                        className="mt-2 h-12 px-4"
                                                         placeholder="ejemplo@correo.com"
+                                                        autoComplete="email"
                                                     />
-                                                </Field>
+                                                </div>
 
-                                                <Field
-                                                    label="Número de teléfono"
-                                                    hint="Obligatorio"
-                                                >
-                                                    <TextInput
+                                                <div>
+                                                    <label
+                                                        htmlFor="activation-phone"
+                                                        className="flex items-center gap-2 text-sm font-semibold text-fg"
+                                                    >
+                                                        <Phone className="size-4 text-accent" aria-hidden />
+                                                        Número de teléfono
+                                                    </label>
+                                                    <Input
+                                                        id="activation-phone"
+                                                        type="tel"
                                                         value={act.phone}
                                                         onChange={(e) =>
                                                             setAct((s) => ({
                                                                 ...s,
-                                                                phone: e.target
-                                                                    .value,
+                                                                phone: e.target.value,
                                                             }))
                                                         }
+                                                        className="mt-2 h-12 px-4"
                                                         placeholder="+34 600 000 000"
+                                                        autoComplete="tel"
                                                     />
-                                                </Field>
-
-                                                <div className="md:col-span-2">
-                                                    <Field
-                                                        label="País"
-                                                        hint="Obligatorio"
-                                                    >
-                                                        <TextInput
-                                                            value={act.country}
-                                                            onChange={(e) =>
-                                                                setAct((s) => ({
-                                                                    ...s,
-                                                                    country:
-                                                                        e.target
-                                                                            .value,
-                                                                }))
-                                                            }
-                                                            placeholder="España"
-                                                        />
-                                                    </Field>
                                                 </div>
                                             </div>
-                                        </div>
 
-                                        <div className="flex items-center justify-between gap-2">
-                                            <GhostButton
-                                                disabled={busy}
-                                                onClick={() =>
-                                                    setAct({
-                                                        licenseKey: "",
-                                                        businessName: "",
-                                                        legal_name: "",
-                                                        display_name: "",
-                                                        email: "",
-                                                        phone: "",
-                                                        country: "",
-                                                    })
-                                                }
-                                            >
-                                                Limpiar
-                                            </GhostButton>
+                                            <div>
+                                                <label
+                                                    htmlFor="activation-country"
+                                                    className="flex items-center gap-2 text-sm font-semibold text-fg"
+                                                >
+                                                    <MapPin className="size-4 text-accent" aria-hidden />
+                                                    País
+                                                </label>
+                                                <Input
+                                                    id="activation-country"
+                                                    value={act.country}
+                                                    onChange={(e) =>
+                                                        setAct((s) => ({
+                                                            ...s,
+                                                            country: e.target.value,
+                                                        }))
+                                                    }
+                                                    className="mt-2 h-12 px-4"
+                                                    placeholder="España"
+                                                    autoComplete="country-name"
+                                                />
+                                            </div>
 
-                                            <PrimaryButton
-                                                type="submit"
-                                                disabled={
-                                                    busy || !activationValid
-                                                }
-                                            >
-                                                {busy
-                                                    ? "Activando…"
-                                                    : "Activar"}
-                                            </PrimaryButton>
-                                        </div>
+                                            {err ? (
+                                                <pre
+                                                    className="whitespace-pre-wrap rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger"
+                                                    role="alert"
+                                                >
+                                                    {err}
+                                                </pre>
+                                            ) : null}
 
-                                        {err && (
-                                            <pre className="mt-1 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl p-3 whitespace-pre-wrap">
-                                                {err}
-                                            </pre>
-                                        )}
-                                    </form>
-                                </Panel>
+                                            <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
+                                                <Button
+                                                    variant="secondary"
+                                                    size="lg"
+                                                    disabled={busy}
+                                                    onClick={() =>
+                                                        setAct({
+                                                            licenseKey: "",
+                                                            businessName: "",
+                                                            legal_name: "",
+                                                            display_name: "",
+                                                            email: "",
+                                                            phone: "",
+                                                            country: "",
+                                                        })
+                                                    }
+                                                >
+                                                    Limpiar
+                                                </Button>
+
+                                                <Button
+                                                    type="submit"
+                                                    size="lg"
+                                                    fullWidth
+                                                    loading={busy}
+                                                    disabled={!activationValid}
+                                                    leftIcon={
+                                                        <ShieldCheck
+                                                            className="size-5"
+                                                            aria-hidden
+                                                        />
+                                                    }
+                                                >
+                                                    Activar TPV
+                                                </Button>
+                                            </div>
+                                        </form>
+                                    </section>
+                                </Card>
                             </div>
                         </div>
                     ) : !gate.allowed ? (

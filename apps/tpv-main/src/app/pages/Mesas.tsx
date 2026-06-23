@@ -94,15 +94,15 @@ export default function Mesas() {
     };
 
     return (
-        <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+        <div className="flex h-full min-h-0 w-full flex-col items-center gap-4 overflow-hidden bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
             <TopBar isCocinero={esCocinero} canEditMesas={canEditMesas} />
 
             {esCocinero ? (
                 <KitchenBoard idUsuarioCocinero={idUsuario} />
             ) : (
                 <>
-                    <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-6">
-                        <div className="flex flex-wrap items-center gap-4">
+                    <div className="flex min-h-0 w-full flex-1 flex-col rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-6">
+                        <div className="flex shrink-0 flex-wrap items-center gap-4">
                             <h2 className="whitespace-nowrap text-lg font-bold leading-none text-fg">
                                 Salones
                             </h2>

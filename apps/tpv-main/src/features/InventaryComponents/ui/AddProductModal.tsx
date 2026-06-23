@@ -371,25 +371,31 @@ export function AddProductModal({
             <div className="max-h-[78vh] overflow-y-auto pr-1">
                 <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="md:col-span-2">
-                        <label className="font-semibold">Nombre *</label>
+                        <label htmlFor="producto-nombre" className="block font-semibold">
+                            Nombre *
+                        </label>
                         <input
+                            id="producto-nombre"
                             type="text"
                             value={nombre}
                             onChange={(e) => setNombre(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             required
                             disabled={loading}
                         />
                     </div>
 
                     <div>
-                        <label className="font-semibold">Categoría *</label>
+                        <label htmlFor="producto-categoria" className="block font-semibold">
+                            Categoría *
+                        </label>
                         <select
+                            id="producto-categoria"
                             value={idCategoria}
                             onChange={(e) =>
                                 setIdCategoria(e.target.value || "")
                             }
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             required
                             disabled={loading}
                         >
@@ -403,13 +409,16 @@ export function AddProductModal({
                     </div>
 
                     <div>
-                        <label className="font-semibold">Proveedor</label>
+                        <label htmlFor="producto-proveedor" className="block font-semibold">
+                            Proveedor
+                        </label>
                         <select
+                            id="producto-proveedor"
                             value={idProveedor}
                             onChange={(e) =>
                                 setIdProveedor(e.target.value || "")
                             }
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         >
                             <option value="">—</option>
@@ -422,23 +431,29 @@ export function AddProductModal({
                     </div>
 
                     <div>
-                        <label className="font-semibold">Precio venta</label>
+                        <label htmlFor="producto-precio-venta" className="block font-semibold">
+                            Precio venta
+                        </label>
                         <input
+                            id="producto-precio-venta"
                             type="number"
                             step="0.01"
                             value={precioVenta}
                             onChange={(e) => setPrecioVenta(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         />
                     </div>
 
                     <div>
-                        <label className="font-semibold">Unidad de medida</label>
+                        <label htmlFor="producto-unidad-medida" className="block font-semibold">
+                            Unidad de medida
+                        </label>
                         <select
+                            id="producto-unidad-medida"
                             value={unidadMedida}
                             onChange={(e) => setUnidadMedida(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         >
                             <option value="">Selecciona</option>
@@ -457,25 +472,34 @@ export function AddProductModal({
                     </div>
 
                     <div>
-                        <label className="font-semibold">Stock mínimo</label>
+                        <label htmlFor="producto-stock-minimo" className="block font-semibold">
+                            Stock mínimo
+                        </label>
                         <input
+                            id="producto-stock-minimo"
                             type="number"
                             step="0.01"
                             value={stockMinimo}
                             onChange={(e) => setStockMinimo(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         />
                     </div>
 
                     <div>
-                        <label className="font-semibold">Cantidad pedido esperada</label>
+                        <label
+                            htmlFor="producto-cantidad-pedido"
+                            className="block font-semibold"
+                        >
+                            Cantidad pedido esperada
+                        </label>
                         <input
+                            id="producto-cantidad-pedido"
                             type="number"
                             step="0.01"
                             value={cantidadPedidoEsperada}
                             onChange={(e) => setCantidadPedidoEsperada(e.target.value)}
-                            className="border border-border rounded-xl px-3 py-2 w-full"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         />
                     </div>
@@ -513,35 +537,53 @@ export function AddProductModal({
                             {crearLoteInicial && (
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
                                     <div>
-                                        <label className="text-sm font-semibold">Código lote *</label>
+                                        <label
+                                            htmlFor="producto-lote-codigo"
+                                            className="block text-sm font-semibold"
+                                        >
+                                            Código lote *
+                                        </label>
                                         <input
+                                            id="producto-lote-codigo"
                                             value={codigoLoteInicial}
                                             onChange={(e) => setCodigoLoteInicial(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                             disabled={loading}
                                             required
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="text-sm font-semibold">Caducidad</label>
+                                        <label
+                                            htmlFor="producto-lote-caducidad"
+                                            className="block text-sm font-semibold"
+                                        >
+                                            Caducidad
+                                        </label>
                                         <input
+                                            id="producto-lote-caducidad"
                                             type="date"
                                             value={caducidadLoteInicial}
                                             onChange={(e) => setCaducidadLoteInicial(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                             disabled={loading}
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="text-sm font-semibold">Cantidad inicial *</label>
+                                        <label
+                                            htmlFor="producto-lote-cantidad"
+                                            className="block text-sm font-semibold"
+                                        >
+                                            Cantidad inicial *
+                                        </label>
                                         <input
+                                            id="producto-lote-cantidad"
                                             type="number"
                                             step="0.01"
                                             value={cantidadInicialLote}
                                             onChange={(e) => setCantidadInicialLote(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full"
+                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                             disabled={loading}
                                             required
                                         />
@@ -654,11 +696,12 @@ export function AddProductModal({
                     </div>
 
                     <div className="md:col-span-2 flex flex-col gap-2">
-                        <label className="font-semibold text-fg">
+                        <label htmlFor="producto-imagen" className="font-semibold text-fg">
                             Imagen <span className="text-fg-muted font-medium">(opcional)</span>
                         </label>
 
                         <input
+                            id="producto-imagen"
                             ref={fileInputRef}
                             type="file"
                             accept="image/*"
