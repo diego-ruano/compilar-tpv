@@ -50,11 +50,6 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
                 <ImageOff className="size-6" aria-hidden />
               </div>
             }
-            loadingFallback={
-              <div className="flex h-24 w-full items-center justify-center rounded-xl border border-border bg-surface-2 text-fg-subtle sm:h-28">
-                <ImageOff className="size-6 animate-pulse" aria-hidden />
-              </div>
-            }
           />
 
           {hasQty && (

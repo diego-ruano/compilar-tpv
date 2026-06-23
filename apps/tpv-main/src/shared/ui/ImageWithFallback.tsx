@@ -6,13 +6,13 @@
 //
 // Comportamiento:
 //   - Sin `src` o tras agotar reintentos → muestra `fallback` (placeholder estético del caller).
-//   - Mientras carga / reintenta → muestra `loadingFallback` (por defecto "Cargando imagen…"),
-//     nunca una imagen rota.
+//   - Mientras carga / reintenta → la imagen está oculta (transparente), nunca un placeholder de
+//     "Cargando…" ni una imagen rota. En modo Main las imágenes están en disco y aparecen al
+//     instante; en el Handy aparecen en cuanto el CDN responde.
 //   - Ante un error (p. ej. 404 porque aún no se ha subido) reintenta el MISMO URL con un pequeño
 //     retardo (sin cache-busting, para no romper el cacheo del CDN cuando la imagen sí exista).
 
 import React, { useEffect, useState } from "react";
-import { ImageOff } from "lucide-react";
 
 type Props = {
   src: string | null | undefined;
@@ -20,27 +20,17 @@ type Props = {
   className?: string;
   /** Placeholder cuando no hay imagen o se agotaron los reintentos. */
   fallback: React.ReactNode;
-  /** Placeholder mientras carga/reintenta. Si se omite, usa uno genérico de "Cargando…". */
-  loadingFallback?: React.ReactNode;
   retries?: number;
   retryDelayMs?: number;
   draggable?: boolean;
   loading?: "lazy" | "eager"; // usa "eager" (default) si el img empieza hidden
 };
 
-const DefaultLoading = (
-  <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-surface-2 text-fg-subtle">
-    <ImageOff className="size-6 animate-pulse" aria-hidden />
-    <span className="text-xs font-semibold">Cargando imagen…</span>
-  </div>
-);
-
 export default function ImageWithFallback({
   src,
   alt,
   className,
   fallback,
-  loadingFallback,
   retries = 5,
   retryDelayMs = 3000,
   draggable = false,
@@ -73,20 +63,19 @@ export default function ImageWithFallback({
   };
 
   return (
-    <>
-      {!loaded ? <>{loadingFallback ?? DefaultLoading}</> : null}
-      <img
-        // `key` fuerza el remount al reintentar → vuelve a pedir el mismo URL.
-        key={attempt}
-        src={src}
-        alt={alt}
-        className={className}
-        style={loaded ? undefined : { display: "none" }}
-        draggable={draggable}
-        loading={loading}
-        onLoad={() => setLoaded(true)}
-        onError={handleError}
-      />
-    </>
+    <img
+      // `key` fuerza el remount al reintentar → vuelve a pedir el mismo URL.
+      key={attempt}
+      src={src}
+      alt={alt}
+      className={className}
+      // Oculta mientras carga para no mostrar el icono de imagen rota durante un reintento;
+      // al cargar aparece directamente la imagen buena, sin placeholder intermedio.
+      style={loaded ? undefined : { visibility: "hidden" }}
+      draggable={draggable}
+      loading={loading}
+      onLoad={() => setLoaded(true)}
+      onError={handleError}
+    />
   );
 }
