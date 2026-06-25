@@ -1245,19 +1245,6 @@ function Trabajadores() {
 
                     <button
                       type="button"
-                      onClick={() => toast.info("Por implementar", "Estadísticas (pendiente)")}
-                      className="
-                        border-2 border-border-strong text-fg rounded-xl
-                        font-medium transition-all duration-300 hover:bg-accent hover:text-white
-                        px-3 py-1.5 text-xs
-                        sm:px-4 sm:py-2 sm:text-sm
-                      "
-                    >
-                      Estadísticas
-                    </button>
-
-                    <button
-                      type="button"
                       onClick={() => toast.info("Por implementar", "Dar de baja (pendiente)")}
                       className="
                         border-2 border-danger text-danger rounded-xl

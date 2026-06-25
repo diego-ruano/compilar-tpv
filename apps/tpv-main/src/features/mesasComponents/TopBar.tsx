@@ -11,7 +11,7 @@ export default function TopBar({
     isCocinero = false,
 }: TopBarProps) {
     return (
-        <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex w-full shrink-0 items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
             <div className="flex min-w-0 items-center gap-3">
                 <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                     {isCocinero ? <ChefHat className="size-6" aria-hidden /> : <LayoutGrid className="size-6" aria-hidden />}

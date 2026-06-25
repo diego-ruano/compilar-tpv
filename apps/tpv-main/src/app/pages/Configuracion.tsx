@@ -413,15 +413,15 @@ export default function Configuracion() {
                                                     setSection(it.key)
                                                 }
                                                 className={cn(
-                                                    "w-full text-left rounded-2xl px-3 py-3 transition border",
+                                                    "w-full text-left rounded-2xl px-3 py-3 border transition-colors duration-150",
+                                                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-surface",
                                                     active
-                                                        ? darkMode
-                                                            ? "bg-surface-2 border-border"
-                                                            : "bg-surface-2 border-border"
-                                                        : darkMode
-                                                            ? "bg-transparent border-transparent hover:bg-surface-2"
-                                                            : "bg-transparent border-transparent hover:bg-surface-2",
+                                                        ? "bg-accent-soft border-accent/30"
+                                                        : "bg-transparent border-transparent hover:bg-surface-2 hover:border-border",
                                                 )}
+                                                aria-current={
+                                                    active ? "page" : undefined
+                                                }
                                             >
                                                 <div
                                                     className={cn(
@@ -568,7 +568,7 @@ export default function Configuracion() {
 
                             {/* Scroll interno */}
                             <div className="h-full min-h-0 overflow-auto px-4 md:px-6 py-5">
-                                <div className="max-w-[980px]">
+                                <div className="w-full">
                                     <div className="mb-4">
                                         <div
                                             className={cn(

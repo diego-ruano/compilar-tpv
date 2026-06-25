@@ -147,8 +147,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
   return (
     <aside
       className={cn(
-        "sticky top-0 flex h-full flex-col border-r border-border bg-surface transition-[width] duration-300",
-        open ? "w-64" : "w-16",
+        "sticky top-0 flex h-full w-full flex-col border-r border-border bg-surface",
       )}
     >
       {/* Cabecera: logo + contraer/expandir */}
@@ -156,7 +155,10 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
         <img
           src={Logo}
           alt="logo"
-          className={cn("size-8 rounded-lg object-contain", open ? "" : "hidden")}
+          className={cn(
+            "h-8 rounded-lg object-contain transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+            open ? "w-8 opacity-100 translate-x-0" : "w-0 opacity-0 -translate-x-2",
+          )}
         />
         <button
           type="button"
@@ -206,21 +208,26 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
         {/* Usuario actual */}
         <div
           className={cn(
-            "flex items-center rounded-xl px-2 py-2",
+            "flex items-center rounded-xl px-2 py-2 transition-[gap] duration-300 ease-out motion-reduce:transition-none",
             open ? "gap-3" : "justify-center",
           )}
         >
           <div className="grid size-9 shrink-0 place-items-center rounded-full bg-accent-soft text-sm font-bold text-accent">
             {initial}
           </div>
-          {open && (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-fg">
-                {nombre || "Usuario"}
-              </p>
-              <p className="truncate text-xs text-fg-muted">{role}</p>
-            </div>
-          )}
+          <div
+            className={cn(
+              "min-w-0 overflow-hidden transition-[width,opacity,transform] duration-300 ease-out motion-reduce:transition-none",
+              open
+                ? "w-40 opacity-100 translate-x-0"
+                : "w-0 opacity-0 -translate-x-2",
+            )}
+          >
+            <p className="truncate text-sm font-semibold text-fg">
+              {nombre || "Usuario"}
+            </p>
+            <p className="truncate text-xs text-fg-muted">{role}</p>
+          </div>
         </div>
 
         {/* Cerrar sesión */}

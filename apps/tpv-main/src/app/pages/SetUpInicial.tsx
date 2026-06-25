@@ -1,15 +1,21 @@
 import React, { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
+    Check,
+    KeyRound,
+    LockKeyhole,
+    Mail,
+    ShieldCheck,
+    UserRound,
+} from "lucide-react";
+import {
     completeInitialSetup,
     uploadInitialSetupToCloud,
 } from "../../features/login/loginApi";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
-
-function cn(...classes: Array<string | false | undefined | null>) {
-    return classes.filter(Boolean).join(" ");
-}
+import { Badge, Button, Card, Input } from "../../shared/ui";
+import Titlebar from "../layoutComponent/Titlebar";
 
 export default function SetupInicial() {
     const navigate = useNavigate();
@@ -114,104 +120,228 @@ export default function SetupInicial() {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-zinc-50 to-zinc-100 flex items-center justify-center p-6">
-            <div className="w-full max-w-xl rounded-3xl border border-black/5 bg-white/70 p-6 shadow-sm backdrop-blur">
-                <h1 className="text-xl font-semibold text-zinc-900">
-                    Configuración inicial
-                </h1>
+        <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-bg text-fg">
+            <Titlebar />
 
-                <p className="mt-1 text-sm text-zinc-600">
-                    Hola {nombre ?? "usuario"}. Antes de usar el TPV debes cambiar el PIN y añadir tu Gmail.
-                </p>
+            <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-4 sm:p-6 lg:p-10">
+                <div
+                    className="pointer-events-none absolute -left-24 -top-24 size-80 rounded-full bg-accent-soft blur-3xl"
+                    aria-hidden
+                />
+                <div
+                    className="pointer-events-none absolute -bottom-32 -right-16 size-96 rounded-full bg-accent-soft opacity-70 blur-3xl"
+                    aria-hidden
+                />
 
-                <div className="mt-5 grid gap-4">
+                <Card
+                    padded={false}
+                    className="relative grid w-full max-w-5xl overflow-hidden rounded-3xl shadow-xl lg:grid-cols-[0.9fr_1.1fr]"
+                >
+                <section className="flex flex-col justify-between border-b border-border bg-surface-2 p-6 sm:p-8 lg:border-b-0 lg:border-r">
                     <div>
-                        <label className="text-xs font-semibold text-zinc-700">
-                            PIN actual
-                        </label>
+                        <div className="flex items-center justify-between gap-3">
+                            <div className="grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent">
+                                <ShieldCheck className="size-7" aria-hidden />
+                            </div>
+                            <Badge tone="accent">Primer acceso</Badge>
+                        </div>
 
-                        <input
-                            value={pinActual}
-                            onChange={(e) =>
-                                setPinActual(e.target.value.replace(/\D/g, "").slice(0, 6))
-                            }
-                            className="mt-1 w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-zinc-900 outline-none"
-                            placeholder="1234"
-                            inputMode="numeric"
-                        />
+                        <h1 className="mt-6 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
+                            Termina de preparar tu cuenta
+                        </h1>
+                        <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
+                            Hola, <span className="font-semibold text-fg">{nombre ?? "usuario"}</span>.
+                            Antes de empezar necesitamos proteger tu acceso y confirmar
+                            tu correo.
+                        </p>
+
+                        <div className="mt-7 space-y-4">
+                            <div className="flex gap-3">
+                                <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                    <KeyRound className="size-4" aria-hidden />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-fg">
+                                        Crea tu PIN personal
+                                    </p>
+                                    <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                        Utiliza entre 4 y 6 dígitos que puedas recordar.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                                <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-accent shadow-sm">
+                                    <Mail className="size-4" aria-hidden />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-semibold text-fg">
+                                        Confirma tu correo
+                                    </p>
+                                    <p className="mt-0.5 text-xs leading-relaxed text-fg-muted">
+                                        Se asociará a tu usuario para los servicios del TPV.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                        <div>
-                            <label className="text-xs font-semibold text-zinc-700">
-                                PIN nuevo
-                            </label>
+                    <div className="mt-8 flex items-center gap-2 rounded-2xl border border-border bg-surface px-4 py-3 text-xs text-fg-muted">
+                        <LockKeyhole className="size-4 shrink-0 text-success" aria-hidden />
+                        Tus datos se guardarán al completar este paso.
+                    </div>
+                </section>
 
-                            <input
-                                value={pinNuevo}
+                <section className="p-6 sm:p-8">
+                    <div className="flex items-center gap-3">
+                        <div className="grid size-10 place-items-center rounded-xl bg-accent-soft text-accent">
+                            <UserRound className="size-5" aria-hidden />
+                        </div>
+                        <div>
+                            <h2 className="text-lg font-bold text-fg">
+                                Datos de acceso
+                            </h2>
+                            <p className="text-sm text-fg-muted">
+                                Todos los campos son obligatorios.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="mt-6 grid gap-5">
+                        <div>
+                            <label
+                                htmlFor="setup-pin-actual"
+                                className="text-sm font-semibold text-fg"
+                            >
+                                PIN actual
+                            </label>
+                            <Input
+                                id="setup-pin-actual"
+                                type="password"
+                                value={pinActual}
                                 onChange={(e) =>
-                                    setPinNuevo(e.target.value.replace(/\D/g, "").slice(0, 6))
+                                    setPinActual(
+                                        e.target.value.replace(/\D/g, "").slice(0, 6),
+                                    )
                                 }
-                                className="mt-1 w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-zinc-900 outline-none"
-                                placeholder="mín 4 dígitos"
+                                className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
+                                placeholder="••••"
                                 inputMode="numeric"
+                                autoComplete="current-password"
+                                maxLength={6}
                             />
                         </div>
 
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div>
+                                <label
+                                    htmlFor="setup-pin-nuevo"
+                                    className="text-sm font-semibold text-fg"
+                                >
+                                    PIN nuevo
+                                </label>
+                                <Input
+                                    id="setup-pin-nuevo"
+                                    type="password"
+                                    value={pinNuevo}
+                                    onChange={(e) =>
+                                        setPinNuevo(
+                                            e.target.value.replace(/\D/g, "").slice(0, 6),
+                                        )
+                                    }
+                                    className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
+                                    placeholder="••••"
+                                    inputMode="numeric"
+                                    autoComplete="new-password"
+                                    maxLength={6}
+                                />
+                            </div>
+
+                            <div>
+                                <label
+                                    htmlFor="setup-pin-confirmacion"
+                                    className="text-sm font-semibold text-fg"
+                                >
+                                    Repite el PIN
+                                </label>
+                                <Input
+                                    id="setup-pin-confirmacion"
+                                    type="password"
+                                    value={pinNuevo2}
+                                    onChange={(e) =>
+                                        setPinNuevo2(
+                                            e.target.value.replace(/\D/g, "").slice(0, 6),
+                                        )
+                                    }
+                                    invalid={
+                                        pinNuevo2.length > 0 &&
+                                        pinNuevo !== pinNuevo2
+                                    }
+                                    className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
+                                    placeholder="••••"
+                                    inputMode="numeric"
+                                    autoComplete="new-password"
+                                    maxLength={6}
+                                />
+                                {pinNuevo2.length > 0 && pinNuevo === pinNuevo2 ? (
+                                    <p className="mt-2 flex items-center gap-1.5 text-xs font-medium text-success">
+                                        <Check className="size-3.5" aria-hidden />
+                                        Los PIN coinciden
+                                    </p>
+                                ) : null}
+                            </div>
+                        </div>
+
                         <div>
-                            <label className="text-xs font-semibold text-zinc-700">
-                                Repite PIN nuevo
+                            <label
+                                htmlFor="setup-email"
+                                className="text-sm font-semibold text-fg"
+                            >
+                                Correo electrónico
                             </label>
-
-                            <input
-                                value={pinNuevo2}
-                                onChange={(e) =>
-                                    setPinNuevo2(e.target.value.replace(/\D/g, "").slice(0, 6))
-                                }
-                                className="mt-1 w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-zinc-900 outline-none"
-                                placeholder="repite"
-                                inputMode="numeric"
+                            <Input
+                                id="setup-email"
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="mt-2 h-12 px-4 text-base"
+                                placeholder="tuemail@ejemplo.com"
+                                inputMode="email"
+                                autoComplete="email"
                             />
+                            <p className="mt-2 text-xs text-fg-subtle">
+                                No tiene que ser Gmail; puedes usar cualquier correo válido.
+                            </p>
                         </div>
+
+                        {error ? (
+                            <div
+                                className="rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger"
+                                role="alert"
+                            >
+                                {error}
+                            </div>
+                        ) : null}
+
+                        <Button
+                            type="button"
+                            size="lg"
+                            fullWidth
+                            loading={saving}
+                            disabled={!canSave}
+                            onClick={onSave}
+                            leftIcon={<ShieldCheck className="size-5" aria-hidden />}
+                            className="mt-1"
+                        >
+                            Guardar y continuar
+                        </Button>
+
+                        <p className="text-center text-xs text-fg-subtle">
+                            Este paso es necesario para desbloquear el TPV.
+                        </p>
                     </div>
-
-                    <div>
-                        <label className="text-xs font-semibold text-zinc-700">
-                            Gmail
-                        </label>
-
-                        <input
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            className="mt-1 w-full rounded-2xl border border-black/10 bg-white px-4 py-3 text-zinc-900 outline-none"
-                            placeholder="tuemail@gmail.com"
-                            inputMode="email"
-                        />
-                    </div>
-
-                    {error ? (
-                        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-                            {error}
-                        </div>
-                    ) : null}
-
-                    <button
-                        onClick={onSave}
-                        disabled={!canSave}
-                        className={cn(
-                            "h-12 w-full rounded-2xl border border-black/5 shadow-sm transition active:scale-[0.98]",
-                            canSave
-                                ? "bg-black text-white hover:bg-black/90"
-                                : "bg-black/5 text-zinc-400 cursor-not-allowed",
-                        )}
-                    >
-                        {saving ? "Guardando..." : "Guardar y continuar"}
-                    </button>
-
-                    <p className="text-xs text-zinc-500">
-                        Nota: mientras no completes esto, el TPV quedará bloqueado.
-                    </p>
-                </div>
+                </section>
+                </Card>
             </div>
         </div>
     );

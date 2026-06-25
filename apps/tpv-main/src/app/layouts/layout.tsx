@@ -22,7 +22,7 @@ function layout({ children }: { children: React.ReactNode }) {
           className={[
             "lg:hidden",
             sidebarOpen ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0",
-            "absolute inset-0 z-30 bg-black/50 transition-opacity",
+            "absolute inset-0 z-30 bg-black/50 transition-opacity duration-300 ease-out motion-reduce:transition-none",
           ].join(" ")}
           onClick={closeSidebar}
         />
@@ -30,13 +30,22 @@ function layout({ children }: { children: React.ReactNode }) {
         {/* Contenedor del sidebar */}
         <div
           className={[
-            "h-full shrink-0",
+            "h-full shrink-0 overflow-hidden",
             "lg:relative lg:z-auto",
             "absolute left-0 top-0 bottom-0 z-40",
-            "transition-transform duration-300",
+            "w-64 lg:w-[var(--sidebar-width)]",
+            "will-change-[transform,width]",
             sidebarOpen ? "translate-x-0" : "-translate-x-full",
             "lg:translate-x-0",
           ].join(" ")}
+          style={
+            {
+              "--sidebar-width": sidebarOpen ? "16rem" : "4rem",
+              transitionProperty: "width, transform",
+              transitionDuration: "480ms",
+              transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)",
+            } as React.CSSProperties
+          }
         >
           <NavBar
             open={sidebarOpen}
@@ -63,7 +72,7 @@ function layout({ children }: { children: React.ReactNode }) {
         </button>
 
         {/* Main scrolleable */}
-        <main className="flex-1 overflow-y-auto bg-bg">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto bg-bg">{children}</main>
       </div>
     </div>
   );

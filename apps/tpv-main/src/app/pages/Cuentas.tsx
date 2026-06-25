@@ -5,7 +5,6 @@ import {
     Trash2,
     X,
     FileDown,
-    BarChart3,
     Send,
     Calculator,
     ReceiptText,
@@ -163,11 +162,11 @@ function DenomsGrid({
     total: number;
 }) {
     return (
-        <div className="rounded-3xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 rounded-2xl border border-border bg-surface p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                        <h3 className="text-base sm:text-lg font-semibold text-fg">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-bold text-fg sm:text-lg">
                             {title}
                         </h3>
                         <Badge>Total: {euro(total)}</Badge>
@@ -180,13 +179,13 @@ function DenomsGrid({
                 <button
                     type="button"
                     onClick={onReset}
-                    className="h-9 px-3 rounded-xl border border-border bg-surface text-xs font-semibold text-fg shadow-sm hover:bg-surface-2 active:scale-[0.98] transition"
+                    className="h-8 shrink-0 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98]"
                 >
                     Reset
                 </button>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(135px,1fr))] gap-2.5">
                 {denoms.map((d) => {
                     const c = count[d.label] || 0;
                     const active = c > 0;
@@ -195,14 +194,16 @@ function DenomsGrid({
                         <div
                             key={d.label}
                             className={cn(
-                                "rounded-2xl border p-3 transition",
+                                "min-w-0 rounded-xl border p-3 transition-colors",
                                 active
                                     ? "border-accent bg-accent-soft ring-1 ring-accent/30"
                                     : "border-border bg-surface-2",
                             )}
                         >
                             <div className="flex items-center justify-between gap-2">
-                                <p className="text-base font-extrabold text-fg">{d.label}</p>
+                                <p className="truncate text-base font-extrabold text-fg">
+                                    {d.label}
+                                </p>
                                 {active ? (
                                     <span className="grid min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-accent-fg">
                                         {c}
@@ -216,29 +217,31 @@ function DenomsGrid({
                                 {active ? `Subtotal ${euro(subtotal)}` : moneyLabel(d.value)}
                             </p>
 
-                            <div className="mt-2 flex items-center gap-2">
+                            <div className="mt-3 grid grid-cols-[2rem_minmax(1.5rem,1fr)_2rem] items-center gap-1.5">
                                 <button
                                     type="button"
                                     onClick={() => onRemove(d.label)}
                                     disabled={c === 0}
                                     aria-label={`Quitar ${d.label}`}
                                     className={cn(
-                                        "grid size-9 shrink-0 place-items-center rounded-xl border border-border bg-surface text-fg transition hover:bg-surface-2 active:scale-[0.95] cursor-pointer",
+                                        "grid size-8 place-items-center rounded-lg border border-border bg-surface text-fg transition hover:bg-surface-2 active:scale-[0.95] cursor-pointer",
                                         c === 0 && "cursor-not-allowed opacity-40",
                                     )}
                                 >
                                     <Minus className="size-4" aria-hidden />
                                 </button>
 
-                                <div className="flex-1 text-center">
-                                    <p className="text-xl font-extrabold leading-none text-fg">{c}</p>
+                                <div className="min-w-0 text-center">
+                                    <p className="truncate text-lg font-extrabold leading-none text-fg">
+                                        {c}
+                                    </p>
                                 </div>
 
                                 <button
                                     type="button"
                                     onClick={() => onAdd(d.label)}
                                     aria-label={`Añadir ${d.label}`}
-                                    className="grid size-9 shrink-0 place-items-center rounded-xl bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.95] cursor-pointer"
+                                    className="grid size-8 place-items-center rounded-lg bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.95] cursor-pointer"
                                 >
                                     <Plus className="size-4" aria-hidden />
                                 </button>
@@ -1175,7 +1178,7 @@ export default function Cuentas() {
     return (
         <div className="flex h-full w-full flex-col gap-3 overflow-hidden bg-bg p-3 sm:p-4 lg:px-10 lg:py-5">
             {/* HEADER */}
-            <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+            <div className="flex w-full shrink-0 flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                     <div className="flex min-w-0 items-center gap-3">
                         <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
@@ -1242,8 +1245,8 @@ export default function Cuentas() {
             </div>
 
             {/* PANELES */}
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
-                        <section className="flex min-h-0 flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
+            <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[repeat(2,minmax(0,1fr))] gap-4 overflow-hidden lg:grid-cols-2 lg:grid-rows-1">
+                        <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
                                     <h2 className="text-lg font-semibold text-fg">Entradas</h2>
@@ -1262,7 +1265,7 @@ export default function Cuentas() {
                                     <div className="col-span-3"></div>
                                 </div>
 
-                                <div className="min-h-0 flex-1 overflow-y-auto">
+                                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                                     {loadingEntradas ? (
                                         <div className="p-4 text-sm text-fg-muted">Cargando entradas…</div>
                                     ) : entradasFiltradas.length ? (
@@ -1328,7 +1331,7 @@ export default function Cuentas() {
                             </div>
                         </section>
 
-                        <section className="flex min-h-0 flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
+                        <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
                             <div className="flex items-start justify-between gap-3 flex-none">
                                 <div>
                                     <h2 className="text-lg font-semibold text-fg">Salidas</h2>
@@ -1348,7 +1351,7 @@ export default function Cuentas() {
                                     <div className="col-span-3"></div>
                                 </div>
 
-                                <div className="min-h-0 flex-1 overflow-y-auto">
+                                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
                                     {loadingSalidas ? (
                                         <div className="p-4 text-sm text-fg-muted">Cargando salidas…</div>
                                     ) : salidasFiltradas.length ? (
@@ -1444,14 +1447,6 @@ export default function Cuentas() {
                         >
                             <FileDown className="size-4" aria-hidden />
                             {savingPdf ? "Generando…" : "Guardar PDF"}
-                        </button>
-
-                        <button
-                            type="button"
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
-                        >
-                            <BarChart3 className="size-4" aria-hidden />
-                            Ver estadísticas
                         </button>
 
                         <button
@@ -1869,20 +1864,25 @@ export default function Cuentas() {
             ) : null}
 
             {openX ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
-                    <div className="absolute inset-0 bg-black/40" onClick={() => setOpenX(false)} />
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+                    <div
+                        className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+                        onClick={() => setOpenX(false)}
+                    />
 
-                    <div className="relative w-[1100px] max-w-[94vw] max-h-[88vh] overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
-                        <div className="flex items-start justify-between gap-3 border-b border-border p-4 sm:p-6">
+                    <div className="relative flex h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
+                        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6">
                             <div className="flex min-w-0 items-center gap-3">
                                 <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                                     <Calculator className="size-6" aria-hidden />
                                 </div>
                                 <div className="min-w-0">
-                                    <h3 className="text-xl font-extrabold text-fg">Entrada de Caja</h3>
+                                    <h3 className="text-xl font-extrabold text-fg">
+                                        Entrada de Caja
+                                    </h3>
                                     <p className="mt-0.5 text-sm text-fg-muted">
-                                        Compara tu <b>fondo</b> con el <b>cierre</b> del día y te decimos qué{" "}
-                                        <b>añadir o quitar</b> para el próximo turno.
+                                        Cuenta el efectivo del fondo y del cierre para preparar el
+                                        siguiente turno.
                                     </p>
                                 </div>
                             </div>
@@ -1897,15 +1897,15 @@ export default function Cuentas() {
                             </button>
                         </div>
 
-                        <div className="p-4 sm:p-6 overflow-auto max-h-[calc(88vh-88px)]">
+                        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
                             {xSavedToast ? (
                                 <div className="mb-4 rounded-2xl border border-success/30 bg-success-soft px-4 py-2 text-sm text-success">
                                     {xSavedToast}
                                 </div>
                             ) : null}
 
-                            <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-3">
-                                <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div className="rounded-2xl border border-border bg-surface-2 p-4">
                                     <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
                                         <Wallet className="size-4 text-accent" aria-hidden />
                                         Fondo total
@@ -1916,7 +1916,7 @@ export default function Cuentas() {
                                     </p>
                                 </div>
 
-                                <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm">
+                                <div className="rounded-2xl border border-border bg-surface-2 p-4">
                                     <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
                                         <Coins className="size-4 text-accent" aria-hidden />
                                         Cierre total
@@ -1929,7 +1929,7 @@ export default function Cuentas() {
 
                                 <div
                                     className={cn(
-                                        "rounded-2xl border p-4 shadow-sm",
+                                        "rounded-2xl border p-4",
                                         deltaResumen.neto >= 0
                                             ? "border-danger/30 bg-danger-soft"
                                             : "border-success/30 bg-success-soft",
@@ -1965,7 +1965,7 @@ export default function Cuentas() {
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
                                 <DenomsGrid
                                     title="1 · Fondo (predeterminado)"
                                     subtitle="Con cuánto quieres empezar siempre todos los turnos."
@@ -1989,7 +1989,7 @@ export default function Cuentas() {
                                 />
                             </div>
 
-                            <div className="mt-4 rounded-3xl border border-border bg-surface p-4 sm:p-5 shadow-sm">
+                            <div className="mt-4 rounded-2xl border border-border bg-surface-2 p-4 sm:p-5">
                                 <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
                                     <div>
                                         <h4 className="text-lg font-extrabold text-fg">
