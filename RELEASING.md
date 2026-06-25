@@ -1,0 +1,150 @@
+# Publicar actualizaciones en producción
+
+Esta guía explica cómo lanzar una nueva versión de la app de escritorio para que **llegue sola a
+todos los clientes** (sin pasar un `.exe` a mano) y cómo **revertir** o **intervenir** si algo sale
+mal, sin tocar el equipo de nadie.
+
+La pieza que lo hace posible: el **updater de Tauri** apunta a un feed que servimos nosotros desde
+`tpv-api` (`GET /v1/update/...`). Como el feed lo controlamos en el servidor, decidimos qué versión
+recibe cada cliente y podemos hacer rollback al instante.
+
+```
+App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-api ──► tabla app_releases (Turso)
+        ▲                                                                         │
+        └──────── descarga instalador + verifica firma ◄── URL del instalador (R2/host público)
+```
+
+---
+
+## 0. Preparación (una sola vez)
+
+1. **Secreto admin del feed** (para poder publicar/retirar versiones):
+   ```bash
+   cd apps/cloud-worker-licensing
+   wrangler secret put RELEASE_ADMIN_TOKEN     # inventa un token largo y guárdalo
+   ```
+   Sin este secreto, `POST /v1/update/publish` queda **deshabilitado** (fail-safe).
+
+2. **Clave de firma del updater** — ya generada en
+   `apps/tpv-main/src-tauri/.tauri/updater.key` (privada, **gitignored**) y su `.pub`.
+   La **pública** ya está embebida en `tauri.conf.json` (`plugins.updater.pubkey`).
+   - ⚠️ **La privada es un secreto crítico.** Si se pierde, NO podrás volver a firmar y los clientes
+     dejarán de poder actualizar. Cópiala a un gestor de secretos / secreto de CI.
+   - Para regenerarla (si prefieres tu propia clave):
+     `pnpm --filter @tpv/main exec tauri signer generate -w src-tauri/.tauri/updater.key -f`
+     y pega la nueva `.pub` en `tauri.conf.json`.
+
+3. **Dependencias / build inicial**: el primer `cargo build` descargará `tauri-plugin-updater`.
+   ```bash
+   pnpm install
+   cargo build
+   ```
+
+4. **Desplegar el worker** con el feed nuevo:
+   ```bash
+   cd apps/cloud-worker-licensing && wrangler deploy
+   ```
+
+---
+
+## 1. Cada release
+
+### a) Subir la versión
+
+Sube el número en **los dos** sitios (deben coincidir):
+- `apps/tpv-main/src-tauri/tauri.conf.json` → `version`
+- `apps/tpv-main/src-tauri/Cargo.toml` → `version`
+
+Usa SemVer (`0.1.0` → `0.1.1` para bugfix, `0.2.0` para features). El updater compara este número.
+
+### b) Compilar y FIRMAR el instalador
+
+El build necesita la clave privada en el entorno (si no, falla porque `createUpdaterArtifacts`
+está activo). En PowerShell:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -Raw "apps/tpv-main/src-tauri/.tauri/updater.key"
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""   # vacía si no le pusiste contraseña
+pnpm tauri build
+```
+
+Salida en `apps/tpv-main/src-tauri/target/release/bundle/`:
+- `nsis/tpv_<version>_x64-setup.exe`  ← instalador
+- `nsis/tpv_<version>_x64-setup.exe.sig`  ← **firma** (su contenido es texto corto)
+
+> En Windows el updater usa por defecto el instalador **NSIS**. (También se genera el `.msi`.)
+
+### c) Hospedar el instalador
+
+Sube el `.exe` a un **host público** (R2 con acceso público, o cualquier CDN) y copia su URL.
+Ejemplo de URL: `https://releases.altarialights.com/tpv_0.2.0_x64-setup.exe`.
+
+### d) Publicar en el feed
+
+```bash
+curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/publish \
+  -H "Authorization: Bearer $RELEASE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "version": "0.2.0",
+    "url": "https://releases.altarialights.com/tpv_0.2.0_x64-setup.exe",
+    "signature": "<pega aquí el CONTENIDO del .exe.sig>",
+    "notes": "Arreglado X. Añadido Y."
+  }'
+```
+
+Listo. A partir de ahora, cada app que arranque verá la actualización y mostrará el aviso
+"Nueva versión disponible". El usuario pulsa **Actualizar y reiniciar** cuando le convenga
+(deliberadamente NO se auto-reinicia, para no cortar un servicio en caja).
+
+### e) Canary (opcional, recomendado)
+
+Publica primero en un `channel` distinto (`"channel":"beta"`) y prueba con un cliente piloto antes
+de publicar en `stable`. *(El cliente lee `stable`; un canal beta requiere apuntar ese equipo a
+`beta` — pendiente de exponer como ajuste; de momento sirve para guardar la release sin activarla en
+stable.)*
+
+---
+
+## 2. Rollback / intervención en caliente
+
+Si una versión sale mala, **no hay que tocar ningún PC**. Desactívala en el feed: el feed vuelve a
+servir automáticamente la anterior activa.
+
+```bash
+curl -X POST https://tpv-api.altarialights.workers.dev/v1/update/deactivate \
+  -H "Authorization: Bearer $RELEASE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "version": "0.2.0" }'
+```
+
+Los clientes que aún no se actualizaron dejarán de ver la 0.2.0. (Los que ya se actualizaron
+necesitan que publiques una 0.2.1 con el arreglo — por eso conviene el canary del paso 1e.)
+
+---
+
+## 3. Plan de recuperación (peor caso)
+
+El updater es muy difícil de romper porque la **detección corre en Rust** (independiente de la UI) y
+el feed lo controlas tú. Aun así, ten esto a mano:
+
+- **Si el feed estuviera caído**: la app simplemente no ve actualizaciones y **sigue funcionando**.
+  Cuando `tpv-api` vuelva, se retoma solo en el siguiente arranque.
+- **Si quisieras un segundo canal de respaldo**: `plugins.updater.endpoints` admite **varias URLs**;
+  añade una estática (p. ej. un `latest.json` en R2) como fallback del worker.
+- **Reinstalación manual (último recurso)**: mantén siempre publicada y accesible la URL del último
+  instalador estable. Reinstalar por encima conserva los datos (`data.db` vive en AppData, no se
+  toca).
+- ⚠️ **Nunca pierdas `updater.key`**: sin ella no puedes firmar y los clientes se quedan sin poder
+  actualizar (tendrías que distribuir una build nueva con otra pubkey a mano). Haz copia de seguridad.
+
+---
+
+## 4. Checklist rápido
+
+- [ ] `version` subida en `tauri.conf.json` **y** `Cargo.toml`
+- [ ] `pnpm tauri build` con `TAURI_SIGNING_PRIVATE_KEY` en el entorno
+- [ ] Instalador `.exe` subido a host público
+- [ ] `POST /v1/update/publish` con la URL + contenido del `.sig`
+- [ ] Probado en un equipo piloto antes de dar por buena la release
+```

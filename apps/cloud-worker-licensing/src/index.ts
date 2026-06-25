@@ -43,8 +43,10 @@ import { syncRoutes } from "./domains/sync/sync.routes";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { ventaRapidaRoutes } from "./domains/venta_rapida/venta_rapida.routes";
+import { updatesRoutes } from "./domains/updates/updates.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
 import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
+import { emailRoutes } from "./domains/email/email.routes";
 
 import legacyLicensing from "./server/index";
 
@@ -150,6 +152,12 @@ app.route("/v1/sync", syncRoutes);
 app.route("/v1/tareas", tareasRoutes);
 app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
+app.route("/v1/email", emailRoutes);
+
+// ---------------- Auto-actualización de la app de escritorio ----------------
+// GET feed (público: lo consume el updater de Tauri, que verifica firma por su cuenta).
+// POST publish/deactivate van protegidos por token admin dentro del propio router.
+app.route("/v1/update", updatesRoutes);
 
 // ---------------- Gestión de dispositivos ----------------
 app.post("/v1/device/list", (c) =>

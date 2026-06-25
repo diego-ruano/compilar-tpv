@@ -13,6 +13,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
 use tpv_application::use_cases::pairing as uc_pairing;
@@ -946,6 +947,73 @@ async fn printer_print_test(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Auto-actualización (updater)
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// La DETECCIÓN corre en Rust (este módulo), no en la UI: aunque el frontend falle a futuro,
+// el chequeo de arranque sigue funcionando y emite `update:available`. La INSTALACIÓN la
+// dispara el usuario (comando `updater_install`), nunca de forma automática: reiniciar un TPV
+// en mitad de un servicio sería peor que esperar al cierre. El feed (qué versión se sirve, y
+// el rollback) se controla desde `tpv-api` sin tocar el equipo del cliente.
+
+/// Metadatos de una actualización disponible (lo que la UI necesita para avisar).
+#[derive(Debug, Clone, Serialize)]
+struct UpdateInfo {
+    /// Versión nueva publicada en el feed (p. ej. "0.2.0").
+    version: String,
+    /// Versión actualmente instalada en este equipo.
+    current_version: String,
+    /// Notas de la versión (texto libre del feed), si las hay.
+    notes: Option<String>,
+}
+
+/// Comprueba el feed (`tpv-api`) y devuelve los metadatos de la nueva versión, o `None` si ya
+/// está al día. La comparación de versiones la hace el plugin de Tauri verificando además la
+/// firma del paquete contra la clave pública embebida en `tauri.conf.json`.
+#[tauri::command]
+async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater no disponible: {e}"))?;
+
+    match updater.check().await {
+        Ok(Some(update)) => Ok(Some(UpdateInfo {
+            version: update.version.clone(),
+            current_version: update.current_version.clone(),
+            notes: update.body.clone(),
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("error comprobando actualización: {e}")),
+    }
+}
+
+/// Descarga, verifica e instala la última actualización y reinicia la app. Vuelve a comprobar el
+/// feed antes de instalar (no se fía de un estado cacheado). Pensado para invocarse cuando el
+/// usuario lo decida (p. ej. al cerrar caja), no en automático.
+#[tauri::command]
+async fn updater_install(app: AppHandle) -> Result<(), String> {
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater no disponible: {e}"))?;
+
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("error comprobando actualización: {e}"))?
+        .ok_or_else(|| "no hay actualización disponible".to_string())?;
+
+    update
+        .download_and_install(|_chunk, _total| {}, || {})
+        .await
+        .map_err(|e| format!("error instalando actualización: {e}"))?;
+
+    // En Windows el instalador cierra la app; `restart` reabre tras aplicar.
+    app.restart();
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Builder (único) + registro de comandos
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -954,8 +1022,36 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle();
+
+            // Chequeo de actualización en arranque (en Rust, independiente del frontend). Si hay
+            // versión nueva, emite `update:available`; la UI muestra un aviso no intrusivo y el
+            // usuario decide cuándo instalar. Falla en silencio (offline / feed caído): se
+            // reintenta en el siguiente arranque y la app sigue funcionando.
+            {
+                let h = handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    match h.updater() {
+                        Ok(updater) => match updater.check().await {
+                            Ok(Some(update)) => {
+                                let _ = h.emit(
+                                    "update:available",
+                                    UpdateInfo {
+                                        version: update.version.clone(),
+                                        current_version: update.current_version.clone(),
+                                        notes: update.body.clone(),
+                                    },
+                                );
+                            }
+                            Ok(None) => {}
+                            Err(e) => eprintln!("[updater] check falló: {e}"),
+                        },
+                        Err(e) => eprintln!("[updater] no disponible: {e}"),
+                    }
+                });
+            }
 
             let app_data_dir = handle
                 .path()
@@ -1021,6 +1117,9 @@ pub fn run() {
             images_ensure_local,
             images_backfill,
             get_app_data_path,
+            // auto-actualización (updater)
+            updater_check,
+            updater_install,
             // impresión (host/Windows — printing.rs)
             printer_list,
             printer_get_selected,
@@ -1190,6 +1289,10 @@ pub fn run() {
             commands::configuracion::config_patch_business_settings,
             commands::configuracion::config_get_ticket_settings,
             commands::configuracion::config_patch_ticket_settings,
+            // correo electrónico
+            commands::email_config::email_config_get,
+            commands::email_config::email_config_patch,
+            commands::email_config::email_enviar_pedido,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

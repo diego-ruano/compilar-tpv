@@ -15,6 +15,9 @@ dist-ssr/
 # ── Tauri (generado) ──
 apps/tpv-main/src-tauri/gen/schemas/
 
+# ── Claves de firma del updater (¡SECRETO! nunca versionar la privada) ──
+apps/tpv-main/src-tauri/.tauri/
+
 # ── Bases de datos / datos locales ──
 *.db
 *.db-journal

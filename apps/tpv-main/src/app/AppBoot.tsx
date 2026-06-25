@@ -14,6 +14,7 @@ import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
 import { useMainSocket } from "../shared/lib/useMainSocket";
 import { useHandySocket } from "../shared/lib/useHandySocket";
 import { queryClient } from "../shared/lib/queryClient";
+import UpdateBanner from "../shared/ui/UpdateBanner";
 
 import LogoAltaria from "../assets/img/logo.png";
 import CerrarVentana from "../assets/svg/CerrarVentana.svg";
@@ -807,6 +808,10 @@ export default function AppBoot({ router }: { router: any }) {
 
     return (
         <div className="w-screen h-screen flex flex-col overflow-hidden">
+            {/* Aviso de actualización (se auto-oculta si no hay ninguna). Montado una vez aquí
+                para que esté disponible en cualquier modo/pantalla. */}
+            <UpdateBanner />
+
             {showBootTopBar ? TopBar : null}
 
             <div

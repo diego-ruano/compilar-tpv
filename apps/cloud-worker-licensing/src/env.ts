@@ -38,6 +38,19 @@ export interface Env {
 	// Bucket R2 de imágenes (productos/categorías/proveedores/alérgenos).
 	// Las claves replican la ruta de la Main: `{tenantId}/images/{subcarpeta}/{uuid}.jpg`.
 	// Las LECTURAS (GET) se sirven públicas + Cache API (CDN edge); las ESCRITURAS
-	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el tenant del token.
+	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el token.
 	IMAGES: R2Bucket;
+
+	// Resend API key para envío de correos gestionados (modo "nuestro servicio").
+	// Configura con: wrangler secret put RESEND_API_KEY
+	RESEND_API_KEY: string;
+
+	// Dirección de origen para correos gestionados (dominio verificado en Resend).
+	// Ejemplo: "TPV <pedidos@altarialights.com>"
+	RESEND_FROM_ADDRESS: string;
+
+	// Token admin para publicar/retirar releases del feed de auto-actualización
+	// (POST /v1/update/publish y /deactivate). Si NO está configurado, la publicación
+	// queda deshabilitada (fail-safe). Configura con: wrangler secret put RELEASE_ADMIN_TOKEN
+	RELEASE_ADMIN_TOKEN?: string;
 }
