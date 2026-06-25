@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Cancela ejecuciones anteriores de la misma rama/PR si llega un push nuevo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Migraciones + ANTI-DRIFT: el esquema que producen las migraciones sobre una BD vacía debe
+  # coincidir con packages/database/schema.snapshot.sql. Si alguien cambia una migración sin
+  # regenerar el snapshot (o introduce una desviación silenciosa), este job falla.
+  migrations-rust:
+    name: Migraciones + anti-drift (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Tests del crate de persistencia (smoke + snapshot anti-drift + lint anti-tx)
+        run: cargo test -p tpv-infra-sqlite
+
+  # Worker: typecheck + que el registro manual de migraciones (tenantMigrations.ts) no se
+  # desincronice de la carpeta packages/database/migrations/.
+  worker:
+    name: Worker typecheck + registro de migraciones
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck del worker
+        run: pnpm --filter tpv-api typecheck
+
+      - name: Anti-drift del registro de migraciones del worker
+        run: node scripts/check-migration-registry.mjs

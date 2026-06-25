@@ -6,6 +6,7 @@ import { useToast } from "../../shared/toast";
 import PedidoModal from "./PedidoModal";
 import type { PedidoEstado, PedidoRow, PedidoCrearInput, PedidoActualizarInput, LineaPedido } from "./pedidosApis";
 import type { LineaPedidoInput } from "./pedidosApis";
+import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
 import type { ProveedorRow } from "./proveedoresApis";
 import {
   usePedidosAll,
@@ -155,9 +156,25 @@ export default function PedidosSection({ proveedores }: Props) {
       }
       const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
       await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
+
+      if (updated.emailDestino && updated.lineas.length > 0) {
+        await emailEnviarPedido({
+          email_destino: updated.emailDestino,
+          nombre_proveedor: updated.nombreProveedor ?? "Proveedor",
+          notas: updated.notas,
+          lineas: updated.lineas.map((l) => ({
+            nombre_producto: l.nombreProducto,
+            cantidad: l.cantidad,
+            precio_unitario: l.precioUnitario,
+            unidad: l.unidad,
+          })),
+        });
+        toast.success("Pedido enviado", `Correo enviado a ${updated.emailDestino}`);
+      } else {
+        toast.success("Pedido enviado", updated.emailDestino ? "Marcado como enviado" : "Sin correo destino — pedido marcado como enviado");
+      }
+
       cerrarModal();
-      const dest = updated.emailDestino;
-      toast.success("Pedido enviado", dest ? `Enviado a ${dest}` : "Sin correo destino configurado");
     } catch (e: any) {
       toast.error("Error", String(e?.message ?? e));
     }

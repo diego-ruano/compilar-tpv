@@ -4,6 +4,7 @@
 
 pub mod clientes;
 pub mod configuracion;
+pub mod email_config;
 pub mod cuentas;
 pub mod inventario;
 pub mod licensing;

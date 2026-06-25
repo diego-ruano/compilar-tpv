@@ -30,6 +30,7 @@ import { Apariencia } from "../../features/configuracion/sections/Apariencia";
 import { Conectividad } from "../../features/configuracion/sections/Conectividad";
 import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
+import { EmailConfig } from "../../features/configuracion/sections/EmailConfig";
 
 
 export default function Configuracion() {
@@ -109,6 +110,12 @@ export default function Configuracion() {
             title: "Apariencia",
             desc: "Tema / modo oscuro",
             keywords: ["tema", "oscuro", "apariencia"],
+        },
+        {
+            key: "EMAIL_CONFIG",
+            title: "Correos automatizados",
+            desc: "Envío de pedidos a proveedores",
+            keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "resend"],
         },
     ];
 
@@ -696,6 +703,10 @@ export default function Configuracion() {
                                                     );
                                                 }}
                                             />
+                                        ) : null}
+
+                                        {section === "EMAIL_CONFIG" ? (
+                                            <EmailConfig darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "TICKET" ? (

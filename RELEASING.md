@@ -45,9 +45,40 @@ App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-ap
    cd apps/cloud-worker-licensing && wrangler deploy
    ```
 
+5. **Secretos y variables de CI/CD** (GitHub → Settings → Secrets and variables → Actions):
+   - Secrets: `TAURI_SIGNING_PRIVATE_KEY` (contenido de `updater.key`),
+     `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+     `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`.
+   - Variables: `R2_BUCKET` (p. ej. `tpv-releases`), `R2_PUBLIC_BASE_URL` (dominio público del
+     bucket), `TPV_API_BASE` (`https://tpv-api.altarialights.workers.dev`).
+
 ---
 
-## 1. Cada release
+## 1. Release automática (CI/CD) — recomendada
+
+Hay dos workflows en `.github/workflows/`:
+
+- **`ci.yml`** (en cada push/PR): corre el **test anti-drift** del esquema (`cargo test -p
+  tpv-infra-sqlite`, que incluye el snapshot), el typecheck del worker y el chequeo del registro de
+  migraciones. Es la red que impide que un cambio de esquema entre roto.
+- **`release.yml`** (al pushear un tag `v*`): compila + **firma** el instalador, lo **sube a R2** y
+  llama a **`POST /v1/update/publish`** automáticamente.
+
+Para lanzar una versión:
+
+```bash
+# 1) sube la versión en tauri.conf.json y Cargo.toml (deben coincidir con el tag)
+# 2) commitea y tagea:
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+El pipeline hace el resto. El rollback sigue siendo `POST /v1/update/deactivate` (§2). Lo de abajo
+(§1-bis) es el **procedimiento manual** equivalente, como respaldo o para entender qué hace el CI.
+
+---
+
+## 1-bis. Release manual (respaldo)
 
 ### a) Subir la versión
 
@@ -154,6 +185,16 @@ migración publicada, el arranque falla a propósito).
        { name: "0002_codigo_barras.sql", sql: m0002 },
    ];
    ```
+4. **Regenera el snapshot anti-drift** (si no, CI falla):
+   ```bash
+   BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot
+   ```
+   Revisa el diff de `packages/database/schema.snapshot.sql` (debe reflejar exactamente tu cambio)
+   y commitéalo.
+5. Verifica en local: `cargo test -p tpv-infra-sqlite` y `node scripts/check-migration-registry.mjs`.
+
+> El esquema generado por las migraciones se compara contra `schema.snapshot.sql` en CI. Es un
+> fichero **generado** (no se edita a mano): atrapa cualquier desviación silenciosa.
 
 ### Reglas (para no romper nada)
 

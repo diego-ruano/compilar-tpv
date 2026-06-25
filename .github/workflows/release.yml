@@ -1,0 +1,100 @@
+name: Release
+
+# Se dispara al publicar un tag de versión, p. ej.:  git tag v1.0.0 && git push origin v1.0.0
+# Flujo: compila + FIRMA el instalador de Windows, lo sube a R2 y lo publica en el feed de tpv-api.
+#
+# IMPORTANTE: sube la `version` en apps/tpv-main/src-tauri/tauri.conf.json y Cargo.toml ANTES de
+# tagear; deben coincidir con el tag (el updater compara esa versión).
+#
+# Secretos requeridos (Settings → Secrets and variables → Actions → Secrets):
+#   TAURI_SIGNING_PRIVATE_KEY            contenido de apps/tpv-main/src-tauri/.tauri/updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   contraseña de esa clave (vacía si no tiene)
+#   R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY   token de API de R2 (S3-compatible)
+#   R2_ACCOUNT_ID                        id de cuenta Cloudflare (para el endpoint de R2)
+#   RELEASE_ADMIN_TOKEN                  el mismo secreto que en el worker (POST /v1/update/publish)
+# Variables requeridas (… → Variables):
+#   R2_BUCKET                            p. ej. tpv-releases
+#   R2_PUBLIC_BASE_URL                   p. ej. https://releases.altarialights.com
+#   TPV_API_BASE                         https://tpv-api.altarialights.workers.dev
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # ts-rs: rellena packages/contracts/src/generated antes de compilar el frontend.
+      - name: Generar tipos TS
+        run: pnpm generate-types
+
+      - name: Compilar + firmar instalador (Tauri / Windows)
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm --filter @tpv/main tauri build
+
+      - name: Localizar artefactos + versión
+        id: art
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          $nsis = "apps/tpv-main/src-tauri/target/release/bundle/nsis"
+          $exe = Get-ChildItem "$nsis/*-setup.exe" | Select-Object -First 1
+          $sig = Get-ChildItem "$nsis/*-setup.exe.sig" | Select-Object -First 1
+          if (-not $exe) { Write-Error "No se encontró el instalador NSIS (.exe)"; exit 1 }
+          if (-not $sig) { Write-Error "No se encontró la firma (.exe.sig) — ¿faltó la clave de firma?"; exit 1 }
+          "version=$version"            >> $env:GITHUB_OUTPUT
+          "exe_path=$($exe.FullName)"   >> $env:GITHUB_OUTPUT
+          "exe_name=$($exe.Name)"       >> $env:GITHUB_OUTPUT
+          "sig_path=$($sig.FullName)"   >> $env:GITHUB_OUTPUT
+          Write-Host "Versión $version  →  $($exe.Name)"
+
+      - name: Subir instalador a R2
+        shell: pwsh
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          $endpoint = "https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          aws s3 cp "${{ steps.art.outputs.exe_path }}" `
+            "s3://${{ vars.R2_BUCKET }}/${{ steps.art.outputs.exe_name }}" `
+            --endpoint-url $endpoint `
+            --content-type "application/octet-stream"
+
+      - name: Publicar en el feed de actualización (tpv-api)
+        shell: pwsh
+        run: |
+          $sig = (Get-Content -Raw "${{ steps.art.outputs.sig_path }}").Trim()
+          $url = "${{ vars.R2_PUBLIC_BASE_URL }}/${{ steps.art.outputs.exe_name }}"
+          $body = @{
+            version   = "${{ steps.art.outputs.version }}"
+            url       = $url
+            signature = $sig
+            notes     = "Release ${{ github.ref_name }}"
+          } | ConvertTo-Json -Compress
+          Invoke-RestMethod -Method Post `
+            -Uri "${{ vars.TPV_API_BASE }}/v1/update/publish" `
+            -Headers @{ Authorization = "Bearer ${{ secrets.RELEASE_ADMIN_TOKEN }}" } `
+            -ContentType "application/json" `
+            -Body $body
+          Write-Host "Publicado $url en el feed."

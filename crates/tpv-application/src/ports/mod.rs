@@ -3,6 +3,7 @@
 pub mod clientes;
 pub mod cloud_sync;
 pub mod configuracion;
+pub mod email_config;
 pub mod cuentas;
 pub mod inventario;
 pub mod licensing;

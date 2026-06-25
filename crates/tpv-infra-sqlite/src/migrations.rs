@@ -222,11 +222,13 @@ mod tests {
     use super::*;
     use libsql::Builder;
 
-    fn uniq() -> u128 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
+    // Unicidad garantizada entre tests en paralelo: contador atómico + PID. (No usar el reloj:
+    // en Windows su resolución es baja y dos tests simultáneos colisionarían de directorio.)
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", std::process::id(), n)
     }
 
     /// Abre una BD libsql local en un fichero temporal. Devuelve la `Database` (hay que mantenerla
@@ -341,5 +343,103 @@ mod tests {
         assert!(msg.contains("modificada"), "el error debe indicar manipulación: {msg}");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Vuelca el esquema resultante (tablas/índices/triggers/vistas), normalizado, para comparar
+    /// contra el snapshot. Excluye internos de SQLite y la tabla de control `_migrations`.
+    async fn dump_schema(conn: &Connection) -> String {
+        let mut rows = conn
+            .query(
+                "SELECT sql FROM sqlite_master \
+                 WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name <> '_migrations' \
+                 ORDER BY type, name;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let mut out = String::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            if let Value::Text(sql) = row.get_value(0).unwrap() {
+                // Normaliza espacios para que reformatear una migración no dispare falsos drifts.
+                out.push_str(&sql.split_whitespace().collect::<Vec<_>>().join(" "));
+                out.push_str(";\n");
+            }
+        }
+        out
+    }
+
+    fn snapshot_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../packages/database/schema.snapshot.sql")
+    }
+
+    /// ANTI-DRIFT: el esquema que producen TODAS las migraciones sobre una BD vacía debe coincidir
+    /// con `packages/database/schema.snapshot.sql`. Si cambias el esquema a propósito, regenera el
+    /// snapshot:  `BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot`.
+    #[tokio::test]
+    async fn schema_snapshot_no_drift() {
+        let (_db, conn, dir) = open_temp().await;
+        run(&conn).await.unwrap();
+        let dump = dump_schema(&conn).await;
+        let path = snapshot_path();
+
+        if std::env::var("BLESS_SCHEMA_SNAPSHOT").is_ok() {
+            std::fs::write(&path, &dump).unwrap();
+            eprintln!("[snapshot] regenerado: {:?}", path);
+        } else {
+            let expected = std::fs::read_to_string(&path).unwrap_or_else(|_| {
+                panic!(
+                    "Falta el snapshot {:?}. Regenéralo con: \
+                     BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot",
+                    path
+                )
+            });
+            assert_eq!(
+                dump.replace("\r\n", "\n").trim(),
+                expected.replace("\r\n", "\n").trim(),
+                "El esquema generado por las migraciones difiere del snapshot. Si es intencionado, \
+                 regenera: BLESS_SCHEMA_SNAPSHOT=1 cargo test -p tpv-infra-sqlite schema_snapshot"
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Las migraciones deben ser sentencias puras: el control de transacción lo gestiona el runner
+    /// (en el worker, dentro de una transacción interactiva; meter BEGIN/COMMIT en el .sql rompería
+    /// con "transacciones anidadas"). Permite el `BEGIN … END` de triggers (no es control de tx).
+    #[test]
+    fn migrations_no_transaction_control() {
+        for (name, content) in migration_files() {
+            let body = strip_line_comments(&strip_block_comments(&content)).to_uppercase();
+            let toks: Vec<String> = body
+                .split(|c: char| c.is_whitespace() || c == ';' || c == '(' || c == ')')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            for (i, t) in toks.iter().enumerate() {
+                let begin_tx = t == "BEGIN"
+                    && toks
+                        .get(i + 1)
+                        .map(|n| matches!(n.as_str(), "TRANSACTION" | "DEFERRED" | "IMMEDIATE" | "EXCLUSIVE"))
+                        .unwrap_or(false);
+                let bad = matches!(t.as_str(), "COMMIT" | "ROLLBACK") || begin_tx;
+                assert!(
+                    !bad,
+                    "La migración '{name}' contiene control de transacción ('{t}'). Usa solo \
+                     sentencias puras (CREATE/ALTER/INSERT…); la transacción la gestiona el runner."
+                );
+            }
+        }
+    }
+
+    fn strip_line_comments(s: &str) -> String {
+        s.lines()
+            .map(|l| match l.find("--") {
+                Some(i) => &l[..i],
+                None => l,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

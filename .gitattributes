@@ -2,3 +2,5 @@
 # El runner calcula el hash del contenido (normalizado a LF) para detectar manipulación; mantener
 # el EOL determinista evita falsos positivos de "migración modificada" al clonar en distinto SO.
 packages/database/migrations/*.sql text eol=lf
+# Snapshot del esquema (generado por el test anti-drift): EOL determinista para comparación estable.
+packages/database/schema.snapshot.sql text eol=lf
