@@ -17,6 +17,7 @@ import type { Client } from "@libsql/client/web";
 
 import { b64ToBytes, bytesToB64 } from "../utils/base64";
 import { aesGcmDecryptFromB64 } from "../utils/crypto";
+import { runTenantMigrations } from "../tenantMigrations";
 
 /** Campos del Env que necesita la resolución/rotación de la DB del tenant. */
 export type TenantDbEnv = {
@@ -34,6 +35,37 @@ export type ResolvedTenantDb = {
 };
 
 const TENANT_DB_ROTATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+// ---------------- Guard de migración por tenant (caché por isolate) ----------------
+//
+// Comprobar la tabla `_migrations` en Turso por HTTP en CADA petición arruinaría el rendimiento.
+// Aquí cacheamos, durante el ciclo de vida del isolate del Worker, qué tenants ya han sido
+// verificados/migrados. Tras la primera vez, el guard deja pasar la petición al instante.
+//
+// Guardamos la PROMESA (no un boolean) a propósito: así varias peticiones concurrentes del MISMO
+// tenant comparten la misma migración en vuelo (single-flight) en lugar de lanzar dos a la vez.
+// - Éxito  → la entrada (promesa resuelta) queda cacheada para siempre en este isolate.
+// - Fallo  → se borra la entrada para reintentar en la próxima petición.
+const migrationGuard = new Map<string, Promise<void>>();
+
+/**
+ * Garantiza —una sola vez por isolate y por tenant— que la BD del tenant tiene aplicadas todas las
+ * migraciones. Idempotente y barato tras la primera vez (devuelve la promesa ya resuelta, sin tocar
+ * Turso). Es el camino que hace que un cambio de esquema llegue a tenants YA activos sin necesidad
+ * de re-provisionar manualmente.
+ */
+export function ensureTenantMigrated(client: Client, tenantId: string): Promise<void> {
+	let inFlight = migrationGuard.get(tenantId);
+	if (!inFlight) {
+		inFlight = runTenantMigrations(client).catch((e) => {
+			// Permite reintentar en la próxima petición (no dejamos el fallo cacheado).
+			migrationGuard.delete(tenantId);
+			throw e;
+		});
+		migrationGuard.set(tenantId, inFlight);
+	}
+	return inFlight;
+}
 
 // ---------------- AES-GCM encrypt (para persistir el token rotado) ----------------
 

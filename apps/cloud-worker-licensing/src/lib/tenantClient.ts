@@ -12,7 +12,7 @@ import { createClient, type Client } from "@libsql/client/web";
 
 import type { Env } from "../env";
 import { getDb } from "../server/db";
-import { resolveTenantDbCredentials } from "../server/db/tenantDb";
+import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 
 type Cached = { client: Client; expiresAtMs: number };
 
@@ -39,8 +39,14 @@ async function build(env: Env, tenantId: string, forceRotate: boolean): Promise<
 
 async function getTenantClient(env: Env, tenantId: string): Promise<Client> {
 	const hit = cache.get(tenantId);
-	if (hit && hit.expiresAtMs > Date.now()) return hit.client;
-	return build(env, tenantId, false);
+	const client =
+		hit && hit.expiresAtMs > Date.now() ? hit.client : await build(env, tenantId, false);
+
+	// Guard de migración: garantiza el esquema al día una vez por isolate (no-op tras la primera
+	// vez). Cubre el caso de un tenant ya activo cuando se publica un cambio de esquema.
+	await ensureTenantMigrated(client, tenantId);
+
+	return client;
 }
 
 function isAuthError(e: unknown): boolean {

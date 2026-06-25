@@ -169,13 +169,16 @@ migración publicada, el arranque falla a propósito).
 
 - **Escritorio**: antes de migrar, la app hace **copia automática** de `data.db` →
   `data.db.bak.<timestamp>` en AppData (red de seguridad; migrar es irreversible).
-- **Turso**: las migraciones de tenant se aplican al **provisionar** (activación de licencia, ver
-  `applyTenantSchemaOnce`). Para forzar la migración en tenants ya activos al publicar un cambio,
-  vuelve a disparar el provisioning o aplica el `.sql` directamente con el CLI de Turso. Haz copia
-  del tenant (`turso db shell ... .dump`) antes de un cambio grande.
-
-> El **guard automático de migración de tenants** (que migre sin re-provisionar) es el Paso 2 del
-> plan, aún pendiente.
+- **Turso**: las migraciones de tenant se aplican automáticamente por dos vías:
+  1. Al **provisionar** (activación de licencia, `applyTenantSchemaOnce`).
+  2. Por el **guard de migración** (`ensureTenantMigrated` en `server/db/tenantDb.ts`), que se
+     ejecuta en el primer acceso de cada tenant tras arrancar un isolate del Worker: en las
+     **lecturas** (`lib/tenantClient.ts`) y en las **escrituras** (DO `tenantHub.ts`). Así un
+     tenant ya activo recibe un cambio de esquema **sin re-provisionar ni intervención manual**.
+     El guard cachea por isolate (single-flight), así que solo verifica `_migrations` una vez por
+     ciclo de vida del isolate.
+- Aun así, antes de un cambio de esquema grande conviene una copia del tenant
+  (`turso db shell ... .dump`).
 
 ---
 

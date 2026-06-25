@@ -1,6 +1,6 @@
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
-import { resolveTenantDbCredentials } from "../server/db/tenantDb";
+import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
 
@@ -601,6 +601,10 @@ export class TenantHub {
 		});
 
 		await this.probeTenantDb(dbTenant);
+
+		// Guard de migración (una vez por vida del DO): asegura el esquema al día ANTES de aplicar
+		// escrituras, por si se publicó un cambio de esquema con el tenant ya activo.
+		await ensureTenantMigrated(dbTenant, tenantId);
 
 		this.tenantDb = dbTenant;
 		this.tenantDbTenantId = tenantId;
