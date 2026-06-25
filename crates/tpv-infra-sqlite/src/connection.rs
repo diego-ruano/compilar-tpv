@@ -20,6 +20,15 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
+/// Marca de tiempo (ms desde epoch) para nombrar la copia de seguridad de la BD.
+fn now_ms() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn value_to_i64(v: Value) -> Option<i64> {
     match v {
         Value::Integer(n) => Some(n),
@@ -98,10 +107,10 @@ async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-/// Red de seguridad: si la BD ya existe y su versión de esquema está por debajo de la última
-/// (es decir, al abrir se le van a aplicar migraciones), hace una **copia del fichero antes** de
-/// migrar. Las migraciones son solo aditivas (no destructivas), pero las migraciones son el único
-/// paso irreversible del sistema, así que la copia es un seguro barato.
+/// Red de seguridad: si la BD ya tiene datos y hay migraciones pendientes (es decir, al abrir se le
+/// van a aplicar), hace una **copia del fichero antes** de migrar. Las migraciones son solo
+/// aditivas, pero migrar es el único paso irreversible del sistema, así que la copia es un seguro
+/// barato.
 ///
 /// Es best-effort: si la copia falla, se avisa por log pero NO se bloquea el arranque (mejor que
 /// dejar la app sin abrir). La comprobación usa una conexión efímera que se cierra antes de copiar.
@@ -118,12 +127,10 @@ async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
     let database = Builder::new_local(db_path_str).build().await.map_err(db_err)?;
     let conn = database.connect().map_err(db_err)?;
 
-    let current = crate::migrations::read_user_version(&conn)
-        .await
-        .map_err(db_err)?;
+    let pending = crate::migrations::has_pending(&conn).await.map_err(db_err)?;
 
-    // Ya está al día: no se migrará nada → no hace falta copia.
-    if current >= crate::migrations::SCHEMA_VERSION {
+    // Ya está al día (o BD nueva sin datos): no se migrará nada → no hace falta copia.
+    if !pending {
         return Ok(());
     }
 
@@ -135,7 +142,7 @@ async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
     drop(conn);
     drop(database);
 
-    let backup = db_path.with_file_name(format!("data.db.bak.v{current}"));
+    let backup = db_path.with_file_name(format!("data.db.bak.{}", now_ms()));
     match std::fs::copy(db_path, &backup) {
         Ok(_) => eprintln!("[migrations] copia de seguridad creada: {:?}", backup),
         Err(e) => eprintln!("[migrations] aviso: no se pudo crear copia de seguridad: {e}"),
@@ -145,8 +152,8 @@ async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
 }
 
 /// Abre la BD local `data.db` dentro de `app_data_dir` (escritor único + pool de lectura, WAL),
-/// aplica `schema` (el contenido de `schema.sql`) y siembra el administrador inicial.
-pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Arc<Db>> {
+/// construye/actualiza el esquema aplicando las migraciones embebidas y siembra el admin inicial.
+pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
     let db_path = app_data_dir.join("data.db");
     let db_path_str = db_path
         .to_str()
@@ -155,7 +162,7 @@ pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Arc<Db
     // Antes de abrir (lo que dispara las migraciones), respaldar si hay migraciones pendientes.
     backup_if_migration_pending(&db_path).await?;
 
-    let db = Db::open(db_path_str, schema)
+    let db = Db::open(db_path_str)
         .await
         .map_err(|e| AppError::repository(format!("Error abriendo la BD: {e}")))?;
 

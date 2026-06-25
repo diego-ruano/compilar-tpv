@@ -1,69 +1,91 @@
 // src/server/tenantMigrations.ts
 //
-// Migraciones versionadas del esquema de la BD **por-tenant (Turso)**. Es el ESPEJO de las
-// migraciones del escritorio (crates/tpv-infra-sqlite/src/migrations.rs): el esquema es compartido,
-// así que cualquier cambio que toque una tabla existente debe aplicarse en AMBOS lados con el mismo
-// número de versión.
+// Runner de migraciones del esquema para las BDs **por-tenant (Turso)**. Es el ESPEJO del runner
+// del escritorio (crates/tpv-infra-sqlite/src/migrations.rs): consume los MISMOS ficheros `.sql` de
+// packages/database/migrations/ y lleva el mismo control por tabla `_migrations` (name, hash,
+// applied_at).
 //
-// Igual que en el escritorio, `schema.sql` se aplica con `CREATE TABLE IF NOT EXISTS` (crea tablas
-// nuevas pero no modifica las existentes). Para los cambios sobre tablas existentes usamos
-// `PRAGMA user_version` + pasos numerados.
+// Ya NO existe `schema.sql`: el esquema completo se construye ejecutando en orden todas las
+// migraciones. Una BD de tenant nueva nace vacía y se construye desde 0001; una existente solo
+// aplica las pendientes.
 //
-// REGLAS: solo aditivo, nunca editar un paso ya publicado, mantener el mismo nº de versión que en
-// `migrations.rs`. Ver RELEASING.md.
+// REGISTRO DE MIGRACIONES: el bundler del worker (esbuild) no soporta glob dinámico de ficheros,
+// así que cada migración se importa explícitamente y se añade a `MIGRATIONS` (en orden). Es la
+// única edición manual al añadir una migración (en Rust `include_dir!` las recoge solas).
 
 import type { Client } from "@libsql/client";
 
-/// Debe COINCIDIR con `SCHEMA_VERSION` de migrations.rs.
-export const SCHEMA_VERSION = 0;
+import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 
-/// Pasos para BDs de tenant ya existentes (mismo contenido/versión que en el escritorio).
-const MIGRATIONS: { version: number; sql: string }[] = [
-	// { version: 1, sql: "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;" },
+const MIGRATIONS: { name: string; sql: string }[] = [
+	{ name: "0001_inicial.sql", sql: m0001 },
+	// Al añadir una migración: importa el .sql arriba y añade aquí su { name, sql } EN ORDEN.
 ];
 
-/// `true` si la BD del tenant es nueva (aún no tiene tablas de negocio). Llamar ANTES de aplicar
-/// `schema.sql`. Así una BD nueva no intenta correr ALTERs que el esquema completo ya incluye.
-export async function tenantIsFresh(client: Client): Promise<boolean> {
-	const r = await client.execute(
-		"SELECT name FROM sqlite_master WHERE type='table' AND name='Roles' LIMIT 1;",
+/** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
+function normalize(s: string): string {
+	return s.replace(/\r\n/g, "\n");
+}
+
+/** Quita comentarios de bloque: el parser de Turso (sqld) los rechaza. */
+function stripBlockComments(s: string): string {
+	return s.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+async function sha256Hex(s: string): Promise<string> {
+	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+	return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Aplica las migraciones pendientes sobre la BD del tenant. Construye el esquema desde cero en BDs
+ * nuevas y pone al día las existentes. Cada migración se aplica dentro de una transacción
+ * interactiva junto con su registro en `_migrations`. Falla si una migración ya aplicada fue
+ * modificada (hash distinto).
+ */
+export async function runTenantMigrations(client: Client): Promise<void> {
+	await client.execute(
+		"CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, hash TEXT NOT NULL, applied_at INTEGER NOT NULL);",
 	);
-	return (r.rows?.length ?? 0) === 0;
-}
 
-async function readUserVersion(client: Client): Promise<number> {
-	const r = await client.execute("PRAGMA user_version;");
-	const row = r.rows?.[0] as any;
-	const v = row?.user_version ?? row?.[0] ?? 0;
-	return Number(v) || 0;
-}
-
-async function setUserVersion(client: Client, version: number): Promise<void> {
-	// PRAGMA no admite bind params; `version` es una constante del código.
-	await client.execute(`PRAGMA user_version = ${version};`);
-}
-
-/// Lleva el esquema del tenant al día. Llamar DESPUÉS de aplicar `schema.sql`.
-/// - `fresh = true`: BD nueva → sella a SCHEMA_VERSION sin correr migraciones.
-/// - `fresh = false`: aplica los pasos pendientes y sella.
-export async function runTenantMigrations(client: Client, fresh: boolean): Promise<void> {
-	if (fresh) {
-		await setUserVersion(client, SCHEMA_VERSION);
-		return;
+	const res = await client.execute("SELECT name, hash FROM _migrations;");
+	const applied = new Map<string, string>();
+	for (const row of res.rows as any[]) {
+		applied.set(String(row.name), String(row.hash));
 	}
 
-	let current = await readUserVersion(client);
+	for (const mig of MIGRATIONS) {
+		const normalized = normalize(mig.sql);
+		const hash = await sha256Hex(normalized);
 
-	for (const { version, sql } of MIGRATIONS) {
-		if (version > current) {
-			console.log(`[tenant-migrations] aplicando v${version}…`);
-			await client.executeMultiple(sql);
-			await setUserVersion(client, version);
-			current = version;
+		const prev = applied.get(mig.name);
+		if (prev !== undefined) {
+			if (prev !== hash) {
+				throw new Error(
+					`migration_altered: '${mig.name}' fue modificada tras aplicarse (hash distinto). ` +
+						`Nunca edites una migración ya publicada: crea una nueva.`,
+				);
+			}
+			continue;
 		}
-	}
 
-	if (current < SCHEMA_VERSION) {
-		await setUserVersion(client, SCHEMA_VERSION);
+		const body = stripBlockComments(normalized);
+
+		// Transacción interactiva: migración + registro, atómicos.
+		const tx = await client.transaction("write");
+		try {
+			await tx.executeMultiple(body);
+			await tx.execute({
+				sql: "INSERT INTO _migrations (name, hash, applied_at) VALUES (?, ?, ?);",
+				args: [mig.name, hash, Date.now()],
+			});
+			await tx.commit();
+			console.log(`[tenant-migrations] aplicada: ${mig.name}`);
+		} catch (e) {
+			await tx.rollback().catch(() => {});
+			throw e;
+		} finally {
+			tx.close();
+		}
 	}
 }

@@ -125,33 +125,33 @@ necesitan que publiques una 0.2.1 con el arreglo — por eso conviene el canary 
 
 ## 3. Cambios de esquema (migraciones de BD)
 
-`schema.sql` se aplica en cada arranque con `CREATE TABLE IF NOT EXISTS`: eso crea **tablas
-nuevas** en clientes existentes, pero **NO modifica tablas que ya existen** (añadir columna, etc.).
-Para esos cambios hay un sistema de migraciones versionadas (`PRAGMA user_version`) en los dos lados:
+**No existe `schema.sql`.** El esquema completo se construye ejecutando en orden los ficheros
+`.sql` de **`packages/database/migrations/`** (`0001_inicial.sql`, `0002_…`, …). Es la **fuente
+única de verdad**, compartida por los dos lados:
 
-- **Escritorio (cada cliente, automático)**: `crates/tpv-infra-sqlite/src/migrations.rs`
-- **Turso (por-tenant)**: `apps/cloud-worker-licensing/src/server/tenantMigrations.ts`
+- **Escritorio (cada cliente, automático)**: `crates/tpv-infra-sqlite/src/migrations.rs` embebe la
+  carpeta con `include_dir!` y aplica lo pendiente en cada arranque.
+- **Turso (por-tenant)**: `apps/cloud-worker-licensing/src/server/tenantMigrations.ts` consume los
+  mismos ficheros.
 
-Instalaciones **nuevas** reciben el esquema completo de `schema.sql` y se sellan a la última
-versión sin correr migraciones. Instalaciones **existentes** aplican solo los pasos que les faltan.
+Cada BD lleva una tabla **`_migrations (name, hash, applied_at)`** con lo ya aplicado. Una BD nueva
+nace vacía y se construye desde `0001`; una existente solo aplica las migraciones que le falten.
+Cada migración se ejecuta **dentro de una transacción** junto con su registro (atómico), y al
+arrancar se verifica que el **hash** de cada migración ya aplicada no haya cambiado (si editas una
+migración publicada, el arranque falla a propósito).
 
 ### Cómo hacer un cambio de esquema
 
-1. Edita `packages/database/schema.sql` para reflejar el **estado final** (lo usan instalaciones
-   nuevas y el aprovisionamiento de Turso).
-2. Sube `SCHEMA_VERSION` en **uno**, en **los dos** ficheros (deben coincidir):
-   `migrations.rs` y `tenantMigrations.ts`.
-3. Añade el **mismo** paso en `MIGRATIONS` de ambos (mismo número, SQL equivalente):
-   ```rust
-   // migrations.rs
-   const MIGRATIONS: &[(i64, &str)] = &[
-       (1, "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;"),
-   ];
-   ```
+1. Crea `packages/database/migrations/000N_descripcion.sql` con el cambio (numeración correlativa,
+   con ceros a la izquierda para que ordene bien).
+2. **Escritorio**: nada más. `include_dir!` recoge el fichero automáticamente.
+3. **Worker**: añade una línea en `tenantMigrations.ts` (importar el `.sql` + entrada en
+   `MIGRATIONS`, en orden). Es la única edición manual (esbuild no soporta glob dinámico):
    ```ts
-   // tenantMigrations.ts
+   import m0002 from "../../../../packages/database/migrations/0002_codigo_barras.sql";
    const MIGRATIONS = [
-       { version: 1, sql: "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;" },
+       { name: "0001_inicial.sql", sql: m0001 },
+       { name: "0002_codigo_barras.sql", sql: m0002 },
    ];
    ```
 
@@ -160,19 +160,22 @@ versión sin correr migraciones. Instalaciones **existentes** aplican solo los p
 - **Solo aditivo y compatible hacia atrás**: `ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`,
   `CREATE INDEX`. Evita renombrar/eliminar columnas mientras haya apps viejas en producción (una
   Main vieja sigue enviando el esquema antiguo por el outbox).
-- **Nunca edites un paso ya publicado**: añade siempre uno nuevo.
-- Para una **tabla totalmente nueva** basta con ponerla en `schema.sql` (el `IF NOT EXISTS` la crea
-  en todos lados); el paso de migración solo es imprescindible para tocar tablas existentes.
+- **Nunca edites una migración ya publicada** (cambiaría su hash → el arranque falla). Crea una nueva.
+- Usa `CREATE TABLE IF NOT EXISTS` / `INSERT OR IGNORE` en las migraciones (las hace re-ejecutables
+  sin daño).
 - Prueba la migración sobre una **copia de una `data.db` real con datos** antes de publicar.
 
 ### Seguridad
 
 - **Escritorio**: antes de migrar, la app hace **copia automática** de `data.db` →
-  `data.db.bak.v<versión_anterior>` en AppData (red de seguridad; las migraciones son irreversibles).
+  `data.db.bak.<timestamp>` en AppData (red de seguridad; migrar es irreversible).
 - **Turso**: las migraciones de tenant se aplican al **provisionar** (activación de licencia, ver
   `applyTenantSchemaOnce`). Para forzar la migración en tenants ya activos al publicar un cambio,
-  vuelve a disparar el provisioning o aplica el `ALTER` directamente con el CLI de Turso. Haz copia
+  vuelve a disparar el provisioning o aplica el `.sql` directamente con el CLI de Turso. Haz copia
   del tenant (`turso db shell ... .dump`) antes de un cambio grande.
+
+> El **guard automático de migración de tenants** (que migre sin re-provisionar) es el Paso 2 del
+> plan, aún pendiente.
 
 ---
 

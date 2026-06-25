@@ -69,3 +69,6 @@ sha2 = "0.10"
 # ── Generación de tipos TS (ts-rs) ──
 # serde-compat va activo por defecto; chrono-impl añade soporte para tipos chrono.
 ts-rs = { version = "12", features = ["chrono-impl"] }
+
+# ── Migraciones: embeber los .sql de packages/database/migrations en el binario ──
+include_dir = "0.7"

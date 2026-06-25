@@ -537,12 +537,9 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
     // SIEMPRE activa (también offline): el outbox es el log de cambios local; se drena a la nube
     // cuando el modo es "online".
-    let db = tpv_infra_sqlite::connection::init_main_db(
-        &app_data_dir,
-        include_str!("../../../../packages/database/schema.sql"),
-    )
-    .await
-    .map_err(String::from)?;
+    let db = tpv_infra_sqlite::connection::init_main_db(&app_data_dir)
+        .await
+        .map_err(String::from)?;
 
     // Drenado inmediato: cada escritura local que confirma en el outbox emite este evento; el
     // WS (useMainSocket) lo escucha y drena la nube al instante (sin esperar al poll de seguridad).
@@ -1067,12 +1064,9 @@ pub fn run() {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
                 // está SIEMPRE activa (también offline); se drena en "online".
                 let db = tauri::async_runtime::block_on(async {
-                    tpv_infra_sqlite::connection::init_main_db(
-                        &app_data_dir,
-                        include_str!("../../../../packages/database/schema.sql"),
-                    )
-                    .await
-                    .expect("Error init_main_db")
+                    tpv_infra_sqlite::connection::init_main_db(&app_data_dir)
+                        .await
+                        .expect("Error init_main_db")
                 });
                 // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
                 let h = handle.clone();

@@ -1,126 +1,345 @@
-//! Migraciones versionadas del esquema de la **BD local (SQLite/libsql)**.
+//! Sistema de migraciones del esquema de la **BD local (SQLite/libsql)**.
 //!
-//! ## El problema que resuelve
-//! `schema.sql` se aplica en cada arranque con `CREATE TABLE IF NOT EXISTS`. Eso crea tablas
-//! nuevas en instalaciones ya existentes, pero **NO** modifica tablas que ya existen (añadir una
-//! columna, cambiar algo…). Sin migraciones, una actualización que tocara una tabla existente
-//! no llegaría a los clientes que ya tienen datos.
+//! ## Modelo (fuente única de verdad)
+//! Ya **no existe `schema.sql`**. El esquema completo se construye ejecutando en orden los ficheros
+//! `.sql` de `packages/database/migrations/` (`0001_inicial.sql`, `0002_…`, …), que se **embeben**
+//! en el binario con [`include_dir!`]. Tanto una instalación nueva como una existente convergen
+//! aplicando las migraciones que aún no tengan registradas.
 //!
-//! ## Cómo funciona
-//! Usamos `PRAGMA user_version` como número de versión del esquema instalado:
+//! ## Control por tabla `_migrations`
+//! Cada BD lleva una tabla `_migrations (name, hash, applied_at)` con las migraciones ya aplicadas.
+//! En cada arranque:
+//! 1. Se asegura la tabla `_migrations`.
+//! 2. Por cada fichero (en orden de nombre):
+//!    - Si **ya está aplicado**: se verifica que su `hash` no haya cambiado (detecta que alguien
+//!      editó una migración ya publicada → error duro). Si coincide, se salta.
+//!    - Si **está pendiente**: se ejecuta **dentro de una transacción** junto con el `INSERT` en
+//!      `_migrations`; o se aplican ambos o ninguno.
 //!
-//! - **Instalación nueva** (BD sin tablas de negocio): `schema.sql` ya deja el esquema completo
-//!   más reciente, así que solo se **sella** a [`SCHEMA_VERSION`] sin correr ninguna migración.
-//! - **Instalación existente**: se aplican en orden los pasos de [`MIGRATIONS`] cuya versión sea
-//!   mayor que la `user_version` actual, y se sube `user_version` a medida que se aplican.
+//! ## Cómo añadir un cambio de esquema
+//! 1. Crea `packages/database/migrations/000N_descripcion.sql` con el cambio (solo aditivo).
+//! 2. Nada más en Rust: `include_dir!` lo recoge solo. (En el worker hay que añadir una línea al
+//!    registro — ver `tenantMigrations.ts`.)
 //!
-//! Distinguir "nueva" de "existente" (ver [`db_is_fresh`]) es lo que evita que una instalación
-//! nueva intente correr un `ALTER TABLE ADD COLUMN` de una columna que `schema.sql` ya creó
-//! (lo que fallaría por "duplicate column").
-//!
-//! ## Cómo añadir un cambio de esquema en el futuro
-//! 1. Edita `packages/database/schema.sql` para reflejar el estado final (instalaciones nuevas +
-//!    aprovisionamiento de Turso lo siguen usando como fuente completa).
-//! 2. Sube [`SCHEMA_VERSION`] en uno.
-//! 3. Añade un paso `(nueva_version, "SQL")` al final de [`MIGRATIONS`].
-//!
-//! ## Reglas (para no romper nada en producción)
-//! - **Solo aditivo y compatible hacia atrás**: `ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`,
-//!   `CREATE INDEX`. Evita renombrar/eliminar columnas mientras haya apps viejas conectadas.
-//! - **Nunca edites un paso ya publicado**: añade siempre uno nuevo (los clientes ya aplicaron el
-//!   anterior y no lo repetirán).
-//! - Para una **tabla totalmente nueva** basta con ponerla en `schema.sql` (el `IF NOT EXISTS` la
-//!   crea en todos lados); el paso de migración solo es imprescindible para tocar tablas que ya
-//!   existen.
-//! - Replica el mismo cambio en **Turso** (esquema compartido): ver `RELEASING.md`.
+//! ## Reglas
+//! - **Solo aditivo / compatible hacia atrás**: `ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`,
+//!   `CREATE INDEX`. Evita renombrar/eliminar columnas mientras haya apps viejas en producción.
+//! - **Nunca edites una migración ya publicada** (cambiaría su hash → error). Crea una nueva.
 
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use include_dir::{include_dir, Dir};
 use libsql::{Connection, Error as LibsqlError, Value};
+use sha2::{Digest, Sha256};
 
-/// Versión actual del esquema. Empieza en 0 (solo el baseline de `schema.sql`, sin migraciones).
-/// Incrementa en uno por cada cambio que toque una tabla existente.
-pub const SCHEMA_VERSION: i64 = 0;
+/// Ficheros de migración embebidos en el binario en tiempo de compilación.
+/// Ruta relativa al directorio del crate (`crates/tpv-infra-sqlite`).
+static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
-/// Pasos de migración para BDs **ya existentes**, en orden creciente de versión.
-/// Cada entrada es `(version_destino, sql)`. El `sql` puede contener varias sentencias.
-///
-/// Ejemplo de un futuro cambio:
-/// ```ignore
-/// const MIGRATIONS: &[(i64, &str)] = &[
-///     (1, "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;"),
-///     (2, "CREATE INDEX IF NOT EXISTS idx_prod_barras ON Productos(Codigo_Barras);"),
-/// ];
-/// ```
-const MIGRATIONS: &[(i64, &str)] = &[];
+type BoxErr = Box<dyn std::error::Error + Send + Sync>;
 
-/// `true` si la BD es una instalación nueva (aún no tiene las tablas de negocio). Debe llamarse
-/// **antes** de aplicar `schema.sql`. Detecta por la presencia de `Roles` (la primera tabla que
-/// crea el esquema).
-pub async fn db_is_fresh(conn: &Connection) -> Result<bool, LibsqlError> {
-    let mut rows = conn
-        .query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='Roles' LIMIT 1;",
-            Vec::<Value>::new(),
-        )
-        .await?;
-    Ok(rows.next().await?.is_none())
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
-/// Lee `PRAGMA user_version` (0 si nunca se ha sellado).
-pub async fn read_user_version(conn: &Connection) -> Result<i64, LibsqlError> {
-    let mut rows = conn
-        .query("PRAGMA user_version;", Vec::<Value>::new())
-        .await?;
-    let Some(row) = rows.next().await? else {
-        return Ok(0);
-    };
-    Ok(match row.get_value(0)? {
-        Value::Integer(n) => n,
-        Value::Real(n) => n as i64,
-        Value::Text(s) => s.parse().unwrap_or(0),
-        _ => 0,
-    })
+/// Lista de migraciones `(nombre, contenido)` ordenada por nombre (0001, 0002, …).
+fn migration_files() -> Vec<(String, String)> {
+    let mut files: Vec<(String, String)> = MIGRATIONS_DIR
+        .files()
+        .filter_map(|f| {
+            let name = f.path().file_name()?.to_str()?.to_string();
+            if !name.ends_with(".sql") {
+                return None;
+            }
+            let content = f.contents_utf8()?.to_string();
+            Some((name, content))
+        })
+        .collect();
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    files
 }
 
-/// Fija `PRAGMA user_version`. `version` es una constante del código (no entrada externa), por eso
-/// se interpola: PRAGMA no admite parámetros. Se ejecuta por `query` y se drena por si la versión
-/// de libsql devolviera filas al fijarlo.
-async fn set_user_version(conn: &Connection, version: i64) -> Result<(), LibsqlError> {
+/// Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas.
+fn normalize(s: &str) -> String {
+    s.replace("\r\n", "\n")
+}
+
+/// Quita comentarios de bloque `/* … */` (UTF-8 safe: corta en los delimitadores ASCII). Algunos
+/// motores los rechazan; nuestras migraciones no usan `/*` dentro de literales, así que es seguro.
+fn strip_block_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find("/*") {
+        out.push_str(&rest[..start]);
+        match rest[start + 2..].find("*/") {
+            Some(end) => rest = &rest[start + 2 + end + 2..],
+            None => {
+                rest = "";
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn sha256_hex(s: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
+}
+
+async fn table_exists(conn: &Connection, name: &str) -> Result<bool, LibsqlError> {
     let mut rows = conn
         .query(
-            &format!("PRAGMA user_version = {version};"),
-            Vec::<Value>::new(),
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1;",
+            vec![Value::Text(name.to_string())],
         )
         .await?;
-    while rows.next().await?.is_some() {}
+    Ok(rows.next().await?.is_some())
+}
+
+async fn ensure_table(conn: &Connection) -> Result<(), LibsqlError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _migrations (\
+            name TEXT PRIMARY KEY, \
+            hash TEXT NOT NULL, \
+            applied_at INTEGER NOT NULL\
+        );",
+    )
+    .await?;
     Ok(())
 }
 
-/// Lleva el esquema al día. Debe llamarse **después** de aplicar `schema.sql`.
-/// - `fresh = true`: instalación nueva → sella a [`SCHEMA_VERSION`] sin correr migraciones.
-/// - `fresh = false`: aplica los pasos de [`MIGRATIONS`] pendientes y sella a [`SCHEMA_VERSION`].
-pub async fn apply_migrations(conn: &Connection, fresh: bool) -> Result<(), LibsqlError> {
-    if fresh {
-        set_user_version(conn, SCHEMA_VERSION).await?;
-        return Ok(());
+/// Mapa `name -> hash` de las migraciones ya aplicadas (vacío si la tabla aún no existe).
+async fn applied_map(conn: &Connection) -> Result<HashMap<String, String>, LibsqlError> {
+    if !table_exists(conn, "_migrations").await? {
+        return Ok(HashMap::new());
     }
 
-    let mut current = read_user_version(conn).await?;
+    let mut rows = conn
+        .query("SELECT name, hash FROM _migrations;", Vec::<Value>::new())
+        .await?;
 
-    for (version, sql) in MIGRATIONS {
-        if *version > current {
-            eprintln!("[migrations] aplicando migración v{version}…");
-            conn.execute_batch(sql).await?;
-            set_user_version(conn, *version).await?;
-            current = *version;
-            eprintln!("[migrations] migración v{version} aplicada");
+    let mut map = HashMap::new();
+    while let Some(row) = rows.next().await? {
+        let name = match row.get_value(0)? {
+            Value::Text(s) => s,
+            _ => continue,
+        };
+        let hash = match row.get_value(1)? {
+            Value::Text(s) => s,
+            _ => String::new(),
+        };
+        map.insert(name, hash);
+    }
+    Ok(map)
+}
+
+/// Aplica todas las migraciones pendientes (cada una en su propia transacción). Crea desde cero el
+/// esquema en BDs nuevas y pone al día las existentes. Falla si una migración ya aplicada fue
+/// modificada (hash distinto).
+pub async fn run(conn: &Connection) -> Result<(), BoxErr> {
+    ensure_table(conn).await?;
+    let applied = applied_map(conn).await?;
+
+    for (name, content) in migration_files() {
+        let normalized = normalize(&content);
+        let hash = sha256_hex(&normalized);
+
+        if let Some(prev) = applied.get(&name) {
+            if *prev != hash {
+                return Err(format!(
+                    "La migración '{name}' fue modificada después de aplicarse (hash distinto). \
+                     Nunca edites una migración ya publicada: crea una nueva."
+                )
+                .into());
+            }
+            continue;
+        }
+
+        let body = strip_block_comments(&normalized);
+
+        // Transacción: migración + registro en `_migrations`, atómicos.
+        conn.execute_batch("BEGIN;").await?;
+        let applied_res: Result<(), LibsqlError> = async {
+            conn.execute_batch(&body).await?;
+            conn.execute(
+                "INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, ?3);",
+                vec![
+                    Value::Text(name.clone()),
+                    Value::Text(hash.clone()),
+                    Value::Integer(now_ms()),
+                ],
+            )
+            .await?;
+            Ok(())
+        }
+        .await;
+
+        match applied_res {
+            Ok(()) => {
+                conn.execute_batch("COMMIT;").await?;
+                eprintln!("[migrations] aplicada: {name}");
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                return Err(Box::new(e));
+            }
         }
     }
 
-    // Sella a la última versión aunque no hubiera pasos (p. ej. un baseline existente en v0
-    // la primera vez que se publica este sistema).
-    if current < SCHEMA_VERSION {
-        set_user_version(conn, SCHEMA_VERSION).await?;
+    Ok(())
+}
+
+/// `true` si hay migraciones pendientes sobre una BD que **ya tiene datos** (existe la tabla
+/// `Roles`). Lo usa la copia de seguridad previa a migrar. Una BD nueva (sin `Roles`) devuelve
+/// `false`: no hay nada que respaldar.
+pub async fn has_pending(conn: &Connection) -> Result<bool, LibsqlError> {
+    if !table_exists(conn, "Roles").await? {
+        return Ok(false);
+    }
+    let applied = applied_map(conn).await?;
+    Ok(migration_files()
+        .into_iter()
+        .any(|(name, _)| !applied.contains_key(&name)))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests de humo del runner (headless): replican los 3 escenarios manuales
+// (creación limpia, idempotencia, anti-tampering) sin necesidad de la GUI.
+// ──────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libsql::Builder;
+
+    fn uniq() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     }
 
-    Ok(())
+    /// Abre una BD libsql local en un fichero temporal. Devuelve la `Database` (hay que mantenerla
+    /// viva mientras se use la `Connection`) + la conexión + el directorio (para limpiar).
+    async fn open_temp() -> (libsql::Database, Connection, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_mig_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.db");
+        let database = Builder::new_local(path.to_str().unwrap())
+            .build()
+            .await
+            .unwrap();
+        let conn = database.connect().unwrap();
+        (database, conn, dir)
+    }
+
+    async fn scalar_i64(conn: &Connection, sql: &str) -> i64 {
+        let mut rows = conn.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        match row.get_value(0).unwrap() {
+            Value::Integer(n) => n,
+            Value::Real(n) => n as i64,
+            _ => panic!("se esperaba entero"),
+        }
+    }
+
+    /// 1) Creación limpia: BD vacía → se construye el esquema y queda registrada 0001 con su hash.
+    #[tokio::test]
+    async fn smoke_clean_create() {
+        let (_db, conn, dir) = open_temp().await;
+
+        run(&conn).await.expect("las migraciones deben aplicarse en una BD limpia");
+
+        // _migrations tiene exactamente la fila 0001 con un hash SHA-256 (64 hex) y timestamp > 0.
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await, 1);
+        let mut rows = conn
+            .query(
+                "SELECT name, hash, applied_at FROM _migrations;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("debe existir la fila 0001");
+        let name = match row.get_value(0).unwrap() {
+            Value::Text(s) => s,
+            _ => panic!(),
+        };
+        let hash = match row.get_value(1).unwrap() {
+            Value::Text(s) => s,
+            _ => panic!(),
+        };
+        let applied_at = match row.get_value(2).unwrap() {
+            Value::Integer(n) => n,
+            _ => panic!(),
+        };
+        assert_eq!(name, "0001_inicial.sql");
+        assert_eq!(hash.len(), 64, "el hash debe ser SHA-256 en hex");
+        assert!(applied_at > 0);
+
+        // Las tablas del esquema se crearon de verdad.
+        assert!(table_exists(&conn, "Roles").await.unwrap());
+        assert!(table_exists(&conn, "Usuarios").await.unwrap());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 2) Idempotencia: re-ejecutar no falla, no duplica filas y NO re-aplica (no toca applied_at).
+    #[tokio::test]
+    async fn smoke_idempotent() {
+        let (_db, conn, dir) = open_temp().await;
+
+        run(&conn).await.unwrap();
+        let applied_at_1 = scalar_i64(
+            &conn,
+            "SELECT applied_at FROM _migrations WHERE name='0001_inicial.sql';",
+        )
+        .await;
+
+        // Segunda pasada: debe detectar que 0001 ya está aplicada y saltarla.
+        run(&conn).await.expect("re-ejecutar no debe fallar");
+
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await, 1);
+        let applied_at_2 = scalar_i64(
+            &conn,
+            "SELECT applied_at FROM _migrations WHERE name='0001_inicial.sql';",
+        )
+        .await;
+        assert_eq!(applied_at_1, applied_at_2, "no debe re-aplicarse la migración");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 3) Anti-tampering: si el hash guardado no coincide con el del fichero (simulando que la
+    ///    migración se modificó tras aplicarse), el runner falla con error duro y no continúa.
+    #[tokio::test]
+    async fn smoke_tamper_detected() {
+        let (_db, conn, dir) = open_temp().await;
+
+        run(&conn).await.unwrap();
+
+        // Corromper el hash registrado (equivale a editar el .sql ya aplicado).
+        conn.execute(
+            "UPDATE _migrations SET hash='hash_manipulado' WHERE name='0001_inicial.sql';",
+            Vec::<Value>::new(),
+        )
+        .await
+        .unwrap();
+
+        let err = run(&conn).await.expect_err("debe detectar la manipulación");
+        let msg = format!("{err}").to_lowercase();
+        assert!(msg.contains("0001_inicial.sql"), "el error debe nombrar la migración: {msg}");
+        assert!(msg.contains("modificada"), "el error debe indicar manipulación: {msg}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

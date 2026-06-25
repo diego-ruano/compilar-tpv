@@ -26,8 +26,7 @@ import {
 import { sha256Hex } from "./crypto";
 
 import { createClient, type Client } from "@libsql/client";
-import TPV_SCHEMA_SQL from "../../../../packages/database/schema.sql";
-import { runTenantMigrations, tenantIsFresh } from "./tenantMigrations";
+import { runTenantMigrations } from "./tenantMigrations";
 
 // ---------------- Env ----------------
 
@@ -669,17 +668,9 @@ async function applyTenantSchemaOnce(tursoUrl: string, token: string): Promise<v
 		authToken: token,
 	});
 
-	// El parser de Turso (sqld) rechaza los comentarios de bloque `/* */` del schema
-	// ("non-terminated block comment at (1,1)"), pase por `batch` o por `executeMultiple`.
-	// Los quitamos y ejecutamos el SQL completo como un único script multi-statement.
-	// El schema no usa `/*` dentro de literales, así que el strip es seguro.
-	const sql = TPV_SCHEMA_SQL.replace(/\/\*[\s\S]*?\*\//g, "");
-
-	// Detectar BD nueva ANTES de aplicar el esquema (para no correr ALTERs que el esquema
-	// completo ya incluye en una BD nueva). Espejo de las migraciones del escritorio.
-	const fresh = await tenantIsFresh(client);
-	await client.executeMultiple(sql);
-	await runTenantMigrations(client, fresh);
+	// Construye/actualiza el esquema aplicando las migraciones (fuente única compartida en
+	// packages/database/migrations). Ya no hay schema.sql. Ver `tenantMigrations.ts`.
+	await runTenantMigrations(client);
 
 	await ensureTenantInitialAdmin(client);
 }

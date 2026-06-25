@@ -1,0 +1,4 @@
+# Migraciones de BD: forzar finales de línea LF y tratarlas como texto.
+# El runner calcula el hash del contenido (normalizado a LF) para detectar manipulación; mantener
+# el EOL determinista evita falsos positivos de "migración modificada" al clonar en distinto SO.
+packages/database/migrations/*.sql text eol=lf
