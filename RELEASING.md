@@ -123,7 +123,60 @@ necesitan que publiques una 0.2.1 con el arreglo — por eso conviene el canary 
 
 ---
 
-## 3. Plan de recuperación (peor caso)
+## 3. Cambios de esquema (migraciones de BD)
+
+`schema.sql` se aplica en cada arranque con `CREATE TABLE IF NOT EXISTS`: eso crea **tablas
+nuevas** en clientes existentes, pero **NO modifica tablas que ya existen** (añadir columna, etc.).
+Para esos cambios hay un sistema de migraciones versionadas (`PRAGMA user_version`) en los dos lados:
+
+- **Escritorio (cada cliente, automático)**: `crates/tpv-infra-sqlite/src/migrations.rs`
+- **Turso (por-tenant)**: `apps/cloud-worker-licensing/src/server/tenantMigrations.ts`
+
+Instalaciones **nuevas** reciben el esquema completo de `schema.sql` y se sellan a la última
+versión sin correr migraciones. Instalaciones **existentes** aplican solo los pasos que les faltan.
+
+### Cómo hacer un cambio de esquema
+
+1. Edita `packages/database/schema.sql` para reflejar el **estado final** (lo usan instalaciones
+   nuevas y el aprovisionamiento de Turso).
+2. Sube `SCHEMA_VERSION` en **uno**, en **los dos** ficheros (deben coincidir):
+   `migrations.rs` y `tenantMigrations.ts`.
+3. Añade el **mismo** paso en `MIGRATIONS` de ambos (mismo número, SQL equivalente):
+   ```rust
+   // migrations.rs
+   const MIGRATIONS: &[(i64, &str)] = &[
+       (1, "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;"),
+   ];
+   ```
+   ```ts
+   // tenantMigrations.ts
+   const MIGRATIONS = [
+       { version: 1, sql: "ALTER TABLE Productos ADD COLUMN Codigo_Barras TEXT;" },
+   ];
+   ```
+
+### Reglas (para no romper nada)
+
+- **Solo aditivo y compatible hacia atrás**: `ALTER TABLE ... ADD COLUMN`, `CREATE TABLE`,
+  `CREATE INDEX`. Evita renombrar/eliminar columnas mientras haya apps viejas en producción (una
+  Main vieja sigue enviando el esquema antiguo por el outbox).
+- **Nunca edites un paso ya publicado**: añade siempre uno nuevo.
+- Para una **tabla totalmente nueva** basta con ponerla en `schema.sql` (el `IF NOT EXISTS` la crea
+  en todos lados); el paso de migración solo es imprescindible para tocar tablas existentes.
+- Prueba la migración sobre una **copia de una `data.db` real con datos** antes de publicar.
+
+### Seguridad
+
+- **Escritorio**: antes de migrar, la app hace **copia automática** de `data.db` →
+  `data.db.bak.v<versión_anterior>` en AppData (red de seguridad; las migraciones son irreversibles).
+- **Turso**: las migraciones de tenant se aplican al **provisionar** (activación de licencia, ver
+  `applyTenantSchemaOnce`). Para forzar la migración en tenants ya activos al publicar un cambio,
+  vuelve a disparar el provisioning o aplica el `ALTER` directamente con el CLI de Turso. Haz copia
+  del tenant (`turso db shell ... .dump`) antes de un cambio grande.
+
+---
+
+## 4. Plan de recuperación (peor caso)
 
 El updater es muy difícil de romper porque la **detección corre en Rust** (independiente de la UI) y
 el feed lo controlas tú. Aun así, ten esto a mano:
@@ -140,7 +193,7 @@ el feed lo controlas tú. Aun así, ten esto a mano:
 
 ---
 
-## 4. Checklist rápido
+## 5. Checklist rápido
 
 - [ ] `version` subida en `tauri.conf.json` **y** `Cargo.toml`
 - [ ] `pnpm tauri build` con `TAURI_SIGNING_PRIVATE_KEY` en el entorno

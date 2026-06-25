@@ -8,7 +8,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use libsql::{Connection, Value};
+use libsql::{Builder, Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_domain::login::hash_pin;
@@ -98,6 +98,52 @@ async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
+/// Red de seguridad: si la BD ya existe y su versión de esquema está por debajo de la última
+/// (es decir, al abrir se le van a aplicar migraciones), hace una **copia del fichero antes** de
+/// migrar. Las migraciones son solo aditivas (no destructivas), pero las migraciones son el único
+/// paso irreversible del sistema, así que la copia es un seguro barato.
+///
+/// Es best-effort: si la copia falla, se avisa por log pero NO se bloquea el arranque (mejor que
+/// dejar la app sin abrir). La comprobación usa una conexión efímera que se cierra antes de copiar.
+async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
+    // Instalación nueva: no hay nada que respaldar (la creará `Db::open`).
+    if !db_path.exists() {
+        return Ok(());
+    }
+
+    let db_path_str = db_path
+        .to_str()
+        .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
+
+    let database = Builder::new_local(db_path_str).build().await.map_err(db_err)?;
+    let conn = database.connect().map_err(db_err)?;
+
+    let current = crate::migrations::read_user_version(&conn)
+        .await
+        .map_err(db_err)?;
+
+    // Ya está al día: no se migrará nada → no hace falta copia.
+    if current >= crate::migrations::SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    // Volcar el WAL al fichero principal para que la copia esté completa, y cerrar la conexión
+    // efímera antes de copiar (Windows bloquea el fichero mientras está abierto).
+    let _ = conn
+        .query("PRAGMA wal_checkpoint(TRUNCATE);", Vec::<Value>::new())
+        .await;
+    drop(conn);
+    drop(database);
+
+    let backup = db_path.with_file_name(format!("data.db.bak.v{current}"));
+    match std::fs::copy(db_path, &backup) {
+        Ok(_) => eprintln!("[migrations] copia de seguridad creada: {:?}", backup),
+        Err(e) => eprintln!("[migrations] aviso: no se pudo crear copia de seguridad: {e}"),
+    }
+
+    Ok(())
+}
+
 /// Abre la BD local `data.db` dentro de `app_data_dir` (escritor único + pool de lectura, WAL),
 /// aplica `schema` (el contenido de `schema.sql`) y siembra el administrador inicial.
 pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Arc<Db>> {
@@ -105,6 +151,9 @@ pub async fn init_main_db(app_data_dir: &Path, schema: &str) -> AppResult<Arc<Db
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| AppError::internal("Ruta de BD inválida"))?;
+
+    // Antes de abrir (lo que dispara las migraciones), respaldar si hay migraciones pendientes.
+    backup_if_migration_pending(&db_path).await?;
 
     let db = Db::open(db_path_str, schema)
         .await

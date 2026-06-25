@@ -20,11 +20,16 @@ pub mod db;
 // Conexión / inicialización de la BD local (schema, migraciones, seed):
 pub mod connection;
 
+// Migraciones versionadas del esquema (PRAGMA user_version): traen al día las BDs ya existentes
+// cuando una actualización modifica tablas. Ver `migrations.rs`.
+pub mod migrations;
+
 // Repositorios concretos (uno por agregado/módulo). Cada uno pide `db.read()` (pool de lectura)
 // o `db.write()` (escritor único) según la operación; los helpers son genéricos sobre los traits
 // `Reader`/`Writer` de `db.rs`.
 pub mod clientes;
 pub mod configuracion;
+pub mod email_config;
 pub mod cuentas;
 pub mod inventario;
 pub mod login;

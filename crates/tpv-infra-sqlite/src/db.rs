@@ -452,8 +452,17 @@ impl Db {
         // Conexión de escritura: afinar, aplicar schema y crear tablas de control.
         let write_conn = Arc::new(database.connect()?);
         tune(&write_conn).await?;
+
+        // Detectar si es una instalación nueva ANTES de aplicar el esquema (una BD nueva aún no
+        // tiene las tablas de negocio). Determina si hay que correr migraciones o sellar directo.
+        let fresh = crate::migrations::db_is_fresh(&write_conn).await?;
+
         write_conn.execute_batch(schema).await?;
         init_sync_tables(&write_conn).await?;
+
+        // Esquema versionado: nuevas → sellan a la última versión; existentes → aplican los pasos
+        // de migración pendientes. Ver `migrations.rs`.
+        crate::migrations::apply_migrations(&write_conn, fresh).await?;
 
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
