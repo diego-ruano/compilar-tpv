@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, Pencil, Trash2, StickyNote, ReceiptText, Printer } from "lucide-react";
+import { Check, ChevronDown, Pencil, Trash2, StickyNote, ReceiptText, Printer } from "lucide-react";
 import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
 import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
@@ -57,11 +57,48 @@ export default function TicketPanel({
   const [notaValue, setNotaValue] = useState("");
 
   const [printOpen, setPrintOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   const currentItem = useMemo(() => {
     if (!notaTicketId) return null;
     return ticket.find((t) => t.id === notaTicketId) ?? null;
   }, [notaTicketId, ticket]);
+
+  const groupedTicket = useMemo(() => {
+    const groups = new Map<string, TicketItem[]>();
+
+    for (const item of ticket) {
+      const key = String(item.categoriaNombre ?? "").trim() || "Sin categoría";
+      const bucket = groups.get(key) ?? [];
+      bucket.push(item);
+      groups.set(key, bucket);
+    }
+
+    return Array.from(groups.entries()).map(([name, items]) => ({
+      name,
+      items,
+    }));
+  }, [ticket]);
+
+  useEffect(() => {
+    setExpandedGroups((prev) => {
+      const next = { ...prev };
+      let changed = false;
+
+      for (const group of groupedTicket) {
+        if (next[group.name] === undefined) {
+          next[group.name] = true;
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [groupedTicket]);
+
+  const toggleGroup = (name: string) => {
+    setExpandedGroups((prev) => ({ ...prev, [name]: !prev[name] }));
+  };
 
   const openNotaModal = (t: TicketItem) => {
     if (!(Number(t.detalleId) > 0)) return;
@@ -115,7 +152,7 @@ export default function TicketPanel({
   return (
     <div
       className="
-        order-2 flex min-h-0 w-full flex-col p-3 lg:order-none lg:w-[380px]
+        order-2 flex h-full min-h-0 w-full flex-col overflow-hidden p-3 lg:order-none lg:w-[380px]
         xl:w-[420px] lg:shrink-0 sm:p-4
       "
     >
@@ -179,7 +216,7 @@ export default function TicketPanel({
         </button>
       </div>
 
-      <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-border bg-bg">
+      <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-bg">
         {ticket.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
             <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
@@ -189,129 +226,170 @@ export default function TicketPanel({
             <p className="text-xs text-fg-muted">Añade productos para empezar.</p>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 p-3">
-            {ticket.map((t) => {
-              const checked = t.seleccionado && !t.pagado;
-              const notas = String(t.notas ?? "").trim();
-              const tieneNota = Boolean(notas);
-              const lineaGuardada = Number(t.detalleId) > 0;
-              const disabledLine = t.pagado;
+          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+            {groupedTicket.map(({ name, items }) => {
+              const expanded = expandedGroups[name] ?? true;
+              const pendingCount = items.filter((item) => !item.pagado).length;
 
               return (
-                <div
-                  key={t.id}
-                  role="button"
-                  tabIndex={disabledLine ? -1 : 0}
-                  onClick={() => {
-                    if (!disabledLine) onToggleSeleccion(t.id);
-                  }}
-                  onKeyDown={(e) => {
-                    if (disabledLine) return;
-
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onToggleSeleccion(t.id);
-                    }
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
-                    checked
-                      ? "border-accent bg-accent-soft"
-                      : "border-border bg-surface hover:bg-surface-2",
-                    t.pagado && "opacity-70",
-                  )}
-                  aria-disabled={disabledLine}
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div
-                      className={cn(
-                        "grid size-6 shrink-0 place-items-center rounded-full border transition",
-                        checked
-                          ? "border-accent bg-accent text-accent-fg"
-                          : "border-border-strong bg-surface",
-                        t.pagado && "border-border bg-surface-2",
-                      )}
-                    >
-                      {checked ? <Check className="size-3.5" aria-hidden /> : null}
-                    </div>
-
+                <div key={name} className="overflow-hidden rounded-xl border border-border bg-surface">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                    onClick={() => toggleGroup(name)}
+                  >
                     <div className="min-w-0">
-                      <p
-                        className={cn(
-                          "flex items-center gap-2 truncate text-sm font-semibold text-fg sm:text-base",
-                          t.pagado && "text-fg-subtle line-through",
-                        )}
-                      >
-                        <span className="truncate">{t.nombre}</span>
-
-                        {tieneNota ? (
-                          <span className="shrink-0 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning">
-                            NOTA
-                          </span>
-                        ) : null}
-                      </p>
-
+                      <p className="truncate text-sm font-semibold text-fg">{name}</p>
                       <p className="text-xs text-fg-subtle">
-                        {t.pagado ? "Cobrado" : "Pendiente"}
+                        {pendingCount} {pendingCount === 1 ? "línea" : "líneas"}
                       </p>
-
-                      {tieneNota ? (
-                        <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
-                          <StickyNote className="size-3 shrink-0" aria-hidden />
-                          {notas}
-                        </p>
-                      ) : null}
                     </div>
-                  </div>
 
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span
+                    <ChevronDown
                       className={cn(
-                        "text-sm font-bold text-fg sm:text-base",
-                        t.pagado && "text-fg-subtle line-through",
+                        "size-4 shrink-0 text-fg-muted transition",
+                        !expanded && "-rotate-90",
                       )}
-                    >
-                      {formatMoney(t.precio)}
-                    </span>
+                      aria-hidden
+                    />
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openNotaModal(t);
-                      }}
-                      disabled={!lineaGuardada}
-                      className={cn(
-                        "grid size-8 place-items-center rounded-lg border transition",
-                        !lineaGuardada
-                          ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-                          : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
-                      )}
-                      title={
-                        lineaGuardada
-                          ? "Añadir/editar nota"
-                          : "La nota estará disponible cuando la línea esté confirmada"
-                      }
-                      aria-label="Nota"
-                    >
-                      <Pencil className="size-4" aria-hidden />
-                    </button>
+                  {expanded ? (
+                    <div className="border-t border-border/70 p-2">
+                      {items.map((t) => {
+                        const checked = t.seleccionado && !t.pagado;
+                        const notas = String(t.notas ?? "").trim();
+                        const tieneNota = Boolean(notas);
+                        const lineaGuardada = Number(t.detalleId) > 0;
+                        const disabledLine = t.pagado;
+                        const categoriaLabel = String(t.categoriaNombre ?? "").trim();
 
-                    {!t.pagado && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEliminarLinea(t.id);
-                        }}
-                        className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
-                        title="Eliminar producto"
-                        aria-label="Eliminar"
-                      >
-                        <Trash2 className="size-4" aria-hidden />
-                      </button>
-                    )}
-                  </div>
+                        return (
+                          <div
+                            key={t.id}
+                            role="button"
+                            tabIndex={disabledLine ? -1 : 0}
+                            onClick={() => {
+                              if (!disabledLine) onToggleSeleccion(t.id);
+                            }}
+                            onKeyDown={(e) => {
+                              if (disabledLine) return;
+
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                onToggleSeleccion(t.id);
+                              }
+                            }}
+                            className={cn(
+                              "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
+                              checked
+                                ? "border-accent bg-accent-soft"
+                                : "border-border bg-surface hover:bg-surface-2",
+                              t.pagado && "opacity-70",
+                            )}
+                            aria-disabled={disabledLine}
+                          >
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div
+                                className={cn(
+                                  "grid size-6 shrink-0 place-items-center rounded-full border transition",
+                                  checked
+                                    ? "border-accent bg-accent text-accent-fg"
+                                    : "border-border-strong bg-surface",
+                                  t.pagado && "border-border bg-surface-2",
+                                )}
+                              >
+                                {checked ? <Check className="size-3.5" aria-hidden /> : null}
+                              </div>
+
+                              <div className="min-w-0">
+                                <p
+                                  className={cn(
+                                    "flex items-center gap-2 truncate text-sm font-semibold text-fg sm:text-base",
+                                    t.pagado && "text-fg-subtle line-through",
+                                  )}
+                                >
+                                  <span className="truncate">{t.nombre}</span>
+
+                                  {tieneNota ? (
+                                    <span className="shrink-0 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning">
+                                      NOTA
+                                    </span>
+                                  ) : null}
+                                </p>
+
+                                <p className="text-xs text-fg-subtle">
+                                  {t.pagado ? "Cobrado" : "Pendiente"}
+                                </p>
+
+                                <div className="mt-1 flex items-center gap-2">
+                                  <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
+                                    {categoriaLabel ? `Cat.: ${categoriaLabel}` : "Sin categoría"}
+                                  </span>
+                                </div>
+
+                                {tieneNota ? (
+                                  <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
+                                    <StickyNote className="size-3 shrink-0" aria-hidden />
+                                    {notas}
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+
+                            <div className="flex shrink-0 items-center gap-2">
+                              <span
+                                className={cn(
+                                  "text-sm font-bold text-fg sm:text-base",
+                                  t.pagado && "text-fg-subtle line-through",
+                                )}
+                              >
+                                {formatMoney(t.precio)}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openNotaModal(t);
+                                }}
+                                disabled={!lineaGuardada}
+                                className={cn(
+                                  "grid size-8 place-items-center rounded-lg border transition",
+                                  !lineaGuardada
+                                    ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                                    : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
+                                )}
+                                title={
+                                  lineaGuardada
+                                    ? "Añadir/editar nota"
+                                    : "La nota estará disponible cuando la línea esté confirmada"
+                                }
+                                aria-label="Nota"
+                              >
+                                <Pencil className="size-4" aria-hidden />
+                              </button>
+
+                              {!t.pagado && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEliminarLinea(t.id);
+                                  }}
+                                  className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
+                                  title="Eliminar producto"
+                                  aria-label="Eliminar"
+                                >
+                                  <Trash2 className="size-4" aria-hidden />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}

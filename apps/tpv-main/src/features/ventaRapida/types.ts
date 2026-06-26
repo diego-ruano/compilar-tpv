@@ -31,6 +31,7 @@ export type TicketItem = {
     precio: number;
     pagado: boolean;
     seleccionado: boolean;
+    categoriaNombre?: string | null;
 
     notas?: string | null;
 };

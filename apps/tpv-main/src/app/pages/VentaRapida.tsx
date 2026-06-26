@@ -193,6 +193,19 @@ export default function VentaRapida() {
   const [categoriaSeleccionada, setCategoriaSeleccionada] =
     useState<CategoriaDisplay | null>(null);
 
+  const categoriaNombreById = useMemo(() => {
+    const map: Record<string, string> = {};
+
+    for (const cat of categorias) {
+      const id = String(cat.ID_Categoria ?? "").trim();
+      if (id) {
+        map[id] = String(cat.Nombre ?? "");
+      }
+    }
+
+    return map;
+  }, [categorias]);
+
   const toast = useToast();
 
   const idTrabajadorAuth = useAuth((s) => s.idTrabajador);
@@ -212,6 +225,35 @@ export default function VentaRapida() {
 
   const [busqueda, setBusqueda] = useState<ProductoDisplay[]>([]);
   const [loadingBusqueda, setLoadingBusqueda] = useState(false);
+
+  const getCategoriaNombreParaProducto = useCallback(
+    (productoId: string | null | undefined) => {
+      const id = String(productoId ?? "").trim();
+      if (!id) return null;
+
+      const fromProductos = productos.find((p) => p.ID_Producto === id);
+      if (fromProductos?.ID_Categoria) {
+        const nombre = categoriaNombreById[String(fromProductos.ID_Categoria)] ?? null;
+        if (nombre) return nombre;
+      }
+
+      const fromBusqueda = busqueda.find((p) => p.ID_Producto === id);
+      if (fromBusqueda?.ID_Categoria) {
+        const nombre = categoriaNombreById[String(fromBusqueda.ID_Categoria)] ?? null;
+        if (nombre) return nombre;
+      }
+
+      if (categoriaSeleccionada?.ID_Categoria) {
+        const idCat = String(categoriaSeleccionada.ID_Categoria ?? "").trim();
+        if (idCat && idCat === String(fromProductos?.ID_Categoria ?? "") && categoriaSeleccionada.Nombre) {
+          return categoriaSeleccionada.Nombre;
+        }
+      }
+
+      return null;
+    },
+    [busqueda, categoriaNombreById, categoriaSeleccionada, productos],
+  );
 
   const [ticket, setTicket] = useState<TicketItem[]>([]);
   const ticketRef = useRef<TicketItem[]>([]);
@@ -414,6 +456,7 @@ export default function VentaRapida() {
           precio: Number(l.Precio_Unitario || 0) * Number(l.Cantidad || 1),
           pagado: Number((l as any).Pagado ?? 0) === 1,
           seleccionado: false,
+          categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
           notas: l.Notas ?? null,
         };
       });
@@ -444,7 +487,7 @@ export default function VentaRapida() {
 
       return ui;
     },
-    [setSeleccionadosLocal],
+    [getCategoriaNombreParaProducto, setSeleccionadosLocal],
   );
 
   const replaceTicketItemLocal = useCallback(
@@ -517,6 +560,28 @@ export default function VentaRapida() {
     },
     [setPendingCobrosLocal, setSeleccionadosLocal],
   );
+
+  useEffect(() => {
+    if (!ticket.length) return;
+
+    let changed = false;
+    const nextTicket = ticket.map((item) => {
+      if (String(item.categoriaNombre ?? "").trim()) return item;
+
+      const resolved = getCategoriaNombreParaProducto(item.productoId);
+      if (resolved) {
+        changed = true;
+        return { ...item, categoriaNombre: resolved };
+      }
+
+      return item;
+    });
+
+    if (changed) {
+      ticketRef.current = nextTicket;
+      setTicket(nextTicket);
+    }
+  }, [getCategoriaNombreParaProducto, ticket]);
 
   useEffect(() => {
     return () => {
@@ -1165,6 +1230,16 @@ export default function VentaRapida() {
       const idProducto = p.ID_Producto;
       const precio = Number(p.Precio_Venta || 0);
       const tempId = makeTempTicketId();
+      const categoriaNombre =
+        getCategoriaNombreParaProducto(idProducto) ||
+        String(
+          p.ID_Categoria && categoriaNombreById[String(p.ID_Categoria)]
+            ? categoriaNombreById[String(p.ID_Categoria)]
+            : "",
+        ).trim() ||
+        (categoriaSeleccionada?.ID_Categoria === p.ID_Categoria && categoriaSeleccionada?.Nombre
+          ? categoriaSeleccionada.Nombre
+          : null);
 
       const tempItem: TicketItem = {
         id: tempId,
@@ -1174,6 +1249,7 @@ export default function VentaRapida() {
         precio,
         pagado: false,
         seleccionado: false,
+        categoriaNombre,
         notas: null,
       };
 
