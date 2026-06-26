@@ -24,6 +24,7 @@ import {
 	setDevicePubKeyB64IfEmptyOrThrow,
 } from "./licenseStore";
 import { sha256Hex } from "./crypto";
+import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 
 import { createClient, type Client } from "@libsql/client";
 import { runTenantMigrations } from "./tenantMigrations";
@@ -553,54 +554,6 @@ function getTenantTokenAgeBaseMs(row: any): number {
 	);
 }
 
-async function hmacSha256Hex(secret: string, raw: string): Promise<string> {
-	const key = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(secret),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"]
-	);
-
-	const mac = await crypto.subtle.sign(
-		"HMAC",
-		key,
-		new TextEncoder().encode(raw)
-	);
-
-	return [...new Uint8Array(mac)]
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
-}
-
-async function verifyInternalWorkerRequest(
-	req: Request,
-	env: Env,
-	rawBody: string
-): Promise<void> {
-	const tsStr = (req.headers.get("x-internal-ts") || "").trim();
-	const sigHex = (req.headers.get("x-internal-sig") || "").trim().toLowerCase();
-
-	if (!tsStr || !sigHex) throw new Error("missing_internal_auth");
-
-	const ts = Number(tsStr);
-	if (!Number.isFinite(ts)) throw new Error("bad_internal_ts");
-
-	const now = Date.now();
-	const MAX_SKEW_MS = 60 * 1000;
-	if (Math.abs(now - ts) > MAX_SKEW_MS) throw new Error("internal_ts_out_of_range");
-
-	const payload = `${ts}\n${req.method.toUpperCase()}\n${new URL(req.url).pathname}\n${rawBody}`;
-	const expected = await hmacSha256Hex(
-		String(env.LICENSE_JWT_SECRET || ""),
-		payload
-	);
-
-	if (!timingSafeEqualHex(expected, sigHex)) {
-		throw new Error("bad_internal_signature");
-	}
-}
-
 async function resolveTenantDbCredentials(
 	dbi: ReturnType<typeof getDb>,
 	env: Env,
@@ -732,7 +685,7 @@ export default {
 			const raw = await request.text();
 
 			try {
-				await verifyInternalWorkerRequest(request, env, raw);
+				await verifyInternalWorkerRequest(request, env.LICENSE_JWT_SECRET, raw);
 			} catch (e: any) {
 				return json({ ok: false, error: String(e?.message || e) }, 401);
 			}
@@ -824,7 +777,7 @@ export default {
 			const raw = await request.text();
 
 			try {
-				await verifyInternalWorkerRequest(request, env, raw);
+				await verifyInternalWorkerRequest(request, env.LICENSE_JWT_SECRET, raw);
 			} catch (e: any) {
 				return json({ ok: false, error: String(e?.message || e) }, 401);
 			}

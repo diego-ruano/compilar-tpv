@@ -8,6 +8,7 @@
 // rechaza la escritura con `main_offline` si no hay una Main conectada.
 
 import type { Env } from "../env";
+import { signInternalWorkerRequest } from "./internalAuth";
 
 export type ApplyCommand = {
 	type: "tenantDb.exec" | "tenantDb.transaction";
@@ -39,6 +40,25 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 	const id = env.TenantHub.idFromName(tenantId);
 	const stub = env.TenantHub.get(id);
 
+	const rawBody = JSON.stringify({
+		type: command.type,
+		payload: command.payload,
+		opId,
+		commandName,
+		deviceId,
+		cloud_payload: cloudPayload ?? null,
+		client_now: clientNow ?? null,
+	});
+
+	// Firma HMAC del worker → el DO verifica que la escritura proviene de `tpv-api`
+	// legítimo. `pathname`/`body` deben coincidir con los que verá el verificador.
+	const sigHeaders = await signInternalWorkerRequest(
+		String(env.LICENSE_JWT_SECRET || ""),
+		"POST",
+		"/internal/apply",
+		rawBody,
+	);
+
 	const res = await stub.fetch("https://do/internal/apply", {
 		method: "POST",
 		headers: {
@@ -46,16 +66,9 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 			"x-tenant-id": tenantId,
 			"x-device-id": deviceId,
 			...(clientNow ? { "x-client-now": clientNow } : {}),
+			...sigHeaders,
 		},
-		body: JSON.stringify({
-			type: command.type,
-			payload: command.payload,
-			opId,
-			commandName,
-			deviceId,
-			cloud_payload: cloudPayload ?? null,
-			client_now: clientNow ?? null,
-		}),
+		body: rawBody,
 	});
 
 	const json: any = await res.json().catch(() => ({}));

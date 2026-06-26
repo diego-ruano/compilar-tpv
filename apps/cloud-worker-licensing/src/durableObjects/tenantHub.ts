@@ -3,6 +3,7 @@ import { createDbClient } from "../server/db/clients";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
+import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 
 type Role = "tpv" | "handy" | "unknown";
 
@@ -1100,12 +1101,27 @@ export class TenantHub {
 		}
 
 		if (url.pathname === "/internal/apply" && request.method === "POST") {
+			const raw = await request.text();
+
+			// Sólo el worker `tpv-api` legítimo (que conoce LICENSE_JWT_SECRET) puede
+			// aplicar SQL en el tenant. Sin esto, cualquiera que alcanzase el DO con los
+			// headers correctos podría escribir comandos arbitrarios.
+			try {
+				await verifyInternalWorkerRequest(
+					request,
+					String(this.env.LICENSE_JWT_SECRET || ""),
+					raw,
+				);
+			} catch (e: any) {
+				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
+			}
+
 			const tenantId = String(request.headers.get("x-tenant-id") || "").trim();
 			if (!tenantId) {
 				return jsonResponse({ ok: false, error: "missing_tenant_id" }, 400);
 			}
 
-			const body = safeJsonParse(await request.text()) || {};
+			const body = safeJsonParse(raw) || {};
 			const type = String(body?.type || "").trim();
 
 			if (!type) {
