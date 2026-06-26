@@ -1171,6 +1171,7 @@ pub fn run() {
             commands::inventario::inventario_upsert_producto,
             commands::inventario::inventario_list_lotes_by_producto,
             commands::inventario::inventario_create_lote,
+            commands::inventario::inventario_update_lote,
             commands::inventario::inventario_ajustar_lote,
             // tareas
             commands::tareas::tareas_get_trabajadores,

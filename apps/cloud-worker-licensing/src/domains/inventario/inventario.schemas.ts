@@ -10,6 +10,7 @@ import type {
 	AjusteLoteInput as ContractAjusteLoteInput,
 	CreateLoteInput as ContractCreateLoteInput,
 	SetProductoAlergenosInput,
+	UpdateLoteInput as ContractUpdateLoteInput,
 	UpsertCategoriaInput as ContractUpsertCategoriaInput,
 	UpsertProductoInput as ContractUpsertProductoInput,
 } from "@tpv/contracts";
@@ -63,6 +64,19 @@ export const createLoteSchema = z.object({
 	notas: optStr,
 });
 
+export const updateLoteSchema = z.object({
+	id_lote: idStr,
+	id_producto: idStr,
+	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
+	caducidad: optStr,
+	cantidad_inicial: z.number().finite().min(0, "Cantidad_Inicial inválida"),
+	stock_disponible: z.number().finite().min(0, "Stock_Disponible inválido"),
+	fecha_entrada: optStr,
+	coste_unitario: optNum,
+	id_proveedor: idStr.nullish(),
+	notas: optStr,
+});
+
 export const ajusteLoteSchema = z.object({
 	stock_disponible: z.number().finite().min(0, "Stock_Disponible inválido"),
 	notas: optStr,
@@ -102,6 +116,17 @@ export type CreateLoteInput = Omit<
 > & {
 	caducidad?: string | null;
 	stock_disponible?: number | null;
+	fecha_entrada?: string | null;
+	coste_unitario?: number | null;
+	id_proveedor?: string | null;
+	notas?: string | null;
+};
+
+export type UpdateLoteInput = Omit<
+	ContractUpdateLoteInput,
+	"caducidad" | "fecha_entrada" | "coste_unitario" | "id_proveedor" | "notas"
+> & {
+	caducidad?: string | null;
 	fecha_entrada?: string | null;
 	coste_unitario?: number | null;
 	id_proveedor?: string | null;

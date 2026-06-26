@@ -6,7 +6,9 @@ use tpv_contracts::inventario::{
     AlergenoInvDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
     ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
-use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
+use tpv_domain::inventario::{
+    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+};
 
 use crate::error::AppResult;
 
@@ -34,5 +36,6 @@ pub trait InventarioRepository: Send + Sync {
     /// Upsert de producto + alérgenos. Devuelve el id de producto.
     async fn upsert_producto(&self, producto: ProductoUpsert) -> AppResult<String>;
     async fn create_lote(&self, lote: LoteNuevo) -> AppResult<()>;
+    async fn update_lote(&self, lote: LoteUpdate) -> AppResult<()>;
     async fn ajustar_lote(&self, ajuste: AjusteLote) -> AppResult<()>;
 }

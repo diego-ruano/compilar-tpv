@@ -7,7 +7,7 @@ use tpv_contracts::inventario::{
     AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
     IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoBaseDto,
     ProductoDetalleDto, ProductoListDto, ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs,
-    UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
+    UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use crate::AppState;
 
@@ -141,6 +141,15 @@ pub async fn inventario_create_lote(
 ) -> Result<String, String> {
     let repo = state.inventario_repo().await?;
     Ok(uc::create_lote(repo.as_ref(), args).await?)
+}
+
+#[tauri::command]
+pub async fn inventario_update_lote(
+    state: State<'_, AppState>,
+    args: UpdateLoteInput,
+) -> Result<String, String> {
+    let repo = state.inventario_repo().await?;
+    Ok(uc::update_lote(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

@@ -121,6 +121,66 @@ pub struct LoteNuevo {
     pub notas: Option<String>,
 }
 
+/// Lote existente a actualizar.
+#[derive(Debug, Clone)]
+pub struct LoteUpdate {
+    pub id_lote: String,
+    pub id_producto: String,
+    pub codigo_lote: String,
+    pub caducidad: Option<String>,
+    pub cantidad_inicial: f64,
+    pub stock_disponible: f64,
+    pub fecha_entrada: Option<String>,
+    pub coste_unitario: Option<f64>,
+    pub id_proveedor: Option<String>,
+    pub notas: Option<String>,
+}
+
+impl LoteUpdate {
+    #[allow(clippy::too_many_arguments)]
+    pub fn validar(
+        id_lote: String,
+        id_producto: String,
+        codigo_lote: String,
+        caducidad: Option<String>,
+        cantidad_inicial: f64,
+        stock_disponible: f64,
+        fecha_entrada: Option<String>,
+        coste_unitario: Option<f64>,
+        id_proveedor: Option<String>,
+        notas: Option<String>,
+    ) -> Result<Self, String> {
+        let id_lote = id_lote.trim().to_string();
+        if id_lote.is_empty() {
+            return Err("id_lote inválido".into());
+        }
+        let lote = LoteNuevo::validar(
+            Some(id_lote.clone()),
+            id_producto,
+            codigo_lote,
+            caducidad,
+            cantidad_inicial,
+            Some(stock_disponible),
+            fecha_entrada,
+            coste_unitario,
+            id_proveedor,
+            notas,
+        )?;
+        Ok(LoteUpdate {
+            id_lote,
+            id_producto: lote.id_producto,
+            codigo_lote: lote.codigo_lote,
+            caducidad: lote.caducidad,
+            cantidad_inicial: lote.cantidad_inicial,
+            stock_disponible: lote.stock_disponible,
+            fecha_entrada: lote.fecha_entrada,
+            coste_unitario: lote.coste_unitario,
+            id_proveedor: lote.id_proveedor,
+            notas: lote.notas,
+        })
+    }
+}
+
 impl LoteNuevo {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(

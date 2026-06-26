@@ -138,6 +138,21 @@ export type CreateLoteArgs = {
     notas?: string | null;
 };
 
+export type UpdateLoteArgs = {
+    id_lote: string;
+    id_producto: string;
+    codigo_lote: string;
+
+    caducidad: string | null;
+    cantidad_inicial: number;
+    stock_disponible: number;
+
+    fecha_entrada?: string | null;
+    coste_unitario?: number | null;
+    id_proveedor?: string | null;
+    notas?: string | null;
+};
+
 export type AjusteLoteArgs = {
     id_lote: string;
     stock_disponible: number;
@@ -567,6 +582,29 @@ export const inventarioAPI = {
                 ...(args.stock_disponible == null
                     ? {}
                     : { stock_disponible: toNum(args.stock_disponible) }),
+
+                fecha_entrada: toStrOrNull(args.fecha_entrada),
+                coste_unitario:
+                    args.coste_unitario == null
+                        ? null
+                        : toNumOrNull(args.coste_unitario),
+                id_proveedor:
+                    args.id_proveedor == null ? null : toId(args.id_proveedor),
+                notas: toStrOrNull(args.notas),
+            },
+        });
+    },
+
+    async updateLote(args: UpdateLoteArgs): Promise<void> {
+        await invokeClient("inventario_update_lote", {
+            args: {
+                id_lote: toId(args.id_lote),
+                id_producto: toId(args.id_producto),
+                codigo_lote: toStr(args.codigo_lote),
+
+                caducidad: toStrOrNull(args.caducidad),
+                cantidad_inicial: toNum(args.cantidad_inicial),
+                stock_disponible: toNum(args.stock_disponible),
 
                 fecha_entrada: toStrOrNull(args.fecha_entrada),
                 coste_unitario:

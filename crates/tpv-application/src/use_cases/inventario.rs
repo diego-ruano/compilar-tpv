@@ -3,11 +3,11 @@
 use tpv_contracts::inventario::{
     AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, InventarioResumenResponse,
     LoteDto, ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto,
-    ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs, UpsertCategoriaInput,
-    UpsertProductoInput, UpsertProductoResult,
+    ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs, UpdateLoteInput,
+    UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use tpv_domain::inventario::{
-    normalize_ids, AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert,
+    normalize_ids, AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
 };
 
 use crate::error::{AppError, AppResult};
@@ -132,6 +132,24 @@ pub async fn create_lote(repo: &R, input: CreateLoteInput) -> AppResult<String> 
     )
     .map_err(AppError::validation)?;
     repo.create_lote(lote).await?;
+    Ok("OK".to_string())
+}
+
+pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> {
+    let lote = LoteUpdate::validar(
+        input.id_lote,
+        input.id_producto,
+        input.codigo_lote,
+        input.caducidad,
+        input.cantidad_inicial,
+        input.stock_disponible,
+        input.fecha_entrada,
+        input.coste_unitario,
+        input.id_proveedor,
+        input.notas,
+    )
+    .map_err(AppError::validation)?;
+    repo.update_lote(lote).await?;
     Ok("OK".to_string())
 }
 

@@ -158,6 +158,15 @@ inventarioRoutes.post("/lotes", async (c) => {
 	return c.json({ id_lote: id });
 });
 
+inventarioRoutes.put("/lotes/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_lote inválido");
+	const p = await parseBody(c, S.updateLoteSchema);
+	if (!p.ok) return p.res;
+	await apply(c, cmd.updateLote(id, { ...p.data, id_lote: id }));
+	return c.json({ ok: true });
+});
+
 inventarioRoutes.patch("/lotes/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_lote inválido");

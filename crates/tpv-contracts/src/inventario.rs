@@ -280,6 +280,31 @@ pub struct CreateLoteInput {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct UpdateLoteInput {
+    pub id_lote: String,
+    pub id_producto: String,
+    pub codigo_lote: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub caducidad: Option<String>,
+    pub cantidad_inicial: f64,
+    pub stock_disponible: f64,
+    #[serde(default)]
+    #[ts(optional)]
+    pub fecha_entrada: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub coste_unitario: Option<f64>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub id_proveedor: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub notas: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct AjusteLoteInput {
     pub id_lote: String,
     pub stock_disponible: f64,
