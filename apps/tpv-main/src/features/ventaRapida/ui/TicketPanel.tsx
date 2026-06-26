@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Check, ChevronDown, Pencil, Trash2, StickyNote, ReceiptText, Printer } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Pencil,
+  Trash2,
+  StickyNote,
+  ReceiptText,
+  Printer,
+} from "lucide-react";
 import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
 import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
@@ -152,41 +160,44 @@ export default function TicketPanel({
   return (
     <div
       className="
-        order-2 flex h-full min-h-0 w-full flex-col overflow-hidden p-3 lg:order-none lg:w-[380px]
-        xl:w-[420px] lg:shrink-0 sm:p-4
+        order-2 grid min-h-0 w-full grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-3
+        lg:order-none lg:h-[calc(100dvh-7.25rem)] lg:max-h-[calc(100dvh-7.25rem)] lg:w-[380px] lg:shrink-0
+        xl:w-[420px] sm:p-4
       "
     >
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="flex items-center gap-2 text-base font-bold text-fg sm:text-lg">
-          <ReceiptText className="size-5 text-accent" aria-hidden />
-          Ticket
-        </h3>
+      <div className="min-h-0">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="flex items-center gap-2 text-base font-bold text-fg sm:text-lg">
+            <ReceiptText className="size-5 text-accent" aria-hidden />
+            Ticket
+          </h3>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setPrintOpen(true)}
-            disabled={ticket.length === 0}
-            className={cn(
-              "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
-              ticket.length === 0
-                ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-                : "border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer",
-            )}
-            title="Imprimir ticket"
-          >
-            <Printer className="size-4" aria-hidden />
-            Imprimir
-          </button>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setPrintOpen(true)}
+              disabled={ticket.length === 0}
+              className={cn(
+                "flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-semibold transition",
+                ticket.length === 0
+                  ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                  : "border-border bg-surface text-fg hover:bg-surface-2 cursor-pointer",
+              )}
+              title="Imprimir ticket"
+            >
+              <Printer className="size-4" aria-hidden />
+              Imprimir
+            </button>
 
-          <div className="text-xs font-semibold text-fg-muted sm:text-sm">
-            Total pendiente:{" "}
-            <span className="text-fg">{formatMoney(totalPendiente)}</span>
+            <div className="text-xs font-semibold text-fg-muted sm:text-sm">
+              Total pendiente:{" "}
+              <span className="text-fg">{formatMoney(totalPendiente)}</span>
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="mt-3 flex flex-col items-stretch gap-2 sm:flex-row">
+      <div className="mt-3 flex min-h-0 flex-col items-stretch gap-2 sm:flex-row">
         <button
           className={cn(
             "flex-1 rounded-xl px-3 py-2.5 text-sm font-semibold transition active:scale-[0.98]",
@@ -216,9 +227,9 @@ export default function TicketPanel({
         </button>
       </div>
 
-      <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-bg">
+      <div className="mt-4 min-h-0 overflow-hidden rounded-2xl border border-border bg-bg">
         {ticket.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+          <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 p-8 text-center">
             <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
               <ReceiptText className="size-6" aria-hidden />
             </div>
@@ -226,178 +237,197 @@ export default function TicketPanel({
             <p className="text-xs text-fg-muted">Añade productos para empezar.</p>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
-            {groupedTicket.map(({ name, items }) => {
-              const expanded = expandedGroups[name] ?? true;
-              const pendingCount = items.filter((item) => !item.pagado).length;
+          <div
+            className="
+              h-full min-h-0 overflow-y-auto overscroll-contain p-3 pr-2
+              [scrollbar-gutter:stable]
+            "
+          >
+            <div className="flex min-h-0 flex-col gap-2">
+              {groupedTicket.map(({ name, items }) => {
+                const expanded = expandedGroups[name] ?? true;
+                const pendingCount = items.filter((item) => !item.pagado).length;
 
-              return (
-                <div key={name} className="overflow-hidden rounded-xl border border-border bg-surface">
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
-                    onClick={() => toggleGroup(name)}
+                return (
+                  <div
+                    key={name}
+                    className="shrink-0 overflow-hidden rounded-xl border border-border bg-surface"
                   >
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-fg">{name}</p>
-                      <p className="text-xs text-fg-subtle">
-                        {pendingCount} {pendingCount === 1 ? "línea" : "líneas"}
-                      </p>
-                    </div>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left"
+                      onClick={() => toggleGroup(name)}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-fg">{name}</p>
+                        <p className="text-xs text-fg-subtle">
+                          {pendingCount} {pendingCount === 1 ? "línea" : "líneas"}
+                        </p>
+                      </div>
 
-                    <ChevronDown
-                      className={cn(
-                        "size-4 shrink-0 text-fg-muted transition",
-                        !expanded && "-rotate-90",
-                      )}
-                      aria-hidden
-                    />
-                  </button>
+                      <ChevronDown
+                        className={cn(
+                          "size-4 shrink-0 text-fg-muted transition",
+                          !expanded && "-rotate-90",
+                        )}
+                        aria-hidden
+                      />
+                    </button>
 
-                  {expanded ? (
-                    <div className="border-t border-border/70 p-2">
-                      {items.map((t) => {
-                        const checked = t.seleccionado && !t.pagado;
-                        const notas = String(t.notas ?? "").trim();
-                        const tieneNota = Boolean(notas);
-                        const lineaGuardada = Number(t.detalleId) > 0;
-                        const disabledLine = t.pagado;
-                        const categoriaLabel = String(t.categoriaNombre ?? "").trim();
+                    {expanded ? (
+                      <div
+                        className="
+                          max-h-[280px] overflow-y-auto overscroll-contain border-t border-border/70 p-2 pr-1
+                          [scrollbar-gutter:stable]
+                        "
+                      >
+                        <div className="flex flex-col gap-2">
+                          {items.map((t) => {
+                            const checked = t.seleccionado && !t.pagado;
+                            const notas = String(t.notas ?? "").trim();
+                            const tieneNota = Boolean(notas);
+                            const lineaGuardada = Number(t.detalleId) > 0;
+                            const disabledLine = t.pagado;
+                            const categoriaLabel = String(t.categoriaNombre ?? "").trim();
 
-                        return (
-                          <div
-                            key={t.id}
-                            role="button"
-                            tabIndex={disabledLine ? -1 : 0}
-                            onClick={() => {
-                              if (!disabledLine) onToggleSeleccion(t.id);
-                            }}
-                            onKeyDown={(e) => {
-                              if (disabledLine) return;
-
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                onToggleSeleccion(t.id);
-                              }
-                            }}
-                            className={cn(
-                              "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
-                              checked
-                                ? "border-accent bg-accent-soft"
-                                : "border-border bg-surface hover:bg-surface-2",
-                              t.pagado && "opacity-70",
-                            )}
-                            aria-disabled={disabledLine}
-                          >
-                            <div className="flex min-w-0 items-center gap-3">
+                            return (
                               <div
+                                key={t.id}
+                                role="button"
+                                tabIndex={disabledLine ? -1 : 0}
+                                onClick={() => {
+                                  if (!disabledLine) onToggleSeleccion(t.id);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (disabledLine) return;
+
+                                  if (e.key === "Enter" || e.key === " ") {
+                                    e.preventDefault();
+                                    onToggleSeleccion(t.id);
+                                  }
+                                }}
                                 className={cn(
-                                  "grid size-6 shrink-0 place-items-center rounded-full border transition",
+                                  "flex w-full items-center justify-between gap-3 rounded-xl border p-3 text-left transition",
                                   checked
-                                    ? "border-accent bg-accent text-accent-fg"
-                                    : "border-border-strong bg-surface",
-                                  t.pagado && "border-border bg-surface-2",
+                                    ? "border-accent bg-accent-soft"
+                                    : "border-border bg-surface hover:bg-surface-2",
+                                  t.pagado && "opacity-70",
                                 )}
+                                aria-disabled={disabledLine}
                               >
-                                {checked ? <Check className="size-3.5" aria-hidden /> : null}
-                              </div>
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <div
+                                    className={cn(
+                                      "grid size-6 shrink-0 place-items-center rounded-full border transition",
+                                      checked
+                                        ? "border-accent bg-accent text-accent-fg"
+                                        : "border-border-strong bg-surface",
+                                      t.pagado && "border-border bg-surface-2",
+                                    )}
+                                  >
+                                    {checked ? <Check className="size-3.5" aria-hidden /> : null}
+                                  </div>
 
-                              <div className="min-w-0">
-                                <p
-                                  className={cn(
-                                    "flex items-center gap-2 truncate text-sm font-semibold text-fg sm:text-base",
-                                    t.pagado && "text-fg-subtle line-through",
-                                  )}
-                                >
-                                  <span className="truncate">{t.nombre}</span>
+                                  <div className="min-w-0">
+                                    <p
+                                      className={cn(
+                                        "flex items-center gap-2 truncate text-sm font-semibold text-fg sm:text-base",
+                                        t.pagado && "text-fg-subtle line-through",
+                                      )}
+                                    >
+                                      <span className="truncate">{t.nombre}</span>
 
-                                  {tieneNota ? (
-                                    <span className="shrink-0 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning">
-                                      NOTA
-                                    </span>
-                                  ) : null}
-                                </p>
+                                      {tieneNota ? (
+                                        <span className="shrink-0 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning">
+                                          NOTA
+                                        </span>
+                                      ) : null}
+                                    </p>
 
-                                <p className="text-xs text-fg-subtle">
-                                  {t.pagado ? "Cobrado" : "Pendiente"}
-                                </p>
+                                    <p className="text-xs text-fg-subtle">
+                                      {t.pagado ? "Cobrado" : "Pendiente"}
+                                    </p>
 
-                                <div className="mt-1 flex items-center gap-2">
-                                  <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
-                                    {categoriaLabel ? `Cat.: ${categoriaLabel}` : "Sin categoría"}
-                                  </span>
+                                    <div className="mt-1 flex items-center gap-2">
+                                      <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
+                                        {categoriaLabel
+                                          ? `Cat.: ${categoriaLabel}`
+                                          : "Sin categoría"}
+                                      </span>
+                                    </div>
+
+                                    {tieneNota ? (
+                                      <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
+                                        <StickyNote className="size-3 shrink-0" aria-hidden />
+                                        {notas}
+                                      </p>
+                                    ) : null}
+                                  </div>
                                 </div>
 
-                                {tieneNota ? (
-                                  <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
-                                    <StickyNote className="size-3 shrink-0" aria-hidden />
-                                    {notas}
-                                  </p>
-                                ) : null}
+                                <div className="flex shrink-0 items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "text-sm font-bold text-fg sm:text-base",
+                                      t.pagado && "text-fg-subtle line-through",
+                                    )}
+                                  >
+                                    {formatMoney(t.precio)}
+                                  </span>
+
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      openNotaModal(t);
+                                    }}
+                                    disabled={!lineaGuardada}
+                                    className={cn(
+                                      "grid size-8 place-items-center rounded-lg border transition",
+                                      !lineaGuardada
+                                        ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
+                                        : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
+                                    )}
+                                    title={
+                                      lineaGuardada
+                                        ? "Añadir/editar nota"
+                                        : "La nota estará disponible cuando la línea esté confirmada"
+                                    }
+                                    aria-label="Nota"
+                                  >
+                                    <Pencil className="size-4" aria-hidden />
+                                  </button>
+
+                                  {!t.pagado && (
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        onEliminarLinea(t.id);
+                                      }}
+                                      className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
+                                      title="Eliminar producto"
+                                      aria-label="Eliminar"
+                                    >
+                                      <Trash2 className="size-4" aria-hidden />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                            </div>
-
-                            <div className="flex shrink-0 items-center gap-2">
-                              <span
-                                className={cn(
-                                  "text-sm font-bold text-fg sm:text-base",
-                                  t.pagado && "text-fg-subtle line-through",
-                                )}
-                              >
-                                {formatMoney(t.precio)}
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openNotaModal(t);
-                                }}
-                                disabled={!lineaGuardada}
-                                className={cn(
-                                  "grid size-8 place-items-center rounded-lg border transition",
-                                  !lineaGuardada
-                                    ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
-                                    : "border-border text-fg-muted hover:bg-surface-2 hover:text-fg cursor-pointer",
-                                )}
-                                title={
-                                  lineaGuardada
-                                    ? "Añadir/editar nota"
-                                    : "La nota estará disponible cuando la línea esté confirmada"
-                                }
-                                aria-label="Nota"
-                              >
-                                <Pencil className="size-4" aria-hidden />
-                              </button>
-
-                              {!t.pagado && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onEliminarLinea(t.id);
-                                  }}
-                                  className="grid size-8 place-items-center rounded-lg border border-border text-fg-muted transition hover:border-danger/30 hover:bg-danger-soft hover:text-danger cursor-pointer"
-                                  title="Eliminar producto"
-                                  aria-label="Eliminar"
-                                >
-                                  <Trash2 className="size-4" aria-hidden />
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
-      <div className="mt-4 rounded-2xl border border-border bg-surface p-3">
+      <div className="mt-4 shrink-0 rounded-2xl border border-border bg-surface p-3">
         <div className="flex items-center justify-between">
           <p className="text-sm text-fg-muted">Seleccionado</p>
           <p className="text-lg font-bold text-fg">{formatMoney(totalSeleccionado)}</p>
@@ -520,11 +550,7 @@ export default function TicketPanel({
         </div>
       ) : null}
 
-      <PrintTicketModal
-        open={printOpen}
-        onClose={() => setPrintOpen(false)}
-        items={ticket}
-      />
+      <PrintTicketModal open={printOpen} onClose={() => setPrintOpen(false)} items={ticket} />
     </div>
   );
 }
