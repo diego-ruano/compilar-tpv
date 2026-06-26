@@ -351,7 +351,7 @@ export default function TicketPanel({
                                     <div className="mt-1 flex items-center gap-2">
                                       <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
                                         {categoriaLabel
-                                          ? `Cat.: ${categoriaLabel}`
+                                          ? ` ${categoriaLabel}`
                                           : "Sin categoría"}
                                       </span>
                                     </div>
