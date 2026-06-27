@@ -10,9 +10,9 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
+import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
-import { getDb } from "../../server/db";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -40,29 +40,10 @@ function safeJsonParse(s: string): any {
 	}
 }
 
-async function isTpvDevice(
-	c: any,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await getDb(c.env).execute({
-		sql: `
-			SELECT role
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			  AND (revoked_at_ms IS NULL OR revoked_at_ms=0)
-			LIMIT 1;
-		`,
-		args: [tenantId, deviceId],
-	});
-	const row = r.rows?.[0] as any | undefined;
-	return String(row?.role || "").trim().toLowerCase() === "tpv";
-}
-
 // POST /v1/sync/changes  { since?: number, limit?: number }
 // Devuelve las operaciones con Seq > since en orden ascendente.
 syncRoutes.post("/changes", async (c) => {
-	const okTpv = await isTpvDevice(c, c.get("tenantId"), c.get("deviceId"));
+	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
 	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
 
 	const body = await c.req.json().catch(() => ({}));
@@ -70,18 +51,6 @@ syncRoutes.post("/changes", async (c) => {
 	const limit = Math.min(Math.max(1, Number((body as any)?.limit ?? 500) || 500), 1000);
 
 	const items = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-		// La tabla puede no existir aún si nunca hubo escrituras de la nube.
-		await db.execute(`
-			CREATE TABLE IF NOT EXISTS Sync_Changes (
-				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-				Op_Id TEXT NOT NULL,
-				Command_Name TEXT,
-				Statements_Json TEXT NOT NULL,
-				Device_Id TEXT,
-				Created_At_Ms INTEGER NOT NULL
-			);
-		`);
-
 		const rs = await db.execute({
 			sql: `
 				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms
