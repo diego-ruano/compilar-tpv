@@ -34,6 +34,11 @@ const folder = readdirSync(migrationsDir)
 	.filter((f) => f.endsWith(".sql"))
 	.sort();
 
+if (folder.length === 0) {
+	console.error("✗ check-migration-registry: la carpeta de migraciones está vacía.");
+	process.exit(1);
+}
+
 // 2) Nombres registrados en el worker (en orden de aparición).
 const registrySrc = readFileSync(registryFile, "utf8");
 const registry = [...registrySrc.matchAll(/name:\s*"([^"]+\.sql)"/g)].map((m) => m[1]);
@@ -49,7 +54,8 @@ if (JSON.stringify(folder) !== JSON.stringify(registry)) {
 }
 
 // 4) Lint anti-transacción en cada .sql (permite el BEGIN…END de triggers).
-const txControl = /\b(COMMIT|ROLLBACK|BEGIN\s+(TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE))\b/i;
+// Detecta: BEGIN; / BEGIN TRANSACTION / BEGIN DEFERRED / BEGIN IMMEDIATE / BEGIN EXCLUSIVE / COMMIT / ROLLBACK
+const txControl = /\b(COMMIT|ROLLBACK|BEGIN\s*;|BEGIN\s+(TRANSACTION|DEFERRED|IMMEDIATE|EXCLUSIVE))\b/i;
 for (const f of folder) {
 	const sql = readFileSync(join(migrationsDir, f), "utf8");
 	// Quita comentarios de bloque y de línea antes de comprobar.
