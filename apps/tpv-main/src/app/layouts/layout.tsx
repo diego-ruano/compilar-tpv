@@ -3,7 +3,7 @@ import { Menu } from "lucide-react";
 import NavBar from "../layoutComponent/NavBar";
 import Titlebar from "../layoutComponent/Titlebar";
 
-function layout({ children }: { children: React.ReactNode }) {
+function Layout({ children }: { children: React.ReactNode }) {
   // Estado del sidebar controlado desde layout (para overlay en móvil).
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -78,4 +78,4 @@ function layout({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default layout;
+export default Layout;
