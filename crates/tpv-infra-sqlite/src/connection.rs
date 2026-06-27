@@ -69,6 +69,18 @@ async fn query_admin_role_id(conn: &Connection) -> AppResult<Option<String>> {
     }
 }
 
+/// Garantiza que existe la fila singleton `Email_Settings (ID=1)`.
+/// Se llama una sola vez en el init para que `get()` sea lectura pura (sin INSERT).
+async fn seed_email_settings(conn: &Connection) -> AppResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);",
+        Vec::<Value>::new(),
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
 /// Crea un usuario admin inicial (PIN `1234`, `Requiere_Setup`) **sólo** si la tabla
 /// `Usuarios` está vacía. Los roles ya los siembra `schema.sql` con sus UUIDv7 fijos.
 async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
@@ -170,6 +182,7 @@ pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
     {
         let w = db.write().await;
         seed_admin_if_empty(w.raw()).await?;
+        seed_email_settings(w.raw()).await?;
     }
 
     Ok(db)

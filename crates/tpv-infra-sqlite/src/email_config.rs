@@ -29,12 +29,7 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 #[async_trait]
 impl EmailConfigRepository for SqliteEmailConfigRepository {
     async fn get(&self) -> AppResult<EmailConfig> {
-        let g = self.db.write().await;
-        let conn = &g;
-
-        conn.execute("INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);", ())
-            .await
-            .map_err(db_err)?;
+        let conn = self.db.read().await;
 
         let mut rows = conn
             .query(
