@@ -518,12 +518,10 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         return Err("Este dispositivo no está en modo MAIN".into());
     }
 
-    {
-        let guard = state.db.lock().await;
+    let mut guard = state.db.lock().await;
 
-        if guard.is_some() {
-            return Ok("OK".into());
-        }
+    if guard.is_some() {
+        return Ok("OK".into());
     }
 
     let app_data_dir = app
@@ -550,7 +548,6 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         });
     }
 
-    let mut guard = state.db.lock().await;
     *guard = Some(db);
 
     Ok("OK".into())
