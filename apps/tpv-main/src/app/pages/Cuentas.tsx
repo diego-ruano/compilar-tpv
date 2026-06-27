@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     Wallet,
     Pencil,
@@ -371,6 +371,7 @@ export default function Cuentas() {
     const [gImporte, setGImporte] = useState<string>("");
     const [gProveedorId, setGProveedorId] = useState<string>("");
     const [savingGasto, setSavingGasto] = useState(false);
+    const savingGastoRef = useRef(false);
     const [errGasto, setErrGasto] = useState<string | null>(null);
 
     const [savingPdf, setSavingPdf] = useState(false);
@@ -636,6 +637,10 @@ export default function Cuentas() {
     };
 
     const guardarGasto = async () => {
+        // Guard síncrono: evita doble-submit antes de que React repinte el estado.
+        if (savingGastoRef.current) return;
+        savingGastoRef.current = true;
+        setSavingGasto(true);
         try {
             setErrGasto(null);
 
@@ -647,20 +652,18 @@ export default function Cuentas() {
             const provRaw = (gProveedorId || "").trim();
             const proveedorId = provRaw === "" ? null : provRaw;
 
-            if (!fecha) return setErrGasto("La fecha es obligatoria.");
-            if (!tipo) return setErrGasto("El tipo es obligatorio.");
-            if (!concepto) return setErrGasto("El concepto es obligatorio.");
+            if (!fecha) { setErrGasto("La fecha es obligatoria."); return; }
+            if (!tipo) { setErrGasto("El tipo es obligatorio."); return; }
+            if (!concepto) { setErrGasto("El concepto es obligatorio."); return; }
             if (!Number.isFinite(importe) || importe <= 0) {
-                return setErrGasto("El importe debe ser un número mayor que 0.");
+                setErrGasto("El importe debe ser un número mayor que 0.");
+                return;
             }
 
-            if (tipo === "Proveedor") {
-                if (!proveedorId) {
-                    return setErrGasto("Selecciona un proveedor.");
-                }
+            if (tipo === "Proveedor" && !proveedorId) {
+                setErrGasto("Selecciona un proveedor.");
+                return;
             }
-
-            setSavingGasto(true);
 
             const ok = await createGasto.mutateAsync({
                 fecha,
@@ -677,6 +680,7 @@ export default function Cuentas() {
             console.error(e);
             setErrGasto(String(e?.message ?? "Error guardando gasto"));
         } finally {
+            savingGastoRef.current = false;
             setSavingGasto(false);
         }
     };

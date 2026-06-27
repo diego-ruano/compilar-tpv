@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Zap,
@@ -97,10 +97,8 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
     if (!isControlled) setOpenLocal(v);
   };
 
-  const isLgUp = useMemo(() => {
-    if (typeof window === "undefined") return true;
-    return window.matchMedia("(min-width: 1024px)").matches;
-  }, []);
+  const isLgUp = () =>
+    typeof window === "undefined" || window.matchMedia("(min-width: 1024px)").matches;
 
   // Al pasar de móvil -> desktop, dejamos el sidebar abierto.
   useEffect(() => {
@@ -127,7 +125,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
   };
 
   const closeIfMobile = () => {
-    if (!isLgUp) {
+    if (!isLgUp()) {
       if (onClose) onClose();
       else setOpen(false);
     }

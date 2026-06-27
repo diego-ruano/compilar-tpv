@@ -42,7 +42,7 @@ export default function MapCanvas({
                     <div className="grid h-full w-full place-items-center text-fg-muted">
                         No hay salones guardados.
                     </div>
-                ) : (
+                ) : !mapSize.width || !mapSize.height ? null : (
                     <Stage
                         width={mapSize.width}
                         height={mapSize.height}

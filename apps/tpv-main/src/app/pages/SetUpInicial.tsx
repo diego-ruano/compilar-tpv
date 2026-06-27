@@ -39,13 +39,15 @@ export default function SetupInicial() {
         return <Navigate to="/VentaRapida" replace />;
     }
 
+    const emailTrimmed = email.trim();
     const canSave =
         !saving &&
         !!idUsuario &&
         pinActual.length >= 4 &&
         pinNuevo.length >= 4 &&
         pinNuevo === pinNuevo2 &&
-        email.trim().length >= 6;
+        emailTrimmed.includes("@") &&
+        emailTrimmed.includes(".");
 
     const onSave = async () => {
         if (!idUsuario) return;
