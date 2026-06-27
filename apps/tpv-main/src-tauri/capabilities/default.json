@@ -24,6 +24,8 @@
         "fs:scope-desktop",
         "fs:scope-document",
 
-        "fs:allow-write-file"
+        "fs:allow-write-file",
+
+        "updater:default"
     ]
 }
