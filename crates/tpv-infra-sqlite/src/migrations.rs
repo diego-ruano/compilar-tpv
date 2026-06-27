@@ -43,7 +43,9 @@ fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        // Reloj corrupto (antes de epoch): i64::MAX evita que entradas aparezcan "muy antiguas"
+        // y sean eliminadas prematuramente por lógica de purga.
+        .unwrap_or(i64::MAX)
 }
 
 /// Lista de migraciones `(nombre, contenido)` ordenada por nombre (0001, 0002, …).
@@ -200,14 +202,15 @@ pub async fn run(conn: &Connection) -> Result<(), BoxErr> {
     Ok(())
 }
 
-/// `true` si hay migraciones pendientes sobre una BD que **ya tiene datos** (existe la tabla
-/// `Roles`). Lo usa la copia de seguridad previa a migrar. Una BD nueva (sin `Roles`) devuelve
-/// `false`: no hay nada que respaldar.
+/// `true` si hay migraciones pendientes sobre una BD que **ya tiene datos** (tiene al menos una
+/// migración registrada en `_migrations`). Lo usa la copia de seguridad previa a migrar. Una BD
+/// nueva sin migraciones devuelve `false`: no hay nada que respaldar.
 pub async fn has_pending(conn: &Connection) -> Result<bool, LibsqlError> {
-    if !table_exists(conn, "Roles").await? {
+    let applied = applied_map(conn).await?;
+    // BD nueva (nunca migrada): nada que respaldar.
+    if applied.is_empty() {
         return Ok(false);
     }
-    let applied = applied_map(conn).await?;
     Ok(migration_files()
         .into_iter()
         .any(|(name, _)| !applied.contains_key(&name)))
@@ -242,6 +245,9 @@ mod tests {
             .await
             .unwrap();
         let conn = database.connect().unwrap();
+        // tune() activa WAL, busy_timeout, FK y synchronous=NORMAL — igual que producción.
+        // Sin esto, las FK quedan desactivadas y violaciones de clave pasan en test pero no en prod.
+        super::tune(&conn).await.unwrap();
         (database, conn, dir)
     }
 
@@ -255,18 +261,22 @@ mod tests {
         }
     }
 
-    /// 1) Creación limpia: BD vacía → se construye el esquema y queda registrada 0001 con su hash.
+    /// 1) Creación limpia: BD vacía → se construye el esquema y quedan registradas todas las
+    ///    migraciones, cada una con su hash SHA-256 y timestamp > 0.
     #[tokio::test]
     async fn smoke_clean_create() {
         let (_db, conn, dir) = open_temp().await;
 
         run(&conn).await.expect("las migraciones deben aplicarse en una BD limpia");
 
-        // _migrations tiene exactamente la fila 0001 con un hash SHA-256 (64 hex) y timestamp > 0.
-        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await, 1);
+        let total = scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await;
+        let expected = migration_files().len() as i64;
+        assert_eq!(total, expected, "debe registrarse una fila por cada migración");
+
+        // Verificar que 0001 está registrada con hash válido.
         let mut rows = conn
             .query(
-                "SELECT name, hash, applied_at FROM _migrations;",
+                "SELECT name, hash, applied_at FROM _migrations WHERE name='0001_inicial.sql';",
                 Vec::<Value>::new(),
             )
             .await
@@ -307,10 +317,13 @@ mod tests {
         )
         .await;
 
-        // Segunda pasada: debe detectar que 0001 ya está aplicada y saltarla.
+        // Segunda pasada: debe detectar que todas las migraciones ya están aplicadas y saltarlas.
         run(&conn).await.expect("re-ejecutar no debe fallar");
 
-        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await, 1);
+        assert_eq!(
+            scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await,
+            migration_files().len() as i64,
+        );
         let applied_at_2 = scalar_i64(
             &conn,
             "SELECT applied_at FROM _migrations WHERE name='0001_inicial.sql';",

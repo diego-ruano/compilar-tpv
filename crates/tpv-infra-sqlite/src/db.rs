@@ -89,7 +89,9 @@ fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        // Reloj corrupto (antes de epoch): i64::MAX evita que las entradas del outbox aparezcan
+        // "muy antiguas" y sean eliminadas prematuramente por lógica de purga.
+        .unwrap_or(i64::MAX)
 }
 
 fn value_to_json(v: &Value) -> serde_json::Value {
