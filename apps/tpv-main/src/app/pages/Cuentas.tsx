@@ -924,18 +924,8 @@ export default function Cuentas() {
             const entradasHoy = await cuentasGetEntradas({ del: hoy, al: hoy });
             const salidasHoy = await cuentasGetSalidas({ del: hoy, al: hoy });
 
-            const qLocal = busqueda.trim().toLowerCase();
-
-            const entradasHoyF = (entradasHoy ?? []).filter((e) => {
-                const texto = `${e.fechaHora} ${e.cliente} ${e.metodo} ${e.importe}`.toLowerCase();
-                return !qLocal || texto.includes(qLocal);
-            });
-
-            const salidasHoyF = (salidasHoy ?? []).filter((s: any) => {
-                const extraProv = `${s.ID_Proveedor ?? s.proveedorId ?? ""}`.toLowerCase();
-                const texto = `${s.fechaHora ?? s.Fecha} ${s.tipoGasto ?? s.Tipo_Gasto} ${s.concepto ?? s.Concepto} ${s.importe ?? s.Importe} ${extraProv}`.toLowerCase();
-                return !qLocal || texto.includes(qLocal);
-            });
+            const entradasHoyF = entradasHoy ?? [];
+            const salidasHoyF = salidasHoy ?? [];
 
             const totalEntradasHoy = entradasHoyF.reduce(
                 (acc: number, e: any) => acc + (Number(e.importe) || 0),
