@@ -61,10 +61,8 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 
 	if (!res.ok) {
 		const detail = await res.text().catch(() => "");
-		return c.json(
-			{ error: "email_send_failed", detail },
-			500,
-		);
+		console.error("[email] Resend error:", detail);
+		return c.json({ error: "email_send_failed" }, 500);
 	}
 
 	return c.json({ ok: true });
