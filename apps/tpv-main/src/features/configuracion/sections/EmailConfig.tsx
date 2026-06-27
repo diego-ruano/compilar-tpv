@@ -42,15 +42,19 @@ export function EmailConfig({ darkMode }: { darkMode: boolean }) {
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     emailConfigGet()
       .then((d) => {
+        if (!alive) return;
         setData(d);
         setLoading(false);
       })
       .catch((e) => {
+        if (!alive) return;
         setError(String(e?.message ?? e));
         setLoading(false);
       });
+    return () => { alive = false; };
   }, []);
 
   function set<K extends keyof EmailConfigData>(key: K, value: EmailConfigData[K]) {
@@ -219,41 +223,16 @@ export function EmailConfig({ darkMode }: { darkMode: boolean }) {
               </div>
             </div>
 
-            <div className="flex items-center gap-3 pt-1">
-              <button
-                type="button"
-                role="switch"
-                aria-checked={data.smtp_use_tls}
-                onClick={() => set("smtp_use_tls", !data.smtp_use_tls)}
-                className={cn(
-                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  data.smtp_use_tls ? "bg-accent" : "bg-border",
-                )}
-              >
-                <span
-                  className={cn(
-                    "pointer-events-none inline-block size-5 rounded-full bg-white shadow-lg transform transition-transform",
-                    data.smtp_use_tls ? "translate-x-5" : "translate-x-0",
-                  )}
-                />
-              </button>
-              <div>
-                <div className={cn("text-sm font-medium", darkMode ? "text-white" : "text-fg")}>
-                  STARTTLS / TLS
-                </div>
-                <div className="text-xs text-fg-muted">
-                  Actívalo si tu servidor requiere conexión cifrada (recomendado, puerto 587).
-                </div>
-              </div>
-            </div>
-
             <div className="mt-2 rounded-xl border border-border bg-surface-2 p-3 text-xs text-fg-muted">
-              <strong>Gmail:</strong> usa <code>smtp.gmail.com</code>, puerto <code>587</code>, TLS
-              activado, y una{" "}
+              La conexión usa siempre cifrado TLS: SMTPS en el puerto 465, STARTTLS en cualquier
+              otro (ej. 587). Las credenciales nunca se transmiten en texto plano.
+              <br />
+              <br />
+              <strong>Gmail:</strong> <code>smtp.gmail.com</code>, puerto <code>587</code> y una{" "}
               <em>contraseña de aplicación</em> (no tu contraseña de Google).
               <br />
               <strong>Outlook / Office 365:</strong> <code>smtp.office365.com</code>, puerto{" "}
-              <code>587</code>, TLS activado.
+              <code>587</code>.
             </div>
           </div>
         </Panel>
