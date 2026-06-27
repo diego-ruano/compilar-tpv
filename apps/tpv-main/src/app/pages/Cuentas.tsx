@@ -722,6 +722,7 @@ export default function Cuentas() {
                 );
 
             const drawLine = (ctx: any) => {
+                if (ctx.y < M + 20) ctx = mkPage();
                 ctx.page.drawLine({
                     start: { x: M, y: ctx.y },
                     end: { x: PAGE_W - M, y: ctx.y },
@@ -729,6 +730,7 @@ export default function Cuentas() {
                     color: rgb(0.9, 0.9, 0.9),
                 });
                 ctx.y -= 10;
+                return ctx;
             };
 
             const write = (
@@ -806,7 +808,7 @@ export default function Cuentas() {
                 { size: 12, bold: true },
             );
             ctx.y -= 6;
-            drawLine(ctx);
+            ctx = drawLine(ctx);
 
             ctx.y -= 16;
             ctx = write(ctx, "Entradas", { size: 14, bold: true });
@@ -825,7 +827,7 @@ export default function Cuentas() {
                 ],
                 { bold: true, color: gray },
             );
-            drawLine(ctx);
+            ctx = drawLine(ctx);
             ctx.y -= 8;
 
             if (!entradasFiltradas.length) {
@@ -847,7 +849,7 @@ export default function Cuentas() {
             }
 
             ctx.y -= 8;
-            drawLine(ctx);
+            ctx = drawLine(ctx);
 
             ctx.y -= 16;
             ctx = write(ctx, "Salidas", { size: 14, bold: true });
@@ -866,7 +868,7 @@ export default function Cuentas() {
                 ],
                 { bold: true, color: gray },
             );
-            drawLine(ctx);
+            ctx = drawLine(ctx);
             ctx.y -= 8;
 
             if (!salidasFiltradas.length) {
@@ -971,6 +973,7 @@ export default function Cuentas() {
                 );
 
             const drawLine = (ctx: any) => {
+                if (ctx.y < M + 20) ctx = mkPage();
                 ctx.page.drawLine({
                     start: { x: M, y: ctx.y },
                     end: { x: PAGE_W - M, y: ctx.y },
@@ -978,6 +981,7 @@ export default function Cuentas() {
                     color: rgb(0.9, 0.9, 0.9),
                 });
                 ctx.y -= 10;
+                return ctx;
             };
 
             const write = (
@@ -1050,7 +1054,7 @@ export default function Cuentas() {
                 { size: 12, bold: true },
             );
             ctx.y -= 6;
-            drawLine(ctx);
+            ctx = drawLine(ctx);
 
             ctx.y -= 16;
             ctx = write(ctx, "Entradas", { size: 14, bold: true });
@@ -1069,7 +1073,7 @@ export default function Cuentas() {
                 ],
                 { bold: true, color: gray },
             );
-            drawLine(ctx);
+            ctx = drawLine(ctx);
             ctx.y -= 8;
 
             if (!entradasHoyF.length) {
@@ -1091,7 +1095,7 @@ export default function Cuentas() {
             }
 
             ctx.y -= 8;
-            drawLine(ctx);
+            ctx = drawLine(ctx);
 
             ctx.y -= 16;
             ctx = write(ctx, "Salidas", { size: 14, bold: true });
@@ -1110,7 +1114,7 @@ export default function Cuentas() {
                 ],
                 { bold: true, color: gray },
             );
-            drawLine(ctx);
+            ctx = drawLine(ctx);
             ctx.y -= 8;
 
             if (!salidasHoyF.length) {
