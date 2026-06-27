@@ -27,6 +27,7 @@ import { useMode, type DeviceMode, type ModeStateValue } from "../shared/stores/
 import { useConnectionMode } from "../shared/stores/useConnectionMode";
 import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import { useContactSettings } from "../shared/stores/useContactSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
@@ -201,6 +202,7 @@ export default function AppBoot({ router }: { router: any }) {
 
     const bizInit = useBusinessSettings((s) => s.init);
     const ticketInit = useTicketSettings((s) => s.init);
+    const contactInit = useContactSettings((s) => s.init);
 
     const mode = useMode((s) => s.mode);
     const setMode = useMode((s) => s.setMode);
@@ -476,7 +478,11 @@ export default function AppBoot({ router }: { router: any }) {
         ticketInit().catch(() => {
             // noop
         });
-    }, [mode, bizInit, ticketInit]);
+
+        contactInit().catch(() => {
+            // noop
+        });
+    }, [mode, bizInit, ticketInit, contactInit]);
 
     // Imágenes → R2: una sola vez, encolar las imágenes locales pre-existentes (Mains anteriores
     // a R2) y drenar la cola. El backfill se auto-protege con un marcador; el drenado es no-op si
@@ -577,10 +583,6 @@ export default function AppBoot({ router }: { router: any }) {
             setMode(m);
 
             await refreshLicense();
-
-            if (m === "tpv") {
-                await refreshGate(false);
-            }
         } catch (e: any) {
             setErr(String(e));
         } finally {
