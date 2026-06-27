@@ -306,9 +306,11 @@ export default function Cuentas() {
     const [del, setDel] = useState(() => todayYMD());
     const [al, setAl] = useState(() => todayYMD());
 
+    const rangoInvalido = !!del && !!al && del > al;
+
     // Lecturas cacheadas (TanStack Query). El rango (del/al) forma parte de la queryKey.
-    const entradasQuery = useCuentasEntradas({ del, al });
-    const salidasQuery = useCuentasSalidas({ del, al });
+    const entradasQuery = useCuentasEntradas({ del, al }, !rangoInvalido);
+    const salidasQuery = useCuentasSalidas({ del, al }, !rangoInvalido);
     const proveedoresQuery = useCuentasProveedoresMini();
 
     // Escrituras (mutaciones con invalidación en onSuccess).
@@ -1227,6 +1229,11 @@ export default function Cuentas() {
                     </div>
                 </div>
 
+                {rangoInvalido && (
+                    <div className="rounded-2xl border border-warning/30 bg-warning-soft px-4 py-2 text-sm text-warning">
+                        La fecha «Del» no puede ser posterior a «Al».
+                    </div>
+                )}
                 {pdfError && (
                     <div className="rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger">
                         {pdfError}

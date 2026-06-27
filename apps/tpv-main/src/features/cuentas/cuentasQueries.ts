@@ -32,17 +32,19 @@ export const cuentasKeys = {
    Lecturas (queries)
 ========================= */
 
-export function useCuentasEntradas(rango: Rango) {
+export function useCuentasEntradas(rango: Rango, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.entradas(rango),
         queryFn: () => cuentasGetEntradas(rango),
+        enabled,
     });
 }
 
-export function useCuentasSalidas(rango: Rango) {
+export function useCuentasSalidas(rango: Rango, enabled = true) {
     return useQuery({
         queryKey: cuentasKeys.salidas(rango),
         queryFn: () => cuentasGetSalidas(rango),
+        enabled,
     });
 }
 
