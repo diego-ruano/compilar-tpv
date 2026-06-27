@@ -223,9 +223,19 @@ function serverNowFixed(): string {
 	return new Date().toISOString().slice(0, 19).replace("T", " ");
 }
 
+// Margen máximo: offset de zona horaria (±14 h) + 5 min de deriva de reloj.
+// Esto bloquea inyecciones de fechas arbitrarias (pasadas/futuras) sin romper
+// ningún timezone legítimo. El valor se trata como naive-UTC para la comparación.
+const MAX_CLIENT_NOW_DRIFT_MS = (14 * 60 + 5) * 60 * 1000;
+
 function resolveClientNow(raw: unknown): string {
 	const s = String(raw ?? "").trim();
-	return CLIENT_NOW_RE.test(s) ? s : serverNowFixed();
+	if (!CLIENT_NOW_RE.test(s)) return serverNowFixed();
+	const clientMs = new Date(s.replace(" ", "T") + "Z").getTime();
+	if (Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) {
+		return serverNowFixed();
+	}
+	return s;
 }
 
 // Reemplaza SOLO las formas exactas (no las que llevan modificador, que acaban en
