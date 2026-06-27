@@ -158,7 +158,8 @@ async fn enviar_smtp(config: EmailConfig, args: EnviarPedidoEmailInput) -> Resul
 
     let creds = Credentials::new(config.smtp_user.clone(), config.smtp_password.clone());
     let host = config.smtp_host.trim();
-    let port = config.smtp_port as u16;
+    let port = u16::try_from(config.smtp_port)
+        .map_err(|_| "Puerto SMTP inválido (1-65535)".to_string())?;
 
     let mailer: AsyncSmtpTransport<Tokio1Executor> = if config.smtp_use_tls {
         AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
