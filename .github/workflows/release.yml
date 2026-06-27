@@ -46,6 +46,26 @@ jobs:
       - name: Generar tipos TS
         run: pnpm generate-types
 
+      - name: Validar coherencia de versiones
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $confJson = Get-Content "apps/tpv-main/src-tauri/tauri.conf.json" | ConvertFrom-Json
+          $confVersion = $confJson.version
+          $cargoLine = Select-String -Path "apps/tpv-main/src-tauri/Cargo.toml" -Pattern '^version\s*=' | Select-Object -First 1
+          $cargoVersion = ($cargoLine.Line -replace '^version\s*=\s*"','') -replace '"',''
+          $ok = $true
+          if ($confVersion -ne $tag) {
+            Write-Error "tauri.conf.json version '$confVersion' != tag '$tag'"
+            $ok = $false
+          }
+          if ($cargoVersion -ne $tag) {
+            Write-Error "src-tauri/Cargo.toml version '$cargoVersion' != tag '$tag'"
+            $ok = $false
+          }
+          if (-not $ok) { exit 1 }
+          Write-Host "Versiones OK: $tag"
+
       - name: Compilar + firmar instalador (Tauri / Windows)
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
