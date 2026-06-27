@@ -72,7 +72,7 @@ export default function Configuracion() {
     const [animKey, setAnimKey] = useState(0);
     useEffect(() => setAnimKey((k) => k + 1), [section]);
 
-    const baseNavItems: NavItem[] = [
+    const baseNavItems: NavItem[] = useMemo(() => [
         {
             key: "NEGOCIO",
             title: "Negocio",
@@ -117,7 +117,7 @@ export default function Configuracion() {
             desc: "Envío de pedidos a proveedores",
             keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "resend"],
         },
-    ];
+    ], []);
 
     const navItems: NavItem[] = useMemo(() => {
         if (!isMain)
@@ -160,7 +160,7 @@ export default function Configuracion() {
                 keywords: ["handy", "vincular", "emparejar", "qr", "pair"],
             },
         ];
-    }, [isMain]);
+    }, [isMain, baseNavItems]);
 
     const filteredNav = useMemo(() => {
         const q = navQuery.trim().toLowerCase();
