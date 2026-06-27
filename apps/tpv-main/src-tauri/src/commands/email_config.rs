@@ -293,11 +293,10 @@ fn build_html(args: &EnviarPedidoEmailInput) -> String {
     )
 }
 
-fn truncate(s: &str, max: usize) -> &str {
-    if s.len() <= max {
-        s
-    } else {
-        &s[..max]
+fn truncate(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((i, _)) => &s[..i],
+        None => s,
     }
 }
 
