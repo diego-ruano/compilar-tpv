@@ -299,8 +299,8 @@ export function AddProductModal({
                     id_producto: isEdit ? (productIdToEdit ?? undefined) : undefined,
                     id_categoria: idCategoria,
                     id_proveedor:
-                        typeof idProveedor === "number" && idProveedor > 0
-                            ? idProveedor
+                        idProveedor !== "" && Number(idProveedor) > 0
+                            ? Number(idProveedor)
                             : null,
                     nombre: nombre.trim(),
                     precio_venta:
