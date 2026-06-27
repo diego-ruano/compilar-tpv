@@ -253,6 +253,7 @@ export default function AppBoot({ router }: { router: any }) {
     });
     const [handyPairBusy, setHandyPairBusy] = useState(false);
     const [handyPairErr, setHandyPairErr] = useState<string | null>(null);
+    const pairingAliveRef = useRef(true);
     // Modo de funcionamiento (offline/online) persistido en AppData: hidratar al arrancar.
     const hydrateConnMode = useConnectionMode((s) => s.hydrate);
     useEffect(() => {
@@ -351,6 +352,13 @@ export default function AppBoot({ router }: { router: any }) {
         }
     }
 
+    useEffect(() => {
+        pairingAliveRef.current = true;
+        return () => {
+            pairingAliveRef.current = false;
+        };
+    }, []);
+
     async function handyStartPair(pairCode: string, pairSecret: string) {
         setHandyPairBusy(true);
         setHandyPairErr(null);
@@ -388,6 +396,7 @@ export default function AppBoot({ router }: { router: any }) {
 
             while (Date.now() - startedAt < timeoutMs) {
                 await new Promise((r) => setTimeout(r, 1500));
+                if (!pairingAliveRef.current) return;
 
                 const ts = Date.now();
                 const msg = `${ts}\nPAIR_FETCH\n${pairCode}\n${nonceB64}\n${ident.deviceId}`;
@@ -431,6 +440,7 @@ export default function AppBoot({ router }: { router: any }) {
                 }
             }
 
+            if (!pairingAliveRef.current) return;
             throw new Error("pair_timeout_waiting_approval");
         } catch (e: any) {
             setHandyPairErr(String(e?.message || e));
