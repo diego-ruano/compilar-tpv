@@ -14,7 +14,7 @@ import {
     Plus,
     Minus,
 } from "lucide-react";
-import { SearchInput } from "../../shared/ui";
+import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import {
     cuentasGetEntradas,
@@ -1486,8 +1486,10 @@ export default function Cuentas() {
                 </div>
             </div>
 
-            {openAddGasto ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <ModalShell
+                open={openAddGasto}
+                onClose={() => { if (!savingGasto) setOpenAddGasto(false); }}
+            >
                     <div
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingGasto ? null : setOpenAddGasto(false))}
@@ -1628,11 +1630,12 @@ export default function Cuentas() {
                             </button>
                         </div>
                     </div>
-                </div>
-            ) : null}
+            </ModalShell>
 
-            {openEditGasto ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <ModalShell
+                open={openEditGasto}
+                onClose={() => { if (!savingEditGasto) setOpenEditGasto(false); }}
+            >
                     <div
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingEditGasto ? null : setOpenEditGasto(false))}
@@ -1767,11 +1770,12 @@ export default function Cuentas() {
                             </button>
                         </div>
                     </div>
-                </div>
-            ) : null}
+            </ModalShell>
 
-            {openEditPago ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <ModalShell
+                open={openEditPago}
+                onClose={() => { if (!savingEditPago) setOpenEditPago(false); }}
+            >
                     <div
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (savingEditPago ? null : setOpenEditPago(false))}
@@ -1865,11 +1869,13 @@ export default function Cuentas() {
                             </button>
                         </div>
                     </div>
-                </div>
-            ) : null}
+            </ModalShell>
 
-            {openX ? (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+            <ModalShell
+                open={openX}
+                onClose={() => setOpenX(false)}
+                className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
+            >
                     <div
                         className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
                         onClick={() => setOpenX(false)}
@@ -2088,11 +2094,14 @@ export default function Cuentas() {
                             </div>
                         </div>
                     </div>
-                </div>
-            ) : null}
+            </ModalShell>
 
             {confirmAccion ? (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center">
+            <ModalShell
+                open
+                onClose={() => { if (!confirmando) setConfirmAccion(null); }}
+                className="fixed inset-0 z-[60] flex items-center justify-center"
+            >
                     <div
                         className="absolute inset-0 bg-black/40"
                         onClick={() => (confirmando ? null : setConfirmAccion(null))}
@@ -2200,7 +2209,7 @@ export default function Cuentas() {
                             </button>
                         </div>
                     </div>
-                </div>
+            </ModalShell>
             ) : null}
         </div>
     );

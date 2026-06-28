@@ -30,3 +30,5 @@ export type { SectionHeaderProps } from "./SectionHeader";
 
 export { default as ThemeToggle } from "./ThemeToggle";
 export type { ThemeToggleProps } from "./ThemeToggle";
+
+export { ModalShell } from "./ModalShell";
