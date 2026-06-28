@@ -16,10 +16,11 @@
 import type { Client } from "@libsql/client";
 
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
+import m0002 from "../../../../packages/database/migrations/0002_contact_settings.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
-	// Al añadir una migración: importa el .sql arriba y añade aquí su { name, sql } EN ORDEN.
+	{ name: "0002_contact_settings.sql", sql: m0002 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
@@ -53,10 +54,15 @@ async function readApplied(
  * Aplica las migraciones pendientes sobre la BD del tenant. Construye el esquema desde cero en BDs
  * nuevas y pone al día las existentes.
  *
- * Garantía de transacción: si hay pendientes, la **lectura de `_migrations` y la aplicación** ocurren
- * dentro de una **transacción interactiva** de libsql; cada migración + su registro entran juntos.
- * Como libsql serializa las transacciones de escritura, esto es seguro ante isolates concurrentes:
- * el segundo en entrar relee dentro de la tx y se salta lo que el primero ya aplicó.
+ * Garantía de transacción: **cada migración se aplica en su propia transacción** (migración + su
+ * registro en `_migrations` entran juntos o ninguno), igual que el runner de escritorio en
+ * `crates/tpv-infra-sqlite/src/migrations.rs`. Si una migración falla, las anteriores ya
+ * confirmadas quedan registradas y no se vuelven a aplicar: solo se reintenta la que falló. Esto
+ * evita que un fallo en la migración N deshaga DML no idempotente de las migraciones N-1 ya
+ * aplicadas en la misma tanda.
+ *
+ * Como libsql serializa las transacciones de escritura, es seguro ante isolates concurrentes: cada
+ * tx relee `_migrations` y se salta lo que otro isolate ya aplicó.
  *
  * Falla (rollback) si una migración ya aplicada fue modificada (hash distinto).
  */
@@ -86,27 +92,30 @@ export async function runTenantMigrations(client: Client): Promise<void> {
 
 	if (pending.length === 0) return;
 
-	// Hay pendientes: aplicarlas bajo UNA transacción interactiva, re-leyendo `_migrations` dentro
-	// de la tx para serializar de forma segura entre isolates concurrentes.
-	const tx = await client.transaction("write");
-	try {
-		const appliedInTx = await readApplied((sql) => tx.execute(sql));
-		for (const mig of pending) {
+	// Hay pendientes: aplicar CADA UNA en su propia transacción, re-leyendo `_migrations` dentro de
+	// la tx para serializar de forma segura entre isolates concurrentes.
+	for (const mig of pending) {
+		const tx = await client.transaction("write");
+		try {
 			// Otro isolate pudo aplicarla mientras esperábamos el lock de escritura.
-			if (appliedInTx.has(mig.name)) continue;
+			const appliedInTx = await readApplied((sql) => tx.execute(sql));
+			if (appliedInTx.has(mig.name)) {
+				await tx.rollback().catch(() => {});
+				continue;
+			}
 
 			await tx.executeMultiple(mig.body);
 			await tx.execute({
 				sql: "INSERT INTO _migrations (name, hash, applied_at) VALUES (?, ?, ?);",
 				args: [mig.name, mig.hash, Date.now()],
 			});
+			await tx.commit();
 			console.log(`[tenant-migrations] aplicada: ${mig.name}`);
+		} catch (e) {
+			await tx.rollback().catch(() => {});
+			throw e;
+		} finally {
+			tx.close();
 		}
-		await tx.commit();
-	} catch (e) {
-		await tx.rollback().catch(() => {});
-		throw e;
-	} finally {
-		tx.close();
 	}
 }
