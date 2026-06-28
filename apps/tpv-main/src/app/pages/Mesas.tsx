@@ -142,10 +142,9 @@ export default function Mesas() {
                             mesaId={mesaSel.mesaId}
                             mesaNombre={mesaSel.mesaNombre}
                             mesaMeta={
-                                (mesaMetaById[mesaSel.mesaId] ??
-                                    mesaMetaById[String(mesaSel.mesaId)] ??
-                                    mesaMetaById[`db-mesa-${mesaSel.mesaId}`] ??
-                                    null) as any
+                                // mesaSel.mesaId es el UUID puro, la clave con la que
+                                // mesasLoadMesaMeta indexa el mapa. Lookup directo.
+                                (mesaMetaById[mesaSel.mesaId] ?? null) as any
                             }
                             onClose={() => {
                                 setModalOpen(false);

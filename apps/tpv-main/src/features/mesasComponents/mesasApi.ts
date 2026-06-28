@@ -201,9 +201,9 @@ export async function mesasLoadMesaMeta(): Promise<Record<any, MesaMeta>> {
                 pendientesCocina,
             };
 
+            // `parseAnyMesaId` ya normaliza la clave a UUID puro, que es exactamente
+            // la que usan los lookups (TableNode/Mesas via `parseMesaId`). Una sola clave.
             out[idMesa] = meta;
-            out[String(idMesa)] = meta;
-            out[`db-mesa-${idMesa}`] = meta;
         }
 
         return out as any;
@@ -223,8 +223,6 @@ export async function mesasLoadMesaMeta(): Promise<Record<any, MesaMeta>> {
             };
 
             out[idMesa] = meta;
-            out[String(idMesa)] = meta;
-            out[`db-mesa-${idMesa}`] = meta;
         }
 
         return out as any;

@@ -24,11 +24,9 @@ export default function TableNode({
 }) {
     const idMesa = parseMesaId(table.id);
 
-    const meta: MesaMeta | undefined = idMesa
-        ? mesaMetaById[idMesa] ??
-        mesaMetaById[String(idMesa)] ??
-        mesaMetaById[`db-mesa-${idMesa}`]
-        : undefined;
+    // `parseMesaId` devuelve el UUID puro, que es la clave con la que `mesasLoadMesaMeta`
+    // indexa el mapa. Un único lookup directo.
+    const meta: MesaMeta | undefined = idMesa ? mesaMetaById[idMesa] : undefined;
 
     const reserva = meta?.reserva ?? null;
     const isReservaActiva = reserva?.estado === "ACTIVA";
