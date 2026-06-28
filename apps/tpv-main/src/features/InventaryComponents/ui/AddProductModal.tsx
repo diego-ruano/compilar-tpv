@@ -298,10 +298,10 @@ export function AddProductModal({
                 (await upsertProducto.mutateAsync({
                     id_producto: isEdit ? (productIdToEdit ?? undefined) : undefined,
                     id_categoria: idCategoria,
-                    id_proveedor:
-                        idProveedor !== "" && Number(idProveedor) > 0
-                            ? Number(idProveedor)
-                            : null,
+                    // ID_Proveedor es un UUID string (no numérico): conservarlo como
+                    // string. Convertirlo con Number() daba NaN para cualquier UUID y
+                    // volvía a dejar el proveedor en null (el bug que H-01 pretendía cerrar).
+                    id_proveedor: idProveedor !== "" ? idProveedor : null,
                     nombre: nombre.trim(),
                     precio_venta:
                         precioVenta.trim() === ""
