@@ -228,7 +228,6 @@ export default function AppBoot({ router }: { router: any }) {
 
     const [act, setAct] = useState({
         licenseKey: "",
-        businessName: "",
         legal_name: "",
         display_name: "",
         email: "",
@@ -602,8 +601,8 @@ export default function AppBoot({ router }: { router: any }) {
             await invoke("license_activate", {
                 args: {
                     activation_key: act.licenseKey,
-                    restaurant_name: act.display_name || act.businessName,
-                    business_name: act.businessName,
+                    restaurant_name: act.display_name,
+                    business_name: act.display_name,
                     legal_name: act.legal_name,
                     display_name: act.display_name,
                     email: act.email,
@@ -1396,7 +1395,6 @@ export default function AppBoot({ router }: { router: any }) {
                                                     onClick={() =>
                                                         setAct({
                                                             licenseKey: "",
-                                                            businessName: "",
                                                             legal_name: "",
                                                             display_name: "",
                                                             email: "",
