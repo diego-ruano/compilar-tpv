@@ -136,9 +136,11 @@ fn load_config(app_data_dir: &Path) -> DeviceConfig {
 
 fn save_config(app_data_dir: &Path, cfg: &DeviceConfig) -> Result<(), String> {
     let p = config_path(app_data_dir);
+    let tmp = p.with_extension("json.tmp");
     let txt = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
 
-    fs::write(&p, txt).map_err(|e| format!("Error escribiendo config {:?}: {e}", p))?;
+    fs::write(&tmp, &txt).map_err(|e| format!("Error escribiendo config tmp {:?}: {e}", tmp))?;
+    fs::rename(&tmp, &p).map_err(|e| format!("Error renombrando config {:?}: {e}", p))?;
 
     Ok(())
 }
@@ -1280,6 +1282,8 @@ pub fn run() {
             commands::configuracion::config_patch_business_settings,
             commands::configuracion::config_get_ticket_settings,
             commands::configuracion::config_patch_ticket_settings,
+            commands::configuracion::config_get_contact_settings,
+            commands::configuracion::config_patch_contact_settings,
             // correo electrónico
             commands::email_config::email_config_get,
             commands::email_config::email_config_patch,
