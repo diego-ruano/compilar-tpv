@@ -17,17 +17,17 @@ export const emailRoutes = new Hono<Ctx>();
 emailRoutes.use("*", tenantAuth);
 
 const lineaSchema = z.object({
-	nombre_producto: z.string(),
+	nombre_producto: z.string().max(200),
 	cantidad: z.number(),
 	precio_unitario: z.number().nullable().optional(),
-	unidad: z.string().nullable().optional(),
+	unidad: z.string().max(50).nullable().optional(),
 });
 
 const enviarPedidoSchema = z.object({
 	email_destino: z.string().email("email_destino inválido"),
-	nombre_proveedor: z.string().min(1),
-	notas: z.string().nullable().optional(),
-	lineas: z.array(lineaSchema).min(1, "El pedido debe tener al menos una línea"),
+	nombre_proveedor: z.string().min(1).max(200),
+	notas: z.string().max(2000).nullable().optional(),
+	lineas: z.array(lineaSchema).min(1, "El pedido debe tener al menos una línea").max(500),
 });
 
 emailRoutes.post("/enviar-pedido", async (c) => {
@@ -42,7 +42,8 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 	const html = buildHtml(nombre_proveedor, notas ?? null, lineas);
 	const text = buildText(nombre_proveedor, notas ?? null, lineas);
 
-	const from = c.env.RESEND_FROM_ADDRESS || "TPV <noreply@altarialights.com>";
+	const from = c.env.RESEND_FROM_ADDRESS;
+	if (!from) return c.json({ error: "missing_env_RESEND_FROM_ADDRESS" }, 500);
 
 	const res = await fetch("https://api.resend.com/emails", {
 		method: "POST",
