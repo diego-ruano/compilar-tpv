@@ -95,7 +95,7 @@ async function aesGcmEncryptToB64(
 
 // ---------------- tenant_databases (DB central) ----------------
 
-async function getTenantDbRow(dbCentral: Client, tenantId: string) {
+export async function getTenantDbRow(dbCentral: Client, tenantId: string) {
 	const r = await dbCentral.execute({
 		sql: `
 			SELECT
@@ -114,7 +114,7 @@ async function getTenantDbRow(dbCentral: Client, tenantId: string) {
 	return r.rows?.[0] as any | undefined;
 }
 
-async function upsertTenantDbRow(
+export async function upsertTenantDbRow(
 	dbCentral: Client,
 	env: TenantDbEnv,
 	tenantId: string,
@@ -135,7 +135,7 @@ async function upsertTenantDbRow(
 	});
 }
 
-async function tursoCreateDbToken(
+export async function tursoCreateDbToken(
 	env: TenantDbEnv,
 	dbName: string,
 ): Promise<string> {

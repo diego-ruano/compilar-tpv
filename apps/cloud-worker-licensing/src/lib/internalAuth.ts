@@ -6,8 +6,8 @@
 // El secreto compartido es `LICENSE_JWT_SECRET` (presente sólo en el entorno del
 // worker y del DO, nunca en clientes). La firma cubre `ts + método + path + body`
 // y lleva una ventana de 60s para mitigar replays. Es la ÚNICA fuente del esquema:
-// tanto el firmante (`lib/hub.ts`) como los verificadores (`server/index.ts` y el
-// DO) la consumen desde aquí para evitar divergencias.
+// tanto el firmante (`lib/hub.ts`) como el verificador (el Durable Object) la
+// consumen desde aquí para evitar divergencias.
 
 const MAX_SKEW_MS = 60 * 1000;
 

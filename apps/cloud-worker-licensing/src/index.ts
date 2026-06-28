@@ -3,18 +3,16 @@
 // Entry del worker `tpv-api` (fusión de los antiguos `tpv-server` + `tpv-licensing`).
 //
 // La API se construye con Hono y se organiza de forma modular: un router
-// principal que monta subrouters por módulo (de momento sólo `pairing`; el resto
-// de dominios —mesas, venta rápida, etc.— se migrarán más adelante).
+// principal que monta subrouters por módulo (pairing, dominios de negocio,
+// licencias, etc.). El antiguo handler legacy `server/index.ts` y su fallthrough
+// `app.all("*")` se eliminaron: las licencias están ahora en domains/licensing.
 //
 // Rutas servidas aquí (Hono):
 //   - GET  /health
 //   - GET  /ws                  → upgrade WebSocket al Durable Object TenantHub
 //   - POST /v1/pair/*           → emparejamiento Main/Handy (routes/pairing.ts)
 //   - POST /v1/device/revoke    → revocación de dispositivo (+ corte del WS)
-//
-// Todo lo demás (activación de licencia, webhook de Lemon, status/validate, y los
-// endpoints internos heredados) se delega al handler de licensing previo, que se
-// mantiene intacto como fallthrough hasta que se migre también a Hono.
+//   - POST /v1/license/activate · GET /v1/license/status · POST /v1/webhooks/lemon
 
 import { Hono } from "hono";
 
@@ -47,8 +45,7 @@ import { updatesRoutes } from "./domains/updates/updates.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
 import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
 import { emailRoutes } from "./domains/email/email.routes";
-
-import legacyLicensing from "./server/index";
+import { licenseRoutes, lemonWebhookRoutes } from "./domains/licensing/licensing.routes";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`).
 export { TenantHub } from "./durableObjects/tenantHub";
@@ -154,6 +151,12 @@ app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
 app.route("/v1/email", emailRoutes);
 
+// ---------------- Licencias (activación / status) + webhook de Lemon ----------------
+// Migrado a Hono desde el antiguo handler legacy `server/index.ts`. Lo consume el cliente Rust
+// (tpv-infra-licensing) y los webhooks de Lemon Squeezy.
+app.route("/v1/license", licenseRoutes);
+app.route("/v1/webhooks", lemonWebhookRoutes);
+
 // ---------------- Auto-actualización de la app de escritorio ----------------
 // GET feed (público: lo consume el updater de Tauri, que verifica firma por su cuenta).
 // POST publish/deactivate van protegidos por token admin dentro del propio router.
@@ -167,11 +170,6 @@ app.post("/v1/device/list", (c) =>
 app.post("/v1/device/revoke", (c) =>
 	handleRevokeDevice(c.req.raw, c.env, getDb(c.env), c.env.TenantHub),
 );
-
-// ---------------- Fallthrough: licensing heredado ----------------
-// Activación de licencia, webhook de Lemon, status/validate, e internos.
-// Se mantiene tal cual hasta migrarlo a Hono.
-app.all("*", (c) => legacyLicensing.fetch(c.req.raw, c.env as any));
 
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
 // idempotency_*) a JSON; el resto cae a un 500 con detalle.

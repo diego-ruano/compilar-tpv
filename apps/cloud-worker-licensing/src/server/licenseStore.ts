@@ -1,7 +1,7 @@
 // src/server/licenseStore.ts
 import type { Client } from "@libsql/client/web";
 import type { LicenseStatus } from "../shared";
-import { aesGcmDecrypt, aesGcmEncrypt, sha256Hex } from "./crypto";
+import { aesGcmEncrypt, sha256Hex } from "./crypto";
 import { exec, execMany } from "./db";
 
 export type LicenseRow = {
@@ -343,13 +343,6 @@ export async function upsertLicenseInstance(db: Client, args: {
     `,
 		[args.instanceId, args.licenseId, args.tenantId, args.deviceId, args.instanceName, now]
 	);
-}
-
-export async function getDecryptedLicenseKey(db: Client, storeKeyB64: string, licHash: string) {
-	const lic = await getLicenseByHash(db, licHash);
-	if (!lic || !lic.license_key_enc) return null;
-	const licenseKey = await aesGcmDecrypt(storeKeyB64, lic.license_key_enc);
-	return { lic, licenseKey };
 }
 
 export async function upsertWebhookEvent(db: Client, args: {
