@@ -1432,11 +1432,11 @@ export default function AppBoot({ router }: { router: any }) {
                             reason={gate.reason}
                             onRetry={() => refreshGate(true)}
                             onClear={() => {
-                                invoke("license_clear_state").finally(() => {
-                                    refreshLicense().finally(() =>
-                                        refreshGate(false),
-                                    );
-                                });
+                                invoke("license_clear_state")
+                                    .catch((e: unknown) => setErr(String(e)))
+                                    .finally(() => {
+                                        void refreshLicense().finally(() => refreshGate(false));
+                                    });
                             }}
                         />
                     ) : (
