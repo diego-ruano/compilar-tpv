@@ -113,14 +113,7 @@ export default function Mesas() {
                                 onChangeSalon={setActiveSalonId}
                             />
 
-                            {/* Botones ocultos SOLO visualmente */}
-                            <div className="hidden">
-                                <button
-                                    type="button"
-                                    onClick={handleReloadAll}
-                                />
-                                <button type="button" onClick={loadMesaMeta} />
-                            </div>
+
                         </div>
 
                         <MapCanvas
