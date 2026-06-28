@@ -266,7 +266,7 @@ function normalizeProveedorId(v: unknown): string | null {
 
 function mapEntradaUI(r: any): Entrada {
     return {
-        id: String(r?.id ?? crypto.randomUUID()),
+        id: String(r?.id ?? ""),
         fechaHora: String(r?.fechaHora ?? "").slice(0, 16),
         cliente: String(r?.cliente ?? ""),
         metodo:
@@ -291,7 +291,7 @@ function mapSalidaUI(
         null;
 
     return {
-        id: String(r?.id ?? r?.ID_Gasto ?? crypto.randomUUID()),
+        id: String(r?.id ?? r?.ID_Gasto ?? ""),
         fechaHora: String(r?.fechaHora ?? r?.Fecha ?? "").slice(0, 10),
         tipoGasto: String(r?.tipoGasto ?? r?.Tipo_Gasto ?? ""),
         concepto: String(r?.concepto ?? r?.Concepto ?? ""),
