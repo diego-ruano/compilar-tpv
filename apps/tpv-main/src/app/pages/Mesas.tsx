@@ -150,8 +150,14 @@ export default function Mesas() {
                             onClose={() => {
                                 setModalOpen(false);
                                 setMesaSel(null);
+                                // Refresca la ocupación del plano UNA sola vez al volver.
+                                // Las queries de mesas se deshabilitan mientras el modal está
+                                // abierto (el plano no es visible); antes onChanged disparaba un
+                                // refetch en cada cambio de línea, redundante y concurrente con la
+                                // reactivación de las queries al cerrar. refetch() ignora staleTime,
+                                // así que el plano queda fresco aunque el modal se cierre enseguida.
+                                metaQuery.refetch();
                             }}
-                            onChanged={loadMesaMeta}
                         />
                     ) : null}
                 </>
