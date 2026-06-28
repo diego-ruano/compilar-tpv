@@ -83,6 +83,11 @@ export default function TableNode({
 
     const strokeWidth = isPendiente ? 3 : isReservaProxima ? 4 : 1;
 
+    // ===== Colores de texto =====
+    // Sobre amber (pendiente) el texto oscuro tiene más contraste; sobre slate/blue el claro.
+    const textFill = isPendiente ? "#1c1917" : "#e5e7eb";
+    const subTextFill = isPendiente ? "#44403c" : "#cbd5e1";
+
     // ===== Textos =====
     const topLabel =
         isReservaActiva && reserva?.clienteNombre
@@ -128,7 +133,7 @@ export default function TableNode({
                         width={(table.radius ?? 45) * 2}
                         align="center"
                         fontSize={13}
-                        fill="#e5e7eb"
+                        fill={textFill}
                     />
                     <Text
                         text={bottomLabel}
@@ -137,7 +142,7 @@ export default function TableNode({
                         width={(table.radius ?? 45) * 2}
                         align="center"
                         fontSize={11}
-                        fill="#cbd5e1"
+                        fill={subTextFill}
                     />
                 </>
             ) : (
@@ -157,14 +162,14 @@ export default function TableNode({
                         x={10}
                         y={10}
                         fontSize={13}
-                        fill="#e5e7eb"
+                        fill={textFill}
                     />
                     <Text
                         text={bottomLabel}
                         x={10}
                         y={30}
                         fontSize={11}
-                        fill="#cbd5e1"
+                        fill={subTextFill}
                     />
                 </>
             )}
