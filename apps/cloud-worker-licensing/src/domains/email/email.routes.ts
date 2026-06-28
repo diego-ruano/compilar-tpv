@@ -101,7 +101,7 @@ function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): st
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${esc(l.nombre_producto)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${l.cantidad}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${precio}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${unidad}</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${esc(unidad)}</td>
       </tr>`;
 		})
 		.join("\n");

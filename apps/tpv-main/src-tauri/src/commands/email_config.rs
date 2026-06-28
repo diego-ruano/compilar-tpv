@@ -161,14 +161,17 @@ async fn enviar_smtp(config: EmailConfig, args: EnviarPedidoEmailInput) -> Resul
     let port = u16::try_from(config.smtp_port)
         .map_err(|_| "Puerto SMTP inválido (1-65535)".to_string())?;
 
-    let mailer: AsyncSmtpTransport<Tokio1Executor> = if config.smtp_use_tls {
-        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
+    // Puerto 465 → TLS implícito (SMTPS); cualquier otro → STARTTLS.
+    // Nunca se envían credenciales sin cifrar.
+    let mailer: AsyncSmtpTransport<Tokio1Executor> = if port == 465 {
+        AsyncSmtpTransport::<Tokio1Executor>::relay(host)
             .map_err(|e| format!("Error conectando SMTP: {e}"))?
             .credentials(creds)
             .port(port)
             .build()
     } else {
-        AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(host)
+        AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(host)
+            .map_err(|e| format!("Error conectando SMTP: {e}"))?
             .credentials(creds)
             .port(port)
             .build()
@@ -258,7 +261,7 @@ fn build_html(args: &EnviarPedidoEmailInput) -> String {
             html_escape(&l.nombre_producto),
             l.cantidad,
             precio,
-            unidad,
+            html_escape(unidad),
         ));
     }
 
