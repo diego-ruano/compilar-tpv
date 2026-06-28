@@ -1,12 +1,13 @@
 // src/pages/Configuracion.tsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 import { invokeClient } from "@tpv/client";
 import type { PairCreateResult } from "@tpv/contracts";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import { useMode } from "../../shared/stores/useMode";
+import { useContactSettings } from "../../shared/stores/useContactSettings";
 import { useTheme } from "../../shared/stores/useTheme";
 
 import { Settings } from "lucide-react";
@@ -55,18 +56,43 @@ export default function Configuracion() {
     const mode = useMode((s) => s.mode);
     const isMain = mode === "tpv";
 
-    const [recoveryEmail, setRecoveryEmail] = useState(
-        "recuperacion@altaria.dev",
-    );
-    const [contactEmail, setContactEmail] = useState("soporte@altaria.dev");
-    const [contactPhone, setContactPhone] = useState("+34 600 000 000");
+    // Datos de contacto — store + draft local
+    const contact = useContactSettings();
+    const contactReady = useContactSettings((s) => s.ready);
+    const contactInit = useContactSettings((s) => s.init);
+
+    const [recoveryEmail, setRecoveryEmail] = useState("");
+    const [contactEmail, setContactEmail] = useState("");
+    const [contactPhone, setContactPhone] = useState("");
+    const [savingContact, setSavingContact] = useState(false);
 
     // Conectado al tema global real: el switch de Apariencia cambia toda la app.
     const darkMode = useTheme((s) => s.theme === "dark");
-    const setDarkMode = (v: boolean) =>
-        useTheme.getState().setTheme(v ? "dark" : "light");
+    const setDarkMode = useCallback(
+        (v: boolean) => useTheme.getState().setTheme(v ? "dark" : "light"),
+        [],
+    );
 
     const [section, setSection] = useState<SectionKey>("NEGOCIO");
+
+    // Sincroniza el draft con el store la primera vez que carga
+    const contactSyncedRef = useRef(false);
+    useEffect(() => {
+        if (!contactReady || contactSyncedRef.current) return;
+        contactSyncedRef.current = true;
+        setRecoveryEmail(contact.recoveryEmail);
+        setContactEmail(contact.contactEmail);
+        setContactPhone(contact.contactPhone);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [contactReady]);
+
+    // Carga lazy al entrar en la sección (cubre modo Handy y TPV sin AppBoot)
+    useEffect(() => {
+        if (section !== "CONTACTO") return;
+        if (contactReady) return;
+        contactInit().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [section, contactReady]);
     const [navQuery, setNavQuery] = useState("");
 
     const [animKey, setAnimKey] = useState(0);
@@ -206,10 +232,10 @@ export default function Configuracion() {
         if (!isMain) return;
 
         if (typeof bizInit === "function" && !bizHydrated) {
-            bizInit().catch(() => { });
+            bizInit().catch((e: unknown) => console.warn("[Configuracion] bizInit error:", e));
         }
         if (typeof ticketInit === "function" && !ticketHydrated) {
-            ticketInit().catch(() => { });
+            ticketInit().catch((e: unknown) => console.warn("[Configuracion] ticketInit error:", e));
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isMain]);
@@ -243,6 +269,20 @@ export default function Configuracion() {
     };
 
     const canSaveBusiness = dirty && !savingBiz && bizHydrated;
+
+    const onSaveContact = async () => {
+        try {
+            setSavingContact(true);
+            contact.setMany({ recoveryEmail, contactEmail, contactPhone });
+            await messageDialog("Guardado");
+        } catch {
+            await messageDialog("No se pudo guardar. Revisa la consola.", {
+                kind: "error",
+            });
+        } finally {
+            setSavingContact(false);
+        }
+    };
 
     // ✅ Vincular handy (REAL con invoke->Rust)
     const [pairCode, setPairCode] = useState("");
@@ -652,17 +692,14 @@ export default function Configuracion() {
                                             <Contacto
                                                 inputTone={inputTone}
                                                 recoveryEmail={recoveryEmail}
-                                                setRecoveryEmail={
-                                                    setRecoveryEmail
-                                                }
+                                                setRecoveryEmail={setRecoveryEmail}
                                                 contactEmail={contactEmail}
-                                                setContactEmail={
-                                                    setContactEmail
-                                                }
+                                                setContactEmail={setContactEmail}
                                                 contactPhone={contactPhone}
-                                                setContactPhone={
-                                                    setContactPhone
-                                                }
+                                                setContactPhone={setContactPhone}
+                                                loading={!contactReady}
+                                                saving={savingContact}
+                                                onSave={onSaveContact}
                                             />
                                         ) : null}
 
