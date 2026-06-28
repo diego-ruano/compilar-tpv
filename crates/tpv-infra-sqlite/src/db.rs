@@ -198,7 +198,7 @@ async fn write_op(conn: &Connection, stmts: &[SqlStatement]) -> Result<(), Libsq
 /// DEVUELVEN una fila con el valor resultante incluso al fijarlas, y enrutarlas por la vía de
 /// `execute` dispara `Execute returned rows` en libsql. `query` acepta sentencias que devuelven
 /// filas (las descartamos) y también las que no.
-async fn tune(conn: &Connection) -> Result<(), LibsqlError> {
+pub(crate) async fn tune(conn: &Connection) -> Result<(), LibsqlError> {
     for pragma in [
         "PRAGMA journal_mode = WAL;",
         "PRAGMA busy_timeout = 5000;",

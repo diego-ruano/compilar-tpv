@@ -247,7 +247,7 @@ mod tests {
         let conn = database.connect().unwrap();
         // tune() activa WAL, busy_timeout, FK y synchronous=NORMAL — igual que producción.
         // Sin esto, las FK quedan desactivadas y violaciones de clave pasan en test pero no en prod.
-        super::tune(&conn).await.unwrap();
+        crate::db::tune(&conn).await.unwrap();
         (database, conn, dir)
     }
 
@@ -311,11 +311,13 @@ mod tests {
         let (_db, conn, dir) = open_temp().await;
 
         run(&conn).await.unwrap();
-        let applied_at_1 = scalar_i64(
-            &conn,
-            "SELECT applied_at FROM _migrations WHERE name='0001_inicial.sql';",
-        )
-        .await;
+        let first_name = migration_files()
+            .into_iter()
+            .next()
+            .map(|(n, _)| n)
+            .expect("debe haber al menos una migración");
+        let q = format!("SELECT applied_at FROM _migrations WHERE name='{first_name}';");
+        let applied_at_1 = scalar_i64(&conn, &q).await;
 
         // Segunda pasada: debe detectar que todas las migraciones ya están aplicadas y saltarlas.
         run(&conn).await.expect("re-ejecutar no debe fallar");
@@ -324,11 +326,7 @@ mod tests {
             scalar_i64(&conn, "SELECT COUNT(*) FROM _migrations;").await,
             migration_files().len() as i64,
         );
-        let applied_at_2 = scalar_i64(
-            &conn,
-            "SELECT applied_at FROM _migrations WHERE name='0001_inicial.sql';",
-        )
-        .await;
+        let applied_at_2 = scalar_i64(&conn, &q).await;
         assert_eq!(applied_at_1, applied_at_2, "no debe re-aplicarse la migración");
 
         let _ = std::fs::remove_dir_all(&dir);
@@ -418,13 +416,44 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// Elimina literales de texto SQL ('…') para que el tokenizador no encuentre palabras
+    /// reservadas dentro de strings ('DO COMMIT NOW' → falso positivo sin este paso).
+    fn strip_sql_string_literals(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let chars: Vec<char> = s.chars().collect();
+        let mut i = 0;
+        while i < chars.len() {
+            if chars[i] == '\'' {
+                i += 1;
+                while i < chars.len() {
+                    if chars[i] == '\'' {
+                        i += 1;
+                        if i < chars.len() && chars[i] == '\'' {
+                            i += 1; // '' → comilla escapada, continuar
+                        } else {
+                            break; // cierre del literal
+                        }
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                out.push(chars[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
     /// Las migraciones deben ser sentencias puras: el control de transacción lo gestiona el runner
     /// (en el worker, dentro de una transacción interactiva; meter BEGIN/COMMIT en el .sql rompería
     /// con "transacciones anidadas"). Permite el `BEGIN … END` de triggers (no es control de tx).
     #[test]
     fn migrations_no_transaction_control() {
         for (name, content) in migration_files() {
-            let body = strip_line_comments(&strip_block_comments(&content)).to_uppercase();
+            let body = strip_sql_string_literals(
+                &strip_line_comments(&strip_block_comments(&content))
+            ).to_uppercase();
             let toks: Vec<String> = body
                 .split(|c: char| c.is_whitespace() || c == ';' || c == '(' || c == ')')
                 .map(|t| t.trim().to_string())
