@@ -77,6 +77,8 @@ export type CompleteInitialSetupInput = { id_usuario: string, pin_actual: string
  */
 export type ConfigPatchInput = { patch: Record<string, unknown>, };
 
+export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
+
 export type CopySemanaInput = { from_monday: string, to_monday: string, overwrite?: boolean, };
 
 /**
