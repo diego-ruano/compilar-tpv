@@ -16,6 +16,7 @@ import {
   type AjusteLoteArgs,
   type CreateCategoriaArgs,
   type CreateLoteArgs,
+  type UpdateLoteArgs,
   type UpsertProductoArgs,
 } from "./api/inventarioAPI";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
@@ -152,6 +153,15 @@ export function useCreateLote() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (args: CreateLoteArgs) => inventarioAPI.createLote(args),
+    onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
+  });
+}
+
+/** Edición completa de lote; invalida la caché de inventario al confirmar. */
+export function useUpdateLote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: UpdateLoteArgs) => inventarioAPI.updateLote(args),
     onSuccess: () => qc.invalidateQueries({ queryKey: inventarioKeys.all }),
   });
 }

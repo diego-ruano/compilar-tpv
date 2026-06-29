@@ -20,7 +20,6 @@ import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
 import AddLoteModal from "./ui/AddLoteModal";
 import {
-  useAjustarLote,
   useLotesByProducto,
   useProductoDetalle,
 } from "./inventarioQueries";
@@ -74,11 +73,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   // ✅ lotes
   const [lotesOpen, setLotesOpen] = useState(false);
   const [addLoteOpen, setAddLoteOpen] = useState(false);
-
-  // ajustar stock lote
-  const [ajustar, setAjustar] = useState<LoteRow | null>(null);
-  const [nuevoStock, setNuevoStock] = useState("");
-  const [ajustando, setAjustando] = useState(false);
+  const [editingLote, setEditingLote] = useState<LoteRow | null>(null);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -87,7 +82,6 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
   const activeId = open ? productId : null;
   const detalleQuery = useProductoDetalle(activeId);
   const lotesQuery = useLotesByProducto(activeId);
-  const ajustarLote = useAjustarLote();
 
   const p: ProductoDetalle | null = detalleQuery.data ?? null;
   const lotes: LoteRow[] = lotesQuery.data ?? [];
@@ -386,7 +380,10 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                       <button
                         type="button"
-                        onClick={() => setAddLoteOpen(true)}
+                        onClick={() => {
+                          setEditingLote(null);
+                          setAddLoteOpen(true);
+                        }}
                         className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
                       >
                         <Plus className="size-4" aria-hidden />
@@ -399,10 +396,11 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     ) : (
                       <div className="rounded-2xl border border-border bg-surface overflow-hidden">
                         <div className="grid grid-cols-12 gap-2 px-4 py-3 bg-surface-2 text-xs font-extrabold text-fg-muted">
-                          <div className="col-span-4">Lote</div>
-                          <div className="col-span-3">Caducidad</div>
-                          <div className="col-span-2 text-right">Stock</div>
-                          <div className="col-span-3">Entrada</div>
+                          <div className="col-span-3">Lote</div>
+                          <div className="col-span-2">Caducidad</div>
+                          <div className="col-span-1 text-right">Stock</div>
+                          <div className="col-span-4 pl-6">Entrada</div>
+                          <div className="col-span-2 text-right">Acciones</div>
                         </div>
 
                         <div className="max-h-[320px] overflow-auto">
@@ -410,23 +408,23 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                             const isFefo = (fefo as any)?.ID_Lote === l.ID_Lote;
                             return (
                               <div key={l.ID_Lote} className={`grid grid-cols-12 gap-2 px-4 py-3 border-t border-border text-sm items-center ${isFefo ? "bg-accent-soft" : ""}`}>
-                                <div className="col-span-4 font-extrabold text-fg truncate">
+                                <div className="col-span-3 font-extrabold text-fg truncate">
                                   {l.Codigo_Lote}
                                   {isFefo && <span className="ml-2 text-xs font-extrabold text-accent">FEFO</span>}
                                 </div>
-                                <div className="col-span-3 text-fg-muted">{formatDateES(l.Caducidad)}</div>
-                                <div className="col-span-2 text-right font-extrabold">{String(l.Stock_Disponible ?? 0)}</div>
-                                <div className="col-span-3 flex items-center justify-between gap-2">
-                                  <span className="text-fg-muted">{formatDateTimeES(l.Fecha_Entrada)}</span>
+                                <div className="col-span-2 text-fg-muted">{formatDateES(l.Caducidad)}</div>
+                                <div className="col-span-1 text-right font-extrabold">{String(l.Stock_Disponible ?? 0)}</div>
+                                <div className="col-span-4 pl-6 text-fg-muted">{formatDateTimeES(l.Fecha_Entrada)}</div>
+                                <div className="col-span-2 flex items-center justify-end gap-2">
                                   <button
                                     type="button"
                                     className="px-3 py-1.5 rounded-xl border border-border hover:bg-surface-2 transition text-xs font-extrabold"
                                     onClick={() => {
-                                      setAjustar(l);
-                                      setNuevoStock(String(l.Stock_Disponible ?? 0));
+                                      setEditingLote(l);
+                                      setAddLoteOpen(true);
                                     }}
                                   >
-                                    Ajustar
+                                    Editar
                                   </button>
                                 </div>
                               </div>
@@ -452,7 +450,10 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <button
                   type="button"
-                  onClick={() => setAddLoteOpen(true)}
+                  onClick={() => {
+                    setEditingLote(null);
+                    setAddLoteOpen(true);
+                  }}
                   className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-border bg-surface py-3 font-extrabold text-fg transition hover:bg-surface-2 cursor-pointer"
                 >
                   <Plus className="size-4" aria-hidden />
@@ -472,81 +473,18 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               {/* Modal añadir lote */}
               <AddLoteModal
                 open={addLoteOpen}
-                onClose={() => setAddLoteOpen(false)}
+                onClose={() => {
+                  setAddLoteOpen(false);
+                  setEditingLote(null);
+                }}
                 productId={productId}
+                loteToEdit={editingLote}
                 onSaved={async () => {
                   // La mutación de creación de lote ya invalida la caché; refrescamos por si acaso.
                   await lotesQuery.refetch();
                 }}
               />
 
-              {/* Modal ajustar stock lote */}
-              {ajustar && (
-                <div
-                  className="fixed inset-0 z-[90] bg-black/40 flex items-end sm:items-center justify-center p-3"
-                  onMouseDown={(e) => {
-                    if (e.target === e.currentTarget && !ajustando) setAjustar(null);
-                  }}
-                >
-                  <div className="bg-surface w-full max-w-[520px] rounded-2xl shadow-xl border border-border overflow-hidden">
-                    <div className="p-5 border-b border-border">
-                      <h3 className="text-lg font-extrabold text-center">Ajustar stock del lote</h3>
-                      <p className="text-center text-sm text-fg-muted mt-1">
-                        {ajustar.Codigo_Lote}
-                      </p>
-                    </div>
-
-                    <div className="p-5">
-                      <label className="text-sm font-semibold text-fg">Nuevo stock disponible</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={nuevoStock}
-                        onChange={(e) => setNuevoStock(e.target.value)}
-                        className="mt-2 h-10 w-full rounded-xl border border-border bg-surface-2 px-3 text-fg outline-none transition focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-ring"
-                        disabled={ajustando}
-                      />
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-5">
-                        <button
-                          type="button"
-                          onClick={() => setAjustar(null)}
-                          disabled={ajustando}
-                          className="w-full px-4 py-2 rounded-xl border border-border hover:bg-surface-2 transition font-semibold disabled:opacity-60"
-                        >
-                          Cancelar
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={ajustando}
-                          onClick={async () => {
-                            const n = Number(String(nuevoStock).replace(",", "."));
-                            if (!Number.isFinite(n) || n < 0) return;
-
-                            setAjustando(true);
-                            try {
-                              // La invalidación de onSuccess recachea los lotes automáticamente.
-                              await ajustarLote.mutateAsync({
-                                id_lote: (ajustar as any).ID_Lote,
-                                stock_disponible: n,
-                                notas: null,
-                              });
-
-                              setAjustar(null);
-                            } finally {
-                              setAjustando(false);
-                            }
-                          }}
-                          className="w-full cursor-pointer rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover disabled:opacity-60"
-                        >
-                          {ajustando ? "Guardando..." : "Guardar"}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </>
           )}
         </div>

@@ -100,10 +100,16 @@ export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 export type DeviceSignB64Args = { payload: string, };
 
+export type EmailConfigDto = { modo: string, smtp_host: string, smtp_port: number, smtp_user: string, smtp_password: string, smtp_from_email: string, smtp_from_name: string, smtp_use_tls: boolean, };
+
+export type EmailConfigPatchInput = { modo: string, smtp_host: string, smtp_port: number, smtp_user: string, smtp_password: string, smtp_from_email: string, smtp_from_name: string, smtp_use_tls: boolean, };
+
 /**
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
  */
 export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
+
+export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: string, notas?: string, lineas: Array<LineaEmailInput>, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
@@ -134,6 +140,12 @@ export type LicenseGateResult = { allowed: boolean, reason: string, state: Licen
 export type LicenseLocalState = { tenant_id: string, device_id: string, token: string, status: string | null, expires_at: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
 export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
+
+export type LineaEmailInput = { nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
+
+export type LineaPedidoDto = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario: number | null, unidad: string | null, };
+
+export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
 
 export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre: string, apellido: string | null, rol: string, email: string, requiere_setup: number, };
 
@@ -218,6 +230,14 @@ export type OutboxEntry = { seq: number, op_id: string, command_name: string, st
  * worker. Campos camelCase (compat frontend: `pairCode`/`pairSecret`/`expiresAtMs`).
  */
 export type PairCreateResult = { ok: boolean, pairCode: string, pairSecret: string, expiresAtMs: number, };
+
+export type PedidoProveedorDto = { id_pedido: string, id_proveedor: string | null, nombre_proveedor: string | null, email_destino: string | null, estado: string, fecha_creacion: string, fecha_envio: string | null, notas: string | null, lineas: Array<LineaPedidoDto>, };
+
+export type PedidosActualizarInput = { id_pedido: string, id_proveedor?: string, email_destino?: string, notas?: string, lineas: Array<LineaPedidoInput>, };
+
+export type PedidosCambiarEstadoInput = { id_pedido: string, estado: string, fecha_envio?: string, };
+
+export type PedidosCrearInput = { id_pedido: string, id_proveedor?: string, email_destino?: string, notas?: string, lineas: Array<LineaPedidoInput>, };
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
@@ -399,6 +419,8 @@ export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto:
 export type UpdateClienteInput = { id_cliente: string, nombre: string, email?: string, telefono?: string, notas?: string, };
 
 export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, };
+
+export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, cantidad_inicial: number, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
 
 export type UpdatePagoInput = { id_pago: string, fecha_hora: string, metodo: string, importe: number, };
 

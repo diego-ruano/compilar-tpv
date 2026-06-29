@@ -15,6 +15,7 @@ import type {
 	UpsertProductoInput,
 	SetAlergenosInput,
 	CreateLoteInput,
+	UpdateLoteInput,
 	AjusteLoteInput,
 } from "./inventario.schemas";
 
@@ -224,6 +225,43 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 		commandName: "inventario_create_lote",
 		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "id" } },
 		cloudPayload: input,
+	};
+}
+
+export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand {
+	return {
+		commandName: "inventario_update_lote",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Lotes_Producto SET
+						ID_Producto = ?2,
+						Codigo_Lote = ?3,
+						Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
+						Caducidad = NULLIF(?5, ''),
+						Cantidad_Inicial = ?6,
+						Stock_Disponible = ?7,
+						Coste_Unitario = ?8,
+						ID_Proveedor = ?9,
+						Notas = ?10
+					WHERE ID_Lote = ?1;
+				`,
+				args: [
+					idLote,
+					input.id_producto,
+					input.codigo_lote.trim(),
+					cleanOrNull(input.fecha_entrada),
+					cleanOrNull(input.caducidad),
+					input.cantidad_inicial,
+					input.stock_disponible,
+					numOrNull(input.coste_unitario),
+					idOrNull(input.id_proveedor),
+					cleanOrNull(input.notas),
+				],
+			},
+		},
+		cloudPayload: { ...input, id_lote: idLote },
 	};
 }
 

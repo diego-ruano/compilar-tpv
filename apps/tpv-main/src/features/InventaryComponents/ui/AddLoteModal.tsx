@@ -1,12 +1,14 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
-import { useCreateLote } from "../inventarioQueries";
+import { type LoteRow } from "../api/inventarioAPI";
+import { useCreateLote, useUpdateLote } from "../inventarioQueries";
 
 type Props = {
     open: boolean;
     onClose: () => void;
     productId: string | null;
+    loteToEdit?: LoteRow | null;
     onSaved: () => void;
 };
 
@@ -15,10 +17,16 @@ function toNum(v: string) {
     return Number.isFinite(n) ? n : NaN;
 }
 
-export default function AddLoteModal({ open, onClose, productId, onSaved }: Props) {
+function dateInputValue(v: string | null | undefined) {
+    return String(v ?? "").split(" ")[0];
+}
+
+export default function AddLoteModal({ open, onClose, productId, loteToEdit = null, onSaved }: Props) {
     const toast = useToast();
 
     const createLote = useCreateLote();
+    const updateLote = useUpdateLote();
+    const isEdit = !!loteToEdit;
 
     const [codigoLote, setCodigoLote] = useState("");
     const [caducidad, setCaducidad] = useState("");
@@ -28,6 +36,23 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
     const [notas, setNotas] = useState("");
 
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        if (!open) return;
+
+        if (!loteToEdit) {
+            reset();
+            return;
+        }
+
+        setCodigoLote(loteToEdit.Codigo_Lote ?? "");
+        setCaducidad(dateInputValue(loteToEdit.Caducidad));
+        setCantidadInicial(String(loteToEdit.Cantidad_Inicial ?? ""));
+        setStockDisponible(String(loteToEdit.Stock_Disponible ?? ""));
+        setCosteUnitario(loteToEdit.Coste_Unitario == null ? "" : String(loteToEdit.Coste_Unitario));
+        setNotas(loteToEdit.Notas ?? "");
+        setLoading(false);
+    }, [open, loteToEdit]);
 
     const ok = useMemo(() => {
         if (!productId) return false;
@@ -70,25 +95,40 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
             const sd = stockDisponible.trim() ? toNum(stockDisponible) : ci;
             const cu = costeUnitario.trim() ? toNum(costeUnitario) : null;
 
-            await createLote.mutateAsync({
-                id_producto: productId,
-                codigo_lote: codigoLote.trim(),
-                caducidad: caducidad.trim() ? caducidad : null,
-                cantidad_inicial: ci,
-                stock_disponible: Number.isFinite(sd) ? sd : null,
-                coste_unitario: cu != null && Number.isFinite(cu) ? cu : null,
-                fecha_entrada: null,
-                id_proveedor: null,
-                notas: notas.trim() ? notas.trim() : null,
-            });
+            if (isEdit && loteToEdit) {
+                await updateLote.mutateAsync({
+                    id_lote: loteToEdit.ID_Lote,
+                    id_producto: productId,
+                    codigo_lote: codigoLote.trim(),
+                    caducidad: caducidad.trim() ? caducidad : null,
+                    cantidad_inicial: ci,
+                    stock_disponible: sd,
+                    coste_unitario: cu != null && Number.isFinite(cu) ? cu : null,
+                    fecha_entrada: loteToEdit.Fecha_Entrada || null,
+                    id_proveedor: loteToEdit.ID_Proveedor ?? null,
+                    notas: notas.trim() ? notas.trim() : null,
+                });
+            } else {
+                await createLote.mutateAsync({
+                    id_producto: productId,
+                    codigo_lote: codigoLote.trim(),
+                    caducidad: caducidad.trim() ? caducidad : null,
+                    cantidad_inicial: ci,
+                    stock_disponible: Number.isFinite(sd) ? sd : null,
+                    coste_unitario: cu != null && Number.isFinite(cu) ? cu : null,
+                    fecha_entrada: null,
+                    id_proveedor: null,
+                    notas: notas.trim() ? notas.trim() : null,
+                });
+            }
 
-            toast.success("OK", "Lote creado");
+            toast.success("OK", isEdit ? "Lote actualizado" : "Lote creado");
             onSaved();
             reset();
             onClose();
         } catch (err) {
-            console.error("Error creando lote:", err);
-            toast.error("Error", "No se pudo crear el lote");
+            console.error("Error guardando lote:", err);
+            toast.error("Error", isEdit ? "No se pudo actualizar el lote" : "No se pudo crear el lote");
         } finally {
             setLoading(false);
         }
@@ -97,7 +137,7 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
     if (!open) return null;
 
     return (
-        <Modal open={open} onClose={() => { if (!loading) { reset(); onClose(); } }} title="Añadir lote" maxWidthClass="max-w-[720px]">
+        <Modal open={open} onClose={() => { if (!loading) { reset(); onClose(); } }} title={isEdit ? "Editar lote" : "Añadir lote"} maxWidthClass="max-w-[720px]">
             <form onSubmit={guardar} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="md:col-span-2">
                     <label className="text-sm font-semibold text-fg">Código de lote *</label>
@@ -174,7 +214,7 @@ export default function AddLoteModal({ open, onClose, productId, onSaved }: Prop
                     disabled={loading || !ok}
                     className="mt-1 cursor-pointer rounded-xl bg-accent py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover disabled:opacity-60 md:col-span-2"
                 >
-                    {loading ? "Guardando..." : "Crear lote"}
+                    {loading ? "Guardando..." : isEdit ? "Guardar cambios" : "Crear lote"}
                 </button>
             </form>
         </Modal>

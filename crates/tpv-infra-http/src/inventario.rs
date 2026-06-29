@@ -14,7 +14,9 @@ use tpv_contracts::inventario::{
     AlergenoInvDto, AlergenoMiniDto, CategoriaInvDto, InventarioResumenResponse, LoteDto,
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
-use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
+use tpv_domain::inventario::{
+    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+};
 
 use crate::CloudClient;
 
@@ -169,6 +171,31 @@ impl InventarioRepository for HttpInventarioRepository {
             "notas": lote.notas,
         });
         let _: JsonValue = self.client.post_json("/v1/inventario/lotes", &body).await?;
+        Ok(())
+    }
+
+    async fn update_lote(&self, lote: LoteUpdate) -> AppResult<()> {
+        let body = json!({
+            "id_lote": lote.id_lote,
+            "id_producto": lote.id_producto,
+            "codigo_lote": lote.codigo_lote,
+            "caducidad": lote.caducidad,
+            "cantidad_inicial": lote.cantidad_inicial,
+            "stock_disponible": lote.stock_disponible,
+            "fecha_entrada": lote.fecha_entrada,
+            "coste_unitario": lote.coste_unitario,
+            "id_proveedor": lote.id_proveedor,
+            "notas": lote.notas,
+        });
+        let id_lote = body
+            .get("id_lote")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let _: JsonValue = self
+            .client
+            .put_json(&format!("/v1/inventario/lotes/{id_lote}"), &body)
+            .await?;
         Ok(())
     }
 

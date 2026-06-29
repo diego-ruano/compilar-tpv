@@ -12,7 +12,9 @@ use tpv_contracts::inventario::{
     ProductDetailResponse, ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProductoResumenDto,
     ProveedorMiniDto,
 };
-use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, ProductoUpsert};
+use tpv_domain::inventario::{
+    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
+};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string};
@@ -529,6 +531,43 @@ impl InventarioRepository for SqliteInventarioRepository {
                 "#,
                 vec![
                     Value::Text(id_lote),
+                    Value::Text(l.id_producto),
+                    Value::Text(l.codigo_lote),
+                    opt_text(l.fecha_entrada),
+                    opt_text(l.caducidad),
+                    Value::Real(l.cantidad_inicial),
+                    Value::Real(l.stock_disponible),
+                    opt_real(l.coste_unitario),
+                    match l.id_proveedor {
+                        Some(v) => Value::Text(v),
+                        None => Value::Null,
+                    },
+                    opt_text(l.notas),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn update_lote(&self, l: LoteUpdate) -> AppResult<()> {
+        let db = self.db.write().await;
+        db.execute(
+                r#"
+                UPDATE Lotes_Producto SET
+                  ID_Producto = ?2,
+                  Codigo_Lote = ?3,
+                  Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
+                  Caducidad = NULLIF(?5, ''),
+                  Cantidad_Inicial = ?6,
+                  Stock_Disponible = ?7,
+                  Coste_Unitario = ?8,
+                  ID_Proveedor = ?9,
+                  Notas = ?10
+                WHERE ID_Lote = ?1;
+                "#,
+                vec![
+                    Value::Text(l.id_lote),
                     Value::Text(l.id_producto),
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
