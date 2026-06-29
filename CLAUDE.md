@@ -228,6 +228,10 @@ y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates
 
 ## 8. Convenciones
 
+- **PROHIBIDO el trailer `Co-Authored-By` (y cualquier atribución a Claude/Anthropic) en los mensajes
+  de commit y en las descripciones de PR.** Ningún commit puede llevar la línea `Co-Authored-By:`. La
+  prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
+  `attribution.commit/pr: ""`).
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a `String` en la frontera Tauri.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
