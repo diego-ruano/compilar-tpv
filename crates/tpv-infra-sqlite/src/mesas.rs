@@ -45,7 +45,7 @@ fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_millis() as i64,
-        Err(_) => 0,
+        Err(_) => i64::MAX,
     }
 }
 

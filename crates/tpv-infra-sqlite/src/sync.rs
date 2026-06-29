@@ -42,7 +42,7 @@ fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .unwrap_or(i64::MAX)
 }
 
 /// Margen (en nº de operaciones) que la purga por cursor deja SIN borrar por debajo del checkpoint.
