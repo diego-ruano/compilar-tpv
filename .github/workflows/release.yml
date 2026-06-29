@@ -37,7 +37,7 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.91.1
       - uses: Swatinem/rust-cache@v2
 
       - name: Instalar dependencias
@@ -66,6 +66,21 @@ jobs:
           }
           if (-not $ok) { exit 1 }
           Write-Host "Versiones OK: $tag"
+
+      - name: Verificar clave de firma del updater
+        shell: pwsh
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if (-not $env:SIGNING_KEY) {
+            Write-Error @"
+FATAL: El secreto TAURI_SIGNING_PRIVATE_KEY no esta configurado en este repositorio.
+Sin esta clave el instalador no puede firmarse y los clientes existentes no podran recibir actualizaciones jamas.
+Ve a Settings -> Secrets and variables -> Actions -> Secrets y anade el contenido de apps/tpv-main/src-tauri/.tauri/updater.key
+"@
+            exit 1
+          }
+          Write-Host "Clave de firma del updater presente OK"
 
       - name: Compilar + firmar instalador (Tauri / Windows)
         env:
