@@ -148,18 +148,12 @@ export default function PedidosSection({ proveedores }: Props) {
   }
 
   async function handleMandar(updated: PedidoRow) {
+    const tieneEmail = !!(updated.emailDestino && updated.lineas.length > 0);
     try {
-      if (isNewPedido) {
-        await crearMutation.mutateAsync(toCrearInput(updated));
-      } else {
-        await actualizarMutation.mutateAsync(toActualizarInput(updated));
-      }
-      const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
-      await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
-
-      if (updated.emailDestino && updated.lineas.length > 0) {
+      // Email primero: si falla aquí, la DB no se toca
+      if (tieneEmail) {
         await emailEnviarPedido({
-          email_destino: updated.emailDestino,
+          email_destino: updated.emailDestino!,
           nombre_proveedor: updated.nombreProveedor ?? "Proveedor",
           notas: updated.notas,
           lineas: updated.lineas.map((l) => ({
@@ -169,6 +163,18 @@ export default function PedidosSection({ proveedores }: Props) {
             unidad: l.unidad,
           })),
         });
+      }
+
+      // Solo llegamos aquí si el email fue OK (o no había email)
+      if (isNewPedido) {
+        await crearMutation.mutateAsync(toCrearInput(updated));
+      } else {
+        await actualizarMutation.mutateAsync(toActualizarInput(updated));
+      }
+      const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
+      await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
+
+      if (tieneEmail) {
         toast.success("Pedido enviado", `Correo enviado a ${updated.emailDestino}`);
       } else {
         toast.success("Pedido enviado", updated.emailDestino ? "Marcado como enviado" : "Sin correo destino — pedido marcado como enviado");
