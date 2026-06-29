@@ -2,7 +2,7 @@
 
 use serde_json::Value as JsonValue;
 
-use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
+use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
 
 use crate::error::AppResult;
 use crate::ports::configuracion::ConfiguracionRepository;
@@ -28,5 +28,17 @@ pub async fn patch_ticket(
     patch: JsonValue,
 ) -> AppResult<String> {
     repo.patch_ticket(&patch).await?;
+    Ok("OK".to_string())
+}
+
+pub async fn get_contact(repo: &dyn ConfiguracionRepository) -> AppResult<ContactSettings> {
+    repo.get_contact().await
+}
+
+pub async fn patch_contact(
+    repo: &dyn ConfiguracionRepository,
+    patch: JsonValue,
+) -> AppResult<String> {
+    repo.patch_contact(&patch).await?;
     Ok("OK".to_string())
 }

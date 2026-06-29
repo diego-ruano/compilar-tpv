@@ -325,6 +325,7 @@ export default function Configuracion() {
 
     // Si cambia a handy, fuera de las secciones solo-Main
     useEffect(() => {
+        if (mode === "loading") return;
         if (
             !isMain &&
             (section === "VINCULAR_HANDY" || section === "CONECTIVIDAD")
@@ -332,7 +333,7 @@ export default function Configuracion() {
             setSection("LICENCIA");
         if (isMain && section === "DISPOSITIVO") setSection("LICENCIA");
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isMain]);
+    }, [isMain, mode]);
 
     return (
         <div className="w-full h-full overflow-hidden bg-bg">

@@ -51,6 +51,17 @@ async function apply(
 	});
 }
 
+configuracionRoutes.get("/contact", async (c) =>
+	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getContact(db))),
+);
+
+configuracionRoutes.patch("/contact", async (c) => {
+	const p = await parseBody(c, configPatchSchema);
+	if (!p.ok) return p.res;
+	await apply(c, cmd.patchContact(p.data.patch));
+	return c.json({ ok: true });
+});
+
 configuracionRoutes.get("/business", async (c) =>
 	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getBusiness(db))),
 );

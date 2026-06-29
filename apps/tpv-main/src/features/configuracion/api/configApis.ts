@@ -7,6 +7,12 @@ import { invokeClient } from "@tpv/client";
 
 /* ── Types frontend ── */
 
+export type ContactSettings = {
+    recoveryEmail: string;
+    contactEmail: string;
+    contactPhone: string;
+};
+
 export type BusinessSettings = {
     businessName: string;
     logoDataUrl: string | null;
@@ -112,7 +118,39 @@ function mapTicketPatchToRust(patch: TicketSettingsPatch): Record<string, any> {
     return out;
 }
 
+function mapContactFromRust(x: any): ContactSettings {
+    return {
+        recoveryEmail: String(pick(x, ["recovery_email", "recoveryEmail"], "")),
+        contactEmail: String(pick(x, ["contact_email", "contactEmail"], "")),
+        contactPhone: String(pick(x, ["contact_phone", "contactPhone"], "")),
+    };
+}
+
+function mapContactPatchToRust(patch: Partial<ContactSettings>): Record<string, any> {
+    const out: Record<string, any> = {};
+    if ("recoveryEmail" in patch) out.recovery_email = patch.recoveryEmail;
+    if ("contactEmail" in patch) out.contact_email = patch.contactEmail;
+    if ("contactPhone" in patch) out.contact_phone = patch.contactPhone;
+    return out;
+}
+
 /* ── API (Local-First) ── */
+
+export async function configGetContactSettings(): Promise<ContactSettings> {
+    const raw = await invokeClient<any>("config_get_contact_settings");
+    return mapContactFromRust(raw);
+}
+
+export async function configPatchContactSettings(
+    patch: Partial<ContactSettings>,
+): Promise<void> {
+    if (!patch || Object.keys(patch).length === 0) return;
+    const patchRust = mapContactPatchToRust(patch);
+    if (Object.keys(patchRust).length === 0) return;
+    await invokeClient<string>("config_patch_contact_settings", {
+        args: { patch: patchRust },
+    });
+}
 
 export async function configGetBusinessSettings(): Promise<BusinessSettings> {
     const raw = await invokeClient<any>("config_get_business_settings");

@@ -26,7 +26,7 @@ fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        .unwrap_or(i64::MAX)
 }
 
 fn value_to_i64(v: Value) -> Option<i64> {
@@ -70,10 +70,20 @@ async fn query_admin_role_id(conn: &Connection) -> AppResult<Option<String>> {
 }
 
 /// Garantiza que existe la fila singleton `Email_Settings (ID=1)`.
-/// Se llama una sola vez en el init para que `get()` sea lectura pura (sin INSERT).
 async fn seed_email_settings(conn: &Connection) -> AppResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);",
+        Vec::<Value>::new(),
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
+/// Garantiza que existe la fila singleton `Contact_Settings (ID=1)`.
+async fn seed_contact_settings(conn: &Connection) -> AppResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);",
         Vec::<Value>::new(),
     )
     .await
@@ -183,6 +193,7 @@ pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
         let w = db.write().await;
         seed_admin_if_empty(w.raw()).await?;
         seed_email_settings(w.raw()).await?;
+        seed_contact_settings(w.raw()).await?;
     }
 
     Ok(db)

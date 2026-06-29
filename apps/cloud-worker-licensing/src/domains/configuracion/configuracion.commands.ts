@@ -37,6 +37,38 @@ function clampPaperWidthMm(v: unknown): number | null {
 	return n === 58 || n === 80 || n === 112 ? n : 80;
 }
 
+export function patchContact(patch: Record<string, unknown>): BuiltCommand {
+	const steps: any[] = [
+		{ kind: "execute", sql: "INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);" },
+	];
+	const sets: string[] = [];
+	const args: any[] = [];
+
+	function add(col: string, value: any) {
+		sets.push(`${col} = ?${args.length + 1}`);
+		args.push(value);
+	}
+
+	if ("recovery_email" in patch) add("Recovery_Email", cleanString(patch.recovery_email) ?? "");
+	if ("contact_email" in patch) add("Contact_Email", cleanString(patch.contact_email) ?? "");
+	if ("contact_phone" in patch) add("Contact_Phone", cleanString(patch.contact_phone) ?? "");
+
+	if (sets.length) {
+		sets.push("Updated_At = datetime('now','localtime')");
+		steps.push({
+			kind: "execute",
+			sql: `UPDATE Contact_Settings SET ${sets.join(", ")} WHERE ID = 1;`,
+			args,
+		});
+	}
+
+	return {
+		commandName: "config_patch_contact_settings",
+		command: { type: "tenantDb.transaction", payload: { steps } },
+		cloudPayload: { patch },
+	};
+}
+
 export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 	const steps: any[] = [
 		{ kind: "execute", sql: "INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);" },

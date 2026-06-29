@@ -1,5 +1,5 @@
 // src/features/configuracion/sections/VincularHandy.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
@@ -66,6 +66,32 @@ export function VincularHandy({
 		const d = new Date(expiresAtMs);
 		return d.toLocaleString("es-ES");
 	}, [expiresAtMs]);
+
+	// Cuenta regresiva en segundos hasta que caduca el QR
+	const [secsLeft, setSecsLeft] = useState<number>(0);
+	const onRegenerateRef = useRef(onRegenerate);
+	useEffect(() => { onRegenerateRef.current = onRegenerate; }, [onRegenerate]);
+
+	useEffect(() => {
+		if (!expiresAtMs) { setSecsLeft(0); return; }
+		const recalc = () => Math.max(0, Math.round((expiresAtMs - Date.now()) / 1000));
+		setSecsLeft(recalc());
+		const id = window.setInterval(() => setSecsLeft(recalc()), 1000);
+		return () => window.clearInterval(id);
+	}, [expiresAtMs]);
+
+	// Auto-regenerar cuando caduca (y no hay carga en curso)
+	useEffect(() => {
+		if (secsLeft > 0 || !expiresAtMs || loading) return;
+		onRegenerateRef.current();
+	}, [secsLeft, expiresAtMs, loading]);
+
+	const countdownText = useMemo(() => {
+		if (!expiresAtMs || secsLeft <= 0) return "";
+		const m = Math.floor(secsLeft / 60);
+		const s = secsLeft % 60;
+		return `${m}:${String(s).padStart(2, "0")}`;
+	}, [secsLeft, expiresAtMs]);
 
 	const [pending, setPending] = useState<PairPendingItem[]>([]);
 	const [pendingErr, setPendingErr] = useState<string | null>(null);
@@ -255,11 +281,17 @@ export function VincularHandy({
 							{expiresAtMs ? (
 								<div
 									className={cn(
-										"mt-1 text-[11px]",
-										darkMode ? "text-fg-subtle" : "text-fg-muted",
+										"mt-1 text-[11px] font-mono",
+										secsLeft <= 30
+											? "text-danger font-semibold"
+											: darkMode
+												? "text-fg-subtle"
+												: "text-fg-muted",
 									)}
 								>
-									Caduca: {expiresText}
+									{secsLeft > 0
+										? `Caduca en ${countdownText}`
+										: `Caduca: ${expiresText}`}
 								</div>
 							) : null}
 						</div>

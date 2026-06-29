@@ -33,6 +33,14 @@ pub struct TicketSettings {
     pub paper_width_mm: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ContactSettings {
+    pub recovery_email: String,
+    pub contact_email: String,
+    pub contact_phone: String,
+}
+
 /// Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

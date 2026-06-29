@@ -8,7 +8,7 @@ use serde_json::Value as JsonValue;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::configuracion::ConfiguracionRepository;
-use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
+use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
 use tpv_domain::configuracion::clamp_paper_width_mm;
 
 use crate::db::{Db, Reader, Writer};
@@ -98,6 +98,9 @@ async fn ensure_config_rows<C: Writer>(conn: &C) -> AppResult<()> {
         .await
         .map_err(db_err)?;
     conn.execute("INSERT OR IGNORE INTO Ticket_Settings (ID) VALUES (1);", ())
+        .await
+        .map_err(db_err)?;
+    conn.execute("INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);", ())
         .await
         .map_err(db_err)?;
     Ok(())
@@ -240,6 +243,70 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let affected = conn.execute(&sql, args).await.map_err(db_err)?;
         if affected == 0 {
             return Err(AppError::not_found("No existe Business_Settings (ID=1)"));
+        }
+        Ok(())
+    }
+
+    async fn get_contact(&self) -> AppResult<ContactSettings> {
+        let g = self.db.write().await;
+        let conn = &g;
+        ensure_config_rows(conn).await?;
+        let mut rows = conn
+            .query(
+                "SELECT Recovery_Email, Contact_Email, Contact_Phone FROM Contact_Settings WHERE ID=1 LIMIT 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let row = rows
+            .next()
+            .await
+            .map_err(db_err)?
+            .ok_or_else(|| AppError::not_found("No existe Contact_Settings (ID=1)"))?;
+        let g = |idx: i32| row.get_value(idx).map_err(db_err);
+        Ok(ContactSettings {
+            recovery_email: v_string(g(0)?).unwrap_or_default(),
+            contact_email: v_string(g(1)?).unwrap_or_default(),
+            contact_phone: v_string(g(2)?).unwrap_or_default(),
+        })
+    }
+
+    async fn patch_contact(&self, patch: &JsonValue) -> AppResult<()> {
+        let g = self.db.write().await;
+        let conn = &g;
+        ensure_config_rows(conn).await?;
+
+        let mut sets: Vec<&str> = Vec::new();
+        let mut args: Vec<Value> = Vec::new();
+
+        if patch_has(patch, "recovery_email") {
+            if let Some(v) = patch_string(patch, "recovery_email") {
+                sets.push("Recovery_Email = ?");
+                args.push(Value::Text(v));
+            }
+        }
+        if patch_has(patch, "contact_email") {
+            if let Some(v) = patch_string(patch, "contact_email") {
+                sets.push("Contact_Email = ?");
+                args.push(Value::Text(v));
+            }
+        }
+        if patch_has(patch, "contact_phone") {
+            if let Some(v) = patch_string(patch, "contact_phone") {
+                sets.push("Contact_Phone = ?");
+                args.push(Value::Text(v));
+            }
+        }
+
+        if sets.is_empty() {
+            return Ok(());
+        }
+        sets.push("Updated_At = datetime('now','localtime')");
+        let sql = format!("UPDATE Contact_Settings SET {} WHERE ID = 1;", sets.join(", "));
+
+        let affected = conn.execute(&sql, args).await.map_err(db_err)?;
+        if affected == 0 {
+            return Err(AppError::not_found("No existe Contact_Settings (ID=1)"));
         }
         Ok(())
     }

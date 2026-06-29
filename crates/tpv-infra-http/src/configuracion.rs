@@ -7,7 +7,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::configuracion::ConfiguracionRepository;
-use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
+use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
 
 use crate::CloudClient;
 
@@ -43,6 +43,18 @@ impl ConfiguracionRepository for HttpConfiguracionRepository {
         let _: JsonValue = self
             .client
             .patch_json("/v1/configuracion/ticket", &json!({ "patch": patch }))
+            .await?;
+        Ok(())
+    }
+
+    async fn get_contact(&self) -> AppResult<ContactSettings> {
+        self.client.get_json("/v1/configuracion/contact").await
+    }
+
+    async fn patch_contact(&self, patch: &JsonValue) -> AppResult<()> {
+        let _: JsonValue = self
+            .client
+            .patch_json("/v1/configuracion/contact", &json!({ "patch": patch }))
             .await?;
         Ok(())
     }

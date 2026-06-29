@@ -2,7 +2,7 @@
 
 import type { Client } from "@libsql/client/web";
 
-import type { BusinessSettings, TicketSettings } from "@tpv/contracts";
+import type { BusinessSettings, ContactSettings, TicketSettings } from "@tpv/contracts";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -54,6 +54,24 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		cif: String(r.cif ?? ""),
 		mensaje_footer: String(r.mensaje_footer ?? "¡Gracias por su visita!"),
 		iva_percent: Number(r.iva_percent ?? 10),
+	};
+}
+
+export async function getContact(db: Client): Promise<ContactSettings> {
+	const rs = await db.execute(`
+		SELECT
+			Recovery_Email AS recovery_email,
+			Contact_Email AS contact_email,
+			Contact_Phone AS contact_phone
+		FROM Contact_Settings
+		WHERE ID=1
+		LIMIT 1;
+	`);
+	const r = rows(rs)[0] ?? {};
+	return {
+		recovery_email: String(r.recovery_email ?? ""),
+		contact_email: String(r.contact_email ?? ""),
+		contact_phone: String(r.contact_phone ?? ""),
 	};
 }
 

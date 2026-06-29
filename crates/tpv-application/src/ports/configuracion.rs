@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
-use tpv_contracts::configuracion::{BusinessSettings, TicketSettings};
+use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
 
 use crate::error::AppResult;
 
@@ -11,8 +11,8 @@ use crate::error::AppResult;
 pub trait ConfiguracionRepository: Send + Sync {
     async fn get_business(&self) -> AppResult<BusinessSettings>;
     async fn get_ticket(&self) -> AppResult<TicketSettings>;
-    /// Aplica un patch parcial a los ajustes de negocio.
+    async fn get_contact(&self) -> AppResult<ContactSettings>;
     async fn patch_business(&self, patch: &JsonValue) -> AppResult<()>;
-    /// Aplica un patch parcial a los ajustes de ticket.
     async fn patch_ticket(&self, patch: &JsonValue) -> AppResult<()>;
+    async fn patch_contact(&self, patch: &JsonValue) -> AppResult<()>;
 }

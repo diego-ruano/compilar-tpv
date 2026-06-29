@@ -177,9 +177,13 @@ function getTenantTokenAgeBaseMs(row: any): number {
 /**
  * Resuelve (y rota si procede) las credenciales de la DB del tenant.
  *
- * @param dbCentral  Cliente libsql a la DB central (control).
- * @param env        Secretos para descifrar/rotar el token.
- * @param tenantId   Tenant a resolver.
+ * Usa locking optimista en la rotación: el UPDATE solo escribe si `rotated_at_ms`
+ * sigue siendo el valor que leyó este isolate. Si otro isolate ganó la carrera,
+ * se relee la fila y se descifra el token que él escribió, sin sobreescribir.
+ *
+ * @param dbCentral   Cliente libsql a la DB central (control).
+ * @param env         Secretos para descifrar/rotar el token.
+ * @param tenantId    Tenant a resolver.
  * @param forceRotate Fuerza la generación de un token nuevo (p. ej. tras un 401).
  */
 export async function resolveTenantDbCredentials(
@@ -196,6 +200,7 @@ export async function resolveTenantDbCredentials(
 
 	const dbName = String(row.turso_db_name);
 	const tursoUrl = String(row.turso_url);
+	const oldRotatedAtMs = toNumOrNull(row?.rotated_at_ms); // null = nunca rotado
 	const lastRotationBaseMs = getTenantTokenAgeBaseMs(row);
 
 	const shouldRotate =
@@ -205,14 +210,39 @@ export async function resolveTenantDbCredentials(
 
 	if (shouldRotate) {
 		const freshToken = await tursoCreateDbToken(env, dbName);
-		await upsertTenantDbRow(dbCentral, env, tenantId, dbName, tursoUrl, freshToken);
 
+		// CAS: solo escribe si nadie más ha rotado mientras generábamos el token.
+		const won = await rotateTokenIfOwner(
+			dbCentral,
+			env,
+			tenantId,
+			freshToken,
+			oldRotatedAtMs,
+		);
+
+		if (won) {
+			return {
+				dbName,
+				tursoUrl,
+				tursoAuthToken: freshToken,
+				rotated: true,
+				rotatedAtMs: Date.now(),
+			};
+		}
+
+		// Otro isolate ganó la carrera: leer y descifrar su token (no sobreescribir).
+		const updated = await getTenantDbRow(dbCentral, tenantId);
+		if (!updated?.turso_auth_token_enc) throw new Error("tenant_db_not_provisioned");
+		const token = await aesGcmDecryptFromB64(
+			env.LICENSE_STORE_KEY,
+			String(updated.turso_auth_token_enc),
+		);
 		return {
 			dbName,
 			tursoUrl,
-			tursoAuthToken: freshToken,
-			rotated: true,
-			rotatedAtMs: Date.now(),
+			tursoAuthToken: token,
+			rotated: false,
+			rotatedAtMs: toNumOrNull(updated?.rotated_at_ms) ?? lastRotationBaseMs,
 		};
 	}
 
@@ -228,4 +258,30 @@ export async function resolveTenantDbCredentials(
 		rotated: false,
 		rotatedAtMs: lastRotationBaseMs,
 	};
+}
+
+/**
+ * Actualiza el token cifrado solo si `rotated_at_ms` sigue siendo `oldRotatedAtMs`
+ * (o NULL si nunca se ha rotado). Devuelve true si la escritura se completó, false
+ * si otro isolate ya había rotado antes.
+ */
+async function rotateTokenIfOwner(
+	dbCentral: Client,
+	env: TenantDbEnv,
+	tenantId: string,
+	freshToken: string,
+	oldRotatedAtMs: number | null,
+): Promise<boolean> {
+	const enc = await aesGcmEncryptToB64(env.LICENSE_STORE_KEY, freshToken);
+	// IS hace comparación NULL-safe: `col IS NULL` cuando el arg es null,
+	// `col IS 1234` (equivalente a =) cuando es un número.
+	const result = await dbCentral.execute({
+		sql: `UPDATE tenant_databases
+		      SET turso_auth_token_enc = ?,
+		          rotated_at_ms        = unixepoch() * 1000
+		      WHERE tenant_id     = ?
+		        AND rotated_at_ms IS ?`,
+		args: [enc, tenantId, oldRotatedAtMs],
+	});
+	return result.rowsAffected > 0;
 }
