@@ -470,16 +470,16 @@ export default function AppBoot({ router }: { router: any }) {
     useEffect(() => {
         if (mode !== "tpv") return;
 
-        bizInit().catch(() => {
-            // noop
+        bizInit().catch((e: unknown) => {
+            console.error("[AppBoot] bizInit error:", e);
         });
 
-        ticketInit().catch(() => {
-            // noop
+        ticketInit().catch((e: unknown) => {
+            console.error("[AppBoot] ticketInit error:", e);
         });
 
-        contactInit().catch(() => {
-            // noop
+        contactInit().catch((e: unknown) => {
+            console.error("[AppBoot] contactInit error:", e);
         });
     }, [mode, bizInit, ticketInit, contactInit]);
 
@@ -490,8 +490,8 @@ export default function AppBoot({ router }: { router: any }) {
         if (mode !== "tpv") return;
         void invoke("images_backfill")
             .then(() => invoke("images_drain_pending"))
-            .catch(() => {
-                // offline / sin permisos: se reintenta más tarde
+            .catch((e: unknown) => {
+                console.warn("[AppBoot] images_drain_pending falló:", e);
             });
     }, [mode]);
 

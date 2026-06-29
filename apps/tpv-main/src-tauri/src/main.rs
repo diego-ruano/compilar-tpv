@@ -717,7 +717,11 @@ async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Res
         None => format!("subidas={subidas} pendientes={}", remaining.len()),
     };
     eprintln!("[image_drain] resultado: {resultado}");
-    Ok(resultado)
+    if ultimo_error.is_some() {
+        Err(resultado)
+    } else {
+        Ok(resultado)
+    }
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
