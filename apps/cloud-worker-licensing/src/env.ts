@@ -53,4 +53,23 @@ export interface Env {
 	// (POST /v1/update/publish y /deactivate). Si NO está configurado, la publicación
 	// queda deshabilitada (fail-safe). Configura con: wrangler secret put RELEASE_ADMIN_TOKEN
 	RELEASE_ADMIN_TOKEN?: string;
+
+	// ── Observabilidad ──
+	// Sentry (errores). DSN del proyecto del worker. Si NO está, Sentry queda deshabilitado
+	// (no-op): el código es seguro de desplegar antes de crear el proyecto.
+	// Configura con: wrangler secret put SENTRY_DSN
+	SENTRY_DSN?: string;
+	// Entorno para separar métricas (dev/staging/prod). Por defecto "prod".
+	ENVIRONMENT?: string;
+	// Release opcional (p. ej. versión desplegada) para agrupar regresiones en Sentry.
+	SENTRY_RELEASE?: string;
+
+	// Axiom (logs estructurados). El token es PRIVADO y vive sólo aquí (nunca en el dispositivo).
+	// Si falta, el reenvío a Axiom se omite silenciosamente. Configura con:
+	//   wrangler secret put AXIOM_TOKEN
+	AXIOM_TOKEN?: string;
+	// Dataset de Axiom donde caen los logs reenviados desde los dispositivos.
+	AXIOM_DATASET?: string;
+	// Dataset de Axiom para los eventos de salud del sistema de sincronización (TenantHub).
+	AXIOM_DATASET_SYNC?: string;
 }

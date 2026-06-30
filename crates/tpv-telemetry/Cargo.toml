@@ -1,0 +1,18 @@
+[package]
+name = "tpv-telemetry"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+description = "Infraestructura de telemetría (logging) del TPV: subscriber `tracing` con consola (dev), fichero local rotado por días y una cola DURABLE en disco que un worker en segundo plano sube por lotes al worker tpv-api. Pieza HOJA del workspace: el resto de crates sólo emiten eventos con las macros estándar de `tracing` sin conocer el destino."
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+sentry = { workspace = true }
+sentry-tracing = { workspace = true }

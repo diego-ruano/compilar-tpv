@@ -4,6 +4,7 @@ import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/t
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
 import { verifyInternalWorkerRequest } from "../lib/internalAuth";
+import { ingestToAxiom } from "../observability/axiom";
 
 type Role = "tpv" | "handy" | "unknown";
 
@@ -803,6 +804,15 @@ export class TenantHub {
 				deviceId || undefined,
 			);
 
+			this.emitSyncEvent("apply", {
+				command,
+				op_id: op,
+				device_id: deviceId || null,
+				seq,
+				tenant_id: tenantId,
+				latency_ms: nowMs() - createdAtMs,
+			});
+
 			return { result, seq };
 		});
 	}
@@ -952,6 +962,30 @@ export class TenantHub {
 			return Number((r.rows?.[0] as any)?.seq ?? 0);
 		} catch {
 			return 0;
+		}
+	}
+
+	/**
+	 * Emite un evento de SALUD del sistema de sincronización a Axiom (dataset AXIOM_DATASET_SYNC).
+	 * Fire-and-forget: la observabilidad jamás debe afectar al camino de escritura del sync, así que
+	 * no se espera ni se propagan errores. No-op si Axiom no está configurado.
+	 */
+	private emitSyncEvent(name: string, fields: Record<string, unknown>): void {
+		const dataset = this.env.AXIOM_DATASET_SYNC;
+		if (!this.env.AXIOM_TOKEN || !dataset) return;
+		try {
+			const event = {
+				_time: new Date().toISOString(),
+				service: "tpv-sync",
+				event: name,
+				tenant_id: this.tenantDbTenantId ?? undefined,
+				connected_devices: this.authed.size,
+				main_connected: this.isMainConnected(),
+				...fields,
+			};
+			void ingestToAxiom(this.env, dataset, [event]);
+		} catch {
+			/* la salud de sync es best-effort; nunca afecta al sync */
 		}
 	}
 
@@ -1331,6 +1365,7 @@ export class TenantHub {
 
 							if (roleFinal === "tpv") {
 								this.broadcast({ type: "main_online", deviceId }, deviceId);
+								this.emitSyncEvent("main_online", { device_id: deviceId });
 							}
 						} catch (e: any) {
 							const err = String(e?.message || e);
@@ -1495,6 +1530,7 @@ export class TenantHub {
 			// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.
 			if (wasMain && !this.isMainConnected()) {
 				this.broadcast({ type: "main_offline", deviceId }, deviceId);
+				this.emitSyncEvent("main_offline", { device_id: deviceId });
 			}
 		});
 

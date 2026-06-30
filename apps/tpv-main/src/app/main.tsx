@@ -7,6 +7,10 @@ import AppBoot from "./AppBoot";
 import { appRouter } from "./Router";
 import { queryClient } from "../shared/lib/queryClient";
 import { initTheme } from "../shared/stores/useTheme";
+import { initSentry } from "../shared/observability/sentry";
+
+// Observabilidad lo primero: así se capturan también los errores del arranque.
+initSentry();
 
 // Aplica el tema (claro/oscuro) al <html> antes del primer render para
 // evitar el parpadeo de tema incorrecto.

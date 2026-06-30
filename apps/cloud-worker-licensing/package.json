@@ -11,6 +11,7 @@
 	"dependencies": {
 		"@libsql/client": "^0.17.0",
 		"@noble/ed25519": "^3.0.0",
+		"@sentry/cloudflare": "^10.62.0",
 		"@tpv/contracts": "workspace:*",
 		"hono": "^4.6.0",
 		"jose": "^6.1.3",

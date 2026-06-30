@@ -26,6 +26,8 @@
 
         "fs:allow-write-file",
 
-        "updater:default"
+        "updater:default",
+
+        "sentry:default"
     ]
 }

@@ -69,3 +69,12 @@ tpv-infra-sqlite = { workspace = true }
 tpv-infra-licensing = { workspace = true }
 tpv-infra-http = { workspace = true }
 tpv-contracts = { workspace = true }
+tpv-telemetry = { workspace = true }
+
+# ───────────── Observabilidad / Logging ─────────────
+# Fachada de logging: el shell y los comandos emiten con las macros de `tracing`; el destino
+# (consola/fichero/nube) lo monta `tpv-telemetry` al arrancar.
+tracing = { workspace = true }
+# Plugin de Sentry para Tauri: unifica el ciclo de vida de Sentry entre la Webview (JS) y el
+# Core (Rust) y captura crashes nativos vía minidump. Reutiliza el cliente que crea tpv-telemetry.
+tauri-plugin-sentry = "0.5"

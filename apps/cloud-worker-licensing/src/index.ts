@@ -15,8 +15,10 @@
 //   - POST /v1/license/activate · GET /v1/license/status · POST /v1/webhooks/lemon
 
 import { Hono } from "hono";
+import * as Sentry from "@sentry/cloudflare";
 
 import type { Env } from "./env";
+import { sentryOptions } from "./observability/sentry";
 import { getDb } from "./server/db";
 import {
 	json,
@@ -46,9 +48,19 @@ import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice
 import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
 import { emailRoutes } from "./domains/email/email.routes";
 import { licenseRoutes, lemonWebhookRoutes } from "./domains/licensing/licensing.routes";
+import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
 
-// El Durable Object vive ahora en este worker (antes en `tpv-server`).
-export { TenantHub } from "./durableObjects/tenantHub";
+// El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
+// para capturar las excepciones de su ciclo de vida (apply idempotente, WebSocket, broadcast).
+// `TenantHub` es un DO de estilo CLÁSICO (clase con método `fetch`, no `extends DurableObject`):
+// la instrumentación funciona en runtime con cualquier DO, pero la firma de tipos del SDK espera
+// la clase base moderna, de ahí el cast acotado.
+import { TenantHub as TenantHubClass } from "./durableObjects/tenantHub";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
+	sentryOptions,
+	TenantHubClass as any,
+);
 
 function readBearerMaybe(req: Request): string {
 	const h = req.headers.get("authorization") || "";
@@ -151,6 +163,11 @@ app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);
 app.route("/v1/email", emailRoutes);
 
+// ---------------- Telemetría (logs de dispositivo → Axiom) ----------------
+// Los dispositivos suben aquí sus lotes de logs; el worker los retransmite a Axiom con el token
+// privado. Auth device-proof; el tenant/device los fija el servidor (ver telemetry.routes.ts).
+app.route("/v1/telemetry", telemetryRoutes);
+
 // ---------------- Licencias (activación / status) + webhook de Lemon ----------------
 // Migrado a Hono desde el antiguo handler legacy `server/index.ts`. Lo consume el cliente Rust
 // (tpv-infra-licensing) y los webhooks de Lemon Squeezy.
@@ -174,6 +191,9 @@ app.post("/v1/device/revoke", (c) =>
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
 // idempotency_*) a JSON; el resto cae a un 500 con detalle.
 app.onError((err, c) => {
+	// Reporta a Sentry también los errores que aquí traducimos a JSON: Hono los captura antes de
+	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
+	Sentry.captureException(err);
 	const status = (err as any)?.status;
 	if (typeof status === "number") {
 		return c.json(
@@ -186,4 +206,8 @@ app.onError((err, c) => {
 	});
 });
 
-export default app;
+// El wrapper de Sentry captura las excepciones no controladas del worker (requiere el flag
+// `nodejs_compat`, ver wrangler.json). Si no hay `SENTRY_DSN`, es un no-op transparente.
+export default Sentry.withSentry(sentryOptions, {
+	fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+} satisfies ExportedHandler<Env>);

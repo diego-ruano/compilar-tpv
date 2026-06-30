@@ -13,6 +13,7 @@ members = [
   "crates/tpv-infra-licensing",
   "crates/tpv-infra-http",
   "crates/tpv-contracts",
+  "crates/tpv-telemetry",
   "apps/tpv-main/src-tauri",
 ]
 
@@ -29,6 +30,7 @@ tpv-infra-sqlite = { path = "crates/tpv-infra-sqlite" }
 tpv-infra-licensing = { path = "crates/tpv-infra-licensing" }
 tpv-infra-http = { path = "crates/tpv-infra-http" }
 tpv-contracts = { path = "crates/tpv-contracts" }
+tpv-telemetry = { path = "crates/tpv-telemetry" }
 
 # ── Async / Runtime ──
 tokio = { version = "1", features = ["full"] }
@@ -72,3 +74,16 @@ ts-rs = { version = "12", features = ["chrono-impl"] }
 
 # ── Migraciones: embeber los .sql de packages/database/migrations en el binario ──
 include_dir = "0.7"
+
+# ── Observabilidad / Logging (crate tpv-telemetry) ──
+# `tracing` es la FACHADA que emite el resto de crates (sin conocer el destino). Los sinks
+# (consola/fichero/nube) los monta tpv-telemetry como capas del subscriber.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Fichero local rotado por días con tope de número de ficheros (max_log_files).
+tracing-appender = "0.2"
+# Sentry (errores/crashes): el cliente lo construye tpv-telemetry; el plugin de Tauri
+# (tauri-plugin-sentry, sólo en la app) reutiliza ese mismo cliente para unificar Rust+Webview.
+sentry = "0.42"
+# Puente tracing→Sentry: convierte los `error!` en eventos Sentry con breadcrumbs.
+sentry-tracing = "0.42"

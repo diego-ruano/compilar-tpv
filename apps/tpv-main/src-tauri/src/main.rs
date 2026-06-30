@@ -274,6 +274,37 @@ fn signing_mode(mode: Option<DeviceMode>) -> Option<&'static str> {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Telemetría: firmante de la subida a /v1/telemetry
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Firma device-proof los lotes de telemetría que el worker de `tpv-telemetry` sube a la nube.
+/// Vive en el shell porque la cripto (`PairingAdapter`) está fuera de la crate de telemetría (que es
+/// una HOJA, sin dependencias internas): el shell inyecta esta capacidad. Devuelve las cabeceras
+/// firmadas (las mismas que usa el `CloudClient`), o `None` si el dispositivo aún no puede firmar
+/// (sin modo/identidad/licencia) — en ese caso el worker retiene los lotes en disco y reintenta.
+struct PairingTelemetrySigner {
+    app_data_dir: PathBuf,
+    /// Espejo síncrono del modo (el worker firma desde su propio hilo, sin contexto async).
+    mode: Arc<std::sync::RwLock<Option<DeviceMode>>>,
+}
+
+impl tpv_telemetry::IngestSigner for PairingTelemetrySigner {
+    fn sign(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
+        let mode = (*self.mode.read().ok()?)?;
+        let mode_str = signing_mode(Some(mode))?;
+        let pairing = PairingAdapter::new(self.app_data_dir.clone());
+        let h = pairing
+            .tpv_server_signed_headers(mode_str, method, path)
+            .ok()?;
+        Some(vec![
+            ("authorization".to_string(), h.authorization),
+            ("x-device-ts".to_string(), h.x_device_ts),
+            ("x-device-sig".to_string(), h.x_device_sig),
+        ])
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Estado global
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -281,6 +312,9 @@ pub(crate) struct AppState {
     db: Arc<Mutex<Option<Arc<Db>>>>,
     cloud: Arc<Mutex<Option<Arc<CloudClient>>>>,
     mode: Arc<Mutex<Option<DeviceMode>>>,
+    /// Espejo SÍNCRONO del modo para el firmante de telemetría (que corre en otro hilo sin async).
+    /// Se mantiene en paralelo con `mode` en cada cambio de modo.
+    mode_sync: Arc<std::sync::RwLock<Option<DeviceMode>>>,
 }
 
 /// Genera un accessor `<name>(&self) -> Arc<dyn $trait>` que devuelve el repositorio
@@ -499,6 +533,18 @@ async fn set_device_mode(
         *m = Some(args.mode);
     }
 
+    // Mantener el espejo síncrono + el contexto de telemetría al día con el modo elegido.
+    if let Ok(mut ms) = state.mode_sync.write() {
+        *ms = Some(args.mode);
+    }
+    let device_id = uc_pairing::device_identity(&PairingAdapter::new(app_data_dir.clone()))
+        .map(|d| d.device_id)
+        .unwrap_or_else(|_| "unknown".to_string());
+    tpv_telemetry::set_device_context(
+        device_id,
+        signing_mode(Some(args.mode)).unwrap_or("unset"),
+    );
+
     // En modo Handy preparamos el cliente HTTP a la nube (no hace red, sólo lo deja listo)
     // para que el cambio de modo sea efectivo sin reiniciar la app.
     if args.mode == DeviceMode::Handy {
@@ -578,6 +624,9 @@ async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result
     // 2) Estado en memoria: sin modo y sin backends acoplados.
     {
         *state.mode.lock().await = None;
+    }
+    if let Ok(mut ms) = state.mode_sync.write() {
+        *ms = None;
     }
     {
         *state.db.lock().await = None;
@@ -1019,12 +1068,88 @@ async fn updater_install(app: AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Sentry primero: captura panics y crashes nativos desde el arranque. El DSN (público) se embebe
+    // en el build vía `TPV_SENTRY_DSN`; si no está, el cliente queda DESHABILITADO (no-op) pero el
+    // plugin se registra igualmente para que el Sentry de la Webview tenga transporte. El guard y el
+    // de minidump deben vivir todo el proceso (por eso son locales de `run`, que bloquea en `.run()`).
+    let sentry_guard = tpv_telemetry::init_sentry(tpv_telemetry::SentryConfig {
+        dsn: option_env!("TPV_SENTRY_DSN").map(|s| s.to_string()),
+        environment: if cfg!(debug_assertions) { "dev" } else { "prod" }.to_string(),
+        release: Some(env!("CARGO_PKG_VERSION").to_string()),
+    });
+    // Minidumps (crashes nativos) sólo con DSN real, para no lanzar el proceso crash-handler en vano.
+    let _minidump_guard =
+        option_env!("TPV_SENTRY_DSN").map(|_| tauri_plugin_sentry::minidump::init(&sentry_guard));
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_sentry::init(&sentry_guard))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let handle = app.handle();
+
+            let app_data_dir = handle
+                .path()
+                .app_data_dir()
+                .expect("Error obteniendo AppData");
+
+            ensure_folders(&app_data_dir).expect("Error creando carpetas");
+
+            let cfg = load_config(&app_data_dir);
+            let mode = cfg.mode;
+
+            // Espejo SÍNCRONO del modo: lo lee el firmante de telemetría desde su propio hilo (sin
+            // contexto async). Se comparte con el `AppState` para mantenerlo al día en cada cambio.
+            let mode_sync = Arc::new(std::sync::RwLock::new(mode));
+
+            // Telemetría: lo primero (tras resolver AppData), para capturar también los errores del
+            // arranque. NUNCA tumba la app: si `init` falla, se avisa por stderr y se sigue sin
+            // telemetría. Destinos: consola (dev) + fichero local 7 días + cola durable que un worker
+            // en segundo plano sube a `/v1/telemetry` firmando device-proof (si aún no puede firmar,
+            // retiene los lotes y reintenta). El shell aporta ruta de datos, versión y el firmante.
+            {
+                let version = handle.package_info().version.to_string();
+                let signer: Arc<dyn tpv_telemetry::IngestSigner> =
+                    Arc::new(PairingTelemetrySigner {
+                        app_data_dir: app_data_dir.clone(),
+                        mode: mode_sync.clone(),
+                    });
+                let mut tcfg =
+                    tpv_telemetry::TelemetryConfig::local_only(app_data_dir.clone(), version);
+                tcfg.ingest = tpv_telemetry::IngestConfig {
+                    url: format!("{CLOUD_API_BASE}/v1/telemetry"),
+                    path: "/v1/telemetry".to_string(),
+                    enabled: true,
+                    signer: Some(signer),
+                };
+                if let Err(e) = tpv_telemetry::init(tcfg) {
+                    eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}");
+                }
+                // Etiqueta el contexto de correlación cuanto antes con la identidad REAL del
+                // dispositivo (id estable derivado de su clave, disponible desde el primer arranque).
+                let device_id =
+                    uc_pairing::device_identity(&PairingAdapter::new(app_data_dir.clone()))
+                        .map(|d| d.device_id)
+                        .unwrap_or_else(|_| "unknown".to_string());
+                tpv_telemetry::set_device_context(
+                    device_id,
+                    mode.and_then(|m| signing_mode(Some(m))).unwrap_or("unset"),
+                );
+                // Tenant (restaurante): en Handy se conoce desde el token; en Main el endpoint de
+                // telemetría ya inyecta el tenant autenticado en la nube, así que aquí es best-effort.
+                if let Ok(Some(tenant)) =
+                    uc_pairing::handy_get_tenant(&PairingAdapter::new(app_data_dir.clone()))
+                {
+                    tpv_telemetry::set_tenant(tenant);
+                }
+                tracing::info!(
+                    target: "tpv::startup",
+                    version = %handle.package_info().version,
+                    mode = ?mode,
+                    "TPV iniciado"
+                );
+            }
 
             // Chequeo de actualización en arranque (en Rust, independiente del frontend). Si hay
             // versión nueva, emite `update:available`; la UI muestra un aviso no intrusivo y el
@@ -1046,22 +1171,12 @@ pub fn run() {
                                 );
                             }
                             Ok(None) => {}
-                            Err(e) => eprintln!("[updater] check falló: {e}"),
+                            Err(e) => tracing::warn!(target: "tpv::updater", error = %e, "check de actualización falló"),
                         },
-                        Err(e) => eprintln!("[updater] no disponible: {e}"),
+                        Err(e) => tracing::warn!(target: "tpv::updater", error = %e, "updater no disponible"),
                     }
                 });
             }
-
-            let app_data_dir = handle
-                .path()
-                .app_data_dir()
-                .expect("Error obteniendo AppData");
-
-            ensure_folders(&app_data_dir).expect("Error creando carpetas");
-
-            let cfg = load_config(&app_data_dir);
-            let mode = cfg.mode;
 
             let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
@@ -1095,6 +1210,7 @@ pub fn run() {
                 db: Arc::new(Mutex::new(db_opt)),
                 cloud: Arc::new(Mutex::new(cloud_opt)),
                 mode: Arc::new(Mutex::new(mode)),
+                mode_sync,
             });
 
             Ok(())

@@ -1,5 +1,6 @@
 import React from "react";
 import ErrorFallback from "./ErrorFallback";
+import { captureException } from "../../../shared/observability/sentry";
 
 type Props = {
     children: React.ReactNode;
@@ -18,7 +19,8 @@ export default class AppErrorBoundary extends React.Component<Props, State> {
     }
 
     componentDidCatch(error: unknown, info: unknown) {
-        // Aquí puedes loguear, o enviar a Rust, etc.
+        // Reporta a Sentry (vía el SDK de Rust) y deja también el rastro en consola.
+        captureException(error, { react: info });
         console.error("💥 ErrorBoundary caught:", error, info);
     }
 
