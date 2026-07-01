@@ -31,7 +31,7 @@ pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// UUID fijos de los seeds (idénticos en local y nube). Ver `packages/database/schema.sql`.
+/// UUID fijos de los seeds (idénticos en local y nube). Ver `packages/database/migrations/0001_inicial.sql`.
 /// La mesa/zona BARRA usa un id fijo para que la venta rápida cuadre entre dispositivos.
 pub const BARRA_MESA_ID: &str = "00000000-0000-7000-8000-000000000401";
 pub const BARRA_ZONA_ID: &str = "00000000-0000-7000-8000-000000000303";

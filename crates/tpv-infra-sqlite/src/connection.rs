@@ -1,9 +1,10 @@
 //! Conexión y arranque (schema + seed) de la base de datos **SQLite local (libsql)**.
 //!
 //! Antes vivía en el shell Tauri (`main.rs`). El shell ahora sólo aporta la ruta de
-//! datos (AppData) y el contenido del `schema.sql`; este módulo abre la BD (`Db`: escritor
-//! único + pool de lectura, WAL), aplica el esquema y siembra el administrador inicial si la
-//! BD está vacía.
+//! datos (AppData); este módulo abre la BD (`Db`: escritor único + pool de lectura, WAL),
+//! construye/actualiza el esquema aplicando las migraciones embebidas
+//! (`packages/database/migrations/`, ver `migrations.rs`) y siembra el administrador inicial
+//! si la BD está vacía.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -49,7 +50,7 @@ async fn query_single_i64(conn: &Connection, sql: &str) -> AppResult<i64> {
     Ok(value_to_i64(v).unwrap_or(0))
 }
 
-/// Lee el `ID_Rol` (UUID en texto) del rol Administrador, sembrado por `schema.sql`.
+/// Lee el `ID_Rol` (UUID en texto) del rol Administrador, sembrado por la migración inicial (`0001`).
 async fn query_admin_role_id(conn: &Connection) -> AppResult<Option<String>> {
     let mut rows = conn
         .query(
@@ -92,7 +93,7 @@ async fn seed_contact_settings(conn: &Connection) -> AppResult<()> {
 }
 
 /// Crea un usuario admin inicial (PIN `1234`, `Requiere_Setup`) **sólo** si la tabla
-/// `Usuarios` está vacía. Los roles ya los siembra `schema.sql` con sus UUIDv7 fijos.
+/// `Usuarios` está vacía. Los roles ya los siembra la migración inicial (`0001`) con sus UUIDv7 fijos.
 async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
     let users_count = query_single_i64(conn, "SELECT COUNT(*) FROM Usuarios;").await?;
     if users_count > 0 {

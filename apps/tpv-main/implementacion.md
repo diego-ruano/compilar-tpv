@@ -1,7 +1,13 @@
 # Lista de tecnologías e implementación
 
 **Release de nuevas versiones del programa (relacionado con la base de datos)**
-Hay un problema si sacamos una actualización del programa que implique añadir campos a las tablas que ya tenemos hechas, porque en el schema.sql tenemos create table if not exists, así que si añadimos el crear un nuevo campo, nunca se va a crear porque esa tabla ya existía entonces ese bloque no se ejecuta (a no ser que se instale la app de cero pero suponemos que ya estaba instalada). Entonces para solucionar esto habría que tener un control de versiones de la base de datos dentro de Rust que compruebe en que versión de la base de datos estamos, si estamos en la
+RESUELTO: ya existe un sistema de migraciones. El esquema ya NO es un `schema.sql` con
+`CREATE TABLE IF NOT EXISTS` (que no aplicaba cambios sobre tablas existentes). La fuente única de
+verdad son los ficheros `.sql` de `packages/database/migrations/`, aplicados en orden y controlados
+por una tabla `_migrations (name, hash, applied_at)`: cada BD (escritorio y tenant Turso) aplica solo
+las migraciones que le falten, así que añadir un campo se hace con una migración nueva y aditiva
+(`ALTER TABLE ... ADD COLUMN`) que se aplica sobre instalaciones existentes. Detalle en
+`crates/tpv-infra-sqlite/src/migrations.rs` y `apps/cloud-worker-licensing/src/server/tenantMigrations.ts`.
 
 **Impresión de los tickets**
 Tauri tiene un plugin para poder mandar cosas a la impresora, tenemos que hacer un diseño del ticket con html y con html2canvas hacemos una captura de pantalla del ticket, la convertimos a un string base64 y se imprime eso. Hay que testear cuando tarda en sacar el ticket porque es una imagen, si tarda yo que se 10 segundos pues no me parece viable, habría que mandar instrucciones crudas a la impresora para que imprima texto puro y no una imagen, pero bueno probamos lo otro primero que es más sencillo

@@ -1,16 +1,18 @@
 /* =========================================================
-   TPV SCHEMA — ÚNICO Y COMPARTIDO (app local + nube Turso)
-   - Fuente de verdad unica del esquema. Lo consumen:
-       * App de escritorio (Rust): include_str! en
-         apps/tpv-main/src-tauri/src/main.rs
-       * Worker tpv-api: import como modulo Text en
-         apps/cloud-worker-licensing/src/server/index.ts
-   - Sin migraciones: pensado para borrar DB y recrear.
+   TPV SCHEMA — MIGRACION INICIAL (0001) · UNICA Y COMPARTIDA (app local + nube Turso)
+   - La FUENTE UNICA DE VERDAD del esquema son los ficheros .sql de
+     packages/database/migrations/, aplicados EN ORDEN. Este es el primero.
+     Los consumen los dos runners espejo:
+       * App de escritorio (Rust): crates/tpv-infra-sqlite/src/migrations.rs los
+         embebe con include_dir! y aplica lo pendiente en cada arranque.
+       * Worker tpv-api: apps/cloud-worker-licensing/src/server/tenantMigrations.ts
+         los registra y aplica igual sobre cada BD por-tenant (Turso).
+     Cada BD lleva una tabla _migrations (name, hash, applied_at): una BD nueva se
+     construye desde 0001 y una existente solo aplica lo que le falte.
+   - REGLA DE ORO: nunca edites una migracion ya publicada (rompe el hash → error
+     duro en ambos runners). Todo cambio va en una migracion NUEVA y aditiva.
    - Inventario con LOTES + FEFO.
-   - Idempotencia/atomicidad: Applied_Operations.
-   - Sin tablas de catch-up: si se cae el WebSocket de la Main, el sistema
-     se congela (presencia en el DO TenantHub), asi que no hay nada que
-     recuperar al reconectar.
+   - Idempotencia/atomicidad: Applied_Operations (ver §10).
    - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
      unico esquema para ambos.
 

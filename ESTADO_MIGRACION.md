@@ -16,8 +16,9 @@ Los dos workers se han **unificado en uno solo**: `apps/cloud-worker-licensing/`
   worker viejo, ahora resuelve credenciales de Turso en local con caché TTL en vez de la llamada
   HTTP cruzada entre workers), **pairing** (`/v1/pair/*`), revoke, WS y el licensing legacy
   (`/v1/license/*`, webhook Lemon) vía fallthrough mientras se migra a Hono.
-- **Schema único**: `packages/database/schema.sql` lo consumen la app (Rust, `include_str!`) y el
-  worker (módulo Text de wrangler). Limpiadas las tablas muertas de la antigua capa `dualCall`.
+- **Schema único**: los ficheros `packages/database/migrations/*.sql` (aplicados en orden) los
+  consumen la app (Rust, `include_dir!` en `migrations.rs`) y el worker (`tenantMigrations.ts`).
+  Limpiadas las tablas muertas de la antigua capa `dualCall`.
 - El cliente Rust (`tpv-infra-licensing`) apunta a `https://tpv-api.altarialights.workers.dev`.
 
 ---
@@ -47,8 +48,8 @@ Los dos workers se han **unificado en uno solo**: `apps/cloud-worker-licensing/`
 - **Pairing/Handy** se conserva (latente para el futuro), como estaba acordado.
 
 ### Otros hitos
-- **Conexión/seed** de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db`); el shell
-  sólo aporta la ruta AppData y el `schema.sql`.
+- **Conexión/seed** de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db`); el esquema
+  lo construyen las migraciones embebidas (`migrations.rs`) y el shell sólo aporta la ruta AppData.
 - Añadida **alta/edición local de trabajador** (`trabajadores_create` / `trabajadores_update`),
   que antes era online-only sobre `dualCall`.
 - **Auditoría de fidelidad** de `licensing`/`pairing`: 1 bug real detectado y corregido

@@ -23,7 +23,7 @@ const REF_ID_MESA_BARRA = { $ref: "id_mesa_barra" } as const;
 const REF_ID_COMANDA = { $ref: "id_comanda" } as const;
 const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 
-// UUIDs fijos (idénticos en local y nube; sembrados en schema.sql).
+// UUIDs fijos (idénticos en local y nube; sembrados en la migración inicial 0001).
 const BARRA_ZONA_ID = "00000000-0000-7000-8000-000000000303";
 const BARRA_MESA_ID = "00000000-0000-7000-8000-000000000401";
 
