@@ -508,11 +508,19 @@ CREATE INDEX IF NOT EXISTS idx_pago_detalles_detalle
 ON Pago_Detalles(ID_Detalle);
 
 /* =========================================================
-   10. Idempotencia / Atomicidad
-   Registro de operaciones ya aplicadas (por Op_Id) para evitar
-   duplicados y dar atomicidad al aplicar cambios (en la nube al
-   recibir ops de las Handy; en local al aplicar cambios entrantes).
-   Tabla interna de control: su ID sigue siendo INTEGER local.
+   10. Idempotencia / Atomicidad (tabla de la NUBE)
+   Applied_Operations la usa el WORKER (nube) como gate idempotente por Op_Id al
+   aplicar escrituras (ver TenantHub.applyInternalCommand): un Op_Id repetido viola
+   UNIQUE(Op_Id) y hace rollback del batch, evitando duplicar el trabajo.
+
+   Forma parte del esquema UNICO compartido, asi que TAMBIEN se crea en la BD local
+   de la Main, pero AHI QUEDA VACIA a proposito: la Main lleva su propia idempotencia
+   en la tabla de control _Sync_Applied_Ops (creada por init_sync_tables en
+   crates/tpv-infra-sqlite/src/db.rs, fuera de las migraciones). Reparto:
+     - NUBE  -> Applied_Operations (esta tabla).
+     - MAIN  -> _Sync_Applied_Ops  (anti-eco de sus propias escrituras + catch-up).
+   Se mantiene en ambos lados por la politica de esquema unico (no pasa nada si queda
+   vacia en un lado). Tabla interna de control: su ID sigue siendo INTEGER local.
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Applied_Operations (
   ID_Applied_Operation INTEGER PRIMARY KEY AUTOINCREMENT,

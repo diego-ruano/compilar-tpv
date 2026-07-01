@@ -517,7 +517,13 @@ impl Db {
     }
 }
 
-/// Crea (idempotente) las tablas de control de la sincronización.
+/// Crea (idempotente) las tablas de control de la sincronización **locales de la Main**. NO forman
+/// parte del esquema compartido (las migraciones) y no existen en la nube.
+///
+/// Reparto de idempotencia (ver §10 de `0001_inicial.sql`): la NUBE usa `Applied_Operations`
+/// (tabla del esquema compartido) como gate por `Op_Id`; la MAIN usa `_Sync_Applied_Ops` (aquí)
+/// para el anti-eco de sus propias escrituras y para el catch-up al reconectar. `Applied_Operations`
+/// también se crea en la BD local (esquema único) pero queda vacía: la Main no la usa.
 async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
     conn.execute_batch(
         r#"
