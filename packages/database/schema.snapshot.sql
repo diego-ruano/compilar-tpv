@@ -9,7 +9,9 @@ CREATE INDEX idx_comandas_trab_apertura ON Comandas(ID_Trabajador, Fecha_Hora_Ap
 CREATE INDEX idx_cuentas_gastos_fecha ON Cuentas_Gastos(Fecha);
 CREATE INDEX idx_cuentas_gastos_proveedor ON Cuentas_Gastos(ID_Proveedor);
 CREATE INDEX idx_dc_cocinero_fecha ON Detalle_Comanda(ID_Usuario_Cocinero, Fecha_Hora_Cocina);
+CREATE INDEX idx_dc_comanda ON Detalle_Comanda(ID_Comanda);
 CREATE INDEX idx_dc_estado_fecha ON Detalle_Comanda(Estado_Cocina, Fecha_Hora_Cocina);
+CREATE INDEX idx_dc_producto ON Detalle_Comanda(ID_Producto);
 CREATE INDEX idx_fichajes_user_abierto ON Fichajes(ID_Usuario, Estado);
 CREATE INDEX idx_fichajes_user_fecha ON Fichajes(ID_Usuario, Fecha);
 CREATE INDEX idx_hp_trab_weekday ON Horario_Predeterminado(ID_Trabajador, Weekday);

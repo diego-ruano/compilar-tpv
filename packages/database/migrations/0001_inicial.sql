@@ -337,6 +337,16 @@ ON Detalle_Comanda(ID_Usuario_Cocinero, Fecha_Hora_Cocina);
 CREATE INDEX IF NOT EXISTS idx_dc_estado_fecha
 ON Detalle_Comanda(Estado_Cocina, Fecha_Hora_Cocina);
 
+-- Ruta mas caliente del POS: "dame las lineas de esta comanda"
+-- (SELECT ... FROM Detalle_Comanda WHERE ID_Comanda = ?). Sin este indice era un
+-- full scan de toda la tabla de lineas en cada apertura/refresco/cobro/ticket.
+CREATE INDEX IF NOT EXISTS idx_dc_comanda
+ON Detalle_Comanda(ID_Comanda);
+
+-- FK a Productos: acelera joins/comprobaciones de integridad por producto.
+CREATE INDEX IF NOT EXISTS idx_dc_producto
+ON Detalle_Comanda(ID_Producto);
+
 CREATE TABLE IF NOT EXISTS Lote_Consumos (
   ID_Detalle TEXT NOT NULL,
   ID_Lote TEXT NOT NULL,
