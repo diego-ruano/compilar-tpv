@@ -665,8 +665,12 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
 
 -- Solo se siembra la zona BARRA: es el ancla de la venta rápida (id fijo, idéntico en local y
 -- nube). Las zonas de ejemplo (Salon/Terraza) se eliminaron del seed; el usuario crea las suyas.
+-- Updated_At: literal FIJO (no datetime('now')). Cada runner (Main y cada tenant) siembra por su
+-- lado en instantes distintos y en otra zona horaria; un literal fijo hace que la fila sea
+-- IDENTICA en todos los dispositivos y en la nube, y que cualquier edicion real (localtime, mas
+-- reciente) gane siempre en la resolucion por Updated_At.
 INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At) VALUES
-  ('00000000-0000-7000-8000-000000000303', 'BARRA', '[]', datetime('now'));
+  ('00000000-0000-7000-8000-000000000303', 'BARRA', '[]', '2024-01-01 00:00:00');
 
 INSERT OR IGNORE INTO Mesas (
   ID_Mesa,
@@ -692,6 +696,6 @@ INSERT OR IGNORE INTO Mesas (
   1,
   1,
   NULL,
-  datetime('now'),
+  '2024-01-01 00:00:00',  -- Updated_At: literal FIJO (ver nota en el seed de Zonas BARRA)
   1
 );
