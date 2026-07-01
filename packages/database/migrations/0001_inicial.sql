@@ -28,7 +28,12 @@
      y la tabla interna Applied_Operations.
 ========================================================= */
 
-PRAGMA foreign_keys = ON;
+-- NOTA: aqui NO va `PRAGMA foreign_keys = ON`. Seria un no-op: (1) es un ajuste
+-- POR CONEXION que no persiste en el fichero, y (2) el runner aplica cada migracion
+-- dentro de una transaccion, donde el PRAGMA se ignora. La aplicacion real de las FK
+-- es responsabilidad de CADA runner de conexion, que lo fija al abrir la conexion:
+--   * App local (Rust): `tune()` en crates/tpv-infra-sqlite/src/db.rs.
+--   * Nube (worker):    `probeTenantDb()` en src/durableObjects/tenantHub.ts.
 
 /* =========================================================
    1. Seguridad y Usuarios
