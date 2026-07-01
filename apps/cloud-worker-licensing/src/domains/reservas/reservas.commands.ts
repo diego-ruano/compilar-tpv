@@ -146,7 +146,8 @@ export function saveReserva(
 					Turno,
 					Comensales,
 					Nota,
-					Estado
+					Estado,
+					Created_At
 				)
 				VALUES (
 					?1,
@@ -157,7 +158,8 @@ export function saveReserva(
 					?6,
 					?7,
 					?8,
-					?9
+					?9,
+					datetime('now','localtime')
 				)
 				ON CONFLICT(ID_Reserva) DO UPDATE SET
 					ID_Cliente = excluded.ID_Cliente,
@@ -196,7 +198,8 @@ export function saveReserva(
 					Turno,
 					Comensales,
 					Nota,
-					Estado
+					Estado,
+					Created_At
 				)
 				VALUES (
 					?1,
@@ -207,7 +210,8 @@ export function saveReserva(
 					?6,
 					?7,
 					?8,
-					?9
+					?9,
+					datetime('now','localtime')
 				);
 			`,
 			args: [REF_ID_RESERVA, ...reservaArgs(input, false)],

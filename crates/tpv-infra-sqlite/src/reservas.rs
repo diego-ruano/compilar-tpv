@@ -263,7 +263,7 @@ impl ReservasRepository for SqliteReservasRepository {
                 .map_err(db_err)?;
             } else {
                 conn.execute(
-                    r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);"#,
+                    r#"INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now','localtime'));"#,
                     vec![
                         Value::Text(id_reserva.clone()),
                         Value::Text(id_cliente),
