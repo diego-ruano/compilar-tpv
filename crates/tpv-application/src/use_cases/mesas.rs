@@ -128,8 +128,9 @@ pub async fn add_linea_comanda(
     if !input.cantidad.is_finite() || input.cantidad <= 0.0 {
         return Err(AppError::validation("cantidad inválida"));
     }
-    if !input.precio.is_finite() {
-        return Err(AppError::validation("precio inválido"));
+    // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
+    if !input.precio.is_finite() || input.precio < 0.0 {
+        return Err(AppError::validation("precio inválido (debe ser >= 0)"));
     }
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
     repo.add_linea_comanda(
@@ -163,7 +164,8 @@ pub async fn cobrar_venta_rapida(
     let items: Vec<(String, f64)> = input
         .items
         .into_iter()
-        .filter(|it| !it.producto_id.trim().is_empty() && it.precio.is_finite())
+        // DB-06: descarta precios no finitos o negativos (nunca escriben Precio_Unitario < 0).
+        .filter(|it| !it.producto_id.trim().is_empty() && it.precio.is_finite() && it.precio >= 0.0)
         .map(|it| (it.producto_id, it.precio))
         .collect();
 

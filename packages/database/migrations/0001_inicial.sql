@@ -332,6 +332,10 @@ ON Comandas(ID_Reserva);
 CREATE INDEX IF NOT EXISTS idx_comandas_trab_apertura
 ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 
+-- Cantidad y Precio_Unitario: la POSITIVIDAD (Cantidad > 0, Precio_Unitario >= 0) se valida en la
+-- CAPA DE APLICACION (use_cases de Rust + esquemas zod del worker), NO con CHECK: SQLite no permite
+-- anadir un CHECK a una tabla ya existente via ALTER, y el runner envuelve cada migracion en una
+-- transaccion (recrear la tabla seria arriesgado en tablas tan referenciadas). Ver DB-06.
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Detalle TEXT PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
@@ -391,6 +395,7 @@ CREATE TABLE IF NOT EXISTS Facturas (
 CREATE INDEX IF NOT EXISTS idx_facturas_cliente
 ON Facturas(ID_Cliente);
 
+-- Importe >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT PRIMARY KEY,
   Fecha DATE NOT NULL,
@@ -471,6 +476,7 @@ CREATE TABLE IF NOT EXISTS Fichaje_Dia (
 /* =========================================================
    9. Pagos
 ========================================================= */
+-- Importe_Total >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
 CREATE TABLE IF NOT EXISTS Pagos (
   ID_Pago TEXT PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,

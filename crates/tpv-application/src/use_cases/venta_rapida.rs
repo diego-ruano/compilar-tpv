@@ -111,8 +111,9 @@ pub async fn add_linea_comanda(
     {
         return Err(AppError::validation("id_comanda/id_producto/cantidad invalid"));
     }
-    if !input.precio_unitario.is_finite() {
-        return Err(AppError::validation("precio_unitario invalid"));
+    // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
+    if !input.precio_unitario.is_finite() || input.precio_unitario < 0.0 {
+        return Err(AppError::validation("precio_unitario invalid (debe ser >= 0)"));
     }
     repo.add_linea_comanda(
         &input.id_comanda,
