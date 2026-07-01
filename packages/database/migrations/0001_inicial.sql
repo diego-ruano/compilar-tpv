@@ -157,6 +157,13 @@ CREATE TABLE IF NOT EXISTS Productos (
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor)
 );
 
+-- La rejilla de productos filtra por categoria; ambos son FKs muy consultadas.
+CREATE INDEX IF NOT EXISTS idx_productos_categoria
+ON Productos(ID_Categoria);
+
+CREATE INDEX IF NOT EXISTS idx_productos_proveedor
+ON Productos(ID_Proveedor);
+
 CREATE TABLE IF NOT EXISTS Lotes_Producto (
   ID_Lote TEXT PRIMARY KEY,
   ID_Producto TEXT NOT NULL,
@@ -291,6 +298,9 @@ CREATE TABLE IF NOT EXISTS Reservas (
 CREATE INDEX IF NOT EXISTS idx_reservas_mesa_dia_hora
 ON Reservas(ID_Mesa, Dia_YMD, Hora);
 
+CREATE INDEX IF NOT EXISTS idx_reservas_cliente
+ON Reservas(ID_Cliente);
+
 /* =========================================================
    6. Comandas / Detalles / Facturas / Cuentas
 ========================================================= */
@@ -372,6 +382,9 @@ CREATE TABLE IF NOT EXISTS Facturas (
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
   FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente)
 );
+
+CREATE INDEX IF NOT EXISTS idx_facturas_cliente
+ON Facturas(ID_Cliente);
 
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT PRIMARY KEY,
@@ -483,6 +496,11 @@ CREATE TABLE IF NOT EXISTS Pago_Detalles (
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle)
 );
+
+-- La PK (ID_Pago, ID_Detalle) no cubre las busquedas por ID_Detalle (que pago
+-- cobro esta linea), necesarias al anular/revertir un pago.
+CREATE INDEX IF NOT EXISTS idx_pago_detalles_detalle
+ON Pago_Detalles(ID_Detalle);
 
 /* =========================================================
    10. Idempotencia / Atomicidad
