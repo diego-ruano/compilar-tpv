@@ -123,6 +123,34 @@ fn rewrite_now_literals(sql: &str) -> String {
         .replace("date('now','localtime')", &format!("'{d}'"))
 }
 
+/// Las ÚNICAS formas de "hora actual" admitidas en SQL replicable: las que
+/// `rewrite_now_literals` (Main) y `resolveNowLiterals` (worker) saben resolver a literal.
+const ALLOWED_NOW_FORMS: [&str; 2] = ["datetime('now','localtime')", "date('now','localtime')"];
+
+/// Detecta una fuente de tiempo NO determinista en `sql` que NO esté cubierta por
+/// `rewrite_now_literals`. Devuelve el token infractor, o `None` si el SQL replicable es seguro.
+///
+/// Motivación (DB-15): `rewrite_now_literals` solo resuelve las dos formas canónicas. Cualquier otra
+/// (`datetime('now')` sin `localtime`, con modificadores `…,'-2 days'`, `strftime(…,'now')`,
+/// `julianday('now')`, `CURRENT_TIMESTAMP/DATE/TIME`) viajaría SIN resolver y la nube (o un re-apply)
+/// la reevaluaría en otro instante/zona → la fila divergiría. Restringimos a UNA forma canónica.
+///
+/// Se descuentan primero las formas permitidas; lo que quede con `'now'` o `CURRENT_*` es un fallo.
+/// Nota: los modificadores (`datetime('now','localtime','-2 days')`) NO contienen la forma canónica
+/// como subcadena (acaban en `,'…')`, no en `)`), así que se detectan igual.
+fn uncovered_time_source(sql: &str) -> Option<&'static str> {
+    let mut stripped = sql.to_string();
+    for form in ALLOWED_NOW_FORMS {
+        stripped = stripped.replace(form, "");
+    }
+    for pat in ["'now'", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME"] {
+        if stripped.contains(pat) {
+            return Some(pat);
+        }
+    }
+    None
+}
+
 fn is_write_sql(sql: &str) -> bool {
     let head: String = sql
         .trim_start()
@@ -330,6 +358,14 @@ impl<'a> WriteGuard<'a> {
     }
 
     async fn capture_write(&self, sql: &str, values: &[Value]) -> Result<(), LibsqlError> {
+        // Guard (DB-15): una escritura replicable NUNCA debe llevar una fuente de tiempo no
+        // determinista fuera de las dos formas canónicas (ver `uncovered_time_source`). En debug
+        // revienta para cazar el error en desarrollo/tests; en release no penaliza.
+        debug_assert!(
+            uncovered_time_source(sql).is_none(),
+            "SQL replicable con hora no determinista sin cubrir por rewrite_now_literals \
+             (usa datetime('now','localtime') o date('now','localtime')): {sql}"
+        );
         let stmt = SqlStatement {
             // La copia replicada lleva el tiempo ya resuelto a literal (determinismo); la
             // ejecución local de arriba conservó su `datetime('now')` real.
@@ -548,4 +584,98 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
     )
     .await
     .map(|_| ())
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tests: determinismo temporal de las sentencias replicables (DB-15)
+// ──────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrite_now_literals_resuelve_formas_canonicas() {
+        // Tras reescribir, no debe quedar ninguna fuente de tiempo sin resolver.
+        let sql = "INSERT INTO T (a,b) VALUES (datetime('now','localtime'), date('now','localtime'));";
+        let out = rewrite_now_literals(sql);
+        assert!(!out.contains("'now'"), "las formas canónicas deben quedar resueltas: {out}");
+        assert!(uncovered_time_source(&out).is_none());
+    }
+
+    #[test]
+    fn uncovered_time_source_acepta_solo_formas_canonicas() {
+        // Permitidas.
+        assert!(uncovered_time_source("SET x = datetime('now','localtime')").is_none());
+        assert!(uncovered_time_source("SET x = date('now','localtime')").is_none());
+        // Literales de texto normales no son 'now'.
+        assert!(uncovered_time_source("Estado = 'Abierta', T = datetime('now','localtime')").is_none());
+        // julianday/strftime sobre PARÁMETROS (no 'now') son deterministas → permitidos.
+        assert!(uncovered_time_source("CAST(julianday(date(?2)) - julianday(date(?1)) AS INTEGER)").is_none());
+
+        // Prohibidas (divergirían al replicar).
+        assert_eq!(uncovered_time_source("VALUES (datetime('now'))"), Some("'now'"));
+        assert_eq!(
+            uncovered_time_source("datetime('now','localtime','-2 days')"),
+            Some("'now'"),
+            "las variantes con modificador NO están cubiertas por rewrite_now_literals"
+        );
+        assert_eq!(uncovered_time_source("strftime('%H','now')"), Some("'now'"));
+        assert_eq!(uncovered_time_source("julianday('now')"), Some("'now'"));
+        assert_eq!(uncovered_time_source("SET T = CURRENT_TIMESTAMP"), Some("CURRENT_TIMESTAMP"));
+    }
+
+    fn collect_commands_ts(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    collect_commands_ts(&p, out);
+                } else if p
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| n.ends_with(".commands.ts"))
+                    .unwrap_or(false)
+                {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    /// DB-15 (lado worker): los `*.commands.ts` construyen las sentencias REPLICABLES de la nube.
+    /// Deben usar SOLO las dos formas canónicas para la hora actual (las únicas que resuelve
+    /// `resolveNowLiterals` en el worker, espejo de `rewrite_now_literals`). Este scan lo garantiza
+    /// desde el harness de Rust (el worker no tiene runner de tests propio).
+    #[test]
+    fn worker_commands_solo_usan_formas_canonicas_de_now() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/cloud-worker-licensing/src/domains");
+        assert!(
+            base.exists(),
+            "No se encontró {base:?}. Si el layout del worker cambió, actualiza la ruta del test."
+        );
+
+        let mut files = Vec::new();
+        collect_commands_ts(&base, &mut files);
+        assert!(
+            !files.is_empty(),
+            "No se encontró ningún *.commands.ts bajo {base:?}: el scan no cubriría nada."
+        );
+
+        let mut violations = Vec::new();
+        for f in &files {
+            let content = std::fs::read_to_string(f).unwrap();
+            for (i, line) in content.lines().enumerate() {
+                if let Some(tok) = uncovered_time_source(line) {
+                    violations.push(format!("{}:{} → {tok}", f.display(), i + 1));
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "Sentencias replicables (*.commands.ts) deben usar SOLO datetime('now','localtime') o \
+             date('now','localtime') para la hora actual. Violaciones:\n{}",
+            violations.join("\n")
+        );
+    }
 }
