@@ -554,19 +554,9 @@ CREATE INDEX IF NOT EXISTS idx_applied_ops_command
 ON Applied_Operations(Command_Name);
 
 /* =========================================================
-   11. Metadatos de esquema
-========================================================= */
-CREATE TABLE IF NOT EXISTS Schema_Meta (
-  Key TEXT PRIMARY KEY,
-  Value TEXT NOT NULL,
-  Updated_At_Ms INTEGER NOT NULL
-);
-
-INSERT OR IGNORE INTO Schema_Meta (Key, Value, Updated_At_Ms)
-VALUES ('schema_version', '2', 0);
-
-/* =========================================================
-   12. Configuración (singletons: ID=1, no son ids de negocio)
+   11. Configuración (singletons: ID=1, no son ids de negocio)
+   (La antigua tabla Schema_Meta/schema_version se retiro: el versionado real del
+    esquema lo lleva la tabla de control _migrations de los runners; ver migrations.rs.)
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Business_Settings (
   ID INTEGER PRIMARY KEY CHECK (ID = 1),
