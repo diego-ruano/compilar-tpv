@@ -619,34 +619,49 @@ INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);
 /* =========================================================
    13. Vistas
 ========================================================= */
+-- Stock por producto + caducidad proxima + lote FEFO siguiente. Reescrita (DB-12) para NO usar
+-- subconsultas correlacionadas por producto (que re-escaneaban Lotes_Producto una vez por producto
+-- y disparaban lecturas -> coste de Turso). Ahora son 2 pasadas unicas sobre Lotes_Producto:
+--   * agg:      SUM(stock) por producto + MIN(caducidad) de los lotes con stock (= caducidad proxima).
+--   * lote_fefo: ROW_NUMBER() en UNA pasada para elegir el lote FEFO siguiente (rn = 1).
+-- Columnas de salida IDENTICAS a la version anterior (Stock_Actual, Caducidad_Proxima, Lote_Proximo).
 CREATE VIEW IF NOT EXISTS v_inventario_producto_stock AS
+WITH agg AS (
+  SELECT
+    ID_Producto,
+    COALESCE(SUM(Stock_Disponible), 0) AS Stock_Actual,
+    -- Caducidad mas proxima = MIN de las caducidades de lotes con stock (MIN ignora NULLs).
+    MIN(CASE WHEN COALESCE(Stock_Disponible, 0) > 0 THEN Caducidad END) AS Caducidad_Proxima
+  FROM Lotes_Producto
+  GROUP BY ID_Producto
+),
+lote_fefo AS (
+  SELECT ID_Producto, Codigo_Lote
+  FROM (
+    SELECT
+      ID_Producto,
+      Codigo_Lote,
+      ROW_NUMBER() OVER (
+        PARTITION BY ID_Producto
+        ORDER BY
+          CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
+          date(Caducidad) ASC,
+          datetime(Fecha_Entrada) ASC,
+          ID_Lote ASC
+      ) AS rn
+    FROM Lotes_Producto
+    WHERE COALESCE(Stock_Disponible, 0) > 0
+  )
+  WHERE rn = 1
+)
 SELECT
   p.ID_Producto,
-  COALESCE(SUM(l.Stock_Disponible), 0) AS Stock_Actual,
-  (
-    SELECT l2.Caducidad
-    FROM Lotes_Producto l2
-    WHERE l2.ID_Producto = p.ID_Producto
-      AND COALESCE(l2.Stock_Disponible, 0) > 0
-      AND l2.Caducidad IS NOT NULL
-    ORDER BY date(l2.Caducidad) ASC, datetime(l2.Fecha_Entrada) ASC, l2.ID_Lote ASC
-    LIMIT 1
-  ) AS Caducidad_Proxima,
-  (
-    SELECT l3.Codigo_Lote
-    FROM Lotes_Producto l3
-    WHERE l3.ID_Producto = p.ID_Producto
-      AND COALESCE(l3.Stock_Disponible, 0) > 0
-    ORDER BY
-      CASE WHEN l3.Caducidad IS NULL THEN 1 ELSE 0 END,
-      date(l3.Caducidad) ASC,
-      datetime(l3.Fecha_Entrada) ASC,
-      l3.ID_Lote ASC
-    LIMIT 1
-  ) AS Lote_Proximo
+  COALESCE(a.Stock_Actual, 0) AS Stock_Actual,
+  a.Caducidad_Proxima AS Caducidad_Proxima,
+  f.Codigo_Lote AS Lote_Proximo
 FROM Productos p
-LEFT JOIN Lotes_Producto l ON l.ID_Producto = p.ID_Producto
-GROUP BY p.ID_Producto;
+LEFT JOIN agg a ON a.ID_Producto = p.ID_Producto
+LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
 
 /* =========================================================
    14. Seeds (UUID fijos: identicos en local y nube)

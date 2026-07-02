@@ -416,6 +416,66 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// DB-12: la vista `v_inventario_producto_stock` se reescribio (window functions en vez de
+    /// subconsultas correlacionadas). Verifica que su semantica es la misma: SUM de stock (todos los
+    /// lotes), caducidad mas proxima (MIN de lotes CON stock) y lote FEFO siguiente (NULLs al final),
+    /// incluyendo productos sin lotes y con solo lotes sin stock.
+    #[tokio::test]
+    async fn view_inventario_stock_semantica() {
+        let (_db, conn, dir) = open_temp().await;
+        run(&conn).await.unwrap();
+
+        conn.execute_batch(
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat1','Cat');\n\
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('P1','cat1','Prod1');\n\
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('P2','cat1','Prod2');\n\
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('P3','cat1','Prod3');\n\
+             INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Caducidad,Stock_Disponible) VALUES ('LA','P1','A','2026-01-01','2026-12-01',5);\n\
+             INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Caducidad,Stock_Disponible) VALUES ('LB','P1','B','2026-02-01','2026-06-01',3);\n\
+             INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Caducidad,Stock_Disponible) VALUES ('LC','P1','C','2026-01-01','2025-01-01',0);\n\
+             INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Caducidad,Stock_Disponible) VALUES ('LD','P1','D','2026-03-01',NULL,2);\n\
+             INSERT INTO Lotes_Producto (ID_Lote,ID_Producto,Codigo_Lote,Fecha_Entrada,Caducidad,Stock_Disponible) VALUES ('LE','P3','E','2026-01-01','2026-01-01',0);",
+        )
+        .await
+        .unwrap();
+
+        async fn read_view(conn: &Connection, id: &str) -> (f64, Value, Value) {
+            let sql = format!(
+                "SELECT Stock_Actual, Caducidad_Proxima, Lote_Proximo \
+                 FROM v_inventario_producto_stock WHERE ID_Producto='{id}';"
+            );
+            let mut rows = conn.query(&sql, Vec::<Value>::new()).await.unwrap();
+            let r = rows.next().await.unwrap().unwrap();
+            let stock = match r.get_value(0).unwrap() {
+                Value::Integer(n) => n as f64,
+                Value::Real(n) => n,
+                v => panic!("stock inesperado: {v:?}"),
+            };
+            (stock, r.get_value(1).unwrap(), r.get_value(2).unwrap())
+        }
+
+        // P1: stock = 5+3+0+2 = 10; caducidad proxima = MIN(con stock) = '2026-06-01' (LB);
+        // lote FEFO = LB (menor caducidad entre los que tienen stock). LC (sin stock) se ignora.
+        let (stock, cad, lote) = read_view(&conn,"P1").await;
+        assert_eq!(stock, 10.0);
+        assert_eq!(cad, Value::Text("2026-06-01".into()));
+        assert_eq!(lote, Value::Text("B".into()));
+
+        // P2: sin lotes -> 0 / NULL / NULL.
+        let (stock, cad, lote) = read_view(&conn,"P2").await;
+        assert_eq!(stock, 0.0);
+        assert_eq!(cad, Value::Null);
+        assert_eq!(lote, Value::Null);
+
+        // P3: solo lote sin stock -> 0 / NULL / NULL.
+        let (stock, cad, lote) = read_view(&conn,"P3").await;
+        assert_eq!(stock, 0.0);
+        assert_eq!(cad, Value::Null);
+        assert_eq!(lote, Value::Null);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Elimina literales de texto SQL ('…') para que el tokenizador no encuentre palabras
     /// reservadas dentro de strings ('DO COMMIT NOW' → falso positivo sin este paso).
     fn strip_sql_string_literals(s: &str) -> String {
