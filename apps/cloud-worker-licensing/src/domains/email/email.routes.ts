@@ -1,8 +1,12 @@
 // src/domains/email/email.routes.ts
 //
-// Endpoint de envío de correo gestionado (modo "nuestro servicio").
-// El cliente Rust llama POST /v1/email/enviar-pedido con JWT de tenant.
-// El worker llama a Resend para enviar el email.
+// Endpoint ÚNICO de envío de correo. Desde DB-04 TODO el correo pasa por aquí (ya no existe el
+// "SMTP propio del negocio"): tanto la Main como la Handy llaman POST /v1/email/enviar-pedido con
+// JWT de tenant y el worker es quien envía. En offline no se puede enviar (hace falta el worker).
+//
+// Backend de envío: el objetivo es Cloudflare Email Service; hasta que esté contratado, el envío
+// operativo usa Resend (abajo). Al provisionarlo, se sustituye la llamada de `fetch` a Resend por
+// el binding/servicio de Cloudflare (gate por env) sin tocar el resto del flujo.
 
 import { Hono } from "hono";
 import { z } from "zod";

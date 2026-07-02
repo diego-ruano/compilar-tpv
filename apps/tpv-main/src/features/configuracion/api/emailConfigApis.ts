@@ -1,17 +1,8 @@
 import { invokeClient } from "@tpv/client";
 
-export type EmailModo = "managed" | "smtp";
-
-export type EmailConfigData = {
-  modo: EmailModo;
-  smtp_host: string;
-  smtp_port: number;
-  smtp_user: string;
-  smtp_password: string;
-  smtp_from_email: string;
-  smtp_from_name: string;
-  smtp_use_tls: boolean;
-};
+// El envío de correo lo hace SIEMPRE el worker (Cloudflare Email Service / Resend). Ya no hay
+// configuración SMTP local ni credenciales del negocio (DB-04): solo se construye el pedido y se
+// manda. En offline no se puede enviar (hace falta el worker).
 
 export type LineaEmailInput = {
   nombre_producto: string;
@@ -26,14 +17,6 @@ export type EnviarPedidoEmailInput = {
   notas?: string | null;
   lineas: LineaEmailInput[];
 };
-
-export async function emailConfigGet(): Promise<EmailConfigData> {
-  return invokeClient<EmailConfigData>("email_config_get");
-}
-
-export async function emailConfigPatch(data: EmailConfigData): Promise<void> {
-  await invokeClient<void>("email_config_patch", { args: data });
-}
 
 export async function emailEnviarPedido(input: EnviarPedidoEmailInput): Promise<void> {
   await invokeClient<void>("email_enviar_pedido", { args: input });

@@ -1405,9 +1405,7 @@ pub fn run() {
             commands::configuracion::config_patch_ticket_settings,
             commands::configuracion::config_get_contact_settings,
             commands::configuracion::config_patch_contact_settings,
-            // correo electrónico
-            commands::email_config::email_config_get,
-            commands::email_config::email_config_patch,
+            // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
             commands::email_config::email_enviar_pedido,
         ])
         .run(tauri::generate_context!())

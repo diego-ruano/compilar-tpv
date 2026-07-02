@@ -70,17 +70,6 @@ async fn query_admin_role_id(conn: &Connection) -> AppResult<Option<String>> {
     }
 }
 
-/// Garantiza que existe la fila singleton `Email_Settings (ID=1)`.
-async fn seed_email_settings(conn: &Connection) -> AppResult<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);",
-        Vec::<Value>::new(),
-    )
-    .await
-    .map_err(db_err)?;
-    Ok(())
-}
-
 /// Garantiza que existe la fila singleton `Contact_Settings (ID=1)`.
 async fn seed_contact_settings(conn: &Connection) -> AppResult<()> {
     conn.execute(
@@ -193,7 +182,6 @@ pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
     {
         let w = db.write().await;
         seed_admin_if_empty(w.raw()).await?;
-        seed_email_settings(w.raw()).await?;
         seed_contact_settings(w.raw()).await?;
     }
 

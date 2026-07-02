@@ -589,20 +589,9 @@ CREATE TABLE IF NOT EXISTS Ticket_Settings (
 
 INSERT OR IGNORE INTO Ticket_Settings (ID) VALUES (1);
 
-CREATE TABLE IF NOT EXISTS Email_Settings (
-  ID INTEGER PRIMARY KEY CHECK (ID = 1),
-  Modo TEXT NOT NULL DEFAULT 'managed' CHECK (Modo IN ('managed', 'smtp')),
-  Smtp_Host TEXT NOT NULL DEFAULT '',
-  Smtp_Port INTEGER NOT NULL DEFAULT 587,
-  Smtp_User TEXT NOT NULL DEFAULT '',
-  Smtp_Password TEXT NOT NULL DEFAULT '',
-  Smtp_From_Email TEXT NOT NULL DEFAULT '',
-  Smtp_From_Name TEXT NOT NULL DEFAULT '',
-  Smtp_Use_Tls INTEGER NOT NULL DEFAULT 1,
-  Updated_At TEXT DEFAULT (datetime('now','localtime'))
-);
-
-INSERT OR IGNORE INTO Email_Settings (ID) VALUES (1);
+-- (La tabla Email_Settings se retiro: todo el correo se envia por el worker
+--  (Cloudflare Email Service / Resend), asi que ya no hay configuracion ni
+--  credenciales SMTP locales ni replicadas a la nube. Ver DB-04.)
 
 /* =========================================================
    13. Vistas

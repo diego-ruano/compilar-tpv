@@ -1,33 +1,10 @@
-//! Contratos (DTOs) de la frontera UI<->Rust para configuración de correo.
+//! Contratos (DTOs) de la frontera UI<->Rust para el envío de pedidos por correo.
+//!
+//! Ya NO hay configuración SMTP (DB-04): todo el correo se envía por el worker, así que aquí solo
+//! viven los DTOs de la petición de envío.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use ts_rs::TS;
-
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct EmailConfigDto {
-    pub modo: String,
-    pub smtp_host: String,
-    pub smtp_port: i32,
-    pub smtp_user: String,
-    pub smtp_password: String,
-    pub smtp_from_email: String,
-    pub smtp_from_name: String,
-    pub smtp_use_tls: bool,
-}
-
-#[derive(Debug, Clone, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct EmailConfigPatchInput {
-    pub modo: String,
-    pub smtp_host: String,
-    pub smtp_port: i32,
-    pub smtp_user: String,
-    pub smtp_password: String,
-    pub smtp_from_email: String,
-    pub smtp_from_name: String,
-    pub smtp_use_tls: bool,
-}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

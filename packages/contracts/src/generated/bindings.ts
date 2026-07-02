@@ -102,10 +102,6 @@ export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 export type DeviceSignB64Args = { payload: string, };
 
-export type EmailConfigDto = { modo: string, smtp_host: string, smtp_port: number, smtp_user: string, smtp_password: string, smtp_from_email: string, smtp_from_name: string, smtp_use_tls: boolean, };
-
-export type EmailConfigPatchInput = { modo: string, smtp_host: string, smtp_port: number, smtp_user: string, smtp_password: string, smtp_from_email: string, smtp_from_name: string, smtp_use_tls: boolean, };
-
 /**
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
  */
