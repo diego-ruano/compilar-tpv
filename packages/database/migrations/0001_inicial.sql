@@ -307,7 +307,7 @@ CREATE INDEX IF NOT EXISTS idx_reservas_cliente
 ON Reservas(ID_Cliente);
 
 /* =========================================================
-   6. Comandas / Detalles / Facturas / Cuentas
+   6. Comandas / Detalles / Cuentas
 ========================================================= */
 CREATE TABLE IF NOT EXISTS Comandas (
   ID_Comanda TEXT PRIMARY KEY,
@@ -379,21 +379,9 @@ CREATE TABLE IF NOT EXISTS Lote_Consumos (
 CREATE INDEX IF NOT EXISTS idx_lote_consumos_lote
 ON Lote_Consumos(ID_Lote);
 
-CREATE TABLE IF NOT EXISTS Facturas (
-  ID_Factura TEXT PRIMARY KEY,
-  ID_Comanda TEXT UNIQUE NOT NULL,
-  ID_Cliente TEXT,
-  Fecha_Emision DATETIME NOT NULL,
-  Subtotal REAL NOT NULL,
-  IVA REAL NOT NULL,
-  Total_Pagado REAL NOT NULL,
-  Metodo_Pago TEXT,
-  FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
-  FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente)
-);
-
-CREATE INDEX IF NOT EXISTS idx_facturas_cliente
-ON Facturas(ID_Cliente);
+-- (La tabla Facturas se retiro: nunca se escribia; el cobro vive integramente en Pagos +
+--  Pago_Detalles, que es la fuente de verdad. Ver DB-13. Si algun dia hace falta facturacion
+--  fiscal, se re-anade en una migracion nueva.)
 
 -- Importe >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (

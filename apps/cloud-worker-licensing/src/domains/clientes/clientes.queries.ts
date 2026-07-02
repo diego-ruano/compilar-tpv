@@ -52,11 +52,6 @@ function overviewBase(): string {
 				ORDER BY r.Dia_YMD DESC, r.Hora DESC
 				LIMIT 1
 			) AS ultima_reserva_mesa,
-			(
-				SELECT IFNULL(SUM(f.Total_Pagado), 0)
-				FROM Facturas f
-				WHERE f.ID_Cliente = c.ID_Cliente
-			) AS total_gastado_calculado,
 			IFNULL(c.Total_Gastado, 0) AS total_gastado_stored,
 			(
 				SELECT COUNT(*)
@@ -82,11 +77,11 @@ export async function overview(
 	const sql =
 		ranking.trim() === "reservas"
 			? `${base}
-				ORDER BY total_reservas DESC, (total_gastado_calculado + total_gastado_stored) DESC, c.ID_Cliente DESC
+				ORDER BY total_reservas DESC, total_gastado_stored DESC, c.ID_Cliente DESC
 				LIMIT 10;`
 			: ranking.trim() === "gasto"
 				? `${base}
-					ORDER BY (total_gastado_calculado + total_gastado_stored) DESC, total_reservas DESC, c.ID_Cliente DESC
+					ORDER BY total_gastado_stored DESC, total_reservas DESC, c.ID_Cliente DESC
 					LIMIT 10;`
 				: `${base}
 					ORDER BY c.ID_Cliente DESC;`;

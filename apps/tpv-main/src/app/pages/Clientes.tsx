@@ -121,9 +121,7 @@ export default function Clientes() {
     const hora = r.Ultima_Reserva_Hora;
     const ultimaReserva = fecha ? `${fecha}${hora ? ` ${hora}` : ""}` : "-";
 
-    const totalGastado =
-      Number(r.Total_Gastado_Calculado || 0) +
-      Number(r.Total_Gastado_Stored || 0);
+    const totalGastado = Number(r.Total_Gastado_Stored || 0);
 
     return {
       ID_Cliente: String(r.ID_Cliente ?? ""),

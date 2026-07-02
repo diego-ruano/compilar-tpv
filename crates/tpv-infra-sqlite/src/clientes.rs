@@ -72,12 +72,6 @@ fn sql_overview_base() -> &'static str {
         LIMIT 1
       ) AS Ultima_Reserva_Mesa,
 
-      (
-        SELECT IFNULL(SUM(f.Total_Pagado), 0)
-        FROM Facturas f
-        WHERE f.ID_Cliente = c.ID_Cliente
-      ) AS Total_Gastado_Calculado,
-
       IFNULL(c.Total_Gastado, 0) AS Total_Gastado_Stored,
 
       (
@@ -105,10 +99,10 @@ impl ClientesRepository for SqliteClientesRepository {
 
         let sql = match ranking {
             ClienteRanking::PorReservas => format!(
-                "{base}\nORDER BY Total_Reservas DESC, (Total_Gastado_Calculado + Total_Gastado_Stored) DESC, c.ID_Cliente DESC\nLIMIT 10;"
+                "{base}\nORDER BY Total_Reservas DESC, Total_Gastado_Stored DESC, c.ID_Cliente DESC\nLIMIT 10;"
             ),
             ClienteRanking::PorGasto => format!(
-                "{base}\nORDER BY (Total_Gastado_Calculado + Total_Gastado_Stored) DESC, Total_Reservas DESC, c.ID_Cliente DESC\nLIMIT 10;"
+                "{base}\nORDER BY Total_Gastado_Stored DESC, Total_Reservas DESC, c.ID_Cliente DESC\nLIMIT 10;"
             ),
             ClienteRanking::Reciente => format!("{base}\nORDER BY c.ID_Cliente DESC;"),
         };
@@ -126,10 +120,9 @@ impl ClientesRepository for SqliteClientesRepository {
             let ur_hora = row.get_value(5).map_err(db_err)?;
             let ur_num = row.get_value(6).map_err(db_err)?;
             let ur_mesa = row.get_value(7).map_err(db_err)?;
-            let tg_calc = row.get_value(8).map_err(db_err)?;
-            let tg_st = row.get_value(9).map_err(db_err)?;
-            let total_res = row.get_value(10).map_err(db_err)?;
-            let pend = row.get_value(11).map_err(db_err)?;
+            let tg_st = row.get_value(8).map_err(db_err)?;
+            let total_res = row.get_value(9).map_err(db_err)?;
+            let pend = row.get_value(10).map_err(db_err)?;
 
             out.push(ClienteOverview {
                 id_cliente: v_string(id_cliente).unwrap_or_default(),
@@ -142,7 +135,6 @@ impl ClientesRepository for SqliteClientesRepository {
                 ultima_reserva_num_personas: v_i64(ur_num),
                 ultima_reserva_mesa: norm_opt_string(ur_mesa),
 
-                total_gastado_calculado: v_f64(tg_calc).unwrap_or(0.0),
                 total_gastado_stored: v_f64(tg_st).unwrap_or(0.0),
 
                 total_reservas: v_i64(total_res).unwrap_or(0),

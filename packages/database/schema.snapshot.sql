@@ -12,7 +12,6 @@ CREATE INDEX idx_dc_cocinero_fecha ON Detalle_Comanda(ID_Usuario_Cocinero, Fecha
 CREATE INDEX idx_dc_comanda ON Detalle_Comanda(ID_Comanda);
 CREATE INDEX idx_dc_estado_fecha ON Detalle_Comanda(Estado_Cocina, Fecha_Hora_Cocina);
 CREATE INDEX idx_dc_producto ON Detalle_Comanda(ID_Producto);
-CREATE INDEX idx_facturas_cliente ON Facturas(ID_Cliente);
 CREATE INDEX idx_fichajes_user_abierto ON Fichajes(ID_Usuario, Estado);
 CREATE INDEX idx_fichajes_user_fecha ON Fichajes(ID_Usuario, Fecha);
 CREATE INDEX idx_hp_trab_weekday ON Horario_Predeterminado(ID_Trabajador, Weekday);
@@ -45,7 +44,6 @@ CREATE TABLE Contact_Settings ( ID INTEGER PRIMARY KEY CHECK (ID = 1), Recovery_
 CREATE TABLE Cuentas_Gastos ( ID_Gasto TEXT PRIMARY KEY, Fecha DATE NOT NULL, Concepto TEXT NOT NULL, Importe REAL NOT NULL, Tipo_Gasto TEXT NOT NULL, ID_Proveedor TEXT NULL, FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL );
 CREATE TABLE Detalle_Comanda ( ID_Detalle TEXT PRIMARY KEY, ID_Comanda TEXT NOT NULL, ID_Producto TEXT NOT NULL, Cantidad REAL NOT NULL, Precio_Unitario REAL NOT NULL, Notas TEXT, Estado_Cocina TEXT DEFAULT 'PENDIENTE', Fecha_Hora_Cocina DATETIME, ID_Usuario_Cocinero TEXT, FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda), FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) );
 CREATE TABLE Email_Settings ( ID INTEGER PRIMARY KEY CHECK (ID = 1), Modo TEXT NOT NULL DEFAULT 'managed' CHECK (Modo IN ('managed', 'smtp')), Smtp_Host TEXT NOT NULL DEFAULT '', Smtp_Port INTEGER NOT NULL DEFAULT 587, Smtp_User TEXT NOT NULL DEFAULT '', Smtp_Password TEXT NOT NULL DEFAULT '', Smtp_From_Email TEXT NOT NULL DEFAULT '', Smtp_From_Name TEXT NOT NULL DEFAULT '', Smtp_Use_Tls INTEGER NOT NULL DEFAULT 1, Updated_At TEXT DEFAULT (datetime('now','localtime')) );
-CREATE TABLE Facturas ( ID_Factura TEXT PRIMARY KEY, ID_Comanda TEXT UNIQUE NOT NULL, ID_Cliente TEXT, Fecha_Emision DATETIME NOT NULL, Subtotal REAL NOT NULL, IVA REAL NOT NULL, Total_Pagado REAL NOT NULL, Metodo_Pago TEXT, FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda), FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente) );
 CREATE TABLE Fichaje_Dia ( ID_Usuario TEXT NOT NULL, Fecha DATE NOT NULL, Turno_Partido INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (ID_Usuario, Fecha), FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) );
 CREATE TABLE Fichajes ( ID_Fichaje TEXT PRIMARY KEY, ID_Usuario TEXT NOT NULL, Fecha DATE NOT NULL, Parte INTEGER NOT NULL DEFAULT 1, Hora_Entrada DATETIME, Hora_Salida DATETIME, Estado TEXT DEFAULT 'ABIERTO', Cerrado_Automatico INTEGER DEFAULT 0, Cierre_Motivo TEXT, Incidencia TEXT, UNIQUE(ID_Usuario, Fecha, Parte), FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) );
 CREATE TABLE Horario_Predeterminado ( ID_Default TEXT PRIMARY KEY, ID_Trabajador TEXT NOT NULL, Weekday INTEGER NOT NULL, Orden INTEGER NOT NULL DEFAULT 1, ID_Turno TEXT NOT NULL, Area TEXT NOT NULL, Hora_Inicio TIME, Hora_Fin TIME, Notas TEXT, FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE CASCADE, FOREIGN KEY (ID_Turno) REFERENCES Turnos(ID_Turno), UNIQUE (ID_Trabajador, Weekday, Orden) );

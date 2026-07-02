@@ -51,7 +51,7 @@ export type ClienteIdArgs = { id_cliente: string, };
 /**
  * Fila del overview de clientes (read model con campos calculados).
  */
-export type ClienteOverview = { id_cliente: string, nombre: string, email: string | null, telefono: string | null, ultima_reserva_fecha: string | null, ultima_reserva_hora: string | null, ultima_reserva_num_personas: number | null, ultima_reserva_mesa: string | null, total_gastado_calculado: number, total_gastado_stored: number, total_reservas: number, reservas_pendientes: number, };
+export type ClienteOverview = { id_cliente: string, nombre: string, email: string | null, telefono: string | null, ultima_reserva_fecha: string | null, ultima_reserva_hora: string | null, ultima_reserva_num_personas: number | null, ultima_reserva_mesa: string | null, total_gastado_stored: number, total_reservas: number, reservas_pendientes: number, };
 
 /**
  * Argumentos del overview.

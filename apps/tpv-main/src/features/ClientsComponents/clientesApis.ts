@@ -21,7 +21,6 @@ export type ClienteRow = {
     Ultima_Reserva_NumPersonas: number | null;
     Ultima_Reserva_Mesa: string | null;
 
-    Total_Gastado_Calculado: number | null;
     Total_Gastado_Stored: number | null;
 
     Total_Reservas: number | null;
@@ -62,7 +61,6 @@ function mapRow(r: ClienteOverview): ClienteRow {
         Ultima_Reserva_NumPersonas: r.ultima_reserva_num_personas ?? null,
         Ultima_Reserva_Mesa: toNullableStr(r.ultima_reserva_mesa),
 
-        Total_Gastado_Calculado: r.total_gastado_calculado ?? 0,
         Total_Gastado_Stored: r.total_gastado_stored ?? 0,
 
         Total_Reservas: r.total_reservas ?? 0,

@@ -23,7 +23,6 @@ pub struct ClienteOverview {
     pub ultima_reserva_num_personas: Option<i64>,
     pub ultima_reserva_mesa: Option<String>,
 
-    pub total_gastado_calculado: f64,
     pub total_gastado_stored: f64,
 
     #[ts(type = "number")]
