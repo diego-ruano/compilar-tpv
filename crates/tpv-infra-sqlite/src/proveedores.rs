@@ -202,6 +202,23 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
             )
             .await
             .map_err(db_err)?;
+            // DB-03: replicar EXPLICITAMENTE el ON DELETE SET NULL de Pedidos_Proveedor y
+            // Cuentas_Gastos. En la nube (Turso/HTTP) no se garantiza que foreign_keys=ON persista
+            // en el batch, asi que no dependemos de la cascada/SET NULL del motor: se hace a mano
+            // (queda capturado en el outbox y converge Main<->nube). Lotes/Productos ya iban arriba
+            // porque su FK es RESTRICT (habria bloqueado el DELETE si no se anulaba antes).
+            conn.execute(
+                "UPDATE Pedidos_Proveedor SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
+                vec![Value::Text(id_proveedor.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+            conn.execute(
+                "UPDATE Cuentas_Gastos SET ID_Proveedor = NULL WHERE ID_Proveedor = ?1;",
+                vec![Value::Text(id_proveedor.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
             let affected = conn
                 .execute(
                     "DELETE FROM Proveedores WHERE ID_Proveedor = ?1;",
