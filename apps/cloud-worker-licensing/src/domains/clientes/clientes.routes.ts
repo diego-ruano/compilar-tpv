@@ -73,6 +73,14 @@ clientesRoutes.get("/:id/form", async (c) => {
 clientesRoutes.post("/", async (c) => {
 	const p = await parseBody(c, S.createClienteSchema);
 	if (!p.ok) return p.res;
+	// CLI-04: rechazar email duplicado con un 409 limpio antes de aplicar (el índice
+	// único ux_clientes_email es el backstop real).
+	if (p.data.email) {
+		const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.emailEnUso(db, p.data.email!, p.data.id_cliente),
+		);
+		if (dup) return c.json({ error: "email_duplicado" }, 409);
+	}
 	const id = await apply(c, cmd.createCliente(p.data));
 	return c.json({ ok: true, id_cliente: id });
 });
@@ -82,6 +90,12 @@ clientesRoutes.put("/:id", async (c) => {
 	if (id == null) return badRequest(c, "id_cliente invalido");
 	const p = await parseBody(c, S.updateClienteSchema);
 	if (!p.ok) return p.res;
+	if (p.data.email) {
+		const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.emailEnUso(db, p.data.email!, id),
+		);
+		if (dup) return c.json({ error: "email_duplicado" }, 409);
+	}
 	await apply(c, cmd.updateCliente(id, p.data));
 	return c.json({ ok: true });
 });

@@ -33,6 +33,7 @@ CREATE INDEX idx_reservas_cliente ON Reservas(ID_Cliente);
 CREATE INDEX idx_reservas_mesa_dia_hora ON Reservas(ID_Mesa, Dia_YMD, Hora);
 CREATE INDEX idx_tarea_asig_tarea ON Tarea_Asignaciones(ID_Tarea);
 CREATE INDEX idx_tarea_asig_trab ON Tarea_Asignaciones(ID_Trabajador, Estado);
+CREATE UNIQUE INDEX ux_clientes_email ON Clientes(lower(Email)) WHERE Email IS NOT NULL AND Email <> '';
 CREATE TABLE Alergenos ( ID_Alergeno TEXT PRIMARY KEY, Nombre TEXT NOT NULL UNIQUE, Nombre_Imagen TEXT, Ruta_Imagen TEXT );
 CREATE TABLE Applied_Operations ( ID_Applied_Operation INTEGER PRIMARY KEY AUTOINCREMENT, Op_Id TEXT NOT NULL, Command_Name TEXT NOT NULL, Request_Hash TEXT NOT NULL, Device_Id TEXT, Status TEXT NOT NULL DEFAULT 'PROCESSING', Result_Json TEXT, Error_Text TEXT, Created_At_Ms INTEGER NOT NULL, Applied_At_Ms INTEGER, Updated_At_Ms INTEGER NOT NULL, UNIQUE (Op_Id), CHECK (Status IN ('PROCESSING', 'APPLIED', 'FAILED')) );
 CREATE TABLE Asignacion_Turnos ( ID_Asignacion TEXT PRIMARY KEY, ID_Trabajador TEXT NOT NULL, Fecha DATE NOT NULL, ID_Turno TEXT NOT NULL, Area TEXT NOT NULL, Hora_Inicio TIME, Hora_Fin TIME, Notas TEXT, FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador), FOREIGN KEY (ID_Turno) REFERENCES Turnos(ID_Turno) );

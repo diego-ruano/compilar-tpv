@@ -31,6 +31,18 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
+/// Traduce errores de las escrituras de cliente. Una violación del índice único de email
+/// (`ux_clientes_email`, sobre `lower(Email)`) se convierte en un error de validación con
+/// mensaje claro (CLI-04); el resto se propaga como error de repositorio.
+fn write_err(e: impl std::fmt::Display) -> AppError {
+    let msg = e.to_string();
+    if msg.contains("ux_clientes_email") {
+        AppError::validation("Ya existe un cliente con ese email.")
+    } else {
+        AppError::repository(msg)
+    }
+}
+
 // Base del overview. En vez de ~6 subconsultas correlacionadas por cliente (coste
 // O(clientes x reservas), CLI-02), se precalcula la última reserva y los agregados en
 // dos CTEs que recorren `Reservas` una sola vez (mismo patrón que DB-12 en inventario).
@@ -210,7 +222,7 @@ impl ClientesRepository for SqliteClientesRepository {
             ],
         )
         .await
-        .map_err(db_err)?;
+        .map_err(write_err)?;
 
         Ok(true)
     }
@@ -237,7 +249,7 @@ impl ClientesRepository for SqliteClientesRepository {
                 ],
             )
             .await
-            .map_err(db_err)?;
+            .map_err(write_err)?;
 
         Ok(affected > 0)
     }

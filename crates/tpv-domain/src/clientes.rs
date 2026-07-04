@@ -48,6 +48,25 @@ fn limpia_opcional(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// Normaliza y valida un email opcional (CLI-04): trim + minúsculas; vacío => `None`.
+/// Si hay un valor no vacío, debe tener formato de email válido. Se pasa a minúsculas
+/// para que la unicidad sea case-insensitive (índice `ux_clientes_email` sobre `lower(Email)`).
+fn normaliza_email(v: Option<String>) -> Result<Option<String>, String> {
+    match v
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+    {
+        None => Ok(None),
+        Some(email) => {
+            if crate::login::validate_email_basic(&email) {
+                Ok(Some(email))
+            } else {
+                Err("email inválido".to_string())
+            }
+        }
+    }
+}
+
 impl NuevoCliente {
     /// Normaliza y valida. `nombre` es obligatorio.
     pub fn validar(
@@ -64,7 +83,7 @@ impl NuevoCliente {
         Ok(NuevoCliente {
             id: id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             nombre,
-            email: limpia_opcional(email),
+            email: normaliza_email(email)?,
             telefono: limpia_opcional(telefono),
             notas: limpia_opcional(notas),
         })
@@ -91,7 +110,7 @@ impl Cliente {
         Ok(Cliente {
             id,
             nombre,
-            email: limpia_opcional(email),
+            email: normaliza_email(email)?,
             telefono: limpia_opcional(telefono),
             notas: limpia_opcional(notas),
         })
