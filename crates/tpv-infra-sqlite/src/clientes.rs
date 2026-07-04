@@ -31,64 +31,61 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
+// Base del overview. En vez de ~6 subconsultas correlacionadas por cliente (coste
+// O(clientes x reservas), CLI-02), se precalcula la última reserva y los agregados en
+// dos CTEs que recorren `Reservas` una sola vez (mismo patrón que DB-12 en inventario).
+// La salida y el orden de columnas son IDÉNTICOS a la versión anterior. No se limita
+// el número de filas: el ranking "Reciente" es la lista completa que el frontend usa
+// para buscar/contar (añadir LIMIT rompería esa búsqueda).
 fn sql_overview_base() -> &'static str {
     r#"
+    WITH ult_reserva AS (
+      SELECT
+        r.ID_Cliente,
+        r.Dia_YMD,
+        r.Hora,
+        r.Comensales,
+        r.ID_Mesa,
+        ROW_NUMBER() OVER (
+          PARTITION BY r.ID_Cliente
+          ORDER BY r.Dia_YMD DESC, r.Hora DESC
+        ) AS rn
+      FROM Reservas r
+    ),
+    agg_reservas AS (
+      SELECT
+        r.ID_Cliente,
+        COUNT(*) AS Total_Reservas,
+        SUM(
+          CASE
+            WHEN UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
+             AND date(r.Dia_YMD) >= date('now','localtime')
+            THEN 1 ELSE 0
+          END
+        ) AS Reservas_Pendientes
+      FROM Reservas r
+      GROUP BY r.ID_Cliente
+    )
     SELECT
       c.ID_Cliente,
       c.Nombre,
       c.Email,
       c.Telefono,
 
-      (
-        SELECT r.Dia_YMD
-        FROM Reservas r
-        WHERE r.ID_Cliente = c.ID_Cliente
-        ORDER BY r.Dia_YMD DESC, r.Hora DESC
-        LIMIT 1
-      ) AS Ultima_Reserva_Fecha,
-
-      (
-        SELECT r.Hora
-        FROM Reservas r
-        WHERE r.ID_Cliente = c.ID_Cliente
-        ORDER BY r.Dia_YMD DESC, r.Hora DESC
-        LIMIT 1
-      ) AS Ultima_Reserva_Hora,
-
-      (
-        SELECT r.Comensales
-        FROM Reservas r
-        WHERE r.ID_Cliente = c.ID_Cliente
-        ORDER BY r.Dia_YMD DESC, r.Hora DESC
-        LIMIT 1
-      ) AS Ultima_Reserva_NumPersonas,
-
-      (
-        SELECT m.Numero_Mesa
-        FROM Reservas r
-        JOIN Mesas m ON m.ID_Mesa = r.ID_Mesa
-        WHERE r.ID_Cliente = c.ID_Cliente
-        ORDER BY r.Dia_YMD DESC, r.Hora DESC
-        LIMIT 1
-      ) AS Ultima_Reserva_Mesa,
+      ur.Dia_YMD    AS Ultima_Reserva_Fecha,
+      ur.Hora       AS Ultima_Reserva_Hora,
+      ur.Comensales AS Ultima_Reserva_NumPersonas,
+      m.Numero_Mesa AS Ultima_Reserva_Mesa,
 
       IFNULL(c.Total_Gastado, 0) AS Total_Gastado_Stored,
 
-      (
-        SELECT COUNT(*)
-        FROM Reservas r
-        WHERE r.ID_Cliente = c.ID_Cliente
-      ) AS Total_Reservas,
-
-      (
-        SELECT COUNT(*)
-        FROM Reservas r
-        WHERE r.ID_Cliente = c.ID_Cliente
-          AND UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
-          AND date(r.Dia_YMD) >= date('now','localtime')
-      ) AS Reservas_Pendientes
+      COALESCE(ar.Total_Reservas, 0)      AS Total_Reservas,
+      COALESCE(ar.Reservas_Pendientes, 0) AS Reservas_Pendientes
 
     FROM Clientes c
+    LEFT JOIN ult_reserva ur ON ur.ID_Cliente = c.ID_Cliente AND ur.rn = 1
+    LEFT JOIN Mesas m        ON m.ID_Mesa = ur.ID_Mesa
+    LEFT JOIN agg_reservas ar ON ar.ID_Cliente = c.ID_Cliente
     "#
 }
 

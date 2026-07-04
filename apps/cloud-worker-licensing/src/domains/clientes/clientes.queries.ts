@@ -16,56 +16,56 @@ function rows(rs: any): any[] {
 	});
 }
 
+// Base del overview. En vez de ~6 subconsultas correlacionadas por cliente (coste
+// O(clientes x reservas), CLI-02), se precalcula la última reserva y los agregados en
+// dos CTEs que recorren `Reservas` una sola vez (paridad con el repo Rust). La salida
+// (nombres de columnas) es IDÉNTICA. No se limita el número de filas: el ranking
+// "Reciente" es la lista completa que el frontend usa para buscar/contar.
 function overviewBase(): string {
 	return `
+		WITH ult_reserva AS (
+			SELECT
+				r.ID_Cliente,
+				r.Dia_YMD,
+				r.Hora,
+				r.Comensales,
+				r.ID_Mesa,
+				ROW_NUMBER() OVER (
+					PARTITION BY r.ID_Cliente
+					ORDER BY r.Dia_YMD DESC, r.Hora DESC
+				) AS rn
+			FROM Reservas r
+		),
+		agg_reservas AS (
+			SELECT
+				r.ID_Cliente,
+				COUNT(*) AS total_reservas,
+				SUM(
+					CASE
+						WHEN UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
+							AND date(r.Dia_YMD) >= date('now','localtime')
+						THEN 1 ELSE 0
+					END
+				) AS reservas_pendientes
+			FROM Reservas r
+			GROUP BY r.ID_Cliente
+		)
 		SELECT
 			c.ID_Cliente AS id_cliente,
 			c.Nombre AS nombre,
 			c.Email AS email,
 			c.Telefono AS telefono,
-			(
-				SELECT r.Dia_YMD
-				FROM Reservas r
-				WHERE r.ID_Cliente = c.ID_Cliente
-				ORDER BY r.Dia_YMD DESC, r.Hora DESC
-				LIMIT 1
-			) AS ultima_reserva_fecha,
-			(
-				SELECT r.Hora
-				FROM Reservas r
-				WHERE r.ID_Cliente = c.ID_Cliente
-				ORDER BY r.Dia_YMD DESC, r.Hora DESC
-				LIMIT 1
-			) AS ultima_reserva_hora,
-			(
-				SELECT r.Comensales
-				FROM Reservas r
-				WHERE r.ID_Cliente = c.ID_Cliente
-				ORDER BY r.Dia_YMD DESC, r.Hora DESC
-				LIMIT 1
-			) AS ultima_reserva_num_personas,
-			(
-				SELECT m.Numero_Mesa
-				FROM Reservas r
-				JOIN Mesas m ON m.ID_Mesa = r.ID_Mesa
-				WHERE r.ID_Cliente = c.ID_Cliente
-				ORDER BY r.Dia_YMD DESC, r.Hora DESC
-				LIMIT 1
-			) AS ultima_reserva_mesa,
+			ur.Dia_YMD AS ultima_reserva_fecha,
+			ur.Hora AS ultima_reserva_hora,
+			ur.Comensales AS ultima_reserva_num_personas,
+			m.Numero_Mesa AS ultima_reserva_mesa,
 			IFNULL(c.Total_Gastado, 0) AS total_gastado_stored,
-			(
-				SELECT COUNT(*)
-				FROM Reservas r
-				WHERE r.ID_Cliente = c.ID_Cliente
-			) AS total_reservas,
-			(
-				SELECT COUNT(*)
-				FROM Reservas r
-				WHERE r.ID_Cliente = c.ID_Cliente
-					AND UPPER(COALESCE(r.Estado,'')) = 'ACTIVA'
-					AND date(r.Dia_YMD) >= date('now','localtime')
-			) AS reservas_pendientes
+			COALESCE(ar.total_reservas, 0) AS total_reservas,
+			COALESCE(ar.reservas_pendientes, 0) AS reservas_pendientes
 		FROM Clientes c
+		LEFT JOIN ult_reserva ur ON ur.ID_Cliente = c.ID_Cliente AND ur.rn = 1
+		LEFT JOIN Mesas m ON m.ID_Mesa = ur.ID_Mesa
+		LEFT JOIN agg_reservas ar ON ar.ID_Cliente = c.ID_Cliente
 	`;
 }
 
