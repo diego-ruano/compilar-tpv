@@ -285,9 +285,13 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Created_At TEXT DEFAULT (datetime('now','localtime'))
 );
 
+-- Reservas.ID_Cliente es NULLABLE a propósito: una reserva puede existir sin cliente
+-- asignado. El gasto solo se atribuye/revierte cuando hay cliente real
+-- (comanda -> reserva -> cliente); si es NULL, no se acredita a nadie. La FK sigue
+-- vigente pero no enforce sobre NULL.
 CREATE TABLE IF NOT EXISTS Reservas (
   ID_Reserva TEXT PRIMARY KEY,
-  ID_Cliente TEXT NOT NULL,
+  ID_Cliente TEXT,
   ID_Mesa TEXT NOT NULL,
   Dia_YMD TEXT NOT NULL,
   Hora TEXT NOT NULL,
