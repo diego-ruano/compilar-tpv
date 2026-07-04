@@ -185,6 +185,12 @@ impl ClientesRepository for SqliteClientesRepository {
         }))
     }
 
+    // NOTA (CLI-06): `create` es un UPSERT por `ID_Cliente` (INSERT ... ON CONFLICT DO
+    // UPDATE), no un alta estricta. Es intencional: hace la operación idempotente si el
+    // mismo id se reaplica (p. ej. reintentos o catch-up de sync), en vez de reventar con
+    // un conflicto de PK. Los conflictos de OTRO cliente con el mismo email sí se rechazan
+    // (índice ux_clientes_email → `write_err`). El alta de UI normal llega sin id y genera
+    // uno nuevo, así que el camino de conflicto por id sólo ocurre en reaplicaciones.
     async fn create(&self, nuevo: NuevoCliente) -> AppResult<bool> {
         let id_cliente = nuevo.id.unwrap_or_else(new_id);
 

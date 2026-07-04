@@ -22,6 +22,9 @@ function idStep(provided?: string) {
 	return { kind: "value", saveAs: "id", sql: "SELECT ?1;", args: [id] };
 }
 
+// NOTA (CLI-06): `createCliente` es un UPSERT por ID_Cliente (INSERT ... ON CONFLICT DO
+// UPDATE), no un alta estricta. Es intencional para que reaplicar el mismo comando (misma
+// Op_Id/UUID en catch-up o reintentos de sync) sea idempotente en vez de romper por PK.
 export function createCliente(input: CreateClienteInput): BuiltCommand {
 	const cloudPayload = {
 		id_cliente: input.id_cliente,
