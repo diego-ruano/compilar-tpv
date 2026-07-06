@@ -4,6 +4,16 @@ fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// Valida la parte de fecha de un valor de lote y la devuelve como `NaiveDate`.
+///
+/// Acepta `YYYY-MM-DD` (Caducidad) o `YYYY-MM-DD HH:MM:SS` (Fecha_Entrada); en el segundo
+/// caso toma los 10 primeros caracteres. Rechaza fechas imposibles (p. ej. `2025-02-30`),
+/// lo que mantiene ordenable el FEFO (`ORDER BY date(Caducidad)`).
+fn fecha_lote_valida(s: &str) -> Option<chrono::NaiveDate> {
+    let ymd = s.get(0..10)?;
+    chrono::NaiveDate::parse_from_str(ymd, "%Y-%m-%d").ok()
+}
+
 /// Normaliza una lista de IDs: recorta, descarta vacíos, ordena y deduplica.
 pub fn normalize_ids(ids: Vec<String>) -> Vec<String> {
     let mut v: Vec<String> = ids
@@ -210,14 +220,45 @@ impl LoteNuevo {
         if !stock.is_finite() || stock < 0.0 {
             return Err("Stock_Disponible inválido".into());
         }
+        // Coherencia (INV-01): no puede haber más disponible del que jamás entró. Si de verdad
+        // entró más género, se sube la cantidad inicial (no se infla el disponible a pelo).
+        if stock > cantidad_inicial + 1e-9 {
+            return Err("El stock disponible no puede superar la cantidad inicial".into());
+        }
+
+        let caducidad = limpia(caducidad);
+        let fecha_entrada = limpia(fecha_entrada);
+
+        // Validación de fechas (INV-03): formato ISO y coherencia temporal, para que el FEFO
+        // ordene bien. Fecha_Entrada puede venir vacía (la BD la fija a `now` por defecto).
+        let cad_date = match &caducidad {
+            Some(c) => match fecha_lote_valida(c) {
+                Some(d) => Some(d),
+                None => return Err("Caducidad con formato inválido (se espera YYYY-MM-DD)".into()),
+            },
+            None => None,
+        };
+        let ent_date = match &fecha_entrada {
+            Some(f) => match fecha_lote_valida(f) {
+                Some(d) => Some(d),
+                None => return Err("Fecha_Entrada con formato inválido".into()),
+            },
+            None => None,
+        };
+        if let (Some(c), Some(e)) = (cad_date, ent_date) {
+            if c < e {
+                return Err("La caducidad no puede ser anterior a la fecha de entrada".into());
+            }
+        }
+
         Ok(LoteNuevo {
             id: id_lote.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
             id_producto,
             codigo_lote,
-            caducidad: limpia(caducidad),
+            caducidad,
             cantidad_inicial,
             stock_disponible: stock,
-            fecha_entrada: limpia(fecha_entrada),
+            fecha_entrada,
             coste_unitario,
             id_proveedor,
             notas: limpia(notas),

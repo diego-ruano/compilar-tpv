@@ -224,16 +224,37 @@ impl InventarioRepository for SqliteInventarioRepository {
         let mut low = db
             .query(
                 r#"
-                WITH base AS (
-                  SELECT p.ID_Producto, p.Nombre, p.Unidad_Medida, p.Precio_Venta,
-                    (SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) AS Stock_Actual,
-                    (SELECT l.Caducidad FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Caducidad_Proxima,
-                    (SELECT l.Codigo_Lote FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Lote
-                  FROM Productos p
+                -- INV-04: sin subconsultas correlacionadas por fila. Stock por producto con un
+                -- GROUP BY, y el lote FEFO (próximo a caducar) con una ventana ROW_NUMBER.
+                WITH stock_por_prod AS (
+                  SELECT ID_Producto, COALESCE(SUM(Stock_Disponible), 0) AS Stock_Actual
+                  FROM Lotes_Producto
+                  GROUP BY ID_Producto
+                ),
+                fefo AS (
+                  SELECT ID_Producto, Caducidad, Codigo_Lote
+                  FROM (
+                    SELECT ID_Producto, Caducidad, Codigo_Lote,
+                      ROW_NUMBER() OVER (
+                        PARTITION BY ID_Producto
+                        ORDER BY date(Caducidad) ASC, datetime(Fecha_Entrada) ASC, ID_Lote ASC
+                      ) AS rn
+                    FROM Lotes_Producto
+                    WHERE Stock_Disponible > 0 AND Caducidad IS NOT NULL
+                  )
+                  WHERE rn = 1
                 )
-                SELECT Nombre, Stock_Actual, Unidad_Medida, Caducidad_Proxima, Lote, Precio_Venta
-                FROM base
-                ORDER BY Stock_Actual ASC, Nombre ASC
+                SELECT
+                  p.Nombre,
+                  COALESCE(sp.Stock_Actual, 0) AS Stock_Actual,
+                  p.Unidad_Medida,
+                  f.Caducidad AS Caducidad_Proxima,
+                  f.Codigo_Lote AS Lote,
+                  p.Precio_Venta
+                FROM Productos p
+                LEFT JOIN stock_por_prod sp ON sp.ID_Producto = p.ID_Producto
+                LEFT JOIN fefo f ON f.ID_Producto = p.ID_Producto
+                ORDER BY Stock_Actual ASC, p.Nombre ASC
                 LIMIT ?1;
                 "#,
                 vec![Value::Integer(limit)],
@@ -429,11 +450,31 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
+        // INV-05: si el producto aparece en comandas históricas, el borrado físico fallaría con un
+        // error crudo de FK. Se avisa con un mensaje claro en su lugar.
+        {
+            let rg = self.db.read().await;
+            let mut rows = rg
+                .query(
+                    "SELECT 1 FROM Detalle_Comanda WHERE ID_Producto=?1 LIMIT 1;",
+                    vec![Value::Text(id_producto.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            if rows.next().await.map_err(db_err)?.is_some() {
+                return Err(AppError::validation(
+                    "No se puede borrar: el producto tiene ventas registradas en comandas.",
+                ));
+            }
+        }
         let g = self.db.write().await;
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             for sql in [
+                // Movimientos primero (FK → Lotes): explícito para que replique a la nube sin
+                // depender de ON DELETE CASCADE del motor (incierto en Turso, DB-03).
+                "DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
                 "DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
                 "DELETE FROM Productos WHERE ID_Producto=?1;",
@@ -511,32 +552,32 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn create_lote(&self, l: LoteNuevo) -> AppResult<()> {
         let id_lote = l.id.unwrap_or_else(new_id);
-        let db = self.db.write().await;
-        db.execute(
+        let id_mov = new_id();
+        let stock = l.stock_disponible;
+        let motivo = l.notas.clone();
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            conn.execute(
                 r#"
+                -- Alta PURA (INV-02): un create con un ID_Lote existente es un no-op idempotente,
+                -- nunca pisa Stock_Disponible (que descuadraría con Lote_Consumos). La edición usa
+                -- update_lote / ajustar_lote.
                 INSERT INTO Lotes_Producto
                   (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
                 VALUES
                   (?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9, ?10)
-                ON CONFLICT(ID_Lote) DO UPDATE SET
-                  ID_Producto = excluded.ID_Producto,
-                  Codigo_Lote = excluded.Codigo_Lote,
-                  Fecha_Entrada = excluded.Fecha_Entrada,
-                  Caducidad = excluded.Caducidad,
-                  Cantidad_Inicial = excluded.Cantidad_Inicial,
-                  Stock_Disponible = excluded.Stock_Disponible,
-                  Coste_Unitario = excluded.Coste_Unitario,
-                  ID_Proveedor = excluded.ID_Proveedor,
-                  Notas = excluded.Notas;
+                ON CONFLICT(ID_Lote) DO NOTHING;
                 "#,
                 vec![
-                    Value::Text(id_lote),
+                    Value::Text(id_lote.clone()),
                     Value::Text(l.id_producto),
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
                     Value::Real(l.cantidad_inicial),
-                    Value::Real(l.stock_disponible),
+                    Value::Real(stock),
                     opt_real(l.coste_unitario),
                     match l.id_proveedor {
                         Some(v) => Value::Text(v),
@@ -547,7 +588,29 @@ impl InventarioRepository for SqliteInventarioRepository {
             )
             .await
             .map_err(db_err)?;
-        Ok(())
+
+            // Auditoría (INV-01b): el alta entra como movimiento 'ALTA' con delta = stock inicial.
+            conn.execute(
+                r#"
+                INSERT INTO Movimientos_Stock
+                  (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                VALUES
+                  (?1, ?2, 'ALTA', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                "#,
+                vec![
+                    Value::Text(id_mov),
+                    Value::Text(id_lote),
+                    Value::Real(stock),
+                    Value::Real(stock),
+                    opt_text(motivo),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+        finish_tx(conn, res).await
     }
 
     async fn update_lote(&self, l: LoteUpdate) -> AppResult<()> {
@@ -588,18 +651,71 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {
-        let db = self.db.write().await;
-        db.execute(
+        let id_mov = new_id();
+        let new_stock = a.stock_disponible;
+        let g = self.db.write().await;
+        let conn = &g;
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            // Cantidad inicial + stock previo (dentro de la tx): para validar coherencia (INV-01) y
+            // calcular el delta del movimiento, todo atómico con la escritura.
+            let (cantidad_inicial, old_stock) = {
+                let mut rows = conn
+                    .query(
+                        "SELECT Cantidad_Inicial, Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
+                        vec![Value::Text(a.id_lote.clone())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(r) => (
+                        fl(r.get_value(0).map_err(db_err)?),
+                        fl(r.get_value(1).map_err(db_err)?),
+                    ),
+                    None => return Err(AppError::validation("Lote no encontrado")),
+                }
+            };
+
+            // Coherencia (INV-01): no dejar más disponible del que jamás entró.
+            if new_stock > cantidad_inicial + 1e-9 {
+                return Err(AppError::validation(
+                    "El stock disponible no puede superar la cantidad inicial del lote.",
+                ));
+            }
+
+            conn.execute(
                 "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
                 vec![
-                    Value::Real(a.stock_disponible),
-                    opt_text(a.notas),
-                    Value::Text(a.id_lote),
+                    Value::Real(new_stock),
+                    opt_text(a.notas.clone()),
+                    Value::Text(a.id_lote.clone()),
                 ],
             )
             .await
             .map_err(db_err)?;
-        Ok(())
+
+            // Auditoría (INV-01b): el ajuste queda como movimiento 'AJUSTE' con su delta.
+            conn.execute(
+                r#"
+                INSERT INTO Movimientos_Stock
+                  (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                VALUES
+                  (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                "#,
+                vec![
+                    Value::Text(id_mov),
+                    Value::Text(a.id_lote),
+                    Value::Real(new_stock - old_stock),
+                    Value::Real(new_stock),
+                    opt_text(a.notas),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+        finish_tx(conn, res).await
     }
 }
 

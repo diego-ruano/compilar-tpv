@@ -138,6 +138,16 @@ inventarioRoutes.post("/productos", async (c) => {
 inventarioRoutes.delete("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
+	// INV-05: no borrar productos con histórico de ventas; mensaje claro en vez de error crudo de FK.
+	const enUso = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.productoReferenciado(db, id),
+	);
+	if (enUso) {
+		return c.json(
+			{ error: "No se puede borrar: el producto tiene ventas registradas en comandas." },
+			409,
+		);
+	}
 	await apply(c, cmd.deleteProducto(id));
 	return c.json({ ok: true });
 });
@@ -172,6 +182,15 @@ inventarioRoutes.patch("/lotes/:id", async (c) => {
 	if (id == null) return badRequest(c, "id_lote inválido");
 	const p = await parseBody(c, S.ajusteLoteSchema);
 	if (!p.ok) return p.res;
-	await apply(c, cmd.ajustarLote(id, p.data));
+	// Coherencia (INV-01): el ajuste no puede dejar más disponible del que entró.
+	const info = await tenantQuery(c.env, c.get("tenantId"), (db) => q.getLoteStock(db, id));
+	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
+	if (p.data.stock_disponible > info.cantidad_inicial + 1e-9) {
+		return c.json(
+			{ error: "El stock disponible no puede superar la cantidad inicial del lote." },
+			400,
+		);
+	}
+	await apply(c, cmd.ajustarLote(id, p.data, info.stock_disponible));
 	return c.json({ ok: true });
 });

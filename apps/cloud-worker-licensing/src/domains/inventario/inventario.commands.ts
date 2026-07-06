@@ -76,21 +76,23 @@ const SQL_UPSERT_CATEGORIA = `
 		Pasa_Cocina = excluded.Pasa_Cocina;
 `;
 
+// Alta PURA (INV-02): un create con un ID_Lote existente es un no-op idempotente, nunca pisa
+// Stock_Disponible (que descuadraría con Lote_Consumos). La edición usa updateLote / ajustarLote.
 const SQL_INSERT_LOTE = `
 	INSERT INTO Lotes_Producto
 		(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
 	VALUES
 		(?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9, ?10)
-	ON CONFLICT(ID_Lote) DO UPDATE SET
-		ID_Producto = excluded.ID_Producto,
-		Codigo_Lote = excluded.Codigo_Lote,
-		Fecha_Entrada = excluded.Fecha_Entrada,
-		Caducidad = excluded.Caducidad,
-		Cantidad_Inicial = excluded.Cantidad_Inicial,
-		Stock_Disponible = excluded.Stock_Disponible,
-		Coste_Unitario = excluded.Coste_Unitario,
-		ID_Proveedor = excluded.ID_Proveedor,
-		Notas = excluded.Notas;
+	ON CONFLICT(ID_Lote) DO NOTHING;
+`;
+
+// Auditoría de stock (INV-01b): cada alta/ajuste deja un movimiento trazable. Fecha canónica
+// (la congela resolveNowLiterals del worker antes de replicar).
+const SQL_INSERT_MOVIMIENTO = `
+	INSERT INTO Movimientos_Stock
+		(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+	VALUES
+		(?1, ?2, ?3, ?4, ?5, ?6, NULL, datetime('now','localtime'));
 `;
 
 // UUIDv7: el id lo genera el cliente y lo envía. Si faltara, generamos uno aquí.
@@ -162,6 +164,9 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 
 export function deleteProducto(idProducto: string): BuiltCommand {
 	const steps = [
+		// Movimientos primero (FK → Lotes): explícito para no depender de ON DELETE CASCADE del
+		// motor (incierto en Turso, DB-03).
+		"DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
 		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
 		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
 		"DELETE FROM Productos WHERE ID_Producto=?1;",
@@ -201,6 +206,7 @@ export function setAlergenosProducto(
 export function createLote(input: CreateLoteInput): BuiltCommand {
 	const stock =
 		input.stock_disponible == null ? input.cantidad_inicial : input.stock_disponible;
+	const movId = crypto.randomUUID();
 
 	const steps: any[] = [
 		idStep(input.id_lote),
@@ -219,6 +225,12 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 				idOrNull(input.id_proveedor),
 				cleanOrNull(input.notas),
 			],
+		},
+		// Auditoría: el alta entra como movimiento 'ALTA' con delta = stock inicial.
+		{
+			kind: "execute",
+			sql: SQL_INSERT_MOVIMIENTO,
+			args: [movId, REF_ID, "ALTA", stock, stock, cleanOrNull(input.notas)],
 		},
 	];
 	return {
@@ -265,16 +277,36 @@ export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand
 	};
 }
 
-export function ajustarLote(idLote: string, input: AjusteLoteInput): BuiltCommand {
+// `stockActual` = Stock_Disponible previo (lo lee la ruta antes de aplicar), para el delta de auditoría.
+export function ajustarLote(
+	idLote: string,
+	input: AjusteLoteInput,
+	stockActual: number,
+): BuiltCommand {
+	const movId = crypto.randomUUID();
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
+			args: [input.stock_disponible, cleanOrNull(input.notas), idLote],
+		},
+		// Auditoría: el ajuste queda como movimiento 'AJUSTE' con su delta (nuevo - anterior).
+		{
+			kind: "execute",
+			sql: SQL_INSERT_MOVIMIENTO,
+			args: [
+				movId,
+				idLote,
+				"AJUSTE",
+				input.stock_disponible - stockActual,
+				input.stock_disponible,
+				cleanOrNull(input.notas),
+			],
+		},
+	];
 	return {
 		commandName: "inventario_ajustar_lote",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
-				args: [input.stock_disponible, cleanOrNull(input.notas), idLote],
-			},
-		},
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_lote: idLote, ...input },
 	};
 }

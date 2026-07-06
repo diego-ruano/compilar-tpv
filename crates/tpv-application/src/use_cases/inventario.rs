@@ -91,6 +91,8 @@ pub async fn delete_producto(repo: &R, id_producto: String) -> AppResult<String>
     if id_producto.trim().is_empty() {
         return Err(AppError::validation("id_producto inválido"));
     }
+    // INV-05: el repo rechaza con mensaje claro si el producto tiene histórico en Detalle_Comanda
+    // (en vez de un error crudo de FK).
     repo.delete_producto(&id_producto).await?;
     Ok("OK".to_string())
 }
@@ -156,6 +158,8 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
 pub async fn ajustar_lote(repo: &R, input: AjusteLoteInput) -> AppResult<String> {
     let ajuste = AjusteLote::validar(input.id_lote, input.stock_disponible, input.notas)
         .map_err(AppError::validation)?;
+    // Coherencia (INV-01, stock ≤ cantidad_inicial) validada en el repo, atómica con la lectura del
+    // stock previo (para el delta de auditoría).
     repo.ajustar_lote(ajuste).await?;
     Ok("OK".to_string())
 }

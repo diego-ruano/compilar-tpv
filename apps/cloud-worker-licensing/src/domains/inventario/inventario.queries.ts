@@ -88,16 +88,37 @@ export async function resumen(
 
 	const low = await db.execute({
 		sql: `
-			WITH base AS (
-				SELECT p.ID_Producto, p.Nombre, p.Unidad_Medida, p.Precio_Venta,
-					(SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) AS Stock_Actual,
-					(SELECT l.Caducidad FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Caducidad_Proxima,
-					(SELECT l.Codigo_Lote FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Lote
-				FROM Productos p
+			-- INV-04: sin subconsultas correlacionadas por fila. Stock por producto con un
+			-- GROUP BY, y el lote FEFO (próximo a caducar) con una ventana ROW_NUMBER.
+			WITH stock_por_prod AS (
+				SELECT ID_Producto, COALESCE(SUM(Stock_Disponible), 0) AS Stock_Actual
+				FROM Lotes_Producto
+				GROUP BY ID_Producto
+			),
+			fefo AS (
+				SELECT ID_Producto, Caducidad, Codigo_Lote
+				FROM (
+					SELECT ID_Producto, Caducidad, Codigo_Lote,
+						ROW_NUMBER() OVER (
+							PARTITION BY ID_Producto
+							ORDER BY date(Caducidad) ASC, datetime(Fecha_Entrada) ASC, ID_Lote ASC
+						) AS rn
+					FROM Lotes_Producto
+					WHERE Stock_Disponible > 0 AND Caducidad IS NOT NULL
+				)
+				WHERE rn = 1
 			)
-			SELECT Nombre, Stock_Actual, Unidad_Medida, Caducidad_Proxima, Lote, Precio_Venta
-			FROM base
-			ORDER BY Stock_Actual ASC, Nombre ASC
+			SELECT
+				p.Nombre,
+				COALESCE(sp.Stock_Actual, 0) AS Stock_Actual,
+				p.Unidad_Medida,
+				f.Caducidad AS Caducidad_Proxima,
+				f.Codigo_Lote AS Lote,
+				p.Precio_Venta
+			FROM Productos p
+			LEFT JOIN stock_por_prod sp ON sp.ID_Producto = p.ID_Producto
+			LEFT JOIN fefo f ON f.ID_Producto = p.ID_Producto
+			ORDER BY Stock_Actual ASC, p.Nombre ASC
 			LIMIT ?1;
 		`,
 		args: [limit],
@@ -154,6 +175,36 @@ export async function productDetail(
 		producto,
 		alergenos: rows(alergRs),
 	} as unknown as ProductDetailResponse;
+}
+
+// `(Cantidad_Inicial, Stock_Disponible)` del lote si existe. Para validar la coherencia de un
+// ajuste (INV-01) antes de aplicarlo por el DO.
+export async function getLoteStock(
+	db: Client,
+	idLote: string,
+): Promise<{ cantidad_inicial: number; stock_disponible: number } | null> {
+	const rs = await db.execute({
+		sql: "SELECT Cantidad_Inicial, Stock_Disponible FROM Lotes_Producto WHERE ID_Lote=?1 LIMIT 1;",
+		args: [idLote],
+	});
+	const r = rows(rs)[0];
+	if (!r) return null;
+	return {
+		cantidad_inicial: Number(r.Cantidad_Inicial ?? 0),
+		stock_disponible: Number(r.Stock_Disponible ?? 0),
+	};
+}
+
+// ¿El producto está referenciado por alguna Detalle_Comanda? (borrado con histórico, INV-05).
+export async function productoReferenciado(
+	db: Client,
+	idProducto: string,
+): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT 1 FROM Detalle_Comanda WHERE ID_Producto=?1 LIMIT 1;",
+		args: [idProducto],
+	});
+	return (rs.rows ?? []).length > 0;
 }
 
 export async function listLotesByProducto(
