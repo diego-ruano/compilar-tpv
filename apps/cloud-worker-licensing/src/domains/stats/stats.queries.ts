@@ -88,11 +88,18 @@ export async function mesas(
 		db,
 		"SELECT COUNT(*) AS n FROM Mesas WHERE COALESCE(Es_Sistema,0)=0;",
 	);
+	// Ingresos al nivel de PAGO (fuente de verdad = Pagos, coherente con caja), semántica por-mesa:
+	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = SUM(Importe_Total). Se
+	// excluyen las mesas de sistema (p. ej. venta rápida) del tablero de mesas. Mismo modelo que
+	// Main/Rust (STAT-01/02/06).
 	const ingresos = await one(
 		db,
-		`SELECT ROUND(COALESCE(SUM(Importe_Total),0),2) AS total, COUNT(DISTINCT ID_Comanda) AS comandas
+		`SELECT ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS total, COUNT(DISTINCT c.ID_Mesa) AS ocupadas
 		 FROM Pagos p
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end};`,
+		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(m.Es_Sistema,0)=0;`,
 	);
 	const top = await one(
 		db,
@@ -110,7 +117,10 @@ export async function mesas(
 	const servRs = await db.execute(
 		`SELECT ${b} AS label, COUNT(DISTINCT p.ID_Comanda) AS value
 		 FROM Pagos p
+		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(m.Es_Sistema,0)=0
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const topRs = await db.execute(
@@ -126,12 +136,12 @@ export async function mesas(
 	);
 	const servicios = rows(servRs);
 	const topMesas = rows(topRs);
-	const comandas = num(ingresos.comandas);
+	const ocupadas = num(ingresos.ocupadas);
 
 	return {
 		total_mesas: num(total.n),
-		ocupadas: comandas,
-		ticket_medio_por_mesa: comandas > 0 ? Math.round((num(ingresos.total) / comandas) * 100) / 100 : 0,
+		ocupadas,
+		ticket_medio_por_mesa: ocupadas > 0 ? Math.round((num(ingresos.total) / ocupadas) * 100) / 100 : 0,
 		mesa_top_comandas: top.mesa
 			? { mesa: String(top.mesa), zona: String(top.zona ?? ""), comandas: num(top.comandas) }
 			: null,

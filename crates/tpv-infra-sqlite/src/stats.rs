@@ -39,33 +39,6 @@ impl SqliteStatsRepository {
    Helpers de introspección y de rango/bucket
 ========================================================= */
 
-async fn table_has_column<C: Reader>(db: &C, table: &str, column: &str) -> Result<bool, String> {
-    let sql = format!("PRAGMA table_info({});", table);
-    let mut rows = db.query(&sql, ()).await.map_err(|e| e.to_string())?;
-
-    while let Ok(Some(r)) = rows.next().await {
-        let name = v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default();
-
-        if name == column {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
-async fn table_exists<C: Reader>(db: &C, table: &str) -> Result<bool, String> {
-    let mut rows = db
-        .query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?1 LIMIT 1;",
-            vec![Value::Text(table.to_string())],
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-
-    Ok(rows.next().await.map_err(|e| e.to_string())?.is_some())
-}
-
 fn bucket_sql_datetime(range: StatsRange, dt_expr: &str) -> String {
     match range {
         StatsRange::Hoy => format!("strftime('%H', {dt})", dt = dt_expr),
@@ -113,14 +86,6 @@ fn range_bounds_sql_reservas(range: StatsRange) -> (&'static str, &'static str) 
             "datetime('now','localtime','start of year')",
             "datetime('now','localtime','start of day','+1 day')",
         ),
-    }
-}
-
-fn bucket_sql(range: StatsRange) -> &'static str {
-    match range {
-        StatsRange::Hoy => "strftime('%H', paid_at)",
-        StatsRange::Semana | StatsRange::Mes => "strftime('%d/%m', paid_at)",
-        StatsRange::Anio => "strftime('%m/%Y', paid_at)",
     }
 }
 
@@ -186,7 +151,7 @@ impl StatsRepository for SqliteStatsRepository {
 impl SqliteStatsRepository {
     async fn mesas_impl(&self, range: StatsRange) -> Result<MesasStatsResponse, String> {
         let (start_expr, end_expr) = range_bounds_sql(range);
-        let bucket_expr = bucket_sql(range);
+        let bucket_expr = bucket_sql_datetime(range, "p.Fecha_Hora");
 
         let g = self.db.read().await;
         let db = &g;
@@ -208,87 +173,34 @@ impl SqliteStatsRepository {
             None => 0,
         };
 
-        let ctes = format!(
+        // Ingresos y ocupación al nivel de PAGO (fuente de verdad = Pagos, coherente con caja):
+        // cada Pago cuenta en su propia Fecha_Hora. Sin exigir comanda 100% pagada ni imputar al
+        // último pago (STAT-01/02). Mismo modelo que el worker/Handy (STAT-06). Se excluyen las
+        // mesas de sistema (p. ej. venta rápida) del tablero de mesas.
+        let sql_occ_ing = format!(
             r#"
-            WITH
-            rng AS (
-              SELECT {start} AS start_dt, {end} AS end_dt
-            ),
-            paid_det AS (
-              SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
-              FROM Pago_Detalles pd
-              JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-              GROUP BY pd.ID_Detalle
-            ),
-            comanda_paid_at AS (
-              SELECT
-                c.ID_Comanda AS ID_Comanda,
-                c.ID_Mesa    AS ID_Mesa,
-                MAX(pd.paid_at) AS paid_at,
-                ROUND(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 2) AS total
-              FROM Comandas c
-              JOIN Detalle_Comanda dc ON dc.ID_Comanda = c.ID_Comanda
-              JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
-              GROUP BY c.ID_Comanda
-            ),
-            pagadas AS (
-              SELECT cp.*
-              FROM comanda_paid_at cp, rng
-              WHERE cp.paid_at >= rng.start_dt
-                AND cp.paid_at <  rng.end_dt
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM Detalle_Comanda dc2
-                  WHERE dc2.ID_Comanda = cp.ID_Comanda
-                    AND NOT EXISTS (
-                      SELECT 1 FROM paid_det pd2 WHERE pd2.ID_Detalle = dc2.ID_Detalle
-                    )
-                )
-            )
+            SELECT
+              COUNT(DISTINCT c.ID_Mesa) AS ocupadas,
+              ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS ingresos
+            FROM Pagos p
+            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(m.Es_Sistema,0)=0;
             "#,
             start = start_expr,
             end = end_expr
         );
 
-        let sql_ocupadas = format!(
-            r#"
-            {ctes}
-            SELECT COUNT(DISTINCT m.ID_Mesa)
-            FROM pagadas p
-            JOIN Mesas m ON m.ID_Mesa = p.ID_Mesa
-            WHERE COALESCE(m.Es_Sistema,0)=0;
-            "#,
-            ctes = ctes
-        );
-
-        let mut rows_occ = db
-            .query(&sql_ocupadas, ())
-            .await
-            .map_err(|e| e.to_string())?;
-        let ocupadas: i64 = match rows_occ.next().await.map_err(|e| e.to_string())? {
-            Some(r) => v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0),
-            None => 0,
-        };
-
-        let sql_ingresos = format!(
-            r#"
-            {ctes}
-            SELECT ROUND(COALESCE(SUM(p.total),0),2)
-            FROM pagadas p
-            JOIN Mesas m ON m.ID_Mesa = p.ID_Mesa
-            WHERE COALESCE(m.Es_Sistema,0)=0;
-            "#,
-            ctes = ctes
-        );
-
-        let mut rows_ing = db
-            .query(&sql_ingresos, ())
-            .await
-            .map_err(|e| e.to_string())?;
-        let total_ingresos: f64 = match rows_ing.next().await.map_err(|e| e.to_string())? {
-            Some(r) => v_f64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0.0),
-            None => 0.0,
-        };
+        let mut rows_occ = db.query(&sql_occ_ing, ()).await.map_err(|e| e.to_string())?;
+        let (ocupadas, total_ingresos): (i64, f64) =
+            match rows_occ.next().await.map_err(|e| e.to_string())? {
+                Some(r) => (
+                    v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0),
+                    v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                ),
+                None => (0, 0.0),
+            };
 
         let ticket_medio_por_mesa: f64 = if ocupadas > 0 {
             (total_ingresos / (ocupadas as f64) * 100.0).round() / 100.0
@@ -298,20 +210,22 @@ impl SqliteStatsRepository {
 
         let sql_top = format!(
             r#"
-            {ctes}
             SELECT
               m.Numero_Mesa,
               z.Nombre_Zona,
-              COUNT(*) AS comandas
-            FROM pagadas p
-            JOIN Mesas m ON m.ID_Mesa = p.ID_Mesa
+              COUNT(DISTINCT p.ID_Comanda) AS comandas
+            FROM Pagos p
+            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-            WHERE COALESCE(m.Es_Sistema,0)=0
-            GROUP BY p.ID_Mesa
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(m.Es_Sistema,0)=0
+            GROUP BY m.ID_Mesa
             ORDER BY comandas DESC, m.Numero_Mesa ASC
             LIMIT 1;
             "#,
-            ctes = ctes
+            start = start_expr,
+            end = end_expr
         );
 
         let mut rows_top = db.query(&sql_top, ()).await.map_err(|e| e.to_string())?;
@@ -327,13 +241,17 @@ impl SqliteStatsRepository {
 
         let sql_serv = format!(
             r#"
-            {ctes}
-            SELECT {bucket} AS b, COUNT(*) AS n
-            FROM pagadas
+            SELECT {bucket} AS b, COUNT(DISTINCT p.ID_Comanda) AS n
+            FROM Pagos p
+            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(m.Es_Sistema,0)=0
             GROUP BY b
             ORDER BY b ASC;
             "#,
-            ctes = ctes,
+            start = start_expr,
+            end = end_expr,
             bucket = bucket_expr
         );
 
@@ -354,20 +272,22 @@ impl SqliteStatsRepository {
 
         let sql_top_mesas = format!(
             r#"
-            {ctes}
             SELECT
               m.Numero_Mesa,
               z.Nombre_Zona,
-              ROUND(SUM(p.total),2) AS total
-            FROM pagadas p
-            JOIN Mesas m ON m.ID_Mesa = p.ID_Mesa
+              ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS total
+            FROM Pagos p
+            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+            JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
-            WHERE COALESCE(m.Es_Sistema,0)=0
-            GROUP BY p.ID_Mesa
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(m.Es_Sistema,0)=0
+            GROUP BY m.ID_Mesa
             ORDER BY total DESC
             LIMIT 10;
             "#,
-            ctes = ctes
+            start = start_expr,
+            end = end_expr
         );
 
         let mut rows_tm = db
@@ -1142,52 +1062,12 @@ impl SqliteStatsRepository {
             }
         }
 
-        let has_salida = table_has_column(db, "Fichajes", "Hora_Salida").await?;
-
-        let ent2_col: Option<&'static str> =
-            if table_has_column(db, "Fichajes", "Hora_Entrada_2").await? {
-                Some("Hora_Entrada_2")
-            } else if table_has_column(db, "Fichajes", "Hora_Entrada2").await? {
-                Some("Hora_Entrada2")
-            } else {
-                None
-            };
-
-        let sal2_col: Option<&'static str> =
-            if table_has_column(db, "Fichajes", "Hora_Salida_2").await? {
-                Some("Hora_Salida_2")
-            } else if table_has_column(db, "Fichajes", "Hora_Salida2").await? {
-                Some("Hora_Salida2")
-            } else {
-                None
-            };
-
-        if has_salida {
+        // Horas trabajadas: se suman todos los tramos (Fichajes) del rango. Los turnos partidos
+        // se modelan como filas separadas (columna `Parte`), no con columnas Hora_Entrada_2, así
+        // que basta con SUM sobre las filas por trabajador.
+        {
             let ent1_dt = fichaje_dt_sql("Hora_Entrada");
             let sal1_dt = fichaje_dt_sql("Hora_Salida");
-
-            let mut second_term = String::new();
-
-            if let (Some(e2), Some(s2)) = (ent2_col, sal2_col) {
-                let e2_dt = fichaje_dt_sql(e2);
-                let s2_dt = fichaje_dt_sql(s2);
-
-                second_term = format!(
-                    r#"
-                    + CASE
-                        WHEN f.{e2} IS NOT NULL AND f.{s2} IS NOT NULL
-                         AND {e2_dt} >= rng.start_dt
-                         AND {e2_dt} <  rng.end_dt
-                        THEN max(0, (julianday({s2_dt}) - julianday({e2_dt})) * 24.0)
-                        ELSE 0
-                      END
-                    "#,
-                    e2 = e2,
-                    s2 = s2,
-                    e2_dt = e2_dt,
-                    s2_dt = s2_dt
-                );
-            }
 
             let sql_horas = format!(
                 r#"
@@ -1202,7 +1082,6 @@ impl SqliteStatsRepository {
                       THEN max(0, (julianday({sal1_dt}) - julianday({ent1_dt})) * 24.0)
                       ELSE 0
                     END
-                    {second_term}
                   ),0),2) AS horas
                 FROM Trabajadores t
                 JOIN Usuarios u ON u.ID_Usuario = t.ID_Usuario
@@ -1213,8 +1092,7 @@ impl SqliteStatsRepository {
                 start = start_expr,
                 end = end_expr,
                 ent1_dt = ent1_dt,
-                sal1_dt = sal1_dt,
-                second_term = second_term
+                sal1_dt = sal1_dt
             );
 
             let mut rows_h = db.query(&sql_horas, ()).await.map_err(|e| e.to_string())?;
@@ -1424,41 +1302,11 @@ impl SqliteStatsRepository {
         let g = self.db.read().await;
         let db = &g;
 
-        if !table_exists(db, "Clientes").await? {
-            return Ok(ClientesStatsResponse {
-                nuevos: 0,
-                recurrentes: 0,
-                no_recurrentes: 0,
-                ticket_medio_cliente: 0.0,
-                nuevos_por_bucket: ChartSeriesI64 {
-                    labels: vec![],
-                    values: vec![],
-                },
-                top_clientes_gasto: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-            });
-        }
-
-        let has_created = table_has_column(db, "Clientes", "Created_At")
-            .await
-            .unwrap_or(false);
-        let has_total_gastado = table_has_column(db, "Clientes", "Total_Gastado")
-            .await
-            .unwrap_or(false);
-        let has_nombre = table_has_column(db, "Clientes", "Nombre")
-            .await
-            .unwrap_or(false);
-        let has_id_cliente = table_has_column(db, "Clientes", "ID_Cliente")
-            .await
-            .unwrap_or(false);
-
-        let mut nuevos: i64 = 0;
+        let nuevos: i64;
         let mut evo_labels: Vec<String> = vec![];
         let mut evo_values: Vec<i64> = vec![];
 
-        if has_created {
+        {
             let alta_dt = "datetime(cl.Created_At)";
             let bucket_expr = bucket_sql_datetime(args.range, alta_dt);
 
@@ -1513,31 +1361,9 @@ impl SqliteStatsRepository {
 
         let mut recurrentes: i64 = 0;
         let mut no_recurrentes: i64 = 0;
-        let mut ticket_medio_cliente: f64 = 0.0;
+        let ticket_medio_cliente: f64;
 
-        let can_sales = table_exists(db, "Pagos").await.unwrap_or(false)
-            && table_exists(db, "Comandas").await.unwrap_or(false)
-            && table_exists(db, "Reservas").await.unwrap_or(false)
-            && table_has_column(db, "Pagos", "ID_Comanda")
-                .await
-                .unwrap_or(false)
-            && table_has_column(db, "Pagos", "Fecha_Hora")
-                .await
-                .unwrap_or(false)
-            && table_has_column(db, "Pagos", "Importe_Total")
-                .await
-                .unwrap_or(false)
-            && table_has_column(db, "Comandas", "ID_Reserva")
-                .await
-                .unwrap_or(false)
-            && table_has_column(db, "Reservas", "ID_Reserva")
-                .await
-                .unwrap_or(false)
-            && table_has_column(db, "Reservas", "ID_Cliente")
-                .await
-                .unwrap_or(false);
-
-        if can_sales {
+        {
             let sql_rec = format!(
                 r#"
                 WITH
@@ -1614,12 +1440,9 @@ impl SqliteStatsRepository {
         let mut top_labels: Vec<String> = vec![];
         let mut top_values: Vec<f64> = vec![];
 
-        if has_total_gastado && has_id_cliente {
-            let name_expr = if has_nombre {
-                "CASE WHEN COALESCE(trim(Nombre),'') <> '' THEN trim(Nombre) ELSE 'Cliente' END"
-            } else {
-                "'Cliente'"
-            };
+        {
+            let name_expr =
+                "CASE WHEN COALESCE(trim(Nombre),'') <> '' THEN trim(Nombre) ELSE 'Cliente' END";
 
             let sql_top = format!(
                 r#"
@@ -1668,89 +1491,14 @@ impl SqliteStatsRepository {
         let g = self.db.read().await;
         let db = &g;
 
-        if !table_exists(db, "Cuentas_Gastos").await? {
-            return Ok(ProveedoresStatsResponse {
-                total_gasto: 0.0,
-                num_gastos: 0,
-                gasto_medio: 0.0,
-                porcentaje_sobre_total_gastos: 0.0,
-                proveedor_top: None,
-                gastos_evolucion: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                gasto_por_proveedor: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                ultimos_gastos: vec![],
-            });
-        }
-
-        let has_fecha = table_has_column(db, "Cuentas_Gastos", "Fecha")
-            .await
-            .unwrap_or(false);
-        let has_importe = table_has_column(db, "Cuentas_Gastos", "Importe")
-            .await
-            .unwrap_or(false);
-
-        if !has_fecha || !has_importe {
-            return Ok(ProveedoresStatsResponse {
-                total_gasto: 0.0,
-                num_gastos: 0,
-                gasto_medio: 0.0,
-                porcentaje_sobre_total_gastos: 0.0,
-                proveedor_top: None,
-                gastos_evolucion: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                gasto_por_proveedor: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                ultimos_gastos: vec![],
-            });
-        }
-
-        let has_id_prov = table_has_column(db, "Cuentas_Gastos", "ID_Proveedor")
-            .await
-            .unwrap_or(false);
-        let has_tipo = table_has_column(db, "Cuentas_Gastos", "Tipo_Gasto")
-            .await
-            .unwrap_or(false);
-        let has_concepto = table_has_column(db, "Cuentas_Gastos", "Concepto")
-            .await
-            .unwrap_or(false);
-        let has_proveedores_table = table_exists(db, "Proveedores").await.unwrap_or(false);
-
+        // Esquema fijo por migraciones: Cuentas_Gastos siempre tiene Fecha, Importe, ID_Proveedor,
+        // Tipo_Gasto y Concepto, y existe la tabla Proveedores. Un gasto es "de proveedor" si tiene
+        // ID_Proveedor o su Tipo_Gasto lo indica.
         let dt_expr = "CASE WHEN cg.Fecha LIKE '%:%' THEN datetime(cg.Fecha) ELSE datetime(cg.Fecha || ' 00:00:00') END";
         let bucket_expr = bucket_sql_datetime(args.range, dt_expr);
 
-        let supplier_filter = if has_id_prov && has_tipo {
-            "AND (cg.ID_Proveedor IS NOT NULL OR lower(cg.Tipo_Gasto) LIKE '%proveedor%')"
-        } else if has_id_prov {
-            "AND (cg.ID_Proveedor IS NOT NULL)"
-        } else if has_tipo {
-            "AND (lower(cg.Tipo_Gasto) LIKE '%proveedor%')"
-        } else {
-            return Ok(ProveedoresStatsResponse {
-                total_gasto: 0.0,
-                num_gastos: 0,
-                gasto_medio: 0.0,
-                porcentaje_sobre_total_gastos: 0.0,
-                proveedor_top: None,
-                gastos_evolucion: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                gasto_por_proveedor: ChartSeriesF64Out {
-                    labels: vec![],
-                    values: vec![],
-                },
-                ultimos_gastos: vec![],
-            });
-        };
+        let supplier_filter =
+            "AND (cg.ID_Proveedor IS NOT NULL OR lower(cg.Tipo_Gasto) LIKE '%proveedor%')";
 
         let sql_total_all = format!(
             r#"
@@ -1814,30 +1562,15 @@ impl SqliteStatsRepository {
             0.0
         };
 
-        let name_expr = if has_id_prov && has_proveedores_table {
-            r#"
+        let name_expr = r#"
             CASE
               WHEN cg.ID_Proveedor IS NOT NULL THEN
                 COALESCE(NULLIF(trim(p.Nombre_Empresa),''), ('Proveedor #' || CAST(cg.ID_Proveedor AS TEXT)))
               ELSE 'Sin proveedor'
             END
-            "#
-        } else if has_id_prov {
-            r#"
-            CASE
-              WHEN cg.ID_Proveedor IS NOT NULL THEN ('Proveedor #' || CAST(cg.ID_Proveedor AS TEXT))
-              ELSE 'Sin proveedor'
-            END
-            "#
-        } else {
-            "'Proveedor'"
-        };
+            "#;
 
-        let join_prov = if has_id_prov && has_proveedores_table {
-            "LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor"
-        } else {
-            ""
-        };
+        let join_prov = "LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor";
 
         let sql_top = format!(
             r#"
@@ -1949,11 +1682,7 @@ impl SqliteStatsRepository {
             );
         }
 
-        let concepto_expr = if has_concepto {
-            "COALESCE(cg.Concepto,'')"
-        } else {
-            "''"
-        };
+        let concepto_expr = "COALESCE(cg.Concepto,'')";
 
         let sql_last = format!(
             r#"
