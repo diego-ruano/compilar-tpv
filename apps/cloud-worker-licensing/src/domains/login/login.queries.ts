@@ -63,9 +63,72 @@ export async function loginOk(db: Client, idUsuario: string): Promise<LoginOk | 
 		nombre: String(r.nombre ?? ""),
 		apellido: r.apellido == null ? null : String(r.apellido),
 		rol: String(r.rol ?? "Sin rol"),
-		email: String(r.email ?? "admin@local"),
+		// LOGIN-06: email ausente → cadena vacía explícita (no un 'admin@local' falso).
+		email: r.email == null ? "" : String(r.email),
 		requiere_setup: Number(r.requiere_setup ?? 0),
 	};
+}
+
+/* =========================================================
+   Anti brute-force del PIN (LOGIN-01). Estado en Intentos_Login de la BD de tenant (device/tenant
+   local, NO se replica). La política de backoff es espejo de tpv-domain::login::login_bloqueo_ms.
+========================================================= */
+
+const INTENTOS_LIBRES = 5;
+
+function bloqueoMs(fallidos: number): number {
+	if (fallidos <= INTENTOS_LIBRES) return 0;
+	switch (fallidos - INTENTOS_LIBRES) {
+		case 1:
+			return 30_000;
+		case 2:
+			return 60_000;
+		case 3:
+			return 5 * 60_000;
+		default:
+			return 15 * 60_000;
+	}
+}
+
+/** Segundos que faltan para poder reintentar (0 si no está bloqueado). */
+export async function throttleSecondsLeft(db: Client, idUsuario: string): Promise<number> {
+	const rs = await db.execute({
+		sql: "SELECT Bloqueado_Hasta_Ms AS hasta FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
+		args: [idUsuario],
+	});
+	const hasta = Number(rows(rs)[0]?.hasta ?? 0);
+	const now = Date.now();
+	return hasta > now ? Math.ceil((hasta - now) / 1000) : 0;
+}
+
+/** Resetea el contador tras un login correcto. */
+export async function throttleReset(db: Client, idUsuario: string): Promise<void> {
+	await db.execute({
+		sql: "DELETE FROM Intentos_Login WHERE ID_Usuario=?1;",
+		args: [idUsuario],
+	});
+}
+
+/** Registra un fallo: incrementa el contador y fija el bloqueo escalado. */
+export async function throttleFail(db: Client, idUsuario: string): Promise<void> {
+	const rs = await db.execute({
+		sql: "SELECT Intentos_Fallidos AS n FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
+		args: [idUsuario],
+	});
+	const fallidos = Number(rows(rs)[0]?.n ?? 0) + 1;
+	const now = Date.now();
+	const hasta = now + bloqueoMs(fallidos);
+	await db.execute({
+		sql: `
+			INSERT INTO Intentos_Login (ID_Usuario, Intentos_Fallidos, Bloqueado_Hasta_Ms, Ultimo_Intento_Ms)
+			VALUES (?1, ?2, ?3, ?4)
+			ON CONFLICT(ID_Usuario) DO UPDATE SET
+				Intentos_Fallidos = excluded.Intentos_Fallidos,
+				Bloqueado_Hasta_Ms = excluded.Bloqueado_Hasta_Ms,
+				Ultimo_Intento_Ms = excluded.Ultimo_Intento_Ms;
+		`,
+		args: [idUsuario, fallidos, hasta, now],
+	});
 }
 
 /**

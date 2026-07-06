@@ -41,6 +41,28 @@ pub fn validate_email_basic(email: &str) -> bool {
 }
 
 /* =========================================================
+   Anti brute-force (LOGIN-01): política de bloqueo por intentos
+========================================================= */
+
+/// Intentos fallidos consecutivos "gratis" antes de empezar a bloquear.
+pub const LOGIN_INTENTOS_LIBRES: u32 = 5;
+
+/// Milisegundos de bloqueo tras `intentos_fallidos` fallos consecutivos. Escalado:
+/// hasta 5 fallos → sin bloqueo; luego 30 s, 1 min, 5 min y 15 min (tope). Al acertar se resetea.
+/// Función pura: la capa de aplicación la usa para fijar `Bloqueado_Hasta_Ms = now + este valor`.
+pub fn login_bloqueo_ms(intentos_fallidos: u32) -> i64 {
+    if intentos_fallidos <= LOGIN_INTENTOS_LIBRES {
+        return 0;
+    }
+    match intentos_fallidos - LOGIN_INTENTOS_LIBRES {
+        1 => 30_000,
+        2 => 60_000,
+        3 => 5 * 60_000,
+        _ => 15 * 60_000,
+    }
+}
+
+/* =========================================================
    Cripto del PIN (PBKDF2)
 ========================================================= */
 
@@ -122,6 +144,25 @@ pub fn hash_pin(pin: &str) -> Result<String, String> {
         "{}i={}${}${}",
         PBKDF2_PREFIX, PBKDF2_ITERS, salt_b64, dk_b64
     ))
+}
+
+/// Iteraciones objetivo para los hashes **nuevos**. Subir este valor (y su espejo `DEFAULT_ITERS`
+/// del worker) endurece el hashing; los hashes viejos migran solos por **rehash-en-login** (ver
+/// `hash_needs_upgrade`). Hoy = 100k por el tope de 10 ms de CPU del plan Free de Cloudflare
+/// (LOGIN-04): al pasar a plan de pago, subir a 600k (OWASP). Ver `docs/analisis/BACKLOG.md`.
+pub const fn target_pbkdf2_iters() -> u32 {
+    PBKDF2_ITERS
+}
+
+/// `true` si el hash almacenado usa **menos** iteraciones que el objetivo actual → conviene
+/// recomputarlo (rehash-en-login) con el PIN ya verificado. Solo debe llamarse tras un `verify_pin`
+/// exitoso (entonces el hash es pbkdf2 válido y parseable).
+pub fn hash_needs_upgrade(stored_hash: &str) -> bool {
+    match parse_pbkdf2_phc(stored_hash) {
+        Ok((iters, _, _)) => iters < PBKDF2_ITERS,
+        // Ilegible/no-pbkdf2: no forzamos rehash aquí (no debería ocurrir tras verificar).
+        Err(_) => false,
+    }
 }
 
 /// Verifica un PIN contra un hash PHC almacenado (comparación en tiempo constante).

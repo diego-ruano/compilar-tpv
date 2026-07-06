@@ -80,12 +80,25 @@ loginRoutes.get("/users", async (c) =>
 loginRoutes.post("/login", async (c) => {
 	const p = await parseBody(c, S.loginUserSchema);
 	if (!p.ok) return p.res;
+	// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
+	const secs = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.throttleSecondsLeft(db, p.data.id_usuario),
+	);
+	if (secs > 0) {
+		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+	}
 	const record = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
-	if (badPin) return badPin;
+	if (badPin) {
+		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.throttleFail(db, p.data.id_usuario),
+		);
+		return badPin;
+	}
+	await tenantQuery(c.env, c.get("tenantId"), (db) => q.throttleReset(db, p.data.id_usuario));
 	const ok = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.loginOk(db, p.data.id_usuario),
 	);
@@ -156,12 +169,25 @@ loginRoutes.post("/sync-initial-setup", async (c) => {
 loginRoutes.post("/punch", async (c) => {
 	const p = await parseBody(c, S.punchSchema);
 	if (!p.ok) return p.res;
+	// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
+	const secs = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.throttleSecondsLeft(db, p.data.id_usuario),
+	);
+	if (secs > 0) {
+		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
+	}
 	const record = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
-	if (badPin) return badPin;
+	if (badPin) {
+		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.throttleFail(db, p.data.id_usuario),
+		);
+		return badPin;
+	}
+	await tenantQuery(c.env, c.get("tenantId"), (db) => q.throttleReset(db, p.data.id_usuario));
 
 	const fecha =
 		p.data.fecha ||

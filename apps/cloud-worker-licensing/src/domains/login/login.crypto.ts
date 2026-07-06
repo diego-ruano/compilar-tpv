@@ -3,6 +3,11 @@
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 
 const PREFIX = "$pbkdf2-sha256$";
+// LOGIN-04: iteraciones para hashes NUEVOS. Espejo de `PBKDF2_ITERS` en crates/tpv-domain/src/login.rs.
+// Hoy 100k por el tope de 10 ms de CPU del plan Free de Cloudflare (600k lo superaría y romperia el
+// login de Handy). Al pasar a plan de pago, subir a 600k (OWASP) AQUÍ y en Rust; la Main rehashea en
+// login automáticamente. Ver docs/analisis/BACKLOG.md. `verify` usa las iteraciones de cada hash, así
+// que verificar hashes viejos (100k) sigue funcionando durante la migración.
 const DEFAULT_ITERS = 100000;
 const SALT_LEN = 16;
 const DK_LEN = 32;

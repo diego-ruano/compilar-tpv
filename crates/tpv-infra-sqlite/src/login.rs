@@ -14,7 +14,9 @@ use libsql::Value;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::login::LoginRepository;
 use tpv_contracts::login::{LoginOk, PunchParte, PunchStatus, UserListItem};
-use tpv_domain::login::{hash_pin, verify_pin, LoginUserRecord, SetupInfo};
+use tpv_domain::login::{
+    hash_needs_upgrade, hash_pin, verify_pin, LoginUserRecord, SetupInfo,
+};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::v_i64;
@@ -28,6 +30,7 @@ impl SqliteLoginRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
     }
+
 }
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
@@ -37,6 +40,7 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 fn today_ymd() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
+
 
 fn now_iso() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
@@ -172,9 +176,12 @@ async fn query_login_record<C: Reader>(
         Value::Text(s) => Some(s),
         _ => None,
     };
+    // LOGIN-06: Email es NULLABLE en el esquema; su ausencia se representa explícitamente como
+    // cadena vacía (no con un `admin@local` falso que enmascare el dato faltante).
     let email = match row.get_value(4).map_err(db_err)? {
         Value::Text(s) => s,
-        _ => "admin@local".into(),
+        Value::Null => String::new(),
+        _ => return Err(AppError::repository("Email inválido")),
     };
     let password_hash = match row.get_value(5).map_err(db_err)? {
         Value::Text(s) => s,
@@ -184,9 +191,11 @@ async fn query_login_record<C: Reader>(
         Value::Integer(n) => n,
         _ => 0,
     };
+    // LOGIN-06: el rol es crítico (base de la autorización). Su ausencia es un error, no un
+    // `"Sin rol"` silencioso que podría confundir o degradar comprobaciones de rol.
     let rol = match row.get_value(7).map_err(db_err)? {
         Value::Text(s) => s,
-        _ => "Sin rol".into(),
+        _ => return Err(AppError::repository("Rol de usuario inválido")),
     };
 
     Ok(Some(LoginUserRecord {
@@ -532,12 +541,35 @@ impl LoginRepository for SqliteLoginRepository {
     }
 
     async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
-        let db = self.db.read().await;
-        let rec = query_login_record(&db, id_usuario)
-            .await?
-            .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?;
+        crate::auth::throttle_check(&self.db, id_usuario).await?;
 
-        verify_pin(pin, &rec.password_hash).map_err(AppError::validation)?;
+        let rec = {
+            let db = self.db.read().await;
+            query_login_record(&db, id_usuario)
+                .await?
+                .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
+        };
+
+        if let Err(e) = verify_pin(pin, &rec.password_hash) {
+            let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
+            return Err(AppError::validation(e));
+        }
+        let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
+
+        // Rehash-en-login (LOGIN-04): si el hash usa menos iteraciones que el objetivo actual, se
+        // recomputa con el PIN ya verificado y se actualiza. Best-effort: un fallo aquí NO rompe el
+        // login. Hoy el objetivo es 100k → no-op; al subirlo (plan de pago) migra en el primer login.
+        if hash_needs_upgrade(&rec.password_hash) {
+            if let Ok(new_hash) = hash_pin(pin) {
+                let w = self.db.write().await;
+                let _ = w
+                    .execute(
+                        "UPDATE Usuarios SET Password_Hash = ?2 WHERE ID_Usuario = ?1;",
+                        vec![Value::Text(rec.id_usuario.clone()), Value::Text(new_hash)],
+                    )
+                    .await;
+            }
+        }
 
         Ok(LoginOk {
             id_usuario: rec.id_usuario,
@@ -585,13 +617,22 @@ impl LoginRepository for SqliteLoginRepository {
         fecha: Option<String>,
         hora_evento: Option<String>,
     ) -> AppResult<PunchStatus> {
+        crate::auth::throttle_check(&self.db, id_usuario).await?;
+
+        let hash = {
+            let db = self.db.read().await;
+            query_password_hash(&db, id_usuario)
+                .await?
+                .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?
+        };
+
+        if let Err(e) = verify_pin(pin, &hash) {
+            let _ = crate::auth::throttle_registrar(&self.db, id_usuario, false).await;
+            return Err(AppError::validation(e));
+        }
+        let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
+
         let db = self.db.write().await;
-        let hash = query_password_hash(&db, id_usuario)
-            .await?
-            .ok_or_else(|| AppError::not_found("Usuario no encontrado o inactivo"))?;
-
-        verify_pin(pin, &hash).map_err(AppError::validation)?;
-
         exec_punch(&db, id_usuario, tipo, fecha, hora_evento).await
     }
 
