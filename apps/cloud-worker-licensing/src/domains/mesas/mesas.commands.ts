@@ -284,7 +284,10 @@ export function abrirComanda(
 								Total_Comanda,
 								Estado
 							)
-							VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta');
+							SELECT ?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta'
+							WHERE NOT EXISTS (
+								SELECT 1 FROM Comandas WHERE ID_Mesa = ?2 AND Estado = 'Abierta'
+							);
 						`,
 						args: [REF_ID_COMANDA, bareIdMesa, idTrabajador, idReserva],
 					},
@@ -302,10 +305,11 @@ export function abrirComanda(
 								COALESCE(Total_Comanda,0) AS total_comanda,
 								COALESCE(Estado,'Abierta') AS estado
 							FROM Comandas
-							WHERE ID_Comanda = ?1
+							WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
+							ORDER BY datetime(Fecha_Hora_Apertura) DESC
 							LIMIT 1;
 						`,
-						args: [REF_ID_COMANDA],
+						args: [bareIdMesa],
 					},
 				],
 				resultKey: "comanda",

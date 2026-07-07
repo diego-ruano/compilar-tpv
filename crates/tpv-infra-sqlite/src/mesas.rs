@@ -884,33 +884,45 @@ impl MesasRepository for SqliteMesasRepository {
         let bare_id_mesa =
             parse_db_id(&data.id_mesa, "db-mesa-").unwrap_or_else(|| data.id_mesa.clone());
 
-        let id_reserva_final = match id_reserva {
-            Some(rid) => Some(rid),
-            None => {
-                select_one_string(
-                    db,
-                    r#"
-                    SELECT ID_Reserva FROM Reservas
-                    WHERE ID_Mesa = ?1 AND Estado='ACTIVA'
-                    ORDER BY datetime(Created_At) DESC LIMIT 1;
-                    "#,
-                    vec![Value::Text(bare_id_mesa.clone())],
-                )
-                .await?
-            }
-        };
+        // MESA-03: apertura idempotente por mesa. Si ya hay una comanda Abierta en la mesa,
+        // la devolvemos en vez de crear una segunda (evita comandas duplicadas por doble
+        // toque o apertura concurrente Main+Handy).
+        if let Some(existing) = select_one_string(
+            db,
+            r#"
+            SELECT ID_Comanda FROM Comandas
+            WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
+            "#,
+            vec![Value::Text(bare_id_mesa.clone())],
+        )
+        .await?
+        {
+            return read_comanda_by_id(db, &existing).await;
+        }
+
+        // MESA-10: sin autoenlace de reserva. Si no viene una reserva explícita, ID_Reserva
+        // queda NULL (no forzamos que cada mesa vaya asociada a una reserva).
+        let id_reserva_final = id_reserva;
 
         let id_comanda_new = new_id();
+        // El INSERT lleva un guard WHERE NOT EXISTS como red de seguridad ante una carrera
+        // (idempotente también al replicarse): si entre la comprobación y aquí apareció una
+        // comanda abierta para la mesa, no se inserta una duplicada. El índice único parcial
+        // idx_comandas_una_abierta_por_mesa lo garantiza además a nivel de esquema.
         db.execute(
             r#"
             INSERT INTO Comandas (
               ID_Comanda, ID_Mesa, ID_Trabajador, ID_Reserva, Fecha_Hora_Apertura, Total_Comanda, Estado
             )
-            VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta');
+            SELECT ?1, ?2, ?3, ?4, datetime('now','localtime'), 0, 'Abierta'
+            WHERE NOT EXISTS (
+              SELECT 1 FROM Comandas WHERE ID_Mesa = ?2 AND Estado = 'Abierta'
+            );
             "#,
             vec![
                 Value::Text(id_comanda_new.clone()),
-                Value::Text(bare_id_mesa),
+                Value::Text(bare_id_mesa.clone()),
                 id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
                 id_reserva_final.map(Value::Text).unwrap_or(Value::Null),
             ],
@@ -918,7 +930,22 @@ impl MesasRepository for SqliteMesasRepository {
         .await
         .map_err(db_err)?;
 
-        read_comanda_by_id(db, &id_comanda_new).await
+        // Devolvemos la comanda abierta de la mesa: la recién creada o, si hubo carrera, la
+        // que ya existía.
+        match select_one_string(
+            db,
+            r#"
+            SELECT ID_Comanda FROM Comandas
+            WHERE ID_Mesa = ?1 AND Estado = 'Abierta'
+            ORDER BY datetime(Fecha_Hora_Apertura) DESC LIMIT 1;
+            "#,
+            vec![Value::Text(bare_id_mesa)],
+        )
+        .await?
+        {
+            Some(id) => read_comanda_by_id(db, &id).await,
+            None => Ok(None),
+        }
     }
 
     async fn comanda_set_trabajador_if_null(

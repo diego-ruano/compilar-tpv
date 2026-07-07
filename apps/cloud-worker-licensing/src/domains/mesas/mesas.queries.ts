@@ -175,26 +175,6 @@ export async function comandaAbiertaByMesa(
 	return id ? readComanda(db, id) : null;
 }
 
-export async function activeReservaForMesa(
-	db: Client,
-	idMesa: string,
-): Promise<string | null> {
-	const bareId = stripMesaPrefix(idMesa);
-	if (!bareId) return null;
-	const rs = await db.execute({
-		sql: `
-			SELECT ID_Reserva AS id
-			FROM Reservas
-			WHERE ID_Mesa = ?1 AND Estado = 'ACTIVA'
-			ORDER BY ID_Reserva DESC
-			LIMIT 1;
-		`,
-		args: [bareId],
-	});
-	const id = String(rows(rs)[0]?.id ?? "").trim();
-	return id ? id : null;
-}
-
 export async function lineas(
 	db: Client,
 	idComanda: string,

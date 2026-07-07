@@ -99,13 +99,12 @@ mesasRoutes.post("/comandas", async (c) => {
 	const p = await parseBody(c, S.abrirComandaSchema);
 	if (!p.ok) return p.res;
 	const resolved = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-		const [idTrabajador, idReservaFromDb] = await Promise.all([
-			q.resolveTrabajadorId(db, p.data.id_trabajador_o_usuario),
-			p.data.id_reserva != null
-				? Promise.resolve(null)
-				: q.activeReservaForMesa(db, p.data.id_mesa),
-		]);
-		return { idTrabajador, idReserva: p.data.id_reserva ?? idReservaFromDb };
+		const idTrabajador = await q.resolveTrabajadorId(
+			db,
+			p.data.id_trabajador_o_usuario,
+		);
+		// MESA-10: sin autoenlace de reserva; si no viene explicita, ID_Reserva queda null.
+		return { idTrabajador, idReserva: p.data.id_reserva ?? null };
 	});
 	const row = await apply(
 		c,

@@ -6,6 +6,7 @@ CREATE INDEX idx_asig_trab_fecha ON Asignacion_Turnos(ID_Trabajador, Fecha);
 CREATE INDEX idx_comandas_mesa_estado ON Comandas(ID_Mesa, Estado);
 CREATE INDEX idx_comandas_reserva ON Comandas(ID_Reserva);
 CREATE INDEX idx_comandas_trab_apertura ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
+CREATE UNIQUE INDEX idx_comandas_una_abierta_por_mesa ON Comandas(ID_Mesa) WHERE Estado = 'Abierta';
 CREATE INDEX idx_cuentas_gastos_fecha ON Cuentas_Gastos(Fecha);
 CREATE INDEX idx_cuentas_gastos_proveedor ON Cuentas_Gastos(ID_Proveedor);
 CREATE INDEX idx_dc_cocinero_fecha ON Detalle_Comanda(ID_Usuario_Cocinero, Fecha_Hora_Cocina);
