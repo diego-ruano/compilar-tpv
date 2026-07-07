@@ -1917,7 +1917,16 @@ impl MesasRepository for SqliteMesasRepository {
             }
 
             if let Err(e) = sumar_gasto_cliente_por_comanda(db, &data.id_comanda, total).await {
-                eprintln!("[WARN] sumar_gasto_cliente_por_comanda error: {}", e);
+                // MESA-06: best-effort — el pago commitea igualmente (Total_Gastado es
+                // reconciliable), pero el fallo se reporta por telemetría (tracing → Sentry),
+                // no se traga en silencio con un eprintln perdido.
+                tracing::warn!(
+                    target: "tpv::mesas",
+                    id_comanda = %data.id_comanda,
+                    importe = total,
+                    error = %e,
+                    "sumar_gasto_cliente_por_comanda falló; pago commiteado sin actualizar Total_Gastado"
+                );
             }
 
             let mut insert_args: Vec<Value> = Vec::with_capacity(2 + ids.len());
