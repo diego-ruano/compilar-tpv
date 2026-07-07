@@ -171,38 +171,17 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
     }
     let importe = (importe * 100.0).round() / 100.0;
 
-    let mut id_reserva = select_one_string(
+    // El gasto se acredita únicamente vía la reserva explícita de la comanda
+    // (Comandas.ID_Reserva → Reservas.ID_Cliente). No hay fallback por reserva
+    // activa de la mesa: acreditar el consumo de un walk-in a un cliente con
+    // reserva en esa mesa es incorrecto y divergía de la implementación Handy
+    // (MESA-04). Paridad con el worker.
+    let id_reserva = select_one_string(
         db,
         "SELECT ID_Reserva FROM Comandas WHERE ID_Comanda=?1 LIMIT 1;",
         vec![Value::Text(id_comanda.to_string())],
     )
     .await?;
-
-    if id_reserva.is_none() {
-        id_reserva = select_one_string(
-            db,
-            r#"
-            SELECT r.ID_Reserva
-            FROM Reservas r
-            JOIN Comandas c ON c.ID_Mesa = r.ID_Mesa
-            WHERE c.ID_Comanda = ?1
-              AND r.Estado = 'ACTIVA'
-            ORDER BY r.ID_Reserva DESC
-            LIMIT 1;
-            "#,
-            vec![Value::Text(id_comanda.to_string())],
-        )
-        .await?;
-
-        if let Some(rid) = id_reserva.clone() {
-            let _ = db
-                .execute(
-                    "UPDATE Comandas SET ID_Reserva=?2 WHERE ID_Comanda=?1;",
-                    vec![Value::Text(id_comanda.to_string()), Value::Text(rid)],
-                )
-                .await;
-        }
-    }
 
     let Some(id_reserva) = id_reserva else {
         return Ok(());
