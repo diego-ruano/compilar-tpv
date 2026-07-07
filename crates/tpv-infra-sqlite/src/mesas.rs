@@ -1072,18 +1072,36 @@ impl MesasRepository for SqliteMesasRepository {
             let importe_total = (sum * 100.0).round() / 100.0;
 
             for (producto_id, precio) in data.items.iter() {
+                // MESA-02: resolvemos Pasa_Cocina con una lectura previa e insertamos el
+                // Estado_Cocina como LITERAL (no un INSERT…SELECT sobre el catálogo). Así la
+                // sentencia capturada en el outbox es determinista al replicarse en la nube,
+                // aunque el producto/categoría difiera del lado que aplica. Mismo patrón que
+                // add_linea_comanda.
+                let pasa = select_one_i64(
+                    db,
+                    r#"
+                    SELECT COALESCE(cat.Pasa_Cocina, 0)
+                    FROM Productos p
+                    JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
+                    WHERE p.ID_Producto = ?1 LIMIT 1;
+                    "#,
+                    vec![Value::Text(producto_id.clone())],
+                )
+                .await?
+                .unwrap_or(0)
+                    == 1;
+                let estado_cocina = if pasa {
+                    Value::Text("PENDIENTE".into())
+                } else {
+                    Value::Null
+                };
+
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
                       ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina
                     )
-                    SELECT
-                      ?1, ?2, ?3, 1, ?4, ?5,
-                      CASE WHEN COALESCE(cat.Pasa_Cocina, 0) = 1 THEN 'PENDIENTE' ELSE NULL END
-                    FROM Productos p
-                    JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                    WHERE p.ID_Producto = ?3
-                    LIMIT 1;
+                    VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6);
                     "#,
                     vec![
                         Value::Text(new_id()),
@@ -1091,6 +1109,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(producto_id.clone()),
                         Value::Real(*precio),
                         Value::Text(batch.clone()),
+                        estado_cocina,
                     ],
                 )
                 .await
