@@ -4,7 +4,6 @@
 //! local (last_insert_rowid) en lugar de ids forzados desde remoto.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -24,9 +23,6 @@ use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
 use crate::util::{new_id, BARRA_MESA_ID};
 
-/// Secuencia para generar etiquetas de lote VR únicas (sustituye al batch derivado de op_id).
-static VR_BATCH_SEQ: AtomicU64 = AtomicU64::new(0);
-
 pub struct SqliteMesasRepository {
     db: Arc<Db>,
 }
@@ -39,14 +35,6 @@ impl SqliteMesasRepository {
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
-}
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(_) => i64::MAX,
-    }
 }
 
 /// Extrae el id (UUID) embebido en un id de UI con prefijo (`db-mesa-<uuid>`).
@@ -1176,9 +1164,6 @@ impl MesasRepository for SqliteMesasRepository {
                 _ => get_or_create_comanda_barra_inner(db, id_trabajador_cobrador.clone()).await?,
             };
 
-            let seq = VR_BATCH_SEQ.fetch_add(1, Ordering::Relaxed);
-            let batch = format!("VR:{}-{}", now_ms(), seq);
-
             let sum = data.items.iter().fold(0.0, |acc, (_p, precio)| acc + *precio);
             let importe_total = (sum * 100.0).round() / 100.0;
 
@@ -1210,19 +1195,20 @@ impl MesasRepository for SqliteMesasRepository {
                 };
 
                 let id_detalle = new_id();
+                // MESA-12: no se escribe la clave de lote en Notas; la correlación con
+                // Pago_Detalles se hace por los ID_Detalle recién insertados (ver abajo).
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
-                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina
+                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina
                     )
-                    VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6);
+                    VALUES (?1, ?2, ?3, 1, ?4, ?5);
                     "#,
                     vec![
                         Value::Text(id_detalle.clone()),
                         Value::Text(id_comanda.to_string()),
                         Value::Text(producto_id.clone()),
                         Value::Real(*precio),
-                        Value::Text(batch.clone()),
                         estado_cocina,
                     ],
                 )
@@ -1288,21 +1274,20 @@ impl MesasRepository for SqliteMesasRepository {
                 .map_err(db_err)?;
             }
 
-            db.execute(
-                r#"
-                INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
-                SELECT ?1, dc.ID_Detalle
-                FROM Detalle_Comanda dc
-                WHERE dc.ID_Comanda = ?2 AND dc.Notas = ?3;
-                "#,
-                vec![
-                    Value::Text(id_pago),
-                    Value::Text(id_comanda.to_string()),
-                    Value::Text(batch),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
+            // MESA-12: enlazamos el pago con exactamente las líneas recién insertadas por sus
+            // ID_Detalle (recogidos en `charged`), en vez de correlacionar por un valor técnico
+            // guardado en la columna Notas del usuario.
+            for (id_detalle, _producto_id, _cantidad) in &charged {
+                db.execute(
+                    r#"
+                    INSERT OR IGNORE INTO Pago_Detalles (ID_Pago, ID_Detalle)
+                    VALUES (?1, ?2);
+                    "#,
+                    vec![Value::Text(id_pago.clone()), Value::Text(id_detalle.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            }
 
             Ok(())
         }
