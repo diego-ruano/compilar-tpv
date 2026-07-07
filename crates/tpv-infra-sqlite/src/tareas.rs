@@ -359,9 +359,10 @@ impl TareasRepository for SqliteTareasRepository {
                   ID_Tarea,
                   Titulo,
                   Descripcion,
-                  Fecha_Limite
+                  Fecha_Limite,
+                  Fecha_Creacion
                 )
-                VALUES (?1, ?2, ?3, ?4);
+                VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'));
                 "#,
                 vec![
                     Value::Text(id_tarea.clone()),

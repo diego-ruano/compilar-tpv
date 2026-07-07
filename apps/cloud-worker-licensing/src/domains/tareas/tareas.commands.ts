@@ -103,9 +103,10 @@ export function createTarea(input: CreateTareaInput): BuiltCommand {
 					ID_Tarea,
 					Titulo,
 					Descripcion,
-					Fecha_Limite
+					Fecha_Limite,
+					Fecha_Creacion
 				)
-				VALUES (?1, ?2, ?3, ?4);
+				VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'));
 			`,
 			args: [
 				REF_ID_TAREA,
