@@ -371,7 +371,7 @@ export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 	};
 }
 
-export function addLinea(input: AddLineaInput): BuiltCommand {
+export function addLinea(input: AddLineaInput, estadoCocina: string | null): BuiltCommand {
 	const steps: any[] = [];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
 	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
@@ -400,7 +400,8 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 		});
 	}
 
-	// Estado_Cocina resuelto como subquery dentro del INSERT, sin pre-query separada.
+	// MESA-07: Estado_Cocina se resuelve como literal (?6) en el route handler; ya no
+	// va una subquery embebida en el INSERT (no determinista al replicarse a la Main).
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -412,16 +413,9 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 				Precio_Unitario,
 				Estado_Cocina
 			)
-			VALUES (
-				?1, ?2, ?3, ?4, ?5,
-				(SELECT CASE WHEN COALESCE(cat.Pasa_Cocina, 0) = 1 THEN 'PENDIENTE' ELSE NULL END
-				 FROM Productos p
-				 JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-				 WHERE p.ID_Producto = ?3
-				 LIMIT 1)
-			);
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6);
 		`,
-		args: [idDetalle, input.id_comanda, input.id_producto, input.cantidad, input.precio],
+		args: [idDetalle, input.id_comanda, input.id_producto, input.cantidad, input.precio, estadoCocina],
 	});
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });
