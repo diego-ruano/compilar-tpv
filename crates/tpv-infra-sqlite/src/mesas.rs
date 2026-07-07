@@ -1263,18 +1263,17 @@ impl MesasRepository for SqliteMesasRepository {
                 SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda
               )
             ORDER BY datetime(c.Fecha_Hora_Apertura) DESC, c.ID_Comanda DESC
-            LIMIT {limit};
+            LIMIT ?2;
             "#,
             estado_filter = if include_pagadas {
                 ""
             } else {
                 "AND c.Estado = 'Abierta'"
             },
-            limit = limit
         );
 
         let mut rows = db
-            .query(&sql, vec![Value::Text(id_mesa_barra)])
+            .query(&sql, vec![Value::Text(id_mesa_barra), Value::Integer(limit)])
             .await
             .map_err(db_err)?;
 
