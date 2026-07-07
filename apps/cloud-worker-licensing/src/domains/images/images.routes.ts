@@ -29,7 +29,7 @@ export const imagesRoutes = new Hono<Ctx>();
 // Sólo se permiten estas subcarpetas y nombres de archivo seguros (uuid + extensión).
 // Evita path traversal y claves arbitrarias en el bucket.
 const REL_PATH_RE =
-	/^images\/(productos|categorias|proveedores|alergenos)\/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png|webp)$/i;
+	/^images\/(productos|categorias|proveedores|alergenos|logo)\/[A-Za-z0-9][A-Za-z0-9._-]*\.(jpg|jpeg|png|webp)$/i;
 
 const ALLOWED_CONTENT_TYPES = new Set([
 	"image/jpeg",
