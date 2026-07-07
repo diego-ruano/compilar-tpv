@@ -502,6 +502,37 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 	};
 }
 
+// MESA-01: pasos deterministas de descuento de stock FEFO a partir del plan resuelto
+// en el route handler. Cada UPDATE lleva el ID_Lote y la cantidad como literales.
+function stockConsumoSteps(
+	allocations: { id_lote: string; take: number; id_detalle: string | null }[],
+) {
+	const steps: any[] = [];
+	for (const a of allocations) {
+		steps.push({
+			kind: "execute",
+			sql: `
+				UPDATE Lotes_Producto
+				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
+				WHERE ID_Lote = ?1;
+			`,
+			args: [a.id_lote, a.take],
+		});
+		if (a.id_detalle) {
+			steps.push({
+				kind: "execute",
+				sql: `
+					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
+					VALUES (?1, ?2, ?3)
+					ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+				`,
+				args: [a.id_detalle, a.id_lote, a.take],
+			});
+		}
+	}
+	return steps;
+}
+
 export function cobrarDetalles(
 	input: CobrarDetallesInput,
 	plan: Extract<CobroDetallesPlan, { ok: true }>,
@@ -573,6 +604,8 @@ export function cobrarDetalles(
 						`,
 						args: [REF_ID_PAGO, input.id_comanda, ...input.detalle_ids],
 					},
+					// MESA-01: descuento de stock/lotes (FEFO) de las lineas cobradas.
+					...stockConsumoSteps(plan.allocations),
 					{
 						kind: "execute",
 						sql: `

@@ -347,8 +347,33 @@ export async function idComandaByDetalle(
 	return id ? id : null;
 }
 
+type StockAllocation = { id_lote: string; take: number; id_detalle: string | null };
+
+async function lotRows(db: Client, productoId: string) {
+	const rs = await db.execute({
+		sql: `
+			SELECT
+				ID_Lote AS id_lote,
+				COALESCE(Stock_Disponible,0) AS stock
+			FROM Lotes_Producto
+			WHERE ID_Producto = ?1
+				AND COALESCE(Stock_Disponible,0) > 0
+			ORDER BY
+				CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
+				date(Caducidad) ASC,
+				datetime(Fecha_Entrada) ASC,
+				ID_Lote ASC;
+		`,
+		args: [productoId],
+	});
+	return rows(rs).map((r) => ({
+		id_lote: String(r.id_lote ?? ""),
+		stock: Number(r.stock ?? 0),
+	}));
+}
+
 export type CobroDetallesPlan =
-	| { ok: true; total: number; id_trabajador: string | null }
+	| { ok: true; total: number; id_trabajador: string | null; allocations: StockAllocation[] }
 	| { ok: false; error: string };
 
 export async function cobrarDetallesPlan(
@@ -385,10 +410,48 @@ export async function cobrarDetallesPlan(
 		args,
 	});
 	const total = Math.round(Number(rows(totalRs)[0]?.total ?? 0) * 100) / 100;
+
+	// MESA-01: consumo FEFO best-effort de las lineas cobradas. Se resuelven las
+	// asignaciones a lotes aqui (lado autoritativo) y el command builder las emite
+	// como UPDATE/INSERT literales -> deterministas al replicarse a la Main. Best-effort:
+	// no aborta el cobro si falta stock (paridad con la Main; decision de negocio).
+	const chargedRs = await db.execute({
+		sql: `
+			SELECT
+				dc.ID_Detalle AS id_detalle,
+				dc.ID_Producto AS id_producto,
+				CAST(COALESCE(dc.Cantidad,1) AS REAL) AS cantidad
+			FROM Detalle_Comanda dc
+			WHERE dc.ID_Comanda = ?1
+				AND dc.ID_Detalle IN (${placeholders})
+			ORDER BY dc.ID_Detalle;
+		`,
+		args,
+	});
+	const charged = rows(chargedRs)
+		.map((r) => ({
+			id_detalle: String(r.id_detalle ?? ""),
+			id_producto: String(r.id_producto ?? ""),
+			cantidad: Number(r.cantidad ?? 0),
+		}))
+		.filter((r) => r.id_detalle.length > 0 && r.id_producto.length > 0 && r.cantidad > 0);
+
+	const allocations: StockAllocation[] = [];
+	for (const linea of charged) {
+		let remaining = linea.cantidad;
+		for (const lot of await lotRows(db, linea.id_producto)) {
+			if (remaining <= 0) break;
+			const take = Math.min(remaining, lot.stock);
+			if (take <= 0) continue;
+			allocations.push({ id_lote: lot.id_lote, take, id_detalle: linea.id_detalle });
+			remaining -= take;
+		}
+	}
 	return {
 		ok: true,
 		total,
 		id_trabajador: await resolveTrabajadorId(db, input.id_usuario),
+		allocations,
 	};
 }
 
