@@ -20,6 +20,15 @@ const DEFAULTS: TicketSettings = {
 
     // ✅ NUEVO (schema): ancho del papel en mm
     paperWidthMm: 80,
+
+    // Parámetros finos de impresión (respetados por el renderizado ESC/POS).
+    paperDpi: 203,
+    charsPerLine: 42,
+    marginTopMm: 0,
+    marginBottomMm: 0,
+    marginLeftMm: 0,
+    marginRightMm: 0,
+    fontScale: 1,
 };
 
 type TicketSettingsState = {

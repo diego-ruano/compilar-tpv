@@ -30,6 +30,21 @@ function clampPaperWidthMm(v: any): number {
 	const n = Number(v);
 	return n === 58 || n === 80 || n === 112 ? n : 80;
 }
+function clampPaperDpi(v: any): number {
+	return Number(v) === 300 ? 300 : 203;
+}
+function clampCharsPerLine(v: any): number {
+	const n = Number(v);
+	return Number.isFinite(n) ? Math.min(80, Math.max(20, Math.round(n))) : 42;
+}
+function clampMarginMm(v: any): number {
+	const n = Number(v);
+	return Number.isFinite(n) ? Math.min(25, Math.max(0, n)) : 0;
+}
+function clampFontScale(v: any): number {
+	const n = Number(v);
+	return Number.isFinite(n) ? Math.min(2, Math.max(0.5, n)) : 1;
+}
 
 export async function getBusiness(db: Client): Promise<BusinessSettings> {
 	const rs = await db.execute(`
@@ -88,7 +103,14 @@ export async function getTicket(db: Client): Promise<TicketSettings> {
 			Show_BaseAndIVA AS show_base_and_iva,
 			Show_Total AS show_total,
 			Show_FooterMessage AS show_footer_message,
-			Paper_Width_Mm AS paper_width_mm
+			Paper_Width_Mm AS paper_width_mm,
+			Paper_Dpi AS paper_dpi,
+			Chars_Per_Line AS chars_per_line,
+			Margin_Top_Mm AS margin_top_mm,
+			Margin_Bottom_Mm AS margin_bottom_mm,
+			Margin_Left_Mm AS margin_left_mm,
+			Margin_Right_Mm AS margin_right_mm,
+			Font_Scale AS font_scale
 		FROM Ticket_Settings
 		WHERE ID=1
 		LIMIT 1;
@@ -106,5 +128,12 @@ export async function getTicket(db: Client): Promise<TicketSettings> {
 		show_total: bool(r.show_total),
 		show_footer_message: bool(r.show_footer_message),
 		paper_width_mm: clampPaperWidthMm(r.paper_width_mm),
+		paper_dpi: clampPaperDpi(r.paper_dpi),
+		chars_per_line: clampCharsPerLine(r.chars_per_line),
+		margin_top_mm: clampMarginMm(r.margin_top_mm),
+		margin_bottom_mm: clampMarginMm(r.margin_bottom_mm),
+		margin_left_mm: clampMarginMm(r.margin_left_mm),
+		margin_right_mm: clampMarginMm(r.margin_right_mm),
+		font_scale: clampFontScale(r.font_scale),
 	};
 }

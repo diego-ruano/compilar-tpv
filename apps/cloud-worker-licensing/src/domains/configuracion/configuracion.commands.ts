@@ -37,6 +37,27 @@ function clampPaperWidthMm(v: unknown): number | null {
 	return n === 58 || n === 80 || n === 112 ? n : 80;
 }
 
+function clampPaperDpi(v: unknown): number | null {
+	const n = Number(v);
+	if (!Number.isFinite(n)) return null;
+	return n === 300 ? 300 : 203;
+}
+function clampCharsPerLine(v: unknown): number | null {
+	const n = Number(v);
+	if (!Number.isFinite(n)) return null;
+	return Math.min(80, Math.max(20, Math.round(n)));
+}
+function clampMarginMm(v: unknown): number | null {
+	const n = Number(v);
+	if (!Number.isFinite(n)) return null;
+	return Math.min(25, Math.max(0, n));
+}
+function clampFontScale(v: unknown): number | null {
+	const n = Number(v);
+	if (!Number.isFinite(n)) return null;
+	return Math.min(2, Math.max(0.5, n));
+}
+
 export function patchContact(patch: Record<string, unknown>): BuiltCommand {
 	const steps: any[] = [
 		{ kind: "execute", sql: "INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);" },
@@ -134,13 +155,22 @@ export function patchTicket(patch: Record<string, unknown>): BuiltCommand {
 	addBool("show_total", "Show_Total");
 	addBool("show_footer_message", "Show_FooterMessage");
 
-	if ("paper_width_mm" in patch) {
-		const n = clampPaperWidthMm(patch.paper_width_mm);
-		if (n != null) {
-			sets.push(`Paper_Width_Mm = ?${args.length + 1}`);
-			args.push(n);
-		}
+	function addNum(key: string, col: string, clamp: (v: unknown) => number | null) {
+		if (!(key in patch)) return;
+		const n = clamp(patch[key]);
+		if (n == null) return;
+		sets.push(`${col} = ?${args.length + 1}`);
+		args.push(n);
 	}
+
+	addNum("paper_width_mm", "Paper_Width_Mm", clampPaperWidthMm);
+	addNum("paper_dpi", "Paper_Dpi", clampPaperDpi);
+	addNum("chars_per_line", "Chars_Per_Line", clampCharsPerLine);
+	addNum("margin_top_mm", "Margin_Top_Mm", clampMarginMm);
+	addNum("margin_bottom_mm", "Margin_Bottom_Mm", clampMarginMm);
+	addNum("margin_left_mm", "Margin_Left_Mm", clampMarginMm);
+	addNum("margin_right_mm", "Margin_Right_Mm", clampMarginMm);
+	addNum("font_scale", "Font_Scale", clampFontScale);
 
 	if (sets.length) {
 		sets.push("Updated_At = datetime('now','localtime')");

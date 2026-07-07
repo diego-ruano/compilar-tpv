@@ -181,15 +181,74 @@ export function Ticket({
                         </SelectInput>
                     </Field>
 
-                    <div className="rounded-xl border border-border bg-surface-2 px-4 py-3">
-                        <div className="text-xs font-semibold text-fg-muted">
-                            Info
-                        </div>
-                        <div className="text-sm text-fg-muted mt-1">
-                            Esto te sirve luego para decidir el layout/estilo de
-                            impresión (58mm vs 80mm, etc.).
-                        </div>
-                    </div>
+                    <Field
+                        label="Resolución (DPI)"
+                        hint="Según el modelo de impresora térmica"
+                    >
+                        <SelectInput
+                            value={String(ticket?.paperDpi ?? 203)}
+                            className={inputTone}
+                            onChange={(e) =>
+                                setSetting("paperDpi", Number(e.target.value))
+                            }
+                        >
+                            <option value="203">203 dpi (estándar)</option>
+                            <option value="300">300 dpi (alta)</option>
+                        </SelectInput>
+                    </Field>
+
+                    <Field
+                        label="Caracteres por línea"
+                        hint="20–80 (se acota al ancho físico del papel)"
+                    >
+                        <TextInput
+                            inputMode="numeric"
+                            value={String(ticket?.charsPerLine ?? 42)}
+                            onChange={(e) =>
+                                setSetting("charsPerLine", Number(e.target.value))
+                            }
+                            placeholder="42"
+                            className={inputTone}
+                        />
+                    </Field>
+
+                    <Field
+                        label="Escala de fuente"
+                        hint="0.5–2.0 · ≥1.5 imprime el cuerpo a doble alto"
+                    >
+                        <TextInput
+                            inputMode="decimal"
+                            value={String(ticket?.fontScale ?? 1)}
+                            onChange={(e) =>
+                                setSetting("fontScale", Number(e.target.value))
+                            }
+                            placeholder="1.0"
+                            className={inputTone}
+                        />
+                    </Field>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+                    {(
+                        [
+                            ["marginTopMm", "Margen superior (mm)"],
+                            ["marginBottomMm", "Margen inferior (mm)"],
+                            ["marginLeftMm", "Margen izquierdo (mm)"],
+                            ["marginRightMm", "Margen derecho (mm)"],
+                        ] as const
+                    ).map(([key, label]) => (
+                        <Field key={key} label={label}>
+                            <TextInput
+                                inputMode="decimal"
+                                value={String(ticket?.[key] ?? 0)}
+                                onChange={(e) =>
+                                    setSetting(key, Number(e.target.value))
+                                }
+                                placeholder="0"
+                                className={inputTone}
+                            />
+                        </Field>
+                    ))}
                 </div>
             </Panel>
 

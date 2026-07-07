@@ -9,7 +9,9 @@ use serde_json::Value as JsonValue;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
-use tpv_domain::configuracion::clamp_paper_width_mm;
+use tpv_domain::configuracion::{
+    clamp_chars_per_line, clamp_font_scale, clamp_margin_mm, clamp_paper_dpi, clamp_paper_width_mm,
+};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_f64, v_i64, v_string};
@@ -142,7 +144,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
-                "SELECT Show_Logo, Show_BusinessName, Show_Address, Show_Phone, Show_CIF, Show_DateTime, Show_LineItems, Show_BaseAndIVA, Show_Total, Show_FooterMessage, Paper_Width_Mm FROM Ticket_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Show_Logo, Show_BusinessName, Show_Address, Show_Phone, Show_CIF, Show_DateTime, Show_LineItems, Show_BaseAndIVA, Show_Total, Show_FooterMessage, Paper_Width_Mm, Paper_Dpi, Chars_Per_Line, Margin_Top_Mm, Margin_Bottom_Mm, Margin_Left_Mm, Margin_Right_Mm, Font_Scale FROM Ticket_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -157,6 +159,17 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         };
         let paper_width_mm =
             clamp_paper_width_mm(v_i64(row.get_value(10).map_err(db_err)?).unwrap_or(80));
+        let paper_dpi = clamp_paper_dpi(v_i64(row.get_value(11).map_err(db_err)?).unwrap_or(203));
+        let chars_per_line =
+            clamp_chars_per_line(v_i64(row.get_value(12).map_err(db_err)?).unwrap_or(42));
+        let margin_top_mm = clamp_margin_mm(v_f64(row.get_value(13).map_err(db_err)?).unwrap_or(0.0));
+        let margin_bottom_mm =
+            clamp_margin_mm(v_f64(row.get_value(14).map_err(db_err)?).unwrap_or(0.0));
+        let margin_left_mm =
+            clamp_margin_mm(v_f64(row.get_value(15).map_err(db_err)?).unwrap_or(0.0));
+        let margin_right_mm =
+            clamp_margin_mm(v_f64(row.get_value(16).map_err(db_err)?).unwrap_or(0.0));
+        let font_scale = clamp_font_scale(v_f64(row.get_value(17).map_err(db_err)?).unwrap_or(1.0));
         Ok(TicketSettings {
             show_logo: getb(0)?,
             show_business_name: getb(1)?,
@@ -169,6 +182,13 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             show_total: getb(8)?,
             show_footer_message: getb(9)?,
             paper_width_mm,
+            paper_dpi,
+            chars_per_line,
+            margin_top_mm,
+            margin_bottom_mm,
+            margin_left_mm,
+            margin_right_mm,
+            font_scale,
         })
     }
 
@@ -340,6 +360,29 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         if let Some(v) = patch_i64(patch, "paper_width_mm") {
             sets.push("Paper_Width_Mm = ?");
             args.push(Value::Integer(clamp_paper_width_mm(v)));
+        }
+        if let Some(v) = patch_i64(patch, "paper_dpi") {
+            sets.push("Paper_Dpi = ?");
+            args.push(Value::Integer(clamp_paper_dpi(v)));
+        }
+        if let Some(v) = patch_i64(patch, "chars_per_line") {
+            sets.push("Chars_Per_Line = ?");
+            args.push(Value::Integer(clamp_chars_per_line(v)));
+        }
+        for (key, col) in [
+            ("margin_top_mm", "Margin_Top_Mm = ?"),
+            ("margin_bottom_mm", "Margin_Bottom_Mm = ?"),
+            ("margin_left_mm", "Margin_Left_Mm = ?"),
+            ("margin_right_mm", "Margin_Right_Mm = ?"),
+        ] {
+            if let Some(v) = patch_f64(patch, key) {
+                sets.push(col);
+                args.push(Value::Real(clamp_margin_mm(v)));
+            }
+        }
+        if let Some(v) = patch_f64(patch, "font_scale") {
+            sets.push("Font_Scale = ?");
+            args.push(Value::Real(clamp_font_scale(v)));
         }
 
         if sets.is_empty() {

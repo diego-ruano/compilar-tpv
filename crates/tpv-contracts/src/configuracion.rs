@@ -31,6 +31,22 @@ pub struct TicketSettings {
     pub show_footer_message: bool,
     #[ts(type = "number")]
     pub paper_width_mm: i64,
+
+    // ── Parámetros de impresión (antes columnas muertas del esquema, ahora respetadas
+    //    por el renderizado ESC/POS en `printing.rs`). ──
+    /// DPI de la impresora térmica (203 | 300). Usado para convertir márgenes mm→dots/líneas.
+    #[ts(type = "number")]
+    pub paper_dpi: i64,
+    /// Caracteres por línea del cuerpo del ticket (fuente A). Autoritativo sobre el ancho de papel.
+    #[ts(type = "number")]
+    pub chars_per_line: i64,
+    /// Márgenes del ticket en milímetros.
+    pub margin_top_mm: f64,
+    pub margin_bottom_mm: f64,
+    pub margin_left_mm: f64,
+    pub margin_right_mm: f64,
+    /// Escala global de la fuente (0.5–2.0). El builder ESC/POS la mapea a magnificación entera.
+    pub font_scale: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

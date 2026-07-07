@@ -249,6 +249,8 @@ export default function Configuracion() {
     const onSaveBusiness = async () => {
         try {
             setSavingBiz(true);
+            // Logo anterior (para limpiar del bucket/disco si se reemplazó por otro del canal R2).
+            const prevLogo = biz.logoDataUrl;
             await (biz as any).setMany({
                 businessName: draft.businessName,
                 logoDataUrl: draft.logoDataUrl,
@@ -258,6 +260,16 @@ export default function Configuracion() {
                 mensajeFooter: draft.mensajeFooter,
                 ivaPercent: draft.ivaPercent,
             });
+            // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
+            if (
+                prevLogo &&
+                prevLogo.startsWith("images/logo/") &&
+                prevLogo !== draft.logoDataUrl
+            ) {
+                void invokeClient("images_delete", {
+                    args: { rel_path: prevLogo },
+                }).catch(() => {});
+            }
             await messageDialog("Guardado");
         } catch {
             await messageDialog("No se pudo guardar. Revisa la consola.", {

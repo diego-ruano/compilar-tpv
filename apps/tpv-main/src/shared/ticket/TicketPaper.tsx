@@ -8,10 +8,11 @@
 // Agrupa por `nombre + precio` (mismo criterio que `buildTicketPayload`), de modo que lo que se
 // ve aquí coincide con lo que el backend imprime en ESC/POS.
 
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
+import { resolveImageUrl } from "../lib/imageUrl";
 
 export type TicketPaperItem = {
     nombre: string;
@@ -71,7 +72,20 @@ export default function TicketPaper({
 
     const empty = grouped.length === 0;
 
-    const showHeaderLogo = settings.showLogo && !!logoDataUrl;
+    // El logo puede ser una ruta relativa (canal R2) o un data URL heredado; se resuelve a una URL
+    // usable para el <img>. Ver `imageUrl.resolveImageUrl` (maneja ambos casos y el modo Handy).
+    const [logoSrc, setLogoSrc] = useState<string>("");
+    useEffect(() => {
+        let alive = true;
+        resolveImageUrl(logoDataUrl)
+            .then((u) => alive && setLogoSrc(u))
+            .catch(() => alive && setLogoSrc(""));
+        return () => {
+            alive = false;
+        };
+    }, [logoDataUrl]);
+
+    const showHeaderLogo = settings.showLogo && !!logoDataUrl && !!logoSrc;
     const showHeaderName = settings.showBusinessName;
     const showAddress = settings.showAddress && !!direccion;
     const showPhone = settings.showPhone && !!telefono;
@@ -92,7 +106,7 @@ export default function TicketPaper({
                     {showHeaderLogo ? (
                         <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
                             <img
-                                src={logoDataUrl!}
+                                src={logoSrc}
                                 alt="logo"
                                 style={{ maxHeight: 48, maxWidth: "70%", objectFit: "contain" }}
                             />

@@ -75,9 +75,28 @@ pub struct PrintTicketPayload {
     #[serde(default)]
     pub show_footer_message: bool,
 
-    /// Ancho de papel en mm (58 / 80 / 112). Determina las columnas de caracteres.
+    /// Ancho de papel en mm (58 / 80 / 112). Acota físicamente las columnas imprimibles.
     #[serde(default = "default_paper_width")]
     pub paper_width_mm: u32,
+
+    // ── Parámetros finos de impresión (Ticket_Settings) ──
+    /// DPI de la impresora (203 | 300). Convierte mm→dots para márgenes y ancho útil.
+    #[serde(default = "default_paper_dpi")]
+    pub paper_dpi: u32,
+    /// Caracteres por línea deseados (fuente A). Se acota al ancho físico disponible.
+    #[serde(default = "default_chars_per_line")]
+    pub chars_per_line: u32,
+    #[serde(default)]
+    pub margin_top_mm: f64,
+    #[serde(default)]
+    pub margin_bottom_mm: f64,
+    #[serde(default)]
+    pub margin_left_mm: f64,
+    #[serde(default)]
+    pub margin_right_mm: f64,
+    /// Escala de fuente (0.5–2.0). ≥1.5 imprime el cuerpo a doble alto (sin perder columnas).
+    #[serde(default = "default_font_scale")]
+    pub font_scale: f64,
 
     #[serde(default)]
     pub items: Vec<PrintTicketLine>,
@@ -86,18 +105,57 @@ pub struct PrintTicketPayload {
 fn default_paper_width() -> u32 {
     80
 }
+fn default_paper_dpi() -> u32 {
+    203
+}
+fn default_chars_per_line() -> u32 {
+    42
+}
+fn default_font_scale() -> f64 {
+    1.0
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Construcción del ticket en ESC/POS (independiente de plataforma)
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Columnas de caracteres (fuente A) según el ancho de papel.
+/// Columnas de caracteres (fuente A) según el ancho de papel. Sirve de tope físico razonable
+/// cuando no hay un DPI/margen fiable con el que calcular el ancho útil real.
 fn cols_for(paper_width_mm: u32) -> usize {
     match paper_width_mm {
         58 => 32,
         112 => 64,
         _ => 48, // 80mm
     }
+}
+
+/// Ancho aproximado de un carácter de la fuente A en dots (12 dots ≈ estándar térmico).
+const CHAR_DOTS: u32 = 12;
+
+/// Convierte milímetros a dots según el DPI de la impresora.
+fn mm_to_dots(mm: f64, dpi: u32) -> u32 {
+    if mm <= 0.0 {
+        0
+    } else {
+        ((mm / 25.4) * dpi as f64).round() as u32
+    }
+}
+
+/// Columnas efectivas del cuerpo: parte de `chars_per_line` deseado pero lo acota al ancho
+/// físico disponible (ancho de papel − márgenes izq/dcha), para no desbordar el papel.
+fn effective_cols(p: &PrintTicketPayload) -> usize {
+    let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
+    let paper_dots = mm_to_dots(p.paper_width_mm as f64, dpi);
+    let left_dots = mm_to_dots(p.margin_left_mm, dpi);
+    let right_dots = mm_to_dots(p.margin_right_mm, dpi);
+    let avail = paper_dots.saturating_sub(left_dots + right_dots);
+    let desired = p.chars_per_line.clamp(20, 80) as usize;
+    let physical_max = if avail == 0 {
+        cols_for(p.paper_width_mm)
+    } else {
+        (avail / CHAR_DOTS) as usize
+    };
+    desired.min(physical_max).max(10)
 }
 
 /// Importe en formato español: `1,70 €`.
@@ -157,6 +215,19 @@ fn esc_size(out: &mut Vec<u8>, n: u8) {
 fn esc_feed(out: &mut Vec<u8>, lines: u8) {
     out.extend_from_slice(&[0x1B, 0x64, lines]); // ESC d n
 }
+/// Avanza el papel `dots` puntos (para márgenes superior/inferior en mm). ESC J admite 0–255,
+/// así que troceamos si hace falta.
+fn esc_feed_dots(out: &mut Vec<u8>, mut dots: u32) {
+    while dots > 0 {
+        let n = dots.min(255) as u8;
+        out.extend_from_slice(&[0x1B, 0x4A, n]); // ESC J n  (print & feed n dots)
+        dots -= n as u32;
+    }
+}
+/// Fija el margen izquierdo en `dots` (GS L). Desplaza físicamente el área de impresión.
+fn esc_left_margin(out: &mut Vec<u8>, dots: u32) {
+    out.extend_from_slice(&[0x1D, 0x4C, (dots & 0xFF) as u8, ((dots >> 8) & 0xFF) as u8]);
+}
 fn esc_cut(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0x1D, 0x56, 0x00]); // GS V 0  (corte total)
 }
@@ -170,10 +241,20 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 
 /// Construye los bytes ESC/POS del ticket replicando la personalización del front.
 pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
-    let cols = cols_for(p.paper_width_mm);
+    let cols = effective_cols(p);
+    let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
+    // Escala de fuente: sólo el eje de altura (mantiene columnas). GS ! 0x01 = doble alto.
+    let base_size: u8 = if p.font_scale >= 1.5 { 0x01 } else { 0x00 };
     let mut out: Vec<u8> = Vec::new();
 
     esc_init(&mut out);
+
+    // Margen izquierdo físico (GS L) y margen superior (avance en dots).
+    esc_left_margin(&mut out, mm_to_dots(p.margin_left_mm, dpi));
+    esc_feed_dots(&mut out, mm_to_dots(p.margin_top_mm, dpi));
+
+    // Tamaño base del cuerpo (respeta font_scale); las cabeceras lo sobreescriben y restauran.
+    esc_size(&mut out, base_size);
 
     // ── Cabecera (centrada) ──
     esc_align(&mut out, 1);
@@ -182,7 +263,7 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
         esc_bold(&mut out, true);
         esc_size(&mut out, 0x11); // doble alto+ancho para el nombre
         text_line(&mut out, if p.business_name.trim().is_empty() { "TPV" } else { &p.business_name });
-        esc_size(&mut out, 0x00);
+        esc_size(&mut out, base_size);
         esc_bold(&mut out, false);
     }
     if p.show_address && !p.direccion.trim().is_empty() {
@@ -250,7 +331,7 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
         esc_size(&mut out, 0x11);
         // Con tamaño doble caben la mitad de columnas.
         text_line(&mut out, &line_two("TOTAL", &fmt_eur(total), cols / 2));
-        esc_size(&mut out, 0x00);
+        esc_size(&mut out, base_size);
         esc_bold(&mut out, false);
     }
 
@@ -267,7 +348,8 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
         esc_align(&mut out, 0);
     }
 
-    // Avance + corte.
+    // Margen inferior (mm) + avance + corte.
+    esc_feed_dots(&mut out, mm_to_dots(p.margin_bottom_mm, dpi));
     esc_feed(&mut out, 4);
     esc_cut(&mut out);
 

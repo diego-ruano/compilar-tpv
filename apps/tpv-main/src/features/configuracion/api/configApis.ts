@@ -35,6 +35,15 @@ export type TicketSettings = {
     showTotal: boolean;
     showFooterMessage: boolean;
     paperWidthMm: number;
+
+    // Parámetros finos de impresión (respetados por el renderizado ESC/POS).
+    paperDpi: number;
+    charsPerLine: number;
+    marginTopMm: number;
+    marginBottomMm: number;
+    marginLeftMm: number;
+    marginRightMm: number;
+    fontScale: number;
 };
 
 export type BusinessSettingsPatch = Partial<BusinessSettings>;
@@ -56,6 +65,19 @@ function num(v: any, fallback: number): number {
 
 function clampPaperWidthMm(n: number): number {
     return n === 58 || n === 80 || n === 112 ? n : 80;
+}
+
+function clampPaperDpi(n: number): number {
+    return n === 300 ? 300 : 203;
+}
+function clampCharsPerLine(n: number): number {
+    return Math.min(80, Math.max(20, Math.round(n)));
+}
+function clampMarginMm(n: number): number {
+    return Math.min(25, Math.max(0, n));
+}
+function clampFontScale(n: number): number {
+    return Math.min(2, Math.max(0.5, n));
 }
 
 function mapBizFromRust(x: any): BusinessSettings {
@@ -97,6 +119,13 @@ function mapTicketFromRust(x: any): TicketSettings {
         showTotal: !!pick(x, ["show_total", "showTotal"], true),
         showFooterMessage: !!pick(x, ["show_footer_message", "showFooterMessage"], true),
         paperWidthMm: clampPaperWidthMm(num(pick(x, ["paper_width_mm", "paperWidthMm"]), 80)),
+        paperDpi: clampPaperDpi(num(pick(x, ["paper_dpi", "paperDpi"]), 203)),
+        charsPerLine: clampCharsPerLine(num(pick(x, ["chars_per_line", "charsPerLine"]), 42)),
+        marginTopMm: clampMarginMm(num(pick(x, ["margin_top_mm", "marginTopMm"]), 0)),
+        marginBottomMm: clampMarginMm(num(pick(x, ["margin_bottom_mm", "marginBottomMm"]), 0)),
+        marginLeftMm: clampMarginMm(num(pick(x, ["margin_left_mm", "marginLeftMm"]), 0)),
+        marginRightMm: clampMarginMm(num(pick(x, ["margin_right_mm", "marginRightMm"]), 0)),
+        fontScale: clampFontScale(num(pick(x, ["font_scale", "fontScale"]), 1)),
     };
 }
 
@@ -115,6 +144,13 @@ function mapTicketPatchToRust(patch: TicketSettingsPatch): Record<string, any> {
     if ("paperWidthMm" in patch) {
         out.paper_width_mm = clampPaperWidthMm(Number(patch.paperWidthMm));
     }
+    if ("paperDpi" in patch) out.paper_dpi = clampPaperDpi(Number(patch.paperDpi));
+    if ("charsPerLine" in patch) out.chars_per_line = clampCharsPerLine(Number(patch.charsPerLine));
+    if ("marginTopMm" in patch) out.margin_top_mm = clampMarginMm(Number(patch.marginTopMm));
+    if ("marginBottomMm" in patch) out.margin_bottom_mm = clampMarginMm(Number(patch.marginBottomMm));
+    if ("marginLeftMm" in patch) out.margin_left_mm = clampMarginMm(Number(patch.marginLeftMm));
+    if ("marginRightMm" in patch) out.margin_right_mm = clampMarginMm(Number(patch.marginRightMm));
+    if ("fontScale" in patch) out.font_scale = clampFontScale(Number(patch.fontScale));
     return out;
 }
 

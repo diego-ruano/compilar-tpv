@@ -52,6 +52,15 @@ export type PrintTicketPayload = {
     show_footer_message: boolean;
 
     paper_width_mm: number;
+
+    paper_dpi: number;
+    chars_per_line: number;
+    margin_top_mm: number;
+    margin_bottom_mm: number;
+    margin_left_mm: number;
+    margin_right_mm: number;
+    font_scale: number;
+
     items: PrintTicketLine[];
 };
 
@@ -136,6 +145,15 @@ export function buildTicketPayload(
         show_footer_message: t.showFooterMessage,
 
         paper_width_mm: t.paperWidthMm,
+
+        paper_dpi: t.paperDpi,
+        chars_per_line: t.charsPerLine,
+        margin_top_mm: t.marginTopMm,
+        margin_bottom_mm: t.marginBottomMm,
+        margin_left_mm: t.marginLeftMm,
+        margin_right_mm: t.marginRightMm,
+        font_scale: t.fontScale,
+
         items: Array.from(map.values()),
     };
 }

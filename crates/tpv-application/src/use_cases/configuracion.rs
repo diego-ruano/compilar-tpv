@@ -4,7 +4,9 @@ use serde_json::Value as JsonValue;
 
 use tpv_contracts::configuracion::{BusinessSettings, ContactSettings, TicketSettings};
 
-use crate::error::AppResult;
+use tpv_domain::configuracion::validate_iva_percent;
+
+use crate::error::{AppError, AppResult};
 use crate::ports::configuracion::ConfiguracionRepository;
 
 pub async fn get_business(repo: &dyn ConfiguracionRepository) -> AppResult<BusinessSettings> {
@@ -19,6 +21,17 @@ pub async fn patch_business(
     repo: &dyn ConfiguracionRepository,
     patch: JsonValue,
 ) -> AppResult<String> {
+    // Si el patch trae `iva_percent`, validarlo antes de persistir: un IVA fuera de
+    // rango o no numérico corromperia el cálculo de todos los tickets y precios.
+    if let Some(iva) = patch.get("iva_percent") {
+        if !iva.is_null() {
+            let v = iva
+                .as_f64()
+                .or_else(|| iva.as_str().and_then(|s| s.parse::<f64>().ok()))
+                .ok_or_else(|| AppError::validation("IVA inválido: no es un número"))?;
+            validate_iva_percent(v).map_err(AppError::validation)?;
+        }
+    }
     repo.patch_business(&patch).await?;
     Ok("OK".to_string())
 }

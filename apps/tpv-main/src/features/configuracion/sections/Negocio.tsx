@@ -1,11 +1,17 @@
 // src/features/configuracion/sections/Negocio.tsx
-import React, { useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/Inputs";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import type { BusinessDraft } from "../types";
+import {
+    resolveImageUrl,
+    triggerImageUploadDrain,
+} from "../../../shared/lib/imageUrl";
+import { useToast } from "../../../shared/toast";
 
 export function Negocio({
     darkMode,
@@ -29,18 +35,67 @@ export function Negocio({
     onReset: () => void;
 }) {
     const fileInputRef = useRef<HTMLInputElement | null>(null);
+    const toast = useToast();
+    const [uploadingLogo, setUploadingLogo] = useState(false);
+
+    // `draft.logoDataUrl` puede ser una ruta relativa (`images/logo/…`, nuevo canal R2) o un
+    // data URL heredado; `resolveImageUrl` maneja ambos y devuelve una URL para el <img>.
+    const [logoSrc, setLogoSrc] = useState<string>("");
+    useEffect(() => {
+        let alive = true;
+        resolveImageUrl(draft.logoDataUrl)
+            .then((u) => {
+                if (alive) setLogoSrc(u);
+            })
+            .catch(() => {
+                if (alive) setLogoSrc("");
+            });
+        return () => {
+            alive = false;
+        };
+    }, [draft.logoDataUrl]);
 
     const onPickLogo = () => fileInputRef.current?.click();
 
-    const onLogoFile = (f?: File | null) => {
+    // Sube el logo por el MISMO canal que las imágenes de producto (disco local + cola R2), y
+    // guarda en el draft sólo la ruta relativa (`images/logo/{uuid}.jpg`). Así el logo ya no
+    // viaja como base64 embebido en la sentencia replicada (CONF-02): sólo una ruta corta.
+    const onLogoFile = async (f?: File | null) => {
         if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            const res = reader.result;
-            if (typeof res === "string")
-                setDraft((d) => ({ ...d, logoDataUrl: res }));
-        };
-        reader.readAsDataURL(f);
+        setUploadingLogo(true);
+        try {
+            const dataUrl: string = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () =>
+                    typeof reader.result === "string"
+                        ? resolve(reader.result)
+                        : reject(new Error("No se pudo leer la imagen"));
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(f);
+            });
+            const base64Data = dataUrl.split(",")[1] ?? "";
+
+            const filename = `${crypto.randomUUID()}.jpg`;
+            const relPath = `images/logo/${filename}`;
+            await invoke("save_image", {
+                args: {
+                    subfolder: "logo",
+                    filename,
+                    base64_data: base64Data,
+                },
+            });
+
+            setDraft((d) => ({ ...d, logoDataUrl: relPath }));
+            triggerImageUploadDrain();
+        } catch (e) {
+            console.error("save_image (logo) error:", e);
+            toast.error(
+                "Logo",
+                typeof e === "string" ? e : "No se pudo subir el logo.",
+            );
+        } finally {
+            setUploadingLogo(false);
+        }
     };
 
     return (
@@ -52,9 +107,9 @@ export function Negocio({
                     <div className="flex items-center gap-2">
                         <GhostButton
                             onClick={onPickLogo}
-                            disabled={!bizHydrated}
+                            disabled={!bizHydrated || uploadingLogo}
                         >
-                            Subir logo
+                            {uploadingLogo ? "Subiendo…" : "Subir logo"}
                         </GhostButton>
                         <GhostButton
                             onClick={() =>
@@ -91,9 +146,9 @@ export function Negocio({
                                 : "border-border bg-surface",
                         )}
                     >
-                        {draft.logoDataUrl ? (
+                        {draft.logoDataUrl && logoSrc ? (
                             <img
-                                src={draft.logoDataUrl}
+                                src={logoSrc}
                                 alt="logo"
                                 className="h-full w-full object-cover"
                             />
