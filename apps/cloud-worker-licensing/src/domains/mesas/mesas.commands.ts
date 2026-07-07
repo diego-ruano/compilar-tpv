@@ -347,14 +347,20 @@ export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 		command: {
 			type: "tenantDb.exec",
 			payload: {
+				// Total_Comanda recalculado server-side desde Detalle_Comanda (SUM),
+				// ignorando el total del cliente (MESA-05). Paridad con la Main.
 				sql: `
 					UPDATE Comandas
 					SET Estado = 'Pagada',
-						Total_Comanda = ?2,
+						Total_Comanda = (
+							SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+							FROM Detalle_Comanda
+							WHERE ID_Comanda = ?1
+						),
 						Fecha_Hora_Cierre = datetime('now','localtime')
 					WHERE ID_Comanda = ?1;
 				`,
-				args: [idComanda, total],
+				args: [idComanda],
 			},
 		},
 		cloudPayload: { id_comanda: idComanda, total },

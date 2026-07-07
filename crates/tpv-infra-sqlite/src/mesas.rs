@@ -889,16 +889,24 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(changed > 0)
     }
 
-    async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()> {
+    async fn cerrar_comanda(&self, id_comanda: &str, _total: f64) -> AppResult<()> {
         let g = self.db.write().await;
         let db = &g;
+        // El Total_Comanda se recalcula server-side desde Detalle_Comanda (SUM), ignorando el
+        // total que envía el cliente: evita cierres con importes arbitrarios/manipulados (MESA-05).
         db.execute(
             r#"
             UPDATE Comandas
-            SET Estado = 'Pagada', Total_Comanda = ?2, Fecha_Hora_Cierre = datetime('now','localtime')
+            SET Estado = 'Pagada',
+                Total_Comanda = (
+                  SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                  FROM Detalle_Comanda
+                  WHERE ID_Comanda = ?1
+                ),
+                Fecha_Hora_Cierre = datetime('now','localtime')
             WHERE ID_Comanda = ?1;
             "#,
-            vec![Value::Text(id_comanda.to_string()), Value::Real(total)],
+            vec![Value::Text(id_comanda.to_string())],
         )
         .await
         .map_err(db_err)?;
