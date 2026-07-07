@@ -1233,6 +1233,15 @@ impl MesasRepository for SqliteMesasRepository {
             .await?;
 
             if !ok {
+                // MESA-15: el INSERT con ID_Trabajador_Cobrador falló (típicamente FK
+                // inexistente). Reintentamos sin el cobrador para no perder el cobro, pero
+                // lo reportamos por telemetría en vez de degradar en silencio.
+                tracing::warn!(
+                    target: "tpv::mesas",
+                    id_comanda = %id_comanda,
+                    id_pago = %id_pago,
+                    "cobro (VR) registrado sin ID_Trabajador_Cobrador: el cobrador no resolvió como FK válida"
+                );
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
@@ -1896,6 +1905,15 @@ impl MesasRepository for SqliteMesasRepository {
             .await?;
 
             if !ok {
+                // MESA-15: el INSERT con ID_Trabajador_Cobrador falló (típicamente FK
+                // inexistente). Reintentamos sin el cobrador para no perder el cobro, pero
+                // lo reportamos por telemetría en vez de degradar en silencio.
+                tracing::warn!(
+                    target: "tpv::mesas",
+                    id_comanda = %data.id_comanda,
+                    id_pago = %id_pago,
+                    "cobro (detalles) registrado sin ID_Trabajador_Cobrador: el cobrador no resolvió como FK válida"
+                );
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
