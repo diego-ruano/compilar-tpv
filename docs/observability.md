@@ -34,6 +34,11 @@ Reglas clave:
   reintenta.
 - El endpoint **fija `tenant_id`/`device_id` desde el JWT** (no del cliente): los datos en Axiom
   siempre quedan correlacionados al dispositivo/restaurante autenticado.
+- **Scrubbing de contenido (OBS-01):** antes de salir a un tercero, el `message` y los `fields` de
+  cada evento (y los mensajes/excepciones de Sentry) pasan por un redactor de patrones sensibles
+  (emails, IBAN, DNI/NIE, teléfonos, JWT, secretos `clave=valor`). `sendDefaultPii=false` sólo cubre
+  el contexto automático de Sentry, no las cadenas que compone el código. El **fichero local** de 7
+  días NO se redacta (es el propio equipo del usuario y la fuente de verdad para soporte).
 
 ## 3. Activación — secretos y variables
 
@@ -63,6 +68,20 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 - Crea los datasets en **región UE**.
 - El token es **ingest-only** y vive sólo en el Worker.
 
+#### Retención (configúrala en Axiom, no hay knob en código)
+
+La retención es una propiedad **del dataset** en el panel de Axiom (no se fija por `wrangler`/código).
+Como estos datos son **operativos** (no de negocio), conviene una retención corta para acotar coste:
+
+| Dataset | Retención sugerida | Motivo |
+|---|---|---|
+| `AXIOM_DATASET_SYNC` | **30 días** | Salud del sync: sólo se emiten **fallos** (`apply_error`) y ciclo de vida (`main_*`); volumen bajo, valor a corto plazo. |
+| `AXIOM_DATASET` (device-logs) | **30–90 días** | Logs de dispositivo `INFO`/`WARN`/`ERROR`; ventana suficiente para soporte. La **fuente de verdad** larga sigue siendo el fichero local de 7 días + tickets. |
+
+> Nota: el plan gratuito de Axiom tiene un tope de retención; fija el valor en el dataset al crearlo
+> y revísalo si cambias de plan. El coste crece con **volumen ingerido × retención**, así que la
+> combinación "sólo fallos" (§7) + retención corta mantiene el gasto plano aunque suba la actividad.
+
 ## 4. Dónde mirar el código
 
 | Capa | Archivo |
@@ -74,6 +93,8 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 | Axiom (helper) | `apps/cloud-worker-licensing/src/observability/axiom.ts` |
 | Endpoint de ingesta | `apps/cloud-worker-licensing/src/domains/telemetry/telemetry.routes.ts` |
 | Eventos de sync | `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts` (`emitSyncEvent`) |
+| Scrubbing de contenido (OBS-01) | `crates/tpv-telemetry/src/scrub.rs` (Rust) · `apps/tpv-main/src/shared/observability/scrub.ts` (Webview) |
+| Esquema de evento (fuente única) | `crates/tpv-telemetry/src/event.rs` → `packages/contracts/src/generated/telemetry.ts` (ts-rs) |
 
 ## 5. Tags de correlación
 
@@ -91,16 +112,22 @@ restaurante/dispositivo/versión.
 ### Axiom (monitors)
 - **Main caída**: contar eventos `event == "main_offline"` sin `main_online` posterior en N minutos
   por `tenant_id` → alerta (las Handy de ese restaurante están congeladas).
-- **Latencia de apply**: percentil de `latency_ms` del evento `apply` por encima de umbral.
+- **Errores de apply**: tasa/volumen del evento `apply_error` por `tenant_id` (fallos al aplicar en
+  el DO). Los apply con éxito **no se emiten** a Axiom (OBS-04): sólo interesan los fallos.
 - **Errores de dispositivo**: tasa de `level == "ERROR"` en `tpv-device-logs` por `tenant_id`.
 - **Backlog de subida**: si un `device_id` deja de mandar lotes durante > X (puede estar offline o
   con la cola atascada).
 
 ## 7. Eventos del sistema de sync (dataset `AXIOM_DATASET_SYNC`)
 
+Sólo se emiten **fallos** y **ciclo de vida** (OBS-04): los apply con éxito NO van a Axiom. Antes se
+emitía un evento `apply` por **cada** escritura; a volumen alto eso disparaba coste y ruido sin
+aportar (un apply correcto no se investiga). El payload de `apply_error` va **recortado**: nombre de
+comando + ids + error truncado, **sin** el comando ni sus args (ni datos ni volumen de más).
+
 | `event` | Cuándo | Campos útiles |
 |---|---|---|
-| `apply` | escritura aplicada con éxito en el DO | `command`, `op_id`, `seq`, `latency_ms`, `device_id` |
+| `apply_error` | un apply **falla** en el DO (excepción/DB) | `command_name`, `op_id`, `device_id`, `error`, `latency_ms` |
 | `main_online` | una Main (tpv) se autentica | `device_id`, `connected_devices` |
 | `main_offline` | se va la última Main → freeze | `device_id`, `connected_devices` |
 

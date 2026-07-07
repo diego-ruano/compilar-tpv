@@ -57,9 +57,14 @@ async fn loop_forever(cfg: WorkerConfig) {
     let mut backoff = BACKOFF_MIN;
 
     loop {
-        // 1) Antesala → disco (durable) + poda.
-        let drained = cfg.state.drain();
+        // 1) Antesala → disco (durable) + poda. Depuramos el contenido (OBS-01) aquí, en el hilo
+        //    del worker (fuera del camino de emisión), ANTES de persistir/subir: así el fichero de
+        //    spool y la subida a la nube ya salen redactados y nunca penalizamos al POS.
+        let mut drained = cfg.state.drain();
         if !drained.is_empty() {
+            for ev in drained.iter_mut() {
+                ev.scrub_in_place();
+            }
             let _ = spool::write_events(&cfg.spool_dir, &drained);
         }
         spool::prune(&cfg.spool_dir, MAX_SPOOL_FILES);

@@ -34,14 +34,39 @@ pub fn init_sentry(cfg: SentryConfig) -> SentryGuard {
         environment: Some(Cow::Owned(cfg.environment)),
         // Nunca PII por defecto (datos de clientes/ventas). GDPR.
         send_default_pii: false,
-        // Scrubbing extra: fuera el usuario y el hostname (puede contener el nombre del equipo).
+        // Scrubbing (OBS-01): además de anular usuario y hostname (que puede llevar el nombre del
+        // equipo), redactamos el CONTENIDO libre que compone el desarrollador —mensajes de
+        // excepción, breadcrumbs y logentry—, donde `send_default_pii=false` no llega. Así un
+        // `error!`/panic con un email o una contraseña no sale en claro a Sentry.
         before_send: Some(Arc::new(|mut event: sentry::protocol::Event<'static>| {
             event.user = None;
             event.server_name = None;
+            scrub_event(&mut event);
             Some(event)
         })),
         ..Default::default()
     };
 
     sentry::init((dsn, options))
+}
+
+/// Redacta el contenido libre de un evento Sentry antes de enviarlo (OBS-01): mensaje, valores de
+/// excepción y mensajes de breadcrumb. Reutiliza el mismo scrubber que la cola de Axiom.
+fn scrub_event(event: &mut sentry::protocol::Event<'static>) {
+    if let Some(msg) = event.message.as_mut() {
+        *msg = crate::scrub::scrub(msg);
+    }
+    if let Some(le) = event.logentry.as_mut() {
+        le.message = crate::scrub::scrub(&le.message);
+    }
+    for exc in event.exception.values.iter_mut() {
+        if let Some(v) = exc.value.as_mut() {
+            *v = crate::scrub::scrub(v);
+        }
+    }
+    for bc in event.breadcrumbs.values.iter_mut() {
+        if let Some(m) = bc.message.as_mut() {
+            *m = crate::scrub::scrub(m);
+        }
+    }
 }

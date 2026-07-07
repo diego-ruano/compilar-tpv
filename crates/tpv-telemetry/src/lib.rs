@@ -25,6 +25,7 @@
 mod context;
 mod event;
 mod forward;
+mod scrub;
 mod spool;
 mod state;
 mod worker;

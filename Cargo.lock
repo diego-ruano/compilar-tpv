@@ -6868,6 +6868,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "tracing",
  "uuid",
 ]
 
@@ -6876,6 +6877,7 @@ name = "tpv-telemetry"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "regex",
  "reqwest 0.12.28",
  "sentry",
  "sentry-tracing",
@@ -6885,6 +6887,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "ts-rs",
 ]
 
 [[package]]

@@ -15,11 +15,17 @@
 import { Hono } from "hono";
 import { z } from "zod";
 
+import type { SpoolEvent } from "@tpv/contracts";
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { ingestToAxiom } from "../../observability/axiom";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
+
+// `tenant_id`/`device_id` los fija el SERVIDOR desde el JWT (el cliente no los manda). El resto de
+// campos de `SpoolEvent` son los que sube el dispositivo y deben coincidir 1:1 con el zod de abajo.
+type ServerSetKeys = "tenant_id" | "device_id";
+type ClientEventKeys = Exclude<keyof SpoolEvent, ServerSetKeys>;
 
 // Tope de eventos por lote (== tamaño de lote del dispositivo, 500).
 const MAX_EVENTS = 500;
@@ -44,6 +50,21 @@ const eventSchema = z.object({
 const batchSchema = z.object({
 	events: z.array(eventSchema).max(MAX_EVENTS),
 });
+
+// Drift-guard (OBS-05): las claves del zod deben coincidir 1:1 con las de `SpoolEvent` (generado
+// desde `crates/tpv-telemetry`, fuente única de verdad). Si en Rust se añade/renombra/quita un
+// campo, uno de los dos `extends` deja de ser `true` y este módulo NO compila hasta actualizarlo.
+type SchemaKeys = keyof z.infer<typeof eventSchema>;
+type AssertSchemaMatchesRust = [
+	[SchemaKeys] extends [ClientEventKeys]
+		? true
+		: ["zod valida claves ausentes en SpoolEvent", Exclude<SchemaKeys, ClientEventKeys>],
+	[ClientEventKeys] extends [SchemaKeys]
+		? true
+		: ["SpoolEvent tiene campos que el zod no valida", Exclude<ClientEventKeys, SchemaKeys>],
+];
+const _assertSchemaMatchesRust: AssertSchemaMatchesRust = [true, true];
+void _assertSchemaMatchesRust;
 
 export const telemetryRoutes = new Hono<Ctx>();
 

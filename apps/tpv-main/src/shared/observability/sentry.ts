@@ -12,7 +12,25 @@
 import * as Sentry from "@sentry/browser";
 import { defaultOptions } from "tauri-plugin-sentry-api";
 
+import { scrub, scrubDeep } from "./scrub";
+
 let started = false;
+
+/**
+ * Redacta (OBS-01) el contenido libre del evento antes de reenviarlo: mensaje, valores de
+ * excepción, mensajes de breadcrumb y datos extra. `sendDefaultPii=false` no cubre estas cadenas.
+ */
+function scrubEvent<E extends Sentry.Event>(event: E): E {
+	if (typeof event.message === "string") event.message = scrub(event.message);
+	for (const exc of event.exception?.values ?? []) {
+		if (typeof exc.value === "string") exc.value = scrub(exc.value);
+	}
+	for (const bc of event.breadcrumbs ?? []) {
+		if (typeof bc.message === "string") bc.message = scrub(bc.message);
+	}
+	if (event.extra) scrubDeep(event.extra);
+	return event;
+}
 
 /** Inicializa Sentry en la Webview. Idempotente. */
 export function initSentry(): void {
@@ -23,6 +41,16 @@ export function initSentry(): void {
 			...defaultOptions,
 			// No grabamos la UI (Session Replay): un TPV maneja datos de clientes/ventas (PII).
 			// Al no añadir la integración de replay, queda desactivado por defecto.
+			//
+			// Scrubbing de contenido (OBS-01) antes de que el evento salga por el puente a Rust.
+			beforeSend: (event) => {
+				try {
+					return scrubEvent(event);
+				} catch {
+					// Si el scrubbing fallara, es más seguro NO enviar que enviar sin depurar.
+					return null;
+				}
+			},
 		});
 	} catch {
 		/* la observabilidad jamás bloquea el arranque */
