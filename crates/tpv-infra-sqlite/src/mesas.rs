@@ -876,7 +876,7 @@ impl MesasRepository for SqliteMesasRepository {
                 SET ID_Trabajador = ?2
                 WHERE ID_Comanda = ?1
                   AND Estado = 'Abierta'
-                  AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0)
+                  AND ID_Trabajador IS NULL
                   AND NOT EXISTS (
                     SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = ?1
                   );
@@ -975,7 +975,7 @@ impl MesasRepository for SqliteMesasRepository {
                     SET ID_Trabajador = ?2
                     WHERE ID_Comanda = ?1
                       AND Estado = 'Abierta'
-                      AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
+                      AND ID_Trabajador IS NULL;
                     "#,
                     vec![Value::Text(id_comanda.to_string()), Value::Text(idt)],
                 )
