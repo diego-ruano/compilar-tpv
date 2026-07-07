@@ -432,7 +432,7 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 		JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 		JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 		WHERE COALESCE(cat.Pasa_Cocina, 0) = 1
-			AND datetime(c.Fecha_Hora_Apertura,'localtime') >= datetime('now','localtime','-2 days')
+			AND datetime(c.Fecha_Hora_Apertura) >= datetime('now','localtime','-2 days')
 			AND EXISTS (
 				SELECT 1
 				FROM Detalle_Comanda dc2
