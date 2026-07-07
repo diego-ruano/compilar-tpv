@@ -211,6 +211,90 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
     Ok(())
 }
 
+/// Consumo de stock FEFO (best-effort) para las líneas cobradas de una venta en mesa/barra.
+/// Descuenta de los lotes por caducidad/entrada y registra la traza en `Lote_Consumos`
+/// por `ID_Detalle`. Es **best-effort**: si no hay stock suficiente NO aborta el cobro
+/// (un cobro de mesa no se bloquea por inventario); consume lo disponible y para. Cada
+/// `UPDATE Lotes_Producto` es por `ID_Lote` con la cantidad como literal → la sentencia
+/// es determinista al replicarse en la nube. Unifica el descuento de stock que hasta ahora
+/// solo hacía el mostrador (`venta_rapida`) con las ventas en mesa (MESA-01).
+async fn consumir_stock_fefo<C: Writer>(
+    db: &C,
+    charged: &[(String, String, f64)],
+) -> AppResult<()> {
+    for (id_detalle, producto_id, cantidad) in charged {
+        let lot_rows: Vec<(String, f64)> = {
+            let mut lots = db
+                .query(
+                    r#"
+                    SELECT ID_Lote, COALESCE(Stock_Disponible,0)
+                    FROM Lotes_Producto
+                    WHERE ID_Producto = ?1
+                      AND COALESCE(Stock_Disponible,0) > 0
+                    ORDER BY
+                      CASE WHEN Caducidad IS NULL THEN 1 ELSE 0 END,
+                      date(Caducidad) ASC,
+                      datetime(Fecha_Entrada) ASC,
+                      ID_Lote ASC;
+                    "#,
+                    vec![Value::Text(producto_id.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+
+            let mut o: Vec<(String, f64)> = Vec::new();
+            while let Some(r) = lots.next().await.map_err(db_err)? {
+                let id_lote = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                let stock = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
+                if !id_lote.is_empty() && stock > 0.0 {
+                    o.push((id_lote, stock));
+                }
+            }
+            o
+        };
+
+        let mut remaining = *cantidad;
+        for (id_lote, stock) in lot_rows {
+            if remaining <= 0.0 {
+                break;
+            }
+            let take = if remaining < stock { remaining } else { stock };
+            if take <= 0.0 {
+                continue;
+            }
+
+            db.execute(
+                r#"
+                UPDATE Lotes_Producto
+                SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
+                WHERE ID_Lote = ?1;
+                "#,
+                vec![Value::Text(id_lote.clone()), Value::Real(take)],
+            )
+            .await
+            .map_err(db_err)?;
+
+            db.execute(
+                r#"
+                INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+                "#,
+                vec![
+                    Value::Text(id_detalle.clone()),
+                    Value::Text(id_lote),
+                    Value::Real(take),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            remaining -= take;
+        }
+    }
+    Ok(())
+}
+
 /// La mesa BARRA se siembra con un id fijo (idéntico en local y nube), así que basta devolverlo.
 async fn get_or_create_mesa_barra_inner<C>(_db: &C) -> AppResult<String> {
     Ok(BARRA_MESA_ID.to_string())
@@ -1071,6 +1155,8 @@ impl MesasRepository for SqliteMesasRepository {
             let sum = data.items.iter().fold(0.0, |acc, (_p, precio)| acc + *precio);
             let importe_total = (sum * 100.0).round() / 100.0;
 
+            // Líneas cobradas (detalle, producto, cantidad=1) para el descuento de stock FEFO.
+            let mut charged: Vec<(String, String, f64)> = Vec::new();
             for (producto_id, precio) in data.items.iter() {
                 // MESA-02: resolvemos Pasa_Cocina con una lectura previa e insertamos el
                 // Estado_Cocina como LITERAL (no un INSERT…SELECT sobre el catálogo). Así la
@@ -1096,6 +1182,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Null
                 };
 
+                let id_detalle = new_id();
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
@@ -1104,7 +1191,7 @@ impl MesasRepository for SqliteMesasRepository {
                     VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6);
                     "#,
                     vec![
-                        Value::Text(new_id()),
+                        Value::Text(id_detalle.clone()),
                         Value::Text(id_comanda.to_string()),
                         Value::Text(producto_id.clone()),
                         Value::Real(*precio),
@@ -1114,11 +1201,15 @@ impl MesasRepository for SqliteMesasRepository {
                 )
                 .await
                 .map_err(db_err)?;
+                charged.push((id_detalle, producto_id.clone(), 1.0));
             }
 
             db.execute(update_total_comanda_sql(), vec![Value::Text(id_comanda.to_string())])
                 .await
                 .map_err(db_err)?;
+
+            // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién vendidas.
+            consumir_stock_fefo(db, &charged).await?;
 
             let id_pago = new_id();
             let ok = try_exec(
@@ -1849,6 +1940,38 @@ impl MesasRepository for SqliteMesasRepository {
                 in_sql2
             );
             db.execute(&sql_insert, insert_args).await.map_err(db_err)?;
+
+            // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién cobradas. Todas
+            // las de `ids` estaban pendientes (validado por el count previo), así que se
+            // consumen exactamente una vez.
+            let mut charged: Vec<(String, String, f64)> = Vec::new();
+            {
+                let mut crows = db
+                    .query(
+                        &format!(
+                            r#"
+                            SELECT dc.ID_Detalle, dc.ID_Producto, CAST(COALESCE(dc.Cantidad,1) AS REAL)
+                            FROM Detalle_Comanda dc
+                            WHERE dc.ID_Comanda = ?1
+                              AND dc.ID_Detalle IN ({})
+                            ORDER BY dc.ID_Detalle;
+                            "#,
+                            in_sql
+                        ),
+                        count_args.clone(),
+                    )
+                    .await
+                    .map_err(db_err)?;
+                while let Some(r) = crows.next().await.map_err(db_err)? {
+                    let id_det = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                    let id_prod = v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default();
+                    let qty = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
+                    if !id_det.is_empty() && !id_prod.is_empty() && qty > 0.0 {
+                        charged.push((id_det, id_prod, qty));
+                    }
+                }
+            }
+            consumir_stock_fefo(db, &charged).await?;
 
             let pending_left = select_one_i64(
                 db,
