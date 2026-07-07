@@ -100,6 +100,81 @@ export function affectedComandas(statements: RawStatement[]): ComandaSyncInfo {
 	return { ids: Array.from(ids), touchedComanda, uncertain, touchedCatalog };
 }
 
+// ── SYNC-06: invalidación selectiva de React Query ─────────────────────────────────────────────
+// En cada `change` los hooks invalidaban TODAS las queries montadas. Aquí derivamos, de la tabla
+// que toca cada sentencia, las CLAVES de feature afectadas, para invalidar solo esas. Fallback
+// SEGURO: si una sentencia toca una tabla no mapeada (o no la sabemos parsear), devolvemos `null`
+// → el hook cae a invalidación global (nunca dejamos datos rancios por un mapeo incompleto).
+//
+// El mapeo es GENEROSO a propósito (sobre-incluir una feature solo cuesta un refetch de algo
+// montado; INFRA-incluir dejaría esa feature obsoleta). `stats` aparece en varias porque su vista
+// lee casi todo; solo está montada dentro de Estadísticas.
+const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
+	comandas: ["mesas", "stats"],
+	detalle_comanda: ["mesas", "stats"],
+	pagos: ["cuentas", "stats"],
+	pago_detalles: ["cuentas", "stats"],
+	cuentas_gastos: ["cuentas", "stats"],
+	categorias_producto: ["inventario", "stats"],
+	productos: ["inventario", "stats"],
+	lotes_producto: ["inventario", "stats"],
+	lote_consumos: ["inventario", "stats"],
+	alergenos: ["inventario"],
+	producto_alergenos: ["inventario"],
+	proveedores: ["proveedores", "inventario", "cuentas", "pedidos_proveedor", "stats"],
+	pedidos_proveedor: ["pedidos_proveedor", "inventario"],
+	lineas_pedido_proveedor: ["pedidos_proveedor", "inventario"],
+	zonas: ["mesas"],
+	mesas: ["mesas"],
+	clientes: ["clientes", "reservas", "stats"],
+	reservas: ["reservas", "stats"],
+	tareas: ["tareas"],
+	tarea_asignaciones: ["tareas"],
+	trabajadores: ["trabajadores", "tareas", "stats"],
+	turnos: ["trabajadores"],
+	asignacion_turnos: ["trabajadores"],
+	horario_predeterminado: ["trabajadores"],
+	fichajes: ["trabajadores"],
+	fichaje_dia: ["trabajadores"],
+	usuarios: ["trabajadores"],
+	roles: ["trabajadores"],
+	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave.
+	business_settings: [],
+	ticket_settings: [],
+	contact_settings: [],
+};
+
+// Tabla destino de una escritura (INSERT/REPLACE/UPDATE/DELETE). `null` si no la reconocemos.
+function targetTable(sql: string): string | null {
+	const s = sql.trim();
+	const m =
+		/^INSERT\s+(?:OR\s+\w+\s+)?INTO\s+["'`[]?(\w+)/i.exec(s) ??
+		/^REPLACE\s+INTO\s+["'`[]?(\w+)/i.exec(s) ??
+		/^UPDATE\s+["'`[]?(\w+)/i.exec(s) ??
+		/^DELETE\s+FROM\s+["'`[]?(\w+)/i.exec(s);
+	return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Claves de feature de React Query afectadas por un lote de sentencias resueltas.
+ *  - Devuelve la lista de claves a invalidar (p. ej. `["cuentas", "stats"]`).
+ *  - Devuelve `null` si alguna sentencia toca una tabla no mapeada o no parseable → el consumidor
+ *    debe invalidar TODO (fallback seguro).
+ */
+export function affectedFeatureKeys(statements: RawStatement[]): string[] | null {
+	const keys = new Set<string>();
+	for (const st of statements ?? []) {
+		const sql = String(st?.sql ?? "");
+		if (!sql.trim()) continue;
+		const table = targetTable(sql);
+		if (table === null) return null; // forma no reconocida → global
+		const feats = TABLE_TO_FEATURES[table];
+		if (feats === undefined) return null; // tabla no mapeada → global
+		for (const f of feats) keys.add(f);
+	}
+	return Array.from(keys);
+}
+
 /**
  * ¿Hay que recargar el ticket de la comanda `activeId` ante este lote?
  *  - Sí, si el lote afecta explícitamente a esa comanda.

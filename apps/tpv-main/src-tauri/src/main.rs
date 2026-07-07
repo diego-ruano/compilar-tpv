@@ -151,6 +151,7 @@ fn ensure_folders(app_data_dir: &Path) -> Result<(), String> {
         app_data_dir.join("images"),
         app_data_dir.join("images").join("categorias"),
         app_data_dir.join("images").join("productos"),
+        app_data_dir.join("images").join("logo"),
     ];
 
     for f in folders {
@@ -252,7 +253,7 @@ fn is_safe_image_rel_path(rel: &str) -> bool {
     if parts.len() != 3 || parts[0] != "images" {
         return false;
     }
-    matches!(parts[1], "productos" | "categorias" | "proveedores" | "alergenos")
+    matches!(parts[1], "productos" | "categorias" | "proveedores" | "alergenos" | "logo")
         && !parts[2].is_empty()
 }
 
@@ -1320,6 +1321,7 @@ pub fn run() {
             // cuentas (migrado a arquitectura hexagonal — commands/cuentas.rs)
             commands::cuentas::cuentas_get_entradas,
             commands::cuentas::cuentas_get_salidas,
+            commands::cuentas::cuentas_get_resumen,
             commands::cuentas::cuentas_create_gasto,
             commands::cuentas::cuentas_update_gasto,
             commands::cuentas::cuentas_delete_gasto,
@@ -1398,6 +1400,7 @@ pub fn run() {
             commands::sync::sync_outbox_pending,
             commands::sync::sync_outbox_mark_sent,
             commands::sync::sync_purge_applied_ops,
+            commands::sync::sync_health,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

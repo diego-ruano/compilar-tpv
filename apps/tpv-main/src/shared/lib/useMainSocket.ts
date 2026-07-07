@@ -22,13 +22,20 @@ import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { cloudPost } from "./cloudApi";
 import { queryClient } from "./queryClient";
-import { affectedComandas, type RawStatement } from "./syncStatements";
+import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
+import { captureException } from "../observability/sentry";
 
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
-const RECONNECT_MS = 3000;
+// SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
+// prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se resetea al autenticarse.
+const RECONNECT_BASE_MS = 3000;
+const RECONNECT_MAX_MS = 30000;
 const PING_MS = 30000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
+// SYNC-13: tope de páginas por ciclo de catch-up (× 500 ops/página = 1M ops). Si se alcanza, el
+// catch-up quedó a medias: continúa en el siguiente ciclo, pero lo señalamos por telemetría.
+const CATCHUP_MAX_PAGES = 2000;
 // Red de seguridad: el drenado inmediato lo dispara el evento Tauri `outbox:pending` (emitido por
 // Rust al confirmar cada escritura local). Este poll solo cubre reintentos de ops que fallaron al
 // subir y el arranque; por eso puede ser holgado (no es el camino de latencia normal).
@@ -68,6 +75,19 @@ async function loadDeviceId(): Promise<string> {
 		return String(r?.deviceId ?? r?.device_id ?? "");
 	} catch {
 		return "";
+	}
+}
+
+// SYNC-15: canjea el token por un ticket efímero de un solo uso para NO exponer el JWT en la URL
+// del WebSocket. Devuelve `null` si el endpoint falla; en ese caso NO abrimos el WS (ya no existe
+// respaldo `?token=`: el token nunca viaja por la URL) y reintentamos más tarde con backoff.
+async function loadWsTicket(mode: "tpv" | "handy"): Promise<string | null> {
+	try {
+		const r = (await cloudPost<any>(mode, "/v1/ws/ticket", {})) as any;
+		const t = String(r?.ticket ?? "");
+		return t || null;
+	} catch {
+		return null;
 	}
 }
 
@@ -121,7 +141,15 @@ export function useMainSocket() {
 						const statements = changes.flatMap((c) =>
 							Array.isArray(c.statements) ? c.statements : [],
 						) as RawStatement[];
-						queryClient.invalidateQueries();
+						// SYNC-06: invalidación selectiva por feature (fallback global si el lote toca
+						// una tabla no mapeada).
+						const featureKeys = affectedFeatureKeys(statements);
+						if (featureKeys === null) {
+							queryClient.invalidateQueries();
+						} else {
+							for (const k of featureKeys)
+								queryClient.invalidateQueries({ queryKey: [k] });
+						}
 						useSyncSignal.getState().bump(affectedComandas(statements));
 					}
 				} catch (e) {
@@ -237,7 +265,8 @@ export function useMainSocket() {
 					since = 0;
 				}
 
-				for (let i = 0; i < 2000 && !cancelled; i++) {
+				let page = 0;
+				for (; page < CATCHUP_MAX_PAGES && !cancelled; page++) {
 					const resp = (await cloudPost<any>("tpv", "/v1/sync/changes", {
 						since,
 					})) as any;
@@ -247,6 +276,15 @@ export function useMainSocket() {
 					const next = Number(resp?.nextSince ?? since);
 					if (next <= since) break;
 					since = next;
+				}
+				// SYNC-13: si agotamos el tope de páginas, el catch-up no terminó en este ciclo
+				// (Main mucho tiempo offline o Sync_Changes enorme). Reanuda al reconectar, pero lo
+				// hacemos VISIBLE para no cortar la convergencia en silencio.
+				if (page >= CATCHUP_MAX_PAGES && !cancelled) {
+					captureException(new Error("sync_catchup_cap_reached"), {
+						pages: page,
+						lastSince: since,
+					});
 				}
 			} catch (e) {
 				console.warn("catch-up de sync falló:", e);
@@ -258,12 +296,16 @@ export function useMainSocket() {
 			}
 		}
 
+		// SYNC-09: retardo de reconexión con backoff exponencial (se resetea a base en `hello_ok`).
+		let reconnectDelay = RECONNECT_BASE_MS;
 		const scheduleReconnect = () => {
 			if (cancelled || retryTimer) return;
+			const delay = Math.min(reconnectDelay, RECONNECT_MAX_MS) + Math.random() * 1000;
+			reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
 			retryTimer = window.setTimeout(() => {
 				retryTimer = null;
 				void open();
-			}, RECONNECT_MS);
+			}, delay);
 		};
 
 		async function open() {
@@ -276,9 +318,15 @@ export function useMainSocket() {
 				return;
 			}
 
-			const socket = new WebSocket(
-				`${WS_URL}?token=${encodeURIComponent(lic.token)}`,
-			);
+			// SYNC-15: el WS se abre SOLO con un ticket efímero de un solo uso (nunca el token en la
+			// URL). Si no lo obtenemos (endpoint caído/sin red), reintentamos más tarde.
+			const ticket = await loadWsTicket("tpv");
+			if (cancelled) return;
+			if (!ticket) {
+				scheduleReconnect();
+				return;
+			}
+			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}`);
 			ws = socket;
 
 			socket.onopen = () => {
@@ -328,6 +376,7 @@ export function useMainSocket() {
 					// Autenticados: ponerse al día (nube→Main), drenar el outbox (Main→nube) y
 					// subir a R2 las imágenes pendientes (canal aparte del outbox SQL).
 					authed = true;
+					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
 					void catchUpThenLive();
 					void drainOutbox(socket);
 					void invoke<string>("images_drain_pending")

@@ -18,7 +18,7 @@ use libsql::{Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
-use tpv_contracts::sync::{OutboxEntry, SqlStatement, SyncChange};
+use tpv_contracts::sync::{OutboxEntry, SqlStatement, SyncChange, SyncHealth};
 
 use crate::db::Db;
 use crate::mapping::v_i64;
@@ -52,6 +52,12 @@ const PURGE_CURSOR_MARGIN: i64 = 500;
 
 /// Antigüedad mínima (ms) para que la purga TTL retire un registro ya confirmado en la nube.
 const PURGE_TTL_MS: i64 = 72 * 60 * 60 * 1000;
+
+/// Reintentos de una op nube→Main antes de ponerla en CUARENTENA (SYNC-01). Cada intento ocurre
+/// en un ciclo de catch-up distinto (el pipeline para y reintenta), así que cubre fallos
+/// transitorios sin descartar datos a la primera. Agotados, la op se salta para no bloquear el
+/// resto de la sincronización indefinidamente.
+const MAX_APPLY_ATTEMPTS: i64 = 5;
 
 /// Convierte un escalar JSON al `Value` de libsql para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
@@ -124,6 +130,78 @@ async fn purge_by_cursor(conn: &Connection, last_seq: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// Registra (o incrementa) el fallo de una op en `_Sync_Failed` y devuelve el nº de intentos
+/// acumulados. Sirve de contador persistente entre ciclos de catch-up para decidir la cuarentena.
+async fn bump_failure(conn: &Connection, ch: &SyncChange, err: &str) -> AppResult<i64> {
+    let now = now_ms();
+    let stmts_json = serde_json::to_string(&ch.statements).unwrap_or_else(|_| "[]".to_string());
+    let err_trunc: String = err.chars().take(500).collect();
+    conn.execute(
+        "INSERT INTO _Sync_Failed \
+           (Op_Id, Seq, Statements_Json, Attempts, Quarantined, Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms) \
+         VALUES (?1, ?2, ?3, 1, 0, ?4, ?5, ?5) \
+         ON CONFLICT(Op_Id) DO UPDATE SET \
+           Attempts = Attempts + 1, Last_Error = ?4, Last_Failed_At_Ms = ?5;",
+        vec![
+            Value::Text(ch.op_id.clone()),
+            Value::Integer(ch.seq),
+            Value::Text(stmts_json),
+            Value::Text(err_trunc),
+            Value::Integer(now),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+
+    let mut rows = conn
+        .query(
+            "SELECT Attempts FROM _Sync_Failed WHERE Op_Id = ?1 LIMIT 1;",
+            vec![Value::Text(ch.op_id.clone())],
+        )
+        .await
+        .map_err(db_err)?;
+    match rows.next().await.map_err(db_err)? {
+        Some(r) => Ok(v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(1)),
+        None => Ok(1),
+    }
+}
+
+/// Pone una op en CUARENTENA: la marca como aplicada (para que el gate de idempotencia la salte),
+/// deja constancia en `_Sync_Failed` (Quarantined=1, visible en el panel de salud) y AVANZA el
+/// checkpoint para no volver a pedirla. El resto del pipeline puede así seguir convergiendo.
+async fn quarantine(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
+    conn.execute(
+        "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, ?2, ?3);",
+        vec![
+            Value::Text(ch.op_id.clone()),
+            Value::Integer(ch.seq),
+            Value::Integer(now_ms()),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+    conn.execute(
+        "UPDATE _Sync_Failed SET Quarantined = 1 WHERE Op_Id = ?1;",
+        vec![Value::Text(ch.op_id.clone())],
+    )
+    .await
+    .map_err(db_err)?;
+    advance_checkpoint(conn, ch.seq).await?;
+    Ok(())
+}
+
+/// Limpia el registro de fallo de una op que acabó aplicándose (fallo transitorio recuperado).
+/// No toca las ya en cuarentena (que igualmente no vuelven a `apply_one`, al estar marcadas).
+async fn clear_failure(conn: &Connection, op_id: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM _Sync_Failed WHERE Op_Id = ?1 AND Quarantined = 0;",
+        vec![Value::Text(op_id.to_string())],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
 /// Aplica una operación de forma atómica: sus sentencias + el registro de idempotencia + el
 /// avance del checkpoint, todo dentro de una transacción. `defer_foreign_keys` evita fallos por
 /// orden dentro de la propia operación. Corre sobre la conexión CRUDA de escritura (sin captura).
@@ -136,11 +214,20 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
         for (i, st) in ch.statements.iter().enumerate() {
             let args: Vec<Value> = st.args.iter().map(json_to_value).collect();
             conn.execute(&st.sql, args).await.map_err(|e| {
+                // El SQL queda SÓLO en el log local a nivel `debug` (no se reenvía a la nube: la
+                // capa de telemetría descarta DEBUG/TRACE). El error que se PROPAGA no incluye la
+                // sentencia, para no filtrar esquema/valores a la telemetría (OBS-02).
+                tracing::debug!(
+                    target: "tpv::sync",
+                    op_id = %ch.op_id,
+                    seq = ch.seq,
+                    stmt_index = i,
+                    sql = %st.sql.split_whitespace().collect::<Vec<_>>().join(" "),
+                    "fallo aplicando sentencia de sync"
+                );
                 AppError::repository(format!(
-                    "op {} (seq {}) sentencia #{i}: {e} :: SQL={}",
-                    ch.op_id,
-                    ch.seq,
-                    st.sql.split_whitespace().collect::<Vec<_>>().join(" ")
+                    "op {} (seq {}) sentencia #{i}: {e}",
+                    ch.op_id, ch.seq,
                 ))
             })?;
         }
@@ -202,13 +289,49 @@ impl SyncRepository for SqliteSyncRepository {
         let conn: &Connection = w.raw();
 
         for ch in &changes {
-            // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up o eco de
-            // las propias escrituras de la Main) se ignora, pero igualmente avanza el checkpoint.
+            // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up, eco de las
+            // propias escrituras de la Main o una op en cuarentena) se ignora, pero igualmente
+            // avanza el checkpoint.
             if op_already_applied(conn, &ch.op_id).await? {
                 advance_checkpoint(conn, ch.seq).await?;
                 continue;
             }
-            apply_one(conn, ch).await?;
+            match apply_one(conn, ch).await {
+                Ok(()) => {
+                    // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
+                    clear_failure(conn, &ch.op_id).await?;
+                }
+                Err(e) => {
+                    // SYNC-01: política de poison-message. Contamos el intento; agotados los
+                    // reintentos, ponemos la op en cuarentena (se salta + avanza checkpoint +
+                    // alerta) para NO bloquear el resto de la cola indefinidamente.
+                    let attempts = bump_failure(conn, ch, &e.to_string()).await?;
+                    if attempts >= MAX_APPLY_ATTEMPTS {
+                        quarantine(conn, ch).await?;
+                        tracing::error!(
+                            target: "tpv::sync",
+                            op_id = %ch.op_id,
+                            seq = ch.seq,
+                            attempts,
+                            error = %e,
+                            "op de sync en CUARENTENA tras agotar reintentos: se salta para no bloquear el pipeline"
+                        );
+                        // Cuarentenada: seguimos con el resto del lote.
+                    } else {
+                        // Aún dentro del margen: paramos el lote SIN avanzar el checkpoint, para
+                        // reintentar esta op (y las siguientes) en el próximo ciclo de catch-up.
+                        tracing::warn!(
+                            target: "tpv::sync",
+                            op_id = %ch.op_id,
+                            seq = ch.seq,
+                            attempts,
+                            error = %e,
+                            "fallo aplicando op de sync; se reintentará en el próximo ciclo"
+                        );
+                        break;
+                    }
+                }
+            }
         }
 
         // Cada vez que el checkpoint avanza (por catch-up o por cambios en vivo) intentamos retirar
@@ -323,5 +446,32 @@ impl SyncRepository for SqliteSyncRepository {
             .await
             .map_err(db_err)?;
         Ok(())
+    }
+
+    async fn health(&self) -> AppResult<SyncHealth> {
+        let r = self.db.read().await;
+        let conn = r.conn();
+
+        async fn count(conn: &Connection, sql: &str) -> AppResult<i64> {
+            let mut rows = conn.query(sql, ()).await.map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => Ok(v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0)),
+                None => Ok(0),
+            }
+        }
+
+        let outbox_pending = count(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
+        let last_seq = checkpoint(conn).await?;
+        let quarantined =
+            count(conn, "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 1;").await?;
+        let failing =
+            count(conn, "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 0;").await?;
+
+        Ok(SyncHealth {
+            outbox_pending,
+            last_seq,
+            quarantined,
+            failing,
+        })
     }
 }

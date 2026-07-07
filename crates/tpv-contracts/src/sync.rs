@@ -46,3 +46,22 @@ pub struct OutboxEntry {
     pub command_name: String,
     pub statements: Vec<SqlStatement>,
 }
+
+/// Foto de SALUD de la sincronización local (SYNC-14). La expone el comando `sync_health` para el
+/// panel de Configuración → Conectividad, de modo que un fallo de convergencia deje de ser invisible.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct SyncHealth {
+    /// Operaciones aún sin subir a la nube (profundidad del outbox).
+    #[ts(type = "number")]
+    pub outbox_pending: i64,
+    /// Último `seq` aplicado localmente (checkpoint del catch-up).
+    #[ts(type = "number")]
+    pub last_seq: i64,
+    /// Operaciones en CUARENTENA (SYNC-01): fallaron al aplicarse y se saltaron para no bloquear.
+    #[ts(type = "number")]
+    pub quarantined: i64,
+    /// Operaciones que están fallando pero aún NO en cuarentena (reintentándose).
+    #[ts(type = "number")]
+    pub failing: i64,
+}

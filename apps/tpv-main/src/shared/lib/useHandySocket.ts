@@ -15,11 +15,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { useMainPresence } from "../stores/useMainPresence";
+import { cloudPost } from "./cloudApi";
 import { queryClient } from "./queryClient";
-import { affectedComandas } from "./syncStatements";
+import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
 
 const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
-const RECONNECT_MS = 3000;
+// SYNC-09: backoff exponencial con tope + jitter (se resetea al autenticarse).
+const RECONNECT_BASE_MS = 3000;
+const RECONNECT_MAX_MS = 30000;
 const PING_MS = 30000;
 
 async function loadAuth(): Promise<{ token: string; tenantId: string } | null> {
@@ -40,6 +43,19 @@ async function loadDeviceId(): Promise<string> {
 		return String(r?.deviceId ?? r?.device_id ?? "");
 	} catch {
 		return "";
+	}
+}
+
+// SYNC-15: ticket efímero de un solo uso para no exponer el JWT en la URL del WebSocket. `null` si
+// el endpoint falla; en ese caso NO abrimos el WS (ya no existe respaldo `?token=`: el token nunca
+// viaja por la URL) y reintentamos más tarde con backoff.
+async function loadWsTicket(): Promise<string | null> {
+	try {
+		const r = (await cloudPost<any>("handy", "/v1/ws/ticket", {})) as any;
+		const t = String(r?.ticket ?? "");
+		return t || null;
+	} catch {
+		return null;
 	}
 }
 
@@ -65,12 +81,16 @@ export function useHandySocket() {
 		let retryTimer: number | null = null;
 		let pingTimer: number | null = null;
 
+		// SYNC-09: retardo de reconexión con backoff exponencial (se resetea a base al autenticarse).
+		let reconnectDelay = RECONNECT_BASE_MS;
 		const scheduleReconnect = () => {
 			if (cancelled || retryTimer) return;
+			const delay = Math.min(reconnectDelay, RECONNECT_MAX_MS) + Math.random() * 1000;
+			reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
 			retryTimer = window.setTimeout(() => {
 				retryTimer = null;
 				void open();
-			}, RECONNECT_MS);
+			}, delay);
 		};
 
 		async function open() {
@@ -84,9 +104,15 @@ export function useHandySocket() {
 				return;
 			}
 
-			const socket = new WebSocket(
-				`${WS_URL}?token=${encodeURIComponent(auth.token)}`,
-			);
+			// SYNC-15: el WS se abre SOLO con un ticket efímero de un solo uso (nunca el token en la
+			// URL). Si no lo obtenemos, reintentamos más tarde.
+			const ticket = await loadWsTicket();
+			if (cancelled) return;
+			if (!ticket) {
+				scheduleReconnect();
+				return;
+			}
+			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}`);
 			ws = socket;
 
 			socket.onopen = () => {
@@ -135,7 +161,8 @@ export function useHandySocket() {
 				// Presencia de la Main: el worker nos dice si hay una Main activa. Sin Main, el
 				// Handy se bloquea por completo (ver useMainPresence + AppBoot).
 				if (msg.type === "main_status") {
-					useMainPresence.getState().setMainOnline(Boolean(msg.online));
+					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: autenticados → resetea el backoff
+						useMainPresence.getState().setMainOnline(Boolean(msg.online));
 					return;
 				}
 				if (msg.type === "main_online") {
@@ -151,10 +178,18 @@ export function useHandySocket() {
 				// Main): refrescamos. No aplicamos SQL (no hay BD local): solo refetch.
 				if (msg.type === "change") {
 					if (!cancelled) {
-						const statements = Array.isArray(msg.statements)
-							? msg.statements
-							: [];
-						queryClient.invalidateQueries();
+						const statements = (
+							Array.isArray(msg.statements) ? msg.statements : []
+						) as RawStatement[];
+						// SYNC-06: invalidación selectiva por feature (fallback global si el lote
+						// toca una tabla no mapeada).
+						const featureKeys = affectedFeatureKeys(statements);
+						if (featureKeys === null) {
+							queryClient.invalidateQueries();
+						} else {
+							for (const k of featureKeys)
+								queryClient.invalidateQueries({ queryKey: [k] });
+						}
 						useSyncSignal.getState().bump(affectedComandas(statements));
 					}
 					return;

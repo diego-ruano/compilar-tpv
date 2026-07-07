@@ -1,6 +1,6 @@
 //! Casos de uso de **sincronización nube → Main**. Orquestación fina sobre `SyncRepository`.
 
-use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry};
+use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry, SyncHealth};
 
 use crate::error::AppResult;
 use crate::ports::sync::SyncRepository;
@@ -37,4 +37,9 @@ pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str, seq: i64) 
 /// outbox queda vacío tras drenar.
 pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
     repo.purge_applied_ops().await
+}
+
+/// Foto de salud de la sincronización local (SYNC-14) para el panel de Conectividad.
+pub async fn health(repo: &dyn SyncRepository) -> AppResult<SyncHealth> {
+    repo.health().await
 }

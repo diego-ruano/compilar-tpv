@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::sync::{OutboxEntry, SyncChange};
+use tpv_contracts::sync::{OutboxEntry, SyncChange, SyncHealth};
 
 use crate::error::AppResult;
 
@@ -36,4 +36,8 @@ pub trait SyncRepository: Send + Sync {
     /// llamarse cuando el outbox queda vacío tras drenar (todo subido). Es segura por diseño: nunca
     /// borra un anti-eco cuya operación siga sin enviarse (evitaría su re-aplicación tras catch-up).
     async fn purge_applied_ops(&self) -> AppResult<()>;
+
+    /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en
+    /// cuarentena/fallando) para el panel de Configuración → Conectividad (SYNC-14).
+    async fn health(&self) -> AppResult<SyncHealth>;
 }

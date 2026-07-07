@@ -103,6 +103,20 @@ type InternalApplyCommand =
 // consulta: basta revalidar cada cierto tiempo (o de inmediato ante un 401).
 const TENANT_DB_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
+// SYNC-08: ventana mínima entre escrituras de `last_seen_at_ms` por dispositivo en la BD central.
+// Absorbe los pings (cada 30 s) sin perder utilidad de presencia (granularidad de minutos basta).
+const LAST_SEEN_THROTTLE_MS = 5 * 60 * 1000;
+
+// ---- SYNC-12: purga del log de sync en la nube ------------------------------
+// `Sync_Changes` y `Applied_Operations` crecían sin límite; el catch-up escanea `Sync_Changes`
+// cada reconexión. Purgamos con SUELO por el checkpoint mínimo de las Main activas (nunca borramos
+// algo que una Main aún no ha consumido) y con TTL (solo filas suficientemente antiguas).
+const PURGE_INTERVAL_MS = 60 * 60 * 1000; // como mucho una purga por hora y por instancia de DO
+const CHECKPOINT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // una Main cuenta para el suelo si reportó < 7 días
+const PURGE_SEQ_MARGIN = 1000; // holgura de Seq por debajo del suelo (cubre solape catch-up/live)
+const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de menos de 7 días
+const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintento nunca llega tan tarde
+
 function safeJsonParse(s: string): any | null {
 	try {
 		return JSON.parse(s);
@@ -229,14 +243,36 @@ function serverNowFixed(): string {
 // ningún timezone legítimo. El valor se trata como naive-UTC para la comparación.
 const MAX_CLIENT_NOW_DRIFT_MS = (14 * 60 + 5) * 60 * 1000;
 
-function resolveClientNow(raw: unknown): string {
+// Devuelve el literal `YYYY-MM-DD HH:MM:SS` SOLO si el emisor mandó una hora válida y dentro de la
+// deriva admisible; `null` si falta o es inaceptable (formato/deriva). NO cae a UTC en silencio: esa
+// decisión la toma el llamador (ver el guard `missing_client_now` en applyInternalCommandIdempotent).
+function parseClientNow(raw: unknown): string | null {
 	const s = String(raw ?? "").trim();
-	if (!CLIENT_NOW_RE.test(s)) return serverNowFixed();
+	if (!CLIENT_NOW_RE.test(s)) return null;
 	const clientMs = new Date(s.replace(" ", "T") + "Z").getTime();
-	if (Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) {
-		return serverNowFixed();
-	}
+	if (Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) return null;
 	return s;
+}
+
+// ¿Alguna sentencia del comando lleva una forma `datetime('now',...)`/`date('now',...)` SIN resolver?
+// (misma señal `('now'` que usa `rewriteNowInSql`.) Si la hay, EXIGIMOS X-Client-Now para fijarla a
+// literal determinista; si no, el comando ya viene con literales (p. ej. desde la Main) y no hace falta.
+function sqlHasNowLiteral(sql: unknown): boolean {
+	return typeof sql === "string" && sql.includes("('now'");
+}
+
+function commandHasNowLiteral(cmd: InternalApplyCommand): boolean {
+	switch (cmd.type) {
+		case "tenantDb.exec":
+		case "tenantDb.value":
+		case "tenantDb.row":
+		case "tenantDb.rows":
+			return sqlHasNowLiteral(cmd.payload?.sql);
+		case "tenantDb.transaction":
+			return (cmd.payload?.steps ?? []).some((s: any) => sqlHasNowLiteral(s?.sql));
+		default:
+			return false;
+	}
 }
 
 // Reemplaza SOLO las formas exactas (no las que llevan modificador, que acaban en
@@ -540,6 +576,10 @@ export class TenantHub {
 		{ nonceB64: string; expiresAtMs: number; issuedAtMs: number }
 	>();
 	private pubkeyByDevice = new Map<string, string>();
+	// SYNC-08: último `last_seen` empujado a la BD central por dispositivo (throttle en memoria).
+	private lastSeenPushedAtMs = new Map<string, number>();
+	// SYNC-12: instante de la última purga del log de sync (throttle en memoria del DO).
+	private lastPurgeAtMs = 0;
 
 	private centralDb: Client | null = null;
 
@@ -582,6 +622,15 @@ export class TenantHub {
 				Statements_Json TEXT NOT NULL,
 				Device_Id TEXT,
 				Created_At_Ms INTEGER NOT NULL
+			);
+		`);
+		// SYNC-12: checkpoint reportado por cada Main (su `Last_Seq` al hacer catch-up). Es el SUELO
+		// de la purga: nunca se borra un `Sync_Changes.Seq` por encima del mínimo de las Main activas.
+		await db.execute(`
+			CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
+				Device_Id TEXT PRIMARY KEY,
+				Last_Seq INTEGER NOT NULL,
+				Updated_At_Ms INTEGER NOT NULL
 			);
 		`);
 	}
@@ -693,13 +742,59 @@ export class TenantHub {
 		return { role, pubkeyB64, revoked };
 	}
 
-	private async touchLastSeen(tenantId: string, deviceId: string) {
-		const dbCentral = this.getCentralDb();
+	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
+		// SYNC-08: sin throttle, cada ping (30 s) por dispositivo escribía en la BD central →
+		// amplificación de escrituras proporcional al nº de dispositivos. Guardamos en memoria del
+		// DO el último instante empujado y solo re-escribimos pasada la ventana (o si `force`, p. ej.
+		// al conectar). La precisión de `last_seen` no necesita ser al segundo.
 		const now = nowMs();
+		if (!force) {
+			const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
+			if (now - last < LAST_SEEN_THROTTLE_MS) return;
+		}
+		this.lastSeenPushedAtMs.set(deviceId, now);
+		const dbCentral = this.getCentralDb();
 		await dbCentral.execute({
 			sql: `UPDATE devices SET last_seen_at_ms=? WHERE tenant_id=? AND device_id=?`,
 			args: [now, tenantId, deviceId],
 		});
+	}
+
+	// SYNC-12: purga (throttled) del log de sync en el tenant. Solo borra filas por DEBAJO del
+	// checkpoint mínimo de las Main activas (con holgura) Y suficientemente antiguas (TTL), de modo
+	// que jamás retira un cambio que una Main aún no ha consumido. Best-effort: nunca rompe el sync.
+	private async maybePurgeSyncLog(tenantId: string): Promise<void> {
+		const now = nowMs();
+		if (now - this.lastPurgeAtMs < PURGE_INTERVAL_MS) return;
+		this.lastPurgeAtMs = now;
+		try {
+			await this.withTenantDbRetry(tenantId, async (db) => {
+				// Suelo = mínimo Last_Seq de las Main que reportaron checkpoint recientemente. Si no
+				// hay ninguna activa, MIN devuelve NULL → no purgamos Sync_Changes (fail-safe).
+				const r = await db.execute({
+					sql: `SELECT MIN(Last_Seq) AS floor FROM Sync_Main_Checkpoints WHERE Updated_At_Ms > ?1;`,
+					args: [now - CHECKPOINT_ACTIVE_MS],
+				});
+				const floorRaw = (r.rows?.[0] as any)?.floor;
+				const floor = floorRaw == null ? null : Number(floorRaw);
+
+				if (floor != null && floor > PURGE_SEQ_MARGIN) {
+					await db.execute({
+						sql: `DELETE FROM Sync_Changes WHERE Seq <= ?1 AND Created_At_Ms < ?2;`,
+						args: [floor - PURGE_SEQ_MARGIN, now - SYNC_CHANGES_TTL_MS],
+					});
+				}
+
+				// Applied_Operations es dedup por Op_Id: un reintento idempotente nunca llega días
+				// después, así que basta un TTL (independiente del checkpoint) para acotarla.
+				await db.execute({
+					sql: `DELETE FROM Applied_Operations WHERE Created_At_Ms < ?1;`,
+					args: [now - APPLIED_OPS_TTL_MS],
+				});
+			});
+		} catch {
+			/* la purga es best-effort: nunca debe afectar al camino de escritura del sync */
+		}
 	}
 
 	private async applyInternalCommandIdempotent(params: {
@@ -724,7 +819,17 @@ export class TenantHub {
 		// El tiempo lo fija el dispositivo emisor (cabecera X-Client-Now); resolvemos los
 		// `datetime('now')` del comando a literal ANTES de ejecutar y de registrar el cambio,
 		// para que la fila sea idéntica en nube, Main y Handy (replicación determinista).
-		const cmd = rewriteCmdNowLiterals(params.cmd, resolveClientNow(params.clientNow));
+		//
+		// SYNC-04 (guard duro): si el comando lleva una forma `datetime('now',...)` SIN resolver y el
+		// emisor NO mandó una X-Client-Now válida, RECHAZAMOS en vez de caer en silencio a UTC (lo que
+		// dejaba la fila con zona horaria distinta al resto). Todo escritor legítimo pasa por el proxy
+		// Rust `tpv_server_post_json`, que siempre fija la cabecera; este guard blinda contra cualquier
+		// caller futuro que la omitiera. Los comandos ya-literales (p. ej. de la Main) no la exigen.
+		const parsedNow = parseClientNow(params.clientNow);
+		if (parsedNow === null && commandHasNowLiteral(params.cmd)) {
+			throw new Error("missing_client_now");
+		}
+		const cmd = rewriteCmdNowLiterals(params.cmd, parsedNow ?? serverNowFixed());
 
 		const op = opId.trim();
 		const command = commandName.trim();
@@ -751,7 +856,7 @@ export class TenantHub {
 		// awaits secuenciales de la transacción interactiva).
 		const built = this.buildApplyBatch(cmd);
 
-		return await this.withTenantDbRetry(tenantId, async (db) => {
+		const runApply = () => this.withTenantDbRetry(tenantId, async (db) => {
 			// Batch atómico = [PRAGMA defer FK] + [gate idempotente] + [trabajo] + [log de sync].
 			// El gate va SIN ON CONFLICT: en un reintento (mismo Op_Id) viola UNIQUE(Op_Id) y hace
 			// rollback de TODO el batch → ni se duplica el trabajo ni el log. No existe estado
@@ -780,7 +885,26 @@ export class TenantHub {
 			} catch (e: any) {
 				if (isUniqueOpIdViolation(e)) {
 					// Reintento idempotente: la op ya estaba aplicada. Recuperamos result + seq.
-					return await this.recoverAppliedOp(db, op, command, requestHash);
+					const recovered = await this.recoverAppliedOp(db, op, command, requestHash);
+					// SYNC-03: si el DO se reinició/evictó tras el commit y ANTES del broadcast
+					// original, las Handy (sin checkpoint) nunca recibieron el cambio. Al reintentar,
+					// el emisor entra por este path idempotente: re-emitimos el broadcast para que el
+					// resto de dispositivos converja. La Main secundaria lo descarta por Op_Id.
+					if (recovered.statements.length) {
+						this.broadcastChange(
+							{
+								command,
+								opId: op,
+								deviceId: deviceId || null,
+								payloadJson: cloudPayloadJson,
+								result: recovered.result,
+								seq: recovered.seq,
+								statements: recovered.statements,
+							},
+							deviceId || undefined,
+						);
+					}
+					return { result: recovered.result, seq: recovered.seq };
 				}
 				throw e;
 			}
@@ -788,7 +912,24 @@ export class TenantHub {
 			const seq = Number(batchResults[batchResults.length - 1]?.lastInsertRowid ?? 0);
 			const result = built.resolveResult(batchResults, MIDDLE_OFFSET);
 
-			// Tras confirmar en Turso, propagamos el cambio (payload + resultado) al resto de
+			// SYNC-10: el gate guardó un Result_Json best-effort (solo literales; lo derivado de la
+				// DB quedó null). Si el resultado REAL difiere (incluye campos derivados de la DB), lo
+				// persistimos ahora para que un reintento idempotente (p. ej. una Handy con
+				// timeout+retry) devuelva el MISMO `data` que el primer intento, no uno degradado.
+				// Solo pagamos el round trip extra cuando de verdad hay algo que refinar.
+				const realResultJson = stringifyJsonValue(result);
+				if (realResultJson !== stringifyJsonValue(built.storageResult)) {
+					try {
+						await db.execute({
+							sql: "UPDATE Applied_Operations SET Result_Json = ?1, Updated_At_Ms = ?2 WHERE Op_Id = ?3;",
+							args: [realResultJson, nowMs(), op],
+						});
+					} catch {
+						/* refinar el cache es best-effort: nunca romper el apply por esto */
+					}
+				}
+
+				// Tras confirmar en Turso, propagamos el cambio (payload + resultado) al resto de
 			// dispositivos autenticados. El originador queda excluido. La Main aplica el payload
 			// directo a su SQLite local (no hay refetch).
 			this.broadcastChange(
@@ -804,17 +945,31 @@ export class TenantHub {
 				deviceId || undefined,
 			);
 
-			this.emitSyncEvent("apply", {
-				command,
-				op_id: op,
-				device_id: deviceId || null,
-				seq,
-				tenant_id: tenantId,
-				latency_ms: nowMs() - createdAtMs,
-			});
+			// SYNC-12: aprovechamos una escritura confirmada para purgar (throttled, fire-and-forget)
+				// el log de sync ya consumido por todas las Main. No bloquea el apply.
+				this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
 
+				// OBS-04: en el ÉXITO no emitimos nada a Axiom. El coste que disparaba el volumen era
+			// justo este evento por cada `apply`; el detalle de un apply correcto no se necesita.
 			return { result, seq };
 		});
+
+		try {
+			return await runApply();
+		} catch (e: any) {
+			// Sólo los FALLOS van a Axiom (100%), con payload RECORTADO: nombre de comando + ids +
+			// error truncado. NO incluimos el comando ni sus args (evita filtrar datos y volumen).
+			// El freeze `main_offline` no llega aquí (se lanza antes) y ya tiene su propio evento.
+			this.emitSyncEvent("apply_error", {
+				command_name: command,
+				op_id: op,
+				device_id: deviceId || null,
+				tenant_id: tenantId,
+				error: String(e?.message || e).slice(0, 500),
+				latency_ms: nowMs() - createdAtMs,
+			});
+			throw e;
+		}
 	}
 
 	// Aplana un InternalApplyCommand a las piezas del batch atómico:
@@ -937,7 +1092,7 @@ export class TenantHub {
 		op: string,
 		command: string,
 		requestHash: string,
-	): Promise<{ result: any; seq: number }> {
+	): Promise<{ result: any; seq: number; statements: ResolvedStmt[] }> {
 		const r = await db.execute({
 			sql: `SELECT Command_Name AS command_name, Request_Hash AS request_hash, Result_Json AS result_json FROM Applied_Operations WHERE Op_Id = ?1 LIMIT 1;`,
 			args: [op],
@@ -947,21 +1102,29 @@ export class TenantHub {
 		if (String(row.command_name || "") !== command) throw new Error("idempotency_command_mismatch");
 		if (String(row.request_hash || "") !== requestHash) throw new Error("idempotency_payload_mismatch");
 		const result = safeJsonParse(String(row.result_json ?? "null"));
-		const seq = await this.lookupChangeSeq(db, op);
-		return { result, seq };
+		const { seq, statements } = await this.lookupChange(db, op);
+		return { result, seq, statements };
 	}
 
-	// Recupera el `Seq` que el log de cambios asignó a una op ya aplicada (reintentos
-	// idempotentes). Devuelve 0 si no hay registro.
-	private async lookupChangeSeq(executor: any, opId: string): Promise<number> {
+	// Recupera el `Seq` y las sentencias replicadas que el log de cambios asignó a una op ya
+	// aplicada (reintentos idempotentes). Las sentencias permiten re-emitir el broadcast (SYNC-03).
+	// Devuelve `{ seq: 0, statements: [] }` si no hay registro.
+	private async lookupChange(
+		executor: any,
+		opId: string,
+	): Promise<{ seq: number; statements: ResolvedStmt[] }> {
 		try {
 			const r = await executor.execute({
-				sql: "SELECT Seq AS seq FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
+				sql: "SELECT Seq AS seq, Statements_Json AS statements_json FROM Sync_Changes WHERE Op_Id = ?1 ORDER BY Seq DESC LIMIT 1;",
 				args: [opId],
 			});
-			return Number((r.rows?.[0] as any)?.seq ?? 0);
+			const row = r.rows?.[0] as any | undefined;
+			const seq = Number(row?.seq ?? 0);
+			const parsed = safeJsonParse(String(row?.statements_json ?? "[]"));
+			const statements: ResolvedStmt[] = Array.isArray(parsed) ? parsed : [];
+			return { seq, statements };
 		} catch {
-			return 0;
+			return { seq: 0, statements: [] };
 		}
 	}
 
@@ -1087,6 +1250,10 @@ export class TenantHub {
 
 		const ch = this.challengeByDevice.get(deviceId);
 		if (!ch) throw new Error("missing_challenge");
+		// SYNC-07: challenge de un SOLO uso. Lo consumimos aquí (éxito o fallo) para que un mismo
+		// nonce/firma no pueda reenviarse dentro de la ventana de 60 s. Un reintento legítimo
+		// fuerza una reemisión (nueva conexión → nuevo challenge).
+		this.challengeByDevice.delete(deviceId);
 		if (msg.nonceB64 !== ch.nonceB64) throw new Error("challenge_mismatch");
 		if (nowMs() > ch.expiresAtMs) throw new Error("challenge_expired");
 
@@ -1277,7 +1444,7 @@ export class TenantHub {
 		this.roles.set(deviceId, roleHeader);
 		this.authed.delete(deviceId);
 
-		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId));
+		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId, true));
 
 		const ch = this.issueChallenge(deviceId);
 
@@ -1524,6 +1691,7 @@ export class TenantHub {
 			this.roles.delete(deviceId);
 			this.authed.delete(deviceId);
 			this.challengeByDevice.delete(deviceId);
+			this.lastSeenPushedAtMs.delete(deviceId);
 			this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
 
 			// Si se va la Main y no queda ninguna conectada, congelamos todo: las

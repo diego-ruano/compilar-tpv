@@ -6,7 +6,7 @@
 use tauri::State;
 
 use tpv_application::use_cases::sync as uc;
-use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry};
+use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry, SyncHealth};
 
 use crate::AppState;
 
@@ -57,4 +57,11 @@ pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), St
     let repo = state.sync_repo().await?;
     uc::purge_applied_ops(repo.as_ref()).await?;
     Ok(())
+}
+
+/// Foto de salud de la sincronización (SYNC-14) para el panel de Configuración → Conectividad.
+#[tauri::command]
+pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, String> {
+    let repo = state.sync_repo().await?;
+    Ok(uc::health(repo.as_ref()).await?)
 }

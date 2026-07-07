@@ -26,7 +26,6 @@ import {
 	serverError,
 	corsHeaders,
 } from "./server/utils/response";
-import { verifyJwtHs256 } from "./server/middleware/jwtHs256";
 
 import { pairingRoutes } from "./routes/pairing";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
@@ -40,6 +39,7 @@ import { proveedoresRoutes } from "./domains/proveedores/proveedores.routes";
 import { reservasRoutes } from "./domains/reservas/reservas.routes";
 import { statsRoutes } from "./domains/stats/stats.routes";
 import { syncRoutes } from "./domains/sync/sync.routes";
+import { wsRoutes } from "./domains/ws/ws.routes";
 import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { ventaRapidaRoutes } from "./domains/venta_rapida/venta_rapida.routes";
@@ -62,12 +62,6 @@ export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 	TenantHubClass as any,
 );
 
-function readBearerMaybe(req: Request): string {
-	const h = req.headers.get("authorization") || "";
-	const m = h.match(/^Bearer\s+(.+)$/i);
-	return m?.[1] || "";
-}
-
 const app = new Hono<{ Bindings: Env }>();
 
 // ---------------- CORS preflight ----------------
@@ -89,18 +83,29 @@ app.get("/ws", async (c) => {
 		const dbCentral = getDb(env);
 
 		const url = new URL(request.url);
-		const tokenQ = url.searchParams.get("token") || "";
-		const token = tokenQ || readBearerMaybe(request);
-		if (!token) return unauthorized(request, "missing_token");
+		const ticketQ = url.searchParams.get("ticket") || "";
 
-		const payload = await verifyJwtHs256(token, env.LICENSE_JWT_SECRET);
+		// SYNC-15: el WS SOLO se abre con un ticket efímero de un solo uso (canjeado por REST firmado
+		// en `/v1/ws/ticket`). Ya no aceptamos el JWT en la URL: nunca viaja un secreto por el query
+		// string. Consumimos el ticket ATÓMICAMENTE (DELETE ... RETURNING): un replay no encuentra
+		// nada que borrar.
+		if (!ticketQ) return unauthorized(request, "missing_ticket");
 
-		const tenantId = String((payload as any).tenantId || "");
-		const deviceId = String((payload as any).deviceId || "");
-		const roleFromToken = String((payload as any).role || "unknown");
+		const now = Date.now();
+		const rt = await dbCentral.execute({
+			sql: `DELETE FROM Ws_Tickets WHERE ticket = ? RETURNING tenant_id, device_id, expires_at_ms;`,
+			args: [ticketQ],
+		});
+		const trow = rt.rows?.[0] as any | undefined;
+		if (!trow) return unauthorized(request, "invalid_ticket");
+		if (Number(trow.expires_at_ms) < now) return unauthorized(request, "expired_ticket");
+
+		const tenantId = String(trow.tenant_id || "");
+		const deviceId = String(trow.device_id || "");
+		const roleFromToken = "unknown"; // el rol autoritativo se resuelve desde la BD central abajo
 
 		if (!tenantId || !deviceId) {
-			return unauthorized(request, "invalid_token_claims");
+			return unauthorized(request, "invalid_ticket");
 		}
 
 		const r = await dbCentral.execute({
@@ -158,6 +163,7 @@ app.route("/v1/proveedores", proveedoresRoutes);
 app.route("/v1/reservas", reservasRoutes);
 app.route("/v1/stats", statsRoutes);
 app.route("/v1/sync", syncRoutes);
+app.route("/v1/ws", wsRoutes);
 app.route("/v1/tareas", tareasRoutes);
 app.route("/v1/trabajadores", trabajadoresRoutes);
 app.route("/v1/venta-rapida", ventaRapidaRoutes);

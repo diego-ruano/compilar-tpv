@@ -357,7 +357,10 @@ impl<'a> WriteGuard<'a> {
         }
     }
 
-    async fn capture_write(&self, sql: &str, values: &[Value]) -> Result<(), LibsqlError> {
+    /// Construye la copia REPLICABLE de una escritura: el tiempo resuelto a literal (determinismo)
+    /// y los args serializados a JSON. La ejecución local conserva su `datetime('now')` real; aquí
+    /// solo se prepara lo que viajará al outbox.
+    fn build_stmt(&self, sql: &str, values: &[Value]) -> SqlStatement {
         // Guard (DB-15): una escritura replicable NUNCA debe llevar una fuente de tiempo no
         // determinista fuera de las dos formas canónicas (ver `uncovered_time_source`). En debug
         // revienta para cazar el error en desarrollo/tests; en release no penaliza.
@@ -366,27 +369,9 @@ impl<'a> WriteGuard<'a> {
             "SQL replicable con hora no determinista sin cubrir por rewrite_now_literals \
              (usa datetime('now','localtime') o date('now','localtime')): {sql}"
         );
-        let stmt = SqlStatement {
-            // La copia replicada lleva el tiempo ya resuelto a literal (determinismo); la
-            // ejecución local de arriba conservó su `datetime('now')` real.
+        SqlStatement {
             sql: rewrite_now_literals(sql),
             args: values.iter().map(value_to_json).collect(),
-        };
-        let mut buf = self.tx_buf.lock().await;
-        match buf.as_mut() {
-            Some(v) => {
-                // Dentro de transacción: acumular; se vuelca en el COMMIT.
-                v.push(stmt);
-                Ok(())
-            }
-            None => {
-                // Escritura suelta (autocommit): operación de una sola sentencia.
-                drop(buf);
-                write_op(self.conn, std::slice::from_ref(&stmt)).await?;
-                // Outbox confirmado (autocommit): drenar la nube ya.
-                self.fire_outbox_notify();
-                Ok(())
-            }
         }
     }
 }
@@ -411,11 +396,49 @@ impl<'a> Writer for WriteGuard<'a> {
     ) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
         let values = params.into_values();
         async move {
-            let affected = self.conn.execute(sql, values.clone()).await?;
-            if is_write_sql(sql) {
-                self.capture_write(sql, &values).await?;
+            // Sentencias que no capturamos (no son escritura replicable): directas.
+            if !is_write_sql(sql) {
+                return self.conn.execute(sql, values).await;
             }
-            Ok(affected)
+
+            let mut buf = self.tx_buf.lock().await;
+            match buf.as_mut() {
+                Some(v) => {
+                    // Dentro de una transacción (BEGIN..COMMIT): ejecutamos el negocio y
+                    // ACUMULAMOS la captura en el buffer; se vuelca en el COMMIT dentro de la
+                    // misma transacción → ya es atómico (negocio + outbox commitean juntos).
+                    let affected = self.conn.execute(sql, values.clone()).await?;
+                    v.push(self.build_stmt(sql, &values));
+                    Ok(affected)
+                }
+                None => {
+                    // Escritura suelta (autocommit). SYNC-02: envolvemos la escritura de negocio
+                    // Y su registro en el outbox (`write_op`) en UNA sola transacción, para que un
+                    // crash entre ambas no deje la fila escrita sin su entrada en el outbox (que
+                    // nunca se replicaría). Todo o nada.
+                    drop(buf);
+                    let stmt = self.build_stmt(sql, &values);
+                    self.conn.execute_batch("BEGIN;").await?;
+                    let res: Result<u64, LibsqlError> = async {
+                        let affected = self.conn.execute(sql, values.clone()).await?;
+                        write_op(self.conn, std::slice::from_ref(&stmt)).await?;
+                        Ok(affected)
+                    }
+                    .await;
+                    match res {
+                        Ok(affected) => {
+                            self.conn.execute_batch("COMMIT;").await?;
+                            // Outbox confirmado (autocommit): drenar la nube ya.
+                            self.fire_outbox_notify();
+                            Ok(affected)
+                        }
+                        Err(e) => {
+                            let _ = self.conn.execute_batch("ROLLBACK;").await;
+                            Err(e)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -580,6 +603,16 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
             Last_Seq INTEGER NOT NULL
         );
         INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
+        CREATE TABLE IF NOT EXISTS _Sync_Failed (
+            Op_Id TEXT PRIMARY KEY,
+            Seq INTEGER NOT NULL,
+            Statements_Json TEXT NOT NULL,
+            Attempts INTEGER NOT NULL,
+            Quarantined INTEGER NOT NULL DEFAULT 0,
+            Last_Error TEXT,
+            First_Failed_At_Ms INTEGER NOT NULL,
+            Last_Failed_At_Ms INTEGER NOT NULL
+        );
         "#,
     )
     .await
@@ -675,6 +708,115 @@ mod tests {
             violations.is_empty(),
             "Sentencias replicables (*.commands.ts) deben usar SOLO datetime('now','localtime') o \
              date('now','localtime') para la hora actual. Violaciones:\n{}",
+            violations.join("\n")
+        );
+    }
+
+    // ── SYNC-11: contrato de los pasos `value` ─────────────────────────────────────────────────
+    // `evalValueStep` (worker) evalúa en JS un set CERRADO de 3 formas. Este mirror + scan garantiza
+    // que ningún `*.commands.ts` introduzca una forma de `value` que la nube no sepa evaluar (lo que
+    // rompería la replicación en RUNTIME). Debe mantenerse en sync con `evalValueStep` de tenantHub.ts.
+
+    /// ¿Es `sql` una forma de paso `value` evaluable por `evalValueStep`?
+    fn value_step_evaluable(sql: &str) -> bool {
+        let s = sql.trim().trim_end_matches(';').trim();
+        let rest = match s.get(..7) {
+            Some(p) if p.eq_ignore_ascii_case("SELECT ") => s[7..].trim(),
+            _ => return false,
+        };
+        // SELECT ?N
+        if let Some(num) = rest.strip_prefix('?') {
+            return !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit());
+        }
+        // SELECT <número> (entero o decimal, signo opcional)
+        if !rest.is_empty() && rest.parse::<f64>().is_ok() {
+            return true;
+        }
+        // SELECT 'prefijo' || ?N
+        if let Some(after_open) = rest.strip_prefix('\'') {
+            if let Some(close) = after_open.find('\'') {
+                let after = after_open[close + 1..].trim();
+                if let Some(r2) = after.strip_prefix("||") {
+                    if let Some(num) = r2.trim().strip_prefix('?') {
+                        return !num.is_empty() && num.bytes().all(|b| b.is_ascii_digit());
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Extrae el literal de cadena de un `sql: "..."` (o `'...'`). Devuelve `None` si el valor no es
+    /// un literal estático (p. ej. template literal con backtick o una variable): eso es justo lo
+    /// que queremos flaggear en un paso `value`.
+    fn extract_sql_literal(line: &str) -> Option<String> {
+        let idx = line.find("sql:")?;
+        let after = line[idx + 4..].trim_start();
+        let quote = after.chars().next()?;
+        if quote != '"' && quote != '\'' {
+            return None;
+        }
+        let rest = &after[quote.len_utf8()..];
+        let end = rest.find(quote)?;
+        Some(rest[..end].to_string())
+    }
+
+    #[test]
+    fn worker_value_steps_solo_usan_formas_evaluables() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/cloud-worker-licensing/src/domains");
+        assert!(base.exists(), "No se encontró {base:?}. ¿Cambió el layout del worker?");
+
+        let mut files = Vec::new();
+        collect_commands_ts(&base, &mut files);
+        assert!(!files.is_empty(), "No se encontró ningún *.commands.ts bajo {base:?}.");
+
+        // Sanidad del mirror: las 3 formas válidas y algunas inválidas.
+        assert!(value_step_evaluable("SELECT ?1;"));
+        assert!(value_step_evaluable("SELECT 1"));
+        assert!(value_step_evaluable("SELECT -2.5"));
+        assert!(value_step_evaluable("SELECT 'pref' || ?2"));
+        assert!(!value_step_evaluable("SELECT id FROM T WHERE x = ?1"));
+        assert!(!value_step_evaluable("SELECT ?1 + ?2"));
+
+        let mut violations = Vec::new();
+        for f in &files {
+            let content = std::fs::read_to_string(f).unwrap();
+            let lines: Vec<&str> = content.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if !(line.contains("kind: \"value\"") || line.contains("kind: 'value'")) {
+                    continue;
+                }
+                // Buscar el `sql:` del mismo objeto (misma línea o siguientes, hasta el cierre `}`).
+                let mut found: Option<String> = None;
+                for j in i..(i + 8).min(lines.len()) {
+                    if let Some(sql) = extract_sql_literal(lines[j]) {
+                        found = Some(sql);
+                        break;
+                    }
+                    if j > i && lines[j].contains('}') {
+                        break;
+                    }
+                }
+                match found {
+                    Some(sql) if value_step_evaluable(&sql) => {}
+                    Some(sql) => violations.push(format!(
+                        "{}:{} → paso `value` no evaluable por evalValueStep: {sql:?}",
+                        f.display(),
+                        i + 1
+                    )),
+                    None => violations.push(format!(
+                        "{}:{} → paso `value` sin `sql:` literal estático (¿template/variable?)",
+                        f.display(),
+                        i + 1
+                    )),
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "SYNC-11: todo paso `value` debe usar una forma evaluable por evalValueStep \
+             (SELECT ?N | SELECT <número> | SELECT 'pref' || ?N). Violaciones:\n{}",
             violations.join("\n")
         );
     }

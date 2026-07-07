@@ -73,5 +73,37 @@ syncRoutes.post("/changes", async (c) => {
 	});
 
 	const nextSince = items.length ? items[items.length - 1].seq : since;
+
+	// SYNC-12: registramos el checkpoint (`since`, lo que la Main YA tiene confirmado) como suelo de
+	// la purga del log. Usamos `since` (no `nextSince`) porque es el límite inferior seguro: si la
+	// Main cayera antes de aplicar este lote, re-pediría desde `since` y no habríamos purgado de más.
+	// Best-effort: un fallo aquí no debe romper el catch-up.
+	try {
+		await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+			await db.execute({
+				sql: `
+					CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
+						Device_Id TEXT PRIMARY KEY,
+						Last_Seq INTEGER NOT NULL,
+						Updated_At_Ms INTEGER NOT NULL
+					);
+				`,
+				args: [],
+			});
+			await db.execute({
+				sql: `
+					INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms)
+					VALUES (?1, ?2, ?3)
+					ON CONFLICT(Device_Id) DO UPDATE SET
+						Last_Seq = MAX(Last_Seq, ?2),
+						Updated_At_Ms = ?3;
+				`,
+				args: [c.get("deviceId"), since, Date.now()],
+			});
+		});
+	} catch {
+		/* el registro del checkpoint es best-effort (solo alimenta la purga) */
+	}
+
 	return c.json({ ok: true, items, nextSince });
 });
