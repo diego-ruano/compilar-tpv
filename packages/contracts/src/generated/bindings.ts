@@ -92,7 +92,19 @@ export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lo
 
 export type CreateTareaInput = { titulo: string, descripcion?: string, fecha_limite?: string, ids_trabajadores: Array<string>, };
 
-export type CuentasRangoArgs = { del?: string, al?: string, };
+export type CuentasRangoArgs = { del?: string, al?: string, 
+/**
+ * Búsqueda de texto (server-side): filtra por fecha/cliente/concepto/método/importe.
+ */
+q?: string, 
+/**
+ * Página 1-based. Si es `None`, se devuelven **todas** las filas (usado por el PDF).
+ */
+page?: number, 
+/**
+ * Tamaño de página. Si es `None`/0 junto con `page`, se ignora la paginación.
+ */
+page_size?: number, };
 
 export type DeleteGastoInput = { id_gasto: string, };
 
@@ -314,6 +326,12 @@ export type ReservasStatsArgs = { range: StatsRange, turno: StatsTurno, };
 
 export type ReservasStatsResponse = { total_reservas: number, cancelaciones: number, mesas_turno: ReservasMesasTurno, reservas_por_bucket: ChartSeriesI64, estado: ChartSeriesI64, franjas: ChartSeriesI64, };
 
+/**
+ * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
+ * rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
+ */
+export type ResumenCajaDto = { total_entradas: number, total_salidas: number, total_efectivo: number, total_tarjeta: number, count_entradas: number, count_salidas: number, };
+
 export type RolRow = { ID_Rol: string, Nombre_Rol: string, };
 
 export type RoomPoly = { type: string, points: Array<number>, };
@@ -359,6 +377,28 @@ export type SummaryArgs = { limit?: number, };
  */
 export type SyncChange = { op_id: string, seq: number, statements: Array<SqlStatement>, };
 
+/**
+ * Foto de SALUD de la sincronización local (SYNC-14). La expone el comando `sync_health` para el
+ * panel de Configuración → Conectividad, de modo que un fallo de convergencia deje de ser invisible.
+ */
+export type SyncHealth = { 
+/**
+ * Operaciones aún sin subir a la nube (profundidad del outbox).
+ */
+outbox_pending: number, 
+/**
+ * Último `seq` aplicado localmente (checkpoint del catch-up).
+ */
+last_seq: number, 
+/**
+ * Operaciones en CUARENTENA (SYNC-01): fallaron al aplicarse y se saltaron para no bloquear.
+ */
+quarantined: number, 
+/**
+ * Operaciones que están fallando pero aún NO en cuarentena (reintentándose).
+ */
+failing: number, };
+
 export type TableInput = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
 
 export type TableOut = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
@@ -374,7 +414,23 @@ export type TareaIdArgs = { id_tarea: string, };
 
 export type TareaRow = { ID_Tarea: string, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, };
 
-export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, };
+export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, 
+/**
+ * DPI de la impresora térmica (203 | 300). Usado para convertir márgenes mm→dots/líneas.
+ */
+paper_dpi: number, 
+/**
+ * Caracteres por línea del cuerpo del ticket (fuente A). Autoritativo sobre el ancho de papel.
+ */
+chars_per_line: number, 
+/**
+ * Márgenes del ticket en milímetros.
+ */
+margin_top_mm: number, margin_bottom_mm: number, margin_left_mm: number, margin_right_mm: number, 
+/**
+ * Escala global de la fuente (0.5–2.0). El builder ESC/POS la mapea a magnificación entera.
+ */
+font_scale: number, };
 
 export type TpvServerPostJsonArgs = { mode: string, path: string, body: unknown, };
 
