@@ -21,14 +21,9 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
     })
 }
 
-/// Normaliza el método de pago a "Tarjeta" o "Efectivo".
-pub fn normalize_metodo(input: &str) -> String {
-    if input.trim().eq_ignore_ascii_case("tarjeta") {
-        "Tarjeta".to_string()
-    } else {
-        "Efectivo".to_string()
-    }
-}
+/// Normalización del método de pago: reexporta la única implementación compartida
+/// (case-insensitive) para evitar divergencias entre dominios (CUENTA-03).
+pub use crate::pago::normalize_metodo;
 
 /// Normaliza el estado de cocina de una línea: "PREPARADO" o "PENDIENTE".
 pub fn normalize_estado_cocina(input: &str) -> String {
