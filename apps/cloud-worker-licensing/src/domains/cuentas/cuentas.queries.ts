@@ -2,7 +2,7 @@
 
 import type { Client } from "@libsql/client/web";
 
-import type { EntradaDto, SalidaDto } from "@tpv/contracts";
+import type { EntradaDto, ResumenCajaDto, SalidaDto } from "@tpv/contracts";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -18,7 +18,7 @@ function rows(rs: any): any[] {
 
 function rangoWhere(del: string | null, al: string | null, fechaExpr: string) {
 	const parts: string[] = [];
-	const args: string[] = [];
+	const args: any[] = [];
 	if (del) {
 		args.push(del);
 		parts.push(`date(${fechaExpr}) >= date(?${args.length})`);
@@ -30,38 +30,95 @@ function rangoWhere(del: string | null, al: string | null, fechaExpr: string) {
 	return { whereSql: parts.length ? `WHERE ${parts.join(" AND ")}` : "", args };
 }
 
+// Añade búsqueda de texto (LIKE sobre las columnas ya calculadas) y paginación a `args`, numerando
+// los placeholders de forma consecutiva. Paridad con `tpv-infra-sqlite::cuentas` (CUENTA-05).
+function applyFilters(
+	args: any[],
+	q: string | null,
+	expr: string,
+	page: number | null,
+	pageSize: number | null,
+): { qClause: string; limitClause: string } {
+	let qClause = "";
+	if (q && q.trim()) {
+		args.push(q.trim());
+		qClause = `WHERE ${expr} LIKE '%' || lower(?${args.length}) || '%'`;
+	}
+	let limitClause = "";
+	if (pageSize && pageSize > 0) {
+		const pg = Math.max(1, page ?? 1);
+		args.push(pageSize);
+		const li = args.length;
+		args.push((pg - 1) * pageSize);
+		const oi = args.length;
+		limitClause = `LIMIT ?${li} OFFSET ?${oi}`;
+	}
+	return { qClause, limitClause };
+}
+
+const entradasInner = (whereRango: string) => `
+	SELECT
+		CAST(p.ID_Pago AS TEXT) AS id,
+		substr(p.Fecha_Hora, 1, 16) AS fecha_hora,
+		(
+			CASE
+				WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
+				WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
+				ELSE 'Venta'
+			END
+			||
+			CASE
+				WHEN cl.Nombre IS NOT NULL AND cl.Nombre <> '' THEN ' / ' || cl.Nombre
+				ELSE ''
+			END
+		) AS cliente,
+		CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
+		IFNULL(p.Importe_Total, 0) AS importe
+	FROM Pagos p
+	JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+	LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+	LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+	LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+	${whereRango}
+`;
+
+const ENTRADAS_Q_EXPR =
+	"lower(fecha_hora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT))";
+
+const salidasInner = (whereRango: string) => `
+	SELECT
+		CAST(g.ID_Gasto AS TEXT) AS id,
+		substr(g.Fecha, 1, 10) AS fecha_hora,
+		g.Tipo_Gasto AS tipo_gasto,
+		g.Concepto AS concepto,
+		g.Importe AS importe,
+		g.ID_Proveedor AS proveedor_id,
+		IFNULL(pr.Nombre_Empresa, '') AS proveedor_nombre
+	FROM Cuentas_Gastos g
+	LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
+	${whereRango}
+`;
+
+const SALIDAS_Q_EXPR =
+	"lower(fecha_hora || ' ' || tipo_gasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedor_id,'') || ' ' || proveedor_nombre)";
+
 export async function entradas(
 	db: Client,
 	del: string | null,
 	al: string | null,
+	q: string | null = null,
+	page: number | null = null,
+	pageSize: number | null = null,
 ): Promise<EntradaDto[]> {
 	const { whereSql, args } = rangoWhere(del, al, "p.Fecha_Hora");
+	const { qClause, limitClause } = applyFilters(args, q, ENTRADAS_Q_EXPR, page, pageSize);
 	const rs = await db.execute({
 		sql: `
-			SELECT
-				CAST(p.ID_Pago AS TEXT) AS id,
-				substr(p.Fecha_Hora, 1, 16) AS fecha_hora,
-				(
-					CASE
-						WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
-						WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
-						ELSE 'Venta'
-					END
-					||
-					CASE
-						WHEN cl.Nombre IS NOT NULL AND cl.Nombre <> '' THEN ' / ' || cl.Nombre
-						ELSE ''
-					END
-				) AS cliente,
-				CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
-				IFNULL(p.Importe_Total, 0) AS importe
-			FROM Pagos p
-			JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-			LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-			LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-			LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
-			${whereSql}
-			ORDER BY p.Fecha_Hora DESC, p.ID_Pago DESC;
+			SELECT id, fecha_hora, cliente, metodo, importe
+			FROM (${entradasInner(whereSql)}) AS e
+			${qClause}
+			ORDER BY fecha_hora DESC, id DESC
+			${limitClause};
 		`,
 		args,
 	});
@@ -72,22 +129,67 @@ export async function salidas(
 	db: Client,
 	del: string | null,
 	al: string | null,
+	q: string | null = null,
+	page: number | null = null,
+	pageSize: number | null = null,
 ): Promise<SalidaDto[]> {
-	const { whereSql, args } = rangoWhere(del, al, "Fecha");
+	const { whereSql, args } = rangoWhere(del, al, "g.Fecha");
+	const { qClause, limitClause } = applyFilters(args, q, SALIDAS_Q_EXPR, page, pageSize);
 	const rs = await db.execute({
 		sql: `
-			SELECT
-				CAST(ID_Gasto AS TEXT) AS id,
-				substr(Fecha, 1, 10) AS fecha_hora,
-				Tipo_Gasto AS tipo_gasto,
-				Concepto AS concepto,
-				Importe AS importe,
-				ID_Proveedor AS proveedor_id
-			FROM Cuentas_Gastos
-			${whereSql}
-			ORDER BY date(Fecha) DESC, ID_Gasto DESC;
+			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id
+			FROM (${salidasInner(whereSql)}) AS g
+			${qClause}
+			ORDER BY fecha_hora DESC, id DESC
+			${limitClause};
 		`,
 		args,
 	});
 	return rows(rs) as SalidaDto[];
+}
+
+// Resumen agregado (totales por método + conteos) sobre TODO el rango + búsqueda, para que la
+// cabecera sea correcta aunque la lista esté paginada (CUENTA-05).
+export async function resumen(
+	db: Client,
+	del: string | null,
+	al: string | null,
+	q: string | null = null,
+): Promise<ResumenCajaDto> {
+	const eRango = rangoWhere(del, al, "p.Fecha_Hora");
+	const { qClause: eQ } = applyFilters(eRango.args, q, ENTRADAS_Q_EXPR, null, null);
+	const eRs = await db.execute({
+		sql: `
+			SELECT
+				IFNULL(SUM(importe), 0) AS te,
+				IFNULL(SUM(CASE WHEN metodo = 'Efectivo' THEN importe ELSE 0 END), 0) AS ef,
+				IFNULL(SUM(CASE WHEN metodo = 'Tarjeta' THEN importe ELSE 0 END), 0) AS ta,
+				COUNT(*) AS ce
+			FROM (${entradasInner(eRango.whereSql)}) AS e
+			${eQ};
+		`,
+		args: eRango.args,
+	});
+	const e = rows(eRs)[0] ?? {};
+
+	const sRango = rangoWhere(del, al, "g.Fecha");
+	const { qClause: sQ } = applyFilters(sRango.args, q, SALIDAS_Q_EXPR, null, null);
+	const sRs = await db.execute({
+		sql: `
+			SELECT IFNULL(SUM(importe), 0) AS ts, COUNT(*) AS cs
+			FROM (${salidasInner(sRango.whereSql)}) AS g
+			${sQ};
+		`,
+		args: sRango.args,
+	});
+	const s = rows(sRs)[0] ?? {};
+
+	return {
+		total_entradas: Number(e.te ?? 0),
+		total_salidas: Number(s.ts ?? 0),
+		total_efectivo: Number(e.ef ?? 0),
+		total_tarjeta: Number(e.ta ?? 0),
+		count_entradas: Number(e.ce ?? 0),
+		count_salidas: Number(s.cs ?? 0),
+	};
 }

@@ -32,6 +32,18 @@ export type ProveedorMini = {
     nombre: string;
 };
 
+export type ResumenCaja = {
+    totalEntradas: number;
+    totalSalidas: number;
+    totalEfectivo: number;
+    totalTarjeta: number;
+    countEntradas: number;
+    countSalidas: number;
+};
+
+/** Tamaño de página por defecto de los listados de caja (CUENTA-05). */
+export const CUENTAS_PAGE_SIZE = 50;
+
 export type Denom = {
     label: string;
     value: number;
@@ -142,24 +154,61 @@ export async function cuentasListProveedoresMini(): Promise<ProveedorMini[]> {
    GET
 ========================= */
 
-export async function cuentasGetEntradas(params: {
+/** Filtros de listado. `page`/`pageSize` omitidos ⇒ el backend devuelve TODAS las filas (PDF). */
+export type CuentasListParams = {
     del?: string | null;
     al?: string | null;
-}): Promise<Entrada[]> {
+    q?: string | null;
+    page?: number | null;
+    pageSize?: number | null;
+};
+
+function listArgs(params: CuentasListParams): Record<string, any> {
+    const q = (params.q ?? "").trim();
+    return {
+        del: params.del ?? null,
+        al: params.al ?? null,
+        q: q ? q : null,
+        page: params.page ?? null,
+        page_size: params.pageSize ?? null,
+    };
+}
+
+export async function cuentasGetEntradas(
+    params: CuentasListParams,
+): Promise<Entrada[]> {
     const rows = await invokeClient<any[]>("cuentas_get_entradas", {
-        args: { del: params.del ?? null, al: params.al ?? null },
+        args: listArgs(params),
     });
     return (rows ?? []).map(mapEntrada);
 }
 
-export async function cuentasGetSalidas(params: {
-    del?: string | null;
-    al?: string | null;
-}): Promise<Salida[]> {
+export async function cuentasGetSalidas(
+    params: CuentasListParams,
+): Promise<Salida[]> {
     const rows = await invokeClient<any[]>("cuentas_get_salidas", {
-        args: { del: params.del ?? null, al: params.al ?? null },
+        args: listArgs(params),
     });
     return (rows ?? []).map(mapSalida);
+}
+
+export async function cuentasGetResumen(params: {
+    del?: string | null;
+    al?: string | null;
+    q?: string | null;
+}): Promise<ResumenCaja> {
+    const q = (params.q ?? "").trim();
+    const r = await invokeClient<any>("cuentas_get_resumen", {
+        args: { del: params.del ?? null, al: params.al ?? null, q: q ? q : null },
+    });
+    return {
+        totalEntradas: toNum(r?.total_entradas ?? r?.totalEntradas, 0),
+        totalSalidas: toNum(r?.total_salidas ?? r?.totalSalidas, 0),
+        totalEfectivo: toNum(r?.total_efectivo ?? r?.totalEfectivo, 0),
+        totalTarjeta: toNum(r?.total_tarjeta ?? r?.totalTarjeta, 0),
+        countEntradas: toNum(r?.count_entradas ?? r?.countEntradas, 0),
+        countSalidas: toNum(r?.count_salidas ?? r?.countSalidas, 0),
+    };
 }
 
 /* =========================

@@ -41,6 +41,23 @@ export const rangoSchema = z.object({
 	al: z.string().nullish().transform(cleanOptional),
 });
 
+const optInt = z
+	.union([z.string(), z.number()])
+	.nullish()
+	.transform((v) => {
+		const n = Number(v);
+		return Number.isFinite(n) && n > 0 ? Math.trunc(n) : null;
+	});
+
+// Listado de caja con búsqueda de texto + paginación (CUENTA-05).
+export const listadoSchema = z.object({
+	del: z.string().nullish().transform(cleanOptional),
+	al: z.string().nullish().transform(cleanOptional),
+	q: z.string().nullish().transform(cleanOptional),
+	page: optInt,
+	page_size: optInt,
+});
+
 export type CreateGastoInput = Omit<
 	ContractCreateGastoInput,
 	"id_gasto" | "proveedor_id"

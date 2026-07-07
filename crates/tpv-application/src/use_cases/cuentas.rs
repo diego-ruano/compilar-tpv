@@ -4,26 +4,43 @@
 //! igual que el backend antiguo; los campos de texto vacíos sí son error de validación.
 
 use tpv_contracts::cuentas::{
-    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto, SalidaDto,
-    UpdateGastoInput, UpdatePagoInput,
+    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
+    ResumenCajaDto, SalidaDto, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cuentas::{normalize_metodo, requerido, GastoData, PagoData};
 
 use crate::error::{AppError, AppResult};
-use crate::ports::cuentas::CuentasRepository;
+use crate::ports::cuentas::{CuentasFiltro, CuentasRepository};
+
+fn filtro_de(args: CuentasRangoArgs) -> CuentasFiltro {
+    CuentasFiltro {
+        del: args.del,
+        al: args.al,
+        q: args.q,
+        page: args.page,
+        page_size: args.page_size,
+    }
+}
 
 pub async fn get_entradas(
     repo: &dyn CuentasRepository,
     args: CuentasRangoArgs,
 ) -> AppResult<Vec<EntradaDto>> {
-    repo.entradas(args.del, args.al).await
+    repo.entradas(filtro_de(args)).await
 }
 
 pub async fn get_salidas(
     repo: &dyn CuentasRepository,
     args: CuentasRangoArgs,
 ) -> AppResult<Vec<SalidaDto>> {
-    repo.salidas(args.del, args.al).await
+    repo.salidas(filtro_de(args)).await
+}
+
+pub async fn get_resumen(
+    repo: &dyn CuentasRepository,
+    args: CuentasRangoArgs,
+) -> AppResult<ResumenCajaDto> {
+    repo.resumen(args.del, args.al, args.q).await
 }
 
 fn proveedor_para(tipo_gasto: &str, proveedor_id: Option<String>) -> Option<String> {
@@ -91,7 +108,9 @@ pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -
     let fecha_hora = requerido(&input.fecha_hora, "fecha_hora").map_err(AppError::validation)?;
     let metodo = normalize_metodo(&input.metodo);
 
-    if input.id_pago.trim().is_empty() || !input.importe.is_finite() || input.importe <= 0.0 {
+    // El importe del input se ignora a propósito (CUENTA-02): el repositorio lo recalcula desde los
+    // `Pago_Detalles` cobrados. Sólo se permite cambiar método y fecha.
+    if input.id_pago.trim().is_empty() {
         return Ok(false);
     }
 

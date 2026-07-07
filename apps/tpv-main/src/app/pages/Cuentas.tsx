@@ -36,6 +36,7 @@ import {
 import {
     useCuentasEntradas,
     useCuentasSalidas,
+    useCuentasResumen,
     useCuentasProveedoresMini,
     useCreateGasto,
     useUpdateGasto,
@@ -43,6 +44,7 @@ import {
     useUpdatePago,
     useDeletePago,
 } from "../../features/cuentas/cuentasQueries";
+import { CUENTAS_PAGE_SIZE } from "../../features/cuentas/cuentasApis";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -308,9 +310,34 @@ export default function Cuentas() {
 
     const rangoInvalido = !!del && !!al && del > al;
 
-    // Lecturas cacheadas (TanStack Query). El rango (del/al) forma parte de la queryKey.
-    const entradasQuery = useCuentasEntradas({ del, al }, !rangoInvalido);
-    const salidasQuery = useCuentasSalidas({ del, al }, !rangoInvalido);
+    // Paginación (CUENTA-05): página 1-based por panel.
+    const [pageEntradas, setPageEntradas] = useState(1);
+    const [pageSalidas, setPageSalidas] = useState(1);
+
+    // Búsqueda server-side con debounce: el texto viaja al backend (no filtra en cliente).
+    const [qDebounced, setQDebounced] = useState("");
+    useEffect(() => {
+        const t = setTimeout(() => setQDebounced(busqueda.trim()), 300);
+        return () => clearTimeout(t);
+    }, [busqueda]);
+
+    // Al cambiar rango o búsqueda, volver a la primera página.
+    useEffect(() => {
+        setPageEntradas(1);
+        setPageSalidas(1);
+    }, [del, al, qDebounced]);
+
+    // Lecturas cacheadas (TanStack Query). Rango + búsqueda + página forman la queryKey.
+    const entradasQuery = useCuentasEntradas(
+        { del, al, q: qDebounced, page: pageEntradas },
+        !rangoInvalido,
+    );
+    const salidasQuery = useCuentasSalidas(
+        { del, al, q: qDebounced, page: pageSalidas },
+        !rangoInvalido,
+    );
+    // Totales de cabecera sobre TODO el rango (no solo la página visible).
+    const resumenQuery = useCuentasResumen({ del, al, q: qDebounced }, !rangoInvalido);
     const proveedoresQuery = useCuentasProveedoresMini();
 
     // Escrituras (mutaciones con invalidación en onSuccess).
@@ -458,34 +485,22 @@ export default function Cuentas() {
         }
     }, [salidasQuery.isError, salidasQuery.error]);
 
-    const q = busqueda.trim().toLowerCase();
+    // La búsqueda y la paginación se hacen en el servidor (CUENTA-05): la lista ya llega filtrada
+    // y paginada, así que se muestra tal cual (sin filtrar de nuevo en cliente).
+    const entradasFiltradas = entradasDB;
+    const salidasFiltradas = salidasDB;
 
-    const entradasFiltradas = useMemo(() => {
-        return entradasDB.filter((e) => {
-            const texto = `${e.fechaHora} ${e.cliente} ${e.metodo} ${e.importe}`.toLowerCase();
-            return !q || texto.includes(q);
-        });
-    }, [entradasDB, q]);
-
-    const salidasFiltradas = useMemo(() => {
-        return salidasDB.filter((s) => {
-            const extraProv = `${s.proveedorId ?? ""} ${s.proveedorNombre ?? ""}`.toLowerCase();
-            const texto = `${s.fechaHora} ${s.tipoGasto} ${s.concepto} ${s.importe} ${extraProv}`.toLowerCase();
-            return !q || texto.includes(q);
-        });
-    }, [salidasDB, q]);
-
-    const totalEntradas = useMemo(
-        () => entradasFiltradas.reduce((acc, e) => acc + (Number(e.importe) || 0), 0),
-        [entradasFiltradas],
-    );
-
-    const totalSalidas = useMemo(
-        () => salidasFiltradas.reduce((acc, s) => acc + (Number(s.importe) || 0), 0),
-        [salidasFiltradas],
-    );
-
+    // Totales de cabecera: del resumen agregado (todo el rango + búsqueda), no de la página visible.
+    const resumen = resumenQuery.data;
+    const totalEntradas = resumen?.totalEntradas ?? 0;
+    const totalSalidas = resumen?.totalSalidas ?? 0;
     const balance = totalEntradas - totalSalidas;
+
+    // Controles de paginación: hay "siguiente" si aún quedan filas por debajo del total del resumen.
+    const hasNextEntradas =
+        pageEntradas * CUENTAS_PAGE_SIZE < (resumen?.countEntradas ?? 0);
+    const hasNextSalidas =
+        pageSalidas * CUENTAS_PAGE_SIZE < (resumen?.countSalidas ?? 0);
 
     const abrirModalGasto = async () => {
         setErrGasto(null);
@@ -582,12 +597,10 @@ export default function Cuentas() {
             if (!editPagoId) return;
 
             const fechaHora = (epFechaHora || "").trim();
-            const importe = Number(String(epImporte).replace(",", "."));
+            // El importe no se edita (CUENTA-02): el backend lo recalcula desde las líneas cobradas.
+            const importe = Number(String(epImporte).replace(",", ".")) || 0;
 
             if (!fechaHora) return setErrEditPago("La fecha/hora es obligatoria.");
-            if (!Number.isFinite(importe) || importe <= 0) {
-                return setErrEditPago("El importe debe ser mayor que 0.");
-            }
 
             setSavingEditPago(true);
 
@@ -700,6 +713,24 @@ export default function Cuentas() {
 
             if (!filePath) return;
 
+            // El PDF refleja TODO el rango (no la página visible): traemos todas las filas sin
+            // paginar (page/pageSize omitidos ⇒ el backend devuelve el conjunto completo).
+            const [entradasRaw, salidasRaw] = await Promise.all([
+                cuentasGetEntradas({ del, al, q: qDebounced }),
+                cuentasGetSalidas({ del, al, q: qDebounced }),
+            ]);
+            const entradasFull = entradasRaw.map(mapEntradaUI);
+            const salidasFull = salidasRaw.map((r) => mapSalidaUI(r, proveedoresMap));
+            const totalEntradasPdf = entradasFull.reduce(
+                (a, e) => a + (Number(e.importe) || 0),
+                0,
+            );
+            const totalSalidasPdf = salidasFull.reduce(
+                (a, s) => a + (Number(s.importe) || 0),
+                0,
+            );
+            const balancePdf = totalEntradasPdf - totalSalidasPdf;
+
             const pdfDoc = await PDFDocument.create();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
             const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
@@ -806,9 +837,9 @@ export default function Cuentas() {
             });
             ctx = write(
                 ctx,
-                `Entradas: ${formatMoney(totalEntradas)} | Salidas: ${formatMoney(
-                    totalSalidas,
-                )} | Balance: ${formatMoney(balance)}`,
+                `Entradas: ${formatMoney(totalEntradasPdf)} | Salidas: ${formatMoney(
+                    totalSalidasPdf,
+                )} | Balance: ${formatMoney(balancePdf)}`,
                 { size: 12, bold: true },
             );
             ctx.y -= 6;
@@ -834,10 +865,10 @@ export default function Cuentas() {
             ctx = drawLine(ctx);
             ctx.y -= 8;
 
-            if (!entradasFiltradas.length) {
+            if (!entradasFull.length) {
                 ctx = write(ctx, "Sin entradas para este rango/filtro.", { color: gray });
             } else {
-                for (const e of entradasFiltradas) {
+                for (const e of entradasFull) {
                     ctx = writeRow(ctx, [
                         { text: e.fechaHora, x: M },
                         { text: e.cliente, x: M + 140 },
@@ -875,10 +906,10 @@ export default function Cuentas() {
             ctx = drawLine(ctx);
             ctx.y -= 8;
 
-            if (!salidasFiltradas.length) {
+            if (!salidasFull.length) {
                 ctx = write(ctx, "Sin salidas para este rango/filtro.", { color: gray });
             } else {
-                for (const s of salidasFiltradas) {
+                for (const s of salidasFull) {
                     const provName =
                         s.proveedorNombre ??
                         (s.proveedorId ? proveedoresMap.get(s.proveedorId) : null);
@@ -1334,6 +1365,31 @@ export default function Cuentas() {
                                     )}
                                 </div>
                             </div>
+
+                            <div className="mt-3 flex flex-none items-center justify-between gap-2 text-xs text-fg-muted">
+                                <span>
+                                    Página {pageEntradas}
+                                    {loadingEntradas ? " · cargando…" : ""}
+                                </span>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={pageEntradas <= 1 || loadingEntradas}
+                                        onClick={() => setPageEntradas((p) => Math.max(1, p - 1))}
+                                        className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Anterior
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!hasNextEntradas || loadingEntradas}
+                                        onClick={() => setPageEntradas((p) => p + 1)}
+                                        className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Siguiente
+                                    </button>
+                                </div>
+                            </div>
                         </section>
 
                         <section className="flex h-full min-h-0 overflow-hidden flex-col rounded-3xl border border-border bg-surface p-4 shadow-sm sm:p-5">
@@ -1433,6 +1489,31 @@ export default function Cuentas() {
                                     ) : (
                                         <div className="p-4 text-sm text-fg-muted">Sin salidas.</div>
                                     )}
+                                </div>
+                            </div>
+
+                            <div className="mt-3 flex flex-none items-center justify-between gap-2 text-xs text-fg-muted">
+                                <span>
+                                    Página {pageSalidas}
+                                    {loadingSalidas ? " · cargando…" : ""}
+                                </span>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={pageSalidas <= 1 || loadingSalidas}
+                                        onClick={() => setPageSalidas((p) => Math.max(1, p - 1))}
+                                        className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Anterior
+                                    </button>
+                                    <button
+                                        type="button"
+                                        disabled={!hasNextSalidas || loadingSalidas}
+                                        onClick={() => setPageSalidas((p) => p + 1)}
+                                        className="h-8 rounded-lg border border-border bg-surface px-3 font-semibold text-fg transition hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-40"
+                                    >
+                                        Siguiente
+                                    </button>
                                 </div>
                             </div>
                         </section>
@@ -1828,10 +1909,14 @@ export default function Cuentas() {
                                 Importe (EUR)
                                 <input
                                     value={epImporte}
-                                    onChange={(e) => setEpImporte(e.target.value)}
+                                    readOnly
+                                    disabled
                                     inputMode="decimal"
-                                    className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
+                                    className="mt-1 w-full cursor-not-allowed rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
                                 />
+                                <span className="mt-1 block text-[11px] font-normal text-fg-subtle">
+                                    Se calcula automáticamente desde las líneas cobradas; no es editable.
+                                </span>
                             </label>
 
                             {errEditPago ? (

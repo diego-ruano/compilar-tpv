@@ -11,20 +11,40 @@ import {
     cuentasDeleteGasto,
     cuentasDeletePago,
     cuentasGetEntradas,
+    cuentasGetResumen,
     cuentasGetSalidas,
     cuentasListProveedoresMini,
     cuentasUpdateGasto,
     cuentasUpdatePago,
+    CUENTAS_PAGE_SIZE,
+    type CuentasListParams,
 } from "./cuentasApis";
 
-type Rango = { del?: string | null; al?: string | null };
+type Rango = { del?: string | null; al?: string | null; q?: string | null };
+type ListParams = Rango & { page?: number };
 
 export const cuentasKeys = {
     all: ["cuentas"] as const,
-    entradas: (rango: Rango) =>
-        ["cuentas", "entradas", rango.del ?? null, rango.al ?? null] as const,
-    salidas: (rango: Rango) =>
-        ["cuentas", "salidas", rango.del ?? null, rango.al ?? null] as const,
+    entradas: (p: ListParams) =>
+        [
+            "cuentas",
+            "entradas",
+            p.del ?? null,
+            p.al ?? null,
+            p.q ?? null,
+            p.page ?? 1,
+        ] as const,
+    salidas: (p: ListParams) =>
+        [
+            "cuentas",
+            "salidas",
+            p.del ?? null,
+            p.al ?? null,
+            p.q ?? null,
+            p.page ?? 1,
+        ] as const,
+    resumen: (rango: Rango) =>
+        ["cuentas", "resumen", rango.del ?? null, rango.al ?? null, rango.q ?? null] as const,
     proveedores: () => ["cuentas", "proveedores"] as const,
 };
 
@@ -32,18 +52,42 @@ export const cuentasKeys = {
    Lecturas (queries)
 ========================= */
 
-export function useCuentasEntradas(rango: Rango, enabled = true) {
+export function useCuentasEntradas(params: ListParams, enabled = true) {
+    const page = params.page ?? 1;
     return useQuery({
-        queryKey: cuentasKeys.entradas(rango),
-        queryFn: () => cuentasGetEntradas(rango),
+        queryKey: cuentasKeys.entradas(params),
+        queryFn: () =>
+            cuentasGetEntradas({
+                del: params.del,
+                al: params.al,
+                q: params.q,
+                page,
+                pageSize: CUENTAS_PAGE_SIZE,
+            } satisfies CuentasListParams),
         enabled,
     });
 }
 
-export function useCuentasSalidas(rango: Rango, enabled = true) {
+export function useCuentasSalidas(params: ListParams, enabled = true) {
+    const page = params.page ?? 1;
     return useQuery({
-        queryKey: cuentasKeys.salidas(rango),
-        queryFn: () => cuentasGetSalidas(rango),
+        queryKey: cuentasKeys.salidas(params),
+        queryFn: () =>
+            cuentasGetSalidas({
+                del: params.del,
+                al: params.al,
+                q: params.q,
+                page,
+                pageSize: CUENTAS_PAGE_SIZE,
+            } satisfies CuentasListParams),
+        enabled,
+    });
+}
+
+export function useCuentasResumen(rango: Rango, enabled = true) {
+    return useQuery({
+        queryKey: cuentasKeys.resumen(rango),
+        queryFn: () => cuentasGetResumen(rango),
         enabled,
     });
 }

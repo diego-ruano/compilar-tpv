@@ -8,14 +8,9 @@ pub fn requerido(input: &str, field: &str) -> Result<String, String> {
     Ok(out)
 }
 
-/// Normaliza el método de pago: sólo "Tarjeta" o "Efectivo".
-pub fn normalize_metodo(input: &str) -> String {
-    if input.trim() == "Tarjeta" {
-        "Tarjeta".to_string()
-    } else {
-        "Efectivo".to_string()
-    }
-}
+/// Normalización del método de pago: reexporta la única implementación compartida
+/// (case-insensitive) para evitar divergencias entre dominios (CUENTA-03).
+pub use crate::pago::normalize_metodo;
 
 /// Datos de un gasto (sin id; el id lo gestiona la capa de persistencia / caso de uso).
 #[derive(Debug, Clone)]

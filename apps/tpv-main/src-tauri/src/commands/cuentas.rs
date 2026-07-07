@@ -4,8 +4,8 @@ use tauri::State;
 
 use tpv_application::use_cases::cuentas as uc;
 use tpv_contracts::cuentas::{
-    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto, SalidaDto,
-    UpdateGastoInput, UpdatePagoInput,
+    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
+    ResumenCajaDto, SalidaDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::AppState;
 
@@ -25,6 +25,15 @@ pub async fn cuentas_get_salidas(
 ) -> Result<Vec<SalidaDto>, String> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_salidas(repo.as_ref(), args).await?)
+}
+
+#[tauri::command]
+pub async fn cuentas_get_resumen(
+    state: State<'_, AppState>,
+    args: CuentasRangoArgs,
+) -> Result<ResumenCajaDto, String> {
+    let repo = state.cuentas_repo().await?;
+    Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]

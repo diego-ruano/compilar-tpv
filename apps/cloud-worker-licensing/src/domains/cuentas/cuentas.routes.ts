@@ -57,24 +57,45 @@ async function apply(
 }
 
 cuentasRoutes.get("/entradas", async (c) => {
-	const p = S.rangoSchema.parse({
+	const p = S.listadoSchema.parse({
 		del: c.req.query("del"),
 		al: c.req.query("al"),
+		q: c.req.query("q"),
+		page: c.req.query("page"),
+		page_size: c.req.query("page_size"),
 	});
 	return c.json(
 		await tenantQuery(c.env, c.get("tenantId"), (db) =>
-			q.entradas(db, p.del, p.al),
+			q.entradas(db, p.del, p.al, p.q, p.page, p.page_size),
 		),
 	);
 });
 
 cuentasRoutes.get("/salidas", async (c) => {
-	const p = S.rangoSchema.parse({
+	const p = S.listadoSchema.parse({
 		del: c.req.query("del"),
 		al: c.req.query("al"),
+		q: c.req.query("q"),
+		page: c.req.query("page"),
+		page_size: c.req.query("page_size"),
 	});
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.salidas(db, p.del, p.al)),
+		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.salidas(db, p.del, p.al, p.q, p.page, p.page_size),
+		),
+	);
+});
+
+cuentasRoutes.get("/resumen", async (c) => {
+	const p = S.listadoSchema.parse({
+		del: c.req.query("del"),
+		al: c.req.query("al"),
+		q: c.req.query("q"),
+	});
+	return c.json(
+		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.resumen(db, p.del, p.al, p.q),
+		),
 	);
 });
 

@@ -15,6 +15,11 @@ export type BuiltCommand = {
 
 const REF_ID = { $ref: "id" } as const;
 
+/// Normaliza el método de pago a "Tarjeta" o "Efectivo" (paridad con `tpv_domain::pago`, CUENTA-03).
+function normalizeMetodo(input: string): string {
+	return input.trim().toLowerCase() === "tarjeta" ? "Tarjeta" : "Efectivo";
+}
+
 // UUIDv7: el id lo genera el cliente y lo envía; si faltara, generamos uno.
 function idStep(provided?: string | null) {
 	const id = (provided ?? "").trim() || crypto.randomUUID();
@@ -101,6 +106,8 @@ export function deleteGasto(idGasto: string): BuiltCommand {
 	};
 }
 
+// Actualiza sólo método y fecha; el Importe_Total se **recalcula** desde los Pago_Detalles
+// cobrados (CUENTA-02), no se toma del input. Paridad con `SqliteCuentasRepository::actualizar_pago`.
 export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand {
 	const cloudPayload = { id_pago: idPago, ...input };
 	return {
@@ -110,23 +117,105 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 			payload: {
 				sql: `
 					UPDATE Pagos
-					SET Fecha_Hora = ?2, Metodo_Pago = ?3, Importe_Total = ?4
+					SET Fecha_Hora = ?2,
+					    Metodo_Pago = ?3,
+					    Importe_Total = (
+					      SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0)
+					      FROM Pago_Detalles pd
+					      JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
+					      WHERE pd.ID_Pago = ?1
+					    )
 					WHERE ID_Pago = ?1;
 				`,
-				args: [idPago, input.fecha_hora, input.metodo, input.importe],
+				args: [idPago, input.fecha_hora, normalizeMetodo(input.metodo)],
 			},
 		},
 		cloudPayload,
 	};
 }
 
+// Borra un pago revirtiendo por completo el cobro (CUENTA-01): devuelve stock (Lote_Consumos),
+// resta el gasto del cliente y reabre la comanda si quedan detalles pendientes. Paridad con
+// `SqliteCuentasRepository::eliminar_pago`. Todo en una transacción del DO.
 export function deletePago(idPago: string): BuiltCommand {
 	const steps = [
+		// 1) Devolver el stock consumido por los detalles del pago y borrar esos Lote_Consumos.
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Lotes_Producto
+				SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
+				    SELECT IFNULL(SUM(lc.Cantidad),0)
+				    FROM Lote_Consumos lc
+				    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
+				    WHERE pd.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
+				)
+				WHERE ID_Lote IN (
+				    SELECT lc.ID_Lote
+				    FROM Lote_Consumos lc
+				    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
+				    WHERE pd.ID_Pago = ?1
+				);
+			`,
+			args: [idPago],
+		},
+		{
+			kind: "execute",
+			sql: "DELETE FROM Lote_Consumos WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);",
+			args: [idPago],
+		},
+		// 2) Restar el gasto del cliente ligado a la comanda del pago (sin bajar de 0).
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Clientes
+				SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - (
+				    SELECT IFNULL(p.Importe_Total,0) FROM Pagos p WHERE p.ID_Pago = ?1
+				))
+				WHERE ID_Cliente = (
+				    SELECT r.ID_Cliente
+				    FROM Pagos p
+				    JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+				    JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+				    WHERE p.ID_Pago = ?1
+				);
+			`,
+			args: [idPago],
+		},
+		// 4) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
 			args: [idPago],
 		},
+		// 5) Reabrir la comanda si tras liberar sus detalles quedan líneas pendientes de pago.
+		//    Se ejecuta con `Pagos` aún presente (para resolver la comanda) pero con los
+		//    Pago_Detalles ya borrados (para que los detalles liberados cuenten como pendientes).
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Comandas
+				SET Estado = CASE
+				      WHEN EXISTS (
+				        SELECT 1 FROM Detalle_Comanda dc
+				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
+				      ) THEN 'Abierta' ELSE Estado END,
+				    Fecha_Hora_Cierre = CASE
+				      WHEN EXISTS (
+				        SELECT 1 FROM Detalle_Comanda dc
+				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
+				      ) THEN NULL ELSE Fecha_Hora_Cierre END,
+				    Total_Comanda = (
+				        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+				        FROM Detalle_Comanda WHERE ID_Comanda = Comandas.ID_Comanda
+				    )
+				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1);
+			`,
+			args: [idPago],
+		},
+		// 6) Borrar el pago.
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pagos WHERE ID_Pago = ?1;",

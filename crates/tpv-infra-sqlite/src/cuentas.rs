@@ -6,12 +6,12 @@ use async_trait::async_trait;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cuentas::CuentasRepository;
-use tpv_contracts::cuentas::{EntradaDto, SalidaDto};
+use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
+use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, v_f64, v_string};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
@@ -63,41 +63,109 @@ fn rango_where(
     (where_sql, params)
 }
 
+/// Construye la cláusula de búsqueda de texto (`WHERE <expr> LIKE …`) sobre las columnas ya
+/// calculadas del subquery interno. Añade el parámetro a `params` y numera el placeholder de forma
+/// consecutiva a los ya presentes. `expr` debe ser una expresión `lower(...)` con las columnas.
+fn q_filter(params: &mut Vec<Value>, q: Option<String>, expr: &str) -> String {
+    match q.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        Some(qs) => {
+            let idx = params.len() + 1;
+            params.push(Value::Text(qs.to_string()));
+            format!("WHERE {expr} LIKE '%' || lower(?{idx}) || '%'")
+        }
+        None => String::new(),
+    }
+}
+
+/// Cláusula de paginación (`LIMIT ? OFFSET ?`) a partir de page (1-based) y page_size. Si no hay
+/// paginación válida (falta page_size o es 0), devuelve cadena vacía → se listan todas las filas.
+fn paginacion(params: &mut Vec<Value>, page: Option<u32>, page_size: Option<u32>) -> String {
+    match page_size {
+        Some(ps) if ps > 0 => {
+            let page = page.unwrap_or(1).max(1);
+            let offset = (page as i64 - 1) * ps as i64;
+            let li = params.len() + 1;
+            let oi = params.len() + 2;
+            params.push(Value::Integer(ps as i64));
+            params.push(Value::Integer(offset));
+            format!("LIMIT ?{li} OFFSET ?{oi}")
+        }
+        _ => String::new(),
+    }
+}
+
+/// Subquery interno de **entradas** (cobros) con las columnas calculadas (fechaHora, cliente,
+/// metodo, importe). Devuelve el SQL y los parámetros del rango de fechas.
+fn entradas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value>) {
+    let (where_rango, params) = rango_where(del, al, "p.Fecha_Hora");
+    let sql = format!(
+        r#"
+        SELECT
+          p.ID_Pago AS id,
+          substr(p.Fecha_Hora, 1, 16) AS fechaHora,
+          (
+            CASE
+              WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
+              WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
+              ELSE 'Venta'
+            END
+            ||
+            CASE
+              WHEN cl.Nombre IS NOT NULL AND cl.Nombre <> '' THEN ' / ' || cl.Nombre
+              ELSE ''
+            END
+          ) AS cliente,
+          CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
+          IFNULL(p.Importe_Total, 0) AS importe
+        FROM Pagos p
+        JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+        LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+        LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+        LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+        {where_rango}
+        "#
+    );
+    (sql, params)
+}
+
+/// Expresión de texto buscable de una fila de entradas (para el `LIKE`).
+const ENTRADAS_Q_EXPR: &str =
+    "lower(fechaHora || ' ' || cliente || ' ' || metodo || ' ' || CAST(importe AS TEXT))";
+
+/// Subquery interno de **salidas** (gastos) con el nombre del proveedor incluido para poder
+/// buscarlo. Devuelve el SQL y los parámetros del rango de fechas.
+fn salidas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value>) {
+    let (where_rango, params) = rango_where(del, al, "g.Fecha");
+    let sql = format!(
+        r#"
+        SELECT
+          g.ID_Gasto AS id,
+          substr(g.Fecha, 1, 10) AS fechaHora,
+          g.Tipo_Gasto AS tipoGasto,
+          g.Concepto AS concepto,
+          g.Importe AS importe,
+          g.ID_Proveedor AS proveedorId,
+          IFNULL(pr.Nombre_Empresa, '') AS proveedorNombre
+        FROM Cuentas_Gastos g
+        LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
+        {where_rango}
+        "#
+    );
+    (sql, params)
+}
+
+/// Expresión de texto buscable de una fila de salidas (incluye proveedor id y nombre).
+const SALIDAS_Q_EXPR: &str = "lower(fechaHora || ' ' || tipoGasto || ' ' || concepto || ' ' || CAST(importe AS TEXT) || ' ' || IFNULL(proveedorId,'') || ' ' || proveedorNombre)";
+
 #[async_trait]
 impl CuentasRepository for SqliteCuentasRepository {
-    async fn entradas(
-        &self,
-        del: Option<String>,
-        al: Option<String>,
-    ) -> AppResult<Vec<EntradaDto>> {
-        let (where_sql, params) = rango_where(del, al, "p.Fecha_Hora");
+    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<Vec<EntradaDto>> {
+        let (inner, mut params) = entradas_inner(filtro.del, filtro.al);
+        let q_clause = q_filter(&mut params, filtro.q, ENTRADAS_Q_EXPR);
+        let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
         let sql = format!(
-            r#"
-            SELECT
-              p.ID_Pago AS id,
-              substr(p.Fecha_Hora, 1, 16) AS fechaHora,
-              (
-                CASE
-                  WHEN m.Numero_Mesa = 'BARRA' THEN 'Take away'
-                  WHEN m.Numero_Mesa IS NOT NULL AND m.Numero_Mesa <> '' THEN 'Mesa ' || m.Numero_Mesa
-                  ELSE 'Venta'
-                END
-                ||
-                CASE
-                  WHEN cl.Nombre IS NOT NULL AND cl.Nombre <> '' THEN ' / ' || cl.Nombre
-                  ELSE ''
-                END
-              ) AS cliente,
-              CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
-              IFNULL(p.Importe_Total, 0) AS importe
-            FROM Pagos p
-            JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
-            LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
-            LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
-            {where_sql}
-            ORDER BY p.Fecha_Hora DESC, p.ID_Pago DESC;
-            "#
+            "SELECT id, fechaHora, cliente, metodo, importe FROM ({inner}) AS e {q_clause} \
+             ORDER BY fechaHora DESC, id DESC {limit_clause};"
         );
 
         let db = self.db.read().await;
@@ -121,25 +189,13 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(out)
     }
 
-    async fn salidas(
-        &self,
-        del: Option<String>,
-        al: Option<String>,
-    ) -> AppResult<Vec<SalidaDto>> {
-        let (where_sql, params) = rango_where(del, al, "Fecha");
+    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<Vec<SalidaDto>> {
+        let (inner, mut params) = salidas_inner(filtro.del, filtro.al);
+        let q_clause = q_filter(&mut params, filtro.q, SALIDAS_Q_EXPR);
+        let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
         let sql = format!(
-            r#"
-            SELECT
-              ID_Gasto AS id,
-              substr(Fecha, 1, 10) AS fechaHora,
-              Tipo_Gasto AS tipoGasto,
-              Concepto AS concepto,
-              Importe AS importe,
-              ID_Proveedor AS proveedorId
-            FROM Cuentas_Gastos
-            {where_sql}
-            ORDER BY date(Fecha) DESC, ID_Gasto DESC;
-            "#
+            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId FROM ({inner}) AS g \
+             {q_clause} ORDER BY fechaHora DESC, id DESC {limit_clause};"
         );
 
         let db = self.db.read().await;
@@ -162,6 +218,67 @@ impl CuentasRepository for SqliteCuentasRepository {
             });
         }
         Ok(out)
+    }
+
+    async fn resumen(
+        &self,
+        del: Option<String>,
+        al: Option<String>,
+        q: Option<String>,
+    ) -> AppResult<ResumenCajaDto> {
+        let db = self.db.read().await;
+
+        // ── Entradas: total + total por método + conteo, sobre todo el rango + búsqueda. ──
+        let (entradas_inner_sql, mut e_params) = entradas_inner(del.clone(), al.clone());
+        let e_q = q_filter(&mut e_params, q.clone(), ENTRADAS_Q_EXPR);
+        let e_sql = format!(
+            r#"
+            SELECT
+              IFNULL(SUM(importe), 0),
+              IFNULL(SUM(CASE WHEN metodo = 'Efectivo' THEN importe ELSE 0 END), 0),
+              IFNULL(SUM(CASE WHEN metodo = 'Tarjeta' THEN importe ELSE 0 END), 0),
+              COUNT(*)
+            FROM ({entradas_inner_sql}) AS e {e_q};
+            "#
+        );
+        let (total_entradas, total_efectivo, total_tarjeta, count_entradas) = {
+            let mut rows = db.query(e_sql.as_str(), e_params).await.map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => (
+                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                    v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                    v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
+                    v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0),
+                ),
+                None => (0.0, 0.0, 0.0, 0),
+            }
+        };
+
+        // ── Salidas: total + conteo. ──
+        let (salidas_inner_sql, mut s_params) = salidas_inner(del, al);
+        let s_q = q_filter(&mut s_params, q, SALIDAS_Q_EXPR);
+        let s_sql = format!(
+            "SELECT IFNULL(SUM(importe), 0), COUNT(*) FROM ({salidas_inner_sql}) AS g {s_q};"
+        );
+        let (total_salidas, count_salidas) = {
+            let mut rows = db.query(s_sql.as_str(), s_params).await.map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => (
+                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                    v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+                ),
+                None => (0.0, 0),
+            }
+        };
+
+        Ok(ResumenCajaDto {
+            total_entradas,
+            total_salidas,
+            total_efectivo,
+            total_tarjeta,
+            count_entradas,
+            count_salidas,
+        })
     }
 
     async fn crear_gasto(&self, id: Option<String>, g: GastoData) -> AppResult<bool> {
@@ -233,20 +350,30 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
+    /// Actualiza un pago permitiendo cambiar sólo **método y fecha**. El `Importe_Total` **no**
+    /// se toma del input: se **recalcula** desde la suma de los `Pago_Detalles` realmente cobrados
+    /// (CUENTA-02), manteniendo la conciliación caja↔ventas. Así no se puede descuadrar la caja
+    /// fijando un importe arbitrario.
     async fn actualizar_pago(&self, id_pago: &str, p: PagoData) -> AppResult<bool> {
         let db = self.db.write().await;
         let affected = db
             .execute(
                 r#"
                 UPDATE Pagos
-                SET Fecha_Hora = ?2, Metodo_Pago = ?3, Importe_Total = ?4
+                SET Fecha_Hora = ?2,
+                    Metodo_Pago = ?3,
+                    Importe_Total = (
+                        SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0)
+                        FROM Pago_Detalles pd
+                        JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
+                        WHERE pd.ID_Pago = ?1
+                    )
                 WHERE ID_Pago = ?1;
                 "#,
                 vec![
                     Value::Text(id_pago.to_string()),
                     Value::Text(p.fecha_hora),
                     Value::Text(p.metodo),
-                    Value::Real(p.importe),
                 ],
             )
             .await
@@ -254,11 +381,91 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
+    /// Borra un pago **revirtiendo por completo y de forma atómica** los efectos del cobro
+    /// (CUENTA-01): devuelve el stock consumido (`Lote_Consumos`), resta el gasto del cliente
+    /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
+    /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
+    /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
+            // 1) Leer comanda + importe del pago ANTES de borrar nada (para la reversión).
+            let (id_comanda, importe) = {
+                let mut rows = conn
+                    .query(
+                        "SELECT ID_Comanda, IFNULL(Importe_Total,0) FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
+                        vec![Value::Text(id_pago.to_string())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(row) => {
+                        let c = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+                        let imp = v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0);
+                        (c, imp)
+                    }
+                    // El pago no existe: nada que revertir.
+                    None => return Ok(false),
+                }
+            };
+
+            // 2) Devolver el stock: sumar de vuelta a cada lote lo consumido por los detalles del
+            //    pago y borrar esos Lote_Consumos (la consumición se hace en el cobro, ligada a
+            //    ID_Detalle; si el pago no consumió stock —p. ej. cobro de mesa— es un no-op).
+            conn.execute(
+                r#"
+                UPDATE Lotes_Producto
+                SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
+                    SELECT IFNULL(SUM(lc.Cantidad),0)
+                    FROM Lote_Consumos lc
+                    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
+                    WHERE pd.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
+                )
+                WHERE ID_Lote IN (
+                    SELECT lc.ID_Lote
+                    FROM Lote_Consumos lc
+                    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
+                    WHERE pd.ID_Pago = ?1
+                );
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+            conn.execute(
+                r#"
+                DELETE FROM Lote_Consumos
+                WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+            // 3) Restar el gasto del cliente ligado a la comanda (vía Reservas), sin bajar de 0.
+            let importe = (importe * 100.0).round() / 100.0;
+            if importe > 0.0 && !id_comanda.is_empty() {
+                conn.execute(
+                    r#"
+                    UPDATE Clientes
+                    SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - ?2)
+                    WHERE ID_Cliente = (
+                        SELECT r.ID_Cliente
+                        FROM Comandas c
+                        JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
+                        WHERE c.ID_Comanda = ?1
+                    );
+                    "#,
+                    vec![Value::Text(id_comanda.clone()), Value::Real(importe)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // 4) Borrar el pago y sus detalles.
             conn.execute(
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
                 vec![Value::Text(id_pago.to_string())],
@@ -272,6 +479,36 @@ impl CuentasRepository for SqliteCuentasRepository {
                 )
                 .await
                 .map_err(db_err)?;
+
+            // 5) Reabrir la comanda si al liberar sus detalles quedan líneas pendientes de pago.
+            if !id_comanda.is_empty() {
+                conn.execute(
+                    r#"
+                    UPDATE Comandas
+                    SET Estado = CASE
+                          WHEN EXISTS (
+                            SELECT 1 FROM Detalle_Comanda dc
+                            LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
+                          ) THEN 'Abierta' ELSE Estado END,
+                        Fecha_Hora_Cierre = CASE
+                          WHEN EXISTS (
+                            SELECT 1 FROM Detalle_Comanda dc
+                            LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
+                          ) THEN NULL ELSE Fecha_Hora_Cierre END,
+                        Total_Comanda = (
+                            SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                            FROM Detalle_Comanda WHERE ID_Comanda = ?1
+                        )
+                    WHERE ID_Comanda = ?1;
+                    "#,
+                    vec![Value::Text(id_comanda.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
             Ok(affected > 0)
         }
         .await;

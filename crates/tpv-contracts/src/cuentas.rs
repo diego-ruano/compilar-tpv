@@ -38,6 +38,33 @@ pub struct CuentasRangoArgs {
     #[serde(default)]
     #[ts(optional)]
     pub al: Option<String>,
+    /// Búsqueda de texto (server-side): filtra por fecha/cliente/concepto/método/importe.
+    #[serde(default)]
+    #[ts(optional)]
+    pub q: Option<String>,
+    /// Página 1-based. Si es `None`, se devuelven **todas** las filas (usado por el PDF).
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub page: Option<u32>,
+    /// Tamaño de página. Si es `None`/0 junto con `page`, se ignora la paginación.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub page_size: Option<u32>,
+}
+
+/// Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
+/// rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ResumenCajaDto {
+    pub total_entradas: f64,
+    pub total_salidas: f64,
+    pub total_efectivo: f64,
+    pub total_tarjeta: f64,
+    #[ts(type = "number")]
+    pub count_entradas: i64,
+    #[ts(type = "number")]
+    pub count_salidas: i64,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

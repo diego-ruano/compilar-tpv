@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
-use tpv_application::ports::cuentas::CuentasRepository;
-use tpv_contracts::cuentas::{EntradaDto, SalidaDto};
+use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
+use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::CloudClient;
@@ -33,18 +33,46 @@ fn rango(del: Option<String>, al: Option<String>) -> Vec<(&'static str, String)>
     q
 }
 
+/// Query params de listado: rango + búsqueda + paginación.
+fn listado_query(filtro: &CuentasFiltro) -> Vec<(&'static str, String)> {
+    let mut q = rango(filtro.del.clone(), filtro.al.clone());
+    if let Some(s) = filtro.q.as_ref().filter(|s| !s.trim().is_empty()) {
+        q.push(("q", s.clone()));
+    }
+    if let Some(p) = filtro.page {
+        q.push(("page", p.to_string()));
+    }
+    if let Some(ps) = filtro.page_size {
+        q.push(("page_size", ps.to_string()));
+    }
+    q
+}
+
 #[async_trait]
 impl CuentasRepository for HttpCuentasRepository {
-    async fn entradas(&self, del: Option<String>, al: Option<String>) -> AppResult<Vec<EntradaDto>> {
+    async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<Vec<EntradaDto>> {
         self.client
-            .get_query("/v1/cuentas/entradas", &rango(del, al))
+            .get_query("/v1/cuentas/entradas", &listado_query(&filtro))
             .await
     }
 
-    async fn salidas(&self, del: Option<String>, al: Option<String>) -> AppResult<Vec<SalidaDto>> {
+    async fn salidas(&self, filtro: CuentasFiltro) -> AppResult<Vec<SalidaDto>> {
         self.client
-            .get_query("/v1/cuentas/salidas", &rango(del, al))
+            .get_query("/v1/cuentas/salidas", &listado_query(&filtro))
             .await
+    }
+
+    async fn resumen(
+        &self,
+        del: Option<String>,
+        al: Option<String>,
+        q: Option<String>,
+    ) -> AppResult<ResumenCajaDto> {
+        let mut params = rango(del, al);
+        if let Some(s) = q.filter(|s| !s.trim().is_empty()) {
+            params.push(("q", s));
+        }
+        self.client.get_query("/v1/cuentas/resumen", &params).await
     }
 
     async fn crear_gasto(&self, id: Option<String>, gasto: GastoData) -> AppResult<bool> {

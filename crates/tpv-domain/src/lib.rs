@@ -14,6 +14,7 @@ pub mod cuentas;
 pub mod inventario;
 pub mod login;
 pub mod mesas;
+pub mod pago;
 pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reservas;
