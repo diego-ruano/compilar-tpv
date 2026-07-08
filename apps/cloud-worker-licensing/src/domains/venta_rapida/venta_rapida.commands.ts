@@ -303,7 +303,7 @@ export function cobrarFraccionado(
 				UPDATE Comandas
 				SET ID_Trabajador = ?2
 				WHERE ID_Comanda = ?1
-					AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
+					AND ID_Trabajador IS NULL;
 			`,
 			args: [input.id_comanda, plan.id_trabajador_cobrador],
 		});

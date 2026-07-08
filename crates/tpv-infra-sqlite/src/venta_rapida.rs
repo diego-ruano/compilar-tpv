@@ -783,7 +783,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     UPDATE Comandas
                     SET ID_Trabajador = ?2
                     WHERE ID_Comanda = ?1
-                      AND (ID_Trabajador IS NULL OR ID_Trabajador <= 0);
+                      AND ID_Trabajador IS NULL;
                     "#,
                     vec![Value::Text(data.id_comanda.clone()), Value::Text(idt)],
                 )
