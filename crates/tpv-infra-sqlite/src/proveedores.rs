@@ -63,7 +63,7 @@ const SQL_PRODUCTO_COLS: &str = r#"
         p.ID_Proveedor,
         p.Nombre,
         p.Precio_Venta,
-        (SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) AS Stock_Actual,
+        ((SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) + COALESCE(p.Stock_Suelto, 0)) AS Stock_Actual,
         p.Stock_Minimo,
         p.Unidad_Medida,
         p.Nombre_Imagen,
