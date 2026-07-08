@@ -72,3 +72,14 @@ refactor.
   vía Cloudflare Logpush — requiere plan de pago. Da retención/observabilidad más allá de
   `wrangler tail` y del SDK de telemetría actual. Ya anotado en
   [observability.md §8](../observability.md#8-notas-y-próximos-pasos).
+- **Envío de correo con Cloudflare Email Service (dejar de depender de Resend).** El objetivo es
+  enviar los correos de pedido a proveedor con el servicio nativo de Cloudflare en vez de Resend
+  (ya previsto en los comentarios de `apps/cloud-worker-licensing/src/domains/email/email.routes.ts`
+  y `commands/email_config.rs`). **Requiere plan de pago:** enviar a destinatarios arbitrarios
+  (los proveedores) exige el **Workers Paid plan** ($5/mes mínimo). En el plan Free solo se puede
+  enviar a **direcciones de destino verificadas** de la cuenta (vía Email Routing), lo que **no**
+  sirve para mandar pedidos a cualquier proveedor. Precio en el plan de pago: **3.000 correos/mes
+  incluidos**, luego **$0,35 por 1.000**. Al activarlo basta sustituir el `fetch` a la API de Resend
+  en `email.routes.ts` por el binding/servicio de Cloudflare (gateado por env), sin tocar el resto
+  del flujo (la Main/Handy siguen llamando a `POST /v1/email/enviar-pedido`).
+  Ref.: [Cloudflare Email Service — Pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
