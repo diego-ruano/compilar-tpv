@@ -73,6 +73,8 @@ export function AddProductModal({
     const [unidadMedida, setUnidadMedida] = useState("");
 
     const [cantidadPedidoEsperada, setCantidadPedidoEsperada] = useState("");
+    // VR-04: stock suelto fuera de lote (vacío = el producto no lo usa; puede ser negativo).
+    const [stockSuelto, setStockSuelto] = useState("");
 
     const [image, setImage] = useState<File | null>(null);
     const [existingImageName, setExistingImageName] = useState<string | null>(null);
@@ -199,6 +201,9 @@ export function AddProductModal({
                     ? String(detalle.Cantidad_Pedido_Esperada)
                     : "",
             );
+            setStockSuelto(
+                detalle.Stock_Suelto != null ? String(detalle.Stock_Suelto) : "",
+            );
 
             setExistingImageName(detalle.Nombre_Imagen ?? null);
             setExistingImagePath(detalle.Ruta_Imagen ?? null);
@@ -318,6 +323,10 @@ export function AddProductModal({
                         cantidadPedidoEsperada.trim() === ""
                             ? null
                             : Number(cantidadPedidoEsperada.replace(",", ".")),
+                    stock_suelto:
+                        stockSuelto.trim() === ""
+                            ? null
+                            : Number(stockSuelto.replace(",", ".")),
                     ids_alergenos: alergIds,
                 })) ?? (isEdit ? (productIdToEdit ?? null) : null);
 
@@ -502,6 +511,30 @@ export function AddProductModal({
                             className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             disabled={loading}
                         />
+                    </div>
+
+                    <div>
+                        <label
+                            htmlFor="producto-stock-suelto"
+                            className="block font-semibold"
+                        >
+                            Stock suelto (fuera de lote)
+                        </label>
+                        <input
+                            id="producto-stock-suelto"
+                            type="number"
+                            step="0.01"
+                            value={stockSuelto}
+                            onChange={(e) => setStockSuelto(e.target.value)}
+                            placeholder="Vacío = no se controla"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={loading}
+                        />
+                        <p className="mt-1 text-xs text-fg-muted">
+                            Stock simple sin lotes: se descuenta al vender lo que no cubran los lotes y
+                            puede quedar negativo (aviso de que has vendido de más). Déjalo vacío si el
+                            producto no lleva control de stock.
+                        </p>
                     </div>
 
                     {!isEdit && (

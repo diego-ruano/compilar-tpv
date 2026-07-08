@@ -42,6 +42,9 @@ export type ProductoRow = {
     Ruta_Imagen: string | null;
 
     Cantidad_Pedido_Esperada: number | null;
+
+    // VR-04: stock suelto fuera de lote (null = el producto no lo usa; puede ser negativo).
+    Stock_Suelto: number | null;
 };
 
 export type ProductoListRow = ProductoRow & {
@@ -119,6 +122,9 @@ export type UpsertProductoArgs = {
     ruta_imagen: string | null;
 
     cantidad_pedido_esperada: number | null;
+
+    // VR-04: stock suelto fuera de lote (opcional; null = no usa; puede ser negativo).
+    stock_suelto?: number | null;
 
     ids_alergenos: string[];
 };
@@ -300,6 +306,9 @@ function normalizeProductoBase(row: any): ProductoRow {
                 "cantidadPedidoEsperada",
             ]),
         ),
+        Stock_Suelto: toNumOrNull(
+            pick(row, ["Stock_Suelto", "stock_suelto", "stockSuelto"]),
+        ),
     };
 }
 
@@ -470,6 +479,9 @@ export const inventarioAPI = {
                 args.cantidad_pedido_esperada == null
                     ? null
                     : toNumOrNull(args.cantidad_pedido_esperada),
+
+            stock_suelto:
+                args.stock_suelto == null ? null : toNumOrNull(args.stock_suelto),
 
             ids_alergenos: normalizeIdList(args.ids_alergenos ?? []),
         };
