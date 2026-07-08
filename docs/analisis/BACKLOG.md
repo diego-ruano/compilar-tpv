@@ -6,7 +6,8 @@
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
-| STAT-03 | 🟡 | Horas infravaloradas por fichajes abiertos: **bloqueado por TRAB-01** (cierre automático de fichajes, dominio trabajadores). | [estadisticas.md](dominios/estadisticas.md) |
+| STAT-03 | 🟡 | Horas infravaloradas por fichajes abiertos: **TRAB-01 ya implementado** (auto-cierre de jornadas colgadas al arrancar). Queda **desbloqueado**: revisar que `stats` trate bien las jornadas auto-cerradas (`Cerrado_Automatico=1`, sin `Hora_Salida`) al sumar horas. | [estadisticas.md](dominios/estadisticas.md) |
+| TRAB-03 | 🟡 | **PII sensible (DNI, IBAN, Nº Seg. Social) en claro y replicada a la nube (Turso).** Cifrado a nivel de campo y/o minimizar la replicación (¿la nube/Handy necesita esos datos?). Tarea de arquitectura/GDPR transversal (cruce con DB-04). Diferida a pase dedicado. | [trabajadores.md](dominios/trabajadores.md) |
 | STAT-06 | 🔵 | Paridad Main↔Handy: la lógica ya se igualó a mano; falta el **harness de tests de contrato** (infra de tests). | [estadisticas.md](dominios/estadisticas.md) |
 | INV-06 | 🔵 | Reconciliación de stock: la tabla `Movimientos_Stock` es su cimiento, pero la fórmula depende de **VR-06** (modelo de consumo, venta-rápida) y de decisiones de producto (dónde corre, qué alerta). | [inventario.md](dominios/inventario.md) |
 | INV-07 | 🔵 | Doble implementación Rust/worker: lógica igualada a mano; falta el **harness de tests de contrato** (misma infra que STAT-06). | [inventario.md](dominios/inventario.md) |
