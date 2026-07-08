@@ -56,6 +56,9 @@ function assignmentSteps(idTarea: string | typeof REF_ID_TAREA, idsRaw: string[]
 		args: [idTarea, ...ids],
 	});
 
+	// TAR-02 (semántica decidida): `INSERT OR IGNORE` es intencional. Un trabajador que ya finalizó
+	// y sigue en el conjunto conserva su FINALIZADA (re-guardar no reabre); solo quien se quita se
+	// borra arriba, y si se le re-añade luego entra como fila nueva ('PENDIENTE'). Espejo del repo.
 	for (const idTrabajador of ids) {
 		steps.push({
 			kind: "execute",

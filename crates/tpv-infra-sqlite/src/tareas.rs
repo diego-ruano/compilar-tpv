@@ -115,6 +115,10 @@ async fn apply_set_asignaciones_core<C: Writer>(
         conn.execute(&sql, sql_args).await.map_err(db_err)?;
     }
 
+    // TAR-02 (semántica decidida): `INSERT OR IGNORE` es intencional. Si un trabajador que YA
+    // finalizó la tarea sigue en el conjunto de asignados, su fila (Estado='FINALIZADA') se
+    // conserva: re-guardar el conjunto NO reabre su asignación. Solo quien se quita del conjunto
+    // se borra arriba; si se le vuelve a añadir después, entra como fila nueva ('PENDIENTE').
     for id_trab in ids_trabajadores.iter() {
         conn.execute(
             r#"
