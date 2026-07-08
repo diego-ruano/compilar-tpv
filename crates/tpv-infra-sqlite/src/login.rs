@@ -46,6 +46,35 @@ fn now_iso() -> String {
     Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+/// TRAB-01: cierre automático de jornadas colgadas. Si un trabajador ficha entrada y olvida la
+/// salida, su fichaje queda `ABIERTO` indefinidamente y corrompe las horas trabajadas que lee
+/// `stats`. Esta función cierra los fichajes ABIERTOS **de días anteriores** marcándolos
+/// `Cerrado_Automatico=1` + `Cierre_Motivo` + `Incidencia` (para revisión manual) y **sin inventar
+/// hora de salida** (`Hora_Salida` queda NULL). Solo afecta a `Fecha < hoy`, así que la jornada en
+/// curso del día no se toca. Es idempotente (los ya cerrados no vuelven a entrar) y va por el
+/// `Writer`, de modo que el cambio se captura en el outbox y se replica a la nube. Se ejecuta al
+/// arrancar el modo Main (ver `init_main`).
+pub async fn auto_close_stale_punches(db: &Db) -> AppResult<u64> {
+    let conn = db.write().await;
+    let affected = conn
+        .execute(
+            r#"
+            UPDATE Fichajes
+            SET Estado = 'CERRADO',
+                Cerrado_Automatico = 1,
+                Cierre_Motivo = 'Cierre automático: jornada sin fichar salida',
+                Incidencia = 'Falta fichar la salida'
+            WHERE Estado = 'ABIERTO'
+              AND Hora_Salida IS NULL
+              AND Fecha < date('now','localtime');
+            "#,
+            vec![],
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(affected)
+}
+
 async fn get_turno_partido_for<C: Reader>(
     conn: &C,
     id_usuario: &str,

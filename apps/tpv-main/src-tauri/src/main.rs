@@ -597,6 +597,19 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         });
     }
 
+    // TRAB-01: al arrancar el modo Main, cerrar automáticamente las jornadas que quedaron abiertas
+    // de días anteriores (alguien fichó entrada y olvidó la salida). Best-effort: no debe impedir el
+    // arranque si falla. Se marcan como incidencia para revisión, sin inventar hora de salida.
+    match tpv_infra_sqlite::login::auto_close_stale_punches(&db).await {
+        Ok(n) if n > 0 => {
+            tracing::info!(target: "tpv::fichajes", cerradas = n, "jornadas colgadas auto-cerradas al arrancar")
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(target: "tpv::fichajes", error = %e, "auto_close_stale_punches falló")
+        }
+    }
+
     *guard = Some(db);
 
     Ok("OK".into())
