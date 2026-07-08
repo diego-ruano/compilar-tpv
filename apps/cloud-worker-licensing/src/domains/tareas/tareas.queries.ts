@@ -25,6 +25,23 @@ function rows(rs: any): any[] {
 	});
 }
 
+// TAR-03: ¿existen TODOS los trabajadores dados? Espejo de la validación del repo local: no se
+// delega en la FK (en la nube puede no aplicarse, dejando asignaciones huérfanas). `ids` llega
+// ya normalizado (limpio y sin duplicados).
+export async function trabajadoresExisten(db: Client, idsRaw: string[]): Promise<boolean> {
+	const ids = Array.from(
+		new Set((idsRaw ?? []).map((s) => (s ?? "").toString().trim()).filter((s) => s.length > 0)),
+	);
+	if (ids.length === 0) return true;
+	const placeholders = ids.map((_, i) => `?${i + 1}`).join(", ");
+	const rs = await db.execute({
+		sql: `SELECT COUNT(DISTINCT ID_Trabajador) AS n FROM Trabajadores WHERE ID_Trabajador IN (${placeholders});`,
+		args: ids,
+	});
+	const n = Number(rows(rs)[0]?.n ?? 0);
+	return n === ids.length;
+}
+
 export async function getTrabajadores(db: Client): Promise<TrabajadorUI[]> {
 	const rs = await db.execute(`
 		SELECT

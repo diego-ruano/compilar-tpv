@@ -71,6 +71,22 @@ async fn apply_set_asignaciones_core<C: Writer>(
     id_tarea: &str,
     ids_trabajadores: &[String],
 ) -> AppResult<()> {
+    // TAR-03: validar que todos los trabajadores existen antes de asignar. No se delega en la FK a
+    // Trabajadores: en la Main ya abortaría, pero en la nube (DB-03) podría no aplicarse y dejar
+    // asignaciones huérfanas. La lista llega ya normalizada (limpia y sin duplicados), así que su
+    // longitud es el nº de ids distintos que deben existir.
+    if !ids_trabajadores.is_empty() {
+        let placeholders = build_in_placeholders(1, ids_trabajadores.len());
+        let sql = format!(
+            "SELECT COUNT(DISTINCT ID_Trabajador) FROM Trabajadores WHERE ID_Trabajador IN ({placeholders});"
+        );
+        let args: Vec<Value> = ids_trabajadores.iter().map(|s| Value::Text(s.clone())).collect();
+        let encontrados = select_one_i64(conn, &sql, args).await?.unwrap_or(0);
+        if (encontrados as usize) != ids_trabajadores.len() {
+            return Err(AppError::validation("Algún trabajador asignado no existe."));
+        }
+    }
+
     if ids_trabajadores.is_empty() {
         conn.execute(
             "DELETE FROM Tarea_Asignaciones WHERE ID_Tarea = ?1;",

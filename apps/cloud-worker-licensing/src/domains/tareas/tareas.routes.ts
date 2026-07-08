@@ -101,6 +101,11 @@ tareasRoutes.get("/:id", async (c) => {
 tareasRoutes.post("/", async (c) => {
 	const p = await parseBody(c, S.createTareaSchema);
 	if (!p.ok) return p.res;
+	// TAR-03: validar que los trabajadores asignados existen antes de aplicar.
+	const okTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.trabajadoresExisten(db, p.data.ids_trabajadores),
+	);
+	if (!okTrab) return badRequest(c, "trabajador_inexistente");
 	const id = await apply(c, cmd.createTarea(p.data));
 	return c.json({ ok: true, id_tarea: id });
 });
@@ -119,6 +124,11 @@ tareasRoutes.put("/:id/asignaciones", async (c) => {
 	if (id == null) return badRequest(c, "id_tarea invalido");
 	const p = await parseBody(c, S.setAsignacionesTareaSchema);
 	if (!p.ok) return p.res;
+	// TAR-03: validar que los trabajadores asignados existen antes de aplicar.
+	const okTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.trabajadoresExisten(db, p.data.ids_trabajadores),
+	);
+	if (!okTrab) return badRequest(c, "trabajador_inexistente");
 	await apply(c, cmd.setAsignacionesTarea(id, p.data));
 	return c.json({ ok: true });
 });
