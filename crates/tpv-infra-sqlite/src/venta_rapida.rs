@@ -1,7 +1,6 @@
 //! Adaptador SQLite del repositorio de **venta rápida** (barra). Local-First:
 //! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -866,46 +865,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 }
             }
 
-            // Validación de suficiencia (todo-o-nada): un producto controla stock si tiene
-            // lotes; si lo solicitado supera el disponible total, abortamos el cobro.
-            {
-                let mut requested_by_product: BTreeMap<String, f64> = BTreeMap::new();
-                for (_d, p, q) in &charged {
-                    *requested_by_product.entry(p.clone()).or_insert(0.0) += *q;
-                }
-
-                for (producto_id, requested) in &requested_by_product {
-                    let mut rows = db
-                        .query(
-                            r#"
-                            SELECT
-                              COUNT(*),
-                              COALESCE(SUM(CAST(COALESCE(Stock_Disponible,0) AS REAL)), 0)
-                            FROM Lotes_Producto
-                            WHERE ID_Producto = ?1;
-                            "#,
-                            vec![Value::Text(producto_id.clone())],
-                        )
-                        .await
-                        .map_err(db_err)?;
-
-                    let (n_lots, available) = match rows.next().await.map_err(db_err)? {
-                        Some(r) => {
-                            let n = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-                            let a = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-                            (n, a)
-                        }
-                        None => (0, 0.0),
-                    };
-
-                    if n_lots > 0 && *requested > available {
-                        return Err(AppError::conflict(format!(
-                            "insufficient_stock:{}:{}:{}",
-                            producto_id, requested, available
-                        )));
-                    }
-                }
-            }
+            // VR-04: NO se valida suficiencia ni se bloquea el cobro por falta de stock. Los lotes
+            // se consumen FEFO (nunca quedan negativos); lo que no cubran se descuenta del stock
+            // suelto del producto (que SÍ puede quedar negativo, como señal de sobreventa). Un
+            // producto sin lotes y sin stock suelto configurado se vende sin descontar (no
+            // inventariado). El exceso ya no aborta el cobro.
 
             db.execute(
                 r#"
@@ -1020,6 +984,18 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
                     remaining -= take;
                 }
+
+                // VR-04: lo que los lotes no cubrieron se descuenta del stock suelto del producto,
+                // que puede quedar negativo (señal de sobreventa). Solo si el producto usa stock
+                // suelto (Stock_Suelto IS NOT NULL); si no, la venta no descuenta más (no inventariado).
+                if remaining > 0.0 {
+                    db.execute(
+                        "UPDATE Productos SET Stock_Suelto = Stock_Suelto - ?2 WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;",
+                        vec![Value::Text(producto_id.clone()), Value::Real(remaining)],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                }
             }
 
             db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
@@ -1087,39 +1063,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
-            // Validación de suficiencia (todo-o-nada) antes de descontar.
-            for it in lineas.iter() {
-                let mut rows = db
-                    .query(
-                        r#"
-                        SELECT
-                          COUNT(*),
-                          COALESCE(SUM(CAST(COALESCE(Stock_Disponible,0) AS REAL)), 0)
-                        FROM Lotes_Producto
-                        WHERE ID_Producto = ?1;
-                        "#,
-                        vec![Value::Text(it.producto_id.clone())],
-                    )
-                    .await
-                    .map_err(db_err)?;
-
-                let (n_lots, available) = match rows.next().await.map_err(db_err)? {
-                    Some(r) => {
-                        let n = v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0);
-                        let a = v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-                        (n, a)
-                    }
-                    None => (0, 0.0),
-                };
-
-                if n_lots > 0 && it.cantidad > available {
-                    return Err(AppError::conflict(format!(
-                        "insufficient_stock:{}:{}:{}",
-                        it.producto_id, it.cantidad, available
-                    )));
-                }
-            }
-
+            // VR-04: sin validación de suficiencia ni bloqueo (coherente con cobrar_fraccionado).
+            // Se consume FEFO de los lotes (nunca negativos) y el resto va al stock suelto.
             for it in lineas.iter() {
                 let mut remaining = it.cantidad;
 
@@ -1169,6 +1114,17 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     .map_err(db_err)?;
 
                     remaining -= take;
+                }
+
+                // VR-04: sobrante tras los lotes → stock suelto (puede quedar negativo; solo si el
+                // producto lo usa).
+                if remaining > 0.0 {
+                    db.execute(
+                        "UPDATE Productos SET Stock_Suelto = Stock_Suelto - ?2 WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;",
+                        vec![Value::Text(it.producto_id.clone()), Value::Real(remaining)],
+                    )
+                    .await
+                    .map_err(db_err)?;
                 }
             }
 
