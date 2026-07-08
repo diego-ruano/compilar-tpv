@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use libsql::Value;
+use libsql::{Row, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reservas::ReservasRepository;
@@ -48,80 +48,85 @@ async fn select_one_i64<C: Reader>(
     Ok(v_i64(row.get_value(0).map_err(db_err)?))
 }
 
+/// Datos de un cliente existente encontrado en el upsert (para el merge "solo rellenar vacíos").
+struct ClienteExistente {
+    id: String,
+    nombre: Option<String>,
+    email: Option<String>,
+    telefono: Option<String>,
+    notas: Option<String>,
+}
+
+fn cliente_existente(row: &Row) -> AppResult<ClienteExistente> {
+    Ok(ClienteExistente {
+        id: s(row.get_value(0).map_err(db_err)?),
+        nombre: norm_opt_string(row.get_value(1).map_err(db_err)?),
+        email: norm_opt_string(row.get_value(2).map_err(db_err)?),
+        telefono: norm_opt_string(row.get_value(3).map_err(db_err)?),
+        notas: norm_opt_string(row.get_value(4).map_err(db_err)?),
+    })
+}
+
 /// Busca o crea el cliente asociado a la reserva (por email, luego por teléfono).
+///
+/// RES-01: al reusar un cliente existente NO se sobrescriben sus datos; solo se rellenan los
+/// campos que estén vacíos (p. ej. añadir un email que no tenía). Así reservar a nombre de una
+/// persona que comparte teléfono/email con otra ya NO renombra ni corrompe la ficha existente.
 async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<String> {
-    let nombre = c.nombre.clone();
     let email = c.email.clone();
     let telefono = c.telefono.clone();
-    let notas = c.notas.clone();
 
-    let mut existing_id: Option<String> = None;
-    let mut existing_email: Option<String> = None;
+    const COLS: &str = "ID_Cliente, Nombre, Email, Telefono, Notas";
+    let mut existing: Option<ClienteExistente> = None;
 
     if let Some(ref e) = email {
         let mut rows = conn
             .query(
-                "SELECT ID_Cliente, Email FROM Clientes WHERE Email = ?1 ORDER BY ID_Cliente DESC LIMIT 1;",
+                &format!("SELECT {COLS} FROM Clientes WHERE Email = ?1 ORDER BY ID_Cliente DESC LIMIT 1;"),
                 vec![Value::Text(e.clone())],
             )
             .await
             .map_err(db_err)?;
         if let Some(row) = rows.next().await.map_err(db_err)? {
-            existing_id = Some(s(row.get_value(0).map_err(db_err)?));
-            existing_email = norm_opt_string(row.get_value(1).map_err(db_err)?);
+            existing = Some(cliente_existente(&row)?);
         }
     }
 
-    if existing_id.is_none() {
+    if existing.is_none() {
         if let Some(ref t) = telefono {
             let mut rows = conn
                 .query(
-                    "SELECT ID_Cliente, Email FROM Clientes WHERE Telefono = ?1 ORDER BY ID_Cliente DESC LIMIT 1;",
+                    &format!("SELECT {COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY ID_Cliente DESC LIMIT 1;"),
                     vec![Value::Text(t.clone())],
                 )
                 .await
                 .map_err(db_err)?;
             if let Some(row) = rows.next().await.map_err(db_err)? {
-                existing_id = Some(s(row.get_value(0).map_err(db_err)?));
-                existing_email = norm_opt_string(row.get_value(1).map_err(db_err)?);
+                existing = Some(cliente_existente(&row)?);
             }
         }
     }
 
-    if let Some(id_cliente) = existing_id {
-        let should_set_email = email.is_some()
-            && existing_email
-                .as_deref()
-                .map(|s| s.trim().is_empty())
-                .unwrap_or(true);
+    if let Some(ex) = existing {
+        // Merge no destructivo: se conserva todo dato existente con valor; solo se rellenan huecos.
+        let nombre_final = ex.nombre.unwrap_or_else(|| c.nombre.clone());
+        let email_final = ex.email.or(email);
+        let telefono_final = ex.telefono.or(telefono);
+        let notas_final = ex.notas.or_else(|| c.notas.clone());
 
-        if should_set_email {
-            conn.execute(
-                "UPDATE Clientes SET Nombre = ?1, Email = ?2, Telefono = ?3, Notas = ?4 WHERE ID_Cliente = ?5;",
-                vec![
-                    Value::Text(nombre),
-                    opt_text(email),
-                    opt_text(telefono),
-                    opt_text(notas),
-                    Value::Text(id_cliente.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-        } else {
-            conn.execute(
-                "UPDATE Clientes SET Nombre = ?1, Telefono = ?2, Notas = ?3 WHERE ID_Cliente = ?4;",
-                vec![
-                    Value::Text(nombre),
-                    opt_text(telefono),
-                    opt_text(notas),
-                    Value::Text(id_cliente.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
-        }
-        return Ok(id_cliente);
+        conn.execute(
+            "UPDATE Clientes SET Nombre = ?1, Email = ?2, Telefono = ?3, Notas = ?4 WHERE ID_Cliente = ?5;",
+            vec![
+                Value::Text(nombre_final),
+                opt_text(email_final),
+                opt_text(telefono_final),
+                opt_text(notas_final),
+                Value::Text(ex.id.clone()),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
+        return Ok(ex.id);
     }
 
     let id_cliente = new_id();
@@ -129,10 +134,10 @@ async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<St
         "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now','localtime'));",
         vec![
             Value::Text(id_cliente.clone()),
-            Value::Text(nombre),
+            Value::Text(c.nombre.clone()),
             opt_text(telefono),
             opt_text(email),
-            opt_text(notas),
+            opt_text(c.notas.clone()),
         ],
     )
     .await

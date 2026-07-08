@@ -14,7 +14,10 @@ const REF_ID_RESERVA = { $ref: "id_reserva" } as const;
 
 export type ClienteReservaExistente = {
 	id_cliente: string;
+	nombre: string | null;
 	email: string | null;
+	telefono: string | null;
+	notas: string | null;
 } | null;
 
 function cleanOrNull(s: unknown): string | null {
@@ -22,44 +25,32 @@ function cleanOrNull(s: unknown): string | null {
 	return t.length ? t : null;
 }
 
+/** RES-01: conserva el valor existente si lo tiene; solo rellena cuando está vacío. */
+function fillEmpty(existente: unknown, nuevo: unknown): string | null {
+	return cleanOrNull(existente) ?? cleanOrNull(nuevo);
+}
+
 function clienteSteps(input: ReservaSaveInput, cliente: ClienteReservaExistente) {
 	if (cliente?.id_cliente) {
-		const shouldSetEmail = input.email && !cleanOrNull(cliente.email);
+		// Merge no destructivo: NO se sobrescriben datos existentes; solo se rellenan los vacíos.
+		// Los valores se calculan aquí (horneados) para que la escritura sea determinista.
+		const nombre = cleanOrNull(cliente.nombre) ?? input.nombre_cliente;
+		const email = fillEmpty(cliente.email, input.email);
+		const telefono = fillEmpty(cliente.telefono, input.telefono);
+		const notas = fillEmpty(cliente.notas, input.notas_cliente);
 		return [
 			{
 				kind: "execute",
-				sql: shouldSetEmail
-					? `
-						UPDATE Clientes
-						SET
-							Nombre = ?1,
-							Email = ?2,
-							Telefono = ?3,
-							Notas = ?4
-						WHERE ID_Cliente = ?5;
-					`
-					: `
-						UPDATE Clientes
-						SET
-							Nombre = ?1,
-							Telefono = ?2,
-							Notas = ?3
-						WHERE ID_Cliente = ?4;
-					`,
-				args: shouldSetEmail
-					? [
-							input.nombre_cliente,
-							input.email,
-							input.telefono,
-							input.notas_cliente,
-							cliente.id_cliente,
-						]
-					: [
-							input.nombre_cliente,
-							input.telefono,
-							input.notas_cliente,
-							cliente.id_cliente,
-						],
+				sql: `
+					UPDATE Clientes
+					SET
+						Nombre = ?1,
+						Email = ?2,
+						Telefono = ?3,
+						Notas = ?4
+					WHERE ID_Cliente = ?5;
+				`,
+				args: [nombre, email, telefono, notas, cliente.id_cliente],
 			},
 			{
 				kind: "value",

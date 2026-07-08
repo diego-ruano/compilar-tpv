@@ -103,43 +103,45 @@ export async function haySolapeReserva(
 	return rows(rs).length > 0;
 }
 
+export type ClienteExistente = {
+	id_cliente: string;
+	nombre: string | null;
+	email: string | null;
+	telefono: string | null;
+	notas: string | null;
+};
+
+// RES-01: trae TODOS los campos del cliente existente para poder rellenar solo los vacíos
+// (sin sobrescribir datos con valor). Busca por email y, si no, por teléfono.
 export async function findClienteReserva(
 	db: Client,
 	email: string | null,
 	telefono: string | null,
-): Promise<{ id_cliente: string; email: string | null } | null> {
+): Promise<ClienteExistente | null> {
+	const COLS = `
+		ID_Cliente AS id_cliente,
+		Nombre AS nombre,
+		Email AS email,
+		Telefono AS telefono,
+		Notas AS notas
+	`;
+
 	if (email) {
 		const rs = await db.execute({
-			sql: `
-				SELECT
-					ID_Cliente AS id_cliente,
-					Email AS email
-				FROM Clientes
-				WHERE Email = ?1
-				ORDER BY ID_Cliente DESC
-				LIMIT 1;
-			`,
+			sql: `SELECT ${COLS} FROM Clientes WHERE Email = ?1 ORDER BY ID_Cliente DESC LIMIT 1;`,
 			args: [email],
 		});
 		const row = rows(rs)[0];
-		if (row) return row as { id_cliente: string; email: string | null };
+		if (row) return row as ClienteExistente;
 	}
 
 	if (telefono) {
 		const rs = await db.execute({
-			sql: `
-				SELECT
-					ID_Cliente AS id_cliente,
-					Email AS email
-				FROM Clientes
-				WHERE Telefono = ?1
-				ORDER BY ID_Cliente DESC
-				LIMIT 1;
-			`,
+			sql: `SELECT ${COLS} FROM Clientes WHERE Telefono = ?1 ORDER BY ID_Cliente DESC LIMIT 1;`,
 			args: [telefono],
 		});
 		const row = rows(rs)[0];
-		if (row) return row as { id_cliente: string; email: string | null };
+		if (row) return row as ClienteExistente;
 	}
 
 	return null;
