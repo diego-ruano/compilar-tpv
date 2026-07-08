@@ -22,6 +22,21 @@ function rows(rs: any): any[] {
 	});
 }
 
+// TRAB-04: ¿ya existe una asignación del mismo turno para ese trabajador ese día? Espejo de la
+// comprobación del repo local (el área puede diferir; el duplicado es trabajador+fecha+turno).
+export async function existeAsignacionTurno(
+	db: Client,
+	idTrabajador: string,
+	fecha: string,
+	idTurno: string,
+): Promise<boolean> {
+	const rs = await db.execute({
+		sql: "SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3 LIMIT 1;",
+		args: [idTrabajador, fecha, idTurno],
+	});
+	return rows(rs).length > 0;
+}
+
 function ymdToDate(ymd: string): Date {
 	const [y, m, d] = ymd.split("-").map(Number);
 	return new Date(Date.UTC(y, m - 1, d));

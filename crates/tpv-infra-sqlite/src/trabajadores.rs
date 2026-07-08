@@ -557,6 +557,26 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
     async fn create_asignacion(&self, data: AsignacionNueva) -> AppResult<bool> {
         let db = self.db.write().await;
 
+        // TRAB-04: no permitir asignar el mismo turno al mismo trabajador el mismo día dos veces.
+        // (El área puede diferir; el duplicado que se bloquea es trabajador+fecha+turno.) El lock de
+        // escritura serializa el check-then-insert, así que no hace falta transacción explícita.
+        let mut dup = db
+            .query(
+                "SELECT 1 FROM Asignacion_Turnos WHERE ID_Trabajador = ?1 AND Fecha = date(?2) AND ID_Turno = ?3 LIMIT 1;",
+                vec![
+                    Value::Text(data.id_trabajador.clone()),
+                    Value::Text(data.fecha.clone()),
+                    Value::Text(data.id_turno.clone()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        if dup.next().await.map_err(db_err)?.is_some() {
+            return Err(AppError::conflict(
+                "Ese trabajador ya tiene ese turno asignado ese día.",
+            ));
+        }
+
         db.execute(
             r#"
             INSERT INTO Asignacion_Turnos (

@@ -112,6 +112,16 @@ trabajadoresRoutes.put("/:id", async (c) => {
 trabajadoresRoutes.post("/horarios/asignaciones", async (c) => {
 	const p = await parseBody(c, S.asignacionCreateSchema);
 	if (!p.ok) return p.res;
+	// TRAB-04: bloquear el mismo turno para el mismo trabajador y día (aunque cambie el área).
+	const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.existeAsignacionTurno(db, p.data.id_trabajador, p.data.fecha, p.data.id_turno),
+	);
+	if (dup) {
+		return c.json(
+			{ error: "asignacion_duplicada", message: "Ese trabajador ya tiene ese turno asignado ese día." },
+			409,
+		);
+	}
 	const id = await apply(c, cmd.createAsignacion(p.data));
 	return c.json({ ok: true, id_asignacion: id });
 });
