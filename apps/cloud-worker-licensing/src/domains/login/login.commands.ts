@@ -53,10 +53,12 @@ export function completeInitialSetup(input: {
 	};
 }
 
+// TRAB-02: la hora de fichaje la fija SIEMPRE el backend (datetime('now','localtime'), que el DO
+// resuelve a literal al aplicar); nunca la envía el cliente, para que el control horario sea veraz.
+// La fecha viene ya calculada en servidor por la ruta.
 export function punchEntrada(input: {
 	id_usuario: string;
-	fecha: string | null;
-	hora_evento: string | null;
+	fecha: string;
 	parte: number;
 }): BuiltCommand {
 	return {
@@ -68,9 +70,9 @@ export function punchEntrada(input: {
 					INSERT INTO Fichajes (
 						ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
 					)
-					VALUES (?1, COALESCE(?2, date('now','localtime')), ?3, COALESCE(?4, datetime('now','localtime')), NULL, 'ABIERTO', 0);
+					VALUES (?1, ?2, ?3, datetime('now','localtime'), NULL, 'ABIERTO', 0);
 				`,
-				args: [input.id_usuario, input.fecha, input.parte, input.hora_evento],
+				args: [input.id_usuario, input.fecha, input.parte],
 			},
 		},
 		cloudPayload: { ...input, tipo: "entrada" },
@@ -79,8 +81,6 @@ export function punchEntrada(input: {
 
 export function punchSalida(input: {
 	id_usuario: string;
-	fecha: string | null;
-	hora_evento: string | null;
 	id_fichaje: string;
 }): BuiltCommand {
 	return {
@@ -90,14 +90,14 @@ export function punchSalida(input: {
 			payload: {
 				sql: `
 					UPDATE Fichajes
-					SET Hora_Salida = COALESCE(?2, datetime('now','localtime')),
+					SET Hora_Salida = datetime('now','localtime'),
 						Estado = 'CERRADO',
 						Cerrado_Automatico = 0,
 						Cierre_Motivo = NULL,
 						Incidencia = NULL
 					WHERE ID_Fichaje = ?1;
 				`,
-				args: [input.id_fichaje, input.hora_evento],
+				args: [input.id_fichaje],
 			},
 		},
 		cloudPayload: { ...input, tipo: "salida" },

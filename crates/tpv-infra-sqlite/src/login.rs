@@ -315,11 +315,15 @@ async fn exec_punch<C: Writer>(
     conn: &C,
     id_usuario: &str,
     tipo: &str,
-    fecha: Option<String>,
-    hora_evento: Option<String>,
+    _fecha: Option<String>,
+    _hora_evento: Option<String>,
 ) -> AppResult<PunchStatus> {
-    let fecha = fecha.unwrap_or_else(today_ymd);
-    let hora_evento = hora_evento.unwrap_or_else(now_iso);
+    // TRAB-02: el control horario debe ser VERAZ. Se ignora deliberadamente la fecha/hora que
+    // envía el cliente (la Main —o un dispositivo— podría falsearla para backdating/forward-dating)
+    // y se usa SIEMPRE el reloj de confianza del backend. No hay flujo de corrección manual que
+    // preservar; si en el futuro se añade, debe ser una operación admin separada y auditada.
+    let fecha = today_ymd();
+    let hora_evento = now_iso();
 
     conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 

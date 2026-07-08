@@ -189,12 +189,12 @@ loginRoutes.post("/punch", async (c) => {
 	}
 	await tenantQuery(c.env, c.get("tenantId"), (db) => q.throttleReset(db, p.data.id_usuario));
 
-	const fecha =
-		p.data.fecha ||
-		(await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-			const status = await q.punchStatus(db, p.data.id_usuario);
-			return status.fecha;
-		}));
+	// TRAB-02: se IGNORA la fecha/hora que envía el cliente (podría falsear el control horario) y se
+	// usa siempre la del servidor. La fecha del fichaje se calcula aquí en servidor.
+	const fecha = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		const status = await q.punchStatus(db, p.data.id_usuario);
+		return status.fecha;
+	});
 
 	if (p.data.tipo === "entrada") {
 		const parte = await tenantQuery(c.env, c.get("tenantId"), (db) =>
@@ -205,7 +205,6 @@ loginRoutes.post("/punch", async (c) => {
 			cmd.punchEntrada({
 				id_usuario: p.data.id_usuario,
 				fecha,
-				hora_evento: p.data.hora_evento,
 				parte,
 			}),
 		);
@@ -220,8 +219,6 @@ loginRoutes.post("/punch", async (c) => {
 			c,
 			cmd.punchSalida({
 				id_usuario: p.data.id_usuario,
-				fecha,
-				hora_evento: p.data.hora_evento,
 				id_fichaje: String(open.id_fichaje),
 			}),
 		);
