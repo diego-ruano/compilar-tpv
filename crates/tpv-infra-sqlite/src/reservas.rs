@@ -232,10 +232,34 @@ impl ReservasRepository for SqliteReservasRepository {
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
 
         let res: AppResult<bool> = async {
-            let id_cliente = upsert_cliente(conn, &r.cliente).await?;
-
             // UUIDv7 explícito: si no viene id (alta), lo generamos. Upsert por id.
             let id_reserva = r.id.clone().unwrap_or_else(new_id);
+
+            // RES-02: impedir el doble booking del mismo hueco exacto (misma mesa + día + hora).
+            // Solo cuentan las reservas que OCUPAN la mesa (no CANCELADA/NO_SHOW/FINALIZADA). Se
+            // excluye la propia reserva (edición). El FE ya avisa antes con los datos cargados;
+            // esta comprobación es la autoritativa (cubre carreras y escrituras de otros clientes).
+            let solapa = select_one_i64(
+                conn,
+                "SELECT 1 FROM Reservas WHERE ID_Mesa = ?1 AND Dia_YMD = ?2 AND Hora = ?3 \
+                 AND Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA') AND ID_Reserva <> ?4 LIMIT 1;",
+                vec![
+                    Value::Text(r.id_mesa.clone()),
+                    Value::Text(r.dia_ymd.clone()),
+                    Value::Text(r.hora.clone()),
+                    Value::Text(id_reserva.clone()),
+                ],
+            )
+            .await?
+            .is_some();
+            if solapa {
+                return Err(AppError::conflict(
+                    "Ya existe una reserva en esa mesa para ese día y hora.",
+                ));
+            }
+
+            let id_cliente = upsert_cliente(conn, &r.cliente).await?;
+
             let exists = select_one_i64(
                 conn,
                 "SELECT 1 FROM Reservas WHERE ID_Reserva = ?1 LIMIT 1;",

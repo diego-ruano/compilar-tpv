@@ -79,6 +79,30 @@ export async function mes(
 	return rows(rs) as ReservaDto[];
 }
 
+// RES-02: ¿hay ya una reserva que ocupe el mismo hueco exacto (mesa+día+hora)? Excluye la
+// propia reserva (edición) y los estados que no ocupan (cancelada/no-show/finalizada). Espejo
+// de la comprobación autoritativa del repo local.
+export async function haySolapeReserva(
+	db: Client,
+	idMesa: string,
+	diaYmd: string,
+	hora: string,
+	idReservaExcluir: string | null,
+): Promise<boolean> {
+	const rs = await db.execute({
+		sql: `
+			SELECT 1
+			FROM Reservas
+			WHERE ID_Mesa = ?1 AND Dia_YMD = ?2 AND Hora = ?3
+				AND Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA')
+				AND ID_Reserva <> ?4
+			LIMIT 1;
+		`,
+		args: [idMesa, diaYmd, hora, idReservaExcluir ?? ""],
+	});
+	return rows(rs).length > 0;
+}
+
 export async function findClienteReserva(
 	db: Client,
 	email: string | null,

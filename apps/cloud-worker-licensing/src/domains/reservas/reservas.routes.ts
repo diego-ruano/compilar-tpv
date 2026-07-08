@@ -77,6 +77,18 @@ reservasRoutes.get("/mes", async (c) => {
 reservasRoutes.post("/", async (c) => {
 	const p = await parseBody(c, S.reservaSaveSchema);
 	if (!p.ok) return p.res;
+
+	// RES-02: rechazar el doble booking del mismo hueco exacto (mesa+día+hora) antes de aplicar.
+	const solapa = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.haySolapeReserva(db, p.data.id_mesa, p.data.dia_ymd, p.data.hora, p.data.id_reserva ?? null),
+	);
+	if (solapa) {
+		return c.json(
+			{ error: "reserva_solapada", message: "Ya existe una reserva en esa mesa para ese día y hora." },
+			409,
+		);
+	}
+
 	const cliente = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.findClienteReserva(db, p.data.email, p.data.telefono),
 	);

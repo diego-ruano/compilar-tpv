@@ -158,7 +158,7 @@ function estadoBloqueaMesa(estadoRaw: string | null | undefined) {
   const e = String(estadoRaw ?? "ACTIVA").trim().toLowerCase();
   if (e === "finalizada") return false;
   if (e === "cancelada") return false;
-  if (e === "noshow") return false;
+  if (e === "no_show" || e === "noshow") return false;
   return true;
 }
 
@@ -473,24 +473,25 @@ export default function Reservas() {
     if (!form.idMesa) return toast.info("Validación", "Debes seleccionar una mesa.");
 
     const turno: Turno = turnoPorHora(form.hora);
+    const horaSql = normalizarHora(form.hora);
 
+    // RES-02: se bloquea el doble booking del hueco EXACTO (misma mesa + día + hora), no todo el
+    // turno: así una mesa puede reservarse varias veces en el mismo servicio a horas distintas.
     const ocupada = reservasMes.some((r) => {
       if (!estadoBloqueaMesa(r.estado)) return false;
       if (r.diaYMD !== seleccionadoClave) return false;
-      if (r.turno !== turno) return false;
-      if (r.idZona !== form.idZona) return false;
+      if (r.hora !== horaSql) return false;
       if (r.idMesa !== form.idMesa) return false;
       if (reservaEditandoId != null && r.id === reservaEditandoId) return false;
       return true;
     });
 
-    if (ocupada) return toast.error("Error", "Esa mesa ya tiene reserva en ese turno.");
+    if (ocupada) return toast.error("Error", "Esa mesa ya tiene una reserva a esa hora.");
 
     try {
       const nombreTrim = form.nombreCliente.trim();
       const telTrim = form.telefono.trim();
       const notaTrim = form.nota?.trim() || "";
-      const horaSql = normalizarHora(form.hora);
 
       const ok = await saveReserva.mutateAsync({
         idReserva: reservaEditandoId,
