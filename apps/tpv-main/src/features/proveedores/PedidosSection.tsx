@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { ShoppingCart, Plus, ChevronRight } from "lucide-react";
 import { SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
@@ -9,7 +9,7 @@ import type { LineaPedidoInput } from "./pedidosApis";
 import { emailEnviarPedido } from "../configuracion/api/emailConfigApis";
 import type { ProveedorRow } from "./proveedoresApis";
 import {
-  usePedidosAll,
+  usePedidosPage,
   useCrearPedido,
   useActualizarPedido,
   useCancelarPedido,
@@ -83,25 +83,22 @@ export default function PedidosSection({ proveedores }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
   const [isNewPedido, setIsNewPedido] = useState(false);
 
-  const query = usePedidosAll();
+  // Búsqueda server-side con debounce (PROV-03): el texto viaja al backend, no filtra en
+  // cliente (que solo vería la página cargada).
+  const [busquedaDebounced, setBusquedaDebounced] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setBusquedaDebounced(busqueda.trim()), 300);
+    return () => clearTimeout(t);
+  }, [busqueda]);
+
+  const query = usePedidosPage(busquedaDebounced);
   const crearMutation = useCrearPedido();
   const actualizarMutation = useActualizarPedido();
   const cancelarMutation = useCancelarPedido();
   const enviarMutation = useEnviarPedido();
 
-  const pedidos = query.data ?? [];
-
-  const pedidosFiltrados = useMemo(() => {
-    const s = busqueda.trim().toLowerCase();
-    if (!s) return pedidos;
-    return pedidos.filter(
-      (p) =>
-        (p.nombreProveedor ?? "").toLowerCase().includes(s) ||
-        (p.emailDestino ?? "").toLowerCase().includes(s) ||
-        (p.notas ?? "").toLowerCase().includes(s) ||
-        ESTADO_LABEL[p.estado].toLowerCase().includes(s),
-    );
-  }, [pedidos, busqueda]);
+  const pedidos = query.data?.pages.flatMap((p) => p.pedidos) ?? [];
+  const total = query.data?.pages[0]?.total ?? 0;
 
   function abrirNuevoPedido() {
     const p = buildPedidoVacio();
@@ -204,8 +201,7 @@ export default function PedidosSection({ proveedores }: Props) {
             <div className="min-w-0">
               <h2 className="text-xl font-bold text-fg sm:text-2xl">Pedidos</h2>
               <p className="text-sm text-fg-muted">
-                {pedidosFiltrados.length}{" "}
-                {pedidosFiltrados.length === 1 ? "pedido" : "pedidos"}
+                {total} {total === 1 ? "pedido" : "pedidos"}
               </p>
             </div>
           </div>
@@ -234,7 +230,7 @@ export default function PedidosSection({ proveedores }: Props) {
           <div className="flex items-center justify-center py-6">
             <p className="text-sm text-fg-muted">Cargando pedidos…</p>
           </div>
-        ) : pedidosFiltrados.length === 0 ? (
+        ) : pedidos.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-border bg-surface-2 py-8 text-center">
             <ShoppingCart className="size-7 text-fg-subtle" aria-hidden />
             <p className="text-sm font-medium text-fg">Sin pedidos</p>
@@ -246,14 +242,14 @@ export default function PedidosSection({ proveedores }: Props) {
           </div>
         ) : (
           <div className="max-h-90 overflow-y-auto rounded-xl border border-border">
-            {pedidosFiltrados.map((p, i) => (
+            {pedidos.map((p, i) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => abrirPedido(p)}
                 className={cn(
                   "flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition hover:bg-surface-2",
-                  i < pedidosFiltrados.length - 1 && "border-b border-border",
+                  i < pedidos.length - 1 && "border-b border-border",
                 )}
               >
                 <span
@@ -280,6 +276,17 @@ export default function PedidosSection({ proveedores }: Props) {
                 <ChevronRight className="size-4 shrink-0 text-fg-subtle" aria-hidden />
               </button>
             ))}
+
+            {query.hasNextPage && (
+              <button
+                type="button"
+                onClick={() => query.fetchNextPage()}
+                disabled={query.isFetchingNextPage}
+                className="flex w-full cursor-pointer items-center justify-center border-t border-border px-3 py-2.5 text-sm font-medium text-accent transition hover:bg-surface-2 disabled:cursor-default disabled:opacity-60"
+              >
+                {query.isFetchingNextPage ? "Cargando…" : "Cargar más"}
+              </button>
+            )}
           </div>
         )}
       </div>

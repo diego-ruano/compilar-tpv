@@ -92,9 +92,26 @@ function toLineasPayload(lineas: LineaPedidoInput[]) {
 
 /* ── API ── */
 
-export async function pedidosGetAll(): Promise<PedidoRow[]> {
-  const rows = await invokeClient<any[]>("pedidos_proveedor_get_all");
-  return (rows ?? []).map(mapPedido);
+export type PedidosPage = {
+  pedidos: PedidoRow[];
+  total: number;
+};
+
+export async function pedidosGetPage(params: {
+  limit: number;
+  offset: number;
+  search?: string | null;
+}): Promise<PedidosPage> {
+  const res = await invokeClient<any>("pedidos_proveedor_get_page", {
+    args: {
+      limit: params.limit,
+      offset: params.offset,
+      search: params.search ?? null,
+    },
+  });
+  const pedidos = Array.isArray(res?.pedidos) ? res.pedidos.map(mapPedido) : [];
+  const total = Number(res?.total ?? 0);
+  return { pedidos, total };
 }
 
 export async function pedidosCrear(input: PedidoCrearInput): Promise<string> {

@@ -249,6 +249,15 @@ export type PedidosCambiarEstadoInput = { id_pedido: string, estado: string, fec
 
 export type PedidosCrearInput = { id_pedido: string, id_proveedor?: string, email_destino?: string, notas?: string, lineas: Array<LineaPedidoInput>, };
 
+export type PedidosGetPageInput = { limit: number, offset: number, search?: string, };
+
+/**
+ * Página de pedidos (PROV-03): el listado se sirve paginado en vez de cargar todos los
+ * pedidos y toda la tabla de líneas en memoria. `total` es el nº de pedidos que casan con
+ * el filtro (para saber si quedan más páginas).
+ */
+export type PedidosPageDto = { pedidos: Array<PedidoProveedorDto>, total: number, };
+
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
 export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };

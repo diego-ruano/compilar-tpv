@@ -8,7 +8,7 @@ use libsql::{Row, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::pedidos_proveedor::PedidoProveedorRepository;
-use tpv_contracts::pedidos_proveedor::{LineaPedidoDto, PedidoProveedorDto};
+use tpv_contracts::pedidos_proveedor::{LineaPedidoDto, PedidoProveedorDto, PedidosPageDto};
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::db::{Db, Reader, Writer};
@@ -51,18 +51,56 @@ fn map_linea(row: &Row) -> AppResult<(String, LineaPedidoDto)> {
 
 #[async_trait]
 impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
-    async fn get_all(&self) -> AppResult<Vec<PedidoProveedorDto>> {
+    async fn get_page(
+        &self,
+        limit: i64,
+        offset: i64,
+        search: Option<String>,
+    ) -> AppResult<PedidosPageDto> {
         let db = self.db.read().await;
 
-        // 1) Pedidos con nombre de proveedor
-        let sql_pedidos = r#"
-            SELECT p.ID_Pedido, p.ID_Proveedor, pr.Nombre_Empresa,
-                   p.Email_Destino, p.Estado, p.Fecha_Creacion, p.Fecha_Envio, p.Notas
-            FROM Pedidos_Proveedor p
-            LEFT JOIN Proveedores pr ON pr.ID_Proveedor = p.ID_Proveedor
-            ORDER BY p.Fecha_Creacion DESC;
-        "#;
-        let mut rows = db.query(sql_pedidos, ()).await.map_err(db_err)?;
+        // Filtro opcional: LIKE case-insensitive sobre proveedor/email/notas/estado. El mismo
+        // patrón `?1` se reutiliza en los cuatro campos.
+        let mut where_params: Vec<Value> = Vec::new();
+        let where_sql = if let Some(term) = &search {
+            where_params.push(Value::Text(format!("%{term}%")));
+            " WHERE pr.Nombre_Empresa LIKE ?1 OR p.Email_Destino LIKE ?1 \
+              OR p.Notas LIKE ?1 OR p.Estado LIKE ?1"
+                .to_string()
+        } else {
+            String::new()
+        };
+
+        // 1) Total de coincidencias (para paginación en la UI).
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM Pedidos_Proveedor p \
+             LEFT JOIN Proveedores pr ON pr.ID_Proveedor = p.ID_Proveedor{where_sql};"
+        );
+        let mut crows = db.query(&count_sql, where_params.clone()).await.map_err(db_err)?;
+        let total = match crows.next().await.map_err(db_err)? {
+            Some(row) => match row.get_value(0).map_err(db_err)? {
+                Value::Integer(n) => n,
+                _ => 0,
+            },
+            None => 0,
+        };
+
+        // 2) Página de pedidos (LIMIT/OFFSET van tras los parámetros del WHERE).
+        let base = where_params.len();
+        let sql_pedidos = format!(
+            "SELECT p.ID_Pedido, p.ID_Proveedor, pr.Nombre_Empresa, \
+                    p.Email_Destino, p.Estado, p.Fecha_Creacion, p.Fecha_Envio, p.Notas \
+             FROM Pedidos_Proveedor p \
+             LEFT JOIN Proveedores pr ON pr.ID_Proveedor = p.ID_Proveedor{where_sql} \
+             ORDER BY p.Fecha_Creacion DESC LIMIT ?{} OFFSET ?{};",
+            base + 1,
+            base + 2
+        );
+        let mut page_params = where_params;
+        page_params.push(Value::Integer(limit));
+        page_params.push(Value::Integer(offset));
+
+        let mut rows = db.query(&sql_pedidos, page_params).await.map_err(db_err)?;
         let mut pedidos: Vec<PedidoProveedorDto> = Vec::new();
         while let Some(row) = rows.next().await.map_err(db_err)? {
             let g = |idx: i32| row.get_value(idx).map_err(db_err);
@@ -80,16 +118,22 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         }
 
         if pedidos.is_empty() {
-            return Ok(pedidos);
+            return Ok(PedidosPageDto { pedidos, total });
         }
 
-        // 2) Todas las líneas en una sola query
-        let sql_lineas = r#"
-            SELECT ID_Pedido, ID_Linea, Nombre_Producto, Cantidad, Precio_Unitario, Unidad
-            FROM Lineas_Pedido_Proveedor
-            ORDER BY rowid ASC;
-        "#;
-        let mut lrows = db.query(sql_lineas, ()).await.map_err(db_err)?;
+        // 3) Líneas SOLO de los pedidos de esta página (IN con placeholders dinámicos), en vez
+        //    de recorrer toda la tabla Lineas_Pedido_Proveedor.
+        let ids: Vec<String> = pedidos.iter().map(|p| p.id_pedido.clone()).collect();
+        let placeholders = (1..=ids.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql_lineas = format!(
+            "SELECT ID_Pedido, ID_Linea, Nombre_Producto, Cantidad, Precio_Unitario, Unidad \
+             FROM Lineas_Pedido_Proveedor WHERE ID_Pedido IN ({placeholders}) ORDER BY rowid ASC;"
+        );
+        let lparams: Vec<Value> = ids.into_iter().map(Value::Text).collect();
+        let mut lrows = db.query(&sql_lineas, lparams).await.map_err(db_err)?;
         let mut lineas_map: HashMap<String, Vec<LineaPedidoDto>> = HashMap::new();
         while let Some(row) = lrows.next().await.map_err(db_err)? {
             let (id_pedido, linea) = map_linea(&row)?;
@@ -102,7 +146,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
             }
         }
 
-        Ok(pedidos)
+        Ok(PedidosPageDto { pedidos, total })
     }
 
     async fn crear(

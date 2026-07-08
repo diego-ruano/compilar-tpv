@@ -2,14 +2,22 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::pedidos_proveedor::PedidoProveedorDto;
+use tpv_contracts::pedidos_proveedor::PedidosPageDto;
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::error::AppResult;
 
 #[async_trait]
 pub trait PedidoProveedorRepository: Send + Sync {
-    async fn get_all(&self) -> AppResult<Vec<PedidoProveedorDto>>;
+    /// Página de pedidos (PROV-03), ordenada por fecha de creación descendente. `search`
+    /// filtra por proveedor/email/notas/estado (LIKE case-insensitive). Devuelve la página
+    /// y el total de coincidencias.
+    async fn get_page(
+        &self,
+        limit: i64,
+        offset: i64,
+        search: Option<String>,
+    ) -> AppResult<PedidosPageDto>;
     async fn crear(
         &self,
         pedido: PedidoProveedorNuevo,

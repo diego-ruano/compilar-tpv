@@ -4,17 +4,19 @@ use tauri::State;
 
 use tpv_application::use_cases::pedidos_proveedor as uc;
 use tpv_contracts::pedidos_proveedor::{
-    PedidoProveedorDto, PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput,
+    PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput, PedidosGetPageInput,
+    PedidosPageDto,
 };
 
 use crate::AppState;
 
 #[tauri::command]
-pub async fn pedidos_proveedor_get_all(
+pub async fn pedidos_proveedor_get_page(
     state: State<'_, AppState>,
-) -> Result<Vec<PedidoProveedorDto>, String> {
+    args: PedidosGetPageInput,
+) -> Result<PedidosPageDto, String> {
     let repo = state.pedidos_proveedor_repo().await?;
-    uc::get_all(repo.as_ref()).await.map_err(|e| e.to_string())
+    uc::get_page(repo.as_ref(), args).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]

@@ -1347,7 +1347,7 @@ pub fn run() {
             commands::proveedores::proveedores_set_vinculos,
             commands::proveedores::proveedores_create_producto,
             // pedidos a proveedores (Local-First, modo Main)
-            commands::pedidos_proveedor::pedidos_proveedor_get_all,
+            commands::pedidos_proveedor::pedidos_proveedor_get_page,
             commands::pedidos_proveedor::pedidos_proveedor_crear,
             commands::pedidos_proveedor::pedidos_proveedor_actualizar,
             commands::pedidos_proveedor::pedidos_proveedor_cambiar_estado,

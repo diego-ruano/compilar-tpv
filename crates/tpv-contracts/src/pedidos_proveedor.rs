@@ -27,7 +27,28 @@ pub struct PedidoProveedorDto {
     pub lineas: Vec<LineaPedidoDto>,
 }
 
+/// Página de pedidos (PROV-03): el listado se sirve paginado en vez de cargar todos los
+/// pedidos y toda la tabla de líneas en memoria. `total` es el nº de pedidos que casan con
+/// el filtro (para saber si quedan más páginas).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct PedidosPageDto {
+    pub pedidos: Vec<PedidoProveedorDto>,
+    #[ts(type = "number")]
+    pub total: i64,
+}
+
 /* ── Inputs ── */
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct PedidosGetPageInput {
+    pub limit: u32,
+    pub offset: u32,
+    #[serde(default)]
+    #[ts(optional)]
+    pub search: Option<String>,
+}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

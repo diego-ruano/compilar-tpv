@@ -1,15 +1,28 @@
 //! Casos de uso de pedidos a proveedores (Local-First).
 
 use tpv_contracts::pedidos_proveedor::{
-    PedidoProveedorDto, PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput,
+    PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput, PedidosGetPageInput,
+    PedidosPageDto,
 };
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::pedidos_proveedor::PedidoProveedorRepository;
 
-pub async fn get_all(repo: &dyn PedidoProveedorRepository) -> AppResult<Vec<PedidoProveedorDto>> {
-    repo.get_all().await
+/// Tamaño máximo de página admitido (evita que la UI pida cargas gigantes).
+const MAX_LIMIT: u32 = 200;
+
+pub async fn get_page(
+    repo: &dyn PedidoProveedorRepository,
+    input: PedidosGetPageInput,
+) -> AppResult<PedidosPageDto> {
+    let limit = input.limit.clamp(1, MAX_LIMIT) as i64;
+    let offset = input.offset as i64;
+    let search = input
+        .search
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    repo.get_page(limit, offset, search).await
 }
 
 pub async fn crear(
