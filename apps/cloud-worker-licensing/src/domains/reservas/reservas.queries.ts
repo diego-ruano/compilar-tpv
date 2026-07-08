@@ -25,31 +25,18 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 		ORDER BY ID_Zona ASC;
 	`);
 
-	// Espejo del comportamiento local (SqliteReservasRepository::meta):
-	// intenta excluir mesas de sistema; si la columna no existe, trae todas.
-	let mesasRs: any;
-	try {
-		mesasRs = await db.execute(`
-			SELECT
-				ID_Mesa AS id_mesa,
-				ID_Zona AS id_zona,
-				Numero_Mesa AS numero_mesa,
-				Capacidad AS capacidad
-			FROM Mesas
-			WHERE COALESCE(Es_Sistema, 0) = 0
-			ORDER BY ID_Zona ASC, ID_Mesa ASC;
-		`);
-	} catch {
-		mesasRs = await db.execute(`
-			SELECT
-				ID_Mesa AS id_mesa,
-				ID_Zona AS id_zona,
-				Numero_Mesa AS numero_mesa,
-				Capacidad AS capacidad
-			FROM Mesas
-			ORDER BY ID_Zona ASC, ID_Mesa ASC;
-		`);
-	}
+	// RES-06: `Es_Sistema` existe siempre en el esquema (NOT NULL DEFAULT 0); el antiguo
+	// fallback a la query sin filtro era código muerto y se ha eliminado. Espejo del repo local.
+	const mesasRs = await db.execute(`
+		SELECT
+			ID_Mesa AS id_mesa,
+			ID_Zona AS id_zona,
+			Numero_Mesa AS numero_mesa,
+			Capacidad AS capacidad
+		FROM Mesas
+		WHERE COALESCE(Es_Sistema, 0) = 0
+		ORDER BY ID_Zona ASC, ID_Mesa ASC;
+	`);
 
 	return {
 		zonas: rows(zonasRs) as ReservasMetaDto["zonas"],

@@ -160,14 +160,11 @@ impl ReservasRepository for SqliteReservasRepository {
             });
         }
 
-        // Mesas (excluyendo mesas de sistema si la columna existe; si no, todas)
-        let msql_filtered = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas WHERE COALESCE(Es_Sistema, 0) = 0 ORDER BY ID_Zona ASC, ID_Mesa ASC;";
-        let msql_all = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas ORDER BY ID_Zona ASC, ID_Mesa ASC;";
-
-        let mut mrows = match conn.query(msql_filtered, ()).await {
-            Ok(rows) => rows,
-            Err(_) => conn.query(msql_all, ()).await.map_err(db_err)?,
-        };
+        // Mesas, excluyendo las de sistema. RES-06: `Es_Sistema` existe siempre en el esquema
+        // (NOT NULL DEFAULT 0), así que el antiguo fallback a la query sin filtro era código
+        // muerto y se ha eliminado.
+        let msql = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas WHERE COALESCE(Es_Sistema, 0) = 0 ORDER BY ID_Zona ASC, ID_Mesa ASC;";
+        let mut mrows = conn.query(msql, ()).await.map_err(db_err)?;
         let mut mesas: Vec<MesaDto> = Vec::new();
         while let Some(row) = mrows.next().await.map_err(db_err)? {
             mesas.push(MesaDto {
