@@ -60,6 +60,9 @@ pub struct ProductoBaseDto {
     pub ruta_imagen: Option<String>,
     #[serde(rename = "Cantidad_Pedido_Esperada")]
     pub cantidad_pedido_esperada: Option<f64>,
+    /// VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
+    #[serde(rename = "Stock_Suelto")]
+    pub stock_suelto: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -245,6 +248,10 @@ pub struct UpsertProductoInput {
     #[serde(default)]
     #[ts(optional)]
     pub cantidad_pedido_esperada: Option<f64>,
+    /// VR-04: stock suelto fuera de lotes (opcional; None = el producto no lo usa).
+    #[serde(default)]
+    #[ts(optional)]
+    pub stock_suelto: Option<f64>,
     #[serde(default)]
     pub ids_alergenos: Vec<String>,
 }

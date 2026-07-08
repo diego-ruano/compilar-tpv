@@ -74,6 +74,7 @@ pub struct ProductoUpsert {
     pub nombre_imagen: Option<String>,
     pub ruta_imagen: Option<String>,
     pub cantidad_pedido_esperada: Option<f64>,
+    pub stock_suelto: Option<f64>,
     pub ids_alergenos: Vec<String>,
 }
 
@@ -90,6 +91,7 @@ impl ProductoUpsert {
         nombre_imagen: Option<String>,
         ruta_imagen: Option<String>,
         cantidad_pedido_esperada: Option<f64>,
+        stock_suelto: Option<f64>,
         ids_alergenos: Vec<String>,
     ) -> Result<Self, String> {
         let nombre = nombre.trim().to_string();
@@ -111,6 +113,7 @@ impl ProductoUpsert {
             nombre_imagen: limpia(nombre_imagen),
             ruta_imagen: limpia(ruta_imagen),
             cantidad_pedido_esperada,
+            stock_suelto: stock_suelto.filter(|v| v.is_finite()),
             ids_alergenos: normalize_ids(ids_alergenos),
         })
     }

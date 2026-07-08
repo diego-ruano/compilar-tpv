@@ -260,11 +260,23 @@ export type PedidosPageDto = { pedidos: Array<PedidoProveedorDto>, total: number
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
-export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };
+export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+/**
+ * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
+ */
+Stock_Suelto: number | null, };
 
-export type ProductoDetalleDto = { alergs: Array<AlergenoMiniDto>, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };
+export type ProductoDetalleDto = { alergs: Array<AlergenoMiniDto>, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+/**
+ * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
+ */
+Stock_Suelto: number | null, };
 
-export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: string | null, Lote_Proximo: string | null, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, };
+export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: string | null, Lote_Proximo: string | null, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+/**
+ * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
+ */
+Stock_Suelto: number | null, };
 
 export type ProductoProveedorDto = { id_producto: string, id_categoria: string | null, id_proveedor: string | null, nombre: string, precio_venta: number | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
 
@@ -497,7 +509,11 @@ export type UploadInitialSetupArgs = { id_usuario: string, email: string, pin: s
 
 export type UpsertCategoriaInput = { id_categoria?: string, nombre: string, nombre_imagen: string, ruta_imagen: string, vendible: boolean, pasa_cocina: boolean, };
 
-export type UpsertProductoInput = { id_producto?: string, id_categoria: string, id_proveedor?: string, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, ids_alergenos: Array<string>, };
+export type UpsertProductoInput = { id_producto?: string, id_categoria: string, id_proveedor?: string, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, 
+/**
+ * VR-04: stock suelto fuera de lotes (opcional; None = el producto no lo usa).
+ */
+stock_suelto?: number, ids_alergenos: Array<string>, };
 
 export type UpsertProductoResult = { id_producto: string, };
 
