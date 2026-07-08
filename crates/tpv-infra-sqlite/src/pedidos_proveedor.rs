@@ -176,19 +176,28 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
-            conn.execute(
-                r#"UPDATE Pedidos_Proveedor
-                   SET ID_Proveedor = ?1, Email_Destino = ?2, Notas = ?3
-                   WHERE ID_Pedido = ?4 AND Estado = 'borrador';"#,
-                vec![
-                    opt_text(id_proveedor),
-                    opt_text(email_destino),
-                    opt_text(notas),
-                    Value::Text(id.clone()),
-                ],
-            )
-            .await
-            .map_err(db_err)?;
+            // PROV-01: el guard `Estado='borrador'` debe cubrir TODA la operación, no solo el
+            // header. Si el UPDATE no afecta filas, el pedido no existe o ya no es borrador
+            // (enviado/cancelado = inmutable): abortamos sin tocar las líneas y devolvemos un
+            // resultado veraz (Ok(false)) en vez del engañoso Ok(true).
+            let affected = conn
+                .execute(
+                    r#"UPDATE Pedidos_Proveedor
+                       SET ID_Proveedor = ?1, Email_Destino = ?2, Notas = ?3
+                       WHERE ID_Pedido = ?4 AND Estado = 'borrador';"#,
+                    vec![
+                        opt_text(id_proveedor),
+                        opt_text(email_destino),
+                        opt_text(notas),
+                        Value::Text(id.clone()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+
+            if affected == 0 {
+                return Ok(false);
+            }
 
             conn.execute(
                 "DELETE FROM Lineas_Pedido_Proveedor WHERE ID_Pedido = ?1;",
