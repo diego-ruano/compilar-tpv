@@ -244,10 +244,14 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
         estado: &str,
         fecha_envio: Option<String>,
     ) -> AppResult<bool> {
+        // PROV-02: un pedido solo transita desde 'borrador' (a 'enviado' o 'cancelado'). El
+        // guard `AND Estado='borrador'` hace inmutables los pedidos ya enviados/cancelados:
+        // evita re-enviar, re-cancelar o marcar 'enviado' un pedido ya cancelado. Si no hay
+        // fila en 'borrador' con ese id, el UPDATE no afecta nada y se devuelve false.
         let db = self.db.write().await;
         let affected = db
             .execute(
-                "UPDATE Pedidos_Proveedor SET Estado = ?1, Fecha_Envio = ?2 WHERE ID_Pedido = ?3;",
+                "UPDATE Pedidos_Proveedor SET Estado = ?1, Fecha_Envio = ?2 WHERE ID_Pedido = ?3 AND Estado = 'borrador';",
                 vec![
                     Value::Text(estado.to_string()),
                     opt_text(fecha_envio),
