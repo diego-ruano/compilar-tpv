@@ -28,6 +28,21 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
+/// Traduce errores de escritura de proveedor. Las columnas `Email` y `CIF` son `UNIQUE`
+/// (PROV-05): una violación produce un mensaje de motor críptico ("UNIQUE constraint
+/// failed: Proveedores.Email"). Aquí se convierte en un error de validación con mensaje
+/// claro para la UI; el resto se propaga como error de repositorio.
+fn write_err(e: impl std::fmt::Display) -> AppError {
+    let msg = e.to_string();
+    if msg.contains("Proveedores.Email") {
+        AppError::validation("Ya existe un proveedor con ese email.")
+    } else if msg.contains("Proveedores.CIF") {
+        AppError::validation("Ya existe un proveedor con ese CIF.")
+    } else {
+        AppError::repository(msg)
+    }
+}
+
 fn s(v: Value) -> String {
     v_string(v).unwrap_or_default()
 }
@@ -181,7 +196,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                 ],
             )
             .await
-            .map_err(db_err)?;
+            .map_err(write_err)?;
         Ok(true)
     }
 
