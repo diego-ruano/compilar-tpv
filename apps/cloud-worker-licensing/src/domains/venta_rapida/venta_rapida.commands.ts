@@ -361,9 +361,13 @@ export function cobrarFraccionado(
 	for (const a of plan.allocations) {
 		steps.push({
 			kind: "execute",
+			// VR-02: los lotes nunca quedan negativos (clamp a 0 por seguridad ante TOCTOU).
 			sql: `
 				UPDATE Lotes_Producto
-				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
+				SET Stock_Disponible = CASE
+					WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
+					ELSE COALESCE(Stock_Disponible,0) - ?2
+				END
 				WHERE ID_Lote = ?1;
 			`,
 			args: [a.id_lote, a.take],
@@ -379,6 +383,20 @@ export function cobrarFraccionado(
 				args: [a.id_detalle, a.id_lote, a.take],
 			});
 		}
+	}
+
+	// VR-04: lo que los lotes no cubrieron se descuenta del stock suelto (puede quedar negativo;
+	// solo si el producto lo usa).
+	for (const s of plan.suelto) {
+		steps.push({
+			kind: "execute",
+			sql: `
+				UPDATE Productos
+				SET Stock_Suelto = Stock_Suelto - ?2
+				WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;
+			`,
+			args: [s.id_producto, s.take],
+		});
 	}
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });
@@ -417,20 +435,34 @@ export function restarStock(
 	input: RestarStockInput,
 	plan: Extract<RestarStockPlan, { ok: true }>,
 ): BuiltCommand {
-	const steps = plan.allocations.length
-		? plan.allocations.map((a) => ({
-				kind: "execute",
-				sql: `
-					UPDATE Lotes_Producto
-					SET Stock_Disponible = CASE
-						WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
-						ELSE COALESCE(Stock_Disponible,0) - ?2
-					END
-					WHERE ID_Lote = ?1;
-				`,
-				args: [a.id_lote, a.take],
-			}))
-		: [{ kind: "value", saveAs: "ok", sql: "SELECT 1;" }];
+	const steps: any[] = plan.allocations.map((a) => ({
+		kind: "execute",
+		sql: `
+			UPDATE Lotes_Producto
+			SET Stock_Disponible = CASE
+				WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
+				ELSE COALESCE(Stock_Disponible,0) - ?2
+			END
+			WHERE ID_Lote = ?1;
+		`,
+		args: [a.id_lote, a.take],
+	}));
+	// VR-04: sobrante tras los lotes → stock suelto (puede quedar negativo; solo si se usa).
+	for (const s of plan.suelto) {
+		steps.push({
+			kind: "execute",
+			sql: `
+				UPDATE Productos
+				SET Stock_Suelto = Stock_Suelto - ?2
+				WHERE ID_Producto = ?1 AND Stock_Suelto IS NOT NULL;
+			`,
+			args: [s.id_producto, s.take],
+		});
+	}
+	if (steps.length === 0) {
+		// Producto sin lotes ni stock suelto: nada que descontar (transacción no vacía).
+		steps.push({ kind: "value", saveAs: "ok", sql: "SELECT 1;" });
+	}
 	return {
 		commandName: "vr_restar_stock",
 		command: {

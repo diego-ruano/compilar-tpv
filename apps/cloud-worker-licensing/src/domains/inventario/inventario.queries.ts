@@ -32,7 +32,7 @@ function rows(rs: any): any[] {
 }
 
 const PRODUCTO_BASE_COLS =
-	"ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada";
+	"ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto";
 
 export async function listCategorias(db: Client): Promise<CategoriaInvDto[]> {
 	const rs = await db.execute(
@@ -56,11 +56,12 @@ export async function listProductosByCategoria(
 		sql: `
 			SELECT
 				p.ID_Producto, p.ID_Categoria, p.ID_Proveedor, p.Nombre, p.Precio_Venta,
-				(SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) AS Stock_Actual,
+				((SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) + COALESCE(p.Stock_Suelto, 0)) AS Stock_Actual,
 				p.Stock_Minimo, p.Unidad_Medida, p.Nombre_Imagen, p.Ruta_Imagen,
 				(SELECT l.Caducidad FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Caducidad_Proxima,
 				(SELECT l.Codigo_Lote FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Lote_Proximo,
-				p.Cantidad_Pedido_Esperada
+				p.Cantidad_Pedido_Esperada,
+				p.Stock_Suelto
 			FROM Productos p
 			WHERE p.ID_Categoria = ?1
 			ORDER BY p.Nombre ASC;
@@ -110,7 +111,7 @@ export async function resumen(
 			)
 			SELECT
 				p.Nombre,
-				COALESCE(sp.Stock_Actual, 0) AS Stock_Actual,
+				COALESCE(sp.Stock_Actual, 0) + COALESCE(p.Stock_Suelto, 0) AS Stock_Actual,
 				p.Unidad_Medida,
 				f.Caducidad AS Caducidad_Proxima,
 				f.Codigo_Lote AS Lote,

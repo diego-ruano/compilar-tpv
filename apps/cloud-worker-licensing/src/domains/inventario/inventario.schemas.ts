@@ -44,6 +44,7 @@ export const upsertProductoSchema = z.object({
 	nombre_imagen: optStr,
 	ruta_imagen: optStr,
 	cantidad_pedido_esperada: optNum,
+	stock_suelto: optNum,
 	ids_alergenos: idList,
 });
 
@@ -93,6 +94,7 @@ export type UpsertProductoInput = Omit<
 	| "nombre_imagen"
 	| "ruta_imagen"
 	| "cantidad_pedido_esperada"
+	| "stock_suelto"
 > & {
 	id_proveedor?: string | null;
 	precio_venta?: number | null;
@@ -101,6 +103,7 @@ export type UpsertProductoInput = Omit<
 	nombre_imagen?: string | null;
 	ruta_imagen?: string | null;
 	cantidad_pedido_esperada?: number | null;
+	stock_suelto?: number | null;
 };
 
 export type SetAlergenosInput = Omit<SetProductoAlergenosInput, "id_producto">;

@@ -26,7 +26,7 @@ const PRODUCTO_COLS = `
 	p.ID_Proveedor AS id_proveedor,
 	p.Nombre AS nombre,
 	p.Precio_Venta AS precio_venta,
-	(SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) AS stock_actual,
+	((SELECT COALESCE(SUM(l.Stock_Disponible), 0) FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto) + COALESCE(p.Stock_Suelto, 0)) AS stock_actual,
 	p.Stock_Minimo AS stock_minimo,
 	p.Unidad_Medida AS unidad_medida,
 	p.Nombre_Imagen AS nombre_imagen,

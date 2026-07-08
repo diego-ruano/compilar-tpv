@@ -63,7 +63,7 @@ function productosSql(where: string, suffix = "") {
 			p.ID_Categoria AS ID_Categoria,
 			p.Nombre AS Nombre,
 			COALESCE(p.Precio_Venta,0) AS Precio_Venta,
-			COALESCE(v.Stock_Actual,0) AS Stock_Actual,
+			COALESCE(v.Stock_Actual,0) + COALESCE(p.Stock_Suelto,0) AS Stock_Actual,
 			COALESCE(p.Stock_Minimo,0) AS Stock_Minimo,
 			p.Unidad_Medida AS Unidad_Medida,
 			p.Nombre_Imagen AS Nombre_Imagen,
@@ -291,6 +291,9 @@ export type StockAllocation = {
 	id_detalle?: string;
 };
 
+// VR-04: cantidad que, tras agotar los lotes, se descuenta del stock suelto del producto.
+export type SueltoDecrement = { id_producto: string; take: number };
+
 export type CobroPlan =
 	| {
 			ok: true;
@@ -299,6 +302,7 @@ export type CobroPlan =
 			id_usuario_cobrador: string | null;
 			id_trabajador_cobrador: string | null;
 			allocations: StockAllocation[];
+			suelto: SueltoDecrement[];
 		}
 	| {
 			ok: false;
@@ -307,6 +311,44 @@ export type CobroPlan =
 			requested?: number;
 			available?: number;
 		};
+
+// VR-01/02/04: reparto FEFO con estado de lotes EN MEMORIA (se decrementa al asignar), para que
+// varias lineas del mismo producto consuman los lotes en cascada (y no re-lean stock ya asignado,
+// que provocaba sobre-asignacion). Los lotes nunca quedan negativos; lo que no cubran va al stock
+// suelto (que si puede quedar negativo). No bloquea por falta de stock.
+async function buildFefoAllocations(
+	db: Client,
+	items: { id_producto: string; cantidad: number; id_detalle?: string }[],
+): Promise<{ allocations: StockAllocation[]; suelto: SueltoDecrement[] }> {
+	const lotState = new Map<string, { id_lote: string; stock: number }[]>();
+	const getLots = async (pid: string) => {
+		let l = lotState.get(pid);
+		if (!l) {
+			l = (await lotRows(db, pid)).map((x) => ({ id_lote: x.id_lote, stock: x.stock }));
+			lotState.set(pid, l);
+		}
+		return l;
+	};
+
+	const allocations: StockAllocation[] = [];
+	const sueltoMap = new Map<string, number>();
+	for (const it of items) {
+		let remaining = it.cantidad;
+		for (const lot of await getLots(it.id_producto)) {
+			if (remaining <= 0) break;
+			const take = Math.min(remaining, lot.stock);
+			if (take <= 0) continue;
+			allocations.push({ id_lote: lot.id_lote, take, id_detalle: it.id_detalle });
+			lot.stock -= take;
+			remaining -= take;
+		}
+		if (remaining > 0) {
+			sueltoMap.set(it.id_producto, (sueltoMap.get(it.id_producto) ?? 0) + remaining);
+		}
+	}
+	const suelto = Array.from(sueltoMap, ([id_producto, take]) => ({ id_producto, take }));
+	return { allocations, suelto };
+}
 
 async function lotRows(db: Client, productoId: string) {
 	const rs = await db.execute({
@@ -381,43 +423,9 @@ export async function cobrarPlan(
 		}))
 		.filter((r) => r.id_detalle.length > 0 && r.id_producto.length > 0 && r.cantidad > 0);
 
-	const requestedByProduct = new Map<string, number>();
-	for (const c of charged) {
-		requestedByProduct.set(
-			c.id_producto,
-			(requestedByProduct.get(c.id_producto) ?? 0) + c.cantidad,
-		);
-	}
-
-	for (const [productoId, requested] of requestedByProduct) {
-		const lots = await lotRows(db, productoId);
-		const available = lots.reduce((acc, l) => acc + l.stock, 0);
-		if (lots.length > 0 && requested > available) {
-			return {
-				ok: false,
-				error: "insufficient_stock",
-				productoId,
-				requested,
-				available,
-			};
-		}
-	}
-
-	const allocations: StockAllocation[] = [];
-	for (const c of charged) {
-		let remaining = c.cantidad;
-		for (const lot of await lotRows(db, c.id_producto)) {
-			if (remaining <= 0) break;
-			const take = Math.min(remaining, lot.stock);
-			if (take <= 0) continue;
-			allocations.push({
-				id_lote: lot.id_lote,
-				take,
-				id_detalle: c.id_detalle,
-			});
-			remaining -= take;
-		}
-	}
+	// VR-01/02/04: sin bloqueo por falta de stock. Reparto FEFO (lotes nunca negativos) y el
+	// sobrante al stock suelto.
+	const { allocations, suelto } = await buildFefoAllocations(db, charged);
 
 	const idUsuario = input.id_usuario_cobrador;
 	const idTrabFromUser = await resolveTrabajadorId(db, idUsuario);
@@ -435,11 +443,12 @@ export async function cobrarPlan(
 		id_trabajador_cobrador:
 			input.id_trabajador_cobrador ?? idTrabFromUser ?? idTrabComanda,
 		allocations,
+		suelto,
 	};
 }
 
 export type RestarStockPlan =
-	| { ok: true; allocations: StockAllocation[] }
+	| { ok: true; allocations: StockAllocation[]; suelto: SueltoDecrement[] }
 	| {
 			ok: false;
 			error: string;
@@ -452,32 +461,12 @@ export async function restarStockPlan(
 	db: Client,
 	input: RestarStockInput,
 ): Promise<RestarStockPlan> {
-	for (const it of input.lineas) {
-		const lots = await lotRows(db, it.producto_id);
-		const available = lots.reduce((acc, l) => acc + l.stock, 0);
-		if (lots.length > 0 && it.cantidad > available) {
-			return {
-				ok: false,
-				error: "insufficient_stock",
-				productoId: it.producto_id,
-				requested: it.cantidad,
-				available,
-			};
-		}
-	}
-
-	const allocations: StockAllocation[] = [];
-	for (const it of input.lineas) {
-		let remaining = it.cantidad;
-		for (const lot of await lotRows(db, it.producto_id)) {
-			if (remaining <= 0) break;
-			const take = Math.min(remaining, lot.stock);
-			if (take <= 0) continue;
-			allocations.push({ id_lote: lot.id_lote, take });
-			remaining -= take;
-		}
-	}
-	return { ok: true, allocations };
+	// VR-01/02/04: sin bloqueo; FEFO (lotes nunca negativos) + sobrante al stock suelto.
+	const { allocations, suelto } = await buildFefoAllocations(
+		db,
+		input.lineas.map((it) => ({ id_producto: it.producto_id, cantidad: it.cantidad })),
+	);
+	return { ok: true, allocations, suelto };
 }
 
 export async function hasPaidLines(db: Client, idComanda: string): Promise<boolean> {
