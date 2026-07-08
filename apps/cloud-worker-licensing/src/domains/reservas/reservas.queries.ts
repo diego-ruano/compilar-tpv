@@ -81,9 +81,9 @@ export async function mes(
 				M.Capacidad AS capacidad,
 				Z.Nombre_Zona AS nombre_zona
 			FROM Reservas R
-			JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
-			JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
-			JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
+			LEFT JOIN Clientes C ON C.ID_Cliente = R.ID_Cliente
+			LEFT JOIN Mesas M ON M.ID_Mesa = R.ID_Mesa
+			LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
 			WHERE R.Dia_YMD >= ?1 AND R.Dia_YMD <= ?2
 			ORDER BY R.Dia_YMD ASC, R.Hora ASC, R.ID_Reserva ASC;
 		`,
