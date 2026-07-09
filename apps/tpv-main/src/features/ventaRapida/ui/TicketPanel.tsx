@@ -288,7 +288,6 @@ export default function TicketPanel({
                             const tieneNota = Boolean(notas);
                             const lineaGuardada = Number(t.detalleId) > 0;
                             const disabledLine = t.pagado;
-                            const categoriaLabel = String(t.categoriaNombre ?? "").trim();
 
                             return (
                               <div
@@ -347,14 +346,6 @@ export default function TicketPanel({
                                     <p className="text-xs text-fg-subtle">
                                       {t.pagado ? "Cobrado" : "Pendiente"}
                                     </p>
-
-                                    <div className="mt-1 flex items-center gap-2">
-                                      <span className="rounded-full border border-border/70 bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-fg-subtle">
-                                        {categoriaLabel
-                                          ? ` ${categoriaLabel}`
-                                          : "Sin categoría"}
-                                      </span>
-                                    </div>
 
                                     {tieneNota ? (
                                       <p className="mt-1 flex items-center gap-1 truncate text-xs text-fg-muted">
