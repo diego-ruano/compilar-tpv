@@ -6,7 +6,6 @@
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
-| STAT-03 | 🟡 | Horas infravaloradas por fichajes abiertos: **TRAB-01 ya implementado** (auto-cierre de jornadas colgadas al arrancar). Queda **desbloqueado**: revisar que `stats` trate bien las jornadas auto-cerradas (`Cerrado_Automatico=1`, sin `Hora_Salida`) al sumar horas. | [estadisticas.md](dominios/estadisticas.md) |
 | TRAB-03 | 🟡 | **PII sensible (DNI, IBAN, Nº Seg. Social) en claro y replicada a la nube (Turso).** Cifrado a nivel de campo y/o minimizar la replicación (¿la nube/Handy necesita esos datos?). Tarea de arquitectura/GDPR transversal (cruce con DB-04). Diferida a pase dedicado. | [trabajadores.md](dominios/trabajadores.md) |
 | STAT-06 | 🔵 | Paridad Main↔Handy: la lógica ya se igualó a mano; falta el **harness de tests de contrato** (infra de tests). | [estadisticas.md](dominios/estadisticas.md) |
 | INV-06 | 🔵 | Reconciliación de stock: la tabla `Movimientos_Stock` es su cimiento, pero la fórmula depende de **VR-06** (modelo de consumo, venta-rápida) y de decisiones de producto (dónde corre, qué alerta). | [inventario.md](dominios/inventario.md) |
@@ -84,3 +83,24 @@ refactor.
   en `email.routes.ts` por el binding/servicio de Cloudflare (gateado por env), sin tocar el resto
   del flujo (la Main/Handy siguen llamando a `POST /v1/email/enviar-pedido`).
   Ref.: [Cloudflare Email Service — Pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
+
+---
+
+## Deuda de arquitectura transversal (T5) — refactor gradual post-lanzamiento
+
+> **Decisión (responsable):** de momento se deja **como está**. Aunque no sea la forma óptima, el
+> producto funciona y converge (la lógica duplicada se igualó a mano y está verificada). Se irá
+> cambiando **poco a poco, sin prisa**, una vez el producto esté lanzado y estable. Fichas:
+> [arquitectura-general.md](transversal/arquitectura-general.md) y §[Unificación de la doble
+> implementación](#unificación-de-la-doble-implementación-mainworker) (arriba).
+
+| ID | Sev | Qué falta | Cuándo |
+|----|-----|-----------|--------|
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker) de la lógica de escritura. Mitigada a mano; falta el **harness de tests de contrato** (SQL golden) y, a medio plazo, una única fuente de generación de sentencias. Es el paraguas de todos los `-parity` (MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-02 | 🟡 | **Errores estructurados** en la frontera: hoy `AppError`→`String`. Pasar a un DTO `{ kind, code, message }` (ts-rs) para que el FE ramifique por tipo/código en vez de string-matching. El worker debe devolver la misma forma. | **Al pasar al worker de pago** (junto con el resto de la infra) |
+| ARCH-05 | 🔵 | **Catálogo de códigos de error** estable y compartido (Rust/worker/FE); retirar `AppError::Raw`. Es la misma pieza que ARCH-02. | Con ARCH-02 |
+| ARCH-03 | 🟡 | **Tipos del worker** (zod `*.schemas.ts`) desde fuente única ts-rs. Patrón ya probado en el repo: **drift-guard de tipos** como en OBS-05 (`SpoolEvent`→`telemetry.ts` + guard en `telemetry.routes.ts`), replicado por dominio. | Refactor gradual post-lanzamiento |
+
+> **ARCH-04** (invalidación selectiva de React Query) y **ARCH-06** (deriva de documentación
+> `schema.sql`) **ya están resueltos** (= SYNC-06 y DB-10 respectivamente); no van al backlog.
+> **ARCH-07** son aciertos a mantener (hexagonal, ts-rs, Local-First, React Query), no un pendiente.
