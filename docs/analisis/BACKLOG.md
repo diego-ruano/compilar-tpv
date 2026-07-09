@@ -104,3 +104,21 @@ refactor.
 > **ARCH-04** (invalidación selectiva de React Query) y **ARCH-06** (deriva de documentación
 > `schema.sql`) **ya están resueltos** (= SYNC-06 y DB-10 respectivamente); no van al backlog.
 > **ARCH-07** son aciertos a mantener (hexagonal, ts-rs, Local-First, React Query), no un pendiente.
+
+---
+
+## Licenciamiento (T3) — revisar al fijar el modelo de precios
+
+> **Decisión (responsable):** de momento se deja **como está**. El endurecimiento del licenciamiento
+> se abordará **más adelante, cuando se decida el modelo de precios** (planes, activación, etc.), ya
+> que el diseño concreto depende de eso. Ficha: [licensing-pairing.md](transversal/licensing-pairing.md).
+
+| ID | Sev | Qué falta | Notas |
+|----|-----|-----------|-------|
+| LIC-01 | 🟡 | La respuesta de licencia **no se verifica criptográficamente** (`call_status`, `lib.rs:217`): solo se confía en TLS. Un usuario con proxy local + CA propia podría forzar `allowed=true` y saltarse el gate. **Arreglo:** el servidor **firma** el estado de licencia (ed25519) y el cliente lo verifica contra una **clave pública pineada** en el binario. | Mayor retorno de seguridad; el gate sigue en cliente (evadible en última instancia), pero eleva mucho la barrera. |
+| LIC-02 | 🟡 | Sin **certificate pinning** del host de la API (habilita el MITM de LIC-01). En pairing el impacto es bajo (handshake ed25519 + JWT firmado). | Opcional si se implementa LIC-01 (la firma pineada es más robusta que el pinning de transporte). |
+| LIC-06 | 🔵 | `LICENSE_API_BASE` y `TPV_SERVER_BASE` son **dos constantes al mismo host** (`lib.rs:37-38`, legacy de la fusión de workers). | Limpieza; unificar en una sola constante. |
+
+> **LIC-03** verificado como **no explotable** en pairing (todos los caminos firmados validan `ts` a
+> 2 min; `fetch-token` con nonce de un solo uso). **LIC-05** (SMTP al keyring) quedó **moot**: DB-04
+> eliminó el SMTP propio (correo por worker). **LIC-04** es documentar el modelo de amenaza del gate.
