@@ -19,7 +19,7 @@ ingresos** (heredan las inconsistencias del modelo de cobro) y de **rendimiento*
 |----|-----|--------|--------|-----------|
 | STAT-01 | 🟡 | ✅ | Ingresos: solo cuenta comandas **totalmente pagadas**, imputadas al último pago → parciales/partidos mal fechados o excluidos | `stats.rs:223-247` |
 | STAT-02 | 🟡 | ✅ | Ingresos desde importes de **detalle**, no de `Pagos.Importe_Total` → diverge de caja si se editó el pago o se usó `cerrar_comanda` | `stats.rs:228` |
-| STAT-03 | 🟡 | ⛔ | Horas de personal dependen de fichajes **cerrados**; los abiertos colgados (TRAB-01) infravaloran | stats trabajadores |
+| STAT-03 | 🟡 | ✅ | Horas de personal dependen de fichajes **cerrados**; los abiertos colgados (TRAB-01) infravaloran | stats trabajadores |
 | STAT-04 | 🟡 | ✅ | Consultas pesadas (CTEs + `NOT EXISTS` correlacionados) sin límite → rendimiento en históricos grandes | `stats.rs:211-251` |
 | STAT-05 | 🔵 | ✅ | Checks defensivos `table_has_column`/`table_exists` (legacy) añaden queries sobre esquema fijo | `stats.rs:42-71` |
 | STAT-06 | 🔵 | 🟡 | Doble implementación Rust/worker (KPIs deben coincidir Main↔Handy) | `stats.rs` ↔ `stats.*.ts` |
@@ -35,8 +35,19 @@ ingresos** (heredan las inconsistencias del modelo de cobro) y de **rendimiento*
 > del tablero de mesas en todas las consultas. Con esto Main↔Handy quedan alineados para `mesas`
 > (STAT-06 baja a 🟡: falta el harness de tests de contrato). Se retiraron los checks defensivos
 > `table_has_column`/`table_exists` y el código muerto de columnas `Hora_Entrada_2/Salida_2`
-> inexistentes (STAT-05). **STAT-03 sigue ⛔ bloqueado por TRAB-01** (cierre automático de fichajes),
-> que es de otro dominio.
+> inexistentes (STAT-05).
+>
+> **Resolución STAT-03 (2026-07-09).** TRAB-01 auto-cierra las jornadas colgadas marcándolas
+> `Cerrado_Automatico=1` **sin inventar `Hora_Salida`** (queda NULL), así que en la query de horas
+> caían en el `ELSE 0` y **seguían infravalorando**. Ahora la query de horas
+> (`stats.rs`, cálculo de `horas_trabajadas`) imputa una **jornada estándar fija** a esos tramos:
+> `WHEN Hora_Entrada IS NOT NULL AND Hora_Salida IS NULL AND Cerrado_Automatico=1 THEN
+> HORAS_JORNADA_SIN_SALIDA (=8 h)`. La jornada **en curso** del día (Estado `ABIERTO`,
+> `Cerrado_Automatico=0`) NO entra: cuenta cuando se ficha la salida real. La constante
+> `HORAS_JORNADA_SIN_SALIDA` centraliza el valor para revisarlo en el futuro (p. ej. estimarlo desde
+> el turno programado). **Nota de paridad:** el `trabajadores` del worker (Handy) es hoy un *stub*
+> que devuelve `horas_trabajadas=0` para todos, así que no hay query de horas que espejar; el cálculo
+> real solo vive en la Main.
 
 ---
 
@@ -61,10 +72,14 @@ ingresos** (heredan las inconsistencias del modelo de cobro) y de **rendimiento*
 - **Arreglo:** unificar la fuente de verdad de ingresos (recomendado: `Pagos`), coherente con caja.
   Cruce con CUENTA-02 y MESA-05.
 
-### STAT-03 🟡 Horas infravaloradas por fichajes abiertos
+### STAT-03 🟡 Horas infravaloradas por fichajes abiertos — ✅ CORREGIDO
 - Las horas de personal se calculan de `Fichajes` cerrados (Hora_Salida). Los fichajes que quedan
   ABIERTOS por falta de cierre automático (**TRAB-01**) no suman → horas por debajo de lo real.
-- **Arreglo:** resolver TRAB-01 (cierre automático) primero. Cruce con [trabajadores.md](trabajadores.md).
+- **Arreglo aplicado:** TRAB-01 ya auto-cierra las jornadas colgadas (`Cerrado_Automatico=1`, sin
+  inventar salida). La query de horas de `stats.rs` imputa ahora una jornada estándar fija
+  (`HORAS_JORNADA_SIN_SALIDA = 8 h`) a los tramos `Cerrado_Automatico=1` con `Hora_Salida` NULL, en
+  vez de 0; la jornada en curso del día no se ve afectada. Decisión de negocio revisable (la
+  constante centraliza el valor). Ver [trabajadores.md](trabajadores.md) TRAB-01.
 
 ### STAT-04 🟡 Rendimiento de las agregaciones
 - **Ubicación:** múltiples CTEs con `NOT EXISTS` correlacionados por comanda y `GROUP BY` amplios,

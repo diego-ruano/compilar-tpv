@@ -25,6 +25,12 @@ use tpv_contracts::stats::{
 
 use crate::mapping::{v_f64, v_i64, v_string};
 
+/// STAT-03: horas que se imputan a una jornada **auto-cerrada** por olvido de fichar la salida
+/// (TRAB-01 la marca `Cerrado_Automatico=1` con `Hora_Salida` NULL). Sin esto, esas jornadas
+/// sumaban 0 h e infravaloraban las horas del trabajador. Se opta por una jornada estándar fija
+/// (decisión de negocio, revisable en el futuro) en vez de estimarla desde el turno programado.
+const HORAS_JORNADA_SIN_SALIDA: f64 = 8.0;
+
 pub struct SqliteStatsRepository {
     db: Arc<Db>,
 }
@@ -1080,6 +1086,15 @@ impl SqliteStatsRepository {
                        AND {ent1_dt} >= rng.start_dt
                        AND {ent1_dt} <  rng.end_dt
                       THEN max(0, (julianday({sal1_dt}) - julianday({ent1_dt})) * 24.0)
+                      -- STAT-03: jornada auto-cerrada por olvido de fichar la salida (TRAB-01):
+                      -- se imputa una jornada estándar fija en vez de 0. La jornada EN CURSO del
+                      -- día (Estado 'ABIERTO', Cerrado_Automatico=0) NO entra aquí: cuenta cuando
+                      -- se ficha la salida real.
+                      WHEN f.Hora_Entrada IS NOT NULL AND f.Hora_Salida IS NULL
+                       AND f.Cerrado_Automatico = 1
+                       AND {ent1_dt} >= rng.start_dt
+                       AND {ent1_dt} <  rng.end_dt
+                      THEN {horas_sin_salida}
                       ELSE 0
                     END
                   ),0),2) AS horas
@@ -1092,7 +1107,8 @@ impl SqliteStatsRepository {
                 start = start_expr,
                 end = end_expr,
                 ent1_dt = ent1_dt,
-                sal1_dt = sal1_dt
+                sal1_dt = sal1_dt,
+                horas_sin_salida = HORAS_JORNADA_SIN_SALIDA
             );
 
             let mut rows_h = db.query(&sql_horas, ()).await.map_err(|e| e.to_string())?;
