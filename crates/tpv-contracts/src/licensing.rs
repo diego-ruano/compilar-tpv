@@ -102,22 +102,16 @@ pub struct HandyWsAuth {
    Args / Inputs
 ========================================================= */
 
+/// Datos del formulario de activación. `activation_key` y `business_name` son los únicos
+/// obligatorios; el resto son datos de contacto del negocio.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LicenseActivateInput {
     pub activation_key: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub restaurant_name: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub business_name: Option<String>,
+    pub business_name: String,
     #[serde(default)]
     #[ts(optional)]
     pub legal_name: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub display_name: Option<String>,
     #[serde(default)]
     #[ts(optional)]
     pub email: Option<String>,

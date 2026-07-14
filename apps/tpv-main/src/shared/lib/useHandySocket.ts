@@ -15,11 +15,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { useMainPresence } from "../stores/useMainPresence";
-import { cloudPost } from "./cloudApi";
+import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
 import { queryClient } from "./queryClient";
 import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
 
-const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 // SYNC-09: backoff exponencial con tope + jitter (se resetea al autenticarse).
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;

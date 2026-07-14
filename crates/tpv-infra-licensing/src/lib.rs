@@ -1,11 +1,14 @@
 //! # tpv-infra-licensing
 //!
-//! Adaptador de **licenciamiento e identidad de dispositivo**. Reúne la lógica de bajo nivel
-//! que vivía en `licensing.rs` y `pairing.rs`: clave ed25519 (keyring), firma de cabeceras,
-//! fichero `license_state.json` y llamadas HTTP (reqwest) a los workers de licencias y de
-//! tpv-server. Implementa los puertos `LicensingService` / `PairingService` de
-//! `tpv-application`. NO depende de Tauri: el directorio de datos (AppData) lo inyecta el
-//! comando al construir el adaptador.
+//! Adaptador de **licenciamiento e identidad de dispositivo**: clave ed25519 (keyring), firma
+//! de cabeceras, fichero `license_state.json` y llamadas HTTP (reqwest) al worker `tpv-api`.
+//! Implementa los puertos `LicensingService` / `PairingService` de `tpv-application`.
+//!
+//! Aquí **no se decide nada**: la política del gate (qué licencia vale, cuánta gracia offline
+//! hay, cuándo se descarta el estado local) vive en `tpv_domain::licensing` y la orquesta
+//! `tpv_application::use_cases::licensing`. Este adaptador trae los datos y ejecuta la acción.
+//!
+//! NO depende de Tauri: el directorio de datos (AppData) lo inyecta el comando al construirlo.
 
 pub mod device;
 
@@ -23,8 +26,10 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
-    LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
+    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
+};
+use tpv_domain::licensing::{
+    Concesion, EstadoServidor, FalloConsulta, RespuestaEstado, SolicitudActivacion,
 };
 
 use device::{
@@ -32,14 +37,12 @@ use device::{
     sign_payload_b64,
 };
 
-// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`).
-// Sirve licencia (/v1/license/*), pairing (/v1/pair/*), revoke, WS y el DO TenantHub.
-const LICENSE_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
-const TPV_SERVER_BASE: &str = "https://tpv-api.altarialights.workers.dev";
+/// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`): sirve
+/// licencia (`/v1/license/*`), pairing (`/v1/pair/*`), revoke, imágenes, WS y el DO TenantHub.
+/// Es el **único** host de la nube: `tpv-infra-http` lo reexporta para el resto del backend.
+pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 
-const OFFLINE_GRACE_MS: i64 = 48 * 60 * 60 * 1000;
 const HTTP_TIMEOUT_SECS: u64 = 20;
-const CLOCK_ROLLBACK_TOLERANCE_MS: i64 = 2 * 60 * 1000;
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -51,17 +54,6 @@ fn now_ms() -> i64 {
 
 fn ext(e: impl std::fmt::Display) -> AppError {
     AppError::external(e.to_string())
-}
-
-fn clean_opt(input: Option<String>) -> Option<String> {
-    input.and_then(|s| {
-        let t = s.trim().to_string();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t)
-        }
-    })
 }
 
 /* ===== Estado local (license_state.json) ===== */
@@ -90,7 +82,7 @@ fn delete_state(dir: &Path) -> AppResult<()> {
     Ok(())
 }
 
-/* ===== HTTP / validación ===== */
+/* ===== HTTP ===== */
 
 fn http_client() -> AppResult<Client> {
     Client::builder()
@@ -99,23 +91,11 @@ fn http_client() -> AppResult<Client> {
         .map_err(|e| ext(format!("Error creando HTTP client: {e}")))
 }
 
-fn server_allows_use(state: &StatusState) -> bool {
-    if state.disabled {
-        return false;
-    }
-    state.status.trim().eq_ignore_ascii_case("active")
+fn api_url(path: &str) -> String {
+    format!("{}{}", CLOUD_API_BASE.trim_end_matches('/'), path)
 }
 
-fn grace_ok(st: &LicenseLocalState) -> Result<bool, String> {
-    let base = st.last_check_ok_ms.unwrap_or(st.activated_at_ms);
-    let now = now_ms();
-    if now + CLOCK_ROLLBACK_TOLERANCE_MS < base {
-        return Err("clock_rollback_detected".into());
-    }
-    Ok(now.saturating_sub(base) <= OFFLINE_GRACE_MS)
-}
-
-/* ===== Tipos API (internos del adaptador) ===== */
+/* ===== Tipos de la API de licencias (internos del adaptador) ===== */
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,18 +117,20 @@ struct ActivateErr {
     details: Option<JsonValue>,
 }
 
+/// Datos del negocio que acompañan a la activación. El worker los espera en camelCase y bajo
+/// el nombre `displayName` (contrato actual del endpoint).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct TenantInfo {
-    display_name: String,
+struct TenantInfo<'a> {
+    display_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    legal_name: Option<String>,
+    legal_name: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    email: Option<String>,
+    email: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    phone: Option<String>,
+    phone: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    country: Option<String>,
+    country: Option<&'a str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,7 +141,7 @@ struct ActivateReq<'a> {
     device_pub_key: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     instance_name: Option<&'a str>,
-    tenant_info: TenantInfo,
+    tenant_info: TenantInfo<'a>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,37 +171,6 @@ struct StatusState {
     created_at_ms: i64,
 }
 
-async fn call_status(st: &LicenseLocalState) -> Result<StatusOk, (u16, String)> {
-    let client = http_client().map_err(|e| (0u16, e.to_string()))?;
-    let url = format!("{}/v1/license/status", LICENSE_API_BASE.trim_end_matches('/'));
-    let ts = now_ms();
-
-    let (sk, _) = get_or_create_device_keypair(&st.device_id).map_err(|e| (0u16, e))?;
-    let sig = sign_device_proof(&sk, ts, "GET", "/v1/license/status", &st.token)
-        .map_err(|e| (0u16, e))?;
-
-    let resp = client
-        .get(url)
-        .bearer_auth(&st.token)
-        .header("X-Device-Ts", ts.to_string())
-        .header("X-Device-Sig", sig)
-        .send()
-        .await
-        .map_err(|e| (0u16, format!("offline: {e}")))?;
-
-    let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
-
-    if !status.is_success() {
-        return Err((status.as_u16(), text));
-    }
-
-    let ok: StatusOk = serde_json::from_str(&text)
-        .map_err(|e| (status.as_u16(), format!("invalid_json: {e} | body={text}")))?;
-
-    Ok(ok)
-}
-
 /* =========================================================
    LicensingAdapter
 ========================================================= */
@@ -232,140 +183,43 @@ impl LicensingAdapter {
     pub fn new(app_data_dir: PathBuf) -> Self {
         Self { app_data_dir }
     }
-
-    async fn gate_inner(&self, force_network: bool) -> AppResult<LicenseGateResult> {
-        let dir = &self.app_data_dir;
-
-        let mut st = match load_state(dir) {
-            Some(s) => s,
-            None => {
-                return Ok(LicenseGateResult {
-                    allowed: false,
-                    reason: "needs_activation".into(),
-                    state: None,
-                })
-            }
-        };
-
-        st.last_check_attempt_ms = Some(now_ms());
-
-        match call_status(&st).await {
-            Ok(sok) => {
-                st.status = Some(sok.state.status.clone());
-                st.expires_at = sok.state.expires_at.clone();
-                st.last_server_time_ms = Some(sok.server_time_ms);
-                st.last_check_ok_ms = Some(now_ms());
-
-                save_state(dir, &st)?;
-
-                if !sok.ok || !server_allows_use(&sok.state) {
-                    delete_state(dir)?;
-                    return Ok(LicenseGateResult {
-                        allowed: false,
-                        reason: "invalid".into(),
-                        state: None,
-                    });
-                }
-
-                Ok(LicenseGateResult {
-                    allowed: true,
-                    reason: "ok".into(),
-                    state: Some(st),
-                })
-            }
-            Err((code, body)) => {
-                if code == 0 || (500..=599).contains(&code) {
-                    save_state(dir, &st)?;
-                    match grace_ok(&st) {
-                        Ok(true) => Ok(LicenseGateResult {
-                            allowed: true,
-                            reason: "offline_grace".into(),
-                            state: Some(st),
-                        }),
-                        Ok(false) => Ok(LicenseGateResult {
-                            allowed: false,
-                            reason: "offline_expired".into(),
-                            state: Some(st),
-                        }),
-                        Err(r) => Ok(LicenseGateResult {
-                            allowed: false,
-                            reason: r,
-                            state: Some(st),
-                        }),
-                    }
-                } else if (400..=499).contains(&code) {
-                    delete_state(dir)?;
-                    Ok(LicenseGateResult {
-                        allowed: false,
-                        reason: format!("invalid_http_{code}"),
-                        state: None,
-                    })
-                } else {
-                    if !force_network {
-                        save_state(dir, &st)?;
-                        if grace_ok(&st).unwrap_or(false) {
-                            return Ok(LicenseGateResult {
-                                allowed: true,
-                                reason: "offline_grace".into(),
-                                state: Some(st),
-                            });
-                        }
-                    }
-                    Err(AppError::external(format!(
-                        "status_failed_http_{}: {}",
-                        code, body
-                    )))
-                }
-            }
-        }
-    }
 }
 
 #[async_trait]
 impl LicensingService for LicensingAdapter {
-    fn get_state(&self) -> AppResult<Option<LicenseLocalState>> {
+    fn load_state(&self) -> AppResult<Option<LicenseLocalState>> {
         Ok(load_state(&self.app_data_dir))
     }
 
-    fn clear_state(&self) -> AppResult<()> {
+    fn save_state(&self, state: &LicenseLocalState) -> AppResult<()> {
+        save_state(&self.app_data_dir, state)
+    }
+
+    fn delete_state(&self) -> AppResult<()> {
         delete_state(&self.app_data_dir)
     }
 
-    async fn activate(&self, input: LicenseActivateInput) -> AppResult<LicenseLocalState> {
-        let activation_key = input.activation_key.trim().to_string();
-
-        let final_display_name = clean_opt(input.display_name)
-            .or_else(|| clean_opt(input.restaurant_name))
-            .or_else(|| clean_opt(input.business_name))
-            .ok_or_else(|| {
-                AppError::validation("display_name/restaurant_name/business_name requerido")
-            })?;
-
-        let dir = &self.app_data_dir;
-
+    async fn activar_remoto(&self, solicitud: &SolicitudActivacion) -> AppResult<Concesion> {
         let device_id = get_or_create_device_id().map_err(ext)?;
         let (_sk, pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
 
-        let client = http_client()?;
-        let url = format!("{}/v1/license/activate", LICENSE_API_BASE.trim_end_matches('/'));
-
         let req = ActivateReq {
-            activation_key: &activation_key,
+            activation_key: &solicitud.clave,
             device_id: &device_id,
             device_pub_key: &pub_b64,
             instance_name: None,
             tenant_info: TenantInfo {
-                display_name: final_display_name,
-                legal_name: clean_opt(input.legal_name),
-                email: clean_opt(input.email),
-                phone: clean_opt(input.phone),
-                country: clean_opt(input.country),
+                display_name: &solicitud.business_name,
+                legal_name: solicitud.legal_name.as_deref(),
+                email: solicitud.email.as_deref(),
+                phone: solicitud.phone.as_deref(),
+                country: solicitud.country.as_deref(),
             },
         };
 
-        let resp = client
-            .post(url)
-            .header("content-type", "application/json")
+        let resp = http_client()?
+            .post(api_url("/v1/license/activate"))
+            .header(CONTENT_TYPE, "application/json")
             .json(&req)
             .send()
             .await
@@ -396,38 +250,81 @@ impl LicensingService for LicensingAdapter {
 
         if !ok.ok || ok.token.trim().is_empty() || ok.tenant_id.trim().is_empty() {
             return Err(AppError::external(format!(
-                "Respuesta inesperada del servidor: {}",
-                text
+                "Respuesta inesperada del servidor: {text}"
             )));
         }
 
-        if let Some(server_device) = ok.device_id.as_ref() {
-            let s = server_device.trim();
-            if !s.is_empty() && s != device_id {
+        // Anti-copia: el token concedido va ligado a la clave de ESTE dispositivo. Si el
+        // servidor nos devuelve otro `deviceId`, la firma de las siguientes peticiones no
+        // cuadraría: mejor fallar aquí que arrastrar un estado inservible.
+        if let Some(server_device) = ok.device_id.as_deref().map(str::trim) {
+            if !server_device.is_empty() && server_device != device_id {
                 return Err(AppError::external(
                     "deviceId mismatch (server devolvió otro deviceId)",
                 ));
             }
         }
 
-        let local = LicenseLocalState {
+        Ok(Concesion {
             tenant_id: ok.tenant_id.trim().to_string(),
-            device_id: device_id.clone(),
+            device_id,
             token: ok.token.trim().to_string(),
-            status: Some(ok.status),
+            status: ok.status,
             expires_at: ok.expires_at,
-            last_server_time_ms: None,
-            last_check_ok_ms: None,
-            last_check_attempt_ms: None,
-            activated_at_ms: now_ms(),
-        };
-
-        save_state(dir, &local)?;
-        Ok(local)
+        })
     }
 
-    async fn gate(&self, force_network: bool) -> AppResult<LicenseGateResult> {
-        self.gate_inner(force_network).await
+    async fn consultar_estado(
+        &self,
+        state: &LicenseLocalState,
+    ) -> Result<RespuestaEstado, FalloConsulta> {
+        const PATH: &str = "/v1/license/status";
+
+        // Un fallo local (keyring, firma, construcción del cliente) es indistinguible de no
+        // tener red desde el punto de vista del gate: en ambos casos no sabemos qué dice el
+        // servidor, así que se trata como `Inalcanzable` y decide la gracia offline.
+        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
+        let ts = now_ms();
+
+        let (sk, _) = get_or_create_device_keypair(&state.device_id)
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+        let sig = sign_device_proof(&sk, ts, "GET", PATH, &state.token)
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let resp = client
+            .get(api_url(PATH))
+            .bearer_auth(&state.token)
+            .header("X-Device-Ts", ts.to_string())
+            .header("X-Device-Sig", sig)
+            .send()
+            .await
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let http = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        if (400..=499).contains(&http) {
+            return Err(FalloConsulta::Rechazada { http });
+        }
+        if (500..=599).contains(&http) {
+            return Err(FalloConsulta::Inalcanzable);
+        }
+
+        let ok: StatusOk =
+            serde_json::from_str(&text).map_err(|e| FalloConsulta::Ilegible {
+                http,
+                detalle: format!("invalid_json: {e} | body={text}"),
+            })?;
+
+        Ok(RespuestaEstado {
+            ok: ok.ok,
+            estado: EstadoServidor {
+                status: ok.state.status,
+                expires_at: ok.state.expires_at,
+                disabled: ok.state.disabled,
+            },
+            server_time_ms: ok.server_time_ms,
+        })
     }
 }
 
@@ -538,7 +435,7 @@ impl PairingService for PairingAdapter {
         path: &str,
         body: JsonValue,
     ) -> AppResult<JsonValue> {
-        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let url = api_url(path);
 
         let client = Client::builder()
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
@@ -629,7 +526,7 @@ impl PairingService for PairingAdapter {
         // PUT firmado (device-proof sobre el path canónico, sin query). El tenant lo deriva el
         // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
         // escritura directa a R2 (no pasa por el hub).
-        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let url = api_url(path);
         let signed = self.signed_headers_inner(mode, "PUT", path)?;
         let client = http_client()?;
 
@@ -662,7 +559,7 @@ impl PairingService for PairingAdapter {
     }
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
-        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let url = api_url(path);
         let signed = self.signed_headers_inner(mode, "DELETE", path)?;
         let client = http_client()?;
 
@@ -691,7 +588,7 @@ impl PairingService for PairingAdapter {
         // la Main no necesita conocerlo; `rel_path` viaja en el cuerpo (no entra en la firma, que
         // es sobre método+path). 404 → None (el binario aún no está en R2).
         let path = "/v1/images/download";
-        let url = format!("{}{}", TPV_SERVER_BASE, path);
+        let url = api_url(path);
         let signed = self.signed_headers_inner(mode, "POST", path)?;
         let client = http_client()?;
 

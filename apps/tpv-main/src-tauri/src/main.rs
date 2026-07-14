@@ -1396,7 +1396,6 @@ pub fn run() {
             commands::licensing::license_check_now,
             // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
             commands::pairing::tpv_server_signed_headers,
-            commands::pairing::license_read_state_for_ui,
             commands::pairing::handy_set_token,
             commands::pairing::handy_clear_token,
             commands::pairing::handy_get_tenant,

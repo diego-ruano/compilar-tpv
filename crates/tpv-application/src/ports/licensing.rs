@@ -7,24 +7,37 @@
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
+use tpv_domain::licensing::{Concesion, FalloConsulta, RespuestaEstado, SolicitudActivacion};
+
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseActivateInput,
-    LicenseGateResult, LicenseLocalState, PairCreateResult, SigB64,
+    ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
 };
 
 use crate::error::AppResult;
 
-/// Servicio de licenciamiento (activación + verificación + estado local).
+/// Servicio de licenciamiento: **transporte y almacén**, sin política.
+///
+/// El adaptador solo trae datos del servidor y lee/escribe `license_state.json`. Quién
+/// puede usar el TPV lo decide el dominio (`tpv_domain::licensing`) y lo orquesta el caso
+/// de uso `use_cases::licensing::gate`.
 #[async_trait]
 pub trait LicensingService: Send + Sync {
-    /// Estado local de licencia (lee `license_state.json`).
-    fn get_state(&self) -> AppResult<Option<LicenseLocalState>>;
-    /// Borra el estado local de licencia.
-    fn clear_state(&self) -> AppResult<()>;
-    /// Activa la licencia contra el worker y persiste el estado.
-    async fn activate(&self, input: LicenseActivateInput) -> AppResult<LicenseLocalState>;
-    /// Verifica la licencia (gate). `force_network` fuerza la comprobación online.
-    async fn gate(&self, force_network: bool) -> AppResult<LicenseGateResult>;
+    /// Lee el estado local. `None` si este dispositivo no tiene licencia activada.
+    fn load_state(&self) -> AppResult<Option<LicenseLocalState>>;
+    /// Persiste el estado local.
+    fn save_state(&self, state: &LicenseLocalState) -> AppResult<()>;
+    /// Borra el estado local.
+    fn delete_state(&self) -> AppResult<()>;
+
+    /// Canjea la clave de activación en el servidor. No persiste nada: devuelve lo concedido.
+    async fn activar_remoto(&self, solicitud: &SolicitudActivacion) -> AppResult<Concesion>;
+
+    /// Consulta el estado de la licencia (petición firmada con la clave del dispositivo).
+    /// El `Err` está clasificado para que el dominio sepa qué significa el fallo.
+    async fn consultar_estado(
+        &self,
+        state: &LicenseLocalState,
+    ) -> Result<RespuestaEstado, FalloConsulta>;
 }
 
 /// Servicio de identidad de dispositivo / pairing (claves, firma, handy token, tpv-server).

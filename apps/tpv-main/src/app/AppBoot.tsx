@@ -1,7 +1,8 @@
 // src/AppBoot.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { RouterProvider } from "react-router-dom";
+import { invokeClient } from "@tpv/client";
+import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
 import {
     ArrowRight,
     Building2,
@@ -64,33 +65,6 @@ function parsePairUri(
         return null;
     }
 }
-
-type LicenseLocalState = {
-    tenantId?: string;
-    tenant_id?: string;
-    deviceId?: string;
-    device_id?: string;
-    token: string;
-    status?: string | null;
-    expiresAt?: string | null;
-    expires_at?: string | null;
-    lastServerTimeMs?: number | null;
-    last_server_time_ms?: number | null;
-
-    lastCheckOkMs?: number | null;
-    last_check_ok_ms?: number | null;
-    lastCheckAttemptMs?: number | null;
-    last_check_attempt_ms?: number | null;
-
-    activatedAtMs?: number;
-    activated_at_ms?: number;
-};
-
-type GateResult = {
-    allowed: boolean;
-    reason: string;
-    state: LicenseLocalState | null;
-};
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -224,12 +198,12 @@ export default function AppBoot({ router }: { router: any }) {
     const [lic, setLic] = useState<LicenseLocalState | null | "loading">(
         "loading",
     );
-    const [gate, setGate] = useState<GateResult | "loading">("loading");
+    const [gate, setGate] = useState<LicenseGateResult | "loading">("loading");
 
     const [act, setAct] = useState({
         licenseKey: "",
         legal_name: "",
-        display_name: "",
+        business_name: "",
         email: "",
         phone: "",
         country: "",
@@ -239,7 +213,7 @@ export default function AppBoot({ router }: { router: any }) {
         return (
             act.licenseKey.trim().length > 0 &&
             act.legal_name.trim().length > 0 &&
-            act.display_name.trim().length > 0 &&
+            act.business_name.trim().length > 0 &&
             act.email.trim().length > 0 &&
             act.phone.trim().length > 0 &&
             act.country.trim().length > 0
@@ -290,7 +264,7 @@ export default function AppBoot({ router }: { router: any }) {
     }, []);
 
     async function handyGetIdentity(): Promise<HandyIdentity> {
-        const r = (await invoke("device_get_identity")) as any;
+        const r = (await invokeClient("device_get_identity")) as any;
 
         console.log("device_get_identity raw:", r);
 
@@ -315,7 +289,7 @@ export default function AppBoot({ router }: { router: any }) {
     }
 
     async function handySignB64(payload: string): Promise<string> {
-        const r = (await invoke("device_sign_b64", {
+        const r = (await invokeClient("device_sign_b64", {
             args: {
                 payload,
             },
@@ -332,7 +306,7 @@ export default function AppBoot({ router }: { router: any }) {
 
     async function loadExistingHandyPair() {
         try {
-            const tenantIdRaw = (await invoke("handy_get_tenant")) as string | null;
+            const tenantIdRaw = await invokeClient<string | null>("handy_get_tenant");
             const tenantId = String(tenantIdRaw || "").trim();
 
             if (!tenantId) {
@@ -419,7 +393,7 @@ export default function AppBoot({ router }: { router: any }) {
                         throw new Error("bad_pair_token_response");
                     }
 
-                    await invoke("handy_set_token", {
+                    await invokeClient("handy_set_token", {
                         args: {
                             token,
                             tenant_id: tenantId,
@@ -457,7 +431,7 @@ export default function AppBoot({ router }: { router: any }) {
     useEffect(() => {
         (async () => {
             try {
-                const rawMode = await invoke("get_device_mode");
+                const rawMode = await invokeClient("get_device_mode");
                 setMode(isDeviceMode(rawMode) ? rawMode : null);
             } catch (e: any) {
                 setErr(String(e));
@@ -488,8 +462,8 @@ export default function AppBoot({ router }: { router: any }) {
     // no hay nada o si está offline (se reintentará por el WebSocket cuando haya conexión).
     useEffect(() => {
         if (mode !== "tpv") return;
-        void invoke("images_backfill")
-            .then(() => invoke("images_drain_pending"))
+        void invokeClient("images_backfill")
+            .then(() => invokeClient("images_drain_pending"))
             .catch((e: unknown) => {
                 console.warn("[AppBoot] images_drain_pending falló:", e);
             });
@@ -506,9 +480,9 @@ export default function AppBoot({ router }: { router: any }) {
 
     async function refreshLicense() {
         try {
-            const st = (await invoke(
+            const st = await invokeClient<LicenseLocalState | null>(
                 "license_get_state",
-            )) as LicenseLocalState | null;
+            );
             setLic(st);
         } catch {
             setLic(null);
@@ -523,9 +497,9 @@ export default function AppBoot({ router }: { router: any }) {
         try {
             setGate("loading");
 
-            const r = (await invoke(
+            const r = await invokeClient<LicenseGateResult>(
                 forceNow ? "license_check_now" : "license_gate",
-            )) as GateResult;
+            );
 
             setGate(r);
             setLic(r.state);
@@ -555,10 +529,10 @@ export default function AppBoot({ router }: { router: any }) {
 
         const everyMs = 6 * 60 * 60 * 1000;
         const id = window.setInterval(() => {
-            invoke("license_check_now")
-                .then((r: any) => {
+            invokeClient<LicenseGateResult>("license_check_now")
+                .then((r) => {
                     setGate(r);
-                    setLic(r?.state ?? null);
+                    setLic(r.state);
                 })
                 .catch(() => {
                     // noop
@@ -573,10 +547,10 @@ export default function AppBoot({ router }: { router: any }) {
         setErr(null);
 
         try {
-            await invoke("set_device_mode", { args: { mode: m } });
+            await invokeClient("set_device_mode", { args: { mode: m } });
 
             if (m === "tpv") {
-                await invoke("init_main");
+                await invokeClient("init_main");
             }
 
             setMode(m);
@@ -598,13 +572,11 @@ export default function AppBoot({ router }: { router: any }) {
         setErr(null);
 
         try {
-            await invoke("license_activate", {
+            await invokeClient<LicenseLocalState>("license_activate", {
                 args: {
                     activation_key: act.licenseKey,
-                    restaurant_name: act.display_name,
-                    business_name: act.display_name,
+                    business_name: act.business_name,
                     legal_name: act.legal_name,
-                    display_name: act.display_name,
                     email: act.email,
                     phone: act.phone,
                     country: act.country,
@@ -628,7 +600,7 @@ export default function AppBoot({ router }: { router: any }) {
             // Reversibilidad real: persiste mode=None, suelta los backends y, si veníamos de
             // Handy, desvincula el token. Tras esto, al reiniciar la app vuelve a salir el
             // selector de modo (no solo es un cambio visual).
-            await invoke("device_reset_mode");
+            await invokeClient("device_reset_mode");
             setMode(null);
         } catch (e: any) {
             setErr(String(e));
@@ -1284,18 +1256,18 @@ export default function AppBoot({ router }: { router: any }) {
 
                                                 <div>
                                                     <label
-                                                        htmlFor="activation-display-name"
+                                                        htmlFor="activation-business-name"
                                                         className="text-sm font-semibold text-fg"
                                                     >
                                                         Nombre del negocio
                                                     </label>
                                                     <Input
-                                                        id="activation-display-name"
-                                                        value={act.display_name}
+                                                        id="activation-business-name"
+                                                        value={act.business_name}
                                                         onChange={(e) =>
                                                             setAct((s) => ({
                                                                 ...s,
-                                                                display_name: e.target.value,
+                                                                business_name: e.target.value,
                                                             }))
                                                         }
                                                         className="mt-2 h-12 px-4"
@@ -1396,7 +1368,7 @@ export default function AppBoot({ router }: { router: any }) {
                                                         setAct({
                                                             licenseKey: "",
                                                             legal_name: "",
-                                                            display_name: "",
+                                                            business_name: "",
                                                             email: "",
                                                             phone: "",
                                                             country: "",
@@ -1432,7 +1404,7 @@ export default function AppBoot({ router }: { router: any }) {
                             reason={gate.reason}
                             onRetry={() => refreshGate(true)}
                             onClear={() => {
-                                invoke("license_clear_state")
+                                invokeClient("license_clear_state")
                                     .catch((e: unknown) => setErr(String(e)))
                                     .finally(() => {
                                         void refreshLicense().finally(() => refreshGate(false));

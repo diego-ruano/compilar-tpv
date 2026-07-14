@@ -9,14 +9,13 @@ use serde_json::Value as JsonValue;
 use tauri::{AppHandle, Manager};
 
 use tpv_application::use_cases::cloud_sync as uc_sync;
-use tpv_application::use_cases::licensing as uc_lic;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
-    LicenseLocalState, PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
+    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
     UploadInitialSetupArgs,
 };
-use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
+use tpv_infra_licensing::PairingAdapter;
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -92,11 +91,4 @@ pub async fn config_upload_initial_setup(
 ) -> Result<String, String> {
     uc_sync::upload_initial_setup(&svc(&app)?, args).await?;
     Ok("OK".into())
-}
-
-/// Lectura del estado de licencia para la UI (mismo dato que `license_get_state`).
-#[tauri::command]
-pub fn license_read_state_for_ui(app: AppHandle) -> Result<Option<LicenseLocalState>, String> {
-    let dir = app_data_dir(&app)?;
-    Ok(uc_lic::get_state(&LicensingAdapter::new(dir))?)
 }

@@ -23,8 +23,9 @@ use tpv_application::ports::licensing::PairingService;
 use tpv_contracts::licensing::ApiSignedHeaders;
 use tpv_infra_licensing::PairingAdapter;
 
-/// Host por defecto del worker unificado `tpv-api` (el mismo que usan licensing/pairing).
-pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
+/// Host del worker unificado `tpv-api`. La constante vive en `tpv-infra-licensing` (la crate
+/// que también firma las peticiones); aquí solo se reexporta para no duplicar el literal.
+pub use tpv_infra_licensing::CLOUD_API_BASE;
 
 const HTTP_TIMEOUT_SECS: u64 = 20;
 

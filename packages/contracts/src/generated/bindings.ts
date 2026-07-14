@@ -143,7 +143,11 @@ export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumen
 
 export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: string, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
 
-export type LicenseActivateInput = { activation_key: string, restaurant_name?: string, business_name?: string, legal_name?: string, display_name?: string, email?: string, phone?: string, country?: string, };
+/**
+ * Datos del formulario de activación. `activation_key` y `business_name` son los únicos
+ * obligatorios; el resto son datos de contacto del negocio.
+ */
+export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, email?: string, phone?: string, country?: string, };
 
 export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, };
 

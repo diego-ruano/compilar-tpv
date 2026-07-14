@@ -17,15 +17,16 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import type { LicenseLocalState } from "@tpv/contracts";
+
 import { useConnectionMode } from "../stores/useConnectionMode";
 import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
-import { cloudPost } from "./cloudApi";
+import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
 import { queryClient } from "./queryClient";
 import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
 import { captureException } from "../observability/sentry";
 
-const WS_URL = "wss://tpv-api.altarialights.workers.dev/ws";
 // SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
 // prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se resetea al autenticarse.
 const RECONNECT_BASE_MS = 3000;
@@ -57,11 +58,12 @@ function toChange(m: any): ChangeArg | null {
 	return { op_id: opId, seq, statements };
 }
 
+// El token de licencia es también la credencial de la nube: sin él no hay WebSocket.
 async function loadLicense(): Promise<{ token: string; tenantId: string } | null> {
 	try {
-		const st = (await invoke<any>("license_read_state_for_ui")) as any;
+		const st = await invoke<LicenseLocalState | null>("license_get_state");
 		const token = String(st?.token ?? "");
-		const tenantId = String(st?.tenant_id ?? st?.tenantId ?? "");
+		const tenantId = String(st?.tenant_id ?? "");
 		if (!token || !tenantId) return null;
 		return { token, tenantId };
 	} catch {
