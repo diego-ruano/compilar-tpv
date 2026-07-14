@@ -4,9 +4,9 @@
 // "SMTP propio del negocio"): tanto la Main como la Handy llaman POST /v1/email/enviar-pedido con
 // JWT de tenant y el worker es quien envía. En offline no se puede enviar (hace falta el worker).
 //
-// Backend de envío: el objetivo es Cloudflare Email Service; hasta que esté contratado, el envío
-// operativo usa Resend (abajo). Al provisionarlo, se sustituye la llamada de `fetch` a Resend por
-// el binding/servicio de Cloudflare (gate por env) sin tocar el resto del flujo.
+// Backend de envío: Cloudflare Email Service, vía el binding `EMAIL` (send_email en wrangler.json).
+// El remitente (`from`) sale de las vars EMAIL_FROM_ADDRESS/EMAIL_FROM_NAME y su dominio debe estar
+// dado de alta en Email Sending (SPF+DKIM). No se usan claves de API: el binding autentica solo.
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -46,28 +46,23 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 	const html = buildHtml(nombre_proveedor, notas ?? null, lineas);
 	const text = buildText(nombre_proveedor, notas ?? null, lineas);
 
-	const from = c.env.RESEND_FROM_ADDRESS;
-	if (!from) return c.json({ error: "missing_env_RESEND_FROM_ADDRESS" }, 500);
+	const fromAddress = c.env.EMAIL_FROM_ADDRESS;
+	if (!fromAddress) return c.json({ error: "missing_env_EMAIL_FROM_ADDRESS" }, 500);
+	const from: EmailAddress = { email: fromAddress, name: c.env.EMAIL_FROM_NAME || "TPV" };
 
-	const res = await fetch("https://api.resend.com/emails", {
-		method: "POST",
-		headers: {
-			"Content-Type": "application/json",
-			Authorization: `Bearer ${c.env.RESEND_API_KEY}`,
-		},
-		body: JSON.stringify({
+	try {
+		await c.env.EMAIL.send({
 			from,
-			to: [email_destino],
+			to: email_destino,
 			subject: `Pedido a ${nombre_proveedor}`,
 			html,
 			text,
-		}),
-	});
-
-	if (!res.ok) {
-		const detail = await res.text().catch(() => "");
-		console.error("[email] Resend error:", detail);
-		return c.json({ error: "email_send_failed" }, 500);
+		});
+	} catch (err) {
+		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
+		const e = err as { code?: string; message?: string };
+		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
+		return c.json({ error: "email_send_failed", code: e.code ?? null }, 500);
 	}
 
 	return c.json({ ok: true });

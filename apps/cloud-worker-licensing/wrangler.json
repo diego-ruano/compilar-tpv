@@ -32,6 +32,11 @@
 			}
 		]
 	},
+	"send_email": [
+		{
+			"name": "EMAIL"
+		}
+	],
 	"r2_buckets": [
 		{
 			"binding": "IMAGES",
@@ -45,6 +50,8 @@
 	],
 	"vars": {
 		"TURSO_DATABASE_URL": "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io",
-		"TURSO_ORG_SLUG": "altarialights"
+		"TURSO_ORG_SLUG": "altarialights",
+		"EMAIL_FROM_ADDRESS": "pedidos@altarialights.com",
+		"EMAIL_FROM_NAME": "TPV"
 	}
 }

@@ -3,8 +3,8 @@ import React from "react";
 import { Panel } from "../ui/Panel";
 
 // Ya no hay configuración de correo (DB-04): todo el envío lo gestiona nuestro servicio a través
-// del worker (Cloudflare Email Service / Resend). No hay SMTP propio ni credenciales que
-// configurar, así que esta sección es solo informativa.
+// del worker (Cloudflare Email Service). No hay SMTP propio ni credenciales que configurar, así
+// que esta sección es solo informativa.
 export function EmailConfig(_props: { darkMode: boolean }) {
   return (
     <div className="flex flex-col gap-4">

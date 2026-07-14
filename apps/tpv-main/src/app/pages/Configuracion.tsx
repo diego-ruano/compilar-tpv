@@ -141,7 +141,7 @@ export default function Configuracion() {
             key: "EMAIL_CONFIG",
             title: "Correos automatizados",
             desc: "Envío de pedidos a proveedores",
-            keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "resend"],
+            keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "cloudflare"],
         },
     ], []);
 

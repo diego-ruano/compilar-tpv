@@ -41,13 +41,15 @@ export interface Env {
 	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el token.
 	IMAGES: R2Bucket;
 
-	// Resend API key para envío de correos gestionados (modo "nuestro servicio").
-	// Configura con: wrangler secret put RESEND_API_KEY
-	RESEND_API_KEY: string;
+	// Cloudflare Email Service: binding de envío de correo (send_email en wrangler.json).
+	// No lleva claves: el binding autentica solo. El dominio del remitente debe estar dado de
+	// alta en Email Sending (SPF+DKIM) — ver `wrangler email sending enable <dominio>`.
+	EMAIL: SendEmail;
 
-	// Dirección de origen para correos gestionados (dominio verificado en Resend).
-	// Ejemplo: "TPV <pedidos@altarialights.com>"
-	RESEND_FROM_ADDRESS: string;
+	// Remitente de los correos gestionados. El dominio de EMAIL_FROM_ADDRESS debe estar onboarded
+	// en Email Sending. Ejemplos: EMAIL_FROM_ADDRESS="pedidos@altarialights.com", EMAIL_FROM_NAME="TPV".
+	EMAIL_FROM_ADDRESS: string;
+	EMAIL_FROM_NAME?: string;
 
 	// Token admin para publicar/retirar releases del feed de auto-actualización
 	// (POST /v1/update/publish y /deactivate). Si NO está configurado, la publicación

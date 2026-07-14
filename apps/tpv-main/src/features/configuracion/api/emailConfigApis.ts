@@ -1,8 +1,8 @@
 import { invokeClient } from "@tpv/client";
 
-// El envío de correo lo hace SIEMPRE el worker (Cloudflare Email Service / Resend). Ya no hay
-// configuración SMTP local ni credenciales del negocio (DB-04): solo se construye el pedido y se
-// manda. En offline no se puede enviar (hace falta el worker).
+// El envío de correo lo hace SIEMPRE el worker (Cloudflare Email Service). Ya no hay configuración
+// SMTP local ni credenciales del negocio (DB-04): solo se construye el pedido y se manda. En
+// offline no se puede enviar (hace falta el worker).
 
 export type LineaEmailInput = {
   nombre_producto: string;

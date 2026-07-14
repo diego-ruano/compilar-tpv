@@ -1,7 +1,7 @@
 //! Comando Tauri para el envío de pedidos por correo.
 //!
 //! Todo el correo se envía SIEMPRE a través del worker (`/v1/email/enviar-pedido`), que es quien
-//! usa el servicio de envío (Cloudflare Email Service / Resend). La Main (y la Handy) solo
+//! usa el servicio de envío (Cloudflare Email Service). La Main (y la Handy) solo
 //! construyen la petición y la mandan al worker. Consecuencias de diseño (DB-04):
 //!   · No hay "SMTP propio del negocio": se retiró el modo SMTP y la tabla `Email_Settings`, así
 //!     que ya NO se guarda ninguna credencial SMTP en la BD ni se replica a la nube.
