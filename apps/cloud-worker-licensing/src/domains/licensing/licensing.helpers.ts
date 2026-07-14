@@ -1,16 +1,20 @@
 // src/domains/licensing/licensing.helpers.ts
 //
-// Helpers del dominio de licencias (activación, status, webhook de Lemon). Portados desde el
-// antiguo handler legacy `server/index.ts` al migrar las rutas a Hono. Reutiliza las utilidades
-// compartidas del worker (base64, crypto, resolución de credenciales del tenant) en vez de
-// mantener copias propias, eliminando la duplicación que arrastraba el código legacy.
+// Helpers del dominio de licencias: sesión (JWT), device-proof, estado derivado de la licencia,
+// **firma ed25519 del estado** (el control central del gate, §5.1 del plan), OTP de cambio de
+// dispositivo y provisión de la BD del tenant.
+//
+// Reutiliza las utilidades compartidas del worker (base64, crypto, credenciales del tenant) en
+// vez de mantener copias propias.
 
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT, jwtVerify, decodeJwt } from "jose";
 import * as ed from "@noble/ed25519";
 import { createClient, type Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
-import { getDevicePubKeyB64 } from "../../server/licenseStore";
+import type { LicenseGateState, SignedLicenseAssertion } from "../../shared";
+import { getDevicePubKeyB64, type LicenseRow } from "../../server/licenseStore";
+import { sha256Hex } from "../../server/crypto";
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 import { sha256HexStr, secretKey } from "../../server/utils/crypto";
 import { runTenantMigrations } from "../../server/tenantMigrations";
@@ -20,6 +24,18 @@ import {
 	tursoCreateDbToken,
 	upsertTenantDbRow,
 } from "../../server/db/tenantDb";
+
+/** Caducidad: aviso los 7 días previos, y 3 días de gracia después (decisión §0 del plan). */
+export const WARN_DAYS = 7;
+export const GRACE_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** La aserción firmada solo vale 5 minutos: no sirve reproducir una vieja que dijera "active". */
+const ASSERTION_TTL_MS = 5 * 60 * 1000;
+
+/** El OTP de cambio de dispositivo: 10 minutos y 5 intentos. */
+export const OTP_TTL_MS = 10 * 60 * 1000;
+export const OTP_MAX_ATTEMPTS = 5;
 
 // ---------------- Env / utilidades genéricas ----------------
 
@@ -31,7 +47,7 @@ export function assertEnv(env: Env, names: (keyof Env)[]): string | null {
 	return null;
 }
 
-/** Turso suele devolver 0/1; Rust espera boolean en `status`. */
+/** Turso suele devolver 0/1; el cliente espera boolean. */
 export function toBool01(v: any, fallback = false): boolean {
 	if (typeof v === "boolean") return v;
 	if (typeof v === "number") return v !== 0;
@@ -43,14 +59,7 @@ export function toBool01(v: any, fallback = false): boolean {
 	return fallback;
 }
 
-function timingSafeEqualHex(a: string, b: string): boolean {
-	if (a.length !== b.length) return false;
-	let out = 0;
-	for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
-	return out === 0;
-}
-
-// ---------------- JWT de licencia (HS256) ----------------
+// ---------------- JWT de sesión (HS256) ----------------
 
 export async function signToken(
 	env: Env,
@@ -79,55 +88,158 @@ export async function verifyToken(
 	return { tenantId, deviceId, licHash };
 }
 
-// ---------------- Webhook de Lemon ----------------
-
-export async function verifyLemonSignature(
-	req: Request,
-	secret: string,
-	rawBody: string,
-): Promise<boolean> {
-	const sig = (req.headers.get("X-Signature") || "").trim().toLowerCase();
-
-	if (!secret || secret.trim().length === 0) {
-		console.log("[LEMON] Missing LEMON_WEBHOOK_SECRET in env");
-		return false;
+/**
+ * Lee los claims de un token **sin verificar la caducidad**. Solo para `/refresh`: el token
+ * caducado sigue diciendo quién dice ser, y a ese "quién" se le exige a continuación un
+ * device-proof firmado con la clave privada del dispositivo. Es lo que evita que un reloj
+ * desajustado o un token vencido borren la licencia del cliente (bug #4).
+ *
+ * NO usar para autorizar nada sin comprobar después el device-proof.
+ */
+export function decodeTokenClaims(
+	token: string,
+): { tenantId: string; deviceId: string; licHash: string } | null {
+	try {
+		const payload = decodeJwt(token);
+		const tenantId = String(payload.tenantId || "");
+		const deviceId = String(payload.deviceId || "");
+		const licHash = String(payload.licHash || "");
+		if (!tenantId || !deviceId || !licHash) return null;
+		return { tenantId, deviceId, licHash };
+	} catch {
+		return null;
 	}
-	if (!sig) return false;
-
-	const key = await crypto.subtle.importKey(
-		"raw",
-		new TextEncoder().encode(secret),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	);
-
-	const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody));
-	const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
-
-	return timingSafeEqualHex(hex, sig);
 }
 
-export async function lemonActivate(licenseKey: string, instanceName: string) {
-	const body = new URLSearchParams();
-	body.set("license_key", licenseKey);
-	body.set("instance_name", instanceName);
+// ---------------- Estado derivado de la licencia ----------------
 
-	const r = await fetch("https://api.lemonsqueezy.com/v1/licenses/activate", {
-		method: "POST",
-		headers: {
-			Accept: "application/json",
-			"content-type": "application/x-www-form-urlencoded",
-		},
-		body,
+/**
+ * La verdad sobre una licencia, derivada por el SERVIDOR (que es la autoridad) y firmada a
+ * continuación. El cliente no recalcula esto: lo verifica y obedece.
+ *
+ * `deviceId` es el del dispositivo que pregunta: si la licencia ya se movió a otro Main
+ * (§6.4), a este se le responde `device_replaced` y se queda fuera.
+ */
+export function computeLicenseState(
+	lic: LicenseRow,
+	deviceId: string,
+	nowMs: number,
+): LicenseGateState {
+	if (lic.status === "revoked" || toBool01(lic.disabled)) return "revoked";
+
+	if (lic.main_device_id && lic.main_device_id !== deviceId) return "device_replaced";
+
+	// Emitida pero sin activar: no debería llegar aquí (sin activar no hay token), pero si
+	// pasa, no está caducada.
+	if (!lic.expires_at_ms) return "active";
+
+	const restante = lic.expires_at_ms - nowMs;
+	if (restante > WARN_DAYS * DAY_MS) return "active";
+	if (restante > 0) return "warn";
+	if (restante > -GRACE_DAYS * DAY_MS) return "expiry_grace";
+	return "expired";
+}
+
+/** Los estados con los que el TPV puede seguir trabajando. */
+export function stateAllowsUse(state: LicenseGateState): boolean {
+	return state === "active" || state === "warn" || state === "expiry_grace";
+}
+
+// ---------------- Firma ed25519 del estado (cierra LIC-01) ----------------
+
+/**
+ * Mensaje canónico de la aserción: orden FIJO, separador `|`. No se firma el JSON porque el
+ * orden de sus claves no está garantizado y el cliente debe poder reconstruir byte a byte
+ * exactamente lo mismo que firmó el servidor.
+ *
+ * ⚠️ Cualquier cambio aquí hay que replicarlo EXACTO en el cliente Rust
+ * (`crates/tpv-infra-licensing`) y subir la versión `v`.
+ */
+export function licenseAssertionMessage(
+	a: Omit<SignedLicenseAssertion, "sig">,
+): string {
+	return [
+		`v${a.v}`,
+		a.tenantId,
+		a.deviceId,
+		a.licenseId,
+		a.state,
+		a.plan,
+		a.expiresAtMs ?? "",
+		a.issuedAtMs,
+		a.assertionExpiresAtMs,
+		a.clientTs,
+	].join("|");
+}
+
+/**
+ * Firma el estado con la clave privada ed25519 del worker. La pública está **pineada** en el
+ * binario del TPV, así que un servidor falso, un MITM con CA de confianza o un DNS envenenado
+ * pueden devolver lo que quieran: sin esta privada, el cliente no se lo cree.
+ */
+export async function signLicenseAssertion(
+	env: Env,
+	fields: Omit<SignedLicenseAssertion, "sig">,
+): Promise<SignedLicenseAssertion> {
+	const seed = b64ToBytes(String(env.LICENSE_SIGNING_PRIVATE_KEY || "").trim());
+	if (seed.length !== 32) throw new Error("LICENSE_SIGNING_PRIVATE_KEY must decode to 32 bytes");
+
+	const msg = new TextEncoder().encode(licenseAssertionMessage(fields));
+	const sig = await ed.signAsync(msg, seed);
+
+	return { ...fields, sig: bytesToB64(sig) };
+}
+
+/** Construye la aserción firmada para una licencia concreta y la petición concreta que la pide. */
+export async function buildSignedAssertion(
+	env: Env,
+	args: {
+		lic: LicenseRow;
+		tenantId: string;
+		deviceId: string;
+		clientTs: number;
+		nowMs: number;
+	},
+): Promise<SignedLicenseAssertion> {
+	return signLicenseAssertion(env, {
+		v: 1,
+		tenantId: args.tenantId,
+		deviceId: args.deviceId,
+		licenseId: args.lic.license_id,
+		state: computeLicenseState(args.lic, args.deviceId, args.nowMs),
+		plan: args.lic.plan,
+		expiresAtMs: args.lic.expires_at_ms,
+		issuedAtMs: args.nowMs,
+		assertionExpiresAtMs: args.nowMs + ASSERTION_TTL_MS,
+		clientTs: args.clientTs,
 	});
+}
 
-	const text = await r.text();
-	let data: any = null;
-	try {
-		data = JSON.parse(text);
-	} catch {}
-	return { ok: r.ok, status: r.status, data, text };
+// ---------------- OTP de cambio de dispositivo ----------------
+
+/** 6 dígitos con CSPRNG. Rango uniforme: se descarta el sesgo del módulo. */
+export function generateOtpCode(): string {
+	const buf = new Uint32Array(1);
+	// 4_294_967_296 no es múltiplo de 1e6: los valores por encima del último múltiplo exacto
+	// se descartan para que los 10^6 códigos sean equiprobables.
+	const limite = Math.floor(0xffffffff / 1_000_000) * 1_000_000;
+	do {
+		crypto.getRandomValues(buf);
+	} while (buf[0] >= limite);
+
+	return String(buf[0] % 1_000_000).padStart(6, "0");
+}
+
+export async function otpHash(code: string): Promise<string> {
+	return sha256Hex(code.trim());
+}
+
+/** Pista del email para la UI: `a***@bar.com`. Nunca se devuelve el correo entero. */
+export function emailHint(email: string): string {
+	const [user, domain] = String(email || "").split("@");
+	if (!user || !domain) return "***";
+	const visible = user.slice(0, 1);
+	return `${visible}${"*".repeat(Math.max(user.length - 1, 1))}@${domain}`;
 }
 
 // ---------------- Device proof (anti-copia, ed25519) ----------------

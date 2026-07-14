@@ -1,0 +1,197 @@
+// src/domains/licensing/licenseEmails.ts
+//
+// Los tres correos del ciclo de vida de una licencia. Backend: Cloudflare Email Service
+// (binding `EMAIL`), el mismo que usa el envío de pedidos a proveedores — sin claves de API.
+//
+// Ninguno de estos envíos puede tumbar la operación que los dispara: si el correo falla, se
+// registra y se sigue. Emitir una licencia y cobrarla es lo importante; el email es entrega.
+
+import type { Env } from "../../env";
+
+type Enviar = {
+	to: string;
+	subject: string;
+	html: string;
+	text: string;
+};
+
+async function enviar(env: Env, msg: Enviar): Promise<boolean> {
+	const fromAddress = String(env.EMAIL_FROM_ADDRESS || "").trim();
+	if (!fromAddress) {
+		console.error("[license-email] falta EMAIL_FROM_ADDRESS");
+		return false;
+	}
+
+	try {
+		await env.EMAIL.send({
+			from: { email: fromAddress, name: env.EMAIL_FROM_NAME || "TPV" },
+			to: msg.to,
+			subject: msg.subject,
+			html: msg.html,
+			text: msg.text,
+		});
+		return true;
+	} catch (err) {
+		const e = err as { code?: string; message?: string };
+		console.error("[license-email] envío fallido:", msg.subject, e.code ?? "", e.message ?? err);
+		return false;
+	}
+}
+
+function layout(titulo: string, cuerpo: string): string {
+	return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>${esc(titulo)}</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
+  <h2 style="color:#111827;margin-bottom:16px">${esc(titulo)}</h2>
+  ${cuerpo}
+  <p style="margin-top:24px;font-size:12px;color:#9ca3af">TPV · Altaria Lights</p>
+</body>
+</html>`;
+}
+
+function destacado(valor: string): string {
+	return `<p style="margin:20px 0;padding:16px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;
+    font-family:ui-monospace,monospace;font-size:22px;font-weight:700;letter-spacing:2px;text-align:center">
+    ${esc(valor)}</p>`;
+}
+
+function esc(s: string): string {
+	return String(s)
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;");
+}
+
+function meses(n: number): string {
+	return n === 1 ? "1 mes" : n === 12 ? "1 año" : `${n} meses`;
+}
+
+/* ============================================================
+   1. La clave de licencia (compra en Stripe o alta manual)
+============================================================ */
+
+export async function sendLicenseKeyEmail(
+	env: Env,
+	args: { to: string; name?: string | null; key: string; termMonths: number },
+): Promise<boolean> {
+	const saludo = args.name?.trim() ? `Hola, ${args.name.trim()}:` : "Hola:";
+
+	const html = layout(
+		"Tu licencia del TPV",
+		`<p>${esc(saludo)}</p>
+     <p>Esta es tu clave de licencia (${esc(meses(args.termMonths))}). Introdúcela en el TPV al abrirlo por primera vez:</p>
+     ${destacado(args.key)}
+     <p style="font-size:14px;color:#6b7280">La cuenta atrás empieza <strong>al activarla</strong>, no hoy: puedes
+     guardarla y activar el TPV cuando lo tengas montado.</p>
+     <p style="font-size:14px;color:#6b7280">Guarda este correo. Es también el buzón desde el que podrás recuperar la
+     licencia si algún día cambias de ordenador.</p>`,
+	);
+
+	const text = `${saludo}
+
+Tu clave de licencia del TPV (${meses(args.termMonths)}):
+
+    ${args.key}
+
+Introdúcela en el TPV al abrirlo por primera vez. La cuenta atrás empieza al activarla, no hoy.
+
+Guarda este correo: es también el buzón desde el que podrás recuperar la licencia si cambias de ordenador.`;
+
+	return enviar(env, { to: args.to, subject: "Tu licencia del TPV", html, text });
+}
+
+/* ============================================================
+   1.b Renovación (el cliente ya tenía licencia: se extiende, no se emite otra)
+============================================================ */
+
+export async function sendLicenseRenewedEmail(
+	env: Env,
+	args: { to: string; name?: string | null; termMonths: number; expiresAtMs: number },
+): Promise<boolean> {
+	const saludo = args.name?.trim() ? `Hola, ${args.name.trim()}:` : "Hola:";
+	const hasta = new Date(args.expiresAtMs).toLocaleDateString("es-ES", {
+		day: "numeric",
+		month: "long",
+		year: "numeric",
+		timeZone: "Europe/Madrid",
+	});
+
+	const html = layout(
+		"Licencia renovada",
+		`<p>${esc(saludo)}</p>
+     <p>Hemos añadido ${esc(meses(args.termMonths))} a tu licencia. Ya está activa hasta el
+     <strong>${esc(hasta)}</strong>.</p>
+     <p style="font-size:14px;color:#6b7280">No tienes que hacer nada: tu TPV lo detectará solo la próxima vez que
+     compruebe la licencia. La misma clave sigue valiendo.</p>`,
+	);
+
+	const text = `${saludo}
+
+Hemos añadido ${meses(args.termMonths)} a tu licencia. Ya está activa hasta el ${hasta}.
+
+No tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valiendo.`;
+
+	return enviar(env, { to: args.to, subject: "Licencia renovada", html, text });
+}
+
+/* ============================================================
+   2. Código de cambio de dispositivo (OTP)
+============================================================ */
+
+export async function sendDeviceChangeCodeEmail(
+	env: Env,
+	args: { to: string; code: string; minutes: number },
+): Promise<boolean> {
+	const html = layout(
+		"Código para activar tu TPV en otro equipo",
+		`<p>Alguien (esperamos que tú) está activando tu licencia en un ordenador nuevo. Introduce este código para confirmarlo:</p>
+     ${destacado(args.code)}
+     <p style="font-size:14px;color:#6b7280">Caduca en ${args.minutes} minutos y solo sirve para ese equipo.</p>
+     <p style="font-size:14px;color:#b91c1c"><strong>¿No has sido tú?</strong> No lo compartas con nadie y responde a este
+     correo: alguien tiene tu clave de licencia.</p>`,
+	);
+
+	const text = `Código para activar tu TPV en otro equipo:
+
+    ${args.code}
+
+Caduca en ${args.minutes} minutos y solo sirve para ese equipo.
+
+¿No has sido tú? No compartas el código y responde a este correo: alguien tiene tu clave de licencia.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Código para activar tu TPV en otro equipo",
+		html,
+		text,
+	});
+}
+
+/* ============================================================
+   3. Aviso: la licencia se movió a otro equipo (detección de abuso)
+============================================================ */
+
+export async function sendDeviceChangedNoticeEmail(
+	env: Env,
+	args: { to: string },
+): Promise<boolean> {
+	const html = layout(
+		"Tu TPV se ha activado en un equipo nuevo",
+		`<p>Tu licencia acaba de activarse en un ordenador distinto. El equipo anterior ha dejado de tener acceso.</p>
+     <p style="font-size:14px;color:#b91c1c"><strong>¿No has sido tú?</strong> Responde a este correo cuanto antes:
+     bloquearemos la licencia y te emitiremos una nueva.</p>`,
+	);
+
+	const text = `Tu licencia del TPV acaba de activarse en un ordenador distinto. El equipo anterior ha dejado de tener acceso.
+
+¿No has sido tú? Responde a este correo cuanto antes: bloquearemos la licencia y te emitiremos una nueva.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Tu TPV se ha activado en un equipo nuevo",
+		html,
+		text,
+	});
+}

@@ -21,6 +21,7 @@ import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
 import { getDb } from "../../server/db";
+import { checkAdminToken } from "../../middleware/requireAdmin";
 
 export const updatesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -48,18 +49,18 @@ async function ensureReleasesSchema(db: Client) {
 
 // Verifica el token admin del header `Authorization: Bearer <token>`. Si el secreto no está
 // configurado, la publicación queda DESHABILITADA (fail-safe: nadie puede publicar por accidente).
-function checkAdmin(c: { req: { header: (n: string) => string | undefined }; env: Env }):
-	| { ok: true }
-	| { ok: false; status: 401 | 503; error: string } {
-	const expected = String(c.env.RELEASE_ADMIN_TOKEN || "").trim();
-	if (!expected) return { ok: false, status: 503, error: "publish_disabled" };
-
-	const h = c.req.header("authorization") || "";
-	const m = h.match(/^Bearer\s+(.+)$/i);
-	const token = (m?.[1] || "").trim();
-	if (!token || token !== expected) return { ok: false, status: 401, error: "unauthorized" };
-
-	return { ok: true };
+// La comparación es *timing-safe* (ver middleware/requireAdmin.ts): antes era un `!==`, que filtra
+// por tiempo cuántos caracteres del token acertaste.
+async function checkAdmin(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<
+	{ ok: true } | { ok: false; status: 401 | 503; error: string }
+> {
+	const fail = await checkAdminToken(c.req.header("authorization"), c.env.RELEASE_ADMIN_TOKEN);
+	if (!fail) return { ok: true };
+	return {
+		ok: false,
+		status: fail.status,
+		error: fail.status === 503 ? "publish_disabled" : fail.error,
+	};
 }
 
 /* ── Feed que consume el updater de Tauri ──────────────────────────────────── */
@@ -127,7 +128,7 @@ const publishSchema = z.object({
 });
 
 updatesRoutes.post("/publish", async (c) => {
-	const auth = checkAdmin(c);
+	const auth = await checkAdmin(c);
 	if (!auth.ok) return c.json({ error: auth.error }, auth.status);
 
 	const body = await c.req.json().catch(() => null);
@@ -172,7 +173,7 @@ const deactivateSchema = z.object({
 });
 
 updatesRoutes.post("/deactivate", async (c) => {
-	const auth = checkAdmin(c);
+	const auth = await checkAdmin(c);
 	if (!auth.ok) return c.json({ error: auth.error }, auth.status);
 
 	const body = await c.req.json().catch(() => null);

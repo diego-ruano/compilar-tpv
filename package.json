@@ -9,7 +9,13 @@
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "generate-types": "turbo run generate-types",
-    "tauri": "pnpm --filter @tpv/main tauri"
+    "tauri": "pnpm --filter @tpv/main tauri",
+
+    "license:issue": "node scripts/tpv-license.mjs issue",
+    "license:list": "node scripts/tpv-license.mjs list",
+    "license:revoke": "node scripts/tpv-license.mjs revoke",
+    "license:extend": "node scripts/tpv-license.mjs extend",
+    "license:keypair": "node scripts/generate-license-keypair.mjs"
   },
   "devDependencies": {
     "turbo": "^2"

@@ -4,8 +4,8 @@
 //
 // Tras fusionar los dos workers, este único worker concentra:
 //   - La base de datos central de Turso (`TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`).
-//   - Los secretos de licencias/JWT (`LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
-//     `LEMON_WEBHOOK_SECRET`).
+//   - Los secretos de licencias (`LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
+//     `LICENSE_SIGNING_PRIVATE_KEY`, `ADMIN_API_TOKEN`, `STRIPE_*`).
 //   - El Turso Platform API (`TURSO_PLATFORM_TOKEN`, `TURSO_ORG_SLUG`) para
 //     aprovisionar/rotar las DBs por-tenant.
 //   - El Durable Object `TenantHub` (WebSocket + apply idempotente).
@@ -21,8 +21,28 @@ export interface Env {
 
 	// Licencias / firma de tokens
 	LICENSE_JWT_SECRET: string;
-	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM)
-	LEMON_WEBHOOK_SECRET: string;
+	LICENSE_STORE_KEY: string; // base64 32 bytes (AES-GCM): cifra la clave de licencia en reposo
+
+	// Firma ed25519 del estado de licencia (§5.1 del plan de licencias propias).
+	// Semilla de 32 bytes en base64. La PRIVADA vive SOLO aquí; la pública está pineada como
+	// constante en el binario Rust (LICENSE_SIGNING_PUBLIC_KEY_B64). Cambiarla invalida a todos
+	// los clientes desplegados. Configura con: wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
+	LICENSE_SIGNING_PRIVATE_KEY: string;
+
+	// Token del endpoint admin de licencias (/v1/admin/*): emitir, listar, revocar, extender.
+	// ≥ 256 bits, comparación timing-safe. Si NO está configurado, el dominio admin queda
+	// DESHABILITADO (fail-closed). Configura con: wrangler secret put ADMIN_API_TOKEN
+	ADMIN_API_TOKEN?: string;
+
+	// Stripe (pago único: 1/3/12 meses). La duración de cada compra se lee de
+	// `metadata.term_months` del Price, no de un mapa en el código.
+	//   wrangler secret put STRIPE_SECRET_KEY      (sk_live_… / sk_test_…)
+	//   wrangler secret put STRIPE_WEBHOOK_SECRET  (whsec_…)
+	STRIPE_SECRET_KEY?: string;
+	STRIPE_WEBHOOK_SECRET?: string;
+
+	// URL pública donde el cliente compra/renueva (la usan los emails de aviso de caducidad).
+	CHECKOUT_URL?: string;
 
 	// Turso Platform API (crear DBs + tokens por-tenant)
 	TURSO_PLATFORM_TOKEN: string;

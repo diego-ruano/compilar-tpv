@@ -4,6 +4,18 @@ export function secretKey(str: string) {
 	return new TextEncoder().encode(str);
 }
 
+/**
+ * Comparación de dos hex en tiempo constante. Un `===` normal sale del bucle en cuanto
+ * encuentra el primer byte distinto, y ese tiempo revela cuántos acertaste: repitiendo, se
+ * reconstruye la firma byte a byte. La usan las verificaciones de firma de webhook.
+ */
+export function timingSafeEqualHex(a: string, b: string): boolean {
+	if (a.length !== b.length) return false;
+	let out = 0;
+	for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+	return out === 0;
+}
+
 export async function sha256HexStr(s: string): Promise<string> {
 	const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
 	return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");

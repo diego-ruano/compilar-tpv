@@ -54,6 +54,7 @@ despliegue. Es viable porque **no hay ninguna licencia real en producción** (ca
 13. [Riesgos y decisiones abiertas](#13-riesgos)
 14. [Referencias](#14-referencias)
 15. [Pendientes (futuro)](#15-pendientes-futuros)
+16. [Checklist de operación — lo que tienes que hacer tú](#16-checklist-de-operacion)
 
 ---
 
@@ -838,4 +839,76 @@ partes → carga en Turso, con reanudación y sin pasar por el TenantHub.
 Mientras tanto: la pantalla de cambio de dispositivo debe **decir la verdad** (“recuperarás tu
 licencia; tus datos solo si tenías la sincronización activada”), y conviene empujar el modo online
 como recomendado, no como opcional.
+
+---
+
+## 16. Checklist de operación
+
+Lo que **no puede hacer el código por ti**: secretos, esquema de la BD central y configuración de
+Stripe. Nada de esto bloquea escribir código, pero **todo** bloquea el despliegue.
+
+> ⛔ **No despliegues el worker suelto.** `GET /v1/license/status` cambia de forma (ahora devuelve
+> la aserción firmada) y el cliente Rust actual no sabe leerla: se quedaría sin poder validar. El
+> worker y la **Fase 3** (cliente Rust) se despliegan **juntos**.
+
+### 16.1 Secretos del worker
+
+Desde `apps/cloud-worker-licensing/`:
+
+```bash
+# 1. Par de firma de licencia (genera el par primero: pnpm license:keypair)
+npx wrangler secret put LICENSE_SIGNING_PRIVATE_KEY   # ← la PRIVADA que imprime el script
+
+# 2. Token del CLI de administración (≥ 256 bits)
+#    Generar: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+npx wrangler secret put ADMIN_API_TOKEN
+
+# 3. Stripe (empieza en modo TEST)
+npx wrangler secret put STRIPE_SECRET_KEY             # sk_test_… / sk_live_…
+npx wrangler secret put STRIPE_WEBHOOK_SECRET         # whsec_…
+
+# 4. Fuera el de Lemon
+npx wrangler secret delete LEMON_WEBHOOK_SECRET
+```
+
+Ya existentes y que **siguen igual**: `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `TURSO_*`,
+`PAIR_PEPPER`, `EMAIL_FROM_ADDRESS`, `RELEASE_ADMIN_TOKEN`, `SENTRY_DSN`, `AXIOM_*`.
+
+**La clave pública** que imprime `pnpm license:keypair` va **pineada en el binario Rust**
+(`LICENSE_SIGNING_PUBLIC_KEY_B64` en `crates/tpv-infra-licensing/src/lib.rs`) — eso lo hago yo en la
+Fase 3, pero necesito que me pases la pública (no la privada).
+
+### 16.2 Migración del control-plane (Turso)
+
+```bash
+turso db shell tpvcontrol-altarialights < docs/sql/control-plane/2026-07-14_licencias_propias.sql
+```
+
+Es **destructiva** (recrea `licenses`, borra `license_instances` y `license_meta`). Acordado: no hay
+licencias reales. Los `ALTER TABLE tenants` del final pueden decir *“duplicate column name”* si la
+columna ya existía: es inofensivo, salta esa línea.
+
+### 16.3 Stripe
+
+1. Un producto **“TPV — Licencia”** con **3 Prices** *one-time* (1 mes, 3 meses, 12 meses).
+2. En **cada Price**, añadir `metadata.term_months` = `1` / `3` / `12`. ⚠️ Sin esto el webhook
+   **rechaza la compra** (fail-closed): es de donde sale la duración.
+3. Un **Payment Link** por Price, con **“recopilar email”** y **crear/enlazar Customer** activados
+   (sin `customer`, una renovación no puede casarse con la licencia existente y emitiría clave nueva).
+4. **Webhook** → `https://tpv-api.altarialights.workers.dev/v1/stripe/webhook`, solo estos eventos:
+   `checkout.session.completed` y `checkout.session.async_payment_succeeded`. Copiar el
+   `whsec_…` a `STRIPE_WEBHOOK_SECRET`.
+5. Probar en test: `stripe listen --forward-to …/v1/stripe/webhook` + `stripe trigger
+   checkout.session.completed`.
+
+### 16.4 Uso del CLI
+
+```bash
+$env:ADMIN_API_TOKEN = "…"                 # PowerShell (bash: export ADMIN_API_TOKEN="…")
+
+pnpm license:issue  -- --term 12 --email cliente@bar.com --name "Bar La Plaza" --send-key
+pnpm license:list
+pnpm license:extend -- --id <licenseId> --months 12
+pnpm license:revoke -- --id <licenseId>
+```
 ```

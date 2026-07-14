@@ -12,7 +12,9 @@
 //   - GET  /ws                  → upgrade WebSocket al Durable Object TenantHub
 //   - POST /v1/pair/*           → emparejamiento Main/Handy (routes/pairing.ts)
 //   - POST /v1/device/revoke    → revocación de dispositivo (+ corte del WS)
-//   - POST /v1/license/activate · GET /v1/license/status · POST /v1/webhooks/lemon
+//   - /v1/license/*             → activación, cambio de dispositivo, status firmado, refresh
+//   - POST /v1/stripe/webhook   → compras (emite/extiende licencia)
+//   - /v1/admin/licenses/*      → alta manual (token admin)
 
 import { Hono } from "hono";
 import * as Sentry from "@sentry/cloudflare";
@@ -47,7 +49,9 @@ import { updatesRoutes } from "./domains/updates/updates.routes";
 import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
 import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
 import { emailRoutes } from "./domains/email/email.routes";
-import { licenseRoutes, lemonWebhookRoutes } from "./domains/licensing/licensing.routes";
+import { licenseRoutes } from "./domains/licensing/licensing.routes";
+import { adminRoutes } from "./domains/admin/admin.routes";
+import { stripeRoutes } from "./domains/stripe/stripe.routes";
 import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
@@ -174,11 +178,14 @@ app.route("/v1/email", emailRoutes);
 // privado. Auth device-proof; el tenant/device los fija el servidor (ver telemetry.routes.ts).
 app.route("/v1/telemetry", telemetryRoutes);
 
-// ---------------- Licencias (activación / status) + webhook de Lemon ----------------
-// Migrado a Hono desde el antiguo handler legacy `server/index.ts`. Lo consume el cliente Rust
-// (tpv-infra-licensing) y los webhooks de Lemon Squeezy.
+// ---------------- Licencias ----------------
+// Sistema PROPIO (ya no Lemon Squeezy): activación, cambio de dispositivo por OTP, estado
+// firmado con ed25519 y refresco de token. Lo consume el cliente Rust (tpv-infra-licensing).
 app.route("/v1/license", licenseRoutes);
-app.route("/v1/webhooks", lemonWebhookRoutes);
+
+// Emisión: por compra (webhook de Stripe) o a mano (endpoints admin + CLI `pnpm license:*`).
+app.route("/v1/stripe", stripeRoutes);
+app.route("/v1/admin", adminRoutes);
 
 // ---------------- Auto-actualización de la app de escritorio ----------------
 // GET feed (público: lo consume el updater de Tauri, que verifica firma por su cuenta).

@@ -1,364 +1,409 @@
 // src/domains/licensing/licensing.routes.ts
 //
-// Rutas de licencias migradas a Hono (antes en el handler legacy `server/index.ts`, servido por el
-// fallthrough `app.all("*")`). Tres endpoints:
-//   - POST /v1/license/activate  → activación contra Lemon + provisión de la BD del tenant.
-//   - GET  /v1/license/status    → estado de la licencia (requiere JWT + device-proof).
-//   - POST /v1/webhooks/lemon     → webhook de Lemon Squeezy (idempotente por firma+body).
+// Las cuatro rutas que consume el TPV (cliente Rust en `crates/tpv-infra-licensing`):
 //
-// La lógica es la misma que la del handler legacy; sólo cambia el envoltorio (fetch manual → Hono)
-// y se reutilizan las utilidades compartidas del worker (ver licensing.helpers.ts).
+//   POST /v1/license/activate              → canjea la clave, liga el Main, provisiona el tenant
+//   POST /v1/license/device-change/request → manda el OTP para mover la licencia a otro equipo
+//   GET  /v1/license/status                → estado FIRMADO (ed25519) + token renovado
+//   POST /v1/license/refresh               → reemite el token caducado, autenticando por device-proof
+//
+// La verdad comercial es NUESTRA (tabla `licenses` en la Turso central): ya no se consulta a
+// ningún tercero. Y el estado que decide el gate viaja firmado: el TLS deja de ser la única
+// barrera (§5.1 del plan).
 
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import type {
-	ActivateRequest,
-	ActivateResponse,
-	ApiError,
-	LemonWebhookPayload,
-	LicenseStatus,
-} from "../../shared";
+import type { ActivateResponse, ApiError, TenantInfo } from "../../shared";
 import { getDb } from "../../server/db";
-import { sha256Hex } from "../../server/crypto";
+import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
-	ensureExtraSchema,
-	ensureTenantExistsMinimal,
+	activateLicenseFirstTime,
+	bumpDeviceOtpAttempts,
+	consumeDeviceOtp,
 	ensureDevice,
-	upsertLicenseFromEventOrActivation,
-	upsertLicenseInstance,
+	ensureTenantExistsMinimal,
+	getDeviceOtp,
 	getLicenseByHash,
-	upsertWebhookEvent,
-	markWebhookProcessed,
+	putDeviceOtp,
+	reassignMainDevice,
 	setDevicePubKeyB64IfEmptyOrThrow,
+	upsertTenantInfo,
+	type LicenseRow,
 } from "../../server/licenseStore";
+import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
+import { sendDeviceChangeCodeEmail, sendDeviceChangedNoticeEmail } from "./licenseEmails";
 import {
 	assertEnv,
-	lemonActivate,
+	buildSignedAssertion,
+	computeLicenseState,
+	decodeTokenClaims,
+	emailHint,
+	generateOtpCode,
+	GRACE_DAYS,
+	OTP_MAX_ATTEMPTS,
+	OTP_TTL_MS,
+	otpHash,
 	provisionTenantDatabase,
 	signToken,
 	toBool01,
 	verifyDeviceProof,
-	verifyLemonSignature,
 	verifyToken,
 } from "./licensing.helpers";
 
 type Ctx = { Bindings: Env };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// /v1/license  (activate + status)
-// ──────────────────────────────────────────────────────────────────────────────
-
 export const licenseRoutes = new Hono<Ctx>();
 
-// POST /v1/license/activate  (TPV MAIN)
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** ¿La licencia está tan caducada que ya no se puede ni activar? (pasada también la gracia) */
+function estaCaducada(lic: LicenseRow, nowMs: number): boolean {
+	if (!lic.expires_at_ms) return false;
+	return nowMs > lic.expires_at_ms + GRACE_DAYS * DAY_MS;
+}
+
+/** ¿La licencia está anulada? */
+function estaAnulada(lic: LicenseRow): boolean {
+	return lic.status === "revoked" || toBool01(lic.disabled);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /v1/license/activate
+// ──────────────────────────────────────────────────────────────────────────────
+
 licenseRoutes.post("/activate", async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
-		"LICENSE_STORE_KEY",
 		"TURSO_DATABASE_URL",
 		"TURSO_AUTH_TOKEN",
 		"TURSO_PLATFORM_TOKEN",
 		"TURSO_ORG_SLUG",
 	]);
-	if (miss) return c.json({ ok: false, error: miss }, 500);
+	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
 	const ct = c.req.header("content-type") || "";
 	if (!ct.toLowerCase().includes("application/json")) {
 		return c.json({ ok: false, error: "Content-Type must be application/json" }, 415);
 	}
 
-	const body = await c.req.json<ActivateRequest & { devicePubKey?: string }>().catch(
-		() => ({ activationKey: "", deviceId: "", instanceName: undefined }) as any,
-	);
+	const body = await c.req.json<any>().catch(() => ({}));
 
-	const activationKey = String((body as any).activationKey || "").trim();
-
-	// deviceId: si viene, lo respetamos; si no, lo genera el Worker.
-	const reqDeviceId = String((body as any).deviceId || "").trim();
-	const deviceId = reqDeviceId || crypto.randomUUID();
-
-	// devicePubKey (obligatoria para anti-copia).
-	const devicePubKey = String((body as any).devicePubKey || "").trim();
-	if (!devicePubKey) return c.json({ ok: false, error: "devicePubKey required" }, 400);
-
-	// instanceName: si no viene, lo generamos a partir del deviceId.
-	const reqInstanceName = String((body as any).instanceName || "").trim();
-	const instanceName = reqInstanceName || `tpv-${deviceId.slice(0, 12)}`;
-
+	const activationKey = normalizeLicenseKey(String(body?.activationKey || ""));
 	if (!activationKey) {
-		const out: ApiError = { ok: false, error: "activationKey required" };
-		return c.json(out, 400);
+		return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
 	}
 
-	const dbi = getDb(env);
-	await ensureExtraSchema(dbi);
+	const deviceId = String(body?.deviceId || "").trim() || crypto.randomUUID();
+	const devicePubKey = String(body?.devicePubKey || "").trim();
+	if (!devicePubKey) {
+		return c.json({ ok: false, error: "devicePubKey required" } satisfies ApiError, 400);
+	}
 
-	// Idempotencia antes de tocar Lemon.
-	const licHash = await sha256Hex(activationKey);
-	const existing = await getLicenseByHash(dbi, licHash);
+	const deviceChangeCode = String(body?.deviceChangeCode || "").trim();
+	const tenantInfo: TenantInfo = body?.tenantInfo || {};
 
-	let act: { ok: boolean; status: number; data: any; text: string };
+	const db = getDb(env);
+	const now = Date.now();
 
-	if (!existing || !existing.tenant_id || existing.tenant_id === "PENDING") {
-		act = await lemonActivate(activationKey, instanceName);
-		if (!act.ok) {
-			const out: ApiError = {
-				ok: false,
-				error: act.data?.error || "lemon_activate_failed",
-				details: act.data || act.text,
-			};
-			return c.json(out, 400);
+	const licHash = await licenseKeyHash(activationKey);
+	const lic = await getLicenseByHash(db, licHash);
+
+	// Mismo error para "no existe" que para un formato válido pero desconocido: no damos pistas
+	// sobre qué claves existen.
+	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	if (estaAnulada(lic)) {
+		return c.json({ ok: false, error: "license_revoked" } satisfies ApiError, 403);
+	}
+	if (estaCaducada(lic, now)) {
+		return c.json({ ok: false, error: "license_expired" } satisfies ApiError, 403);
+	}
+
+	const esPrimeraActivacion = !lic.main_device_id;
+	const esMismoEquipo = lic.main_device_id === deviceId;
+	const esCambioDeEquipo = !esPrimeraActivacion && !esMismoEquipo;
+
+	// ── Cambio de equipo: exige el OTP del email (§6.4) ──────────────────────
+	if (esCambioDeEquipo) {
+		if (!deviceChangeCode) {
+			return c.json(
+				{
+					ok: false,
+					error: "device_change_required",
+					details: { emailHint: emailHint(lic.customer_email) },
+				} satisfies ApiError,
+				409,
+			);
 		}
-	} else {
-		act = {
-			ok: true,
-			status: 200,
-			data: {
-				license_key: { status: existing.status, expires_at: existing.expires_at },
-				meta: { reused: true },
-			},
-			text: "",
-		};
+
+		const otp = await getDeviceOtp(db, lic.license_id, deviceId);
+		if (!otp || otp.consumed_at_ms) {
+			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
+		}
+		if (otp.attempts >= OTP_MAX_ATTEMPTS) {
+			return c.json({ ok: false, error: "too_many_attempts" } satisfies ApiError, 429);
+		}
+		if (now > otp.expires_at_ms) {
+			return c.json({ ok: false, error: "code_expired" } satisfies ApiError, 401);
+		}
+
+		const presentado = await otpHash(deviceChangeCode);
+		if (!timingSafeEqualHex(presentado, otp.code_hash)) {
+			await bumpDeviceOtpAttempts(db, lic.license_id, deviceId);
+			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
+		}
+
+		// Consumo atómico: si dos peticiones llegan a la vez con el código bueno, solo una gana.
+		const consumido = await consumeDeviceOtp(db, lic.license_id, deviceId);
+		if (!consumido) {
+			return c.json({ ok: false, error: "invalid_code" } satisfies ApiError, 401);
+		}
 	}
 
-	const licenseKeyObj = act.data?.license_key;
-	const instanceObj = act.data?.instance;
+	// ── Tenant + dispositivo ────────────────────────────────────────────────
+	const tenantId = lic.tenant_id || crypto.randomUUID();
 
-	const status = (licenseKeyObj?.status || "active") as LicenseStatus;
-	const expiresAt = licenseKeyObj?.expires_at ? String(licenseKeyObj.expires_at) : null;
-	const instanceId = instanceObj?.id ? String(instanceObj.id) : null;
+	await ensureTenantExistsMinimal(db, tenantId);
 
-	const tenantId =
-		existing?.tenant_id && existing.tenant_id !== "PENDING"
-			? existing.tenant_id
-			: crypto.randomUUID();
-
-	// Garantiza tenant y device.
-	await ensureTenantExistsMinimal(dbi, tenantId);
-
-	// ensureDevice también guarda pubkey si procede (y controla mismatch).
-	await ensureDevice(dbi, tenantId, deviceId, "tpv", devicePubKey);
-
-	// Extra seguridad: si ya existía key distinta, esto lanza 409.
-	await setDevicePubKeyB64IfEmptyOrThrow(dbi, tenantId, deviceId, devicePubKey);
-
-	const { license } = await upsertLicenseFromEventOrActivation({
-		db: dbi,
-		storeKeyB64: env.LICENSE_STORE_KEY,
-		licenseKeyPlain: activationKey,
-		tenantId,
-		status,
-		expiresAt,
-		testMode: Boolean(act.data?.meta?.test_mode),
-
-		lemon_license_key_id: licenseKeyObj?.id
-			? String(licenseKeyObj.id)
-			: existing?.lemon_license_key_id ?? null,
-		lemon_customer_id: licenseKeyObj?.customer_id ? String(licenseKeyObj.customer_id) : null,
-		lemon_order_id: licenseKeyObj?.order_id ? String(licenseKeyObj.order_id) : null,
-		lemon_order_item_id: licenseKeyObj?.order_item_id
-			? String(licenseKeyObj.order_item_id)
-			: null,
-		lemon_store_id: licenseKeyObj?.store_id ? String(licenseKeyObj.store_id) : null,
-		lemon_product_id: licenseKeyObj?.product_id ? String(licenseKeyObj.product_id) : null,
-
-		instances_count:
-			typeof licenseKeyObj?.instances_count === "number"
-				? licenseKeyObj.instances_count
-				: null,
-		activation_limit:
-			typeof licenseKeyObj?.activation_limit === "number"
-				? licenseKeyObj.activation_limit
-				: null,
-
-		user_name: licenseKeyObj?.user_name ? String(licenseKeyObj.user_name) : null,
-		user_email: licenseKeyObj?.user_email ? String(licenseKeyObj.user_email) : null,
-
-		lemon_created_at: licenseKeyObj?.created_at ? String(licenseKeyObj.created_at) : null,
-		lemon_updated_at: licenseKeyObj?.updated_at ? String(licenseKeyObj.updated_at) : null,
-
-		meta: act.data?.meta || null,
-	});
-
-	if (instanceId) {
-		await upsertLicenseInstance(dbi, {
-			instanceId,
-			licenseId: license.license_id,
-			tenantId,
-			deviceId,
-			instanceName: instanceName || null,
-		});
-	}
-
-	// Provisión de la BD del tenant + esquema + admin inicial.
 	try {
-		await provisionTenantDatabase(dbi, env, tenantId);
+		// Liga la pubkey del dispositivo (anti-copia). Si ese device_id ya existía con OTRA
+		// clave, esto lanza `device_key_mismatch`: alguien ha copiado el fichero de estado.
+		await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);
+		await setDevicePubKeyB64IfEmptyOrThrow(db, tenantId, deviceId, devicePubKey);
+	} catch (e: any) {
+		if (e?.code === "device_key_mismatch") {
+			return c.json({ ok: false, error: "device_key_mismatch" } satisfies ApiError, 409);
+		}
+		throw e;
+	}
+
+	try {
+		await provisionTenantDatabase(db, env, tenantId);
 	} catch (e: any) {
 		return c.json(
-			{ ok: false, error: "tenant_db_provision_failed", details: String(e?.message || e) },
+			{
+				ok: false,
+				error: "tenant_db_provision_failed",
+				details: String(e?.message || e),
+			} satisfies ApiError,
 			500,
 		);
 	}
 
+	await upsertTenantInfo(db, tenantId, {
+		displayName: tenantInfo.displayName ?? null,
+		legalName: tenantInfo.legalName ?? null,
+		email: tenantInfo.email ?? null,
+		phone: tenantInfo.phone ?? null,
+		country: tenantInfo.country ?? null,
+	});
+
+	// ── Licencia: arrancar el reloj o mover el Main ─────────────────────────
+	let expiresAtMs = lic.expires_at_ms;
+
+	if (esPrimeraActivacion) {
+		expiresAtMs = await activateLicenseFirstTime(db, {
+			licenseId: lic.license_id,
+			tenantId,
+			deviceId,
+			termMonths: lic.term_months,
+		});
+	} else if (esCambioDeEquipo) {
+		await reassignMainDevice(db, {
+			licenseId: lic.license_id,
+			fromDeviceId: lic.main_device_id,
+			toDeviceId: deviceId,
+		});
+
+		// Aviso al titular: si el cambio no lo ha hecho él, queremos que se entere HOY.
+		// No bloquea la activación: el correo es entrega, no autorización.
+		c.executionCtx.waitUntil(sendDeviceChangedNoticeEmail(env, { to: lic.customer_email }));
+	}
+
 	const token = await signToken(env, { tenantId, deviceId, licHash });
 
-	const out: ActivateResponse & { deviceId: string } = {
+	const out: ActivateResponse = {
 		ok: true,
 		tenantId,
 		deviceId,
 		token,
-		status,
-		expiresAt,
+		status: esPrimeraActivacion ? "active" : lic.status,
+		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
 	};
 
 	return c.json(out);
 });
 
+// ──────────────────────────────────────────────────────────────────────────────
+// POST /v1/license/device-change/request
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// Manda el código de 6 dígitos al email de la licencia. Responde SIEMPRE lo mismo, exista o no
+// la clave: si contestara distinto, cualquiera podría usar este endpoint para averiguar qué
+// claves son válidas.
+
+licenseRoutes.post("/device-change/request", async (c) => {
+	const env = c.env;
+	const miss = assertEnv(env, ["TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN", "EMAIL_FROM_ADDRESS"]);
+	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
+
+	const body = await c.req.json<any>().catch(() => ({}));
+	const activationKey = normalizeLicenseKey(String(body?.activationKey || ""));
+	const deviceId = String(body?.deviceId || "").trim();
+
+	const respuestaConstante = c.json({ ok: true });
+	if (!activationKey || !deviceId) return respuestaConstante;
+
+	const db = getDb(env);
+	const now = Date.now();
+
+	const lic = await getLicenseByHash(db, await licenseKeyHash(activationKey));
+
+	// Solo se manda código si el cambio de dispositivo tiene sentido: la licencia existe, no
+	// está anulada, y de verdad está ligada a OTRO equipo.
+	const procede =
+		lic &&
+		!estaAnulada(lic) &&
+		!estaCaducada(lic, now) &&
+		lic.main_device_id &&
+		lic.main_device_id !== deviceId;
+
+	if (!procede || !lic) return respuestaConstante;
+
+	// Anti-machaque: si acabamos de mandar uno hace menos de un minuto, no reenviamos (pero
+	// respondemos igual). Evita usar el endpoint como cañón de correo contra un cliente.
+	const previo = await getDeviceOtp(db, lic.license_id, deviceId);
+	if (previo && !previo.consumed_at_ms && now - previo.created_at_ms < 60_000) {
+		return respuestaConstante;
+	}
+
+	const code = generateOtpCode();
+	await putDeviceOtp(db, {
+		licenseId: lic.license_id,
+		newDeviceId: deviceId,
+		codeHash: await otpHash(code),
+		expiresAtMs: now + OTP_TTL_MS,
+	});
+
+	c.executionCtx.waitUntil(
+		sendDeviceChangeCodeEmail(env, {
+			to: lic.customer_email,
+			code,
+			minutes: Math.round(OTP_TTL_MS / 60_000),
+		}),
+	);
+
+	return respuestaConstante;
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // GET /v1/license/status
+// ──────────────────────────────────────────────────────────────────────────────
+
 licenseRoutes.get("/status", async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, ["LICENSE_JWT_SECRET", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
-	if (miss) return c.json({ ok: false, error: miss }, 500);
+	const miss = assertEnv(env, [
+		"LICENSE_JWT_SECRET",
+		"LICENSE_SIGNING_PRIVATE_KEY",
+		"TURSO_DATABASE_URL",
+		"TURSO_AUTH_TOKEN",
+	]);
+	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const h = c.req.header("authorization") || "";
-	const m = h.match(/^Bearer\s+(.+)$/i);
-	if (!m) return c.json({ ok: false, error: "missing_token" }, 401);
+	const auth = c.req.header("authorization") || "";
+	const m = auth.match(/^Bearer\s+(.+)$/i);
+	if (!m) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
 
 	let claims: { tenantId: string; deviceId: string; licHash: string };
 	try {
 		claims = await verifyToken(env, m[1]);
 	} catch {
-		return c.json({ ok: false, error: "invalid_token" }, 401);
+		// Token caducado o inválido. El cliente NO debe borrar la licencia por esto: debe
+		// intentar /refresh (device-proof). Se lo decimos explícitamente en el código de error.
+		return c.json({ ok: false, error: "token_expired" } satisfies ApiError, 401);
 	}
 
-	const dbi = getDb(env);
-	await ensureExtraSchema(dbi);
+	const db = getDb(env);
 
-	const proof = await verifyDeviceProof(c.req.raw, dbi, {
+	const proof = await verifyDeviceProof(c.req.raw, db, {
 		tenantId: claims.tenantId,
 		deviceId: claims.deviceId,
 	});
-	if (!proof.ok) return c.json({ ok: false, error: proof.error }, 401);
+	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
 
-	const lic = await getLicenseByHash(dbi, claims.licHash);
-	if (!lic) return c.json({ ok: false, error: "not_found" }, 404);
+	const lic = await getLicenseByHash(db, claims.licHash);
+	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+
+	const now = Date.now();
+	const clientTs = Number(c.req.header("X-Device-Ts") || 0);
+
+	const assertion = await buildSignedAssertion(env, {
+		lic,
+		tenantId: claims.tenantId,
+		deviceId: claims.deviceId,
+		clientTs,
+		nowMs: now,
+	});
+
+	// Token renovado en cada comprobación (cada 6 h): así nunca se llega al muro de los 30 días
+	// que obligaba a reactivar a mano (bug #1).
+	const token = await signToken(env, claims);
 
 	return c.json({
 		ok: true,
-		state: {
-			tenant_id: lic.tenant_id,
-			status: lic.status,
-			expires_at: lic.expires_at,
-			disabled: toBool01((lic as any).disabled, false),
-			test_mode: toBool01((lic as any).test_mode, false),
-			key_short: lic.key_short,
-			updated_at_ms: lic.updated_at_ms,
-			created_at_ms: lic.created_at_ms,
+		assertion,
+		token,
+		info: {
+			keyShort: lic.key_short,
+			customerEmail: lic.customer_email,
+			termMonths: lic.term_months,
+			origin: lic.origin,
 		},
-		serverTime: Date.now(),
+		serverTime: now,
 	});
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
-// /v1/webhooks  (Lemon Squeezy)
+// POST /v1/license/refresh
 // ──────────────────────────────────────────────────────────────────────────────
+//
+// Reemite el token de sesión cuando el viejo ya no vale (caducó, o el reloj del equipo iba
+// desajustado). NO se confía en el token: se leen sus claims sin verificar y se exige un
+// device-proof firmado con la clave privada del dispositivo, que solo tiene el equipo legítimo.
+// Es lo que evita que un 401 transitorio borre la licencia del cliente (bug #4).
 
-export const lemonWebhookRoutes = new Hono<Ctx>();
-
-// POST /v1/webhooks/lemon
-lemonWebhookRoutes.post("/lemon", async (c) => {
+licenseRoutes.post("/refresh", async (c) => {
 	const env = c.env;
-	const miss = assertEnv(env, [
-		"LEMON_WEBHOOK_SECRET",
-		"TURSO_DATABASE_URL",
-		"TURSO_AUTH_TOKEN",
-		"LICENSE_STORE_KEY",
-	]);
-	if (miss) return c.json({ ok: false, error: miss }, 500);
+	const miss = assertEnv(env, ["LICENSE_JWT_SECRET", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const raw = await c.req.raw.text();
+	const auth = c.req.header("authorization") || "";
+	const m = auth.match(/^Bearer\s+(.+)$/i);
+	if (!m) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
 
-	console.log("[LEMON] webhook hit", {
-		ts: Date.now(),
-		sigPresent: Boolean((c.req.header("X-Signature") || "").trim()),
-		bytes: raw.length,
+	const claims = decodeTokenClaims(m[1]);
+	if (!claims) return c.json({ ok: false, error: "invalid_token" } satisfies ApiError, 401);
+
+	const db = getDb(env);
+
+	const proof = await verifyDeviceProof(c.req.raw, db, {
+		tenantId: claims.tenantId,
+		deviceId: claims.deviceId,
 	});
+	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
 
-	const validSig = await verifyLemonSignature(c.req.raw, env.LEMON_WEBHOOK_SECRET, raw);
-	if (!validSig) return c.json({ ok: false, error: "invalid_signature" }, 401);
-
-	const sig = (c.req.header("X-Signature") || "").trim().toLowerCase();
-	const bodySha = await sha256Hex(raw);
-	const eventUid = await sha256Hex(sig + ":" + bodySha);
-
-	const dbi = getDb(env);
-	await ensureExtraSchema(dbi);
-
-	let payload: LemonWebhookPayload | null = null;
-	try {
-		payload = JSON.parse(raw);
-	} catch {
-		return c.json({ ok: false, error: "invalid_json" }, 400);
+	const lic = await getLicenseByHash(db, claims.licHash);
+	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
+	if (estaAnulada(lic)) {
+		return c.json({ ok: false, error: "license_revoked" } satisfies ApiError, 403);
 	}
 
-	const eventName = String(payload?.meta?.event_name || "");
-	const testMode = Boolean(payload?.meta?.test_mode);
-
-	const resourceType = (payload as any)?.data?.type ? String((payload as any).data.type) : null;
-	const resourceId = (payload as any)?.data?.id ? String((payload as any).data.id) : null;
-
-	const idemp = await upsertWebhookEvent(dbi, {
-		event_uid: eventUid,
-		event_name: eventName || "unknown",
-		resource_type: resourceType,
-		resource_id: resourceId,
-		sig_hex: sig || null,
-		body_sha256: bodySha,
-		payload_json: raw,
-	});
-
-	if (idemp.already) {
-		return c.json({ ok: true, received: true, eventName, idempotent: true });
+	// Si la licencia ya se movió a otro Main, este equipo no merece un token nuevo.
+	if (computeLicenseState(lic, claims.deviceId, Date.now()) === "device_replaced") {
+		return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 403);
 	}
 
-	try {
-		const attrs = payload?.data?.attributes || {};
-		const licenseKey = String((attrs as any).key || "").trim();
-		const status = String((attrs as any).status || "unknown").trim() as LicenseStatus;
-		const expiresAt = (attrs as any).expires_at ? String((attrs as any).expires_at) : null;
-
-		console.log("[LEMON] event", {
-			eventName,
-			hasKey: Boolean(licenseKey),
-			status,
-			expiresAt,
-			testMode,
-		});
-
-		if (licenseKey) {
-			await upsertLicenseFromEventOrActivation({
-				db: dbi,
-				storeKeyB64: env.LICENSE_STORE_KEY,
-				licenseKeyPlain: licenseKey,
-				tenantId: null,
-				status: (status || "active") as LicenseStatus,
-				expiresAt,
-				testMode,
-
-				lemon_license_key_id: resourceId,
-				lemon_created_at: (attrs as any).created_at ? String((attrs as any).created_at) : null,
-				lemon_updated_at: (attrs as any).updated_at ? String((attrs as any).updated_at) : null,
-
-				meta: { eventName, payload },
-			});
-		}
-
-		await markWebhookProcessed(dbi, eventUid, true);
-		return c.json({ ok: true, received: true, eventName });
-	} catch (e: any) {
-		await markWebhookProcessed(dbi, eventUid, false, String(e?.message || e));
-		return c.json({ ok: false, error: "webhook_processing_failed" }, 500);
-	}
+	const token = await signToken(env, claims);
+	return c.json({ ok: true, token });
 });
