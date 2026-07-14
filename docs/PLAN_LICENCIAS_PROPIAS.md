@@ -1,8 +1,13 @@
 # Plan — Sistema de licencias propio (retirada de Lemon Squeezy + Stripe)
 
-> **Estado:** DISEÑO (sin implementar). Este documento describe *qué* cambiar/añadir/borrar y *por qué*.
-> No se ha tocado código de producto todavía.
-> **Fecha:** 2026-07-09 · **Rama:** `main`
+> **Estado:** EN EJECUCIÓN.
+> · **Fase 0 (preparación del cliente) — ✅ hecha** (`a610d9a`): la política del gate se sacó del
+>   adaptador a `tpv-domain::licensing`, se unificó el host de la nube en una constante, se retiró el
+>   comando duplicado `license_read_state_for_ui` y los alias muertos de `LicenseActivateInput`.
+>   El cliente ya está listo para recibir la firma ed25519 y el enforcement de `expires_at` sin
+>   tocar infraestructura.
+> · **Worker — 🟡 en curso** (fases 1 y 2 fusionadas, ver §0).
+> **Fecha:** 2026-07-09 (actualizado 2026-07-14) · **Rama:** `main`
 > **Ámbito:** subsistema de **licencias** (activación, gate, cobro, alta manual). El **pairing** de
 > Handy y la **sincronización** (§9 de [CLAUDE.md](../CLAUDE.md)) se mantienen intactos y solo se
 > mencionan donde comparten cripto/identidad de dispositivo.
@@ -14,11 +19,21 @@
 | Decisión | Elección | Consecuencia de diseño |
 |---|---|---|
 | **Modelo de cobro** | **Duración fija (pago único)**: 1 / 3 / 12 meses | Webhook principal `checkout.session.completed`. Sin facturación recurrente que reconciliar. Renovar = nuevo pago (extiende la licencia). |
-| **Al caducar** | **Aviso previo + gracia corta** | El servidor calcula `warn`/`grace`/`blocked` sobre `expires_at`. Banner de aviso N días antes; ventana de gracia de M días tras caducar; luego bloqueo. Independiente de la gracia **offline** (red) de 48 h ya existente. |
-| **Alta manual** | **Endpoint admin protegido + CLI interno** | Sin panel web público. Un endpoint con `ADMIN_API_TOKEN` (comparación *timing-safe*) minta/lista/revoca/extiende licencias; lo invoca un script que ejecuta el admin. Mínima superficie de ataque. |
+| **Al caducar** | **Aviso 7 días + gracia 3 días** | El servidor calcula `warn`/`grace`/`blocked` sobre `expires_at`. Banner de aviso los 7 días previos; 3 días de gracia tras caducar (el TPV sigue abierto, banner rojo); luego bloqueo. Independiente de la gracia **offline** (red) de 48 h ya existente. |
+| **Alta manual** | **Endpoint admin protegido + CLI interno** | Sin panel web público. Un endpoint con `ADMIN_API_TOKEN` (comparación *timing-safe*) minta/lista/revoca/extiende licencias; lo invoca un script de Node (`pnpm license:*`) que ejecuta el admin. Mínima superficie de ataque. |
+| **Identidad y cambio de dispositivo** | **Activación verificada por email (OTP)** | La licencia se liga a **un único Main** (`main_device_id`). Activar en un equipo distinto exige un **código de 6 dígitos enviado al `customer_email`** de la licencia: el cliente migra solo (sirve con el PC muerto o robado), pero traspasar la licencia exige entregar también el buzón. El Main anterior se bloquea en su siguiente `/status`. Cierra el bug de asientos ilimitados (#3) sin generar carga de soporte. Ver [§6.4](#64-cambio-de-dispositivo-otp). |
+| **OTP: cuándo** | **Solo al cambiar de dispositivo** | La 1ª activación va directa (la clave acaba de llegar por email a esa misma persona). El código solo se exige si la licencia ya está ligada a otro `main_device_id`. |
+| **Email de la licencia** | **Obligatorio al emitir** | `customer_email` es `NOT NULL`: sin él no habría recuperación autoservicio. Stripe siempre lo aporta; el CLI lo exige. El flag `--send-key` decide solo si **además** se le manda la clave por correo. |
+| **Mapeo precio → duración** | **`metadata.term_months` en el Price de Stripe** | Se pueden crear o cambiar precios sin desplegar el worker. Si un Price llega sin `term_months`, el fulfillment **se rechaza** y queda registrado (fail-closed): nunca se emite una licencia de duración desconocida. |
+| **Envío de correo** | **Cloudflare Email Service** (binding `EMAIL`) | ⚠️ Corrige este plan: **no es Resend** (se retiró). Se reutiliza el binding y el patrón de [email.routes.ts](../apps/cloud-worker-licensing/src/domains/email/email.routes.ts). Sin claves de API. |
 
 **Producto único:** una sola “línea” de licencia (`plan = "standard"`) con tres precios (uno por
 duración). Si en el futuro hay más planes, el modelo ya lleva la columna `plan`.
+
+**Sin ventana rota:** la migración del esquema borra las columnas `lemon_*`, que el `activate`
+actual todavía escribe. Por eso el worker se hace **de una sola tanda** (fases 1 y 2 juntas):
+modelo + emisión + `activate` reescrito + `status` firmado + retirada de Lemon en un único
+despliegue. Es viable porque **no hay ninguna licencia real en producción** (campo libre).
 
 ---
 
@@ -38,6 +53,7 @@ duración). Si en el futuro hay más planes, el modelo ya lleva la columna `plan
 12. [Checklist de retirada de Lemon](#12-checklist-lemon)
 13. [Riesgos y decisiones abiertas](#13-riesgos)
 14. [Referencias](#14-referencias)
+15. [Pendientes (futuro)](#15-pendientes-futuros)
 
 ---
 
@@ -61,7 +77,7 @@ Cambios de alto nivel:
 - **Dentro Stripe** (pago único): un endpoint `POST /v1/stripe/webhook` verifica la firma de Stripe
   (HMAC-SHA256 manual con SubtleCrypto, mismo patrón que ya se usa con Lemon) y, en
   `checkout.session.completed`, **minta o extiende** una licencia y **envía la clave por email**
-  (Resend, ya integrado).
+  (Cloudflare Email Service, ya integrado).
 - **Alta manual**: `POST /v1/admin/licenses` (token admin) minta una clave con la duración elegida.
 - **Activación endurecida**: la clave la valida nuestro worker contra la BD (ya no Lemon); se
   aprovisiona la BD del tenant (igual que hoy) y se liga la pubkey del dispositivo (anti-copia, igual
@@ -95,10 +111,10 @@ Cambios de alto nivel:
 | Worker · helpers | [licensing.helpers.ts](../apps/cloud-worker-licensing/src/domains/licensing/licensing.helpers.ts) | `lemonActivate`, `verifyLemonSignature`, `signToken`(HS256 30d), `verifyToken`, `verifyDeviceProof`, `provisionTenantDatabase`, `ensureTenantInitialAdmin` |
 | Worker · store | [licenseStore.ts](../apps/cloud-worker-licensing/src/server/licenseStore.ts) | tabla `licenses` con columnas `lemon_*`, `devices`, `tenants`, `license_instances`, `webhook_events`, `license_meta` |
 | Worker · tipos | [shared.ts](../apps/cloud-worker-licensing/src/shared.ts) | `LicenseStatus`, `ActivateRequest/Response`, `LemonWebhookPayload` |
-| Worker · env | [env.ts](../apps/cloud-worker-licensing/src/env.ts) | `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `LEMON_WEBHOOK_SECRET`, Turso, Resend |
+| Worker · env | [env.ts](../apps/cloud-worker-licensing/src/env.ts) | `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `LEMON_WEBHOOK_SECRET`, Turso, email (binding `EMAIL`) |
 | Worker · router | [index.ts](../apps/cloud-worker-licensing/src/index.ts) | monta `licenseRoutes` y `lemonWebhookRoutes` |
 | Cripto reutilizable | [server/crypto.ts](../apps/cloud-worker-licensing/src/server/crypto.ts) · [utils/crypto.ts](../apps/cloud-worker-licensing/src/server/utils/crypto.ts) · [utils/nobleEd25519.ts](../apps/cloud-worker-licensing/src/server/utils/nobleEd25519.ts) | `aesGcmEncrypt/Decrypt`, `sha256Hex`, verificación/firma ed25519, HMAC *timing-safe* |
-| Email | [email.routes.ts](../apps/cloud-worker-licensing/src/domains/email/email.routes.ts) | Resend ya integrado (reutilizable para enviar la clave) |
+| Email | [email.routes.ts](../apps/cloud-worker-licensing/src/domains/email/email.routes.ts) | Cloudflare Email Service ya integrado (binding `EMAIL`, reutilizable para enviar la clave) |
 | Cliente Rust · adaptador | [lib.rs](../crates/tpv-infra-licensing/src/lib.rs) | `LicensingAdapter` (activate/gate/`call_status`), `PairingAdapter` |
 | Cliente Rust · identidad | [device.rs](../crates/tpv-infra-licensing/src/device.rs) | device-id + keypair ed25519 en keyring, `sign_device_proof` |
 | Contratos | [tpv-contracts/src/licensing.rs](../crates/tpv-contracts/src/licensing.rs) | `LicenseLocalState`, `LicenseGateResult`, `LicenseActivateInput` |
@@ -144,7 +160,7 @@ Ya **no** aplican (eliminados desde la auditoría de junio): `Activacion.tsx`, `
    Admin ──► CLI ──► POST /v1/admin/licenses│      WORKER  tpv-api (Cloudflare)     │
              (ADMIN_API_TOKEN, timing-safe) │  · verifica firma Stripe (SubtleCrypto)│
                                             │  · minta/extiende licencia (control-DB)│
-                                            │  · email de la clave (Resend)          │
+                                            │  · email de la clave (Email Service)     │
                                             │  · /v1/license/activate  (valida clave)│
                                             │  · /v1/license/status    (FIRMA ed25519)│
                                             │  · /v1/license/refresh   (device-proof)│
@@ -168,7 +184,7 @@ Principios:
   tabla `licenses`; solo cambia `origin` (`'stripe'` | `'manual'`).
 - **Reutilización máxima.** Se conservan y reaprovechan: identidad ed25519 en keyring
   ([device.rs](../crates/tpv-infra-licensing/src/device.rs)), device-proof + anti-replay, AES-GCM en
-  reposo, `provisionTenantDatabase` + `ensureTenantInitialAdmin`, el JWT HS256 de sesión, Resend, y el
+  reposo, `provisionTenantDatabase` + `ensureTenantInitialAdmin`, el JWT HS256 de sesión, el envío de correo, y el
   patrón hexagonal (comando fino → caso de uso → puerto → adaptador).
 - **Novedad criptográfica.** Un **par ed25519 de *firma de licencia*** (distinto del de dispositivo):
   la privada vive **solo** en el worker (`LICENSE_SIGNING_PRIVATE_KEY`); la pública se **pinea como
@@ -191,6 +207,7 @@ CREATE TABLE licenses (
   key_short                  TEXT,                  -- "TPV-…-AB12" para UI (no sensible)
 
   tenant_id                  TEXT,                  -- NULL hasta la 1ª activación
+  main_device_id             TEXT,                  -- el ÚNICO Main que puede usar la licencia
   status                     TEXT NOT NULL,         -- 'issued'|'active'|'expired'|'revoked'
   disabled                   INTEGER NOT NULL DEFAULT 0,
 
@@ -202,13 +219,15 @@ CREATE TABLE licenses (
   activated_at_ms            INTEGER,               -- 1ª activación (arranca el reloj)
   expires_at_ms              INTEGER,               -- caducidad ABSOLUTA (fuente de verdad del gate)
 
+  -- Identidad del cliente (raíz de confianza del cambio de dispositivo, §6.4):
+  customer_email             TEXT NOT NULL,         -- OBLIGATORIO: destino del OTP
+  customer_name              TEXT,
+
   -- Enlace Stripe (reemplaza lemon_*):
   stripe_customer_id         TEXT,
   stripe_checkout_session_id TEXT,                  -- idempotencia de fulfillment
   stripe_payment_intent_id   TEXT,
   stripe_price_id            TEXT,
-  customer_email             TEXT,
-  customer_name              TEXT,
 
   created_at_ms              INTEGER NOT NULL,
   updated_at_ms              INTEGER NOT NULL
@@ -216,6 +235,32 @@ CREATE TABLE licenses (
 CREATE UNIQUE INDEX ux_licenses_key_hash ON licenses(license_key_hash);
 CREATE INDEX ix_licenses_customer ON licenses(stripe_customer_id);
 CREATE INDEX ix_licenses_tenant   ON licenses(tenant_id);
+CREATE INDEX ix_licenses_email    ON licenses(customer_email);
+```
+
+### 4.1.b Códigos de cambio de dispositivo (OTP)
+
+```sql
+-- OTP de un solo uso para reactivar en un equipo distinto (§6.4). Solo se guarda el hash.
+CREATE TABLE license_device_otp (
+  license_id       TEXT NOT NULL,
+  code_hash        TEXT NOT NULL,       -- sha256(código) — nunca en claro
+  new_device_id    TEXT NOT NULL,       -- el código solo vale para ESTE dispositivo
+  attempts         INTEGER NOT NULL DEFAULT 0,
+  expires_at_ms    INTEGER NOT NULL,    -- +10 min
+  consumed_at_ms   INTEGER,
+  created_at_ms    INTEGER NOT NULL,
+  PRIMARY KEY (license_id, new_device_id)
+);
+
+-- Traza de cada cambio de Main (auditoría / detección de abuso).
+CREATE TABLE license_device_swaps (
+  swap_id        TEXT PRIMARY KEY,
+  license_id     TEXT NOT NULL,
+  from_device_id TEXT,
+  to_device_id   TEXT NOT NULL,
+  at_ms          INTEGER NOT NULL
+);
 ```
 
 **Anclaje del reloj (decisión de diseño):** la caducidad **arranca en la 1ª activación**, no en la
@@ -371,7 +416,7 @@ y no se promete lo imposible.
      - ¿cliente ya tiene licencia activa? (stripe_customer_id)
          · sí → extiende expires_at += term  (email "renovada")
          · no → minta clave (CSPRNG) + fila licenses(origin='stripe', status='issued')
-                 → email con la clave (Resend)
+                 → email con la clave (Email Service)
 6. Responde 200 (rápido).
 ```
 
@@ -392,8 +437,11 @@ admin$ tpv-license issue --term 12 --email cliente@bar.com --name "Bar La Plaza"
 3. Worker:
    - sha256(clave) → busca licencia. No existe → error 'license_not_found'.
    - status ∈ {revoked,disabled} → error. status 'expired' → error 'license_expired'.
-   - 1ª activación: status='active', activated_at, expires_at = now + term.
-     Reactivación en otro Main del MISMO tenant: OK (misma licencia). Distinto tenant: rechazo.
+   - ¿main_device_id?
+       · NULL (1ª activación) → sigue: status='active', activated_at=now,
+         expires_at = now + term_months, main_device_id = deviceId.
+       · == deviceId (re-activación en el MISMO equipo) → OK, idempotente.
+       · != deviceId (otro equipo) → NO activa: exige OTP (§6.4).
    - liga pubkey del dispositivo (anti-copia) — igual que hoy.
    - provisiona la BD del tenant (Turso) + admin inicial — igual que hoy.
    - persiste tenantInfo (legal_name/email/phone/country) en tenants — corrige bug #5.
@@ -401,7 +449,36 @@ admin$ tpv-license issue --term 12 --email cliente@bar.com --name "Bar La Plaza"
 4. Cliente guarda license_state.json (tenant_id, device_id, token, status, expires_at).
 ```
 
-### 6.4 Gate (arranque + cada 6 h + al activar modo online)
+### 6.4 Cambio de dispositivo (OTP)
+
+El cliente cambia de ordenador (se rompió, se lo robaron, lo formateó). **No hace falta el equipo
+viejo** y **no hace falta soporte**: basta con su clave y con el buzón al que se emitió la licencia.
+
+```
+1. Activa con su clave en el PC nuevo → el worker ve main_device_id != deviceId
+   → responde 409 { error: 'device_change_required', emailHint: 'a***@bar.com' }.
+2. El TPV pide el código. El cliente pulsa "Enviar código":
+   POST /v1/license/device-change/request { activationKey, deviceId }
+   → worker: genera 6 dígitos (CSPRNG), guarda sha256 en license_device_otp
+     (ligado a ESE deviceId, 10 min, máx 5 intentos), y lo envía a customer_email.
+     Responde SIEMPRE 200 con el mismo cuerpo (no filtra si la clave existe).
+3. El cliente teclea el código:
+   POST /v1/license/activate { activationKey, deviceId, devicePubKey, tenantInfo, deviceChangeCode }
+   → worker verifica el OTP (hash, caducidad, intentos, mismo deviceId).
+   → OK: main_device_id = deviceId (MISMO tenant_id: conserva su BD y sus datos),
+     consume el OTP, registra el swap en license_device_swaps y **avisa por email al titular**
+     ("tu TPV se ha activado en un equipo nuevo; si no has sido tú, contáctanos").
+4. El Main anterior, en su siguiente /status, ve que ya no es el main_device_id
+   → 'device_replaced' → borra su estado local y se bloquea. Un solo escritor, invariante intacto.
+```
+
+> **Ojo — los datos no viajan con la licencia.** El cambio de dispositivo recupera la **licencia y
+> el tenant**, no necesariamente el contenido: la BD del tenant en Turso solo está poblada si ese
+> cliente trabajaba en **modo online** (el outbox replica a la nube). Un cliente en modo offline
+> que pierde el PC recupera su licencia, pero su TPV nuevo arranca **vacío**. Pendiente de
+> resolver (ver [§15](#15-pendientes-futuros)).
+
+### 6.5 Gate (arranque + cada 6 h + al activar modo online)
 
 ```
 1. license_gate → GET /v1/license/status (device-proof firmado).
@@ -415,13 +492,15 @@ admin$ tpv-license issue --term 12 --email cliente@bar.com --name "Bar La Plaza"
    - 401 por reloj/desfase o token expirado → NO borrar; intentar /v1/license/refresh
      (auth por device-proof) — corrige bug #4.
    - 'license_not_found'/'revoked'/'expired' definitivo → borra estado y bloquea.
-5. Caducidad (aviso + gracia, decisión del responsable):
-   - now within [expires_at - WARN_DAYS, expires_at) → allowed=true + warn=true (banner).
-   - now within [expires_at, expires_at + GRACE_DAYS) → allowed=true + reason='expiry_grace' (banner rojo).
-   - now ≥ expires_at + GRACE_DAYS → allowed=false + reason='expired'.
+5. Caducidad (aviso 7 días + gracia 3 días):
+   - now within [expires_at - 7d, expires_at) → allowed=true + warn=true (banner).
+   - now within [expires_at, expires_at + 3d) → allowed=true + reason='expiry_grace' (banner rojo).
+   - now ≥ expires_at + 3d → allowed=false + reason='expired'.
+6. El dispositivo ya no es el Main de la licencia (hubo un cambio, §6.4)
+   → allowed=false + reason='device_replaced' → borra el estado local.
 ```
 
-### 6.5 Renovación / caducidad ya vencida
+### 6.6 Renovación / caducidad ya vencida
 
 - Con extensión por `stripe_customer_id`: el cliente vuelve a comprar → el webhook extiende → en el
   siguiente `/status` el TPV ve el nuevo `expires_at` (firmado) y el banner desaparece. Sin re-teclear
@@ -429,7 +508,7 @@ admin$ tpv-license issue --term 12 --email cliente@bar.com --name "Bar La Plaza"
 - Si se emitió clave nueva: el TPV ofrece “Renovar / introducir clave” → `activate` que **suma** el
   término.
 
-### 6.6 Revocación (admin / fraude / reembolso)
+### 6.7 Revocación (admin / fraude / reembolso)
 
 ```
 tpv-license revoke --license-id …  → status='revoked', disabled=1
@@ -456,9 +535,17 @@ Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
   del token** + cálculo `warn`/`grace`/`expired` sobre `expires_at`.
 - 🟩 `licensing.routes.ts` · `POST /v1/license/refresh`: nuevo; auth por **device-proof** (decodifica
   claims del token aunque esté caducado, verifica proof contra la pubkey guardada), reemite token.
+- 🟩 `licensing.routes.ts` · `POST /v1/license/device-change/request`: nuevo (§6.4). Genera el OTP de
+  6 dígitos, guarda su `sha256` en `license_device_otp` (ligado al `deviceId` que pide el cambio,
+  10 min, máx 5 intentos) y lo envía a `customer_email`. Respuesta **constante** (mismo 200 exista o
+  no la clave) para no filtrar qué claves son válidas. Rate-limit por clave/IP.
+- 🟨 `licensing.routes.ts` · `POST /v1/license/activate`: acepta `deviceChangeCode` opcional; sin él,
+  si `main_device_id` ya apunta a otro equipo → `409 device_change_required`. Con OTP válido:
+  reasigna `main_device_id`, registra el swap y **avisa por email al titular**.
 - 🟩 `licensing.helpers.ts`: `signLicenseAssertion(env, fields)` (ed25519 con
   `LICENSE_SIGNING_PRIVATE_KEY`, WebCrypto `crypto.subtle.sign({name:'Ed25519'})` o `@noble/ed25519`),
-  y `computeLicenseState(license, now)` (deriva `active/expired/warn/grace`).
+  `computeLicenseState(license, now)` (deriva `active/expired/warn/grace`) y los helpers del OTP
+  (`issueDeviceOtp`, `verifyDeviceOtp` — hash + caducidad + intentos, comparación *timing-safe*).
 
 **Stripe (nuevo dominio):**
 - 🟩 `src/domains/stripe/stripe.routes.ts`: `POST /v1/stripe/webhook` (verificación manual de firma,
@@ -470,8 +557,14 @@ Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
 
 **Admin (nuevo dominio):**
 - 🟩 `src/domains/admin/admin.routes.ts`: `POST /v1/admin/licenses` (issue), `GET /v1/admin/licenses`
-  (list), `POST /v1/admin/licenses/:id/revoke`, `POST /v1/admin/licenses/:id/extend`. Middleware
-  `requireAdmin` (Bearer *timing-safe*).
+  (list), `POST /v1/admin/licenses/:id/revoke`, `POST /v1/admin/licenses/:id/extend`. `email` es
+  **obligatorio** en el issue; `sendKey` decide si además se le manda la clave por correo.
+- 🟩 `src/middleware/requireAdmin.ts`: Bearer con comparación **timing-safe** contra `ADMIN_API_TOKEN`;
+  fail-closed si el secreto no está configurado. 🟨 De paso, `updates.routes.ts` (`checkAdmin`) pasa a
+  usarlo: hoy compara el token con `!==` (no *timing-safe*) y mantiene su propio secreto.
+- 🟩 `scripts/tpv-license.mjs` (raíz del repo, **fuera** del workspace/Turbo) + scripts de pnpm
+  (`license:issue`, `license:list`, `license:revoke`, `license:extend`). Lee `ADMIN_API_TOKEN` del
+  entorno del admin; nunca se hardcodea ni se versiona.
 
 **Store / tipos / env / router:**
 - 🟨 `licenseStore.ts`: quitar columnas `lemon_*` de `LicenseRow`, del `INSERT`/`ON CONFLICT` de
@@ -599,17 +692,22 @@ verificando en cada paso (`cargo build`, `cargo test -p tpv-contracts`, `tsc`, `
 - Generar el par de firma ed25519. Crear los 3 Prices + Payment Links + webhook en Stripe **test**.
 - `wrangler secret put` de los 4 secretos nuevos. Escribir el script SQL de migración del control-plane.
 
-**Fase 1 — Worker: modelo de datos + emisión.**
-- Aplicar la migración SQL (drop `lemon_*`, add nuevas columnas).
-- `licenseStore.ts`: `issueLicense`/`extendLicense`/`activateLicense`/`getLicenseByStripeCustomer`.
-- Dominio `stripe/` (webhook + verificación + fulfillment + email). Probar con Stripe CLI.
-- Dominio `admin/` (issue/list/revoke/extend) + `requireAdmin`. CLI mínimo (`scripts/tpv-license`).
-
-**Fase 2 — Worker: activación + status firmado + refresh.**
-- Reescribir `activate` (validación contra BD, provisión de tenant, persistir tenantInfo).
-- `status` firmado (ed25519) + `warn`/`grace` + refresco de token. Nuevo `refresh` por device-proof.
-- 🟥 Borrar Lemon (`lemonActivate`, `verifyLemonSignature`, `lemonWebhookRoutes`, `LemonWebhookPayload`,
-  `LEMON_WEBHOOK_SECRET`, columnas ya migradas). `typecheck` verde.
+**Fases 1 + 2 — Worker completo (una sola tanda, ver §0).**
+Se fusionan porque la migración del esquema rompe el `activate` actual: dejarlas separadas
+implicaría desplegar un worker roto entre medias. Orden interno:
+1. Migración SQL del control-plane (drop `lemon_*`, nuevas columnas, `license_device_otp`,
+   `license_device_swaps`).
+2. `licenseStore.ts`: `issueLicense`/`extendLicense`/`activateLicense`/`getLicenseByHash`/
+   `getLicenseByStripeCustomer` + helpers del OTP. Fuera todo lo `lemon_*`.
+3. `shared.ts` / `env.ts` / `index.ts`: tipos, secretos nuevos, montaje de rutas.
+4. Dominio `admin/` (issue/list/revoke/extend) + `requireAdmin` *timing-safe* + CLI. **Primero**,
+   porque permite emitir claves y probar el resto end-to-end sin depender de Stripe.
+5. `activate` reescrito (validación contra BD, `main_device_id`, OTP de cambio de dispositivo,
+   provisión de tenant, persistir tenantInfo) + `device-change/request` + emails.
+6. `status` firmado (ed25519) + `warn`/`grace` + refresco de token. Nuevo `refresh` por device-proof.
+7. 🟥 Borrar Lemon (`lemonActivate`, `verifyLemonSignature`, `lemonWebhookRoutes`,
+   `LemonWebhookPayload`, `LEMON_WEBHOOK_SECRET`).
+8. Dominio `stripe/` (webhook + verificación + fulfillment + email). Probar con Stripe CLI.
 
 **Fase 3 — Cliente Rust.**
 - Contracts: nuevos campos + `reason`s. `pnpm generate-types`.
@@ -701,4 +799,43 @@ verificando en cada paso (`cargo build`, `cargo test -p tpv-contracts`, `tsc`, `
 - Cliente Rust — `ed25519-dalek` (`VerifyingKey::verify_strict`): https://docs.rs/ed25519-dalek
 - Auditorías internas previas: [AUDITORIA_LICENCIAS.md](AUDITORIA_LICENCIAS.md) ·
   [licensing-pairing.md](analisis/transversal/licensing-pairing.md) · [BACKLOG.md](analisis/BACKLOG.md)
+
+---
+
+## 15. Pendientes (futuro)
+
+Trabajo **conscientemente aplazado**. No bloquea el sistema de licencias propio, pero el modelo de
+datos se diseña para que estas piezas sean una **ampliación y no una reescritura**.
+
+### 15.1 Cuenta de cliente con contraseña (el modelo “SaaS completo”)
+
+Hoy la raíz de confianza del cambio de dispositivo es **el buzón de correo** (OTP, §6.4). El paso
+natural es que la licencia cuelgue de una **cuenta** (email + contraseña) y que activar el TPV sea
+**iniciar sesión**. Qué añadiría:
+
+- Recuperación autoservicio sin teclear la clave (solo login).
+- Portal del cliente: ver facturas, **renovar**, listar/desvincular dispositivos.
+- Casa de forma natural con el `stripe_customer_id` (misma identidad para cobro y acceso).
+
+**Por qué se aplaza:** mete fricción en las pruebas de desarrollo (registro + login en cada
+activación) y no aporta seguridad *adicional* frente al OTP por email —el buzón sigue siendo la
+raíz de confianza en ambos casos—. Cuando se haga, el `customer_email` ya obligatorio de `licenses`
+es la clave de unión: se añade una tabla `accounts` y la licencia pasa a referenciarla, sin tocar
+la activación ni el gate.
+
+### 15.2 Recuperación de datos al cambiar de dispositivo (offline → online)
+
+El cambio de dispositivo (§6.4) devuelve **licencia y tenant**, pero los **datos** solo están en la
+nube si el cliente trabajaba en **modo online**. Un cliente en offline que pierde el PC recupera la
+licencia con la BD vacía.
+
+La solución obvia —“que active el modo online y se suba todo”— **no es viable tal cual**: un negocio
+con un año de operación acumula un `_Sync_Outbox` enorme y el primer drenado reventaría (miles de
+sentencias por WebSocket, sin control de lotes ni de memoria en el DO). Hace falta diseñar un
+**bootstrap masivo** distinto del sync incremental: snapshot comprimido de la BD local → subida en
+partes → carga en Turso, con reanudación y sin pasar por el TenantHub.
+
+Mientras tanto: la pantalla de cambio de dispositivo debe **decir la verdad** (“recuperarás tu
+licencia; tus datos solo si tenías la sincronización activada”), y conviene empujar el modo online
+como recomendado, no como opcional.
 ```
