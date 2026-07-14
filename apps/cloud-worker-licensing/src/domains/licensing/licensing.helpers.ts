@@ -185,7 +185,7 @@ export async function verifyDeviceProof(
 // ---------------- Bootstrap del admin inicial del tenant ----------------
 
 const PBKDF2_PREFIX = "$pbkdf2-sha256$";
-const PBKDF2_ITERS = 100_000;
+const PBKDF2_ITERS = 600_000;
 const PBKDF2_SALT_LEN = 16;
 const PBKDF2_DK_LEN = 32;
 

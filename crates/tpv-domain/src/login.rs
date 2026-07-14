@@ -8,7 +8,7 @@ use rand::RngCore;
 use sha2::Sha256;
 
 const PBKDF2_PREFIX: &str = "$pbkdf2-sha256$";
-const PBKDF2_ITERS: u32 = 100_000;
+const PBKDF2_ITERS: u32 = 600_000;
 const SALT_LEN: usize = 16;
 const DK_LEN: usize = 32;
 
@@ -148,8 +148,9 @@ pub fn hash_pin(pin: &str) -> Result<String, String> {
 
 /// Iteraciones objetivo para los hashes **nuevos**. Subir este valor (y su espejo `DEFAULT_ITERS`
 /// del worker) endurece el hashing; los hashes viejos migran solos por **rehash-en-login** (ver
-/// `hash_needs_upgrade`). Hoy = 100k por el tope de 10 ms de CPU del plan Free de Cloudflare
-/// (LOGIN-04): al pasar a plan de pago, subir a 600k (OWASP). Ver `docs/analisis/BACKLOG.md`.
+/// `hash_needs_upgrade`). = 600k (recomendación OWASP para PBKDF2-HMAC-SHA256, LOGIN-04). El coste
+/// de CPU en el worker (login/fichaje de Handy) es de decenas de ms, muy por debajo del tope del
+/// plan de pago de Cloudflare. Ver `docs/analisis/BACKLOG.md`.
 pub const fn target_pbkdf2_iters() -> u32 {
     PBKDF2_ITERS
 }
