@@ -465,7 +465,47 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .map_err(db_err)?;
             }
 
-            // 4) Borrar el pago y sus detalles.
+            // 4) Si la mesa ya tiene otra comanda abierta, mover a ella las lineas que este pago
+            //    va a liberar. Reabrir tambien la comanda historica violaria el indice que
+            //    garantiza una unica comanda abierta por mesa. El movimiento conserva las lineas
+            //    pendientes y permite cobrarlas de nuevo desde la comanda activa.
+            if !id_comanda.is_empty() {
+                conn.execute(
+                    r#"
+                    UPDATE Detalle_Comanda
+                    SET ID_Comanda = (
+                        SELECT abierta.ID_Comanda
+                        FROM Comandas origen
+                        JOIN Comandas abierta
+                          ON abierta.ID_Mesa = origen.ID_Mesa
+                         AND abierta.Estado = 'Abierta'
+                         AND abierta.ID_Comanda <> origen.ID_Comanda
+                        WHERE origen.ID_Comanda = ?1
+                        LIMIT 1
+                    )
+                    WHERE ID_Detalle IN (
+                        SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?2
+                    )
+                      AND EXISTS (
+                        SELECT 1
+                        FROM Comandas origen
+                        JOIN Comandas abierta
+                          ON abierta.ID_Mesa = origen.ID_Mesa
+                         AND abierta.Estado = 'Abierta'
+                         AND abierta.ID_Comanda <> origen.ID_Comanda
+                        WHERE origen.ID_Comanda = ?1
+                    );
+                    "#,
+                    vec![
+                        Value::Text(id_comanda.clone()),
+                        Value::Text(id_pago.to_string()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            // 5) Borrar el pago y sus detalles.
             conn.execute(
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
                 vec![Value::Text(id_pago.to_string())],
@@ -480,28 +520,59 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .await
                 .map_err(db_err)?;
 
-            // 5) Reabrir la comanda si al liberar sus detalles quedan líneas pendientes de pago.
+            // 6) Reabrir la comanda original solo si no hay otra abierta para la mesa. Si las
+            //    lineas se movieron a una comanda activa, recalcular tambien el total de esa
+            //    comanda. De este modo nunca se crean dos comandas abiertas para la misma mesa.
             if !id_comanda.is_empty() {
                 conn.execute(
                     r#"
                     UPDATE Comandas
                     SET Estado = CASE
-                          WHEN EXISTS (
+                          WHEN ID_Comanda = ?1
+                           AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
-                          ) THEN 'Abierta' ELSE Estado END,
+                            WHERE dc.ID_Comanda = Comandas.ID_Comanda
+                              AND pd.ID_Detalle IS NULL
+                          )
+                           AND NOT EXISTS (
+                            SELECT 1 FROM Comandas abierta
+                            WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+                              AND abierta.Estado = 'Abierta'
+                              AND abierta.ID_Comanda <> Comandas.ID_Comanda
+                          )
+                          THEN 'Abierta' ELSE Estado END,
                         Fecha_Hora_Cierre = CASE
-                          WHEN EXISTS (
+                          WHEN ID_Comanda = ?1
+                           AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
-                          ) THEN NULL ELSE Fecha_Hora_Cierre END,
+                            WHERE dc.ID_Comanda = Comandas.ID_Comanda
+                              AND pd.ID_Detalle IS NULL
+                          )
+                           AND NOT EXISTS (
+                            SELECT 1 FROM Comandas abierta
+                            WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+                              AND abierta.Estado = 'Abierta'
+                              AND abierta.ID_Comanda <> Comandas.ID_Comanda
+                          )
+                          THEN NULL ELSE Fecha_Hora_Cierre END,
                         Total_Comanda = (
                             SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
-                            FROM Detalle_Comanda WHERE ID_Comanda = ?1
+                            FROM Detalle_Comanda
+                            WHERE ID_Comanda = Comandas.ID_Comanda
                         )
-                    WHERE ID_Comanda = ?1;
+                    WHERE ID_Comanda = ?1
+                       OR ID_Comanda = (
+                            SELECT abierta.ID_Comanda
+                            FROM Comandas origen
+                            JOIN Comandas abierta
+                              ON abierta.ID_Mesa = origen.ID_Mesa
+                             AND abierta.Estado = 'Abierta'
+                             AND abierta.ID_Comanda <> origen.ID_Comanda
+                            WHERE origen.ID_Comanda = ?1
+                            LIMIT 1
+                       );
                     "#,
                     vec![Value::Text(id_comanda.clone())],
                 )

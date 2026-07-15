@@ -182,13 +182,48 @@ export function deletePago(idPago: string): BuiltCommand {
 			`,
 			args: [idPago],
 		},
-		// 4) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
+		// 4) Si la mesa ya tiene otra comanda abierta, mover alli las lineas que se van a liberar.
+		//    Asi respetamos el indice de una unica comanda abierta por mesa y las lineas quedan
+		//    disponibles para cobrarse de nuevo desde la comanda activa.
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Detalle_Comanda
+				SET ID_Comanda = (
+				    SELECT abierta.ID_Comanda
+				    FROM Pagos p
+				    JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
+				    JOIN Comandas abierta
+				      ON abierta.ID_Mesa = origen.ID_Mesa
+				     AND abierta.Estado = 'Abierta'
+				     AND abierta.ID_Comanda <> origen.ID_Comanda
+				    WHERE p.ID_Pago = ?1
+				    LIMIT 1
+				)
+				WHERE ID_Detalle IN (
+				    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
+				)
+				  AND EXISTS (
+				    SELECT 1
+				    FROM Pagos p
+				    JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
+				    JOIN Comandas abierta
+				      ON abierta.ID_Mesa = origen.ID_Mesa
+				     AND abierta.Estado = 'Abierta'
+				     AND abierta.ID_Comanda <> origen.ID_Comanda
+				    WHERE p.ID_Pago = ?1
+				  );
+			`,
+			args: [idPago],
+		},
+		// 5) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
 			args: [idPago],
 		},
-		// 5) Reabrir la comanda si tras liberar sus detalles quedan líneas pendientes de pago.
+		// 6) Reabrir la comanda original solo si no existe otra abierta para la mesa. Si las lineas
+		//    se movieron, recalcular tambien el total de la comanda activa.
 		//    Se ejecuta con `Pagos` aún presente (para resolver la comanda) pero con los
 		//    Pago_Detalles ya borrados (para que los detalles liberados cuenten como pendientes).
 		{
@@ -196,26 +231,53 @@ export function deletePago(idPago: string): BuiltCommand {
 			sql: `
 				UPDATE Comandas
 				SET Estado = CASE
-				      WHEN EXISTS (
+				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
+				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
 				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
-				      ) THEN 'Abierta' ELSE Estado END,
+				      )
+				       AND NOT EXISTS (
+				        SELECT 1 FROM Comandas abierta
+				        WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+				          AND abierta.Estado = 'Abierta'
+				          AND abierta.ID_Comanda <> Comandas.ID_Comanda
+				      )
+				      THEN 'Abierta' ELSE Estado END,
 				    Fecha_Hora_Cierre = CASE
-				      WHEN EXISTS (
+				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
+				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
 				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
-				      ) THEN NULL ELSE Fecha_Hora_Cierre END,
+				      )
+				       AND NOT EXISTS (
+				        SELECT 1 FROM Comandas abierta
+				        WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+				          AND abierta.Estado = 'Abierta'
+				          AND abierta.ID_Comanda <> Comandas.ID_Comanda
+				      )
+				      THEN NULL ELSE Fecha_Hora_Cierre END,
 				    Total_Comanda = (
 				        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
 				        FROM Detalle_Comanda WHERE ID_Comanda = Comandas.ID_Comanda
 				    )
-				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1);
+				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
+				   OR ID_Comanda = (
+				      SELECT abierta.ID_Comanda
+				      FROM Pagos p
+				      JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
+				      JOIN Comandas abierta
+				        ON abierta.ID_Mesa = origen.ID_Mesa
+				       AND abierta.Estado = 'Abierta'
+				       AND abierta.ID_Comanda <> origen.ID_Comanda
+				      WHERE p.ID_Pago = ?1
+				      LIMIT 1
+				   );
 			`,
 			args: [idPago],
 		},
-		// 6) Borrar el pago.
+		// 7) Borrar el pago.
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pagos WHERE ID_Pago = ?1;",
