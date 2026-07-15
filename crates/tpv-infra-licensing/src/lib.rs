@@ -420,8 +420,18 @@ impl LicensingService for LicensingAdapter {
                     return Ok(ResultadoActivacion::CambioDispositivoRequerido { email_hint });
                 }
 
-                // Resto de errores de negocio: verbatim (el frontend los compara por igualdad).
-                return Err(AppError::raw(e.error));
+                // Resto de errores de negocio: verbatim (el frontend los compara por igualdad). Si
+                // el worker adjunta un `details` en texto (p. ej. el error de Turso en
+                // `tenant_db_provision_failed`), se anexa para que sea diagnosticable en la UI.
+                let detalle = e.details.as_ref().and_then(|d| match d {
+                    JsonValue::String(s) => Some(s.clone()),
+                    JsonValue::Null => None,
+                    other => Some(other.to_string()),
+                });
+                return Err(AppError::raw(match detalle {
+                    Some(d) if !d.trim().is_empty() => format!("{}: {}", e.error, d),
+                    _ => e.error,
+                }));
             }
             return Err(AppError::external(format!(
                 "activate_failed_http_{http}: {text}"
