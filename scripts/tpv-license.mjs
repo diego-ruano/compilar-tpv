@@ -7,11 +7,39 @@
 //   pnpm license:revoke -- --id <licenseId>
 //   pnpm license:extend -- --id <licenseId> --months 12
 //
-// El token NO se escribe aquí ni se versiona: sale del entorno.
-//   PowerShell:  $env:ADMIN_API_TOKEN = "…"
-//   bash:        export ADMIN_API_TOKEN="…"
-//
-// Contra otro host (p. ej. `wrangler dev`): TPV_API_BASE=http://127.0.0.1:8787
+// El token NO se versiona. Se lee, por este orden:
+//   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
+//   2. Un fichero `.env` en la raíz del repo (gitignoreado) con la línea:
+//        ADMIN_API_TOKEN=tu-token
+//      Igual para TPV_API_BASE si quieres apuntar a otro host (p. ej. wrangler dev).
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+// Carga un `.env` sencillo (KEY=VALUE por línea, admite comillas y # comentarios) SIN dependencias.
+// Lo real del entorno tiene prioridad: el fichero solo rellena lo que falte.
+function loadDotEnv() {
+	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+	const file = path.join(root, ".env");
+	let txt;
+	try {
+		txt = fs.readFileSync(file, "utf8");
+	} catch {
+		return; // sin .env: se usa el entorno tal cual
+	}
+	for (const raw of txt.split(/\r?\n/)) {
+		const line = raw.trim();
+		if (!line || line.startsWith("#")) continue;
+		const eq = line.indexOf("=");
+		if (eq === -1) continue;
+		const key = line.slice(0, eq).trim();
+		let val = line.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+		if (key && process.env[key] === undefined) process.env[key] = val;
+	}
+}
+
+loadDotEnv();
 
 const API_BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
 const TOKEN = process.env.ADMIN_API_TOKEN;
@@ -145,7 +173,11 @@ const [cmd, ...rest] = process.argv.slice(2);
 const args = parseArgs(rest);
 
 if (!TOKEN) {
-	fail('Falta ADMIN_API_TOKEN en el entorno.\n    PowerShell:  $env:ADMIN_API_TOKEN = "…"\n    bash:        export ADMIN_API_TOKEN="…"');
+	fail(
+		'Falta ADMIN_API_TOKEN. Ponlo en un fichero .env en la raiz del repo:\n' +
+			'    ADMIN_API_TOKEN=tu-token\n' +
+			'  (o como variable de entorno: $env:ADMIN_API_TOKEN = "…" en PowerShell)',
+	);
 }
 
 const comandos = { issue, list, revoke, extend };
