@@ -78,6 +78,45 @@ function isDeviceMode(value: unknown): value is DeviceMode | null {
     return value === "tpv" || value === "handy" || value === null;
 }
 
+// Mensaje humano por motivo de bloqueo. El motivo crudo (que compara el gate) se muestra aparte,
+// pequeño, para soporte. El default cubre cualquier código nuevo sin dejar la pantalla muda.
+function blockedCopy(reason: string): { title: string; body: string } {
+    if (reason === "expired")
+        return {
+            title: "Licencia caducada",
+            body: "Tu licencia ha caducado y se acabó el periodo de gracia. Renuévala con el mismo correo de compra y vuelve a intentarlo.",
+        };
+    if (reason === "revoked")
+        return {
+            title: "Licencia anulada",
+            body: "Esta licencia ha sido anulada. Si crees que es un error, contacta con soporte.",
+        };
+    if (reason === "device_replaced")
+        return {
+            title: "Licencia trasladada",
+            body: "Esta licencia se ha activado en otro equipo, así que este ha dejado de tener acceso. Si no has sido tú, contacta con soporte cuanto antes.",
+        };
+    if (reason === "bad_signature")
+        return {
+            title: "No se pudo verificar la licencia",
+            body: "La respuesta del servidor de licencias no superó la comprobación de seguridad. Revisa tu conexión (proxy/antivirus) y reintenta.",
+        };
+    if (reason === "offline_expired" || reason === "clock_rollback_detected")
+        return {
+            title: "Sin conexión demasiado tiempo",
+            body: "Llevas demasiado tiempo sin conectar con el servidor de licencias. Conéctate a internet y reintenta la comprobación.",
+        };
+    if (reason === "license_not_found")
+        return {
+            title: "Licencia no encontrada",
+            body: "El servidor no reconoce esta licencia. Puede que se haya borrado o introducido mal. Vuelve a activar con tu clave.",
+        };
+    return {
+        title: "Licencia bloqueada",
+        body: "No se puede validar la licencia en este momento. Reintenta la comprobación o vuelve a activar con tu clave.",
+    };
+}
+
 function BlockedScreen({
     reason,
     onRetry,
@@ -87,15 +126,12 @@ function BlockedScreen({
     onRetry: () => void;
     onClear: () => void;
 }) {
+    const { title, body } = blockedCopy(reason);
     return (
         <div className="min-h-full w-full bg-slate-100 flex items-center justify-center p-6">
             <div className="w-full max-w-lg rounded-2xl bg-white shadow-sm border border-slate-200 p-6">
-                <h1 className="text-2xl font-semibold text-slate-900">
-                    Licencia bloqueada
-                </h1>
-                <p className="text-sm text-slate-600 mt-2">
-                    Motivo: <span className="font-mono">{reason}</span>
-                </p>
+                <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
+                <p className="text-sm text-slate-600 mt-2">{body}</p>
 
                 <div className="mt-5 flex gap-3">
                     <button
@@ -108,15 +144,58 @@ function BlockedScreen({
                         onClick={onClear}
                         className="rounded-xl border border-slate-300 bg-white py-3 px-4 font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                        Borrar licencia
+                        Borrar y volver a activar
                     </button>
                 </div>
 
-                <div className="mt-4 text-xs text-slate-500">
-                    Si estabas sin internet y se acabó la gracia offline, vuelve
-                    a conectar y reintenta.
-                </div>
+                <p className="mt-4 font-mono text-xs text-slate-400">{reason}</p>
             </div>
+        </div>
+    );
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Banner de aviso de caducidad. Se muestra por encima de la app cuando el gate deja pasar pero la
+// licencia está en la ventana de aviso (`warn`) o en la gracia posterior a caducar
+// (`expiry_grace`). No bloquea: informa. La cuenta de días sale del `expires_at_ms` firmado.
+function LicenseExpiryBanner({
+    reason,
+    expiresAtMs,
+}: {
+    reason: "warn" | "expiry_grace";
+    expiresAtMs: number | null;
+}) {
+    const dias =
+        expiresAtMs != null ? Math.ceil((expiresAtMs - Date.now()) / DAY_MS) : null;
+
+    const grace = reason === "expiry_grace";
+
+    let texto: string;
+    if (grace) {
+        const restantes = dias != null ? Math.max(dias, 0) : null;
+        texto =
+            restantes != null
+                ? `Tu licencia ha caducado. Te ${restantes === 1 ? "queda 1 día" : `quedan ${restantes} días`} de margen antes del bloqueo.`
+                : "Tu licencia ha caducado. Estás en el periodo de gracia antes del bloqueo.";
+    } else {
+        texto =
+            dias != null && dias > 0
+                ? `Tu licencia caduca ${dias === 1 ? "mañana" : `en ${dias} días`}.`
+                : "Tu licencia caduca hoy.";
+    }
+
+    return (
+        <div
+            className={cn(
+                "w-full px-4 py-2 text-center text-sm font-medium",
+                grace
+                    ? "bg-danger-soft text-danger border-b border-danger"
+                    : "bg-warning-soft text-fg border-b border-warning",
+            )}
+            role="status"
+        >
+            {texto} Renuévala con el mismo correo de compra y se extenderá sola.
         </div>
     );
 }
@@ -655,7 +734,18 @@ export default function AppBoot({ router }: { router: any }) {
     // (login incluido). null = aún conectando/sin confirmar (fail-closed).
     const mainOnline = useMainPresence((s) => s.mainOnline);
 
-    const isMainAppReady = mode === "tpv" && gate !== "loading" && gate.allowed;
+    const gateNow = gate === "loading" ? null : gate;
+    const isMainAppReady = mode === "tpv" && gateNow !== null && gateNow.allowed;
+
+    // Aviso de caducidad: solo cuando el gate deja pasar pero avisa (warn/expiry_grace). Cuelga
+    // por encima de la app, sin bloquearla.
+    const expiryWarning =
+        isMainAppReady &&
+        gateNow &&
+        (gateNow.reason === "warn" || gateNow.reason === "expiry_grace")
+            ? { reason: gateNow.reason as "warn" | "expiry_grace", state: gateNow.state }
+            : null;
+
     const handyIsReady = mode === "handy" && handyPair.step === "paired";
     const handyMainActive = mainOnline === true;
     // El Handy solo muestra su app (RouterProvider, con su propia Titlebar) si está emparejado Y
@@ -668,6 +758,12 @@ export default function AppBoot({ router }: { router: any }) {
     return (
         <div className="w-screen h-screen flex flex-col overflow-hidden">
             <UpdateBanner />
+            {expiryWarning ? (
+                <LicenseExpiryBanner
+                    reason={expiryWarning.reason}
+                    expiresAtMs={expiryWarning.state?.expires_at_ms ?? null}
+                />
+            ) : null}
             {showBootTopBar ? <Titlebar /> : null}
 
             <div

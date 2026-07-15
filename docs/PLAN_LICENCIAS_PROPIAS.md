@@ -12,10 +12,13 @@
 >   la fase 3).
 > · **Cliente Rust (fase 3) — ✅ hecho**: clave pública pineada + verificación de la firma en
 >   `consultar_estado`, enforcement de `expires_at` vía estado firmado, clasificación de errores con
->   `/refresh` transparente, flujo de OTP de cambio de dispositivo end-to-end (comando + UI mínima en
+>   `/refresh` transparente, flujo de OTP de cambio de dispositivo end-to-end (comando + UI en
 >   AppBoot). `cargo build` + `cargo test` + `tsc` verdes.
-> · **Pendiente de ti**: secretos, `DROP` de las 3 tablas viejas y config de Stripe (§16). Luego
->   desplegar worker **y** app juntos.
+> · **Frontend (fase 4) — ✅ hecho**: `Licencia.tsx` cableado a datos reales (estado, plan, días
+>   restantes, dispositivo), banner de aviso de caducidad (`warn`/`expiry_grace`) sobre la app, y
+>   `BlockedScreen` con textos por motivo. `tsc` verde.
+> · **Pendiente de ti**: secretos, `DROP` de las 3 tablas viejas (✅ ya aplicado) y config de Stripe
+>   (§16). Luego desplegar worker **y** app juntos.
 > **Fecha:** 2026-07-09 (actualizado 2026-07-14) · **Rama:** `main`
 > **Ámbito:** subsistema de **licencias** (activación, gate, cobro, alta manual). El **pairing** de
 > Handy y la **sincronización** (§9 de [CLAUDE.md](../CLAUDE.md)) se mantienen intactos y solo se
