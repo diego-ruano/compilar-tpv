@@ -73,11 +73,10 @@ jobs:
           SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         run: |
           if (-not $env:SIGNING_KEY) {
-            Write-Error @"
-FATAL: El secreto TAURI_SIGNING_PRIVATE_KEY no esta configurado en este repositorio.
-Sin esta clave el instalador no puede firmarse y los clientes existentes no podran recibir actualizaciones jamas.
-Ve a Settings -> Secrets and variables -> Actions -> Secrets y anade el contenido de apps/tpv-main/src-tauri/.tauri/updater.key
-"@
+            Write-Host "FATAL: El secreto TAURI_SIGNING_PRIVATE_KEY no esta configurado en este repositorio."
+            Write-Host "Sin esta clave el instalador no puede firmarse y los clientes existentes no podran recibir actualizaciones jamas."
+            Write-Host "Ve a Settings -> Secrets and variables -> Actions -> Secrets y anade el contenido de apps/tpv-main/src-tauri/.tauri/updater.key"
+            Write-Error "Falta el secreto TAURI_SIGNING_PRIVATE_KEY: no se puede firmar el instalador."
             exit 1
           }
           Write-Host "Clave de firma del updater presente OK"
