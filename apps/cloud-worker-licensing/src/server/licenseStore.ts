@@ -21,6 +21,118 @@ import { aesGcmEncrypt } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
 
+/* ============================================================
+   Auto-provisión del esquema (control-plane)
+============================================================ */
+
+let schemaReady = false;
+
+/**
+ * Crea las tablas del sistema de licencias si no existen. Se ejecuta una vez por isolate (patrón
+ * de `updates.routes.ts`): así no hace falta ni migración ni script manual.
+ *
+ * ⚠️ La única cosa que esto NO puede hacer es **recrear** una tabla `licenses` que ya exista con
+ * el esquema viejo de Lemon (`CREATE TABLE IF NOT EXISTS` no la reemplaza). En un entorno que
+ * venga de Lemon hay que borrarla una vez: `DROP TABLE licenses;` — y el worker la reconstruye.
+ */
+export async function ensureLicensingSchema(db: Client): Promise<void> {
+	if (schemaReady) return;
+
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS licenses (
+      license_id                 TEXT PRIMARY KEY,
+      license_key_hash           TEXT NOT NULL UNIQUE,
+      license_key_enc            TEXT,
+      key_short                  TEXT,
+      tenant_id                  TEXT,
+      main_device_id             TEXT,
+      status                     TEXT NOT NULL,
+      disabled                   INTEGER NOT NULL DEFAULT 0,
+      plan                       TEXT NOT NULL DEFAULT 'standard',
+      term_months                INTEGER NOT NULL,
+      origin                     TEXT NOT NULL,
+      issued_at_ms               INTEGER NOT NULL,
+      activated_at_ms            INTEGER,
+      expires_at_ms              INTEGER,
+      customer_email             TEXT NOT NULL,
+      customer_name              TEXT,
+      stripe_customer_id         TEXT,
+      stripe_checkout_session_id TEXT,
+      stripe_payment_intent_id   TEXT,
+      stripe_price_id            TEXT,
+      created_at_ms              INTEGER NOT NULL,
+      updated_at_ms              INTEGER NOT NULL
+    );
+    `,
+	);
+
+	// Índice único de idempotencia del fulfillment de Stripe (parcial: ignora los NULL).
+	await exec(
+		db,
+		`CREATE UNIQUE INDEX IF NOT EXISTS ux_licenses_stripe_session
+       ON licenses (stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL;`,
+	);
+	await exec(db, `CREATE INDEX IF NOT EXISTS ix_licenses_stripe_customer ON licenses (stripe_customer_id);`);
+	await exec(db, `CREATE INDEX IF NOT EXISTS ix_licenses_tenant ON licenses (tenant_id);`);
+	await exec(db, `CREATE INDEX IF NOT EXISTS ix_licenses_email ON licenses (customer_email);`);
+
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS license_device_otp (
+      license_id     TEXT NOT NULL,
+      new_device_id  TEXT NOT NULL,
+      code_hash      TEXT NOT NULL,
+      attempts       INTEGER NOT NULL DEFAULT 0,
+      expires_at_ms  INTEGER NOT NULL,
+      consumed_at_ms INTEGER,
+      created_at_ms  INTEGER NOT NULL,
+      PRIMARY KEY (license_id, new_device_id)
+    );
+    `,
+	);
+
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS license_device_swaps (
+      swap_id        TEXT PRIMARY KEY,
+      license_id     TEXT NOT NULL,
+      from_device_id TEXT,
+      to_device_id   TEXT NOT NULL,
+      at_ms          INTEGER NOT NULL
+    );
+    `,
+	);
+
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS admin_audit (
+      audit_id   TEXT PRIMARY KEY,
+      action     TEXT NOT NULL,
+      license_id TEXT,
+      detail     TEXT,
+      at_ms      INTEGER NOT NULL
+    );
+    `,
+	);
+
+	// Datos del negocio en `tenants` (corrige el bug #5). ALTER no admite IF NOT EXISTS: si la
+	// columna ya está, Turso lanza "duplicate column name" y lo ignoramos.
+	for (const col of ["display_name", "legal_name", "email", "phone", "country"]) {
+		try {
+			await exec(db, `ALTER TABLE tenants ADD COLUMN ${col} TEXT;`);
+		} catch {
+			/* columna ya existente */
+		}
+	}
+
+	schemaReady = true;
+}
+
 export type LicenseRow = {
 	license_id: string;
 	license_key_hash: string;

@@ -6,7 +6,16 @@
 >   comando duplicado `license_read_state_for_ui` y los alias muertos de `LicenseActivateInput`.
 >   El cliente ya está listo para recibir la firma ed25519 y el enforcement de `expires_at` sin
 >   tocar infraestructura.
-> · **Worker — 🟡 en curso** (fases 1 y 2 fusionadas, ver §0).
+> · **Worker (fases 1+2) — ✅ hecho**: modelo propio, emisión (Stripe + admin/CLI), activación con
+>   `main_device_id` + OTP de cambio de dispositivo, `/status` firmado ed25519, `/refresh`, fuera
+>   Lemon. El worker se auto-provisiona el esquema. `typecheck` verde. **Sin desplegar** (va junto a
+>   la fase 3).
+> · **Cliente Rust (fase 3) — ✅ hecho**: clave pública pineada + verificación de la firma en
+>   `consultar_estado`, enforcement de `expires_at` vía estado firmado, clasificación de errores con
+>   `/refresh` transparente, flujo de OTP de cambio de dispositivo end-to-end (comando + UI mínima en
+>   AppBoot). `cargo build` + `cargo test` + `tsc` verdes.
+> · **Pendiente de ti**: secretos, `DROP` de las 3 tablas viejas y config de Stripe (§16). Luego
+>   desplegar worker **y** app juntos.
 > **Fecha:** 2026-07-09 (actualizado 2026-07-14) · **Rama:** `main`
 > **Ámbito:** subsistema de **licencias** (activación, gate, cobro, alta manual). El **pairing** de
 > Handy y la **sincronización** (§9 de [CLAUDE.md](../CLAUDE.md)) se mantienen intactos y solo se
@@ -878,15 +887,21 @@ Ya existentes y que **siguen igual**: `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
 (`LICENSE_SIGNING_PUBLIC_KEY_B64` en `crates/tpv-infra-licensing/src/lib.rs`) — eso lo hago yo en la
 Fase 3, pero necesito que me pases la pública (no la privada).
 
-### 16.2 Migración del control-plane (Turso)
+### 16.2 Esquema del control-plane (Turso) — **sin migración**
+
+El worker se **auto-provisiona** el esquema nuevo (`ensureLicensingSchema` en `licenseStore.ts`): la
+primera petición crea `licenses`, `license_device_otp`, `license_device_swaps`, `admin_audit` y las
+columnas de `tenants`. No hay que ejecutar SQL para eso.
+
+Lo único manual, **una vez**: borrar las tablas viejas de Lemon (el `CREATE TABLE IF NOT EXISTS` no
+puede reemplazar una `licenses` que ya existe con las columnas `lemon_*`):
 
 ```bash
 turso db shell tpvcontrol-altarialights < docs/sql/control-plane/2026-07-14_licencias_propias.sql
+# (son 3 líneas: DROP de licenses, license_meta, license_instances)
 ```
 
-Es **destructiva** (recrea `licenses`, borra `license_instances` y `license_meta`). Acordado: no hay
-licencias reales. Los `ALTER TABLE tenants` del final pueden decir *“duplicate column name”* si la
-columna ya existía: es inofensivo, salta esa línea.
+Seguro porque no hay licencias reales. Tras esto, la primera llamada al worker reconstruye todo.
 
 ### 16.3 Stripe
 

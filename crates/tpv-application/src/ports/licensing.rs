@@ -7,7 +7,9 @@
 use async_trait::async_trait;
 use serde_json::Value as JsonValue;
 
-use tpv_domain::licensing::{Concesion, FalloConsulta, RespuestaEstado, SolicitudActivacion};
+use tpv_domain::licensing::{
+    EstadoVerificado, FalloConsulta, ResultadoActivacion, SolicitudActivacion,
+};
 
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
@@ -17,9 +19,9 @@ use crate::error::AppResult;
 
 /// Servicio de licenciamiento: **transporte y almacén**, sin política.
 ///
-/// El adaptador solo trae datos del servidor y lee/escribe `license_state.json`. Quién
-/// puede usar el TPV lo decide el dominio (`tpv_domain::licensing`) y lo orquesta el caso
-/// de uso `use_cases::licensing::gate`.
+/// El adaptador trae datos del servidor (incluida la verificación ed25519 de la firma, que es
+/// cripto: no cabe en el dominio puro) y lee/escribe `license_state.json`. Quién puede usar el
+/// TPV lo decide el dominio (`tpv_domain::licensing`) y lo orquesta el caso de uso.
 #[async_trait]
 pub trait LicensingService: Send + Sync {
     /// Lee el estado local. `None` si este dispositivo no tiene licencia activada.
@@ -29,15 +31,25 @@ pub trait LicensingService: Send + Sync {
     /// Borra el estado local.
     fn delete_state(&self) -> AppResult<()>;
 
-    /// Canjea la clave de activación en el servidor. No persiste nada: devuelve lo concedido.
-    async fn activar_remoto(&self, solicitud: &SolicitudActivacion) -> AppResult<Concesion>;
+    /// Canjea la clave en el servidor. No persiste nada. `device_change_code` solo se envía al
+    /// mover la licencia a otro equipo (§6.4); el servidor puede responder pidiéndolo.
+    async fn activar_remoto(
+        &self,
+        solicitud: &SolicitudActivacion,
+        device_change_code: Option<&str>,
+    ) -> AppResult<ResultadoActivacion>;
 
-    /// Consulta el estado de la licencia (petición firmada con la clave del dispositivo).
-    /// El `Err` está clasificado para que el dominio sepa qué significa el fallo.
+    /// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia.
+    async fn solicitar_cambio_dispositivo(&self, clave: &str) -> AppResult<()>;
+
+    /// Consulta el estado de la licencia (petición firmada) y **verifica la firma ed25519**
+    /// contra la clave pública pineada antes de devolverla. Si el token de sesión ha caducado,
+    /// lo renueva de forma transparente por device-proof (`/refresh`) y reintenta. El `Err` está
+    /// clasificado para que el dominio sepa qué significa el fallo.
     async fn consultar_estado(
         &self,
         state: &LicenseLocalState,
-    ) -> Result<RespuestaEstado, FalloConsulta>;
+    ) -> Result<EstadoVerificado, FalloConsulta>;
 }
 
 /// Servicio de identidad de dispositivo / pairing (claves, firma, handy token, tpv-server).

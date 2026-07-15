@@ -2,7 +2,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { invokeClient } from "@tpv/client";
-import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
+import type {
+    LicenseActivateOutcome,
+    LicenseGateResult,
+    LicenseLocalState,
+} from "@tpv/contracts";
 import {
     ArrowRight,
     Building2,
@@ -209,16 +213,26 @@ export default function AppBoot({ router }: { router: any }) {
         country: "",
     });
 
+    // Cambio de dispositivo (§6.4): si la licencia ya está en otro equipo, el servidor pide un
+    // código de 6 dígitos que le llega al email. `hint` (p. ej. `a***@bar.com`) != null significa
+    // que estamos en ese paso.
+    const [deviceChangeHint, setDeviceChangeHint] = useState<string | null>(null);
+    const [deviceChangeCode, setDeviceChangeCode] = useState("");
+    const [otpSending, setOtpSending] = useState(false);
+
+    const enDeviceChange = deviceChangeHint !== null;
+
     const activationValid = useMemo(() => {
-        return (
+        const base =
             act.licenseKey.trim().length > 0 &&
             act.legal_name.trim().length > 0 &&
             act.business_name.trim().length > 0 &&
             act.email.trim().length > 0 &&
             act.phone.trim().length > 0 &&
-            act.country.trim().length > 0
-        );
-    }, [act]);
+            act.country.trim().length > 0;
+        // En el paso de cambio de dispositivo, además hace falta el código completo.
+        return base && (!enDeviceChange || deviceChangeCode.trim().length === 6);
+    }, [act, enDeviceChange, deviceChangeCode]);
 
     // HANDY pairing
     const [handyUriInput, setHandyUriInput] = useState("");
@@ -563,6 +577,21 @@ export default function AppBoot({ router }: { router: any }) {
         }
     }
 
+    // Pide (o reenvía) el código de cambio de dispositivo al email de la licencia.
+    async function requestDeviceChangeCode() {
+        setOtpSending(true);
+        setErr(null);
+        try {
+            await invokeClient("license_request_device_change", {
+                args: { activation_key: act.licenseKey },
+            });
+        } catch (e: any) {
+            setErr(String(e));
+        } finally {
+            setOtpSending(false);
+        }
+    }
+
     async function submitActivation(e: React.FormEvent) {
         e.preventDefault();
 
@@ -572,7 +601,7 @@ export default function AppBoot({ router }: { router: any }) {
         setErr(null);
 
         try {
-            await invokeClient<LicenseLocalState>("license_activate", {
+            const outcome = await invokeClient<LicenseActivateOutcome>("license_activate", {
                 args: {
                     activation_key: act.licenseKey,
                     business_name: act.business_name,
@@ -580,9 +609,22 @@ export default function AppBoot({ router }: { router: any }) {
                     email: act.email,
                     phone: act.phone,
                     country: act.country,
+                    device_change_code: enDeviceChange
+                        ? deviceChangeCode.trim()
+                        : undefined,
                 },
             });
 
+            // La licencia ya está en otro equipo: entramos en el paso de cambio de dispositivo y
+            // disparamos el envío del código al email de la licencia.
+            if (outcome.outcome === "device_change_required") {
+                setDeviceChangeHint(outcome.email_hint ?? "");
+                await requestDeviceChangeCode();
+                return;
+            }
+
+            setDeviceChangeHint(null);
+            setDeviceChangeCode("");
             await refreshLicense();
             await refreshGate(true);
         } catch (e: any) {
@@ -1350,6 +1392,51 @@ export default function AppBoot({ router }: { router: any }) {
                                                 />
                                             </div>
 
+                                            {enDeviceChange ? (
+                                                <div className="rounded-2xl border border-accent bg-accent-soft px-4 py-4">
+                                                    <p className="text-sm font-semibold text-fg">
+                                                        Esta licencia ya está activa en otro equipo
+                                                    </p>
+                                                    <p className="mt-1 text-xs leading-relaxed text-fg-muted">
+                                                        Te hemos enviado un código de 6 dígitos a{" "}
+                                                        <span className="font-mono font-semibold text-fg">
+                                                            {deviceChangeHint || "tu correo"}
+                                                        </span>
+                                                        . Introdúcelo para mover la licencia a este
+                                                        ordenador. El equipo anterior dejará de
+                                                        funcionar.
+                                                    </p>
+
+                                                    <Input
+                                                        id="activation-device-code"
+                                                        value={deviceChangeCode}
+                                                        onChange={(e) =>
+                                                            setDeviceChangeCode(
+                                                                e.target.value
+                                                                    .replace(/[^\d]/g, "")
+                                                                    .slice(0, 6),
+                                                            )
+                                                        }
+                                                        className="mt-3 h-14 px-4 text-center font-mono text-xl font-bold tracking-[0.35em]"
+                                                        placeholder="000000"
+                                                        inputMode="numeric"
+                                                        autoComplete="one-time-code"
+                                                        maxLength={6}
+                                                    />
+
+                                                    <button
+                                                        type="button"
+                                                        onClick={requestDeviceChangeCode}
+                                                        disabled={otpSending}
+                                                        className="mt-2 text-xs font-semibold text-accent hover:underline disabled:opacity-50"
+                                                    >
+                                                        {otpSending
+                                                            ? "Enviando…"
+                                                            : "Reenviar código"}
+                                                    </button>
+                                                </div>
+                                            ) : null}
+
                                             {err ? (
                                                 <pre
                                                     className="whitespace-pre-wrap rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-danger"
@@ -1364,7 +1451,7 @@ export default function AppBoot({ router }: { router: any }) {
                                                     variant="secondary"
                                                     size="lg"
                                                     disabled={busy}
-                                                    onClick={() =>
+                                                    onClick={() => {
                                                         setAct({
                                                             licenseKey: "",
                                                             legal_name: "",
@@ -1372,8 +1459,10 @@ export default function AppBoot({ router }: { router: any }) {
                                                             email: "",
                                                             phone: "",
                                                             country: "",
-                                                        })
-                                                    }
+                                                        });
+                                                        setDeviceChangeHint(null);
+                                                        setDeviceChangeCode("");
+                                                    }}
                                                 >
                                                     Limpiar
                                                 </Button>
@@ -1391,7 +1480,9 @@ export default function AppBoot({ router }: { router: any }) {
                                                         />
                                                     }
                                                 >
-                                                    Activar TPV
+                                                    {enDeviceChange
+                                                        ? "Confirmar y activar"
+                                                        : "Activar TPV"}
                                                 </Button>
                                             </div>
                                         </form>

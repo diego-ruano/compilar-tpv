@@ -31,6 +31,7 @@ import {
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
+import { ensureLicensingSchemaMw } from "../../middleware/ensureSchema";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import { sendDeviceChangeCodeEmail, sendDeviceChangedNoticeEmail } from "./licenseEmails";
 import {
@@ -54,6 +55,8 @@ import {
 type Ctx = { Bindings: Env };
 
 export const licenseRoutes = new Hono<Ctx>();
+
+licenseRoutes.use("*", ensureLicensingSchemaMw);
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 

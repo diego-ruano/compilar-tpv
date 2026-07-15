@@ -147,11 +147,41 @@ export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_A
  * Datos del formulario de activación. `activation_key` y `business_name` son los únicos
  * obligatorios; el resto son datos de contacto del negocio.
  */
-export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, email?: string, phone?: string, country?: string, };
+export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, email?: string, phone?: string, country?: string, 
+/**
+ * Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo (§6.4).
+ */
+device_change_code?: string, };
+
+/**
+ * Resultado de `license_activate`. Si la licencia ya estaba en otro equipo, `outcome` es
+ * `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
+ * es `"activated"` con el estado ya guardado.
+ */
+export type LicenseActivateOutcome = { outcome: string, state: LicenseLocalState | null, email_hint?: string, };
+
+/**
+ * Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la
+ * licencia. El `device_id` lo pone el backend (es el de este equipo).
+ */
+export type LicenseDeviceChangeInput = { activation_key: string, };
 
 export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, };
 
-export type LicenseLocalState = { tenant_id: string, device_id: string, token: string, status: string | null, expires_at: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
+export type LicenseLocalState = { tenant_id: string, device_id: string, token: string, status: string | null, 
+/**
+ * Caducidad en texto ISO (informativo para la UI).
+ */
+expires_at: string | null, 
+/**
+ * Caducidad absoluta en ms. Es el dato con el que la UI calcula los días restantes del
+ * banner de aviso; lo fija el servidor (firmado) en cada `/status`.
+ */
+expires_at_ms: number | null, 
+/**
+ * Plan de la licencia (`standard`). Lo refresca `/status`.
+ */
+plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
 export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 

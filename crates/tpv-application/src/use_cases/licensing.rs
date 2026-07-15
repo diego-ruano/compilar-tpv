@@ -1,12 +1,16 @@
 //! Casos de uso de **licensing**.
 //!
-//! El gate se orquesta aquí: se trae el estado del servidor por el puerto, se le pide el
-//! veredicto al dominio y se aplica la acción sobre `license_state.json`. Ni una decisión
-//! de negocio en el adaptador, ni una línea de HTTP en el dominio.
+//! El gate se orquesta aquí: se trae el estado verificado del servidor por el puerto, se le pide
+//! el veredicto al dominio y se aplica la acción sobre `license_state.json`. Ni una decisión de
+//! negocio en el adaptador, ni una línea de HTTP/cripto en el dominio.
 
-use tpv_contracts::licensing::{LicenseActivateInput, LicenseGateResult, LicenseLocalState};
+use tpv_contracts::licensing::{
+    LicenseActivateInput, LicenseActivateOutcome, LicenseDeviceChangeInput, LicenseGateResult,
+    LicenseLocalState,
+};
 use tpv_domain::licensing::{
-    self as dom, AccionEstado, Concesion, Motivo, Resolucion, SolicitudActivacion, Veredicto,
+    self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion, ResultadoActivacion,
+    SolicitudActivacion, Veredicto,
 };
 
 use crate::error::{AppError, AppResult};
@@ -20,6 +24,10 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+fn clean(s: Option<String>) -> Option<String> {
+    s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
 pub fn get_state(svc: &dyn LicensingService) -> AppResult<Option<LicenseLocalState>> {
     svc.load_state()
 }
@@ -28,11 +36,12 @@ pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
     svc.delete_state()
 }
 
-/// Activa la licencia en este dispositivo y persiste el estado resultante.
+/// Activa la licencia en este dispositivo. Si el servidor exige el código de cambio de equipo,
+/// no falla: devuelve `outcome = "device_change_required"` para que la UI pida el OTP.
 pub async fn activate(
     svc: &dyn LicensingService,
     input: LicenseActivateInput,
-) -> AppResult<LicenseLocalState> {
+) -> AppResult<LicenseActivateOutcome> {
     let solicitud = SolicitudActivacion::validar(
         input.activation_key,
         input.business_name,
@@ -43,11 +52,36 @@ pub async fn activate(
     )
     .map_err(AppError::validation)?;
 
-    let concedido = svc.activar_remoto(&solicitud).await?;
-    let estado = estado_inicial(concedido);
+    let code = clean(input.device_change_code);
 
-    svc.save_state(&estado)?;
-    Ok(estado)
+    match svc.activar_remoto(&solicitud, code.as_deref()).await? {
+        ResultadoActivacion::Activada(concedido) => {
+            let estado = estado_inicial(concedido);
+            svc.save_state(&estado)?;
+            Ok(LicenseActivateOutcome {
+                outcome: "activated".to_string(),
+                state: Some(estado),
+                email_hint: None,
+            })
+        }
+        ResultadoActivacion::CambioDispositivoRequerido { email_hint } => Ok(LicenseActivateOutcome {
+            outcome: "device_change_required".to_string(),
+            state: None,
+            email_hint: Some(email_hint),
+        }),
+    }
+}
+
+/// Pide al servidor que mande el OTP de cambio de dispositivo al email de la licencia.
+pub async fn request_device_change(
+    svc: &dyn LicensingService,
+    input: LicenseDeviceChangeInput,
+) -> AppResult<()> {
+    let clave = input.activation_key.trim();
+    if clave.is_empty() {
+        return Err(AppError::validation("activation_key required"));
+    }
+    svc.solicitar_cambio_dispositivo(clave).await
 }
 
 /// Gate de arranque / periódico: se apoya en la gracia offline si no hay red.
@@ -55,8 +89,8 @@ pub async fn gate(svc: &dyn LicensingService) -> AppResult<LicenseGateResult> {
     comprobar(svc, false).await
 }
 
-/// Comprobación pedida por el usuario ("Reintentar"): no enmascara los fallos del servidor
-/// con la gracia offline.
+/// Comprobación pedida por el usuario ("Reintentar"): no enmascara los fallos del servidor con la
+/// gracia offline.
 pub async fn check_now(svc: &dyn LicensingService) -> AppResult<LicenseGateResult> {
     comprobar(svc, true).await
 }
@@ -74,25 +108,35 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
     estado.last_check_attempt_ms = Some(ahora);
 
     match svc.consultar_estado(&estado).await {
-        Ok(respuesta) => {
-            // El servidor es la autoridad: su versión del estado sustituye a la cacheada.
-            estado.status = Some(respuesta.estado.status.clone());
-            estado.expires_at = respuesta.estado.expires_at.clone();
-            estado.last_server_time_ms = Some(respuesta.server_time_ms);
-            estado.last_check_ok_ms = Some(ahora);
-
-            aplicar(svc, estado, dom::evaluar_respuesta(&respuesta))
-        }
+        Ok(verificado) => aplicar(svc, actualizar(estado, &verificado, ahora), dom::evaluar_estado(verificado.assertion.estado)),
 
         Err(fallo) => {
             let base = dom::base_gracia(estado.last_check_ok_ms, estado.activated_at_ms);
-
             match dom::evaluar_fallo(&fallo, base, ahora, forzar_red) {
                 Resolucion::Decidido(veredicto) => aplicar(svc, estado, veredicto),
                 Resolucion::Indecidible => Err(AppError::external(fallo.to_string())),
             }
         }
     }
+}
+
+/// Vuelca en el estado local lo que dijo el servidor (es la autoridad): estado, caducidad, plan,
+/// y el token renovado si lo hubo.
+fn actualizar(
+    mut estado: LicenseLocalState,
+    verificado: &EstadoVerificado,
+    ahora: i64,
+) -> LicenseLocalState {
+    let a = &verificado.assertion;
+    estado.status = Some(a.estado.codigo().to_string());
+    estado.expires_at_ms = a.expires_at_ms;
+    estado.plan = Some(a.plan.clone());
+    estado.last_server_time_ms = Some(verificado.server_time_ms);
+    estado.last_check_ok_ms = Some(ahora);
+    if let Some(token) = &verificado.token_renovado {
+        estado.token = token.clone();
+    }
+    estado
 }
 
 /// Ejecuta la acción que dicta el veredicto y compone la respuesta para la UI.
@@ -126,6 +170,8 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
         token: concedido.token,
         status: Some(concedido.status),
         expires_at: concedido.expires_at,
+        expires_at_ms: concedido.expires_at_ms,
+        plan: concedido.plan,
         last_server_time_ms: None,
         last_check_ok_ms: None,
         last_check_attempt_ms: None,

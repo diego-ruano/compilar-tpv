@@ -17,6 +17,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -29,7 +31,8 @@ use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
 };
 use tpv_domain::licensing::{
-    Concesion, EstadoServidor, FalloConsulta, RespuestaEstado, SolicitudActivacion,
+    self as dom, AssertionVerificada, Concesion, EstadoLicencia, EstadoVerificado, FalloConsulta,
+    ResultadoActivacion, SolicitudActivacion,
 };
 
 use device::{
@@ -41,6 +44,15 @@ use device::{
 /// licencia (`/v1/license/*`), pairing (`/v1/pair/*`), revoke, imágenes, WS y el DO TenantHub.
 /// Es el **único** host de la nube: `tpv-infra-http` lo reexporta para el resto del backend.
 pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
+
+/// Clave pública ed25519 (base64) con la que el worker firma el estado de licencia. Va **pineada**
+/// en el binario: no se descarga de ningún sitio. Es lo que cierra LIC-01 —un servidor falso, un
+/// MITM con CA de confianza o un DNS envenenado no tienen la privada, así que no pueden forjar un
+/// `active`. La privada vive SOLO en el worker (secreto `LICENSE_SIGNING_PRIVATE_KEY`).
+///
+/// Rotarla invalida a todos los clientes con esta versión: para rotar sin cortar, pinear dos
+/// claves a la vez durante una ventana (§5.7 del plan). Generada con `pnpm license:keypair`.
+pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str = "WKG8YsOKSGSDhzauiqeMih0zCwNhwYRVQOE4Ywcvm1I=";
 
 const HTTP_TIMEOUT_SECS: u64 = 20;
 
@@ -97,6 +109,20 @@ fn api_url(path: &str) -> String {
 
 /* ===== Tipos de la API de licencias (internos del adaptador) ===== */
 
+/// Respuesta de error del worker: `{ ok:false, error, details? }`.
+#[derive(Debug, Deserialize)]
+struct ApiErr {
+    error: String,
+    details: Option<JsonValue>,
+}
+
+impl ApiErr {
+    fn parse(text: &str) -> Option<Self> {
+        serde_json::from_str::<ApiErr>(text).ok()
+    }
+}
+
+/// Respuesta OK de `/v1/license/activate`.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ActivateOk {
@@ -108,17 +134,7 @@ struct ActivateOk {
     device_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ActivateErr {
-    #[allow(dead_code)]
-    ok: bool,
-    error: String,
-    details: Option<JsonValue>,
-}
-
-/// Datos del negocio que acompañan a la activación. El worker los espera en camelCase y bajo
-/// el nombre `displayName` (contrato actual del endpoint).
+/// Datos del negocio que acompañan a la activación (el worker los espera en camelCase).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TenantInfo<'a> {
@@ -140,35 +156,110 @@ struct ActivateReq<'a> {
     device_id: &'a str,
     device_pub_key: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    instance_name: Option<&'a str>,
+    device_change_code: Option<&'a str>,
     tenant_info: TenantInfo<'a>,
 }
 
+/// Respuesta de `/v1/license/status`: la aserción firmada + token renovado + info no crítica.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StatusOk {
+    #[allow(dead_code)]
     ok: bool,
-    state: StatusState,
-    #[serde(rename = "serverTime")]
-    server_time_ms: i64,
+    assertion: SignedAssertionDto,
+    token: Option<String>,
+    server_time: i64,
+}
+
+/// La aserción tal cual viaja por el cable. La firma se verifica antes de creerse nada.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SignedAssertionDto {
+    v: u8,
+    tenant_id: String,
+    device_id: String,
+    license_id: String,
+    state: String,
+    plan: String,
+    expires_at_ms: Option<i64>,
+    issued_at_ms: i64,
+    assertion_expires_at_ms: i64,
+    client_ts: i64,
+    sig: String,
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct StatusState {
-    #[allow(dead_code)]
-    tenant_id: String,
-    status: String,
-    expires_at: Option<String>,
-    disabled: bool,
-    #[allow(dead_code)]
-    test_mode: bool,
-    #[allow(dead_code)]
-    key_short: String,
-    #[allow(dead_code)]
-    updated_at_ms: i64,
-    #[allow(dead_code)]
-    created_at_ms: i64,
+struct RefreshOk {
+    token: String,
+}
+
+/* =========================================================
+   Verificación de la firma (el control central del gate)
+========================================================= */
+
+fn pinned_verifying_key() -> Result<VerifyingKey, FalloConsulta> {
+    let bytes = B64
+        .decode(LICENSE_SIGNING_PUBLIC_KEY_B64)
+        .map_err(|_| FalloConsulta::FirmaInvalida)?;
+    let arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| FalloConsulta::FirmaInvalida)?;
+    VerifyingKey::from_bytes(&arr).map_err(|_| FalloConsulta::FirmaInvalida)
+}
+
+/// Verifica la firma ed25519 contra la clave pineada, comprueba que la aserción es de ESTA
+/// petición (`client_ts`) y que no ha caducado, y solo entonces construye el estado de fiar.
+fn verificar_assertion(
+    dto: SignedAssertionDto,
+    client_ts_enviado: i64,
+    ahora_ms: i64,
+) -> Result<AssertionVerificada, FalloConsulta> {
+    let estado = EstadoLicencia::from_code(&dto.state).ok_or_else(|| FalloConsulta::Ilegible {
+        detalle: format!("estado_desconocido: {}", dto.state),
+    })?;
+
+    let assertion = AssertionVerificada {
+        version: dto.v,
+        tenant_id: dto.tenant_id,
+        device_id: dto.device_id,
+        license_id: dto.license_id,
+        estado,
+        plan: dto.plan,
+        expires_at_ms: dto.expires_at_ms,
+        issued_at_ms: dto.issued_at_ms,
+        assertion_expires_at_ms: dto.assertion_expires_at_ms,
+        client_ts: dto.client_ts,
+    };
+
+    let vk = pinned_verifying_key()?;
+    let sig_bytes = B64.decode(&dto.sig).map_err(|_| FalloConsulta::FirmaInvalida)?;
+    let sig = Signature::from_slice(&sig_bytes).map_err(|_| FalloConsulta::FirmaInvalida)?;
+
+    let msg = dom::mensaje_canonico(&assertion);
+    vk.verify(msg.as_bytes(), &sig)
+        .map_err(|_| FalloConsulta::FirmaInvalida)?;
+
+    // Firma buena, pero ¿es de esta petición y sigue vigente? (anti-replay)
+    if !dom::assertion_fresca(&assertion, client_ts_enviado, ahora_ms) {
+        return Err(FalloConsulta::FirmaInvalida);
+    }
+
+    Ok(assertion)
+}
+
+/// Clasifica el error del worker según lo que implica para el gate: un rechazo definitivo de la
+/// licencia (borra) vs. una incidencia de auth/reloj (se trata como offline, no borra).
+fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
+    match code {
+        // La licencia ya no vale en este equipo: hay que borrar el estado local.
+        "license_not_found" | "license_revoked" | "device_replaced" => {
+            FalloConsulta::Rechazada { code: code.to_string() }
+        }
+        // Todo lo demás (token/reloj/proof/5xx): transitorio o ambiguo. No se tira la licencia;
+        // decide la gracia offline. Si persiste > 48 h, la gracia expira y bloquea igual.
+        _ => {
+            let _ = http;
+            FalloConsulta::Inalcanzable
+        }
+    }
 }
 
 /* =========================================================
@@ -182,6 +273,88 @@ pub struct LicensingAdapter {
 impl LicensingAdapter {
     pub fn new(app_data_dir: PathBuf) -> Self {
         Self { app_data_dir }
+    }
+
+    /// GET `/v1/license/status` firmado con device-proof. Devuelve el cuerpo parseado, o el error
+    /// ya clasificado. NO verifica la firma todavía (eso es del llamante, que conoce el `ts`).
+    async fn get_status(
+        &self,
+        token: &str,
+        device_id: &str,
+    ) -> Result<(StatusOk, i64), FalloConsulta> {
+        const PATH: &str = "/v1/license/status";
+
+        // Un fallo local (keyring, firma, cliente HTTP) es indistinguible de no tener red para el
+        // gate: en ambos casos no sabemos qué dice el servidor → `Inalcanzable` (gracia offline).
+        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
+        let ts = now_ms();
+
+        let (sk, _) =
+            get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
+        let sig =
+            sign_device_proof(&sk, ts, "GET", PATH, token).map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let resp = client
+            .get(api_url(PATH))
+            .bearer_auth(token)
+            .header("X-Device-Ts", ts.to_string())
+            .header("X-Device-Sig", sig)
+            .send()
+            .await
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let http = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        if !(200..300).contains(&http) {
+            let code = ApiErr::parse(&text).map(|e| e.error).unwrap_or_default();
+            return Err(clasificar_error(http, &code));
+        }
+
+        let ok: StatusOk = serde_json::from_str(&text).map_err(|e| FalloConsulta::Ilegible {
+            detalle: format!("invalid_json: {e} | body={text}"),
+        })?;
+
+        Ok((ok, ts))
+    }
+
+    /// POST `/v1/license/refresh` (device-proof). Reemite el token de sesión cuando el viejo ha
+    /// caducado. `Ok(None)` si el refresco falló por red (se cae a la gracia offline).
+    async fn refrescar_token(
+        &self,
+        token: &str,
+        device_id: &str,
+    ) -> Result<String, FalloConsulta> {
+        const PATH: &str = "/v1/license/refresh";
+
+        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
+        let ts = now_ms();
+
+        let (sk, _) =
+            get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
+        let sig = sign_device_proof(&sk, ts, "POST", PATH, token)
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let resp = client
+            .post(api_url(PATH))
+            .bearer_auth(token)
+            .header("X-Device-Ts", ts.to_string())
+            .header("X-Device-Sig", sig)
+            .send()
+            .await
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
+
+        let http = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        if !(200..300).contains(&http) {
+            let code = ApiErr::parse(&text).map(|e| e.error).unwrap_or_default();
+            return Err(clasificar_error(http, &code));
+        }
+
+        serde_json::from_str::<RefreshOk>(&text)
+            .map(|r| r.token)
+            .map_err(|_| FalloConsulta::Inalcanzable)
     }
 }
 
@@ -199,7 +372,11 @@ impl LicensingService for LicensingAdapter {
         delete_state(&self.app_data_dir)
     }
 
-    async fn activar_remoto(&self, solicitud: &SolicitudActivacion) -> AppResult<Concesion> {
+    async fn activar_remoto(
+        &self,
+        solicitud: &SolicitudActivacion,
+        device_change_code: Option<&str>,
+    ) -> AppResult<ResultadoActivacion> {
         let device_id = get_or_create_device_id().map_err(ext)?;
         let (_sk, pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
 
@@ -207,7 +384,7 @@ impl LicensingService for LicensingAdapter {
             activation_key: &solicitud.clave,
             device_id: &device_id,
             device_pub_key: &pub_b64,
-            instance_name: None,
+            device_change_code,
             tenant_info: TenantInfo {
                 display_name: &solicitud.business_name,
                 legal_name: solicitud.legal_name.as_deref(),
@@ -225,23 +402,29 @@ impl LicensingService for LicensingAdapter {
             .await
             .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
 
-        let status = resp.status();
+        let http = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
 
-        if !status.is_success() {
-            if let Ok(e) = serde_json::from_str::<ActivateErr>(&text) {
-                let details = e.details.map(|v| v.to_string()).unwrap_or_default();
-                return Err(AppError::external(format!(
-                    "{}{}{}",
-                    e.error,
-                    if details.is_empty() { "" } else { " - " },
-                    details
-                )));
+        if !(200..300).contains(&http) {
+            if let Some(e) = ApiErr::parse(&text) {
+                // El servidor pide el OTP: la licencia ya está en otro Main. No es un error para el
+                // usuario, es un paso más del flujo → lo devolvemos como resultado, con la pista.
+                if e.error == "device_change_required" {
+                    let email_hint = e
+                        .details
+                        .as_ref()
+                        .and_then(|d| d.get("emailHint"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    return Ok(ResultadoActivacion::CambioDispositivoRequerido { email_hint });
+                }
+
+                // Resto de errores de negocio: verbatim (el frontend los compara por igualdad).
+                return Err(AppError::raw(e.error));
             }
             return Err(AppError::external(format!(
-                "activate_failed_http_{}: {}",
-                status.as_u16(),
-                text
+                "activate_failed_http_{http}: {text}"
             )));
         }
 
@@ -254,9 +437,8 @@ impl LicensingService for LicensingAdapter {
             )));
         }
 
-        // Anti-copia: el token concedido va ligado a la clave de ESTE dispositivo. Si el
-        // servidor nos devuelve otro `deviceId`, la firma de las siguientes peticiones no
-        // cuadraría: mejor fallar aquí que arrastrar un estado inservible.
+        // Anti-copia: el token concedido va ligado a la clave de ESTE dispositivo. Si el servidor
+        // devuelve otro `deviceId`, la firma de las siguientes peticiones no cuadraría.
         if let Some(server_device) = ok.device_id.as_deref().map(str::trim) {
             if !server_device.is_empty() && server_device != device_id {
                 return Err(AppError::external(
@@ -265,65 +447,70 @@ impl LicensingService for LicensingAdapter {
             }
         }
 
-        Ok(Concesion {
+        Ok(ResultadoActivacion::Activada(Concesion {
             tenant_id: ok.tenant_id.trim().to_string(),
             device_id,
             token: ok.token.trim().to_string(),
             status: ok.status,
             expires_at: ok.expires_at,
-        })
+            // La activación devuelve `expiresAt` en ISO; el número absoluto lo fija el primer
+            // `/status` firmado. Aquí queda pendiente (None) hasta esa comprobación.
+            expires_at_ms: None,
+            plan: None,
+        }))
+    }
+
+    async fn solicitar_cambio_dispositivo(&self, clave: &str) -> AppResult<()> {
+        let device_id = get_or_create_device_id().map_err(ext)?;
+
+        // La respuesta es constante (siempre 200) por diseño del worker: no filtra si la clave
+        // existe. Basta con no fallar en el transporte.
+        let body = serde_json::json!({ "activationKey": clave, "deviceId": device_id });
+
+        http_client()?
+            .post(api_url("/v1/license/device-change/request"))
+            .header(CONTENT_TYPE, "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ext(format!("No se pudo pedir el código: {e}")))?;
+
+        Ok(())
     }
 
     async fn consultar_estado(
         &self,
         state: &LicenseLocalState,
-    ) -> Result<RespuestaEstado, FalloConsulta> {
-        const PATH: &str = "/v1/license/status";
+    ) -> Result<EstadoVerificado, FalloConsulta> {
+        let ahora = now_ms();
 
-        // Un fallo local (keyring, firma, construcción del cliente) es indistinguible de no
-        // tener red desde el punto de vista del gate: en ambos casos no sabemos qué dice el
-        // servidor, así que se trata como `Inalcanzable` y decide la gracia offline.
-        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
-        let ts = now_ms();
+        // 1er intento con el token actual.
+        let (ok, ts) = match self.get_status(&state.token, &state.device_id).await {
+            Ok(v) => v,
+            Err(fallo) => {
+                // Un token de sesión caducado NO debe borrar la licencia: se renueva por
+                // device-proof (`/refresh`) y se reintenta una vez. El worker devuelve
+                // `token_expired`, que `clasificar_error` mete en `Inalcanzable`; distinguimos ese
+                // caso reintentando el refresco, que sí sabe si el problema es el token.
+                if !matches!(fallo, FalloConsulta::Inalcanzable) {
+                    return Err(fallo);
+                }
+                let nuevo = self.refrescar_token(&state.token, &state.device_id).await?;
+                let (ok, ts) = self.get_status(&nuevo, &state.device_id).await?;
+                let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+                return Ok(EstadoVerificado {
+                    assertion,
+                    server_time_ms: ok.server_time,
+                    token_renovado: Some(nuevo),
+                });
+            }
+        };
 
-        let (sk, _) = get_or_create_device_keypair(&state.device_id)
-            .map_err(|_| FalloConsulta::Inalcanzable)?;
-        let sig = sign_device_proof(&sk, ts, "GET", PATH, &state.token)
-            .map_err(|_| FalloConsulta::Inalcanzable)?;
-
-        let resp = client
-            .get(api_url(PATH))
-            .bearer_auth(&state.token)
-            .header("X-Device-Ts", ts.to_string())
-            .header("X-Device-Sig", sig)
-            .send()
-            .await
-            .map_err(|_| FalloConsulta::Inalcanzable)?;
-
-        let http = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-
-        if (400..=499).contains(&http) {
-            return Err(FalloConsulta::Rechazada { http });
-        }
-        if (500..=599).contains(&http) {
-            return Err(FalloConsulta::Inalcanzable);
-        }
-
-        let ok: StatusOk =
-            serde_json::from_str(&text).map_err(|e| FalloConsulta::Ilegible {
-                http,
-                detalle: format!("invalid_json: {e} | body={text}"),
-            })?;
-
-        Ok(RespuestaEstado {
-            ok: ok.ok,
-            estado: EstadoServidor {
-                status: ok.state.status,
-                expires_at: ok.state.expires_at,
-                disabled: ok.state.disabled,
-            },
-            server_time_ms: ok.server_time_ms,
+        let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+        Ok(EstadoVerificado {
+            assertion,
+            server_time_ms: ok.server_time,
+            token_renovado: ok.token,
         })
     }
 }

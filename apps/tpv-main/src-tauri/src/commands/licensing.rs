@@ -8,7 +8,8 @@ use tauri::{AppHandle, Manager};
 
 use tpv_application::use_cases::licensing as uc;
 use tpv_contracts::licensing::{
-    LicenseActivateInput, LicenseGateResult, LicenseLocalState,
+    LicenseActivateInput, LicenseActivateOutcome, LicenseDeviceChangeInput, LicenseGateResult,
+    LicenseLocalState,
 };
 use tpv_infra_licensing::LicensingAdapter;
 
@@ -47,6 +48,16 @@ pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, Stri
 pub async fn license_activate(
     app: AppHandle,
     args: LicenseActivateInput,
-) -> Result<LicenseLocalState, String> {
+) -> Result<LicenseActivateOutcome, String> {
     Ok(uc::activate(&svc(&app)?, args).await?)
+}
+
+/// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia (§6.4).
+#[tauri::command]
+pub async fn license_request_device_change(
+    app: AppHandle,
+    args: LicenseDeviceChangeInput,
+) -> Result<String, String> {
+    uc::request_device_change(&svc(&app)?, args).await?;
+    Ok("OK".into())
 }

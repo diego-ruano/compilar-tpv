@@ -1,22 +1,20 @@
 //! Dominio de **licenciamiento**: la política del gate.
 //!
-//! Aquí vive la única pregunta que importa —¿puede usarse el TPV?— y sus reglas:
-//! qué respuesta del servidor da una licencia por buena, cuánto se aguanta sin poder
-//! hablar con él (gracia offline), cuándo el estado local deja de valer y hay que
-//! borrarlo. Todo son funciones puras: ni red, ni ficheros, ni Tauri. El adaptador
-//! (`tpv-infra-licensing`) se limita a traer los datos y a ejecutar la acción.
-
-use serde::{Deserialize, Serialize};
+//! La única pregunta que importa —¿puede usarse el TPV?— y sus reglas: qué estado firmado da
+//! una licencia por buena, cómo se reconstruye el mensaje que el servidor firmó (para poder
+//! verificarlo), cuánto se aguanta sin red (gracia offline) y cuándo se descarta el estado
+//! local. Todo funciones puras: ni red, ni ficheros, ni cripto (la verificación ed25519 la hace
+//! el adaptador con la clave pineada; aquí solo se construye el mensaje canónico a verificar).
 
 /// Cuánto puede seguir funcionando el TPV sin lograr contactar con el servidor de licencias.
 pub const GRACIA_OFFLINE_MS: i64 = 48 * 60 * 60 * 1000;
 
-/// Margen que se le concede al reloj del dispositivo antes de considerar que se ha
-/// atrasado (a mano) para estirar la gracia offline.
+/// Margen que se le concede al reloj del dispositivo antes de considerar que se ha atrasado
+/// (a mano) para estirar la gracia offline.
 pub const TOLERANCIA_RELOJ_MS: i64 = 2 * 60 * 1000;
 
 /* =========================================================
-   Datos que cruzan la frontera con el servidor de licencias
+   Activación
 ========================================================= */
 
 /// Datos validados para activar una licencia en este dispositivo.
@@ -63,8 +61,8 @@ impl SolicitudActivacion {
 
 /// Lo que el servidor concede al activar: identidad del tenant + token de sesión.
 ///
-/// Ese `token` no es solo la llave del gate: es la credencial con la que el dispositivo
-/// firma **todas** sus llamadas a la nube (sync, pairing, imágenes, WebSocket).
+/// Ese `token` no es solo la llave del gate: es la credencial con la que el dispositivo firma
+/// **todas** sus llamadas a la nube (sync, pairing, imágenes, WebSocket).
 #[derive(Debug, Clone)]
 pub struct Concesion {
     pub tenant_id: String,
@@ -72,45 +70,141 @@ pub struct Concesion {
     pub token: String,
     pub status: String,
     pub expires_at: Option<String>,
+    pub expires_at_ms: Option<i64>,
+    pub plan: Option<String>,
 }
 
-/// Estado de la licencia tal y como lo reporta el servidor.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EstadoServidor {
-    pub status: String,
-    pub expires_at: Option<String>,
-    pub disabled: bool,
-}
-
-/// Respuesta completa a la consulta de estado.
+/// Resultado de intentar activar. El servidor puede exigir un código de cambio de dispositivo
+/// si la licencia ya está ligada a otro Main (§6.4 del plan).
 #[derive(Debug, Clone)]
-pub struct RespuestaEstado {
-    pub ok: bool,
-    pub estado: EstadoServidor,
-    pub server_time_ms: i64,
+pub enum ResultadoActivacion {
+    Activada(Concesion),
+    /// Hace falta el OTP del email para mover la licencia a este equipo. `email_hint` es la
+    /// pista que se muestra al usuario (`a***@bar.com`).
+    CambioDispositivoRequerido { email_hint: String },
 }
 
-/// Por qué no se pudo consultar el estado, clasificado por lo que implica para el gate.
+/* =========================================================
+   Estado firmado (lo que decide el gate)
+========================================================= */
+
+/// Estado de la licencia derivado por el SERVIDOR (la autoridad) y firmado con ed25519. El
+/// cliente no lo recalcula: lo verifica y obedece. Los códigos coinciden con `LicenseGateState`
+/// del worker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EstadoLicencia {
+    Active,
+    Warn,
+    ExpiryGrace,
+    Expired,
+    Revoked,
+    DeviceReplaced,
+}
+
+impl EstadoLicencia {
+    pub fn from_code(s: &str) -> Option<Self> {
+        match s.trim() {
+            "active" => Some(EstadoLicencia::Active),
+            "warn" => Some(EstadoLicencia::Warn),
+            "expiry_grace" => Some(EstadoLicencia::ExpiryGrace),
+            "expired" => Some(EstadoLicencia::Expired),
+            "revoked" => Some(EstadoLicencia::Revoked),
+            "device_replaced" => Some(EstadoLicencia::DeviceReplaced),
+            _ => None,
+        }
+    }
+
+    pub fn codigo(&self) -> &'static str {
+        match self {
+            EstadoLicencia::Active => "active",
+            EstadoLicencia::Warn => "warn",
+            EstadoLicencia::ExpiryGrace => "expiry_grace",
+            EstadoLicencia::Expired => "expired",
+            EstadoLicencia::Revoked => "revoked",
+            EstadoLicencia::DeviceReplaced => "device_replaced",
+        }
+    }
+}
+
+/// Aserción **ya verificada** (el adaptador comprobó la firma y la frescura). Sus campos son de
+/// fiar porque reconstruyen exactamente el mensaje que el servidor firmó.
+#[derive(Debug, Clone)]
+pub struct AssertionVerificada {
+    pub version: u8,
+    pub tenant_id: String,
+    pub device_id: String,
+    pub license_id: String,
+    pub estado: EstadoLicencia,
+    pub plan: String,
+    pub expires_at_ms: Option<i64>,
+    pub issued_at_ms: i64,
+    pub assertion_expires_at_ms: i64,
+    pub client_ts: i64,
+}
+
+/// Mensaje canónico que firma el servidor. Orden FIJO, separador `|`.
+///
+/// ⚠️ Tiene que ser **idéntico byte a byte** a `licenseAssertionMessage` del worker
+/// (`apps/cloud-worker-licensing/src/domains/licensing/licensing.helpers.ts`). Cualquier cambio
+/// aquí obliga a cambiarlo allí y a subir `version`.
+pub fn mensaje_canonico(a: &AssertionVerificada) -> String {
+    let expires = a
+        .expires_at_ms
+        .map(|v| v.to_string())
+        .unwrap_or_default();
+
+    format!(
+        "v{}|{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        a.version,
+        a.tenant_id,
+        a.device_id,
+        a.license_id,
+        a.estado.codigo(),
+        a.plan,
+        expires,
+        a.issued_at_ms,
+        a.assertion_expires_at_ms,
+        a.client_ts,
+    )
+}
+
+/// ¿Es la aserción de ESTA petición y sigue vigente? Aunque la firma sea válida, una aserción
+/// vieja (otro `client_ts`) o ya caducada (> 5 min) no vale: es el anti-replay.
+pub fn assertion_fresca(a: &AssertionVerificada, client_ts_enviado: i64, ahora_ms: i64) -> bool {
+    a.client_ts == client_ts_enviado && ahora_ms <= a.assertion_expires_at_ms
+}
+
+/// Respuesta de estado ya verificada, lista para que decida el dominio.
+#[derive(Debug, Clone)]
+pub struct EstadoVerificado {
+    pub assertion: AssertionVerificada,
+    pub server_time_ms: i64,
+    /// Token de sesión renovado por el servidor (fin del muro de los 30 días). `None` si no tocó.
+    pub token_renovado: Option<String>,
+}
+
+/// Por qué no se pudo obtener un estado verificado, clasificado por lo que implica para el gate.
 #[derive(Debug, Clone)]
 pub enum FalloConsulta {
-    /// No hubo forma de hablar con el servidor (sin red, timeout, 5xx, o un fallo local
-    /// al firmar la petición). La licencia local sigue valiendo mientras dure la gracia.
+    /// Sin red, timeout, 5xx, o una incidencia de auth transitoria (reloj desfasado). La licencia
+    /// local sigue valiendo mientras dure la gracia offline.
     Inalcanzable,
-    /// El servidor contestó rechazando la petición (4xx): la licencia local ya no vale.
-    Rechazada { http: u16 },
-    /// El servidor contestó algo que no sabemos interpretar. No es un "no", pero tampoco
-    /// un "sí": no permite afirmar que la licencia sea válida.
-    Ilegible { http: u16, detalle: String },
+    /// La respuesta llegó pero su firma no verifica (o no es de esta petición). Posible servidor
+    /// falso / MITM: se bloquea, pero NO se borra la licencia (podría ser transitorio).
+    FirmaInvalida,
+    /// El servidor dice que esta licencia ya no vale (no existe, revocada, movida a otro equipo).
+    Rechazada { code: String },
+    /// Respuesta que no sabemos interpretar. Ni un sí ni un no.
+    Ilegible { detalle: String },
 }
 
 impl std::fmt::Display for FalloConsulta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FalloConsulta::Inalcanzable => write!(f, "license_status_unreachable"),
-            FalloConsulta::Rechazada { http } => write!(f, "license_status_rejected_http_{http}"),
-            FalloConsulta::Ilegible { http, detalle } => {
-                write!(f, "status_failed_http_{http}: {detalle}")
-            }
+            FalloConsulta::FirmaInvalida => write!(f, "bad_signature"),
+            FalloConsulta::Rechazada { code } => write!(f, "{code}"),
+            FalloConsulta::Ilegible { detalle } => write!(f, "status_unreadable: {detalle}"),
         }
     }
 }
@@ -119,14 +213,19 @@ impl std::fmt::Display for FalloConsulta {
    Veredicto del gate
 ========================================================= */
 
-/// Motivo del veredicto. `codigo()` es el string estable que cruza a la UI (el frontend
-/// compara `needs_activation` por igualdad y muestra el resto en la pantalla de bloqueo).
+/// Motivo del veredicto. `codigo()` es el string estable que cruza a la UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Motivo {
     Ok,
+    Warn,
+    ExpiryGrace,
+    Expired,
+    Revoked,
+    DeviceReplaced,
+    BadSignature,
     NecesitaActivacion,
-    Invalida,
-    InvalidaHttp(u16),
+    /// Rechazo del servidor con su código verbatim (p. ej. `license_not_found`).
+    Rechazada(String),
     GraciaOffline,
     GraciaOfflineAgotada,
     RelojAtrasado,
@@ -136,9 +235,14 @@ impl Motivo {
     pub fn codigo(&self) -> String {
         match self {
             Motivo::Ok => "ok".to_string(),
+            Motivo::Warn => "warn".to_string(),
+            Motivo::ExpiryGrace => "expiry_grace".to_string(),
+            Motivo::Expired => "expired".to_string(),
+            Motivo::Revoked => "revoked".to_string(),
+            Motivo::DeviceReplaced => "device_replaced".to_string(),
+            Motivo::BadSignature => "bad_signature".to_string(),
             Motivo::NecesitaActivacion => "needs_activation".to_string(),
-            Motivo::Invalida => "invalid".to_string(),
-            Motivo::InvalidaHttp(http) => format!("invalid_http_{http}"),
+            Motivo::Rechazada(code) => code.clone(),
             Motivo::GraciaOffline => "offline_grace".to_string(),
             Motivo::GraciaOfflineAgotada => "offline_expired".to_string(),
             Motivo::RelojAtrasado => "clock_rollback_detected".to_string(),
@@ -146,12 +250,10 @@ impl Motivo {
     }
 }
 
-/// Qué hacer con el estado local (`license_state.json`) después del veredicto.
+/// Qué hacer con el estado local (`license_state.json`) tras el veredicto.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccionEstado {
-    /// Persistirlo con las marcas de comprobación actualizadas.
     Conservar,
-    /// Borrarlo: la licencia ya no es utilizable y hay que volver a activar.
     Borrar,
 }
 
@@ -165,54 +267,92 @@ pub struct Veredicto {
 
 impl Veredicto {
     fn permitir(motivo: Motivo) -> Self {
-        Veredicto {
-            permitido: true,
-            motivo,
-            accion: AccionEstado::Conservar,
-        }
+        Veredicto { permitido: true, motivo, accion: AccionEstado::Conservar }
     }
 
-    /// Bloquea pero conserva el estado: el problema puede ser temporal (sin red, reloj),
-    /// así que no se tira la licencia; el usuario puede reintentar.
+    /// Bloquea pero conserva el estado: el problema puede ser temporal (sin red, firma, caducidad
+    /// renovable), así que no se tira la licencia; el usuario reintenta.
     fn bloquear(motivo: Motivo) -> Self {
-        Veredicto {
-            permitido: false,
-            motivo,
-            accion: AccionEstado::Conservar,
-        }
+        Veredicto { permitido: false, motivo, accion: AccionEstado::Conservar }
     }
 
-    /// Bloquea y descarta el estado: el servidor ha dicho que esta licencia no vale.
+    /// Bloquea y descarta el estado: el servidor ha dicho que esta licencia no vale en este equipo.
     fn invalidar(motivo: Motivo) -> Self {
-        Veredicto {
-            permitido: false,
-            motivo,
-            accion: AccionEstado::Borrar,
-        }
+        Veredicto { permitido: false, motivo, accion: AccionEstado::Borrar }
+    }
+}
+
+/// Traduce el estado firmado del servidor en un veredicto.
+///
+/// `Expired` bloquea pero **conserva** el estado: si el cliente renueva, el siguiente `/status`
+/// lo verá `active` y basta con reintentar, sin re-teclear la clave. `Revoked` y
+/// `DeviceReplaced` sí borran: en este equipo la licencia se acabó.
+pub fn evaluar_estado(estado: EstadoLicencia) -> Veredicto {
+    match estado {
+        EstadoLicencia::Active => Veredicto::permitir(Motivo::Ok),
+        EstadoLicencia::Warn => Veredicto::permitir(Motivo::Warn),
+        EstadoLicencia::ExpiryGrace => Veredicto::permitir(Motivo::ExpiryGrace),
+        EstadoLicencia::Expired => Veredicto::bloquear(Motivo::Expired),
+        EstadoLicencia::Revoked => Veredicto::invalidar(Motivo::Revoked),
+        EstadoLicencia::DeviceReplaced => Veredicto::invalidar(Motivo::DeviceReplaced),
     }
 }
 
 /// Resultado de evaluar un fallo de consulta.
 pub enum Resolucion {
-    /// Se puede decidir con lo que hay.
     Decidido(Veredicto),
-    /// El fallo no permite decidir (respuesta ilegible sin gracia que aplicar). El caso de
-    /// uso propaga el error al llamante en vez de inventarse un sí o un no.
+    /// El fallo no permite decidir; el caso de uso propaga el error en vez de inventar un sí/no.
     Indecidible,
 }
 
-/// Vigencia de la gracia offline.
+pub fn evaluar_fallo(
+    fallo: &FalloConsulta,
+    base_ms: i64,
+    ahora_ms: i64,
+    forzar_red: bool,
+) -> Resolucion {
+    match fallo {
+        FalloConsulta::Inalcanzable => Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+            Gracia::Vigente => Veredicto::permitir(Motivo::GraciaOffline),
+            Gracia::Agotada => Veredicto::bloquear(Motivo::GraciaOfflineAgotada),
+            Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
+        }),
+
+        // Sin firma válida no hay acceso, pase lo que pase. Se conserva la licencia: podría ser un
+        // MITM puntual o una rotación de clave, no un motivo para forzar la re-activación.
+        FalloConsulta::FirmaInvalida => {
+            Resolucion::Decidido(Veredicto::bloquear(Motivo::BadSignature))
+        }
+
+        FalloConsulta::Rechazada { code } => {
+            Resolucion::Decidido(Veredicto::invalidar(Motivo::Rechazada(code.clone())))
+        }
+
+        FalloConsulta::Ilegible { .. } => {
+            if forzar_red {
+                return Resolucion::Indecidible;
+            }
+            match evaluar_gracia(base_ms, ahora_ms) {
+                Gracia::Vigente => Resolucion::Decidido(Veredicto::permitir(Motivo::GraciaOffline)),
+                _ => Resolucion::Indecidible,
+            }
+        }
+    }
+}
+
+/* =========================================================
+   Gracia offline
+========================================================= */
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gracia {
     Vigente,
     Agotada,
-    /// El reloj del dispositivo va por detrás del último contacto conocido: alguien lo ha
-    /// atrasado para estirar la gracia.
     RelojAtrasado,
 }
 
-/// Instante desde el que se cuenta la gracia offline: la última comprobación correcta o,
-/// si nunca hubo ninguna, el momento de la activación.
+/// Instante desde el que se cuenta la gracia offline: la última comprobación correcta o, si nunca
+/// hubo ninguna, el momento de la activación.
 pub fn base_gracia(last_check_ok_ms: Option<i64>, activated_at_ms: i64) -> i64 {
     last_check_ok_ms.unwrap_or(activated_at_ms)
 }
@@ -228,58 +368,6 @@ pub fn evaluar_gracia(base_ms: i64, ahora_ms: i64) -> Gracia {
     }
 }
 
-/// ¿Da el servidor la licencia por utilizable?
-///
-/// NOTA (LIC-02): hoy **no** se comprueba `expires_at`. El servidor actual es la autoridad
-/// y el campo llega como string opaco; el sistema de licencias propio lo hará cumplir aquí,
-/// junto con la verificación de la firma ed25519 (ver `docs/PLAN_LICENCIAS_PROPIAS.md` §5.6).
-fn licencia_utilizable(estado: &EstadoServidor) -> bool {
-    !estado.disabled && estado.status.trim().eq_ignore_ascii_case("active")
-}
-
-/// Evalúa una respuesta que sí se pudo leer.
-pub fn evaluar_respuesta(respuesta: &RespuestaEstado) -> Veredicto {
-    if respuesta.ok && licencia_utilizable(&respuesta.estado) {
-        Veredicto::permitir(Motivo::Ok)
-    } else {
-        Veredicto::invalidar(Motivo::Invalida)
-    }
-}
-
-/// Evalúa un fallo de consulta.
-///
-/// `forzar_red` es la comprobación que pide el usuario explícitamente ("Reintentar"): ante
-/// una respuesta ilegible no se le deja caer en la gracia offline, se le devuelve el fallo.
-pub fn evaluar_fallo(
-    fallo: &FalloConsulta,
-    base_ms: i64,
-    ahora_ms: i64,
-    forzar_red: bool,
-) -> Resolucion {
-    match fallo {
-        FalloConsulta::Inalcanzable => Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms)
-        {
-            Gracia::Vigente => Veredicto::permitir(Motivo::GraciaOffline),
-            Gracia::Agotada => Veredicto::bloquear(Motivo::GraciaOfflineAgotada),
-            Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
-        }),
-
-        FalloConsulta::Rechazada { http } => {
-            Resolucion::Decidido(Veredicto::invalidar(Motivo::InvalidaHttp(*http)))
-        }
-
-        FalloConsulta::Ilegible { .. } => {
-            if forzar_red {
-                return Resolucion::Indecidible;
-            }
-            match evaluar_gracia(base_ms, ahora_ms) {
-                Gracia::Vigente => Resolucion::Decidido(Veredicto::permitir(Motivo::GraciaOffline)),
-                _ => Resolucion::Indecidible,
-            }
-        }
-    }
-}
-
 fn limpia_opcional(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -290,116 +378,115 @@ mod tests {
 
     const AHORA: i64 = 1_700_000_000_000;
 
-    fn estado(status: &str, disabled: bool) -> RespuestaEstado {
-        RespuestaEstado {
-            ok: true,
-            estado: EstadoServidor {
-                status: status.to_string(),
-                expires_at: None,
-                disabled,
-            },
-            server_time_ms: AHORA,
+    fn assertion(estado: EstadoLicencia) -> AssertionVerificada {
+        AssertionVerificada {
+            version: 1,
+            tenant_id: "t1".into(),
+            device_id: "d1".into(),
+            license_id: "lic1".into(),
+            estado,
+            plan: "standard".into(),
+            expires_at_ms: Some(AHORA + 1000),
+            issued_at_ms: AHORA,
+            assertion_expires_at_ms: AHORA + 5 * 60 * 1000,
+            client_ts: AHORA,
         }
     }
 
     #[test]
-    fn licencia_activa_permite_usar_el_tpv() {
-        let v = evaluar_respuesta(&estado("active", false));
-        assert!(v.permitido);
-        assert_eq!(v.motivo.codigo(), "ok");
-        assert_eq!(v.accion, AccionEstado::Conservar);
+    fn el_mensaje_canonico_es_estable_y_coincide_con_el_worker() {
+        // Debe ser idéntico a lo que compone `licenseAssertionMessage` en el worker.
+        let a = assertion(EstadoLicencia::Active);
+        assert_eq!(
+            mensaje_canonico(&a),
+            format!("v1|t1|d1|lic1|active|standard|{}|{}|{}|{}", AHORA + 1000, AHORA, AHORA + 300_000, AHORA),
+        );
     }
 
     #[test]
-    fn licencia_deshabilitada_o_inactiva_borra_el_estado_local() {
-        for r in [estado("active", true), estado("expired", false)] {
-            let v = evaluar_respuesta(&r);
-            assert!(!v.permitido);
-            assert_eq!(v.accion, AccionEstado::Borrar);
+    fn expires_at_null_se_serializa_como_vacio() {
+        let mut a = assertion(EstadoLicencia::Active);
+        a.expires_at_ms = None;
+        assert!(mensaje_canonico(&a).contains("|standard||")); // plan | (vacío) | issued
+    }
+
+    #[test]
+    fn una_asercion_de_otra_peticion_o_caducada_no_es_fresca() {
+        let a = assertion(EstadoLicencia::Active);
+        assert!(assertion_fresca(&a, AHORA, AHORA));
+        assert!(!assertion_fresca(&a, AHORA + 1, AHORA), "otro client_ts");
+        assert!(!assertion_fresca(&a, AHORA, a.assertion_expires_at_ms + 1), "caducada");
+    }
+
+    #[test]
+    fn estados_que_permiten_usar_y_estados_que_bloquean() {
+        for (e, permite, borra) in [
+            (EstadoLicencia::Active, true, false),
+            (EstadoLicencia::Warn, true, false),
+            (EstadoLicencia::ExpiryGrace, true, false),
+            (EstadoLicencia::Expired, false, false),
+            (EstadoLicencia::Revoked, false, true),
+            (EstadoLicencia::DeviceReplaced, false, true),
+        ] {
+            let v = evaluar_estado(e);
+            assert_eq!(v.permitido, permite, "{:?}", e);
+            assert_eq!(v.accion == AccionEstado::Borrar, borra, "{:?}", e);
+        }
+    }
+
+    #[test]
+    fn firma_invalida_bloquea_pero_no_borra() {
+        match evaluar_fallo(&FalloConsulta::FirmaInvalida, AHORA, AHORA, false) {
+            Resolucion::Decidido(v) => {
+                assert!(!v.permitido);
+                assert_eq!(v.motivo.codigo(), "bad_signature");
+                assert_eq!(v.accion, AccionEstado::Conservar);
+            }
+            Resolucion::Indecidible => panic!("una firma inválida siempre decide: bloquea"),
+        }
+    }
+
+    #[test]
+    fn un_rechazo_del_servidor_borra_y_conserva_su_codigo() {
+        let fallo = FalloConsulta::Rechazada { code: "license_not_found".into() };
+        match evaluar_fallo(&fallo, AHORA, AHORA, false) {
+            Resolucion::Decidido(v) => {
+                assert!(!v.permitido);
+                assert_eq!(v.motivo.codigo(), "license_not_found");
+                assert_eq!(v.accion, AccionEstado::Borrar);
+            }
+            Resolucion::Indecidible => panic!("un rechazo siempre decide"),
         }
     }
 
     #[test]
     fn sin_red_se_aguanta_hasta_agotar_la_gracia() {
-        let base = AHORA - GRACIA_OFFLINE_MS + 1;
-        assert_eq!(evaluar_gracia(base, AHORA), Gracia::Vigente);
+        assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS + 1, AHORA), Gracia::Vigente);
         assert_eq!(evaluar_gracia(AHORA - GRACIA_OFFLINE_MS - 1, AHORA), Gracia::Agotada);
     }
 
     #[test]
     fn atrasar_el_reloj_no_estira_la_gracia() {
-        let base = AHORA + TOLERANCIA_RELOJ_MS + 1;
-        assert_eq!(evaluar_gracia(base, AHORA), Gracia::RelojAtrasado);
-    }
-
-    #[test]
-    fn un_4xx_invalida_la_licencia_pero_un_5xx_no() {
-        let rechazada = evaluar_fallo(&FalloConsulta::Rechazada { http: 404 }, AHORA, AHORA, false);
-        match rechazada {
-            Resolucion::Decidido(v) => {
-                assert!(!v.permitido);
-                assert_eq!(v.motivo.codigo(), "invalid_http_404");
-                assert_eq!(v.accion, AccionEstado::Borrar);
-            }
-            Resolucion::Indecidible => panic!("un 4xx siempre decide"),
-        }
-
-        match evaluar_fallo(&FalloConsulta::Inalcanzable, AHORA, AHORA, false) {
-            Resolucion::Decidido(v) => {
-                assert!(v.permitido);
-                assert_eq!(v.accion, AccionEstado::Conservar);
-            }
-            Resolucion::Indecidible => panic!("sin red hay gracia"),
-        }
-    }
-
-    #[test]
-    fn una_respuesta_ilegible_solo_cae_en_la_gracia_si_no_la_pidio_el_usuario() {
-        let fallo = FalloConsulta::Ilegible {
-            http: 200,
-            detalle: "invalid_json".to_string(),
-        };
-
-        assert!(matches!(
-            evaluar_fallo(&fallo, AHORA, AHORA, true),
-            Resolucion::Indecidible
-        ));
-        assert!(matches!(
-            evaluar_fallo(&fallo, AHORA, AHORA, false),
-            Resolucion::Decidido(_)
-        ));
+        assert_eq!(evaluar_gracia(AHORA + TOLERANCIA_RELOJ_MS + 1, AHORA), Gracia::RelojAtrasado);
     }
 
     #[test]
     fn la_activacion_exige_clave_y_nombre_de_negocio() {
-        assert!(SolicitudActivacion::validar(
-            "  ".into(),
-            "Bar La Plaza".into(),
-            None,
-            None,
-            None,
-            None
-        )
-        .is_err());
-
-        assert!(
-            SolicitudActivacion::validar("TPV-1".into(), "  ".into(), None, None, None, None)
-                .is_err()
-        );
+        assert!(SolicitudActivacion::validar("  ".into(), "Bar".into(), None, None, None, None).is_err());
+        assert!(SolicitudActivacion::validar("K".into(), "  ".into(), None, None, None, None).is_err());
 
         let s = SolicitudActivacion::validar(
-            " TPV-1 ".into(),
-            " Bar La Plaza ".into(),
+            " K ".into(),
+            " Bar ".into(),
             Some("  ".into()),
             Some(" a@b.com ".into()),
             None,
             None,
         )
-        .expect("solicitud válida");
-
-        assert_eq!(s.clave, "TPV-1");
-        assert_eq!(s.business_name, "Bar La Plaza");
-        assert_eq!(s.legal_name, None, "los opcionales vacíos se descartan");
+        .expect("válida");
+        assert_eq!(s.clave, "K");
+        assert_eq!(s.business_name, "Bar");
+        assert_eq!(s.legal_name, None);
         assert_eq!(s.email.as_deref(), Some("a@b.com"));
     }
 }

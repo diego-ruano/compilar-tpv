@@ -20,8 +20,16 @@ pub struct LicenseLocalState {
     pub device_id: String,
     pub token: String,
     pub status: Option<String>,
+    /// Caducidad en texto ISO (informativo para la UI).
     #[serde(alias = "expiresAt")]
     pub expires_at: Option<String>,
+    /// Caducidad absoluta en ms. Es el dato con el que la UI calcula los días restantes del
+    /// banner de aviso; lo fija el servidor (firmado) en cada `/status`.
+    #[serde(alias = "expiresAtMs")]
+    #[ts(type = "number | null")]
+    pub expires_at_ms: Option<i64>,
+    /// Plan de la licencia (`standard`). Lo refresca `/status`.
+    pub plan: Option<String>,
     #[serde(alias = "lastServerTimeMs")]
     #[ts(type = "number | null")]
     pub last_server_time_ms: Option<i64>,
@@ -121,6 +129,30 @@ pub struct LicenseActivateInput {
     #[serde(default)]
     #[ts(optional)]
     pub country: Option<String>,
+    /// Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo (§6.4).
+    #[serde(default)]
+    #[ts(optional)]
+    pub device_change_code: Option<String>,
+}
+
+/// Resultado de `license_activate`. Si la licencia ya estaba en otro equipo, `outcome` es
+/// `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
+/// es `"activated"` con el estado ya guardado.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LicenseActivateOutcome {
+    pub outcome: String,
+    pub state: Option<LicenseLocalState>,
+    #[ts(optional)]
+    pub email_hint: Option<String>,
+}
+
+/// Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la
+/// licencia. El `device_id` lo pone el backend (es el de este equipo).
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LicenseDeviceChangeInput {
+    pub activation_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

@@ -17,6 +17,7 @@ import { z } from "zod";
 
 import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
+import { ensureLicensingSchemaMw } from "../../middleware/ensureSchema";
 import { getDb } from "../../server/db";
 import {
 	auditAdmin,
@@ -32,6 +33,7 @@ import { assertEnv } from "../licensing/licensing.helpers";
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
 adminRoutes.use("*", requireAdmin);
+adminRoutes.use("*", ensureLicensingSchemaMw);
 
 /** Las tres duraciones del producto. Un plazo fuera de aquí es un error de tecleo. */
 const TERMS = [1, 3, 12] as const;
