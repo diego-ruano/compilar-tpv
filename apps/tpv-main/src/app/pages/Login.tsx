@@ -407,7 +407,7 @@ export default function Login() {
                 email: ok.email,
             });
 
-            navigate("/", { replace: true });
+            navigate(ok.rol === "Cocinero" ? "/Comandas" : "/", { replace: true });
         } catch (e: any) {
             const msg =
                 typeof e === "string"

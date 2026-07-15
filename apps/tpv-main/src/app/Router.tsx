@@ -31,6 +31,7 @@ export const appRouter = createBrowserRouter([
             { path: "VentaRapida", element: <VentaRapida /> },
 
             { path: "Mesas", element: <Mesas /> },
+            { path: "Comandas", element: <Mesas /> },
             { path: "Mesas/editar", element: <EditTables /> },
 
             { path: "Inventario", element: <Inventario /> },

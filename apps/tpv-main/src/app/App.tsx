@@ -25,6 +25,11 @@ function AppInner() {
         return <Outlet />;
     }
 
+    const path = location.pathname.toLowerCase();
+    if (role === "Cocinero" && (path === "/" || path === "/ventarapida")) {
+        return <Navigate to="/Comandas" replace />;
+    }
+
     return (
         <Layout>
             <Outlet />
