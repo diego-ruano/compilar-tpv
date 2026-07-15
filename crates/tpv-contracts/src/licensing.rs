@@ -11,6 +11,9 @@ use ts_rs::TS;
    Estado de licencia (fichero local)
 ========================================================= */
 
+/// Estado local NO sensible de la licencia (fichero `license_state.json`). El **token** de sesión
+/// NO está aquí: es una credencial y vive solo en el keyring del SO (ver `device::*_license_token`).
+/// Nada lee el token de este fichero.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LicenseLocalState {
@@ -18,7 +21,6 @@ pub struct LicenseLocalState {
     pub tenant_id: String,
     #[serde(alias = "deviceId")]
     pub device_id: String,
-    pub token: String,
     pub status: Option<String>,
     /// Caducidad en texto ISO (informativo para la UI).
     #[serde(alias = "expiresAt")]

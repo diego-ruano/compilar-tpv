@@ -36,8 +36,8 @@ use tpv_domain::licensing::{
 };
 
 use device::{
-    get_handy_token, get_or_create_device_id, get_or_create_device_keypair, sign_device_proof,
-    sign_payload_b64,
+    clear_license_token, get_handy_token, get_license_token, get_or_create_device_id,
+    get_or_create_device_keypair, set_license_token, sign_device_proof, sign_payload_b64,
 };
 
 /// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`): sirve
@@ -275,6 +275,15 @@ impl LicensingAdapter {
         Self { app_data_dir }
     }
 
+    /// Guarda en el keyring el token de sesión efectivo tras un `/status`: el que renovó el
+    /// servidor (`renovado`) o, si no vino, el que ya se estaba usando (`actual`). Un fallo de
+    /// escritura del keyring no invalida el gate (la petición ya se hizo con el token válido): se
+    /// ignora y se reintentará en la siguiente comprobación.
+    fn persistir_token(&self, renovado: Option<&str>, actual: &str) {
+        let efectivo = renovado.map(str::trim).filter(|s| !s.is_empty()).unwrap_or(actual);
+        let _ = set_license_token(efectivo);
+    }
+
     /// GET `/v1/license/status` firmado con device-proof. Devuelve el cuerpo parseado, o el error
     /// ya clasificado. NO verifica la firma todavía (eso es del llamante, que conoce el `ts`).
     async fn get_status(
@@ -369,6 +378,9 @@ impl LicensingService for LicensingAdapter {
     }
 
     fn delete_state(&self) -> AppResult<()> {
+        // Borrar la licencia también retira su credencial del keyring (si no, quedaría un token
+        // huérfano y utilizable).
+        clear_license_token().map_err(ext)?;
         delete_state(&self.app_data_dir)
     }
 
@@ -457,10 +469,12 @@ impl LicensingService for LicensingAdapter {
             }
         }
 
+        // El token es una credencial: va directo al keyring, nunca a `license_state.json`.
+        set_license_token(ok.token.trim()).map_err(ext)?;
+
         Ok(ResultadoActivacion::Activada(Concesion {
             tenant_id: ok.tenant_id.trim().to_string(),
             device_id,
-            token: ok.token.trim().to_string(),
             status: ok.status,
             expires_at: ok.expires_at,
             // La activación devuelve `expiresAt` en ISO; el número absoluto lo fija el primer
@@ -494,8 +508,12 @@ impl LicensingService for LicensingAdapter {
     ) -> Result<EstadoVerificado, FalloConsulta> {
         let ahora = now_ms();
 
+        // El token vive en el keyring. Si no está, no podemos consultar: se trata como offline
+        // (gracia) en vez de tirar la licencia por un problema puntual de acceso al keyring.
+        let token = get_license_token().map_err(|_| FalloConsulta::Inalcanzable)?;
+
         // 1er intento con el token actual.
-        let (ok, ts) = match self.get_status(&state.token, &state.device_id).await {
+        let (ok, ts) = match self.get_status(&token, &state.device_id).await {
             Ok(v) => v,
             Err(fallo) => {
                 // Un token de sesión caducado NO debe borrar la licencia: se renueva por
@@ -505,22 +523,24 @@ impl LicensingService for LicensingAdapter {
                 if !matches!(fallo, FalloConsulta::Inalcanzable) {
                     return Err(fallo);
                 }
-                let nuevo = self.refrescar_token(&state.token, &state.device_id).await?;
+                let nuevo = self.refrescar_token(&token, &state.device_id).await?;
                 let (ok, ts) = self.get_status(&nuevo, &state.device_id).await?;
                 let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+                // Persistir el token efectivo (el que renovó /status, o el del refresh si no).
+                self.persistir_token(ok.token.as_deref(), &nuevo);
                 return Ok(EstadoVerificado {
                     assertion,
                     server_time_ms: ok.server_time,
-                    token_renovado: Some(nuevo),
                 });
             }
         };
 
         let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+        // El worker renueva el token en cada /status: se guarda en el keyring (fin del muro de 30d).
+        self.persistir_token(ok.token.as_deref(), &token);
         Ok(EstadoVerificado {
             assertion,
             server_time_ms: ok.server_time,
-            token_renovado: ok.token,
         })
     }
 }
@@ -538,14 +558,10 @@ impl PairingAdapter {
         Self { app_data_dir }
     }
 
+    /// Token de sesión de la Main (modo `tpv`), leído del **keyring** (ya no de
+    /// `license_state.json`). Es la credencial que firma las llamadas a la nube.
     fn license_token(&self) -> AppResult<String> {
-        let st = load_state(&self.app_data_dir)
-            .ok_or_else(|| AppError::not_found("license_state_missing"))?;
-        let token = st.token.trim().to_string();
-        if token.is_empty() {
-            return Err(AppError::not_found("license_token required"));
-        }
-        Ok(token)
+        get_license_token().map_err(AppError::not_found)
     }
 
     fn signed_headers_inner(

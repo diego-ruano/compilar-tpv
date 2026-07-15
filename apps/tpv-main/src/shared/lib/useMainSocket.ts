@@ -58,14 +58,14 @@ function toChange(m: any): ChangeArg | null {
 	return { op_id: opId, seq, statements };
 }
 
-// El token de licencia es también la credencial de la nube: sin él no hay WebSocket.
-async function loadLicense(): Promise<{ token: string; tenantId: string } | null> {
+// Solo necesitamos el tenantId para firmar el hello del WS. El token de sesión NO se expone al
+// frontend (vive en el keyring): el intercambio del ticket y las llamadas firmadas las hace Rust.
+async function loadLicense(): Promise<{ tenantId: string } | null> {
 	try {
 		const st = await invoke<LicenseLocalState | null>("license_get_state");
-		const token = String(st?.token ?? "");
 		const tenantId = String(st?.tenant_id ?? "");
-		if (!token || !tenantId) return null;
-		return { token, tenantId };
+		if (!tenantId) return null;
+		return { tenantId };
 	} catch {
 		return null;
 	}

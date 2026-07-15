@@ -59,15 +59,14 @@ impl SolicitudActivacion {
     }
 }
 
-/// Lo que el servidor concede al activar: identidad del tenant + token de sesión.
+/// Lo que el servidor concede al activar: identidad del tenant y estado inicial.
 ///
-/// Ese `token` no es solo la llave del gate: es la credencial con la que el dispositivo firma
-/// **todas** sus llamadas a la nube (sync, pairing, imágenes, WebSocket).
+/// El **token** de sesión concedido NO viaja aquí: el adaptador lo guarda directamente en el
+/// keyring (es una credencial, no estado). Ni el dominio ni el caso de uso lo tocan.
 #[derive(Debug, Clone)]
 pub struct Concesion {
     pub tenant_id: String,
     pub device_id: String,
-    pub token: String,
     pub status: String,
     pub expires_at: Option<String>,
     pub expires_at_ms: Option<i64>,
@@ -175,12 +174,13 @@ pub fn assertion_fresca(a: &AssertionVerificada, client_ts_enviado: i64, ahora_m
 }
 
 /// Respuesta de estado ya verificada, lista para que decida el dominio.
+///
+/// El token renovado que el servidor devuelve en cada `/status` (fin del muro de los 30 días) NO
+/// aparece aquí: el adaptador lo persiste directamente en el keyring. El dominio solo decide.
 #[derive(Debug, Clone)]
 pub struct EstadoVerificado {
     pub assertion: AssertionVerificada,
     pub server_time_ms: i64,
-    /// Token de sesión renovado por el servidor (fin del muro de los 30 días). `None` si no tocó.
-    pub token_renovado: Option<String>,
 }
 
 /// Por qué no se pudo obtener un estado verificado, clasificado por lo que implica para el gate.

@@ -133,9 +133,7 @@ fn actualizar(
     estado.plan = Some(a.plan.clone());
     estado.last_server_time_ms = Some(verificado.server_time_ms);
     estado.last_check_ok_ms = Some(ahora);
-    if let Some(token) = &verificado.token_renovado {
-        estado.token = token.clone();
-    }
+    // El token renovado ya lo persistió el adaptador en el keyring; aquí no hay token que tocar.
     estado
 }
 
@@ -167,7 +165,6 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
     LicenseLocalState {
         tenant_id: concedido.tenant_id,
         device_id: concedido.device_id,
-        token: concedido.token,
         status: Some(concedido.status),
         expires_at: concedido.expires_at,
         expires_at_ms: concedido.expires_at_ms,

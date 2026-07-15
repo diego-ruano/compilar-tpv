@@ -91,6 +91,38 @@ pub fn sign_payload_b64(sk: &SigningKey, payload: &str) -> Result<String, String
     Ok(B64.encode(sig.to_bytes()))
 }
 
+/* ===== license token (keyring) =====
+   El token de sesión de la Main es una credencial (JWT que firma TODAS las llamadas a la nube):
+   vive SOLO en el keyring del SO, nunca en `license_state.json`. Un fichero copiado no basta para
+   suplantar al dispositivo (falta también la clave privada ed25519, que igualmente está aquí). */
+
+fn key_entry_license_token() -> Result<Entry, String> {
+    Entry::new("tpv-auth", "license-token").map_err(|e| e.to_string())
+}
+
+pub fn get_license_token() -> Result<String, String> {
+    let entry = key_entry_license_token()?;
+    let token = entry
+        .get_password()
+        .map_err(|_| "license_token_missing".to_string())?;
+    let token = token.trim().to_string();
+    if token.is_empty() {
+        return Err("license_token_missing".into());
+    }
+    Ok(token)
+}
+
+pub fn set_license_token(token: &str) -> Result<(), String> {
+    key_entry_license_token()?
+        .set_password(token.trim())
+        .map_err(|e| e.to_string())
+}
+
+pub fn clear_license_token() -> Result<(), String> {
+    let _ = key_entry_license_token()?.delete_password();
+    Ok(())
+}
+
 /* ===== handy token (keyring) ===== */
 
 fn key_entry_handy_token() -> Result<Entry, String> {

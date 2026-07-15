@@ -168,7 +168,12 @@ export type LicenseDeviceChangeInput = { activation_key: string, };
 
 export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, };
 
-export type LicenseLocalState = { tenant_id: string, device_id: string, token: string, status: string | null, 
+/**
+ * Estado local NO sensible de la licencia (fichero `license_state.json`). El **token** de sesión
+ * NO está aquí: es una credencial y vive solo en el keyring del SO (ver `device::*_license_token`).
+ * Nada lee el token de este fichero.
+ */
+export type LicenseLocalState = { tenant_id: string, device_id: string, status: string | null, 
 /**
  * Caducidad en texto ISO (informativo para la UI).
  */
