@@ -58,6 +58,9 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
       expires_at_ms              INTEGER,
       customer_email             TEXT NOT NULL,
       customer_name              TEXT,
+      customer_business_name     TEXT,
+      customer_phone             TEXT,
+      customer_address_json      TEXT,
       stripe_customer_id         TEXT,
       stripe_checkout_session_id TEXT,
       stripe_payment_intent_id   TEXT,
@@ -130,6 +133,17 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
 		}
 	}
 
+	// Datos de compra de Stripe (nombre empresarial, teléfono, dirección de facturación) para la
+	// factura que el negocio emite luego a mano. Auto-añadidos a una tabla `licenses` ya existente
+	// (el CREATE TABLE IF NOT EXISTS de arriba solo sirve para BBDD nuevas).
+	for (const col of ["customer_business_name", "customer_phone", "customer_address_json"]) {
+		try {
+			await exec(db, `ALTER TABLE licenses ADD COLUMN ${col} TEXT;`);
+		} catch {
+			/* columna ya existente */
+		}
+	}
+
 	schemaReady = true;
 }
 
@@ -155,6 +169,9 @@ export type LicenseRow = {
 
 	customer_email: string;
 	customer_name: string | null;
+	customer_business_name: string | null;
+	customer_phone: string | null;
+	customer_address_json: string | null;
 
 	stripe_customer_id: string | null;
 	stripe_checkout_session_id: string | null;
@@ -259,6 +276,9 @@ export type IssueLicenseArgs = {
 	origin: LicenseOrigin;
 	customerEmail: string;
 	customerName?: string | null;
+	customerBusinessName?: string | null;
+	customerPhone?: string | null;
+	customerAddressJson?: string | null;
 	plan?: string;
 
 	stripeCustomerId?: string | null;
@@ -296,6 +316,7 @@ export async function issueLicense(
       plan, term_months, origin,
       issued_at_ms, activated_at_ms, expires_at_ms,
       customer_email, customer_name,
+      customer_business_name, customer_phone, customer_address_json,
       stripe_customer_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_price_id,
       created_at_ms, updated_at_ms
     ) VALUES (
@@ -305,6 +326,7 @@ export async function issueLicense(
       ?, ?, ?,
       ?, NULL, NULL,
       ?, ?,
+      ?, ?, ?,
       ?, ?, ?, ?,
       ?, ?
     );
@@ -320,6 +342,9 @@ export async function issueLicense(
 			now,
 			args.customerEmail,
 			args.customerName ?? null,
+			args.customerBusinessName ?? null,
+			args.customerPhone ?? null,
+			args.customerAddressJson ?? null,
 			args.stripeCustomerId ?? null,
 			args.stripeCheckoutSessionId ?? null,
 			args.stripePaymentIntentId ?? null,

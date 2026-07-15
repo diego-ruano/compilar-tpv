@@ -7,8 +7,12 @@
 import type { Env } from "../../env";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 
-/** Fijada explícitamente: así los campos de la sesión no cambian bajo nuestros pies. */
-const STRIPE_API_VERSION = "2025-07-30.basil";
+/**
+ * Fijada explícitamente: así los campos de la sesión no cambian bajo nuestros pies.
+ * `2025-09-30.clover` (o posterior) es OBLIGATORIA para leer `customer_details.business_name`:
+ * el nombre empresarial se añadió en esa versión y con `basil` el campo NO viaja en la respuesta.
+ */
+const STRIPE_API_VERSION = "2025-09-30.clover";
 
 /** Tolerancia de reloj del webhook (la que recomienda Stripe). Nunca 0: los relojes derivan. */
 const SIGNATURE_TOLERANCE_MS = 5 * 60 * 1000;
@@ -119,8 +123,46 @@ export function customerEmailFromSession(session: any): string | null {
 }
 
 export function customerNameFromSession(session: any): string | null {
-	const name = session?.customer_details?.name ?? null;
+	const d = session?.customer_details;
+	// `name` es el campo clásico; `individual_name` / `collected_information` cubren la recogida
+	// granular de nombres (name_collection, API clover), por si `name` no viniera relleno.
+	const name =
+		d?.name ?? d?.individual_name ?? session?.collected_information?.individual_name ?? null;
 	return name ? String(name).trim() : null;
+}
+
+/** Nombre empresarial (checkbox "Recopilar nombres empresariales"). Nuevo en la API clover. */
+export function customerBusinessNameFromSession(session: any): string | null {
+	const bn =
+		session?.customer_details?.business_name ??
+		session?.collected_information?.business_name ??
+		null;
+	return bn ? String(bn).trim() : null;
+}
+
+/** Teléfono (checkbox "Solicitar número de teléfono"). */
+export function customerPhoneFromSession(session: any): string | null {
+	const p = session?.customer_details?.phone ?? null;
+	return p ? String(p).trim() : null;
+}
+
+/**
+ * Dirección de facturación como JSON (checkbox "Recolecta las direcciones"). Se guarda entera
+ * para la factura que el negocio emite luego a mano; `null` si Stripe no mandó ningún campo.
+ */
+export function customerAddressJsonFromSession(session: any): string | null {
+	const a = session?.customer_details?.address ?? null;
+	if (!a) return null;
+	const addr = {
+		line1: a.line1 ?? null,
+		line2: a.line2 ?? null,
+		city: a.city ?? null,
+		state: a.state ?? null,
+		postal_code: a.postal_code ?? null,
+		country: a.country ?? null,
+	};
+	const tieneAlgo = Object.values(addr).some((v) => v != null && String(v).trim() !== "");
+	return tieneAlgo ? JSON.stringify(addr) : null;
 }
 
 /** El `customer` puede venir como id o como objeto expandido. */

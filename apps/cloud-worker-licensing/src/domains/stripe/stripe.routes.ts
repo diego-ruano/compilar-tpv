@@ -30,9 +30,12 @@ import {
 import { sendLicenseKeyEmail, sendLicenseRenewedEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import {
+	customerAddressJsonFromSession,
+	customerBusinessNameFromSession,
 	customerEmailFromSession,
 	customerIdFromSession,
 	customerNameFromSession,
+	customerPhoneFromSession,
 	paymentIntentIdFromSession,
 	priceIdFromSession,
 	retrieveCheckoutSession,
@@ -151,6 +154,9 @@ async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string
 
 	const customerId = customerIdFromSession(session);
 	const name = customerNameFromSession(session);
+	const businessName = customerBusinessNameFromSession(session);
+	const phone = customerPhoneFromSession(session);
+	const addressJson = customerAddressJsonFromSession(session);
 	const priceId = priceIdFromSession(session);
 	const paymentIntentId = paymentIntentIdFromSession(session);
 
@@ -184,6 +190,9 @@ async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string
 		origin: "stripe",
 		customerEmail: email,
 		customerName: name,
+		customerBusinessName: businessName,
+		customerPhone: phone,
+		customerAddressJson: addressJson,
 		stripeCustomerId: customerId,
 		stripeCheckoutSessionId: sessionId,
 		stripePaymentIntentId: paymentIntentId,
