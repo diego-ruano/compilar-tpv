@@ -182,37 +182,17 @@ export function deletePago(idPago: string): BuiltCommand {
 			`,
 			args: [idPago],
 		},
-		// 4) Si la mesa ya tiene otra comanda abierta, mover alli las lineas que se van a liberar.
-		//    Asi respetamos el indice de una unica comanda abierta por mesa y las lineas quedan
-		//    disponibles para cobrarse de nuevo desde la comanda activa.
+		// 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado: moverlas a
+		//    otra comanda crearia un ticket fantasma y permitiria cobrarlas una segunda vez. El
+		//    TenantHub ejecuta el batch con `defer_foreign_keys`, por lo que Pago_Detalles puede
+		//    borrarse en el paso siguiente sin dejar referencias al confirmar.
 		{
 			kind: "execute",
 			sql: `
-				UPDATE Detalle_Comanda
-				SET ID_Comanda = (
-				    SELECT abierta.ID_Comanda
-				    FROM Pagos p
-				    JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
-				    JOIN Comandas abierta
-				      ON abierta.ID_Mesa = origen.ID_Mesa
-				     AND abierta.Estado = 'Abierta'
-				     AND abierta.ID_Comanda <> origen.ID_Comanda
-				    WHERE p.ID_Pago = ?1
-				    LIMIT 1
-				)
+				DELETE FROM Detalle_Comanda
 				WHERE ID_Detalle IN (
 				    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
-				)
-				  AND EXISTS (
-				    SELECT 1
-				    FROM Pagos p
-				    JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
-				    JOIN Comandas abierta
-				      ON abierta.ID_Mesa = origen.ID_Mesa
-				     AND abierta.Estado = 'Abierta'
-				     AND abierta.ID_Comanda <> origen.ID_Comanda
-				    WHERE p.ID_Pago = ?1
-				  );
+				);
 			`,
 			args: [idPago],
 		},
@@ -222,8 +202,8 @@ export function deletePago(idPago: string): BuiltCommand {
 			sql: "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
 			args: [idPago],
 		},
-		// 6) Reabrir la comanda original solo si no existe otra abierta para la mesa. Si las lineas
-		//    se movieron, recalcular tambien el total de la comanda activa.
+		// 6) Recalcular la comanda original. Solo se reabre si conserva otras lineas pendientes y
+		//    no existe otra comanda abierta para la mesa.
 		//    Se ejecuta con `Pagos` aún presente (para resolver la comanda) pero con los
 		//    Pago_Detalles ya borrados (para que los detalles liberados cuenten como pendientes).
 		{
@@ -262,18 +242,7 @@ export function deletePago(idPago: string): BuiltCommand {
 				        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
 				        FROM Detalle_Comanda WHERE ID_Comanda = Comandas.ID_Comanda
 				    )
-				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
-				   OR ID_Comanda = (
-				      SELECT abierta.ID_Comanda
-				      FROM Pagos p
-				      JOIN Comandas origen ON origen.ID_Comanda = p.ID_Comanda
-				      JOIN Comandas abierta
-				        ON abierta.ID_Mesa = origen.ID_Mesa
-				       AND abierta.Estado = 'Abierta'
-				       AND abierta.ID_Comanda <> origen.ID_Comanda
-				      WHERE p.ID_Pago = ?1
-				      LIMIT 1
-				   );
+				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1);
 			`,
 			args: [idPago],
 		},

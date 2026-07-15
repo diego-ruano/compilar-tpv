@@ -389,7 +389,12 @@ impl CuentasRepository for SqliteCuentasRepository {
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        // Las lineas se eliminan antes que Pago_Detalles para poder identificarlas con la
+        // relacion del pago. Diferimos las FK hasta COMMIT; al final de la transaccion ya no
+        // queda ninguna referencia colgante.
+        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
+            .await
+            .map_err(db_err)?;
         let res: AppResult<bool> = async {
             // 1) Leer comanda + importe del pago ANTES de borrar nada (para la reversión).
             let (id_comanda, importe) = {
@@ -465,47 +470,22 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .map_err(db_err)?;
             }
 
-            // 4) Si la mesa ya tiene otra comanda abierta, mover a ella las lineas que este pago
-            //    va a liberar. Reabrir tambien la comanda historica violaria el indice que
-            //    garantiza una unica comanda abierta por mesa. El movimiento conserva las lineas
-            //    pendientes y permite cobrarlas de nuevo desde la comanda activa.
-            if !id_comanda.is_empty() {
-                conn.execute(
-                    r#"
-                    UPDATE Detalle_Comanda
-                    SET ID_Comanda = (
-                        SELECT abierta.ID_Comanda
-                        FROM Comandas origen
-                        JOIN Comandas abierta
-                          ON abierta.ID_Mesa = origen.ID_Mesa
-                         AND abierta.Estado = 'Abierta'
-                         AND abierta.ID_Comanda <> origen.ID_Comanda
-                        WHERE origen.ID_Comanda = ?1
-                        LIMIT 1
-                    )
-                    WHERE ID_Detalle IN (
-                        SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?2
-                    )
-                      AND EXISTS (
-                        SELECT 1
-                        FROM Comandas origen
-                        JOIN Comandas abierta
-                          ON abierta.ID_Mesa = origen.ID_Mesa
-                         AND abierta.Estado = 'Abierta'
-                         AND abierta.ID_Comanda <> origen.ID_Comanda
-                        WHERE origen.ID_Comanda = ?1
-                    );
-                    "#,
-                    vec![
-                        Value::Text(id_comanda.clone()),
-                        Value::Text(id_pago.to_string()),
-                    ],
-                )
-                .await
-                .map_err(db_err)?;
-            }
+            // 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado arriba,
+            //    por lo que conservarlas o moverlas a otra comanda crearia un ticket fantasma y
+            //    permitiria cobrarlas de nuevo.
+            conn.execute(
+                r#"
+                DELETE FROM Detalle_Comanda
+                WHERE ID_Detalle IN (
+                    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
+                );
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
 
-            // 5) Borrar el pago y sus detalles.
+            // 5) Borrar las relaciones y el pago.
             conn.execute(
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
                 vec![Value::Text(id_pago.to_string())],
@@ -520,9 +500,9 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .await
                 .map_err(db_err)?;
 
-            // 6) Reabrir la comanda original solo si no hay otra abierta para la mesa. Si las
-            //    lineas se movieron a una comanda activa, recalcular tambien el total de esa
-            //    comanda. De este modo nunca se crean dos comandas abiertas para la misma mesa.
+            // 6) Recalcular la comanda original. Solo se reabre si ya contenia otras lineas
+            //    pendientes y no existe otra comanda abierta para la mesa. Las lineas anuladas
+            //    nunca se trasladan a otro ticket.
             if !id_comanda.is_empty() {
                 conn.execute(
                     r#"
@@ -562,17 +542,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                             FROM Detalle_Comanda
                             WHERE ID_Comanda = Comandas.ID_Comanda
                         )
-                    WHERE ID_Comanda = ?1
-                       OR ID_Comanda = (
-                            SELECT abierta.ID_Comanda
-                            FROM Comandas origen
-                            JOIN Comandas abierta
-                              ON abierta.ID_Mesa = origen.ID_Mesa
-                             AND abierta.Estado = 'Abierta'
-                             AND abierta.ID_Comanda <> origen.ID_Comanda
-                            WHERE origen.ID_Comanda = ?1
-                            LIMIT 1
-                       );
+                    WHERE ID_Comanda = ?1;
                     "#,
                     vec![Value::Text(id_comanda.clone())],
                 )
