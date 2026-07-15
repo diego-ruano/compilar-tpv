@@ -8,7 +8,12 @@ use rand::RngCore;
 use sha2::Sha256;
 
 const PBKDF2_PREFIX: &str = "$pbkdf2-sha256$";
-const PBKDF2_ITERS: u32 = 600_000;
+// Tope IMPUESTO por Cloudflare Workers: su `crypto.subtle` PBKDF2 no admite más de 100.000
+// iteraciones (límite del runtime, NO del plan). Como los hashes de PIN viajan por la sync y el
+// worker los VERIFICA en el login de Handy (que no tiene BD local), el número tiene que ser uno
+// que ambos runtimes acepten → 100k es el techo común. Espejo de `DEFAULT_ITERS` en el worker
+// (login.crypto.ts). Para PINs numéricos la protección real es el rate-limit, no las iteraciones.
+const PBKDF2_ITERS: u32 = 100_000;
 const SALT_LEN: usize = 16;
 const DK_LEN: usize = 32;
 
@@ -146,11 +151,10 @@ pub fn hash_pin(pin: &str) -> Result<String, String> {
     ))
 }
 
-/// Iteraciones objetivo para los hashes **nuevos**. Subir este valor (y su espejo `DEFAULT_ITERS`
-/// del worker) endurece el hashing; los hashes viejos migran solos por **rehash-en-login** (ver
-/// `hash_needs_upgrade`). = 600k (recomendación OWASP para PBKDF2-HMAC-SHA256, LOGIN-04). El coste
-/// de CPU en el worker (login/fichaje de Handy) es de decenas de ms, muy por debajo del tope del
-/// plan de pago de Cloudflare. Ver `docs/analisis/BACKLOG.md`.
+/// Iteraciones objetivo para los hashes **nuevos**. Fijado en 100k porque es el máximo que admite
+/// el `crypto.subtle` PBKDF2 de Cloudflare Workers, que es quien verifica los PIN en el login de
+/// Handy (online). Subirlo rompería ese login y la creación del admin del tenant. Los hashes con
+/// menos iteraciones migran solos por **rehash-en-login** (ver `hash_needs_upgrade`).
 pub const fn target_pbkdf2_iters() -> u32 {
     PBKDF2_ITERS
 }

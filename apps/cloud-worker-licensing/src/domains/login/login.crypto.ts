@@ -3,12 +3,11 @@
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 
 const PREFIX = "$pbkdf2-sha256$";
-// LOGIN-04: iteraciones para hashes NUEVOS. Espejo de `PBKDF2_ITERS` en crates/tpv-domain/src/login.rs.
-// 600k = recomendación OWASP para PBKDF2-HMAC-SHA256. Coste de CPU en el worker (login/fichaje de
-// Handy) de decenas de ms, muy por debajo del tope del plan de pago. `verify` usa las iteraciones de
-// cada hash, así que verificar hashes viejos (100k) sigue funcionando; la Main los rehashea a 600k en
-// el primer login de cada usuario. Ver docs/analisis/BACKLOG.md.
-const DEFAULT_ITERS = 600000;
+// Iteraciones para hashes NUEVOS. Espejo de `PBKDF2_ITERS` en crates/tpv-domain/src/login.rs.
+// TOPE de Cloudflare Workers: `crypto.subtle` PBKDF2 no admite más de 100.000 iteraciones (límite
+// del runtime, NO del plan). Como este mismo módulo también VERIFICA (`verify` usa las iteraciones
+// de cada hash), un hash con >100k tampoco se podría comprobar aquí. 100k es el máximo posible.
+const DEFAULT_ITERS = 100000;
 const SALT_LEN = 16;
 const DK_LEN = 32;
 

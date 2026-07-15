@@ -297,7 +297,10 @@ export async function verifyDeviceProof(
 // ---------------- Bootstrap del admin inicial del tenant ----------------
 
 const PBKDF2_PREFIX = "$pbkdf2-sha256$";
-const PBKDF2_ITERS = 600_000;
+// Máximo que admite el PBKDF2 de Cloudflare Workers (100k, límite del runtime). Debe coincidir con
+// `DEFAULT_ITERS` (login.crypto.ts) y `PBKDF2_ITERS` (crates/tpv-domain/src/login.rs): el admin que
+// se siembra aquí se verifica luego con esos verificadores.
+const PBKDF2_ITERS = 100_000;
 const PBKDF2_SALT_LEN = 16;
 const PBKDF2_DK_LEN = 32;
 

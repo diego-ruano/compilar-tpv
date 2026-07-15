@@ -88,11 +88,16 @@ principal:** el **espacio de claves** (PIN de 4 dígitos) combinado con la ausen
   confianza.
 
 ### LOGIN-04 🟡 Parámetros de hashing
-- **Ubicación:** `PBKDF2_ITERS = 100_000` (`domain/login.rs:11`); `parse_pbkdf2_phc` **rechaza**
-  argon2 (`:61`).
-- **Fallo:** 100k está por debajo de la recomendación OWASP actual para PBKDF2-SHA256 (~600k), y se
-  descarta un algoritmo más robusto (Argon2id) por diseño.
-- **Arreglo:** subir iteraciones y/o migrar a Argon2id con rehash progresivo en el login.
+- **Ubicación:** `PBKDF2_ITERS = 100_000` (`domain/login.rs:11`), espejado en el worker
+  (`login.crypto.ts` y `licensing.helpers.ts`); `parse_pbkdf2_phc` **rechaza** argon2 (`:61`).
+- **Fallo:** 100k está por debajo de la recomendación OWASP actual (~600k). **Pero no se puede
+  subir:** el `crypto.subtle` PBKDF2 de Cloudflare Workers tiene un tope duro de 100.000 iteraciones
+  (límite del runtime, no del plan), y el worker es quien verifica el PIN en el login de Handy
+  online. Un intento previo de subirlo a 600k rompió la activación (creación del admin del tenant) y
+  habría roto el login de Handy. Para PINs numéricos la protección real es el lockout (LOGIN-01), no
+  las iteraciones.
+- **Arreglo:** si se quisiera endurecer de verdad, migrar a un KDF más fuerte disponible en Workers
+  (Argon2/scrypt vía WASM); subir las iteraciones de PBKDF2 no es una opción en este runtime.
 
 ### LOGIN-05 🔵 Doble implementación crítica
 - Login/verify existe en Rust y worker. Una divergencia en la verificación sería grave. **Arreglo:**
