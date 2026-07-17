@@ -869,18 +869,18 @@ Desde `apps/cloud-worker-licensing/`:
 
 ```bash
 # 1. Par de firma de licencia (genera el par primero: pnpm license:keypair)
-npx wrangler secret put LICENSE_SIGNING_PRIVATE_KEY   # ← la PRIVADA que imprime el script
+pnpm exec wrangler secret put LICENSE_SIGNING_PRIVATE_KEY   # ← la PRIVADA que imprime el script
 
 # 2. Token del CLI de administración (≥ 256 bits)
 #    Generar: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-npx wrangler secret put ADMIN_API_TOKEN
+pnpm exec wrangler secret put ADMIN_API_TOKEN
 
 # 3. Stripe (empieza en modo TEST)
-npx wrangler secret put STRIPE_SECRET_KEY             # sk_test_… / sk_live_…
-npx wrangler secret put STRIPE_WEBHOOK_SECRET         # whsec_…
+pnpm exec wrangler secret put STRIPE_SECRET_KEY             # sk_test_… / sk_live_…
+pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET         # whsec_…
 
 # 4. Fuera el de Lemon
-npx wrangler secret delete LEMON_WEBHOOK_SECRET
+pnpm exec wrangler secret delete LEMON_WEBHOOK_SECRET
 ```
 
 Ya existentes y que **siguen igual**: `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `TURSO_*`,

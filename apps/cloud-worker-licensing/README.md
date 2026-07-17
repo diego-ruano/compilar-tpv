@@ -28,15 +28,18 @@ A live public deployment of this template is available at [https://durable-chat-
 
 ## Setup Steps
 
-1. Install the project dependencies with a package manager of your choice:
+> El gestor de paquetes de este monorepo es **pnpm**, siempre. Nada de `npm` ni `npx` (ver §8 de
+> [CLAUDE.md](../../CLAUDE.md)).
+
+1. Instala las dependencias (desde la raíz del monorepo):
    ```bash
-   npm install
+   pnpm install
    ```
-2. Deploy the project!
+2. Despliega:
    ```bash
-   npx wrangler deploy
+   pnpm exec wrangler deploy
    ```
-3. Monitor your worker
+3. Observa los logs del worker en vivo:
    ```bash
-   npx wrangler tail
+   pnpm exec wrangler tail
    ```

@@ -228,6 +228,20 @@ y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates
 
 ## 8. Convenciones
 
+- **PROHIBIDO `npm` y `npx` en este repo — el gestor es `pnpm`, siempre y para todo.** Aplica a
+  cualquiera que trabaje aquí, **incluido Claude**: ni en comandos, ni en scripts, ni en la
+  documentación. Equivalencias:
+
+  | ❌ Nunca | ✅ Siempre |
+  |---|---|
+  | `npm install` / `npm i` | `pnpm install` |
+  | `npm install <pkg>` | `pnpm add <pkg>` (`-D` para dev, `-w` para la raíz) |
+  | `npx <bin>` | `pnpm exec <bin>` (p. ej. `pnpm exec wrangler deploy`) |
+  | `npm run <script>` | `pnpm <script>` / `pnpm --filter <paquete> <script>` |
+
+  Mezclar npm rompe el workspace: genera un `package-lock.json` paralelo al `pnpm-lock.yaml`, aplana
+  `node_modules` (se pierde el aislamiento estricto de pnpm) y reaparecen los problemas de rutas
+  largas en Windows que motivaron la purga de `node_modules` (§6).
 - **PROHIBIDO el trailer `Co-Authored-By` (y cualquier atribución a Claude/Anthropic) en los mensajes
   de commit y en las descripciones de PR.** Ningún commit puede llevar la línea `Co-Authored-By:`. La
   prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
