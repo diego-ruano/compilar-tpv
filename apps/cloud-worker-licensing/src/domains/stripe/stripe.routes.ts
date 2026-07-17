@@ -24,6 +24,7 @@ import {
 	getLicenseByStripeSession,
 	getRenewableLicenseByStripeCustomer,
 	issueLicense,
+	markKeyEmailSent,
 	markWebhookProcessed,
 	upsertWebhookEvent,
 } from "../../server/licenseStore";
@@ -199,10 +200,15 @@ async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string
 		stripePriceId: priceId,
 	});
 
-	await sendLicenseKeyEmail(env, {
+	const emailSent = await sendLicenseKeyEmail(env, {
 		to: license.customer_email,
 		name: license.customer_name,
 		key: keyPlain,
 		termMonths,
 	});
+
+	// Si el correo falla NO reventamos el webhook (la venta es lo importante y la clave sigue
+	// recuperable cifrada): dejamos `key_email_sent_at_ms` a NULL para que la licencia salga en
+	// `pnpm license:list` como pendiente y se reenvíe con `pnpm license:resend`.
+	if (emailSent) await markKeyEmailSent(db, license.license_id);
 }

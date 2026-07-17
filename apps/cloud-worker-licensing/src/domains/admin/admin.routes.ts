@@ -19,12 +19,14 @@ import type { Env } from "../../env";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { ensureLicensingSchemaMw } from "../../middleware/ensureSchema";
 import { getDb } from "../../server/db";
+import { aesGcmDecrypt } from "../../server/crypto";
 import {
 	auditAdmin,
 	extendLicense,
 	getLicenseById,
 	issueLicense,
 	listLicenses,
+	markKeyEmailSent,
 	revokeLicense,
 } from "../../server/licenseStore";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
@@ -98,6 +100,46 @@ adminRoutes.post("/licenses", async (c) => {
 	});
 });
 
+/**
+ * Recupera y reenvía la clave de una licencia. Es la red de seguridad del "pagó y no le llegó el
+ * correo": la clave en claro solo existe cifrada (`license_key_enc`), así que aquí se descifra, se
+ * reenvía al `customer_email` y **se devuelve también en la respuesta** para que el admin tenga
+ * siempre una salida manual aunque el email vuelva a fallar.
+ */
+adminRoutes.post("/licenses/:id/resend-key", async (c) => {
+	const env = c.env;
+	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
+	if (miss) return c.json({ ok: false, error: miss }, 500);
+
+	const db = getDb(env);
+	const licenseId = c.req.param("id");
+
+	const lic = await getLicenseById(db, licenseId);
+	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
+	if (!lic.license_key_enc) return c.json({ ok: false, error: "key_unavailable" }, 409);
+
+	const keyPlain = await aesGcmDecrypt(env.LICENSE_STORE_KEY, lic.license_key_enc);
+
+	const emailSent = await sendLicenseKeyEmail(env, {
+		to: lic.customer_email,
+		name: lic.customer_name,
+		key: keyPlain,
+		termMonths: lic.term_months,
+	});
+	if (emailSent) await markKeyEmailSent(db, licenseId);
+
+	await auditAdmin(db, "resend", licenseId, { email: lic.customer_email, emailSent });
+
+	return c.json({
+		ok: true,
+		licenseId,
+		key: keyPlain,
+		keyShort: lic.key_short,
+		email: lic.customer_email,
+		emailSent,
+	});
+});
+
 adminRoutes.get("/licenses", async (c) => {
 	const db = getDb(c.env);
 
@@ -125,6 +167,7 @@ adminRoutes.get("/licenses", async (c) => {
 			issuedAt: new Date(l.issued_at_ms).toISOString(),
 			activatedAt: l.activated_at_ms ? new Date(l.activated_at_ms).toISOString() : null,
 			expiresAt: l.expires_at_ms ? new Date(l.expires_at_ms).toISOString() : null,
+			keyEmailSentAt: l.key_email_sent_at_ms ? new Date(l.key_email_sent_at_ms).toISOString() : null,
 		})),
 	});
 });

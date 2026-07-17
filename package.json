@@ -15,6 +15,7 @@
     "license:list": "node scripts/tpv-license.mjs list",
     "license:revoke": "node scripts/tpv-license.mjs revoke",
     "license:extend": "node scripts/tpv-license.mjs extend",
+    "license:resend": "node scripts/tpv-license.mjs resend",
     "license:keypair": "node scripts/generate-license-keypair.mjs"
   },
   "devDependencies": {

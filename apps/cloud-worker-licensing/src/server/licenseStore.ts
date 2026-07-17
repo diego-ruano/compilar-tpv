@@ -61,6 +61,7 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
       customer_business_name     TEXT,
       customer_phone             TEXT,
       customer_address_json      TEXT,
+      key_email_sent_at_ms       INTEGER,
       stripe_customer_id         TEXT,
       stripe_checkout_session_id TEXT,
       stripe_payment_intent_id   TEXT,
@@ -144,6 +145,14 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
 		}
 	}
 
+	// Entrega del correo con la clave: `key_email_sent_at_ms IS NULL` ⇒ ese cliente pagó y NO ha
+	// recibido su clave (fallo de email). INTEGER, aparte del bucle de arriba que crea columnas TEXT.
+	try {
+		await exec(db, `ALTER TABLE licenses ADD COLUMN key_email_sent_at_ms INTEGER;`);
+	} catch {
+		/* columna ya existente */
+	}
+
 	schemaReady = true;
 }
 
@@ -172,6 +181,7 @@ export type LicenseRow = {
 	customer_business_name: string | null;
 	customer_phone: string | null;
 	customer_address_json: string | null;
+	key_email_sent_at_ms: number | null;
 
 	stripe_customer_id: string | null;
 	stripe_checkout_session_id: string | null;
@@ -488,6 +498,20 @@ export async function revokeLicense(db: Client, licenseId: string): Promise<void
 	);
 }
 
+/**
+ * Marca que el correo con la clave se entregó. Se llama SOLO si el envío devolvió `true`; si falla,
+ * la columna queda NULL y ese cliente aparece como "pagó y no tiene su clave" (reenviable con
+ * `pnpm license:resend`).
+ */
+export async function markKeyEmailSent(db: Client, licenseId: string): Promise<void> {
+	const now = Date.now();
+	await exec(
+		db,
+		`UPDATE licenses SET key_email_sent_at_ms=?, updated_at_ms=? WHERE license_id=?;`,
+		[now, now, licenseId],
+	);
+}
+
 /** Persiste los datos del negocio que llegan en la activación (corrige el bug #5). */
 export async function upsertTenantInfo(
 	db: Client,
@@ -765,7 +789,7 @@ export async function markWebhookProcessed(
 
 export async function auditAdmin(
 	db: Client,
-	action: "issue" | "revoke" | "extend",
+	action: "issue" | "revoke" | "extend" | "resend",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

@@ -6,6 +6,7 @@
 //   pnpm license:list   -- [--limit 50]
 //   pnpm license:revoke -- --id <licenseId>
 //   pnpm license:extend -- --id <licenseId> --months 12
+//   pnpm license:resend -- --id <licenseId>          (reenvía/recupera la clave por email)
 //
 // El token NO se versiona. Se lee, por este orden:
 //   1. La variable de entorno ADMIN_API_TOKEN (si está puesta).
@@ -144,10 +145,28 @@ async function list(args) {
 			meses: l.termMonths,
 			origen: l.origin,
 			cliente: l.customerEmail,
+			correo: l.keyEmailSentAt ? "enviado" : "PENDIENTE",
 			caduca: l.expiresAt ? l.expiresAt.slice(0, 10) : "— (sin activar)",
 			licenseId: l.licenseId,
 		})),
 	);
+}
+
+async function resend(args) {
+	const id = String(args.id || "").trim();
+	if (!id) fail("--id <licenseId> requerido (sácalo de `pnpm license:list`)");
+
+	const res = await api("POST", `/v1/admin/licenses/${id}/resend-key`);
+
+	console.log(`
+  ✔ Clave recuperada${res.emailSent ? " y reenviada" : ""}
+
+    Clave        ${res.key}
+    Cliente      ${res.email}
+    Email        ${res.emailSent ? "enviado ✔" : "FALLÓ el envío ✖ (la clave está arriba: pásasela tú)"}
+
+  Dásela al cliente. Sigue guardada cifrada en la base de datos.
+`);
 }
 
 async function revoke(args) {
@@ -180,7 +199,7 @@ if (!TOKEN) {
 	);
 }
 
-const comandos = { issue, list, revoke, extend };
+const comandos = { issue, list, revoke, extend, resend };
 
 if (!comandos[cmd]) {
 	console.error(`
@@ -190,6 +209,7 @@ if (!comandos[cmd]) {
     list    [--limit 50]
     revoke  --id <licenseId>
     extend  --id <licenseId> --months 1|3|12
+    resend  --id <licenseId>
 `);
 	process.exit(1);
 }
