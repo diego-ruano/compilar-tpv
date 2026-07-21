@@ -182,13 +182,28 @@ export function deletePago(idPago: string): BuiltCommand {
 			`,
 			args: [idPago],
 		},
-		// 4) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
+		// 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado: moverlas a
+		//    otra comanda crearia un ticket fantasma y permitiria cobrarlas una segunda vez. El
+		//    TenantHub ejecuta el batch con `defer_foreign_keys`, por lo que Pago_Detalles puede
+		//    borrarse en el paso siguiente sin dejar referencias al confirmar.
+		{
+			kind: "execute",
+			sql: `
+				DELETE FROM Detalle_Comanda
+				WHERE ID_Detalle IN (
+				    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
+				);
+			`,
+			args: [idPago],
+		},
+		// 5) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
 			args: [idPago],
 		},
-		// 5) Reabrir la comanda si tras liberar sus detalles quedan líneas pendientes de pago.
+		// 6) Recalcular la comanda original. Solo se reabre si conserva otras lineas pendientes y
+		//    no existe otra comanda abierta para la mesa.
 		//    Se ejecuta con `Pagos` aún presente (para resolver la comanda) pero con los
 		//    Pago_Detalles ya borrados (para que los detalles liberados cuenten como pendientes).
 		{
@@ -196,17 +211,33 @@ export function deletePago(idPago: string): BuiltCommand {
 			sql: `
 				UPDATE Comandas
 				SET Estado = CASE
-				      WHEN EXISTS (
+				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
+				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
 				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
-				      ) THEN 'Abierta' ELSE Estado END,
+				      )
+				       AND NOT EXISTS (
+				        SELECT 1 FROM Comandas abierta
+				        WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+				          AND abierta.Estado = 'Abierta'
+				          AND abierta.ID_Comanda <> Comandas.ID_Comanda
+				      )
+				      THEN 'Abierta' ELSE Estado END,
 				    Fecha_Hora_Cierre = CASE
-				      WHEN EXISTS (
+				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
+				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
 				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
-				      ) THEN NULL ELSE Fecha_Hora_Cierre END,
+				      )
+				       AND NOT EXISTS (
+				        SELECT 1 FROM Comandas abierta
+				        WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+				          AND abierta.Estado = 'Abierta'
+				          AND abierta.ID_Comanda <> Comandas.ID_Comanda
+				      )
+				      THEN NULL ELSE Fecha_Hora_Cierre END,
 				    Total_Comanda = (
 				        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
 				        FROM Detalle_Comanda WHERE ID_Comanda = Comandas.ID_Comanda
@@ -215,7 +246,7 @@ export function deletePago(idPago: string): BuiltCommand {
 			`,
 			args: [idPago],
 		},
-		// 6) Borrar el pago.
+		// 7) Borrar el pago.
 		{
 			kind: "execute",
 			sql: "DELETE FROM Pagos WHERE ID_Pago = ?1;",

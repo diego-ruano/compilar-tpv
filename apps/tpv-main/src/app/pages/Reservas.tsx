@@ -863,7 +863,7 @@ export default function Reservas() {
                             HORA
                           </div>
                           <div className="text-lg font-extrabold tracking-wide">{r.hora}</div>
-                          <div className="mt-1 rounded-md bg-surface-2 px-2 py-0.5 text-[10px] font-extrabold tracking-widest">
+                          <div className="mt-1 rounded-md border border-white/30 bg-white/15 px-2 py-0.5 text-[10px] font-extrabold tracking-widest text-white">
                             {turnoLabel(r.turno)}
                           </div>
                         </div>

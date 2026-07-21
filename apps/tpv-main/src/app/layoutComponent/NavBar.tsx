@@ -34,7 +34,7 @@ type MenuItem = { pagina: string; nombre?: string; icon: LucideIcon };
 const ITEMS = {
   ventaRapida: { pagina: "VentaRapida", nombre: "Venta Rápida", icon: Zap },
   mesas: { pagina: "Mesas", icon: LayoutGrid },
-  comandas: { pagina: "Mesas", nombre: "Comandas", icon: LayoutGrid },
+  comandas: { pagina: "Comandas", nombre: "Comandas", icon: LayoutGrid },
   inventario: { pagina: "Inventario", icon: Package },
   reservas: { pagina: "Reservas", icon: CalendarDays },
   trabajadores: { pagina: "Trabajadores", icon: Users },

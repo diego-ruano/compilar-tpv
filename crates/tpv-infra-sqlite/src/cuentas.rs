@@ -389,7 +389,12 @@ impl CuentasRepository for SqliteCuentasRepository {
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        // Las lineas se eliminan antes que Pago_Detalles para poder identificarlas con la
+        // relacion del pago. Diferimos las FK hasta COMMIT; al final de la transaccion ya no
+        // queda ninguna referencia colgante.
+        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
+            .await
+            .map_err(db_err)?;
         let res: AppResult<bool> = async {
             // 1) Leer comanda + importe del pago ANTES de borrar nada (para la reversión).
             let (id_comanda, importe) = {
@@ -465,7 +470,22 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .map_err(db_err)?;
             }
 
-            // 4) Borrar el pago y sus detalles.
+            // 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado arriba,
+            //    por lo que conservarlas o moverlas a otra comanda crearia un ticket fantasma y
+            //    permitiria cobrarlas de nuevo.
+            conn.execute(
+                r#"
+                DELETE FROM Detalle_Comanda
+                WHERE ID_Detalle IN (
+                    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
+                );
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+            // 5) Borrar las relaciones y el pago.
             conn.execute(
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
                 vec![Value::Text(id_pago.to_string())],
@@ -480,26 +500,47 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .await
                 .map_err(db_err)?;
 
-            // 5) Reabrir la comanda si al liberar sus detalles quedan líneas pendientes de pago.
+            // 6) Recalcular la comanda original. Solo se reabre si ya contenia otras lineas
+            //    pendientes y no existe otra comanda abierta para la mesa. Las lineas anuladas
+            //    nunca se trasladan a otro ticket.
             if !id_comanda.is_empty() {
                 conn.execute(
                     r#"
                     UPDATE Comandas
                     SET Estado = CASE
-                          WHEN EXISTS (
+                          WHEN ID_Comanda = ?1
+                           AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
-                          ) THEN 'Abierta' ELSE Estado END,
+                            WHERE dc.ID_Comanda = Comandas.ID_Comanda
+                              AND pd.ID_Detalle IS NULL
+                          )
+                           AND NOT EXISTS (
+                            SELECT 1 FROM Comandas abierta
+                            WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+                              AND abierta.Estado = 'Abierta'
+                              AND abierta.ID_Comanda <> Comandas.ID_Comanda
+                          )
+                          THEN 'Abierta' ELSE Estado END,
                         Fecha_Hora_Cierre = CASE
-                          WHEN EXISTS (
+                          WHEN ID_Comanda = ?1
+                           AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
                             LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-                            WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
-                          ) THEN NULL ELSE Fecha_Hora_Cierre END,
+                            WHERE dc.ID_Comanda = Comandas.ID_Comanda
+                              AND pd.ID_Detalle IS NULL
+                          )
+                           AND NOT EXISTS (
+                            SELECT 1 FROM Comandas abierta
+                            WHERE abierta.ID_Mesa = Comandas.ID_Mesa
+                              AND abierta.Estado = 'Abierta'
+                              AND abierta.ID_Comanda <> Comandas.ID_Comanda
+                          )
+                          THEN NULL ELSE Fecha_Hora_Cierre END,
                         Total_Comanda = (
                             SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
-                            FROM Detalle_Comanda WHERE ID_Comanda = ?1
+                            FROM Detalle_Comanda
+                            WHERE ID_Comanda = Comandas.ID_Comanda
                         )
                     WHERE ID_Comanda = ?1;
                     "#,
