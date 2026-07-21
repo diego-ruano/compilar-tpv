@@ -13,3 +13,8 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Runtime async para los #[tokio::test] de los casos de uso. Solo se compila al testear;
+# no entra en el binario de producción.
+tokio = { workspace = true }
