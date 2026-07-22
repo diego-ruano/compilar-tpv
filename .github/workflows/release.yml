@@ -85,6 +85,9 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # DSN público de Sentry (proyecto tpv-desktop) embebido en el build vía option_env!.
+          # Si el secreto no existe, GitHub lo pasa vacío y Sentry queda en no-op.
+          TPV_SENTRY_DSN: ${{ secrets.TPV_SENTRY_DSN }}
         run: pnpm --filter @tpv/main tauri build
 
       - name: Localizar artefactos + versión
