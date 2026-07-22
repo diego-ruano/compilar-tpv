@@ -14,11 +14,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Migraciones + ANTI-DRIFT: el esquema que producen las migraciones sobre una BD vacía debe
-  # coincidir con packages/database/schema.snapshot.sql. Si alguien cambia una migración sin
-  # regenerar el snapshot (o introduce una desviación silenciosa), este job falla.
+  # Tests de Rust: dominio (validaciones puras), casos de uso (con repos falsos) y persistencia.
+  # El de persistencia incluye además el ANTI-DRIFT: el esquema que producen las migraciones sobre
+  # una BD vacía debe coincidir con packages/database/schema.snapshot.sql. Si alguien cambia una
+  # migración sin regenerar el snapshot (o introduce una desviación silenciosa), este job falla.
+  #
+  # Se listan las crates una a una en vez de usar --workspace: el workspace incluye
+  # apps/tpv-main/src-tauri, que necesita las librerías de sistema de Tauri (GTK/webkit2gtk) y no
+  # compila en un runner Ubuntu pelado.
   migrations-rust:
-    name: Migraciones + anti-drift (Rust)
+    name: Tests Rust + anti-drift de migraciones
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,8 +31,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.91.1
       - uses: Swatinem/rust-cache@v2
 
-      - name: Tests del crate de persistencia (smoke + snapshot anti-drift + lint anti-tx)
-        run: cargo test -p tpv-infra-sqlite
+      - name: Tests de dominio, casos de uso y persistencia
+        run: cargo test -p tpv-domain -p tpv-application -p tpv-infra-sqlite
 
   # Frontend: typecheck (usa bindings.ts ya commiteado, sin recompilar Rust).
   frontend:
