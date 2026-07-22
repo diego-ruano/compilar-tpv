@@ -42,7 +42,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFCNjRFQjI1NEUyNUJCRTAKUldUZ3V5Vk9KZXRrR3hSakxnbDhld2xqcTkrRFk1UVBWNXUwZFBqeEsyUGh0MVg3dEVlTk1MUGgK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVCM0JBRTNGQjdDOUUxRDEKUldUUjRjbTNQNjQ3VzZLUXc0eWd5RmhZYlFpQXRWYjRvdmEwT29QcDBBYjRTQjZ1RWw1U01vb1YK",
       "endpoints": [
         "https://tpv-api.altarialights.workers.dev/v1/update/{{target}}/{{arch}}/{{current_version}}"
       ],
