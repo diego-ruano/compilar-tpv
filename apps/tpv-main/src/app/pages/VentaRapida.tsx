@@ -7,6 +7,7 @@ import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import { useToast } from "../../shared/toast";
 import { SearchInput } from "../../shared/ui";
+import { captureException } from "../../shared/observability/sentry";
 
 import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
 import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
@@ -862,6 +863,9 @@ export default function VentaRapida() {
       applyLineasToTicketPanel(boot.lineas);
     } catch (e) {
       console.error("Fallo bootstrap venta rápida, usando flujo anterior:", e);
+      // Se captura como excepción en Sentry (no sólo breadcrumb) para que aparezca como issue
+      // con traza, aunque el flujo se recupere con el camino anterior.
+      captureException(e, { flujo: "vrBootstrap" });
 
       await cargarCategorias();
 
