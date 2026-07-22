@@ -9,8 +9,8 @@ use tpv_contracts::licensing::{
     LicenseLocalState,
 };
 use tpv_domain::licensing::{
-    self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion, ResultadoActivacion,
-    SolicitudActivacion, Veredicto,
+    self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion,
+    ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
 
 use crate::error::{AppError, AppResult};
@@ -64,11 +64,13 @@ pub async fn activate(
                 email_hint: None,
             })
         }
-        ResultadoActivacion::CambioDispositivoRequerido { email_hint } => Ok(LicenseActivateOutcome {
-            outcome: "device_change_required".to_string(),
-            state: None,
-            email_hint: Some(email_hint),
-        }),
+        ResultadoActivacion::CambioDispositivoRequerido { email_hint } => {
+            Ok(LicenseActivateOutcome {
+                outcome: "device_change_required".to_string(),
+                state: None,
+                email_hint: Some(email_hint),
+            })
+        }
     }
 }
 
@@ -108,7 +110,11 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
     estado.last_check_attempt_ms = Some(ahora);
 
     match svc.consultar_estado(&estado).await {
-        Ok(verificado) => aplicar(svc, actualizar(estado, &verificado, ahora), dom::evaluar_estado(verificado.assertion.estado)),
+        Ok(verificado) => aplicar(
+            svc,
+            actualizar(estado, &verificado, ahora),
+            dom::evaluar_estado(verificado.assertion.estado),
+        ),
 
         Err(fallo) => {
             let base = dom::base_gracia(estado.last_check_ok_ms, estado.activated_at_ms);
@@ -173,5 +179,43 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
         last_check_ok_ms: None,
         last_check_attempt_ms: None,
         activated_at_ms: now_ms(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clean_recorta_y_descarta_cadenas_vacias() {
+        assert_eq!(clean(Some("  otp  ".into())), Some("otp".into()));
+        assert_eq!(clean(Some("   ".into())), None);
+        assert_eq!(clean(None), None);
+    }
+
+    #[test]
+    fn reloj_en_milisegundos_es_positivo() {
+        assert!(now_ms() > 0);
+    }
+
+    #[test]
+    fn estado_inicial_copia_la_concesion_y_arranca_sin_checks() {
+        let estado = estado_inicial(Concesion {
+            tenant_id: "tenant-1".into(), device_id: "device-1".into(),
+            status: "active".into(), expires_at: Some("2027-01-01".into()),
+            expires_at_ms: Some(1_798_761_600_000), plan: Some("pro".into()),
+        });
+        assert_eq!(estado.tenant_id, "tenant-1");
+        assert_eq!(estado.device_id, "device-1");
+        assert_eq!(estado.status.as_deref(), Some("active"));
+        assert_eq!(estado.plan.as_deref(), Some("pro"));
+        assert!(estado.last_check_ok_ms.is_none());
+        assert!(estado.last_check_attempt_ms.is_none());
+        assert!(estado.activated_at_ms > 0);
+    }
+
+    #[test]
+    fn clean_no_altera_texto_interior() {
+        assert_eq!(clean(Some("  codigo con espacios  ".into())), Some("codigo con espacios".into()));
     }
 }

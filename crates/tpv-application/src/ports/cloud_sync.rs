@@ -15,10 +15,6 @@ use crate::error::AppResult;
 pub trait CloudSyncService: Send + Sync {
     /// Sube a la nube el setup inicial del admin (email + PIN ya validados en local), para que
     /// el login de la Handy funcione contra datos reales y no contra el seed.
-    async fn upload_initial_setup(
-        &self,
-        id_usuario: &str,
-        email: &str,
-        pin: &str,
-    ) -> AppResult<()>;
+    async fn upload_initial_setup(&self, id_usuario: &str, email: &str, pin: &str)
+        -> AppResult<()>;
 }

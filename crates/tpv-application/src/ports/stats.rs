@@ -35,8 +35,5 @@ pub trait StatsRepository: Send + Sync {
     async fn clientes(&self, args: ClientesStatsArgs) -> AppResult<ClientesStatsResponse>;
 
     /// Resumen de gasto en proveedores.
-    async fn proveedores(
-        &self,
-        args: ProveedoresStatsArgs,
-    ) -> AppResult<ProveedoresStatsResponse>;
+    async fn proveedores(&self, args: ProveedoresStatsArgs) -> AppResult<ProveedoresStatsResponse>;
 }

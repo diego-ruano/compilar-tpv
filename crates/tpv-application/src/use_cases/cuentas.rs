@@ -53,7 +53,10 @@ fn proveedor_para(tipo_gasto: &str, proveedor_id: Option<String>) -> Option<Stri
     }
 }
 
-pub async fn create_gasto(repo: &dyn CuentasRepository, input: CreateGastoInput) -> AppResult<bool> {
+pub async fn create_gasto(
+    repo: &dyn CuentasRepository,
+    input: CreateGastoInput,
+) -> AppResult<bool> {
     let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
     let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
     let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
@@ -77,7 +80,10 @@ pub async fn create_gasto(repo: &dyn CuentasRepository, input: CreateGastoInput)
     repo.crear_gasto(id, gasto).await
 }
 
-pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput) -> AppResult<bool> {
+pub async fn update_gasto(
+    repo: &dyn CuentasRepository,
+    input: UpdateGastoInput,
+) -> AppResult<bool> {
     let fecha = requerido(&input.fecha, "fecha").map_err(AppError::validation)?;
     let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
     let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
@@ -97,7 +103,10 @@ pub async fn update_gasto(repo: &dyn CuentasRepository, input: UpdateGastoInput)
     repo.actualizar_gasto(&input.id_gasto, gasto).await
 }
 
-pub async fn delete_gasto(repo: &dyn CuentasRepository, input: DeleteGastoInput) -> AppResult<bool> {
+pub async fn delete_gasto(
+    repo: &dyn CuentasRepository,
+    input: DeleteGastoInput,
+) -> AppResult<bool> {
     if input.id_gasto.trim().is_empty() {
         return Ok(false);
     }
@@ -127,4 +136,49 @@ pub async fn delete_pago(repo: &dyn CuentasRepository, input: DeletePagoInput) -
         return Ok(false);
     }
     repo.eliminar_pago(&input.id_pago).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proveedor_solo_se_conserva_en_gastos_de_proveedor() {
+        assert_eq!(
+            proveedor_para("Proveedor", Some(" p1 ".into())),
+            Some("p1".into())
+        );
+        assert_eq!(proveedor_para("Proveedor", Some("  ".into())), None);
+        assert_eq!(proveedor_para("Otro", Some("p1".into())), None);
+    }
+
+    #[test]
+    fn filtro_preserva_todos_los_argumentos() {
+        let filtro = filtro_de(CuentasRangoArgs {
+            del: Some("2026-01-01".into()),
+            al: Some("2026-01-31".into()),
+            q: Some("cafe".into()),
+            page: Some(2),
+            page_size: Some(25),
+        });
+        assert_eq!(filtro.del.as_deref(), Some("2026-01-01"));
+        assert_eq!(filtro.al.as_deref(), Some("2026-01-31"));
+        assert_eq!(filtro.q.as_deref(), Some("cafe"));
+        assert_eq!((filtro.page, filtro.page_size), (Some(2), Some(25)));
+    }
+
+    #[test]
+    fn filtro_admite_consulta_sin_rango_ni_paginacion() {
+        let filtro = filtro_de(CuentasRangoArgs {
+            del: None, al: None, q: None, page: None, page_size: None,
+        });
+        assert!(filtro.del.is_none() && filtro.al.is_none() && filtro.q.is_none());
+        assert!(filtro.page.is_none() && filtro.page_size.is_none());
+    }
+
+    #[test]
+    fn proveedor_es_sensible_al_tipo_de_gasto_canonico() {
+        assert_eq!(proveedor_para("proveedor", Some("p1".into())), None);
+        assert_eq!(proveedor_para("Proveedor ", Some("p1".into())), None);
+    }
 }

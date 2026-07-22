@@ -6,9 +6,7 @@ use tpv_contracts::inventario::{
     AlergenoInvDto, CategoriaInvDto, InventarioResumenResponse, LoteDto, ProductDetailResponse,
     ProductoBaseDto, ProductoDetalleDto, ProductoListDto, ProveedorMiniDto,
 };
-use tpv_domain::inventario::{
-    AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert,
-};
+use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 
 use crate::error::AppResult;
 

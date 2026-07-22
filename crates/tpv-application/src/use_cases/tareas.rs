@@ -110,7 +110,8 @@ pub async fn marcar_finalizada(
     if input.id_tarea.trim().is_empty() || input.id_trabajador.trim().is_empty() {
         return Err(AppError::validation("id_tarea/id_trabajador required"));
     }
-    repo.marcar_finalizada(&input.id_tarea, &input.id_trabajador).await
+    repo.marcar_finalizada(&input.id_tarea, &input.id_trabajador)
+        .await
 }
 
 #[cfg(test)]
@@ -159,7 +160,10 @@ mod tests {
             Ok(true)
         }
         async fn set_asignaciones(&self, id: &str, ids: Vec<String>) -> AppResult<bool> {
-            self.asignaciones.lock().unwrap().push((id.to_string(), ids));
+            self.asignaciones
+                .lock()
+                .unwrap()
+                .push((id.to_string(), ids));
             Ok(true)
         }
         async fn delete_tarea(&self, id: &str) -> AppResult<bool> {
@@ -167,7 +171,10 @@ mod tests {
             Ok(true)
         }
         async fn marcar_finalizada(&self, id: &str, trab: &str) -> AppResult<bool> {
-            self.finalizar.lock().unwrap().push((id.to_string(), trab.to_string()));
+            self.finalizar
+                .lock()
+                .unwrap()
+                .push((id.to_string(), trab.to_string()));
             Ok(true)
         }
     }
@@ -235,7 +242,9 @@ mod tests {
             descripcion: None,
             fecha_limite: None,
         };
-        assert!(es_validacion(update_tarea(&repo, sin_id).await.unwrap_err()));
+        assert!(es_validacion(
+            update_tarea(&repo, sin_id).await.unwrap_err()
+        ));
 
         let sin_titulo = UpdateTareaInput {
             id_tarea: "tarea1".into(),
@@ -243,7 +252,9 @@ mod tests {
             descripcion: None,
             fecha_limite: None,
         };
-        assert!(es_validacion(update_tarea(&repo, sin_titulo).await.unwrap_err()));
+        assert!(es_validacion(
+            update_tarea(&repo, sin_titulo).await.unwrap_err()
+        ));
 
         assert!(repo.update.lock().unwrap().is_empty());
     }
@@ -275,7 +286,9 @@ mod tests {
             id_tarea: "  ".into(),
             ids_trabajadores: vec!["t1".into()],
         };
-        assert!(es_validacion(set_asignaciones(&repo, input).await.unwrap_err()));
+        assert!(es_validacion(
+            set_asignaciones(&repo, input).await.unwrap_err()
+        ));
         assert!(repo.asignaciones.lock().unwrap().is_empty());
     }
 
@@ -296,9 +309,14 @@ mod tests {
     #[tokio::test]
     async fn delete_tarea_exige_id() {
         let repo = FakeRepo::default();
-        let err = delete_tarea(&repo, TareaIdArgs { id_tarea: "  ".into() })
-            .await
-            .unwrap_err();
+        let err = delete_tarea(
+            &repo,
+            TareaIdArgs {
+                id_tarea: "  ".into(),
+            },
+        )
+        .await
+        .unwrap_err();
         assert!(es_validacion(err));
         assert!(repo.delete.lock().unwrap().is_empty());
     }
@@ -306,9 +324,14 @@ mod tests {
     #[tokio::test]
     async fn delete_tarea_valida_delega() {
         let repo = FakeRepo::default();
-        assert!(delete_tarea(&repo, TareaIdArgs { id_tarea: "tarea1".into() })
-            .await
-            .unwrap());
+        assert!(delete_tarea(
+            &repo,
+            TareaIdArgs {
+                id_tarea: "tarea1".into()
+            }
+        )
+        .await
+        .unwrap());
         assert_eq!(*repo.delete.lock().unwrap(), vec!["tarea1".to_string()]);
     }
 
@@ -319,13 +342,17 @@ mod tests {
             id_tarea: "t1".into(),
             id_trabajador: "  ".into(),
         };
-        assert!(es_validacion(marcar_finalizada(&repo, sin_trab).await.unwrap_err()));
+        assert!(es_validacion(
+            marcar_finalizada(&repo, sin_trab).await.unwrap_err()
+        ));
 
         let sin_tarea = FinalizarTareaInput {
             id_tarea: String::new(),
             id_trabajador: "w1".into(),
         };
-        assert!(es_validacion(marcar_finalizada(&repo, sin_tarea).await.unwrap_err()));
+        assert!(es_validacion(
+            marcar_finalizada(&repo, sin_tarea).await.unwrap_err()
+        ));
 
         assert!(repo.finalizar.lock().unwrap().is_empty());
     }
@@ -349,17 +376,32 @@ mod tests {
     #[tokio::test]
     async fn lecturas_con_id_vacio_cortan_sin_error() {
         let repo = FakeRepo::default();
-        assert!(get_tarea_by_id(&repo, TareaIdArgs { id_tarea: " ".into() })
-            .await
-            .unwrap()
-            .is_none());
-        assert!(get_tarea_asignados(&repo, TareaIdArgs { id_tarea: " ".into() })
-            .await
-            .unwrap()
-            .is_empty());
-        assert!(get_mis_tareas(&repo, MisTareasArgs { id_trabajador: " ".into() })
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(get_tarea_by_id(
+            &repo,
+            TareaIdArgs {
+                id_tarea: " ".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_none());
+        assert!(get_tarea_asignados(
+            &repo,
+            TareaIdArgs {
+                id_tarea: " ".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_empty());
+        assert!(get_mis_tareas(
+            &repo,
+            MisTareasArgs {
+                id_trabajador: " ".into()
+            }
+        )
+        .await
+        .unwrap()
+        .is_empty());
     }
 }

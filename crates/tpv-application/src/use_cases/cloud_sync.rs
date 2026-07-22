@@ -28,3 +28,23 @@ pub async fn upload_initial_setup(
 
     svc.upload_initial_setup(&id_usuario, &email, &pin).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requerido_recorta_y_rechaza_vacio() {
+        assert_eq!(requerido("  valor  ", "campo").unwrap(), "valor");
+        assert!(matches!(
+            requerido("   ", "campo"),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn requerido_identifica_el_campo_que_falla() {
+        let error = requerido("\t\n", "email").unwrap_err().to_string();
+        assert!(error.contains("email required"));
+    }
+}

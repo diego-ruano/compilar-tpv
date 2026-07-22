@@ -120,3 +120,39 @@ pub async fn download_image(
     let rel_path = requerido(rel_path, "rel_path")?;
     svc.download_image(&mode, &rel_path).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normaliza_modos_admitidos() {
+        assert_eq!(normalize_mode(" TPV ").unwrap(), "tpv");
+        assert_eq!(normalize_mode("handy").unwrap(), "handy");
+        assert!(normalize_mode("admin").is_err());
+    }
+
+    #[test]
+    fn normaliza_path_y_rechaza_rutas_no_absolutas() {
+        assert_eq!(normalize_path(" /v1/images/x ").unwrap(), "/v1/images/x");
+        assert!(normalize_path("v1/images/x").is_err());
+        assert!(normalize_path("   ").is_err());
+    }
+
+    #[test]
+    fn requerido_recorta_el_valor() {
+        assert_eq!(requerido("  tenant  ", "tenant").unwrap(), "tenant");
+        assert!(requerido(" ", "tenant").is_err());
+    }
+
+    #[test]
+    fn modo_es_insensible_a_mayusculas() {
+        assert_eq!(normalize_mode("HaNdY").unwrap(), "handy");
+        assert_eq!(normalize_mode("TpV").unwrap(), "tpv");
+    }
+
+    #[test]
+    fn path_conserva_query_y_subruta_canonica() {
+        assert_eq!(normalize_path(" /v1/sync/changes?since=10 ").unwrap(), "/v1/sync/changes?since=10");
+    }
+}

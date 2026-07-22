@@ -202,3 +202,34 @@ pub async fn update_trabajador(
 
     repo.update_trabajador(&input.id_trabajador, cambios).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opcionales_de_trabajador_se_recortan_y_limpian() {
+        assert_eq!(
+            limpiar_opcional(Some("  Cocina  ".into())),
+            Some("Cocina".into())
+        );
+        assert_eq!(limpiar_opcional(Some("   ".into())), None);
+        assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[test]
+    fn estado_de_trabajador_se_normaliza() {
+        assert_eq!(normalizar_estado(" ACTIVO "), "Activo");
+        assert_eq!(normalizar_estado("desconocido"), "Activo");
+    }
+
+    #[test]
+    fn estado_inactivo_es_insensible_a_mayusculas_y_espacios() {
+        assert_eq!(normalizar_estado("  INACTIVO  "), "Inactivo");
+    }
+
+    #[test]
+    fn limpiar_opcional_conserva_unicode() {
+        assert_eq!(limpiar_opcional(Some("  PeÃ±a Ã�lvarez  ".into())), Some("PeÃ±a Ã�lvarez".into()));
+    }
+}

@@ -43,7 +43,8 @@ pub trait MesasRepository: Send + Sync {
 
     /* Barra */
     async fn get_or_create_mesa_barra(&self) -> AppResult<String>;
-    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String>;
+    async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>)
+        -> AppResult<String>;
     async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()>;
     async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String>;
     async fn list_comandas_barra(
@@ -63,8 +64,11 @@ pub trait MesasRepository: Send + Sync {
     async fn search_productos_by_nombre(&self, q: String) -> AppResult<Vec<ProductoVendibleOut>>;
 
     /* Detalles (ticket) */
-    async fn remove_one_pending_detalle(&self, id_comanda: &str, id_producto: &str)
-        -> AppResult<()>;
+    async fn remove_one_pending_detalle(
+        &self,
+        id_comanda: &str,
+        id_producto: &str,
+    ) -> AppResult<()>;
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()>;
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()>;
     async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<()>;

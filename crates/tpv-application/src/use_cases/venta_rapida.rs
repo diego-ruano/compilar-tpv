@@ -47,7 +47,8 @@ pub async fn list_comandas_barra(
     repo: &dyn VentaRapidaRepository,
     args: VrListComandasArgs,
 ) -> AppResult<Vec<ComandaBarraRow>> {
-    repo.list_comandas_barra(args.include_pagadas, args.limit).await
+    repo.list_comandas_barra(args.include_pagadas, args.limit)
+        .await
 }
 
 pub async fn get_lineas_comanda(
@@ -97,7 +98,8 @@ pub async fn create_comanda_barra(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let get_or_create = input.get_or_create.unwrap_or(false);
-    repo.create_comanda_barra(id_trabajador, get_or_create).await
+    repo.create_comanda_barra(id_trabajador, get_or_create)
+        .await
 }
 
 pub async fn add_linea_comanda(
@@ -109,11 +111,15 @@ pub async fn add_linea_comanda(
         || !input.cantidad.is_finite()
         || input.cantidad <= 0.0
     {
-        return Err(AppError::validation("id_comanda/id_producto/cantidad invalid"));
+        return Err(AppError::validation(
+            "id_comanda/id_producto/cantidad invalid",
+        ));
     }
     // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
     if !input.precio_unitario.is_finite() || input.precio_unitario < 0.0 {
-        return Err(AppError::validation("precio_unitario invalid (debe ser >= 0)"));
+        return Err(AppError::validation(
+            "precio_unitario invalid (debe ser >= 0)",
+        ));
     }
     repo.add_linea_comanda(
         &input.id_comanda,
@@ -131,7 +137,8 @@ pub async fn remove_last_unpaid_linea(
     if input.id_comanda.trim().is_empty() || input.id_producto.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_producto invalid"));
     }
-    repo.remove_last_unpaid_linea(&input.id_comanda, &input.id_producto).await
+    repo.remove_last_unpaid_linea(&input.id_comanda, &input.id_producto)
+        .await
 }
 
 pub async fn delete_linea_if_unpaid(
@@ -141,7 +148,8 @@ pub async fn delete_linea_if_unpaid(
     if input.id_comanda.trim().is_empty() || input.id_detalle.trim().is_empty() {
         return Err(AppError::validation("id_comanda/id_detalle invalid"));
     }
-    repo.delete_linea_if_unpaid(&input.id_comanda, &input.id_detalle).await
+    repo.delete_linea_if_unpaid(&input.id_comanda, &input.id_detalle)
+        .await
 }
 
 pub async fn update_nota_detalle(
@@ -151,7 +159,8 @@ pub async fn update_nota_detalle(
     if input.id_detalle.trim().is_empty() {
         return Err(AppError::validation("id_detalle invalid"));
     }
-    repo.update_nota_detalle(&input.id_detalle, limpiar_opcional(input.nota)).await
+    repo.update_nota_detalle(&input.id_detalle, limpiar_opcional(input.nota))
+        .await
 }
 
 pub async fn cobrar_fraccionado(
@@ -203,7 +212,9 @@ pub async fn restar_stock(
     let mut norm: Vec<StockLinea> = input
         .lineas
         .into_iter()
-        .filter(|it| !it.producto_id.trim().is_empty() && it.cantidad.is_finite() && it.cantidad > 0.0)
+        .filter(|it| {
+            !it.producto_id.trim().is_empty() && it.cantidad.is_finite() && it.cantidad > 0.0
+        })
         .collect();
 
     norm.sort_by(|a, b| a.producto_id.cmp(&b.producto_id));
@@ -234,4 +245,117 @@ pub async fn delete_comanda_if_safe(
         return Err(AppError::validation("id_comanda invalid"));
     }
     repo.delete_comanda_if_safe(&input.id_comanda).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeRepo { stock: Mutex<Vec<Vec<StockLinea>>>, cobros: Mutex<Vec<CobroFraccionado>> }
+
+    #[async_trait]
+    impl VentaRapidaRepository for FakeRepo {
+        async fn list_categorias_vendibles(&self) -> AppResult<Vec<CategoriaRow>> { panic!("no usado") }
+        async fn list_productos_by_categoria(&self, _: &str) -> AppResult<Vec<ProductoRow>> { panic!("no usado") }
+        async fn search_productos(&self, _: String, _: i64) -> AppResult<Vec<ProductoRow>> { panic!("no usado") }
+        async fn list_comandas_barra(&self, _: bool, _: Option<i64>) -> AppResult<Vec<ComandaBarraRow>> { panic!("no usado") }
+        async fn get_lineas_comanda(&self, _: &str) -> AppResult<Vec<LineaComandaRow>> { panic!("no usado") }
+        async fn get_index_rows(&self, _: Vec<String>) -> AppResult<Vec<IndexRow>> { panic!("no usado") }
+        async fn get_detalles_ver_ticket(&self, _: &str) -> AppResult<Vec<VerTicketsDetalleRow>> { panic!("no usado") }
+        async fn create_comanda_barra(&self, _: Option<String>, _: bool) -> AppResult<String> { panic!("no usado") }
+        async fn add_linea_comanda(&self, _: &str, _: &str, _: f64, _: f64) -> AppResult<String> { panic!("no usado") }
+        async fn remove_last_unpaid_linea(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
+        async fn delete_linea_if_unpaid(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
+        async fn update_nota_detalle(&self, _: &str, _: Option<String>) -> AppResult<bool> { panic!("no usado") }
+        async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool> { self.cobros.lock().unwrap().push(data); Ok(true) }
+        async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> { self.stock.lock().unwrap().push(lineas); Ok(true) }
+        async fn delete_comanda_if_safe(&self, _: &str) -> AppResult<bool> { panic!("no usado") }
+    }
+
+    #[test]
+    fn metodo_de_cobro_se_normaliza() {
+        assert_eq!(normalize_metodo(" tarjeta "), "Tarjeta");
+        assert_eq!(normalize_metodo("otro"), "Efectivo");
+    }
+
+    #[test]
+    fn notas_vacias_se_convierten_en_none() {
+        assert_eq!(
+            limpiar_opcional(Some("  sin cebolla  ".into())),
+            Some("sin cebolla".into())
+        );
+        assert_eq!(limpiar_opcional(Some(" ".into())), None);
+    }
+
+    #[test]
+    fn metodo_tarjeta_es_insensible_a_mayusculas() {
+        assert_eq!(normalize_metodo("TARJETA"), "Tarjeta");
+        assert_eq!(normalize_metodo("  TaRjEtA  "), "Tarjeta");
+    }
+
+    #[test]
+    fn notas_none_permanecen_ausentes() {
+        assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[tokio::test]
+    async fn restar_stock_filtra_invalidos_ordena_y_agrupa_productos() {
+        let repo = FakeRepo::default();
+        let input = VrRestarStockInput { lineas: vec![
+            StockLinea { producto_id: "b".into(), cantidad: 2.0 },
+            StockLinea { producto_id: "a".into(), cantidad: 1.5 },
+            StockLinea { producto_id: "b".into(), cantidad: 3.0 },
+            StockLinea { producto_id: " ".into(), cantidad: 8.0 },
+            StockLinea { producto_id: "c".into(), cantidad: 0.0 },
+            StockLinea { producto_id: "d".into(), cantidad: f64::NAN },
+        ]};
+        assert!(restar_stock(&repo, input).await.unwrap());
+        let calls = repo.stock.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].len(), 2);
+        assert_eq!(calls[0][0].producto_id, "a");
+        assert_eq!(calls[0][0].cantidad, 1.5);
+        assert_eq!(calls[0][1].producto_id, "b");
+        assert_eq!(calls[0][1].cantidad, 5.0);
+    }
+
+    #[tokio::test]
+    async fn restar_stock_sin_lineas_validas_no_toca_repo() {
+        let repo = FakeRepo::default();
+        let input = VrRestarStockInput { lineas: vec![StockLinea { producto_id: "".into(), cantidad: -1.0 }] };
+        assert!(restar_stock(&repo, input).await.unwrap());
+        assert!(repo.stock.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cobrar_fraccionado_normaliza_metodo_ids_y_detalles() {
+        let repo = FakeRepo::default();
+        let input = VrCobrarFraccionadoInput {
+            id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: 12.5,
+            id_usuario_cobrador: Some(" usuario-1 ".into()), id_trabajador_cobrador: Some(" ".into()),
+            detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
+        };
+        assert!(cobrar_fraccionado(&repo, input).await.unwrap());
+        let calls = repo.cobros.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].metodo, "Tarjeta");
+        assert_eq!(calls[0].id_usuario_cobrador.as_deref(), Some("usuario-1"));
+        assert!(calls[0].id_trabajador_cobrador.is_none());
+        assert_eq!(calls[0].detalles, vec!["d1".to_string(), "d2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn cobrar_fraccionado_rechaza_importe_no_finito_y_detalles_vacios() {
+        let repo = FakeRepo::default();
+        let invalido = |importe, detalles| VrCobrarFraccionadoInput {
+            id_comanda: "c1".into(), metodo: "efectivo".into(), importe_total: importe,
+            id_usuario_cobrador: None, id_trabajador_cobrador: None, detalles,
+        };
+        assert!(cobrar_fraccionado(&repo, invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
+        assert!(cobrar_fraccionado(&repo, invalido(1.0, vec![" ".into()])).await.is_err());
+        assert!(repo.cobros.lock().unwrap().is_empty());
+    }
 }

@@ -61,3 +61,67 @@ pub async fn actualizar_cliente(
 
     repo.update(cliente).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct RepoQueNoDebeLlamarse;
+
+    #[async_trait]
+    impl ClientesRepository for RepoQueNoDebeLlamarse {
+        async fn overview(&self, _: ClienteRanking) -> AppResult<Vec<ClienteOverview>> {
+            panic!("repo llamado")
+        }
+        async fn form(&self, _: &str) -> AppResult<Option<ClienteForm>> {
+            panic!("repo llamado")
+        }
+        async fn create(&self, _: NuevoCliente) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn update(&self, _: Cliente) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+    }
+
+    #[tokio::test]
+    async fn obtener_form_con_id_vacio_no_toca_repo() {
+        assert!(obtener_form(&RepoQueNoDebeLlamarse, "   ".into())
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn crear_cliente_invalido_no_toca_repo() {
+        let input = CreateClienteInput {
+            id_cliente: None,
+            nombre: " ".into(),
+            email: None,
+            telefono: None,
+            notas: None,
+        };
+        assert!(matches!(
+            crear_cliente(&RepoQueNoDebeLlamarse, input).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn actualizar_cliente_exige_id_y_nombre_validos() {
+        let sin_id = UpdateClienteInput { id_cliente: " ".into(), nombre: "Ana".into(), email: None, telefono: None, notas: None };
+        let sin_nombre = UpdateClienteInput { id_cliente: "c1".into(), nombre: " ".into(), email: None, telefono: None, notas: None };
+        assert!(matches!(actualizar_cliente(&RepoQueNoDebeLlamarse, sin_id).await, Err(AppError::Validation(_))));
+        assert!(matches!(actualizar_cliente(&RepoQueNoDebeLlamarse, sin_nombre).await, Err(AppError::Validation(_))));
+    }
+
+    #[tokio::test]
+    async fn crear_cliente_rechaza_email_mal_formado() {
+        let input = CreateClienteInput {
+            id_cliente: Some("c1".into()), nombre: "Ana".into(),
+            email: Some("correo-sin-arroba".into()), telefono: None, notas: None,
+        };
+        assert!(matches!(crear_cliente(&RepoQueNoDebeLlamarse, input).await, Err(AppError::Validation(_))));
+    }
+}

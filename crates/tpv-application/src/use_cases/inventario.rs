@@ -164,3 +164,34 @@ pub async fn ajustar_lote(repo: &R, input: AjusteLoteInput) -> AppResult<String>
     repo.ajustar_lote(ajuste).await?;
     Ok("OK".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_de_alergenos_se_normalizan_sin_vacios_ni_duplicados() {
+        let ids = normalize_ids(vec![" b ".into(), "a".into(), "a".into(), " ".into()]);
+        assert_eq!(ids, vec!["a".to_string(), "b".to_string()]);
+    }
+
+    #[test]
+    fn resultado_upsert_conserva_id_generado_por_repo() {
+        let result = UpsertProductoResult {
+            id_producto: "producto-1".into(),
+        };
+        assert_eq!(result.id_producto, "producto-1");
+    }
+
+    #[test]
+    fn normalizacion_de_alergenos_es_idempotente() {
+        let una = normalize_ids(vec![" gluten ".into(), "huevo".into(), "gluten".into()]);
+        let dos = normalize_ids(una.clone());
+        assert_eq!(una, dos);
+    }
+
+    #[test]
+    fn normalizacion_de_alergenos_acepta_lista_vacia() {
+        assert!(normalize_ids(Vec::new()).is_empty());
+    }
+}

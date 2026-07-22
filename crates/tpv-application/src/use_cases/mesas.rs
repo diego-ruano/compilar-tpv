@@ -36,9 +36,7 @@ pub async fn load_layout(repo: &dyn MesasRepository) -> AppResult<Vec<SalonOut>>
     repo.load_layout().await
 }
 
-pub async fn get_mesas_ocupadas(
-    repo: &dyn MesasRepository,
-) -> AppResult<HashMap<String, bool>> {
+pub async fn get_mesas_ocupadas(repo: &dyn MesasRepository) -> AppResult<HashMap<String, bool>> {
     repo.get_mesas_ocupadas().await
 }
 
@@ -92,7 +90,8 @@ pub async fn comanda_set_trabajador_if_null(
         return Ok(false);
     }
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
-    repo.comanda_set_trabajador_if_null(&input.id_comanda, id).await
+    repo.comanda_set_trabajador_if_null(&input.id_comanda, id)
+        .await
 }
 
 pub async fn cerrar_comanda(
@@ -183,8 +182,7 @@ pub async fn create_comanda_barra(
     repo: &dyn MesasRepository,
     input: MesasCreateComandaBarraInput,
 ) -> AppResult<String> {
-    repo.create_comanda_barra(opt_id(input.id_trabajador))
-        .await
+    repo.create_comanda_barra(opt_id(input.id_trabajador)).await
 }
 
 pub async fn list_comandas_barra(
@@ -208,9 +206,7 @@ pub async fn delete_comanda_barra_if_safe(
 
 /* Meta + catálogo */
 
-pub async fn mesas_meta_all(
-    repo: &dyn MesasRepository,
-) -> AppResult<HashMap<String, MesaMetaOut>> {
+pub async fn mesas_meta_all(repo: &dyn MesasRepository) -> AppResult<HashMap<String, MesaMetaOut>> {
     repo.mesas_meta_all().await
 }
 
@@ -301,9 +297,7 @@ pub async fn cobrar_detalles(
 
 /* Cocina */
 
-pub async fn kitchen_list_today_pending(
-    repo: &dyn MesasRepository,
-) -> AppResult<Vec<KitchenRow>> {
+pub async fn kitchen_list_today_pending(repo: &dyn MesasRepository) -> AppResult<Vec<KitchenRow>> {
     repo.kitchen_list_today_pending().await
 }
 
@@ -322,4 +316,29 @@ pub async fn kitchen_set_line_state(
     let estado = normalize_estado_cocina(&estado_raw);
     repo.kitchen_set_line_state(&input.id_detalle, &input.id_usuario_cocinero, estado)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opt_id_recorta_y_elimina_ids_vacios() {
+        assert_eq!(
+            opt_id(Some("  trabajador-1  ".into())),
+            Some("trabajador-1".into())
+        );
+        assert_eq!(opt_id(Some("   ".into())), None);
+        assert_eq!(opt_id(None), None);
+    }
+
+    #[test]
+    fn opt_id_conserva_el_contenido_interior() {
+        assert_eq!(opt_id(Some(" usuario barra ".into())), Some("usuario barra".into()));
+    }
+
+    #[test]
+    fn opt_id_descarta_distintos_tipos_de_espacio() {
+        assert_eq!(opt_id(Some("\t\n".into())), None);
+    }
 }

@@ -92,3 +92,74 @@ pub async fn crear_producto(
     .map_err(AppError::validation)?;
     repo.crear_producto(producto).await
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct RepoQueNoDebeLlamarse;
+    #[async_trait]
+    impl ProveedoresRepository for RepoQueNoDebeLlamarse {
+        async fn get_all(&self) -> AppResult<Vec<ProveedorDto>> {
+            panic!("repo llamado")
+        }
+        async fn get_productos(&self, _: &str) -> AppResult<Vec<ProductoProveedorDto>> {
+            panic!("repo llamado")
+        }
+        async fn get_categorias(&self) -> AppResult<Vec<CategoriaProveedorDto>> {
+            panic!("repo llamado")
+        }
+        async fn get_productos_all(&self) -> AppResult<Vec<ProductoProveedorDto>> {
+            panic!("repo llamado")
+        }
+        async fn guardar(&self, _: ProveedorValidado) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn set_vinculos(&self, _: &str, _: Vec<String>) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn crear_producto(&self, _: ProductoNuevo) -> AppResult<String> {
+            panic!("repo llamado")
+        }
+    }
+
+    #[tokio::test]
+    async fn ids_vacios_se_rechazan_antes_del_repo() {
+        assert!(matches!(
+            get_productos(&RepoQueNoDebeLlamarse, " ".into()).await,
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            eliminar(&RepoQueNoDebeLlamarse, " ".into()).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn set_vinculos_exige_proveedor() {
+        let input = ProveedoresSetVinculosInput {
+            id_proveedor: " ".into(),
+            producto_ids: vec!["p1".into()],
+        };
+        assert!(matches!(
+            set_vinculos(&RepoQueNoDebeLlamarse, input).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn ids_de_productos_se_recortan_ordenan_y_deduplican() {
+        let ids = normalizar_producto_ids(vec![" p2 ".into(), "p1".into(), "p2".into(), " ".into()]);
+        assert_eq!(ids, vec!["p1".to_string(), "p2".to_string()]);
+    }
+
+    #[test]
+    fn normalizar_vinculos_es_idempotente() {
+        let una = normalizar_producto_ids(vec!["p2".into(), "p1".into()]);
+        assert_eq!(normalizar_producto_ids(una.clone()), una);
+    }
+}

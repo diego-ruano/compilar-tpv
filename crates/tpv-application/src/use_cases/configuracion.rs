@@ -55,3 +55,63 @@ pub async fn patch_contact(
     repo.patch_contact(&patch).await?;
     Ok("OK".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+
+    struct RepoQueNoDebeLlamarse;
+    #[async_trait]
+    impl ConfiguracionRepository for RepoQueNoDebeLlamarse {
+        async fn get_business(&self) -> AppResult<BusinessSettings> {
+            panic!("repo llamado")
+        }
+        async fn get_ticket(&self) -> AppResult<TicketSettings> {
+            panic!("repo llamado")
+        }
+        async fn get_contact(&self) -> AppResult<ContactSettings> {
+            panic!("repo llamado")
+        }
+        async fn patch_business(&self, _: &JsonValue) -> AppResult<()> {
+            panic!("repo llamado")
+        }
+        async fn patch_ticket(&self, _: &JsonValue) -> AppResult<()> {
+            panic!("repo llamado")
+        }
+        async fn patch_contact(&self, _: &JsonValue) -> AppResult<()> {
+            panic!("repo llamado")
+        }
+    }
+
+    #[tokio::test]
+    async fn patch_business_rechaza_iva_no_numerico_sin_persistir() {
+        let patch = serde_json::json!({"iva_percent": "abc"});
+        assert!(matches!(
+            patch_business(&RepoQueNoDebeLlamarse, patch).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn patch_business_rechaza_iva_fuera_de_rango() {
+        let patch = serde_json::json!({"iva_percent": 101});
+        assert!(matches!(
+            patch_business(&RepoQueNoDebeLlamarse, patch).await,
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn patch_business_rechaza_iva_negativo_y_booleano() {
+        for patch in [serde_json::json!({"iva_percent": -0.01}), serde_json::json!({"iva_percent": true})] {
+            assert!(matches!(patch_business(&RepoQueNoDebeLlamarse, patch).await, Err(AppError::Validation(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn patch_business_rechaza_infinito_codificado_como_texto() {
+        let patch = serde_json::json!({"iva_percent": "inf"});
+        assert!(matches!(patch_business(&RepoQueNoDebeLlamarse, patch).await, Err(AppError::Validation(_))));
+    }
+}

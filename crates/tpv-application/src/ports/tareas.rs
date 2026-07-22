@@ -20,11 +20,16 @@ pub trait TareasRepository: Send + Sync {
 
     /* Escrituras (Local-First, sin outbox) */
     /// Crea una tarea y sus asignaciones iniciales. `true` si todo fue bien.
-    async fn create_tarea(&self, data: TareaData, ids_trabajadores: Vec<String>) -> AppResult<bool>;
+    async fn create_tarea(&self, data: TareaData, ids_trabajadores: Vec<String>)
+        -> AppResult<bool>;
     /// Actualiza una tarea existente. Error si no existe.
     async fn update_tarea(&self, id_tarea: &str, data: TareaData) -> AppResult<bool>;
     /// Sustituye el conjunto de asignaciones de la tarea. Error si la tarea no existe.
-    async fn set_asignaciones(&self, id_tarea: &str, ids_trabajadores: Vec<String>) -> AppResult<bool>;
+    async fn set_asignaciones(
+        &self,
+        id_tarea: &str,
+        ids_trabajadores: Vec<String>,
+    ) -> AppResult<bool>;
     /// Elimina una tarea (y sus asignaciones). Error si no existe.
     async fn delete_tarea(&self, id_tarea: &str) -> AppResult<bool>;
     /// Marca finalizada la asignación de un trabajador en una tarea. Error si no existe.
