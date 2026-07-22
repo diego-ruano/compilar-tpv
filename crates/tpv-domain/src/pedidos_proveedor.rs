@@ -70,3 +70,39 @@ impl PedidoProveedorNuevo {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linea_valida_normaliza_textos_y_permite_cero() {
+        let l = LineaPedidoNueva::validar(" l1 ".into(), " Tomate ".into(), 0.0, Some(0.0), Some(" kg ".into())).unwrap();
+        assert_eq!(l.id_linea, "l1");
+        assert_eq!(l.nombre_producto, "Tomate");
+        assert_eq!(l.cantidad, 0.0);
+        assert_eq!(l.precio_unitario, Some(0.0));
+        assert_eq!(l.unidad.as_deref(), Some("kg"));
+    }
+
+    #[test]
+    fn linea_rechaza_nombre_cantidad_y_precio_invalidos() {
+        assert!(LineaPedidoNueva::validar("l".into(), " ".into(), 1.0, None, None).is_err());
+        for cantidad in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(LineaPedidoNueva::validar("l".into(), "x".into(), cantidad, None, None).is_err());
+        }
+        for precio in [-0.01, f64::NAN, f64::INFINITY] {
+            assert!(LineaPedidoNueva::validar("l".into(), "x".into(), 1.0, Some(precio), None).is_err());
+        }
+    }
+
+    #[test]
+    fn pedido_exige_id_y_limpia_opcionales() {
+        assert!(PedidoProveedorNuevo::validar(" ".into(), None, None, None).is_err());
+        let p = PedidoProveedorNuevo::validar(" p1 ".into(), Some(" prov1 ".into()), Some(" ".into()), Some(" urgente ".into())).unwrap();
+        assert_eq!(p.id_pedido, "p1");
+        assert_eq!(p.id_proveedor.as_deref(), Some("prov1"));
+        assert!(p.email_destino.is_none());
+        assert_eq!(p.notas.as_deref(), Some("urgente"));
+    }
+}

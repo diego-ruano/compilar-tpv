@@ -213,3 +213,96 @@ pub struct SetupInfo {
     pub password_hash: String,
     pub requiere_setup: i64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn textos_requeridos_y_opcionales_se_limpian() {
+        assert_eq!(requerido(" admin ", "rol").unwrap(), "admin");
+        assert_eq!(requerido(" ", "rol").unwrap_err(), "rol required");
+        assert_eq!(limpiar_opcional(Some(" Ana ".into())), Some("Ana".into()));
+        assert_eq!(limpiar_opcional(Some("\t".into())), None);
+        assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[test]
+    fn email_basico_acepta_y_rechaza_casos_representativos() {
+        for email in ["a@b.es", " usuario@example.com ", "A.B+tag@EXAMPLE.COM"] { assert!(validate_email_basic(email)); }
+        for email in ["", "a@b", "abcdef", "a b@c.es", "@.com", "a@.c"] { assert!(!validate_email_basic(email), "deberia rechazar {email}"); }
+    }
+
+    #[test]
+    fn bloqueo_escala_en_los_limites_definidos() {
+        for intentos in 0..=LOGIN_INTENTOS_LIBRES { assert_eq!(login_bloqueo_ms(intentos), 0); }
+        assert_eq!(login_bloqueo_ms(6), 30_000);
+        assert_eq!(login_bloqueo_ms(7), 60_000);
+        assert_eq!(login_bloqueo_ms(8), 300_000);
+        assert_eq!(login_bloqueo_ms(9), 900_000);
+        assert_eq!(login_bloqueo_ms(u32::MAX), 900_000);
+    }
+
+    #[test]
+    fn comparacion_constante_cubre_igualdad_diferencia_y_longitud() {
+        assert!(timing_safe_eq(&[], &[]));
+        assert!(timing_safe_eq(&[1, 2, 3], &[1, 2, 3]));
+        assert!(!timing_safe_eq(&[1, 2, 3], &[1, 2, 4]));
+        assert!(!timing_safe_eq(&[1], &[1, 0]));
+    }
+
+    #[test]
+    fn hash_nuevo_usa_formato_iteraciones_y_tamanos_correctos() {
+        let hash = hash_pin("Abc123!").unwrap();
+        assert!(hash.starts_with("$pbkdf2-sha256$i=100000$"));
+        let (iters, salt, dk) = parse_pbkdf2_phc(&hash).unwrap();
+        assert_eq!(iters, target_pbkdf2_iters());
+        assert_eq!(salt.len(), SALT_LEN);
+        assert_eq!(dk.len(), DK_LEN);
+    }
+
+    #[test]
+    fn hash_usa_salt_aleatorio_y_verifica_pin_alfanumerico() {
+        let h1 = hash_pin("Abc123!").unwrap();
+        let h2 = hash_pin("Abc123!").unwrap();
+        assert_ne!(h1, h2);
+        assert!(verify_pin("Abc123!", &h1).is_ok());
+        assert!(verify_pin("abc123!", &h1).is_err());
+        assert!(verify_pin("Abc124!", &h1).is_err());
+    }
+
+    #[test]
+    fn pin_recorta_extremos_pero_conserva_espacios_interiores() {
+        let hash = hash_pin("  cafe 2026  ").unwrap();
+        assert!(verify_pin("cafe 2026", &hash).is_ok());
+        assert!(verify_pin(" cafe 2026 ", &hash).is_ok());
+        assert!(verify_pin("cafe2026", &hash).is_err());
+    }
+
+    #[test]
+    fn pin_corto_se_rechaza_al_crear_y_verificar() {
+        for pin in ["", "1", "a1", "abc"] { assert!(hash_pin(pin).is_err()); }
+        let hash = hash_pin("1234").unwrap();
+        assert!(verify_pin("12", &hash).is_err());
+    }
+
+    #[test]
+    fn parser_rechaza_algoritmos_y_hashes_malformados() {
+        let casos = [
+            "$argon2id$v=19$m=1$sal$hash", "argon2$loquesea", "texto plano",
+            "$pbkdf2-sha256$", "$pbkdf2-sha256$x=100$aA==$aA==",
+            "$pbkdf2-sha256$i=0$aA==$aA==", "$pbkdf2-sha256$i=abc$aA==$aA==",
+            "$pbkdf2-sha256$i=1$%%%$aA==", "$pbkdf2-sha256$i=1$aA==$%%%",
+        ];
+        for hash in casos { assert!(parse_pbkdf2_phc(hash).is_err(), "deberia rechazar {hash}"); }
+    }
+
+    #[test]
+    fn detecta_hash_antiguo_que_necesita_upgrade() {
+        let hash = hash_pin("1234").unwrap();
+        let antiguo = hash.replacen("i=100000", "i=99999", 1);
+        assert!(!hash_needs_upgrade(&hash));
+        assert!(hash_needs_upgrade(&antiguo));
+        assert!(!hash_needs_upgrade("hash desconocido"));
+    }
+}

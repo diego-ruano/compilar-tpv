@@ -89,3 +89,27 @@ pub struct TrabajadorCambios {
     pub fecha_fin_contrato: Option<String>,
     pub password_hash: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requerido_recorta_y_reporta_campo() {
+        assert_eq!(requerido(" Sala ", "area").unwrap(), "Sala");
+        assert_eq!(requerido("\t", "area").unwrap_err(), "area required");
+    }
+
+    #[test]
+    fn opcionales_limpian_extremos_y_vacios() {
+        assert_eq!(limpiar_opcional(Some(" Cocina ".into())), Some("Cocina".into()));
+        assert_eq!(limpiar_opcional(Some(" \n ".into())), None);
+        assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[test]
+    fn estado_solo_reconoce_inactivo() {
+        for valor in ["Inactivo", " INACTIVO ", "inactivo"] { assert_eq!(normalizar_estado(valor), "Inactivo"); }
+        for valor in ["", "Activo", "baja", "desconocido"] { assert_eq!(normalizar_estado(valor), "Activo"); }
+    }
+}

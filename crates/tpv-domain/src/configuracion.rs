@@ -50,3 +50,38 @@ pub fn clamp_margin_mm(n: f64) -> f64 {
         n.clamp(0.0, 25.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ancho_y_dpi_solo_admiten_valores_soportados() {
+        for width in [58, 80, 112] { assert_eq!(clamp_paper_width_mm(width), width); }
+        for width in [-1, 0, 57, 81, 999] { assert_eq!(clamp_paper_width_mm(width), 80); }
+        assert_eq!(clamp_paper_dpi(203), 203);
+        assert_eq!(clamp_paper_dpi(300), 300);
+        assert_eq!(clamp_paper_dpi(600), 203);
+    }
+
+    #[test]
+    fn iva_admite_limites_y_rechaza_no_finitos_o_fuera_de_rango() {
+        for iva in [0.0, 4.0, 10.0, 21.0, 100.0] { assert!(validate_iva_percent(iva).is_ok()); }
+        for iva in [-0.01, 100.01, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] { assert!(validate_iva_percent(iva).is_err()); }
+    }
+
+    #[test]
+    fn caracteres_escala_y_margen_se_acotan() {
+        assert_eq!(clamp_chars_per_line(-1), 20);
+        assert_eq!(clamp_chars_per_line(42), 42);
+        assert_eq!(clamp_chars_per_line(100), 80);
+        assert_eq!(clamp_font_scale(0.1), 0.5);
+        assert_eq!(clamp_font_scale(1.25), 1.25);
+        assert_eq!(clamp_font_scale(9.0), 2.0);
+        assert_eq!(clamp_font_scale(f64::NAN), 1.0);
+        assert_eq!(clamp_margin_mm(-1.0), 0.0);
+        assert_eq!(clamp_margin_mm(12.5), 12.5);
+        assert_eq!(clamp_margin_mm(100.0), 25.0);
+        assert_eq!(clamp_margin_mm(f64::INFINITY), 0.0);
+    }
+}

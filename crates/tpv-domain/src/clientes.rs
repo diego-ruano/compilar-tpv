@@ -116,3 +116,40 @@ impl Cliente {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ranking_mapea_argumentos_y_desconocidos() {
+        assert_eq!(ClienteRanking::from_arg(" reservas "), ClienteRanking::PorReservas);
+        assert_eq!(ClienteRanking::from_arg("gasto"), ClienteRanking::PorGasto);
+        assert_eq!(ClienteRanking::from_arg("GASTO"), ClienteRanking::Reciente);
+        assert_eq!(ClienteRanking::from_arg(""), ClienteRanking::Reciente);
+    }
+
+    #[test]
+    fn nuevo_cliente_normaliza_todos_los_campos() {
+        let c = NuevoCliente::validar(Some(" c1 ".into()), " Ana ".into(), Some(" ANA@EXAMPLE.COM ".into()), Some(" 600 ".into()), Some(" nota ".into())).unwrap();
+        assert_eq!(c.id.as_deref(), Some("c1"));
+        assert_eq!(c.nombre, "Ana");
+        assert_eq!(c.email.as_deref(), Some("ana@example.com"));
+        assert_eq!(c.telefono.as_deref(), Some("600"));
+        assert_eq!(c.notas.as_deref(), Some("nota"));
+    }
+
+    #[test]
+    fn nuevo_cliente_descarta_opcionales_vacios() {
+        let c = NuevoCliente::validar(Some(" ".into()), "Ana".into(), Some(" ".into()), Some(" ".into()), None).unwrap();
+        assert!(c.id.is_none() && c.email.is_none() && c.telefono.is_none() && c.notas.is_none());
+    }
+
+    #[test]
+    fn clientes_rechazan_nombre_id_y_email_invalidos() {
+        assert!(NuevoCliente::validar(None, " ".into(), None, None, None).is_err());
+        assert!(NuevoCliente::validar(None, "Ana".into(), Some("sin-arroba".into()), None, None).is_err());
+        assert!(Cliente::validar_edicion(" ".into(), "Ana".into(), None, None, None).is_err());
+        assert!(Cliente::validar_edicion("c1".into(), " ".into(), None, None, None).is_err());
+    }
+}

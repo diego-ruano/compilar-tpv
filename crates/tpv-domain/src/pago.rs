@@ -13,3 +13,18 @@ pub fn normalize_metodo(input: &str) -> String {
         "Efectivo".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tarjeta_se_normaliza_sin_importar_caso_o_espacios() {
+        for valor in ["tarjeta", "Tarjeta", "TARJETA", "  TaRjEtA  "] { assert_eq!(normalize_metodo(valor), "Tarjeta"); }
+    }
+
+    #[test]
+    fn cualquier_otro_valor_es_efectivo() {
+        for valor in ["", " ", "efectivo", "bizum", "card", "tarjetas"] { assert_eq!(normalize_metodo(valor), "Efectivo"); }
+    }
+}

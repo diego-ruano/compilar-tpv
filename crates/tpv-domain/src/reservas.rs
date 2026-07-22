@@ -188,3 +188,89 @@ impl ReservaValidada {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dia_acepta_iso_y_timestamp() {
+        assert_eq!(normalize_dia_ymd(" 2026-07-22 ").unwrap(), "2026-07-22");
+        assert_eq!(normalize_dia_ymd("2026-07-22T18:30:00Z").unwrap(), "2026-07-22");
+        assert_eq!(normalize_dia_ymd("2026-07-22 18:30:00").unwrap(), "2026-07-22");
+    }
+
+    #[test]
+    fn dia_rechaza_formato_y_fechas_calendario_imposibles() {
+        for valor in ["", "22/07/2026", "2026-7-2", "2026-13-01", "2026-02-30"] {
+            assert!(normalize_dia_ymd(valor).is_err(), "deberia rechazar {valor}");
+        }
+    }
+
+    #[test]
+    fn hora_acepta_limites_y_elimina_segundos() {
+        assert_eq!(normalize_hora_hhmm("00:00").unwrap(), "00:00");
+        assert_eq!(normalize_hora_hhmm("23:59").unwrap(), "23:59");
+        assert_eq!(normalize_hora_hhmm(" 14:35:59 ").unwrap(), "14:35");
+    }
+
+    #[test]
+    fn hora_rechaza_formato_y_rangos_invalidos() {
+        for valor in ["", "9:30", "0930", "24:00", "23:60", "aa:bb", "-1:00"] {
+            assert!(normalize_hora_hhmm(valor).is_err(), "deberia rechazar {valor}");
+        }
+    }
+
+    #[test]
+    fn estados_conocidos_se_normalizan_y_desconocido_va_a_proxima() {
+        for (raw, esperado) in [("proxima", "PROXIMA"), (" ACTIVA ", "ACTIVA"), ("finalizada", "FINALIZADA"), ("cancelada", "CANCELADA"), ("no_show", "NO_SHOW")] {
+            assert_eq!(normalize_estado(Some(raw.into())), esperado);
+        }
+        assert_eq!(normalize_estado(None), "PROXIMA");
+        assert_eq!(normalize_estado(Some("otro".into())), "PROXIMA");
+    }
+
+    #[test]
+    fn turno_se_deriva_en_todos_los_limites_horarios() {
+        for (hora, esperado) in [("00:00", "DESAYUNO"), ("12:59", "DESAYUNO"), ("13:00", "COMIDA"), ("15:59", "COMIDA"), ("16:00", "CAFE"), ("18:59", "CAFE"), ("19:00", "CENA"), ("23:59", "CENA")] {
+            assert_eq!(normalize_turno(None, hora), esperado);
+        }
+    }
+
+    #[test]
+    fn turno_explicito_valido_prevalece_y_desconocido_se_deriva() {
+        assert_eq!(normalize_turno(Some(" cena ".into()), "09:00"), "CENA");
+        assert_eq!(normalize_turno(Some("otro".into()), "14:00"), "COMIDA");
+    }
+
+    fn reserva_base(id: Option<String>, comensales: i64, mesa: &str, nombre: &str) -> Result<ReservaValidada, String> {
+        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.into(), nombre.into(), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
+    }
+
+    #[test]
+    fn reserva_nueva_normaliza_y_fuerza_estado_proxima() {
+        let r = reserva_base(None, 4, " m1 ", " Ana ").unwrap();
+        assert!(r.id.is_none());
+        assert_eq!(r.id_mesa, "m1");
+        assert_eq!(r.turno, "COMIDA");
+        assert_eq!(r.estado, "PROXIMA");
+        assert_eq!(r.nota.as_deref(), Some("terraza"));
+        assert_eq!(r.cliente.nombre, "Ana");
+        assert_eq!(r.cliente.telefono.as_deref(), Some("600"));
+    }
+
+    #[test]
+    fn reserva_editada_conserva_estado_normalizado() {
+        let r = reserva_base(Some(" r1 ".into()), 2, "m1", "Ana").unwrap();
+        assert_eq!(r.id.as_deref(), Some("r1"));
+        assert_eq!(r.estado, "CANCELADA");
+    }
+
+    #[test]
+    fn reserva_rechaza_comensales_mesa_y_cliente_invalidos() {
+        assert!(reserva_base(None, 0, "m1", "Ana").is_err());
+        assert!(reserva_base(None, -1, "m1", "Ana").is_err());
+        assert!(reserva_base(None, 1, " ", "Ana").is_err());
+        assert!(reserva_base(None, 1, "m1", " ").is_err());
+    }
+}

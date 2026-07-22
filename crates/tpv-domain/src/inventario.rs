@@ -297,3 +297,109 @@ impl AjusteLote {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_se_recortan_ordenan_y_deduplican() {
+        assert_eq!(normalize_ids(vec![" b ".into(), "a".into(), "b".into(), " ".into()]), vec!["a", "b"]);
+        assert!(normalize_ids(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn categoria_exige_nombre_y_normaliza_campos() {
+        assert!(CategoriaUpsert::validar(None, " ".into(), "".into(), "".into(), true, false).is_err());
+        let c = CategoriaUpsert::validar(Some(" c1 ".into()), " Bebidas ".into(), " foto.jpg ".into(), " images/foto.jpg ".into(), true, false).unwrap();
+        assert_eq!(c.id.as_deref(), Some("c1"));
+        assert_eq!(c.nombre, "Bebidas");
+        assert_eq!(c.nombre_imagen, "foto.jpg");
+        assert_eq!(c.ruta_imagen, "images/foto.jpg");
+        assert!(c.vendible && !c.pasa_cocina);
+    }
+
+    fn producto(nombre: &str, categoria: &str, stock_suelto: Option<f64>, alergenos: Vec<String>) -> Result<ProductoUpsert, String> {
+        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(2.5), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, alergenos)
+    }
+
+    #[test]
+    fn producto_exige_nombre_y_categoria() {
+        assert!(producto(" ", "c1", None, vec![]).is_err());
+        assert!(producto("Cafe", " ", None, vec![]).is_err());
+    }
+
+    #[test]
+    fn producto_normaliza_opcionales_alergenos_y_stock_suelto() {
+        let p = producto(" Cafe ", " c1 ", Some(4.0), vec![" gluten ".into(), "huevo".into(), "gluten".into()]).unwrap();
+        assert_eq!(p.id.as_deref(), Some("p1"));
+        assert_eq!(p.id_categoria, "c1");
+        assert_eq!(p.id_proveedor.as_deref(), Some("prov1"));
+        assert_eq!(p.nombre, "Cafe");
+        assert_eq!(p.unidad_medida.as_deref(), Some("unidad"));
+        assert!(p.nombre_imagen.is_none());
+        assert_eq!(p.stock_suelto, Some(4.0));
+        assert_eq!(p.ids_alergenos, vec!["gluten", "huevo"]);
+    }
+
+    #[test]
+    fn producto_descarta_stock_suelto_no_finito() {
+        assert!(producto("Cafe", "c1", Some(f64::NAN), vec![]).unwrap().stock_suelto.is_none());
+        assert!(producto("Cafe", "c1", Some(f64::INFINITY), vec![]).unwrap().stock_suelto.is_none());
+    }
+
+    fn lote(cantidad: f64, stock: Option<f64>, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
+        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, stock, entrada.map(str::to_string), Some(1.25), Some(" prov1 ".into()), Some(" fresco ".into()))
+    }
+
+    #[test]
+    fn lote_valido_usa_cantidad_como_stock_por_defecto_y_normaliza() {
+        let l = lote(10.0, None, Some("2026-12-31"), Some("2026-07-22 10:00:00")).unwrap();
+        assert_eq!(l.id.as_deref(), Some("l1"));
+        assert_eq!(l.id_producto, "p1");
+        assert_eq!(l.codigo_lote, "L-001");
+        assert_eq!(l.stock_disponible, 10.0);
+        assert_eq!(l.notas.as_deref(), Some("fresco"));
+    }
+
+    #[test]
+    fn lote_rechaza_cantidades_y_stock_invalidos() {
+        for cantidad in [-1.0, f64::NAN, f64::INFINITY] { assert!(lote(cantidad, None, None, None).is_err()); }
+        for stock in [-1.0, f64::NAN, f64::INFINITY, 10.1] { assert!(lote(10.0, Some(stock), None, None).is_err()); }
+        assert!(lote(10.0, Some(10.0 + 1e-8), None, None).is_err());
+        assert!(lote(10.0, Some(10.0 + 1e-10), None, None).is_ok());
+    }
+
+    #[test]
+    fn lote_valida_fechas_reales_y_orden_temporal() {
+        assert!(lote(1.0, None, Some("2025-02-30"), None).is_err());
+        assert!(lote(1.0, None, None, Some("fecha mala")).is_err());
+        assert!(lote(1.0, None, Some("2026-01-01"), Some("2026-02-01")).is_err());
+        assert!(lote(1.0, None, Some("2024-02-29"), Some("2024-02-29")).is_ok());
+    }
+
+    #[test]
+    fn lote_exige_producto_y_codigo() {
+        assert!(LoteNuevo::validar(None, " ".into(), "x".into(), None, 1.0, None, None, None, None, None).is_err());
+        assert!(LoteNuevo::validar(None, "p".into(), " ".into(), None, 1.0, None, None, None, None, None).is_err());
+    }
+
+    #[test]
+    fn update_exige_id_y_reutiliza_reglas_de_lote() {
+        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, 1.0, 1.0, None, None, None, None).is_err());
+        assert!(LoteUpdate::validar("l1".into(), "p".into(), "l".into(), None, 1.0, 2.0, None, None, None, None).is_err());
+        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, 2.0, 1.0, None, None, None, Some(" nota ".into())).unwrap();
+        assert_eq!(l.id_lote, "l1");
+        assert_eq!(l.notas.as_deref(), Some("nota"));
+    }
+
+    #[test]
+    fn ajuste_exige_id_y_stock_finito_no_negativo() {
+        assert!(AjusteLote::validar(" ".into(), 1.0, None).is_err());
+        for stock in [-1.0, f64::NAN, f64::INFINITY] { assert!(AjusteLote::validar("l1".into(), stock, None).is_err()); }
+        let a = AjusteLote::validar(" l1 ".into(), 0.0, Some(" merma ".into())).unwrap();
+        assert_eq!(a.id_lote, "l1");
+        assert_eq!(a.stock_disponible, 0.0);
+        assert_eq!(a.notas.as_deref(), Some("merma"));
+    }
+}

@@ -62,3 +62,29 @@ pub struct CobroDetalles {
     pub detalle_ids: Vec<String>,
     pub id_usuario: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn textos_obligatorios_y_opcionales_se_normalizan() {
+        assert_eq!(requerido(" mesa-1 ", "mesa").unwrap(), "mesa-1");
+        assert!(requerido(" ", "mesa").unwrap_err().contains("mesa required"));
+        assert_eq!(limpiar_opcional(Some(" nota ".into())), Some("nota".into()));
+        assert_eq!(limpiar_opcional(Some(" ".into())), None);
+        assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[test]
+    fn cocina_solo_reconoce_preparado() {
+        assert_eq!(normalize_estado_cocina(" preparado "), "PREPARADO");
+        for estado in ["", "pendiente", "cocinando", "servido"] { assert_eq!(normalize_estado_cocina(estado), "PENDIENTE"); }
+    }
+
+    #[test]
+    fn metodo_de_pago_usa_normalizador_compartido() {
+        assert_eq!(normalize_metodo("TaRjEtA"), "Tarjeta");
+        assert_eq!(normalize_metodo("otro"), "Efectivo");
+    }
+}

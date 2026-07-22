@@ -123,3 +123,50 @@ pub fn normalizar_producto_ids(ids: Vec<String>) -> Vec<String> {
     v.dedup();
     v
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proveedor_exige_nombre_y_limpia_campos() {
+        assert!(ProveedorValidado::validar(None, " ".into(), None, None, None, None, None, None, None).is_err());
+        let p = ProveedorValidado::validar(Some(" pr1 ".into()), " Mercado ".into(), Some(" Ana ".into()), Some(" ".into()), Some(" a@b.es ".into()), None, None, None, None).unwrap();
+        assert_eq!(p.id.as_deref(), Some("pr1"));
+        assert_eq!(p.nombre_empresa, "Mercado");
+        assert_eq!(p.contacto.as_deref(), Some("Ana"));
+        assert!(p.telefono.is_none());
+        assert_eq!(p.email.as_deref(), Some("a@b.es"));
+    }
+
+    #[test]
+    fn producto_exige_relaciones_y_nombre() {
+        let validar = |cat: &str, prov: &str, nombre: &str| ProductoNuevo::validar(None, cat.into(), prov.into(), nombre.into(), None, None, None, None);
+        assert!(validar("", "p", "x").is_err());
+        assert!(validar("c", "", "x").is_err());
+        assert!(validar("c", "p", " ").is_err());
+    }
+
+    #[test]
+    fn producto_rechaza_numeros_negativos_o_no_finitos() {
+        for valor in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), Some(valor), None, None, None).is_err());
+            assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), None, Some(valor), None, None).is_err());
+            assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), None, None, Some(valor), None).is_err());
+        }
+    }
+
+    #[test]
+    fn producto_valido_admite_ceros_y_normaliza() {
+        let p = ProductoNuevo::validar(Some(" x1 ".into()), " c1 ".into(), " p1 ".into(), " Harina ".into(), Some(0.0), Some(0.0), Some(0.0), Some(" kg ".into())).unwrap();
+        assert_eq!(p.id.as_deref(), Some("x1"));
+        assert_eq!(p.id_categoria, "c1");
+        assert_eq!(p.id_proveedor, "p1");
+        assert_eq!(p.unidad_medida.as_deref(), Some("kg"));
+    }
+
+    #[test]
+    fn ids_se_ordenan_deduplican_y_limpian() {
+        assert_eq!(normalizar_producto_ids(vec![" b ".into(), "a".into(), "b".into(), " ".into()]), vec!["a", "b"]);
+    }
+}

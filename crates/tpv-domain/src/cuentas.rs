@@ -29,3 +29,21 @@ pub struct PagoData {
     pub metodo: String,
     pub importe: f64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requerido_recorta_y_nombra_el_campo_ausente() {
+        assert_eq!(requerido("  concepto  ", "concepto").unwrap(), "concepto");
+        assert_eq!(requerido(" \t ", "fecha").unwrap_err(), "fecha required");
+    }
+
+    #[test]
+    fn metodo_compartido_es_insensible_a_mayusculas() {
+        assert_eq!(normalize_metodo(" TARJETA "), "Tarjeta");
+        assert_eq!(normalize_metodo("efectivo"), "Efectivo");
+        assert_eq!(normalize_metodo("bizum"), "Efectivo");
+    }
+}

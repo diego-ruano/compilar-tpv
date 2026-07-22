@@ -32,3 +32,21 @@ pub struct CobroFraccionado {
     /// IDs de detalle a cobrar (no vacíos, ordenados y deduplicados).
     pub detalles: Vec<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metodo_normaliza_tarjeta_y_fallback_efectivo() {
+        for valor in ["tarjeta", " TARJETA ", "TaRjEtA"] { assert_eq!(normalize_metodo(valor), "Tarjeta"); }
+        for valor in ["", "efectivo", "bizum", "card"] { assert_eq!(normalize_metodo(valor), "Efectivo"); }
+    }
+
+    #[test]
+    fn opcional_recorta_conserva_interior_y_descarta_vacio() {
+        assert_eq!(limpiar_opcional(Some(" sin  cebolla ".into())), Some("sin  cebolla".into()));
+        assert_eq!(limpiar_opcional(Some("\t\n".into())), None);
+        assert_eq!(limpiar_opcional(None), None);
+    }
+}
