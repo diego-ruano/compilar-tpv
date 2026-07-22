@@ -15,6 +15,7 @@
 | LOGIN-02 (hash nube) | 🟠 | *(Opcional, no necesario)* No replicar / segregar `Password_Hash` de la nube. Con LOGIN-04 (600k) el crackeo offline ya se encarece mucho, así que este rediseño (que Handy delegue la auth en la Main, o un pepper fuera de la BD) queda como extra, no como pendiente. | [login.md](dominios/login.md) |
 | MESA-11 | 🟡 | Doble implementación Main (Rust) ↔ worker (TS) del dominio mesas: la lógica se iguala a mano y **diverge** (ya pasó con MESA-04/MESA-07). Falta el **harness de tests de contrato** y un plan de unificación (ver §[Unificación de la doble implementación](#unificación-de-la-doble-implementación-mainworker)). | [mesas.md](dominios/mesas.md) |
 | MESA-14 | 🔵 | Componentes de UI monolíticos (`MesaComandaModal.tsx` ~70 KB, `KitchenBoard.tsx` ~18 KB): troceo en subcomponentes (ticket / panel de cobro / selector de productos) + hooks. **Pospuesto por prioridad**, no hay bug de negocio detrás. | [mesas.md](dominios/mesas.md) |
+| FABLE-G | 🟠 | **CSP del cliente Tauri con comodín `https:`** (`script-src`/`connect-src` heredan de `default-src` → cualquier XSS futuro podría cargar código remoto y usar las APIs de Tauri). La investigación está **hecha y la solución redactada** (CSP estricta + `devCsp` + recorte de capacidades, ver §[Endurecimiento de la CSP](#endurecimiento-de-la-csp-del-cliente-tauri-fable-g--solución-lista-pendiente-de-aplicar)); aplazado porque aplicarla exige **probar a mano muchos flujos** (la CSP falla en runtime, no en compilación). | [auditoria-fable.md](../../auditoria-fable.md) |
 
 **Nota:** el harness de tests de contrato Rust↔worker cubriría de una vez STAT-06, INV-07, MESA-11 (y
 LOGIN-05 si acaba aplazado). Es una tarea transversal de infraestructura de testing, no de un dominio.
@@ -122,3 +123,69 @@ refactor.
 > **LIC-03** verificado como **no explotable** en pairing (todos los caminos firmados validan `ts` a
 > 2 min; `fetch-token` con nonce de un solo uso). **LIC-05** (SMTP al keyring) quedó **moot**: DB-04
 > eliminó el SMTP propio (correo por worker). **LIC-04** es documentar el modelo de amenaza del gate.
+
+---
+
+## Endurecimiento de la CSP del cliente Tauri (FABLE-G) — solución lista, pendiente de aplicar
+
+> Hallazgo 🟠 **G** de [auditoria-fable.md](../../auditoria-fable.md). Investigación completada el
+> 2026-07-18 (verificada contra el código del repo y la doc oficial de Tauri v2); **solo falta
+> aplicar los 3 cambios y pasar el checklist de pruebas manuales**. Se aplazó porque la CSP falla en
+> runtime (no en compilación) y la verificación toca muchos flujos.
+
+**Hallazgo clave de la investigación:** la webview usa mucha menos red de la que la auditoría asumía.
+El REST al worker va SIEMPRE por el proxy Rust (`tpv_server_post_json`, ver `shared/lib/cloudApi.ts`)
+y Sentry de la webview reenvía por `invoke` al SDK de Rust. Lo único directo desde la webview es el
+**WebSocket** (`useMainSocket`/`useHandySocket`) y las **imágenes** (asset local en Main, bucket R2
+público en Handy vía `shared/lib/imageUrl.ts`). No hay fuentes remotas, ni iframes, ni workers, ni
+wasm. Por eso `connect-src` NO necesita `https://tpv-api...` (a diferencia de lo que proponía la
+auditoría).
+
+### Cambio 1 — `csp` de producción en `apps/tpv-main/src-tauri/tauri.conf.json`
+
+```json
+"csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost wss://tpv-api.altarialights.workers.dev; img-src 'self' asset: http://asset.localhost https://asset.localhost https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-src 'none'"
+```
+
+- `style-src 'unsafe-inline'` es necesario: hay ~34 atributos `style={{…}}` en el frontend.
+- `ipc: http://ipc.localhost` es el transporte del IPC de Tauri en Windows (requisito documentado).
+- Tauri inyecta nonces/hashes para sus scripts de arranque en build → `script-src 'self'` funciona
+  (no tocar `dangerousDisableAssetCspModification`).
+- ⚠️ Si algún día se cambia `CDN_IMAGES_BASE` (`imageUrl.ts`) a dominio propio, actualizar el
+  `img-src` a la vez.
+
+### Cambio 2 — añadir `devCsp` (OBLIGATORIO junto al cambio 1)
+
+Si `devCsp` no existe, la `csp` de producción se aplica también en `tauri dev` y **rompe el dev**:
+el HMR de Vite usa `ws://localhost:1420` (y `ws://<IP>:1421` en dev Android por LAN) y el preámbulo
+de react-refresh es un script inline sin nonce (la inyección de nonces es solo en build).
+
+```json
+"devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost ws: wss://tpv-api.altarialights.workers.dev; img-src 'self' asset: http://asset.localhost https://asset.localhost https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev blob: data:"
+```
+
+### Cambio 3 — recorte de capacidades en `apps/tpv-main/src-tauri/capabilities/default.json`
+
+- **Quitar `opener:default`**: `@tauri-apps/plugin-opener` no se importa en ningún sitio del
+  frontend ni se usa en `crates/` (solo el `.init()` en `lib.rs`). Puede quitarse el plugin entero
+  (Cargo.toml + dependencia JS), no solo la capacidad.
+- **Quitar `fs:scope-download`, `fs:scope-desktop`, `fs:scope-document`**: los únicos `writeFile`
+  del frontend (exportar PDFs en `Cuentas.tsx` y `Trabajadores.tsx`) escriben en rutas elegidas con
+  el diálogo `save()`, y el plugin dialog añade la ruta elegida al scope de fs en runtime
+  (verificado en el fuente de `plugins-workspace`: el comando `save` hace `allow_file(&path)`).
+  Basta con `fs:default` + `fs:allow-write-file` + los permisos de `dialog:*`.
+
+### Checklist de verificación manual (el motivo del aplazamiento)
+
+Los fallos de CSP aparecen en la consola de la webview como `Refused to connect/load…`. Probar:
+
+1. Arranque de la app (el IPC pasa por `connect-src`).
+2. Modo online: WebSocket conectado y sincronizando (Main y Handy).
+3. Imágenes de productos en Main (protocolo `asset:`) y en Handy (bucket R2).
+4. Preview al subir/cambiar una imagen de producto/categoría (`blob:`).
+5. Exportar PDF desde Cuentas y desde Trabajadores (dialog `save()` + `writeFile`, valida también
+   el recorte de `fs:scope-*`).
+6. `pnpm tauri dev` con HMR vivo (valida el `devCsp`).
+
+**Colateral detectado en la investigación:** hay un `package-lock.json` huérfano en
+`apps/tpv-main/` que viola la regla pnpm-only (§8 de CLAUDE.md) → borrarlo en un commit aparte.
