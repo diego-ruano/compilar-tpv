@@ -95,7 +95,9 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
-          $nsis = "apps/tpv-main/src-tauri/target/release/bundle/nsis"
+          # OJO: el Cargo.toml raíz es un workspace VIRTUAL, así que cargo centraliza los
+          # artefactos de todos los miembros en <raíz>/target/, no en el target/ de la crate.
+          $nsis = "target/release/bundle/nsis"
           $exe = Get-ChildItem "$nsis/*-setup.exe" | Select-Object -First 1
           $sig = Get-ChildItem "$nsis/*-setup.exe.sig" | Select-Object -First 1
           if (-not $exe) { Write-Error "No se encontró el instalador NSIS (.exe)"; exit 1 }
