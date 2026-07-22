@@ -1242,11 +1242,10 @@ export class TenantHub {
 	private async verifyHelloSigned(params: {
 		tenantId: string;
 		deviceId: string;
-		roleHeader: Role;
 		msg: HelloSignedMsg;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role }> {
-		const { tenantId, deviceId, roleHeader, msg, pubkeyB64Hint } = params;
+		const { tenantId, deviceId, msg, pubkeyB64Hint } = params;
 
 		const ch = this.challengeByDevice.get(deviceId);
 		if (!ch) throw new Error("missing_challenge");
@@ -1266,12 +1265,15 @@ export class TenantHub {
 		let pubkeyB64 = (pubkeyB64Hint || "").trim();
 		if (!pubkeyB64) pubkeyB64 = (this.pubkeyByDevice.get(deviceId) || "").trim();
 
-		let roleFinal: Role = roleHeader;
-
 		const centralInfo = await this.loadDeviceFromCentral(tenantId, deviceId);
 		if (centralInfo.revoked) throw new Error("device_revoked");
 		if (centralInfo.pubkeyB64) pubkeyB64 = centralInfo.pubkeyB64;
-		roleFinal = centralInfo.role !== "unknown" ? centralInfo.role : roleHeader;
+
+		// El rol lo dicta EXCLUSIVAMENTE la BD central (activación → 'tpv',
+		// pairing → 'handy'). La cabecera x-role es del cliente y no puede
+		// otorgar privilegios: si la fila no trae un rol válido, el dispositivo
+		// queda "unknown" (sin permisos de apply ni de eventos).
+		const roleFinal: Role = centralInfo.role;
 
 		if (!pubkeyB64) throw new Error("device_pubkey_not_registered");
 
@@ -1495,7 +1497,6 @@ export class TenantHub {
 							const { roleFinal } = await this.verifyHelloSigned({
 								tenantId,
 								deviceId,
-								roleHeader,
 								msg,
 								pubkeyB64Hint: pubkeyHint,
 							});
@@ -1561,6 +1562,21 @@ export class TenantHub {
 			// asíncrono solo para reconciliar/revertir si algo falla.
 			if (msg.type === "apply") {
 				const m = msg as ApplyMsg;
+
+				// Autorización por rol: solo la Main (`tpv`) puede ejecutar SQL crudo
+				// por WS. El rol viene del helloSigned (BD central), nunca de la
+				// cabecera x-role del cliente. Las escrituras de la Handy van por
+				// REST → comandos de dominio acotados (hub.ts → /internal/apply).
+				if (this.roles.get(deviceId) !== "tpv") {
+					this.send(server, {
+						type: "apply_ack",
+						opId: String(m.opId ?? m.op_id ?? "").trim(),
+						ok: false,
+						error: "forbidden_not_tpv",
+					});
+					return;
+				}
+
 				const inner = m.command;
 				const cmdType = String(inner?.type || "").trim();
 				const opId = String(m.opId ?? m.op_id ?? "").trim();
@@ -1630,7 +1646,9 @@ export class TenantHub {
 			}
 
 			if (msg.type === "event") {
-				const role = this.roles.get(deviceId) || roleHeader;
+				// El rol para autorizar viene del helloSigned (BD central); la
+				// cabecera x-role del cliente jamás decide permisos.
+				const role = this.roles.get(deviceId) ?? "unknown";
 				const name = String(msg.name || "");
 
 				if (!isEventAllowed(role, name)) {
