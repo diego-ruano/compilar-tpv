@@ -1,9 +1,33 @@
 // src/shared/stores/useTheme.ts
 import { create } from "zustand";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export type Theme = "light" | "dark";
 
 const STORAGE_KEY = "tpv:theme";
+
+// Colores de fondo por tema en RGBA (0-255), espejo de --bg en Global.css.
+// En Windows el canal alpha se ignora; ambos son opacos.
+const BG_DARK: [number, number, number, number] = [14, 15, 19, 255]; // #0e0f13
+const BG_LIGHT: [number, number, number, number] = [246, 247, 249, 255]; // #f6f7f9
+
+/**
+ * Fija el color de fondo NATIVO del WebView2 (no del DOM). Ese color es el que
+ * el webview pinta durante una recarga (Ctrl+R), antes de que exista la nueva
+ * página; por defecto es blanco y ahí nace el destello. Al fijarlo aquí persiste
+ * entre recargas dentro del mismo proceso, eliminando el flash blanco.
+ */
+function applyNativeBackground(dark: boolean) {
+    try {
+        void getCurrentWindow()
+            .setBackgroundColor(dark ? BG_DARK : BG_LIGHT)
+            .catch(() => {
+                /* API/permiso no disponible: ignoramos */
+            });
+    } catch {
+        /* fuera de contexto Tauri: ignoramos */
+    }
+}
 
 /**
  * Lee el tema inicial.
@@ -25,8 +49,15 @@ function getInitialTheme(): Theme {
 function applyThemeClass(theme: Theme) {
     if (typeof document === "undefined") return;
     const root = document.documentElement;
-    if (theme === "dark") root.classList.add("dark");
+    const dark = theme === "dark";
+    if (dark) root.classList.add("dark");
     else root.classList.remove("dark");
+    // Mantiene sincronizado el fondo inline que fija el script anti-FOUC de
+    // index.html, para que un cambio de tema en caliente no deje al <html>
+    // con un color de fondo obsoleto detrás del body.
+    root.style.backgroundColor = dark ? "#0e0f13" : "#f6f7f9";
+    root.style.colorScheme = dark ? "dark" : "light";
+    applyNativeBackground(dark);
 }
 
 type ThemeState = {

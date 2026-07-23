@@ -16,7 +16,8 @@
         "width": 800,
         "height": 600,
         "decorations": false,
-        "label": "main"
+        "label": "main",
+        "backgroundColor": "#f6f7f9"
       }
     ],
     "security": {

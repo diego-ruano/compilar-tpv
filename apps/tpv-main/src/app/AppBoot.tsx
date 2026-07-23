@@ -768,14 +768,12 @@ export default function AppBoot({ router }: { router: any }) {
 
             <div
                 className={cn(
-                    "flex-1 min-h-0 bg-slate-100",
+                    "flex-1 min-h-0 bg-bg",
                     showBootTopBar ? "overflow-y-auto" : "overflow-hidden",
                 )}
             >
                 {mode === "loading" || lic === "loading" ? (
-                    <div className="min-h-full w-full bg-slate-100 p-6 font-sans">
-                        Cargando...
-                    </div>
+                    <div className="min-h-full w-full bg-bg p-6 font-sans" />
                 ) : mode === null ? (
                     <div className="relative flex min-h-full w-full items-center justify-center overflow-hidden bg-bg px-4 py-6 font-sans text-fg sm:px-6 lg:px-10">
                         <div
@@ -1237,9 +1235,7 @@ export default function AppBoot({ router }: { router: any }) {
                     )
                 ) : mode === "tpv" ? (
                     gate === "loading" ? (
-                        <div className="min-h-full w-full bg-slate-100 p-6 font-sans">
-                            Comprobando licencia...
-                        </div>
+                        <div className="min-h-full w-full bg-bg p-6 font-sans" />
                     ) : !gate.allowed && gate.reason === "needs_activation" ? (
                         <div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">
                             <div
