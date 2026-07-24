@@ -20,6 +20,7 @@ use tpv_application::use_cases::pairing as uc_pairing;
 
 use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
+    avisos::AvisosScanRepository,
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
     mesas::MesasRepository,
@@ -40,6 +41,7 @@ use tpv_infra_http::{
 };
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
+    avisos::SqliteAvisosScanRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
@@ -469,6 +471,19 @@ impl AppState {
             .cloned()
             .ok_or_else(|| "DB no inicializada (pedidos requieren modo Main)".to_string())?;
         Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn)) as Arc<dyn PedidoProveedorRepository>)
+    }
+
+    /// Escáner de avisos (tareas vencidas / reservas próximas): solo Main (SQLite). En Handy no hay
+    /// BD local → devuelve error y el tick periódico lo salta.
+    pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (escáner de avisos requiere modo Main)".to_string())?;
+        Ok(Arc::new(SqliteAvisosScanRepository::new(conn)) as Arc<dyn AvisosScanRepository>)
     }
 }
 
@@ -1058,13 +1073,41 @@ async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
         .map_err(|e| format!("updater no disponible: {e}"))?;
 
     match updater.check().await {
-        Ok(Some(update)) => Ok(Some(UpdateInfo {
-            version: update.version.clone(),
-            current_version: update.current_version.clone(),
-            notes: update.body.clone(),
-        })),
+        Ok(Some(update)) => {
+            // Aviso "actualización disponible" a los administradores. Dedupe por versión → una sola
+            // notificación por versión aunque el chequeo se repita (arranque + reintentos).
+            notify_update_available(&app, &update.version).await;
+            Ok(Some(UpdateInfo {
+                version: update.version.clone(),
+                current_version: update.current_version.clone(),
+                notes: update.body.clone(),
+            }))
+        }
         Ok(None) => Ok(None),
         Err(e) => Err(format!("error comprobando actualización: {e}")),
+    }
+}
+
+/// Emite (best-effort) una notificación de actualización disponible a los administradores. Si no
+/// hay notifier disponible aún (sin modo/BD), no hace nada.
+async fn notify_update_available(app: &AppHandle, version: &str) {
+    use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
+    let state = app.state::<AppState>();
+    if let Ok(notifier) = state.notifier().await {
+        let _ = notifier
+            .emitir(NuevaNotificacion {
+                tipo: "actualizacion_disponible".to_string(),
+                severidad: Severidad::Info,
+                titulo: "Actualización disponible".to_string(),
+                cuerpo: Some(format!("Versión {version} lista para instalar.")),
+                destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                accion: Some("ver_actualizacion".to_string()),
+                payload: None,
+                clave_dedupe: Some(format!("actualizacion:{version}")),
+                expira_en: None,
+            })
+            .await;
     }
 }
 
@@ -1243,6 +1286,28 @@ pub fn run() {
                 cloud: Arc::new(Mutex::new(cloud_opt)),
                 mode: Arc::new(Mutex::new(mode)),
                 mode_sync,
+            });
+
+            // Escáner periódico de avisos (tareas vencidas / reservas próximas). Corre en un hilo
+            // de fondo cada 10 min; solo hace algo cuando hay BD (modo Main): en Handy/arranque sin
+            // BD, `avisos_scan_repo` devuelve error y se salta. Emite con dedupe → idempotente.
+            let scan_handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10 * 60));
+                loop {
+                    interval.tick().await;
+                    let state = scan_handle.state::<AppState>();
+                    if let (Ok(scan), Ok(notifier)) =
+                        (state.avisos_scan_repo().await, state.notifier().await)
+                    {
+                        let _ = tpv_application::use_cases::avisos::escanear(
+                            scan.as_ref(),
+                            notifier.as_ref(),
+                            tpv_application::use_cases::avisos::VENTANA_RESERVA_MIN,
+                        )
+                        .await;
+                    }
+                }
             });
 
             Ok(())

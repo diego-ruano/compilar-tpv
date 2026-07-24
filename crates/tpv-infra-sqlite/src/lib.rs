@@ -28,6 +28,7 @@ pub mod migrations;
 // o `db.write()` (escritor único) según la operación; los helpers son genéricos sobre los traits
 // `Reader`/`Writer` de `db.rs`.
 pub mod auth;
+pub mod avisos;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;

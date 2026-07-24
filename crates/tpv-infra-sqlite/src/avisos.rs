@@ -1,0 +1,89 @@
+//! Adaptador SQLite del **escáner de avisos** (`AvisosScanRepository`). Lecturas puras (pool de
+//! lectura) de condiciones de tiempo/estado; no escribe (las emisiones las hace el `Notifier`).
+
+use std::sync::Arc;
+
+use async_trait::async_trait;
+use libsql::Value;
+
+use tpv_application::error::{AppError, AppResult};
+use tpv_application::ports::avisos::{AvisosScanRepository, ReservaProxima, TareaVencida};
+
+use crate::db::{Db, Reader};
+use crate::mapping::v_string;
+
+pub struct SqliteAvisosScanRepository {
+    db: Arc<Db>,
+}
+
+impl SqliteAvisosScanRepository {
+    pub fn new(db: Arc<Db>) -> Self {
+        Self { db }
+    }
+}
+
+fn db_err(e: impl std::fmt::Display) -> AppError {
+    AppError::repository(e.to_string())
+}
+
+#[async_trait]
+impl AvisosScanRepository for SqliteAvisosScanRepository {
+    async fn tareas_vencidas(&self) -> AppResult<Vec<TareaVencida>> {
+        // Tarea ABIERTA con fecha límite pasada y ≥1 asignación no finalizada. `date('now','localtime')`
+        // va en una LECTURA (no se captura en el outbox), así que es seguro.
+        let sql = r#"
+            SELECT t.ID_Tarea, t.Titulo
+            FROM Tareas t
+            WHERE COALESCE(t.Estado, 'ABIERTA') = 'ABIERTA'
+              AND t.Fecha_Limite IS NOT NULL
+              AND date(t.Fecha_Limite) < date('now','localtime')
+              AND EXISTS (
+                SELECT 1 FROM Tarea_Asignaciones a
+                WHERE a.ID_Tarea = t.ID_Tarea AND a.Estado <> 'FINALIZADA'
+              )
+            ORDER BY t.Fecha_Limite ASC;
+        "#;
+
+        let db = self.db.read().await;
+        let mut rows = db.query(sql, ()).await.map_err(db_err)?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            out.push(TareaVencida {
+                id_tarea: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                titulo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+            });
+        }
+        Ok(out)
+    }
+
+    async fn reservas_proximas(&self, ventana_min: i64) -> AppResult<Vec<ReservaProxima>> {
+        // El modificador de `datetime` va como parámetro (?1 = "+N minutes"): reserva cuyo inicio
+        // cae entre ahora y ahora+ventana.
+        let modif = format!("+{} minutes", ventana_min.max(0));
+        let sql = r#"
+            SELECT r.ID_Reserva, COALESCE(c.Nombre, '') AS Nombre, r.Dia_YMD, r.Hora
+            FROM Reservas r
+            LEFT JOIN Clientes c ON c.ID_Cliente = r.ID_Cliente
+            WHERE UPPER(COALESCE(r.Estado, '')) = 'ACTIVA'
+              AND datetime(r.Dia_YMD || ' ' || r.Hora) >= datetime('now','localtime')
+              AND datetime(r.Dia_YMD || ' ' || r.Hora) <= datetime('now','localtime', ?1)
+            ORDER BY r.Dia_YMD ASC, r.Hora ASC;
+        "#;
+
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(sql, vec![Value::Text(modif)])
+            .await
+            .map_err(db_err)?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            out.push(ReservaProxima {
+                id_reserva: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                nombre_cliente: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                dia_ymd: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                hora: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
+            });
+        }
+        Ok(out)
+    }
+}

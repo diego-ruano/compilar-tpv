@@ -1,5 +1,6 @@
 //! Casos de uso: orquestan dominio + puertos. Sin SQL ni detalles de Tauri.
 
+pub mod avisos;
 pub mod clientes;
 pub mod cloud_sync;
 pub mod configuracion;

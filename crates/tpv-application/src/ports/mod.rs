@@ -1,5 +1,6 @@
 //! Puertos (traits) que la infraestructura debe implementar.
 
+pub mod avisos;
 pub mod clientes;
 pub mod cloud_sync;
 pub mod configuracion;
