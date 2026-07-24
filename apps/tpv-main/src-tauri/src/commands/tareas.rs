@@ -62,7 +62,9 @@ pub async fn tareas_create_tarea(
     args: CreateTareaInput,
 ) -> Result<bool, String> {
     let repo = state.tareas_repo().await?;
-    Ok(uc::create_tarea(repo.as_ref(), args).await?)
+    // El Notifier solo existe en modo Main (SQLite local); en Handy es `None` y no se emite localmente.
+    let notifier = state.notifier().await.ok();
+    Ok(uc::create_tarea(repo.as_ref(), notifier.as_deref(), args).await?)
 }
 
 #[tauri::command]
@@ -71,7 +73,8 @@ pub async fn tareas_update_tarea(
     args: UpdateTareaInput,
 ) -> Result<bool, String> {
     let repo = state.tareas_repo().await?;
-    Ok(uc::update_tarea(repo.as_ref(), args).await?)
+    let notifier = state.notifier().await.ok();
+    Ok(uc::update_tarea(repo.as_ref(), notifier.as_deref(), args).await?)
 }
 
 #[tauri::command]
@@ -80,7 +83,8 @@ pub async fn tareas_set_asignaciones_tarea(
     args: SetAsignacionesTareaInput,
 ) -> Result<bool, String> {
     let repo = state.tareas_repo().await?;
-    Ok(uc::set_asignaciones(repo.as_ref(), args).await?)
+    let notifier = state.notifier().await.ok();
+    Ok(uc::set_asignaciones(repo.as_ref(), notifier.as_deref(), args).await?)
 }
 
 #[tauri::command]
