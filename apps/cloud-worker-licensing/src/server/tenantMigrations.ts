@@ -22,6 +22,7 @@ import m0004 from "../../../../packages/database/migrations/0004_movimientos_sto
 import m0005 from "../../../../packages/database/migrations/0005_intentos_login.sql";
 import m0006 from "../../../../packages/database/migrations/0006_comanda_unica_abierta.sql";
 import m0007 from "../../../../packages/database/migrations/0007_stock_suelto.sql";
+import m0008 from "../../../../packages/database/migrations/0008_notificaciones.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
@@ -31,6 +32,7 @@ const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0005_intentos_login.sql", sql: m0005 },
 	{ name: "0006_comanda_unica_abierta.sql", sql: m0006 },
 	{ name: "0007_stock_suelto.sql", sql: m0007 },
+	{ name: "0008_notificaciones.sql", sql: m0008 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
