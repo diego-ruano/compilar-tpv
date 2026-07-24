@@ -3,9 +3,11 @@
 use tpv_contracts::reservas::{
     ReservaDeleteInput, ReservaDto, ReservaSaveInput, ReservasGetMesArgs, ReservasMetaDto,
 };
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 use tpv_domain::reservas::{normalize_dia_ymd, ReservaValidada};
 
 use crate::error::{AppError, AppResult};
+use crate::ports::notificaciones::Notifier;
 use crate::ports::reservas::ReservasRepository;
 
 pub async fn get_meta(repo: &dyn ReservasRepository) -> AppResult<ReservasMetaDto> {
@@ -21,7 +23,21 @@ pub async fn get_mes(
     repo.mes(&desde, &hasta).await
 }
 
-pub async fn guardar(repo: &dyn ReservasRepository, input: ReservaSaveInput) -> AppResult<bool> {
+pub async fn guardar(
+    repo: &dyn ReservasRepository,
+    notifier: Option<&dyn Notifier>,
+    input: ReservaSaveInput,
+) -> AppResult<bool> {
+    // ¿Es un alta? (sin id -> el repo asigna uno). Se captura ANTES de `validar`, que consume input.
+    let es_nueva = input
+        .id_reserva
+        .as_deref()
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true);
+    let nombre_cliente = input.nombre_cliente.trim().to_string();
+    let dia = input.dia_ymd.trim().to_string();
+    let hora = input.hora.trim().to_string();
+
     let validada = ReservaValidada::validar(
         input.id_reserva,
         &input.dia_ymd,
@@ -38,7 +54,29 @@ pub async fn guardar(repo: &dyn ReservasRepository, input: ReservaSaveInput) -> 
     )
     .map_err(AppError::validation)?;
 
-    repo.guardar(validada).await
+    let ok = repo.guardar(validada).await?;
+
+    // Aviso "nueva reserva" a los administradores (SOLO en altas, no al editar). Best-effort.
+    if ok && es_nueva {
+        if let Some(notifier) = notifier {
+            let cuerpo = format!("{nombre_cliente} · {dia} {hora}");
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "reserva_nueva".to_string(),
+                    severidad: Severidad::Info,
+                    titulo: "Nueva reserva".to_string(),
+                    cuerpo: Some(cuerpo.trim().to_string()),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: Some("ver_reservas".to_string()),
+                    payload: None,
+                    clave_dedupe: None,
+                    expira_en: None,
+                })
+                .await;
+        }
+    }
+
+    Ok(ok)
 }
 
 pub async fn eliminar(repo: &dyn ReservasRepository, input: ReservaDeleteInput) -> AppResult<bool> {
@@ -68,6 +106,74 @@ mod tests {
         async fn eliminar(&self, _: &str) -> AppResult<bool> {
             panic!("repo llamado")
         }
+    }
+
+    /// Repo que acepta `guardar` (para probar la emisión sin tocar SQLite).
+    struct RepoOk;
+    #[async_trait]
+    impl ReservasRepository for RepoOk {
+        async fn meta(&self) -> AppResult<ReservasMetaDto> {
+            unimplemented!("no usado en estos tests")
+        }
+        async fn mes(&self, _: &str, _: &str) -> AppResult<Vec<ReservaDto>> {
+            Ok(vec![])
+        }
+        async fn guardar(&self, _: ReservaValidada) -> AppResult<bool> {
+            Ok(true)
+        }
+        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            Ok(true)
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeNotifier {
+        emitidas: std::sync::Mutex<Vec<NuevaNotificacion>>,
+    }
+    #[async_trait]
+    impl Notifier for FakeNotifier {
+        async fn emitir(&self, n: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(n);
+            Ok("notif-1".into())
+        }
+        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
+            Ok(false)
+        }
+    }
+
+    fn input_reserva(id: Option<&str>) -> ReservaSaveInput {
+        ReservaSaveInput {
+            id_reserva: id.map(|s| s.to_string()),
+            dia_ymd: "2026-07-25".into(),
+            hora: "20:30".into(),
+            turno: None,
+            comensales: 2,
+            nota: None,
+            estado: None,
+            id_mesa: "m1".into(),
+            nombre_cliente: "Ana".into(),
+            telefono: None,
+            email: None,
+            notas_cliente: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn guardar_alta_emite_aviso_a_admin() {
+        let notifier = FakeNotifier::default();
+        assert!(guardar(&RepoOk, Some(&notifier), input_reserva(None)).await.unwrap());
+
+        let emitidas = notifier.emitidas.lock().unwrap();
+        assert_eq!(emitidas.len(), 1);
+        assert_eq!(emitidas[0].tipo, "reserva_nueva");
+        assert_eq!(emitidas[0].destino, Destino::Rol(ADMIN_ROL_ID.to_string()));
+    }
+
+    #[tokio::test]
+    async fn guardar_edicion_no_emite() {
+        let notifier = FakeNotifier::default();
+        assert!(guardar(&RepoOk, Some(&notifier), input_reserva(Some("r1"))).await.unwrap());
+        assert!(notifier.emitidas.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

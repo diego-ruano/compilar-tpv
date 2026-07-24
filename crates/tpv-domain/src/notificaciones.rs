@@ -1,6 +1,11 @@
 //! Dominio de **notificaciones**: enums, entidad de emisión y validaciones puras.
 //! No conoce SQLite, ni Tauri, ni la frontera de la UI.
 
+/// `ID_Rol` FIJO del rol "Administrador" (seed de `0001_inicial.sql`, idéntico en Main y nube).
+/// Para dirigir avisos a todos los administradores con `Destino::Rol(ADMIN_ROL_ID)` sin lookups:
+/// la visibilidad compara `Destino_Valor` contra `Usuarios.ID_Rol`.
+pub const ADMIN_ROL_ID: &str = "00000000-0000-7000-8000-000000000001";
+
 /// Severidad visual de una notificación (mapea a la columna `Severidad`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severidad {

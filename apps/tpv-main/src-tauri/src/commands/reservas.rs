@@ -29,7 +29,8 @@ pub async fn reservas_save(
     args: ReservaSaveInput,
 ) -> Result<bool, String> {
     let repo = state.reservas_repo().await?;
-    Ok(uc::guardar(repo.as_ref(), args).await?)
+    let notifier = state.notifier().await.ok();
+    Ok(uc::guardar(repo.as_ref(), notifier.as_deref(), args).await?)
 }
 
 #[tauri::command]

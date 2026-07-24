@@ -4,9 +4,11 @@ use tpv_contracts::pedidos_proveedor::{
     PedidosActualizarInput, PedidosCambiarEstadoInput, PedidosCrearInput, PedidosGetPageInput,
     PedidosPageDto,
 };
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::error::{AppError, AppResult};
+use crate::ports::notificaciones::Notifier;
 use crate::ports::pedidos_proveedor::PedidoProveedorRepository;
 
 /// Tamaño máximo de página admitido (evita que la UI pida cargas gigantes).
@@ -27,6 +29,7 @@ pub async fn get_page(
 
 pub async fn crear(
     repo: &dyn PedidoProveedorRepository,
+    notifier: Option<&dyn Notifier>,
     input: PedidosCrearInput,
 ) -> AppResult<String> {
     let pedido = PedidoProveedorNuevo::validar(
@@ -52,7 +55,27 @@ pub async fn crear(
         .collect();
     let lineas = lineas.map_err(AppError::validation)?;
 
-    repo.crear(pedido, lineas).await
+    let id = repo.crear(pedido, lineas).await?;
+
+    // Un pedido nuevo nace en 'borrador' (pendiente de revisar/enviar): avisamos a los
+    // administradores. Dedupe por id => idempotente. Best-effort (no tumba la creación).
+    if let Some(notifier) = notifier {
+        let _ = notifier
+            .emitir(NuevaNotificacion {
+                tipo: "pedido_pendiente".to_string(),
+                severidad: Severidad::Aviso,
+                titulo: "Pedido pendiente de aprobar".to_string(),
+                cuerpo: Some("Hay un pedido de proveedor en borrador esperando revisión.".to_string()),
+                destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                accion: Some("ver_pedidos".to_string()),
+                payload: None,
+                clave_dedupe: Some(format!("pedido_pendiente:{id}")),
+                expira_en: None,
+            })
+            .await;
+    }
+
+    Ok(id)
 }
 
 pub async fn actualizar(
@@ -145,6 +168,70 @@ mod tests {
         async fn cambiar_estado(&self, _: &str, _: &str, _: Option<String>) -> AppResult<bool> {
             panic!("no usado")
         }
+    }
+
+    /// Repo que acepta `crear` (para probar la emisión sin tocar SQLite).
+    struct RepoCrearOk;
+    #[async_trait]
+    impl PedidoProveedorRepository for RepoCrearOk {
+        async fn get_page(&self, _: i64, _: i64, _: Option<String>) -> AppResult<PedidosPageDto> {
+            unimplemented!("no usado")
+        }
+        async fn crear(
+            &self,
+            _: PedidoProveedorNuevo,
+            _: Vec<LineaPedidoNueva>,
+        ) -> AppResult<String> {
+            Ok("ped-1".into())
+        }
+        async fn actualizar(
+            &self,
+            _: &str,
+            _: Option<String>,
+            _: Option<String>,
+            _: Option<String>,
+            _: Vec<LineaPedidoNueva>,
+        ) -> AppResult<bool> {
+            unimplemented!("no usado")
+        }
+        async fn cambiar_estado(&self, _: &str, _: &str, _: Option<String>) -> AppResult<bool> {
+            unimplemented!("no usado")
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeNotifier {
+        emitidas: Mutex<Vec<NuevaNotificacion>>,
+    }
+    #[async_trait]
+    impl Notifier for FakeNotifier {
+        async fn emitir(&self, n: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(n);
+            Ok("n1".into())
+        }
+        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn crear_emite_pedido_pendiente_a_admin() {
+        let notifier = FakeNotifier::default();
+        let input = PedidosCrearInput {
+            id_pedido: "p1".into(),
+            id_proveedor: Some("prov1".into()),
+            email_destino: None,
+            notas: None,
+            lineas: vec![],
+        };
+        let id = crear(&RepoCrearOk, Some(&notifier), input).await.unwrap();
+        assert_eq!(id, "ped-1");
+
+        let emitidas = notifier.emitidas.lock().unwrap();
+        assert_eq!(emitidas.len(), 1);
+        assert_eq!(emitidas[0].tipo, "pedido_pendiente");
+        assert_eq!(emitidas[0].destino, Destino::Rol(ADMIN_ROL_ID.to_string()));
+        assert_eq!(emitidas[0].clave_dedupe.as_deref(), Some("pedido_pendiente:ped-1"));
     }
 
     #[tokio::test]

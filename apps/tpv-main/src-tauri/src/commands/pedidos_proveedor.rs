@@ -25,7 +25,10 @@ pub async fn pedidos_proveedor_crear(
     args: PedidosCrearInput,
 ) -> Result<String, String> {
     let repo = state.pedidos_proveedor_repo().await?;
-    uc::crear(repo.as_ref(), args).await.map_err(|e| e.to_string())
+    let notifier = state.notifier().await.ok();
+    uc::crear(repo.as_ref(), notifier.as_deref(), args)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
