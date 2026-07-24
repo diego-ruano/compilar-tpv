@@ -3,6 +3,7 @@ import Layout from "./layouts/layout";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
+import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 import Login from "./pages/Login";
 
 // ✅ importa tu provider
@@ -15,6 +16,9 @@ function AppInner() {
 
     // Auto-logout por inactividad (solo actúa con sesión iniciada).
     useInactivityLogout();
+
+    // Toast al llegar una notificación nueva (no-op sin sesión).
+    useNotificacionesToast();
 
     if (!role) return <Login />;
 
