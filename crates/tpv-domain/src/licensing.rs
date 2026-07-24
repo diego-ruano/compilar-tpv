@@ -7,7 +7,8 @@
 //! el adaptador con la clave pineada; aquí solo se construye el mensaje canónico a verificar).
 
 /// Cuánto puede seguir funcionando el TPV sin lograr contactar con el servidor de licencias.
-pub const GRACIA_OFFLINE_MS: i64 = 48 * 60 * 60 * 1000;
+/// 72 h (3 días): margen amplio ante cortes de internet antes de bloquear.
+pub const GRACIA_OFFLINE_MS: i64 = 72 * 60 * 60 * 1000;
 
 /// Margen que se le concede al reloj del dispositivo antes de considerar que se ha atrasado
 /// (a mano) para estirar la gracia offline.

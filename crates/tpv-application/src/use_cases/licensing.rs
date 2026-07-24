@@ -12,9 +12,17 @@ use tpv_domain::licensing::{
     self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion,
     ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::licensing::LicensingService;
+use crate::ports::notificaciones::Notifier;
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+const HORA_MS: i64 = 60 * 60 * 1000;
+/// Días de gracia tras caducar la licencia (para el texto del aviso). DEBE coincidir con
+/// `GRACE_DAYS` del worker (`licensing.helpers.ts`), que es quien decide el estado real.
+const GRACIA_LICENCIA_DIAS: i64 = 3;
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -86,15 +94,117 @@ pub async fn request_device_change(
     svc.solicitar_cambio_dispositivo(clave).await
 }
 
-/// Gate de arranque / periódico: se apoya en la gracia offline si no hay red.
-pub async fn gate(svc: &dyn LicensingService) -> AppResult<LicenseGateResult> {
-    comprobar(svc, false).await
+/// Gate de arranque / periódico: se apoya en la gracia offline si no hay red. Además, avisa a los
+/// administradores cuando la licencia está por caducar, caducada-en-gracia, o corriendo sin conexión.
+pub async fn gate(
+    svc: &dyn LicensingService,
+    notifier: Option<&dyn Notifier>,
+) -> AppResult<LicenseGateResult> {
+    let res = comprobar(svc, false).await?;
+    if let Some(notifier) = notifier {
+        avisar_estado_licencia(notifier, &res, now_ms()).await;
+    }
+    Ok(res)
 }
 
 /// Comprobación pedida por el usuario ("Reintentar"): no enmascara los fallos del servidor con la
-/// gracia offline.
+/// gracia offline. No emite avisos (es una acción manual, no el pulso periódico).
 pub async fn check_now(svc: &dyn LicensingService) -> AppResult<LicenseGateResult> {
     comprobar(svc, true).await
+}
+
+/// Emite (best-effort) avisos a los administradores según el veredicto del gate. Dedupe temporal:
+/// avisos de licencia una vez al DÍA; el de gracia offline una vez cada 4 H (recordatorio insistente
+/// para no jugársela a que se olvide). El estado real (permitir/bloquear) NO se toca aquí.
+async fn avisar_estado_licencia(notifier: &dyn Notifier, res: &LicenseGateResult, ahora_ms: i64) {
+    let Some(state) = res.state.as_ref() else {
+        return;
+    };
+    let dia = ahora_ms / DAY_MS; // índice de día → dedupe diario sin formatear fecha
+
+    match res.reason.as_str() {
+        // Licencia por caducar (estado firmado `warn` del servidor).
+        "warn" => {
+            let dias = dias_ceil(state.expires_at_ms.map(|e| e - ahora_ms).unwrap_or(0));
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "licencia_por_expirar".to_string(),
+                    severidad: Severidad::Aviso,
+                    titulo: "Licencia por caducar".to_string(),
+                    cuerpo: Some(format!(
+                        "Tu licencia caduca en {dias} día(s). Renuévala para evitar el bloqueo."
+                    )),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: Some("ver_licencia".to_string()),
+                    payload: None,
+                    clave_dedupe: Some(format!("licencia_warn:{dia}")),
+                    expira_en: None,
+                })
+                .await;
+        }
+        // Caducada pero dentro de los 3 días de gracia (estado firmado `expiry_grace`): sigue funcionando.
+        "expiry_grace" => {
+            let bloqueo_ms = state
+                .expires_at_ms
+                .map(|e| e + GRACIA_LICENCIA_DIAS * DAY_MS)
+                .unwrap_or(ahora_ms);
+            let dias = dias_ceil(bloqueo_ms - ahora_ms);
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "licencia_caducada".to_string(),
+                    severidad: Severidad::Error,
+                    titulo: "Licencia caducada".to_string(),
+                    cuerpo: Some(format!(
+                        "Tu licencia ha caducado. Te quedan {dias} día(s) para renovar antes de que la app se bloquee."
+                    )),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: Some("ver_licencia".to_string()),
+                    payload: None,
+                    clave_dedupe: Some(format!("licencia_gracia:{dia}")),
+                    expira_en: None,
+                })
+                .await;
+        }
+        // Sin conexión con el servidor: corriendo con la gracia offline (72 h). Recordar cada 4 h.
+        "offline_grace" => {
+            let base = dom::base_gracia(state.last_check_ok_ms, state.activated_at_ms);
+            let restante_ms = (dom::GRACIA_OFFLINE_MS - (ahora_ms - base)).max(0);
+            let horas = horas_ceil(restante_ms);
+            let bucket = ahora_ms / (4 * HORA_MS);
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "gracia_offline".to_string(),
+                    severidad: Severidad::Aviso,
+                    titulo: "Sin conexión con licencias".to_string(),
+                    cuerpo: Some(format!(
+                        "No se ha podido verificar la licencia. Quedan ~{horas} h de funcionamiento sin conexión antes de bloquear."
+                    )),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: None,
+                    payload: None,
+                    clave_dedupe: Some(format!("gracia_offline:{bucket}")),
+                    expira_en: None,
+                })
+                .await;
+        }
+        _ => {}
+    }
+}
+
+fn dias_ceil(ms: i64) -> i64 {
+    if ms <= 0 {
+        0
+    } else {
+        (ms + DAY_MS - 1) / DAY_MS
+    }
+}
+
+fn horas_ceil(ms: i64) -> i64 {
+    if ms <= 0 {
+        0
+    } else {
+        (ms + HORA_MS - 1) / HORA_MS
+    }
 }
 
 async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<LicenseGateResult> {
@@ -185,6 +295,69 @@ fn estado_inicial(concedido: Concesion) -> LicenseLocalState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct FakeNotifier {
+        emitidas: Mutex<Vec<NuevaNotificacion>>,
+    }
+    #[async_trait]
+    impl Notifier for FakeNotifier {
+        async fn emitir(&self, n: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(n);
+            Ok("n".into())
+        }
+        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
+            Ok(false)
+        }
+    }
+
+    fn state_con_expiry(expires_at_ms: Option<i64>) -> LicenseLocalState {
+        LicenseLocalState {
+            tenant_id: "t1".into(),
+            device_id: "d1".into(),
+            status: None,
+            expires_at: None,
+            expires_at_ms,
+            plan: None,
+            last_server_time_ms: None,
+            last_check_ok_ms: None,
+            last_check_attempt_ms: None,
+            activated_at_ms: 0,
+        }
+    }
+
+    fn result(reason: &str, state: LicenseLocalState) -> LicenseGateResult {
+        LicenseGateResult { allowed: true, reason: reason.into(), state: Some(state) }
+    }
+
+    #[tokio::test]
+    async fn avisa_segun_el_motivo_del_gate() {
+        let ahora = 1_000 * DAY_MS;
+        let n = FakeNotifier::default();
+
+        avisar_estado_licencia(&n, &result("warn", state_con_expiry(Some(ahora + 3 * DAY_MS))), ahora).await;
+        avisar_estado_licencia(&n, &result("expiry_grace", state_con_expiry(Some(ahora - DAY_MS))), ahora).await;
+
+        let mut s = state_con_expiry(None);
+        s.last_check_ok_ms = Some(ahora - HORA_MS);
+        s.activated_at_ms = ahora - HORA_MS;
+        avisar_estado_licencia(&n, &result("offline_grace", s), ahora).await;
+
+        // Estado sano: no emite.
+        avisar_estado_licencia(&n, &result("ok", state_con_expiry(None)), ahora).await;
+
+        let e = n.emitidas.lock().unwrap();
+        assert_eq!(e.len(), 3);
+        assert_eq!(e[0].tipo, "licencia_por_expirar");
+        assert!(e[0].clave_dedupe.as_deref().unwrap().starts_with("licencia_warn:"));
+        assert_eq!(e[1].tipo, "licencia_caducada");
+        assert!(e[1].clave_dedupe.as_deref().unwrap().starts_with("licencia_gracia:"));
+        assert_eq!(e[2].tipo, "gracia_offline");
+        assert!(e[2].clave_dedupe.as_deref().unwrap().starts_with("gracia_offline:"));
+        assert!(e.iter().all(|n| n.destino == Destino::Rol(ADMIN_ROL_ID.to_string())));
+    }
 
     #[test]
     fn clean_recorta_y_descarta_cadenas_vacias() {

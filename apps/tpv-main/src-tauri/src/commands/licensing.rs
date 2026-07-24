@@ -36,7 +36,11 @@ pub fn license_clear_state(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, String> {
-    Ok(uc::gate(&svc(&app)?).await?)
+    // Notifier (mode-switched) para avisar de licencia por caducar / caducada-en-gracia / gracia
+    // offline. `None` si aún no hay modo/BD → no se avisa. La decisión del gate NO depende de esto.
+    let notifier = app.state::<crate::AppState>().notifier().await.ok();
+    let service = svc(&app)?;
+    Ok(uc::gate(&service, notifier.as_deref()).await?)
 }
 
 #[tauri::command]

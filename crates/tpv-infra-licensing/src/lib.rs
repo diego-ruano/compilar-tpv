@@ -254,7 +254,7 @@ fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
             FalloConsulta::Rechazada { code: code.to_string() }
         }
         // Todo lo demás (token/reloj/proof/5xx): transitorio o ambiguo. No se tira la licencia;
-        // decide la gracia offline. Si persiste > 48 h, la gracia expira y bloquea igual.
+        // decide la gracia offline. Si persiste > 72 h, la gracia expira y bloquea igual.
         _ => {
             let _ = http;
             FalloConsulta::Inalcanzable
