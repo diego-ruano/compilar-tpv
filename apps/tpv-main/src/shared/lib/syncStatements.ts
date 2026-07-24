@@ -138,6 +138,8 @@ const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
 	fichaje_dia: ["trabajadores"],
 	usuarios: ["trabajadores"],
 	roles: ["trabajadores"],
+	notificaciones: ["notificaciones"],
+	notificacion_lecturas: ["notificaciones"],
 	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave.
 	business_settings: [],
 	ticket_settings: [],

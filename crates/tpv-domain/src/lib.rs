@@ -15,6 +15,7 @@ pub mod inventario;
 pub mod licensing;
 pub mod login;
 pub mod mesas;
+pub mod notificaciones;
 pub mod pago;
 pub mod pedidos_proveedor;
 pub mod proveedores;

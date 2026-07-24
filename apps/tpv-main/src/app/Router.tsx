@@ -17,6 +17,7 @@ import Estadisticas from "./pages/Estadisticas";
 import Configuracion from "./pages/Configuracion";
 import Cuentas from "./pages/Cuentas";
 import Tareas from "./pages/Tareas";
+import Notificaciones from "./pages/Notificaciones";
 import Logout from "./pages/Logout";
 import NotFound from "./pages/errorPages/NotFound";
 
@@ -47,6 +48,7 @@ export const appRouter = createBrowserRouter([
 
             { path: "Estadisticas", element: <Estadisticas /> },
             { path: "Cuentas", element: <Cuentas /> },
+            { path: "Notificaciones", element: <Notificaciones /> },
             { path: "Configuracion", element: <Configuracion /> },
 
             { path: "Logout", element: <Logout /> },

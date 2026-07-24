@@ -11,6 +11,7 @@ import {
   ListChecks,
   Wallet,
   BarChart3,
+  Bell,
   Settings,
   LogOut,
   PanelLeft,
@@ -20,6 +21,7 @@ import {
 import NavBarItem from "./NavBarItem";
 import Logo from "../../assets/img/logo-morado-cuadrado.png";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useNoLeidasCount } from "../../features/notificaciones/notificacionesQueries";
 import { cn } from "../../shared/lib/cn";
 
 type Props = {
@@ -43,6 +45,7 @@ const ITEMS = {
   tareas: { pagina: "Tareas", icon: ListChecks },
   cuentas: { pagina: "Cuentas", icon: Wallet },
   estadisticas: { pagina: "Estadisticas", icon: BarChart3 },
+  notificaciones: { pagina: "Notificaciones", icon: Bell },
   configuracion: { pagina: "Configuracion", nombre: "Configuración", icon: Settings },
 } satisfies Record<string, MenuItem>;
 
@@ -61,7 +64,7 @@ const MENU_BY_ROLE: Record<string, { top: MenuItem[]; bottom: MenuItem[] }> = {
       ITEMS.cuentas,
       ITEMS.estadisticas,
     ],
-    bottom: [ITEMS.configuracion],
+    bottom: [ITEMS.notificaciones, ITEMS.configuracion],
   },
   Camarero: {
     top: [
@@ -72,21 +75,24 @@ const MENU_BY_ROLE: Record<string, { top: MenuItem[]; bottom: MenuItem[] }> = {
       ITEMS.trabajadores,
       ITEMS.tareas,
     ],
-    bottom: [],
+    bottom: [ITEMS.notificaciones],
   },
   Limpieza: {
     top: [ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
-    bottom: [],
+    bottom: [ITEMS.notificaciones],
   },
   Cocinero: {
     top: [ITEMS.comandas, ITEMS.inventario, ITEMS.trabajadores, ITEMS.tareas],
-    bottom: [],
+    bottom: [ITEMS.notificaciones],
   },
 };
 
 function NavBar({ open: openProp, onToggle, onClose }: Props) {
-  const { role, nombre, logout } = useAuth();
+  const { role, nombre, logout, idUsuario } = useAuth();
   const navigate = useNavigate();
+
+  // Badge de la campana: nº de notificaciones no leídas del usuario logueado.
+  const noLeidas = useNoLeidasCount(idUsuario).data ?? 0;
 
   // Soporta controlado por layout (responsive) o "uncontrolled".
   const [openLocal, setOpenLocal] = useState(false);
@@ -200,6 +206,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
             svg={item.icon}
             abierto={open}
             onClick={closeIfMobile}
+            badge={item.pagina === "Notificaciones" ? noLeidas : undefined}
           />
         ))}
 

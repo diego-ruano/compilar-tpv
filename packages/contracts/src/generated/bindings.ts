@@ -82,6 +82,16 @@ export type ContactSettings = { recovery_email: string, contact_email: string, c
 export type CopySemanaInput = { from_monday: string, to_monday: string, overwrite?: boolean, };
 
 /**
+ * Entrada para emitir una notificación manual (envío desde una pantalla de administración).
+ * El resto de módulos NO usan este DTO: emiten por el puerto `Notifier` en su caso de uso.
+ */
+export type CrearNotificacionInput = { tipo: string, severidad?: string, titulo: string, cuerpo?: string, destino_tipo: string, destino_valor?: string, accion?: string, 
+/**
+ * JSON (como string) con los datos de la acción.
+ */
+payload?: string, clave_dedupe?: string, expira_en?: string, };
+
+/**
  * Entrada para crear un cliente (Local-First: sin op_id ni outbox).
  */
 export type CreateClienteInput = { id_cliente?: string, nombre: string, email?: string, telefono?: string, notas?: string, };
@@ -202,6 +212,16 @@ export type LoginUserArgs = { id_usuario: string, pin: string, };
 
 export type LoteDto = { ID_Lote: string, ID_Producto: string, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Cantidad_Inicial: number, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: string | null, Notas: string | null, };
 
+/**
+ * Marca una notificación como leída por un usuario.
+ */
+export type MarcarLeidaInput = { id_notificacion: string, id_usuario: string, };
+
+/**
+ * Marca como leídas todas las notificaciones visibles de un usuario.
+ */
+export type MarcarTodasLeidasInput = { id_usuario: string, };
+
 export type MesaDto = { id_mesa: string, id_zona: string, numero_mesa: string, capacidad: number, };
 
 export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
@@ -267,6 +287,30 @@ export type MesasUpdateDetalleNotaInput = { id_detalle: string, nota?: string, }
 export type MisTareasArgs = { id_trabajador: string, };
 
 export type MisTareasRow = { ID_Tarea: string, Titulo: string, Descripcion: string | null, Fecha_Limite: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
+
+/**
+ * Fila del centro de notificaciones **para un usuario concreto**: incluye `leida`, que se calcula
+ * respecto a ese usuario (una notificación "a todos" está leída para unos y no para otros).
+ */
+export type NotificacionRow = { id_notificacion: string, tipo: string, severidad: string, titulo: string, cuerpo: string | null, destino_tipo: string, destino_valor: string | null, accion: string | null, payload: string | null, estado: string, creada_en: string, expira_en: string | null, 
+/**
+ * ¿La ha leído el usuario por el que se consulta?
+ */
+leida: boolean, };
+
+/**
+ * Args para listar las notificaciones visibles de un usuario.
+ */
+export type NotificacionesListArgs = { id_usuario: string, 
+/**
+ * Si es `true`, solo devuelve las no leídas por ese usuario.
+ */
+solo_no_leidas?: boolean, };
+
+/**
+ * Args con solo el id de usuario (p. ej. contador de no leídas).
+ */
+export type NotificacionesUsuarioArgs = { id_usuario: string, };
 
 /**
  * Una operación pendiente en el outbox local de la Main (dirección Main → nube). El frontend

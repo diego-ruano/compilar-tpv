@@ -22,7 +22,9 @@ use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
-    mesas::MesasRepository, pedidos_proveedor::PedidoProveedorRepository,
+    mesas::MesasRepository,
+    notificaciones::{NotificacionesRepository, Notifier},
+    pedidos_proveedor::PedidoProveedorRepository,
     proveedores::ProveedoresRepository, reservas::ReservasRepository,
     stats::StatsRepository, sync::SyncRepository, tareas::TareasRepository,
     trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
@@ -30,7 +32,8 @@ use tpv_application::ports::{
 use tpv_infra_http::{
     clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
     cuentas::HttpCuentasRepository, inventario::HttpInventarioRepository,
-    login::HttpLoginRepository, mesas::HttpMesasRepository, proveedores::HttpProveedoresRepository,
+    login::HttpLoginRepository, mesas::HttpMesasRepository,
+    notificaciones::HttpNotificacionesRepository, proveedores::HttpProveedoresRepository,
     reservas::HttpReservasRepository, stats::HttpStatsRepository, tareas::HttpTareasRepository,
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
@@ -40,6 +43,7 @@ use tpv_infra_sqlite::{
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
+    notificaciones::SqliteNotificacionesRepository,
     pedidos_proveedor::SqlitePedidoProveedorRepository, proveedores::SqliteProveedoresRepository,
     reservas::SqliteReservasRepository, stats::SqliteStatsRepository, sync::SqliteSyncRepository,
     tareas::SqliteTareasRepository, trabajadores::SqliteTrabajadoresRepository,
@@ -424,6 +428,20 @@ impl AppState {
         VentaRapidaRepository,
         SqliteVentaRapidaRepository,
         HttpVentaRapidaRepository
+    );
+    repo_accessor!(
+        notificaciones_repo,
+        NotificacionesRepository,
+        SqliteNotificacionesRepository,
+        HttpNotificacionesRepository
+    );
+    // El puerto de emisión `Notifier` lo implementa el MISMO adaptador (SQLite en Main, HTTP en
+    // Handy), así que también es mode-switched: en Handy `emitir` va por REST → DO → broadcast.
+    repo_accessor!(
+        notifier,
+        Notifier,
+        SqliteNotificacionesRepository,
+        HttpNotificacionesRepository
     );
 
     /// Repositorio de sincronización (aplicar cambios de la nube en la BD local). NO es
@@ -1364,6 +1382,12 @@ pub fn run() {
             commands::pedidos_proveedor::pedidos_proveedor_crear,
             commands::pedidos_proveedor::pedidos_proveedor_actualizar,
             commands::pedidos_proveedor::pedidos_proveedor_cambiar_estado,
+            // notificaciones (Local-First, modo Main)
+            commands::notificaciones::notificaciones_listar,
+            commands::notificaciones::notificaciones_no_leidas,
+            commands::notificaciones::notificaciones_marcar_leida,
+            commands::notificaciones::notificaciones_marcar_todas_leidas,
+            commands::notificaciones::notificaciones_crear,
             // venta rápida
             commands::venta_rapida::vr_list_categorias_vendibles,
             commands::venta_rapida::vr_list_productos_by_categoria,

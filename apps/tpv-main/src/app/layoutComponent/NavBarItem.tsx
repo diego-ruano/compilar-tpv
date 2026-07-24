@@ -8,12 +8,15 @@ function NavBarItem({
   svg: SvgIcon,
   abierto,
   onClick,
+  badge,
 }: {
   pagina: string;
   nombre?: string;
   svg: LucideIcon;
   abierto: boolean;
   onClick?: () => void;
+  /** Contador opcional (p. ej. notificaciones no leídas). Se pinta sobre el icono si > 0. */
+  badge?: number;
 }) {
   const ruta: To = "../" + pagina;
   const label = nombre || pagina;
@@ -47,7 +50,14 @@ function NavBarItem({
         )}
       />
 
-      <SvgIcon className="size-5 shrink-0" strokeWidth={active ? 2.4 : 2} />
+      <span className="relative shrink-0">
+        <SvgIcon className="size-5" strokeWidth={active ? 2.4 : 2} />
+        {typeof badge === "number" && badge > 0 && (
+          <span className="absolute -right-2 -top-2 grid h-4 min-w-4 place-items-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-white shadow-sm">
+            {badge > 99 ? "99+" : badge}
+          </span>
+        )}
+      </span>
 
       <span
         className={cn(
