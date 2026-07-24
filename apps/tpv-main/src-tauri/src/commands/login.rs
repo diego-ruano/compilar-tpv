@@ -29,7 +29,8 @@ pub async fn login_user(
     args: LoginUserArgs,
 ) -> Result<LoginOk, String> {
     let repo = state.login_repo().await?;
-    Ok(uc::login_user(repo.as_ref(), args).await?)
+    let notifier = state.notifier().await.ok();
+    Ok(uc::login_user(repo.as_ref(), notifier.as_deref(), args).await?)
 }
 
 #[tauri::command]

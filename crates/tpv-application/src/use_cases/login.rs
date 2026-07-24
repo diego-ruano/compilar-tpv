@@ -7,9 +7,14 @@ use tpv_contracts::login::{
     SetTurnoPartidoInput, UserListItem,
 };
 use tpv_domain::login::{hash_pin, limpiar_opcional, requerido, validate_email_basic};
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::login::LoginRepository;
+use crate::ports::notificaciones::Notifier;
+
+/// Umbral de intentos de PIN fallidos consecutivos que dispara el aviso de seguridad.
+const UMBRAL_LOGIN_FALLIDOS: i64 = 5;
 
 /// Hash de un PIN (comando `hash_password`). Cómputo puro de dominio.
 pub fn hash_password(pin: &str) -> AppResult<String> {
@@ -20,8 +25,40 @@ pub async fn list_login_users(repo: &dyn LoginRepository) -> AppResult<Vec<UserL
     repo.list_login_users().await
 }
 
-pub async fn login_user(repo: &dyn LoginRepository, args: LoginUserArgs) -> AppResult<LoginOk> {
-    repo.login(&args.id_usuario, &args.pin).await
+pub async fn login_user(
+    repo: &dyn LoginRepository,
+    notifier: Option<&dyn Notifier>,
+    args: LoginUserArgs,
+) -> AppResult<LoginOk> {
+    let res = repo.login(&args.id_usuario, &args.pin).await;
+
+    // Aviso de seguridad a admins EXACTAMENTE al alcanzar el umbral de fallos consecutivos (una vez
+    // por racha; el 6º, 7º… no re-emiten, y un login correcto resetea el contador). Best-effort.
+    if res.is_err() {
+        if let Some(notifier) = notifier {
+            if let Ok(n) = repo.intentos_fallidos(&args.id_usuario).await {
+                if n == UMBRAL_LOGIN_FALLIDOS {
+                    let _ = notifier
+                        .emitir(NuevaNotificacion {
+                            tipo: "login_fallidos".to_string(),
+                            severidad: Severidad::Aviso,
+                            titulo: "Varios intentos de acceso fallidos".to_string(),
+                            cuerpo: Some(format!(
+                                "Se han registrado {UMBRAL_LOGIN_FALLIDOS} intentos de PIN fallidos seguidos."
+                            )),
+                            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                            accion: None,
+                            payload: None,
+                            clave_dedupe: None,
+                            expira_en: None,
+                        })
+                        .await;
+                }
+            }
+        }
+    }
+
+    res
 }
 
 pub async fn get_today_punch_status(
@@ -103,6 +140,91 @@ pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<P
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    struct FakeLogin {
+        fallidos: i64,
+    }
+    #[async_trait]
+    impl LoginRepository for FakeLogin {
+        async fn list_login_users(&self) -> AppResult<Vec<UserListItem>> {
+            Ok(vec![])
+        }
+        async fn get_today_punch_status(&self, _: &str) -> AppResult<PunchStatus> {
+            unimplemented!("no usado")
+        }
+        async fn login(&self, _: &str, _: &str) -> AppResult<LoginOk> {
+            Err(AppError::validation("PIN incorrecto"))
+        }
+        async fn intentos_fallidos(&self, _: &str) -> AppResult<i64> {
+            Ok(self.fallidos)
+        }
+        async fn complete_initial_setup(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: &str,
+        ) -> AppResult<()> {
+            unimplemented!("no usado")
+        }
+        async fn punch(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: Option<String>,
+            _: Option<String>,
+        ) -> AppResult<PunchStatus> {
+            unimplemented!("no usado")
+        }
+        async fn set_turno_partido(
+            &self,
+            _: &str,
+            _: Option<String>,
+            _: bool,
+        ) -> AppResult<()> {
+            unimplemented!("no usado")
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeNotifier {
+        emitidas: Mutex<Vec<NuevaNotificacion>>,
+    }
+    #[async_trait]
+    impl Notifier for FakeNotifier {
+        async fn emitir(&self, n: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(n);
+            Ok("n".into())
+        }
+        async fn resolver_por_clave(&self, _: &str) -> AppResult<bool> {
+            Ok(false)
+        }
+    }
+
+    #[tokio::test]
+    async fn login_emite_aviso_al_quinto_fallo() {
+        let repo = FakeLogin { fallidos: 5 };
+        let notifier = FakeNotifier::default();
+        let args = LoginUserArgs { id_usuario: "u1".into(), pin: "0000".into() };
+        assert!(login_user(&repo, Some(&notifier), args).await.is_err());
+
+        let e = notifier.emitidas.lock().unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, "login_fallidos");
+        assert_eq!(e[0].destino, Destino::Rol(ADMIN_ROL_ID.to_string()));
+    }
+
+    #[tokio::test]
+    async fn login_no_emite_antes_del_umbral() {
+        let repo = FakeLogin { fallidos: 4 };
+        let notifier = FakeNotifier::default();
+        let args = LoginUserArgs { id_usuario: "u1".into(), pin: "0000".into() };
+        assert!(login_user(&repo, Some(&notifier), args).await.is_err());
+        assert!(notifier.emitidas.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn hash_password_genera_hash_verificable_y_no_deja_pin_en_claro() {

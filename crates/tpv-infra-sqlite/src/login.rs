@@ -573,6 +573,21 @@ impl LoginRepository for SqliteLoginRepository {
         build_punch_status(&db, id_usuario, &today_ymd()).await
     }
 
+    async fn intentos_fallidos(&self, id_usuario: &str) -> AppResult<i64> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                "SELECT Intentos_Fallidos FROM Intentos_Login WHERE ID_Usuario=?1 LIMIT 1;",
+                vec![Value::Text(id_usuario.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(match rows.next().await.map_err(db_err)? {
+            Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+            None => 0,
+        })
+    }
+
     async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk> {
         crate::auth::throttle_check(&self.db, id_usuario).await?;
 

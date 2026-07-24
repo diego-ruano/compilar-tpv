@@ -21,6 +21,12 @@ pub trait LoginRepository: Send + Sync {
     /// Verifica el PIN y devuelve los datos de sesión.
     async fn login(&self, id_usuario: &str, pin: &str) -> AppResult<LoginOk>;
 
+    /// Nº de intentos de PIN fallidos consecutivos del usuario (0 si no hay racha). Por defecto 0:
+    /// los adaptadores que no lo rastrean (p. ej. HTTP/Handy) no disparan el aviso de seguridad.
+    async fn intentos_fallidos(&self, _id_usuario: &str) -> AppResult<i64> {
+        Ok(0)
+    }
+
     /// Verifica el PIN actual, comprueba el email y aplica el setup inicial (cambia PIN + email).
     async fn complete_initial_setup(
         &self,
