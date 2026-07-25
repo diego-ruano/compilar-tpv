@@ -5,9 +5,21 @@
 
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use ed25519_dalek::{Signature, Signer, SigningKey};
-use keyring::Entry;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
+
+use crate::secret_store;
+
+// Identificadores (service, key) del almacén de secretos. En escritorio son el par (service, user)
+// del keyring del SO; en Android son claves de las SharedPreferences cifradas. NO cambiar: cambiarlos
+// haría "perder" los secretos ya guardados en instalaciones existentes.
+const SVC_LICENSING: &str = "tpv-licensing";
+const KEY_DEVICE_ID: &str = "device-id";
+const SVC_DEVICE_KEY: &str = "tpv-licensing-devicekey";
+const SVC_AUTH: &str = "tpv-auth";
+const KEY_LICENSE_TOKEN: &str = "license-token";
+const KEY_HANDY_TOKEN: &str = "handy-token";
+const KEY_HANDY_TENANT: &str = "handy-tenant-id";
 
 pub fn sha256_hex(s: &str) -> String {
     let mut h = Sha256::new();
@@ -16,16 +28,10 @@ pub fn sha256_hex(s: &str) -> String {
     out.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/* ===== device-id + keypair (keyring) ===== */
-
-fn key_entry_device_id() -> Result<Entry, String> {
-    Entry::new("tpv-licensing", "device-id").map_err(|e| e.to_string())
-}
+/* ===== device-id + keypair (almacén de secretos) ===== */
 
 pub fn get_or_create_device_id() -> Result<String, String> {
-    let entry = key_entry_device_id()?;
-
-    if let Ok(v) = entry.get_password() {
+    if let Ok(Some(v)) = secret_store::get(SVC_LICENSING, KEY_DEVICE_ID) {
         let t = v.trim().to_string();
         if !t.is_empty() {
             return Ok(t);
@@ -33,19 +39,13 @@ pub fn get_or_create_device_id() -> Result<String, String> {
     }
 
     let id = Uuid::new_v4().to_string();
-    entry.set_password(&id).map_err(|e| e.to_string())?;
+    secret_store::set(SVC_LICENSING, KEY_DEVICE_ID, &id)?;
     Ok(id)
 }
 
-fn key_entry_privkey(device_id: &str) -> Result<Entry, String> {
-    Entry::new("tpv-licensing-devicekey", device_id).map_err(|e| e.to_string())
-}
-
-/// Devuelve `(SigningKey, pubkey_b64)` desde keyring; si no existe, la crea y persiste.
+/// Devuelve `(SigningKey, pubkey_b64)` desde el almacén; si no existe, la crea y persiste.
 pub fn get_or_create_device_keypair(device_id: &str) -> Result<(SigningKey, String), String> {
-    let entry = key_entry_privkey(device_id)?;
-
-    if let Ok(b64) = entry.get_password() {
+    if let Ok(Some(b64)) = secret_store::get(SVC_DEVICE_KEY, device_id) {
         let bytes = B64.decode(b64.trim()).map_err(|e| e.to_string())?;
 
         if bytes.len() != 32 {
@@ -66,7 +66,7 @@ pub fn get_or_create_device_keypair(device_id: &str) -> Result<(SigningKey, Stri
     let sk = SigningKey::generate(&mut rng);
 
     let sk_b64 = B64.encode(sk.to_bytes());
-    entry.set_password(&sk_b64).map_err(|e| e.to_string())?;
+    secret_store::set(SVC_DEVICE_KEY, device_id, &sk_b64)?;
 
     let pub_b64 = B64.encode(sk.verifying_key().to_bytes());
     Ok((sk, pub_b64))
@@ -96,15 +96,10 @@ pub fn sign_payload_b64(sk: &SigningKey, payload: &str) -> Result<String, String
    vive SOLO en el keyring del SO, nunca en `license_state.json`. Un fichero copiado no basta para
    suplantar al dispositivo (falta también la clave privada ed25519, que igualmente está aquí). */
 
-fn key_entry_license_token() -> Result<Entry, String> {
-    Entry::new("tpv-auth", "license-token").map_err(|e| e.to_string())
-}
-
 pub fn get_license_token() -> Result<String, String> {
-    let entry = key_entry_license_token()?;
-    let token = entry
-        .get_password()
-        .map_err(|_| "license_token_missing".to_string())?;
+    let token = secret_store::get(SVC_AUTH, KEY_LICENSE_TOKEN)
+        .map_err(|_| "license_token_missing".to_string())?
+        .ok_or_else(|| "license_token_missing".to_string())?;
     let token = token.trim().to_string();
     if token.is_empty() {
         return Err("license_token_missing".into());
@@ -113,31 +108,20 @@ pub fn get_license_token() -> Result<String, String> {
 }
 
 pub fn set_license_token(token: &str) -> Result<(), String> {
-    key_entry_license_token()?
-        .set_password(token.trim())
-        .map_err(|e| e.to_string())
+    secret_store::set(SVC_AUTH, KEY_LICENSE_TOKEN, token.trim())
 }
 
 pub fn clear_license_token() -> Result<(), String> {
-    let _ = key_entry_license_token()?.delete_password();
+    let _ = secret_store::delete(SVC_AUTH, KEY_LICENSE_TOKEN);
     Ok(())
 }
 
-/* ===== handy token (keyring) ===== */
-
-fn key_entry_handy_token() -> Result<Entry, String> {
-    Entry::new("tpv-auth", "handy-token").map_err(|e| e.to_string())
-}
-
-fn key_entry_handy_tenant() -> Result<Entry, String> {
-    Entry::new("tpv-auth", "handy-tenant-id").map_err(|e| e.to_string())
-}
+/* ===== handy token (almacén de secretos) ===== */
 
 pub fn get_handy_token() -> Result<String, String> {
-    let entry = key_entry_handy_token()?;
-    let token = entry
-        .get_password()
-        .map_err(|_| "handy_token_missing".to_string())?;
+    let token = secret_store::get(SVC_AUTH, KEY_HANDY_TOKEN)
+        .map_err(|_| "handy_token_missing".to_string())?
+        .ok_or_else(|| "handy_token_missing".to_string())?;
     let token = token.trim().to_string();
     if token.is_empty() {
         return Err("handy_token required".into());
@@ -146,25 +130,20 @@ pub fn get_handy_token() -> Result<String, String> {
 }
 
 pub fn handy_set_token(token: &str, tenant_id: &str) -> Result<(), String> {
-    key_entry_handy_token()?
-        .set_password(token)
-        .map_err(|e| e.to_string())?;
-    key_entry_handy_tenant()?
-        .set_password(tenant_id)
-        .map_err(|e| e.to_string())?;
+    secret_store::set(SVC_AUTH, KEY_HANDY_TOKEN, token)?;
+    secret_store::set(SVC_AUTH, KEY_HANDY_TENANT, tenant_id)?;
     Ok(())
 }
 
 pub fn handy_clear_token() -> Result<(), String> {
-    let _ = key_entry_handy_token()?.delete_password();
-    let _ = key_entry_handy_tenant()?.delete_password();
+    let _ = secret_store::delete(SVC_AUTH, KEY_HANDY_TOKEN);
+    let _ = secret_store::delete(SVC_AUTH, KEY_HANDY_TENANT);
     Ok(())
 }
 
 pub fn handy_get_tenant() -> Result<Option<String>, String> {
-    let entry = key_entry_handy_tenant()?;
-    match entry.get_password() {
-        Ok(v) => {
+    match secret_store::get(SVC_AUTH, KEY_HANDY_TENANT) {
+        Ok(Some(v)) => {
             let tenant_id = v.trim().to_string();
             if tenant_id.is_empty() {
                 Ok(None)
@@ -172,6 +151,6 @@ pub fn handy_get_tenant() -> Result<Option<String>, String> {
                 Ok(Some(tenant_id))
             }
         }
-        Err(_) => Ok(None),
+        _ => Ok(None),
     }
 }

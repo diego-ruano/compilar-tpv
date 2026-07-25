@@ -19,5 +19,15 @@ thiserror = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
-keyring = { workspace = true }
 rand = { workspace = true }
+
+# keyring (keychain del SO) solo en escritorio; en Android su backend seria mock (no persistente),
+# asi que alli se sustituye por el almacen JNI Android Keystore + SharedPreferences (secret_store.rs).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { workspace = true }
+
+# Android: acceso al Context/JavaVM (ndk-context) y a las clases del framework (jni) para el almacen
+# de secretos cifrado con Android Keystore. Ver secret_store.rs.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

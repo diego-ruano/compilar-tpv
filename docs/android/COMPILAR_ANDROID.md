@@ -143,13 +143,23 @@ libsql = { version = "0.3", default-features = false, features = ["core"] }
     guardan sus 32 bytes en el almacén cifrado.
   - **Por qué NO Stronghold (opción B):** se desbloquea por contraseña; para una clave de dispositivo
     headless no aporta device-binding real → sería un *downgrade* de seguridad. Descartada.
-- **Implementación propuesta:** puerto/módulo `secret_store` en `device.rs` con dos impls cfg-gateadas
-  (mismas firmas): `#[cfg(not(target_os="android"))]` = `keyring` actual; `#[cfg(target_os="android")]`
-  = puente al plugin Kotlin. Y pasar `keyring` a dependencia target-specific:
-  ```toml
-  [target.'cfg(not(target_os = "android"))'.dependencies]
-  keyring = "2"
-  ```
+- **Implementación (✅ HECHA, 2026-07-25):** módulo
+  [secret_store.rs](../../crates/tpv-infra-licensing/src/secret_store.rs) con dos impls cfg-gateadas y
+  **misma API** (`get`/`set`/`delete` por `(service, key)`); `device.rs` **no cambia de firma** (sigue
+  con funciones libres, con constantes para los identificadores). Backends:
+  - `#[cfg(not(target_os="android"))]` → `keyring` (idéntico al comportamiento anterior).
+  - `#[cfg(target_os="android")]` → **JNI puro a clases del framework**: clave maestra AES-256-GCM **no
+    exportable** en el **Android Keystore** + valores cifrados en **SharedPreferences privadas** de la
+    app. El `Context`/`JavaVM` se obtienen con `ndk_context` (sin `AppHandle`). **No usa AndroidX ni
+    Kotlin ni toca `gen/android`** (solo clases del sistema, findables por JNI) → sobrevive a
+    `tauri android init`. Deps target-android: `jni`, `ndk-context`.
+  - `keyring` pasa a dependencia `[target.'cfg(not(target_os = "android"))'.dependencies]` (no se
+    compila en Android; su backend allí sería mock).
+  - **Verificado:** compila para Android (arm64) **y** escritorio. ⚠️ El **runtime** está **pendiente**
+    de validar en dispositivo/emulador (los fallos de firma JNI solo aparecen al ejecutar).
+  - **Nota de diseño:** se descartó el plugin Kotlin + `EncryptedSharedPreferences` (opción A2) porque
+    obligaba a tocar `gen/android` + Gradle y a resolver el classloader de la app desde hilos nativos
+    (tokio). El JNI a clases del framework (A1) es autocontenido en la crate y más robusto ante re-init.
 
 ### 4.4 Impresión (`printing.rs`) — sin bloqueo
 - Ya tiene stub `#[cfg(not(windows))]`
@@ -231,9 +241,10 @@ pnpm tauri android dev                                     # dev sobre emulador/
 - [x] Gatear `#[cfg(desktop)]`: `tauri-plugin-sentry` (plugin + minidump) + sentry→rustls (§4.2, §4.5) ✅
 - [x] Capabilities: mover `updater:default`/`sentry:default` a `desktop.json` (§4.6) ✅
 - [x] **`tauri android build --debug --apk --target aarch64` → APK generado** ✅ (§8, 2026-07-25)
+- [x] SecretStore Android real: JNI Android Keystore (AES-256-GCM) + SharedPreferences (§4.3) ✅ *(compila; runtime por validar)*
 - [ ] Instalar/arrancar el APK en emulador o dispositivo real
+- [ ] Validar en runtime el SecretStore (persistencia de identidad/pairing tras reinicio)
 - [ ] Probar flujo Handy en dispositivo (pairing, lectura REST, WS)
-- [ ] SecretStore Android real (EncryptedSharedPreferences + plugin Kotlin) (§4.3)
 - [ ] Revisar usabilidad de las pantallas Handy en móvil/tablet (diseño, no build)
 - [ ] (Opcional) build release/AAB firmado para Google Play
 
@@ -277,6 +288,15 @@ Cadena de bloqueos resuelta hasta generar el APK debug (arm64):
 - **keyring** sigue en modo *mock* en Android (identidad no persistente) → siguiente trabajo real:
   SecretStore (§4.3). El APK arranca pero aún no persiste pairing entre reinicios.
 - **Pendiente inmediato:** instalar el APK en emulador/dispositivo y probar el flujo Handy.
+
+### 2026-07-25 (tarde) — SecretStore Android (Android Keystore) ✅ compila
+- Nuevo módulo `secret_store.rs` (§4.3): `keyring` en escritorio; en Android, **Android Keystore
+  AES-256-GCM + SharedPreferences privadas** por JNI a clases del framework (sin AndroidX/Kotlin, sin
+  tocar `gen/android`). `device.rs` migrado a `secret_store::{get,set,delete}` **sin cambiar firmas**.
+- `keyring` pasa a dep solo-escritorio; añadidas `jni = "0.21"` + `ndk-context = "0.1"` target-android.
+- Verificado: `cargo ndk -t arm64-v8a build -p tpv-infra-licensing` ✅ y `cargo check` host ✅.
+- ⚠️ Runtime **sin validar** aún (requiere dispositivo/emulador): confirmar que persiste la identidad
+  ed25519 y el handy-token entre reinicios y que el descifrado AES-GCM funciona.
 
 <!-- Plantilla para nuevas entradas:
 ### AAAA-MM-DD — <título>

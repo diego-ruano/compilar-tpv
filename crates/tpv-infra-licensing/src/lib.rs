@@ -11,6 +11,7 @@
 //! NO depende de Tauri: el directorio de datos (AppData) lo inyecta el comando al construirlo.
 
 pub mod device;
+mod secret_store;
 
 use std::fs;
 use std::path::{Path, PathBuf};
