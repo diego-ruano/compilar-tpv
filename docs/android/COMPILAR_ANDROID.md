@@ -1,0 +1,284 @@
+# Compilar el TPV para Android — cuaderno de bitácora
+
+> **Estado:** EN INVESTIGACIÓN / EN CURSO.
+> Documento vivo. Aquí se apunta **todo lo que vamos descubriendo** sobre cómo cross-compilar la app
+> (Tauri 2 + Rust + React) a Android, para no re-investigar. Cada hallazgo nuevo → a la §8 (Bitácora).
+> **Objetivo actual:** habilitar el modo **Handy** (camarero handheld) en Android. El modo **Main**
+> (TPV completo con BD local) queda documentado como fase posterior.
+> **Fecha inicio:** 2026-07-25 · **Rama:** `main` · **Ámbito:** build/toolchain Android.
+>
+> Contexto del monorepo y arquitectura: ver [CLAUDE.md](../../CLAUDE.md). Este doc solo cubre Android.
+
+---
+
+## 0. Estrategia (por qué Handy primero)
+
+- La app es **un solo binario** que contiene todos los modos. Compartir el código **no** obliga a que
+  Android habilite todos los modos: qué modos se encienden es decisión de build (`#[cfg]`), no un
+  desperdicio de la arquitectura.
+- **Handy en Android = poco trabajo** (lee por REST, sin BD local en runtime, sin impresión, sin
+  licencia Main, sin updater desktop). El único bloqueo *real* es la persistencia de secretos.
+- **Main en Android = bastante más** (impresión térmica por Bluetooth/USB-OTG, UI responsive para
+  tablet, y el propio uso de la BD local). Fase posterior — ver §7.
+- **Matiz clave de compilación:** aunque Handy no *use* la BD local, el `AppState` con el macro
+  `repo_accessor!` ([main.rs](../../apps/tpv-main/src-tauri/src/main.rs)) **nombra** los tipos
+  `Sqlite*Repository`, así que `tpv-infra-sqlite` (y por tanto `libsql`) **se compila igualmente** en
+  el binario. → No se puede esquivar `libsql`; hay que cross-compilarlo (ya validado, §3).
+
+---
+
+## 1. Entorno verificado (2026-07-25, Windows 11)
+
+| Pieza | Valor | Notas |
+|---|---|---|
+| Android SDK | `C:\Users\diego\AppData\Local\Android\Sdk` | Instalado (vía Android Studio) |
+| **NDK** | `29.0.13846066` | En `…\Sdk\ndk\29.0.13846066` |
+| `cargo-ndk` | **v4.1.2** | `cargo install cargo-ndk`. Funciona con NDK 29. |
+| Targets Rust | `aarch64-linux-android`, `armv7-linux-androideabi`, `i686-linux-android`, `x86_64-linux-android` | Los 4 ya instalados |
+| Proyecto Android | `apps/tpv-main/src-tauri/gen/android/` | Regenerado con `tauri android init` |
+
+**Config del `gen/android/app/build.gradle.kts`** (lo que dejó `tauri android init`):
+- `namespace` / `applicationId` = `com.altarialights.tpv`
+- `minSdk = 24`, `compileSdk = 36`, `targetSdk = 36`
+- ABIs empaquetadas: `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`
+- `usesCleartextTraffic`: `false` en release, `true` en debug (la API va por HTTPS → ok)
+- Plugin gradle `id("rust")` con `rootDirRel = "../../../"` → gradle dispara el cargo build por ABI.
+
+> ⚠️ **Env del NDK:** en shells nuevas `ANDROID_NDK_HOME` / `ANDROID_NDK_ROOT` suelen estar **sin
+> definir** aunque el NDK exista. Para `cargo-ndk` (y `tauri android build`) hay que apuntarlo:
+> ```bash
+> export ANDROID_NDK_HOME="C:/Users/diego/AppData/Local/Android/Sdk/ndk/29.0.13846066"
+> ```
+> Conviene fijarlo como **variable de usuario de Windows** para no repetirlo en cada sesión.
+
+---
+
+## 2. Técnica: aislar bloqueos compilando crate por crate
+
+En vez de lanzar `tauri android build` completo (que choca a la vez con varios bloqueos y no aísla
+nada), se compila **una crate concreta** contra el target Android. Así se sabe exactamente qué
+compila y qué no, sin ruido:
+
+```bash
+export ANDROID_NDK_HOME="C:/Users/diego/AppData/Local/Android/Sdk/ndk/29.0.13846066"
+cargo ndk -t arm64-v8a build -p <crate>      # arm64 basta para validar
+```
+
+Las crates `tpv-domain`, `tpv-application`, `tpv-contracts`, `tpv-infra-http` no arrastran nada
+desktop-only → cruzan sin problema. Los sospechosos se aíslan uno a uno (§3).
+
+---
+
+## 3. Hallazgos verificados
+
+| Prueba | Comando | Resultado |
+|---|---|---|
+| `libsql` / persistencia | `cargo ndk -t arm64-v8a build -p tpv-infra-sqlite` | ✅ **Compila** (2m02s). Incluye `libsql-sys v0.5.0` (SQLite en C, compilado con el clang del NDK) **y** el stack de replicación (`tonic`, `hyper`, `libsql_replication`). **No hace falta recortar features.** |
+| `keyring` / identidad | `cargo ndk -t arm64-v8a build -p tpv-infra-licensing` | ✅ **Compila** (37s, 1 warning dead-code). **Bloqueo solo en runtime**, no en build (ver §4.3). |
+
+**Versiones resueltas de libsql** (Cargo.lock): `libsql v0.3.5`, `libsql-sys v0.5.0`,
+`libsql-rusqlite v0.30.0`, `libsql_replication v0.3.1`.
+
+**Nota sobre features de libsql:** `connection.rs` solo usa `Builder::new_local`
+([connection.rs:139](../../crates/tpv-infra-sqlite/src/connection.rs)), es decir, **BD de fichero
+local, sin remote/replicación**. Con el build completo pasando, no es necesario, pero si en el futuro
+molesta el stack gRPC se puede recortar en [Cargo.toml raíz](../../Cargo.toml) a:
+```toml
+libsql = { version = "0.3", default-features = false, features = ["core"] }
+```
+
+---
+
+## 4. Bloqueos conocidos y su solución
+
+### 4.1 Updater (`tauri-plugin-updater`) — bloqueo de compilación
+- **Qué:** el plugin es **solo escritorio**. `main.rs` llama a `app.updater()` en `updater_check`,
+  `updater_install` y en el chequeo de arranque → no compila en Android.
+- **Solución:** gatear con `#[cfg(desktop)]` la dep ([Cargo.toml](../../apps/tpv-main/src-tauri/Cargo.toml)),
+  el registro del plugin, los comandos y el bloque de arranque.
+- **Actualizaciones en Android:** vía **Google Play** (auto-update gratis con `versionCode` mayor).
+  Para forzar/avisar desde la app: **Play In-App Updates** (`com.google.android.play:app-update`,
+  modo *immediate* recomendado para un TPV). Alternativa sin Play: sideload de APK con
+  `PackageInstaller` + permiso `REQUEST_INSTALL_PACKAGES`.
+
+### 4.2 Sentry (`tauri-plugin-sentry`) — bloqueo parcial
+- **Qué rompe:** solo el **minidump**. `tauri_plugin_sentry::minidump::init`
+  ([main.rs:1157](../../apps/tpv-main/src-tauri/src/main.rs)) lanza un **proceso helper** de crashes
+  nativos → mecanismo de escritorio, no existe en Android.
+- **Qué SÍ funciona en Android:** el crate `sentry` de Rust (panics + eventos por HTTP) y el Sentry
+  de la webview (JS).
+- **Solución:** gatear el minidump con `#[cfg(desktop)]`. **Pendiente de verificar** si el propio
+  `tauri-plugin-sentry` compila en Android; si no, gatear también el plugin y en Android quedarse con
+  el crate `sentry`.
+- **Crashes nativos de Android (NDK/JVM/ANR):** añadir el **Sentry Android SDK**
+  (`io.sentry:sentry-android` por Gradle) en `gen/android`. Es el equivalente al minidump de Windows.
+- **Mapa mental de las 3 capas de crashes:**
+  | Capa | Captura | Plataforma |
+  |---|---|---|
+  | Webview/JS | Sentry JS | ambas |
+  | `panic!` de Rust | crate `sentry` (HTTP) | ambas |
+  | Crash nativo duro (segfault/abort) | minidump (desktop) / Sentry Android SDK (Android) | específico |
+
+### 4.3 Keyring / almacén de secretos — bloqueo de runtime (persistencia)
+- **Qué:** `keyring` v2 **compila** en Android (§3) pero **no tiene backend real**: cae a un almacén
+  *mock* en memoria → los secretos **no persisten entre reinicios**. El dispositivo "olvidaría" su
+  identidad ed25519 y su handy-token al cerrar. *(Comportamiento documentado de keyring; pendiente de
+  confirmar empíricamente en dispositivo.)*
+- **Superficie de uso** (toda en [device.rs](../../crates/tpv-infra-licensing/src/device.rs)), 5
+  secretos string por `service`+`key` con get/set/delete:
+  | Secreto | Servicio/clave |
+  |---|---|
+  | `device-id` (UUID) | `tpv-licensing / device-id` |
+  | clave privada ed25519 (32 B b64) | `tpv-licensing-devicekey / {device_id}` |
+  | license-token (JWT Main) | `tpv-auth / license-token` |
+  | handy-token (JWT) | `tpv-auth / handy-token` |
+  | handy-tenant-id | `tpv-auth / handy-tenant-id` |
+- **Solución elegida (opción A): Android Keystore + EncryptedSharedPreferences.** Clave maestra AES
+  **hardware-backed** (TEE/StrongBox, no exportable) que cifra los secretos en
+  `EncryptedSharedPreferences` (Jetpack `androidx.security:security-crypto`; `minSdk 24` lo soporta).
+  Es el equivalente real al keychain del SO en escritorio y **preserva el anti-copia** (un fichero
+  copiado no descifra en otro dispositivo). Requiere un pequeño **plugin Kotlin/JNI** que el
+  adaptador Rust invoca.
+  - **La cripto ed25519 NO cambia**: se sigue generando/firmando en Rust (`ed25519-dalek`); solo se
+    guardan sus 32 bytes en el almacén cifrado.
+  - **Por qué NO Stronghold (opción B):** se desbloquea por contraseña; para una clave de dispositivo
+    headless no aporta device-binding real → sería un *downgrade* de seguridad. Descartada.
+- **Implementación propuesta:** puerto/módulo `secret_store` en `device.rs` con dos impls cfg-gateadas
+  (mismas firmas): `#[cfg(not(target_os="android"))]` = `keyring` actual; `#[cfg(target_os="android")]`
+  = puente al plugin Kotlin. Y pasar `keyring` a dependencia target-specific:
+  ```toml
+  [target.'cfg(not(target_os = "android"))'.dependencies]
+  keyring = "2"
+  ```
+
+### 4.4 Impresión (`printing.rs`) — sin bloqueo
+- Ya tiene stub `#[cfg(not(windows))]`
+  ([printing.rs:578](../../apps/tpv-main/src-tauri/src/printing.rs)) que compila en Android y devuelve
+  error "solo disponible en Windows". El Handy no imprime → no bloquea.
+- Opcional: gatear los comandos `printer_*` a `#[cfg(desktop)]` para no exponerlos en Android.
+- Para **Main en Android** habría que implementar transporte Bluetooth/USB-OTG (el armado ESC/POS
+  `build_ticket` ya es agnóstico y se reutiliza; solo cambia `print_raw`).
+
+### 4.5 OpenSSL / native-tls (stack de Sentry) — bloqueo de compilación ✅ resuelto
+- **Síntoma:** `openssl-sys` no cross-compila a Android (`Could not find openssl via pkg-config`).
+  En Windows no dolía porque `native-tls` = SChannel (sin openssl); en Android `native-tls` = openssl.
+- **Causa (árbol inverso):** el único que activaba `native-tls` era el crate **`sentry`** (feature
+  `default` → `transport` → `native-tls`), tirado por `tpv-telemetry` y por `tauri-plugin-sentry`.
+- **Fix:** en [Cargo.toml raíz](../../Cargo.toml), `sentry` con `default-features = false` +
+  `["backtrace","contexts","debug-images","panic","reqwest","rustls"]` → transporte **rustls** en
+  **todas** las plataformas (coherente con reqwest, que ya iba rustls). Verificado con
+  `cargo tree --target aarch64-linux-android -i openssl-sys` → "did not match any packages".
+- **Diagnóstico útil:** `cargo tree -p tpv --target aarch64-linux-android -i <crate-nativo> -e features`
+  da la cadena exacta de quién activa una feature/dep problemática.
+
+### 4.6 Capabilities: permisos de plugins desktop-only — bloqueo de build ✅ resuelto
+- **Síntoma:** `Permission updater:default not found` (e igual pasaría con `sentry:default`) en el
+  build script (`tauri-build`) al compilar Android: el permiso no existe porque su plugin ya no está
+  en el build de Android.
+- **Fix:** sacar `updater:default` y `sentry:default` de
+  [capabilities/default.json](../../apps/tpv-main/src-tauri/capabilities/default.json) y meterlos en un
+  capability nuevo [capabilities/desktop.json](../../apps/tpv-main/src-tauri/capabilities/desktop.json)
+  con `"platforms": ["linux","macOS","windows"]`. En Android ese capability se ignora → no exige esos
+  permisos. **Regla general:** todo permiso de un plugin gateado a escritorio debe vivir en un
+  capability con `platforms` de escritorio.
+
+---
+
+## 5. Comandos de referencia
+
+### Setup (una vez)
+```bash
+# Targets Rust de Android
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
+# Herramienta que configura el clang del NDK como linker/CC del cargo
+cargo install cargo-ndk
+
+# Proyecto Android (regenera gen/android)
+pnpm tauri android init
+```
+
+### Validar una crate aislada (cross-compile)
+```bash
+export ANDROID_NDK_HOME="C:/Users/diego/AppData/Local/Android/Sdk/ndk/29.0.13846066"
+cargo ndk -t arm64-v8a build -p <crate>
+```
+
+### Build/run de la app completa (VERIFICADO 2026-07-25 — genera APK)
+```bash
+# El NDK/SDK/JDK deben estar en el entorno (en shells nuevas suelen estar sin definir):
+export ANDROID_HOME="C:/Users/diego/AppData/Local/Android/Sdk"
+export ANDROID_NDK_HOME="C:/Users/diego/AppData/Local/Android/Sdk/ndk/29.0.13846066"
+export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"   # JBR de Android Studio (JDK 21)
+export PATH="$JAVA_HOME/bin:$PATH"
+
+pnpm tauri android build --debug --apk --target aarch64   # APK debug arm64 (rápido; auto-firmado)
+pnpm tauri android dev                                     # dev sobre emulador/dispositivo
+# APK resultante: apps/tpv-main/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+```
+> El build debug se auto-firma con el keystore de debug (no necesita config de firma). Para
+> release/AAB (Play) hará falta un keystore propio en `gen/android`.
+
+> Recordatorio del repo: **siempre `pnpm`, nunca `npm`/`npx`** (ver [CLAUDE.md](../../CLAUDE.md) §8).
+
+---
+
+## 6. Checklist para dejar Handy compilando+arrancando en Android
+
+- [x] Validar que `libsql` cross-compila (§3) ✅
+- [x] Validar que `keyring` compila (bloqueo solo runtime) (§3) ✅
+- [x] Gatear `#[cfg(desktop)]`: updater (dep + plugin + comandos + arranque) (§4.1) ✅
+- [x] Gatear `#[cfg(desktop)]`: `tauri-plugin-sentry` (plugin + minidump) + sentry→rustls (§4.2, §4.5) ✅
+- [x] Capabilities: mover `updater:default`/`sentry:default` a `desktop.json` (§4.6) ✅
+- [x] **`tauri android build --debug --apk --target aarch64` → APK generado** ✅ (§8, 2026-07-25)
+- [ ] Instalar/arrancar el APK en emulador o dispositivo real
+- [ ] Probar flujo Handy en dispositivo (pairing, lectura REST, WS)
+- [ ] SecretStore Android real (EncryptedSharedPreferences + plugin Kotlin) (§4.3)
+- [ ] Revisar usabilidad de las pantallas Handy en móvil/tablet (diseño, no build)
+- [ ] (Opcional) build release/AAB firmado para Google Play
+
+---
+
+## 7. Pendiente para "Main en Android" (fase posterior)
+
+- **Impresión** por Bluetooth/USB-OTG (nuevo transporte `print_raw`; ESC/POS reutilizable).
+- **UI responsive** del POS completo para tablet (posible coste grande de frontend).
+- `libsql` local ya validado que compila (§3) → el outbox/sync vendría "gratis".
+- Actualización por Play (igual que Handy).
+
+---
+
+## 8. Bitácora (append de hallazgos)
+
+### 2026-07-25 — Arranque de la investigación
+- Estado de partida: `gen/android` había sido **borrado** (aparecía como `D` en git); se regeneró con
+  `tauri android init` (config en §1).
+- Instalado `cargo-ndk v4.1.2`. Los 4 targets Rust ya estaban.
+- NDK detectado: `29.0.13846066`. Env `ANDROID_NDK_HOME` estaba sin definir en shell → hay que
+  exportarlo.
+- ✅ **`tpv-infra-sqlite` (libsql) compila para arm64-android** en 2m02s, features completas.
+  → El mayor "sí/no" del proyecto Android resuelto a favor. `libsql-sys` (C) compila con el NDK.
+- ✅ **`tpv-infra-licensing` (keyring) compila para arm64-android** en 37s. keyring **no** es bloqueo
+  de compilación; el problema es persistencia en runtime → SecretStore (§4.3).
+- Bloqueos de compilación reales identificados y acotados a la crate de la app: `app.updater()` y
+  `tauri_plugin_sentry::minidump::init` (§4.1, §4.2). Solución: `#[cfg(desktop)]`.
+- **Siguiente:** gatear updater + minidump y lanzar `tauri android build` completo.
+
+### 2026-07-25 (tarde) — Primer APK de Android ✅ (rama `compilacion-android`)
+Cadena de bloqueos resuelta hasta generar el APK debug (arm64):
+1. Gates `#[cfg(desktop)]` de **updater** + **minidump** (§4.1, §4.2) → superados a la primera.
+2. **`openssl-sys`** (native-tls del stack de Sentry) → `sentry` a **rustls** + `tauri-plugin-sentry`
+   a solo-escritorio (§4.5).
+3. **`updater:default`/`sentry:default`** no existen en Android → movidos a
+   `capabilities/desktop.json` con `platforms` de escritorio (§4.6).
+- **Resultado:** `pnpm tauri android build --debug --apk --target aarch64` → **APK OK** (~4 min):
+  `gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk` (~129 MB, debug/universal).
+- Desktop (`cargo check -p tpv` host) verde en **cada** paso → no se rompió el escritorio.
+- **keyring** sigue en modo *mock* en Android (identidad no persistente) → siguiente trabajo real:
+  SecretStore (§4.3). El APK arranca pero aún no persiste pairing entre reinicios.
+- **Pendiente inmediato:** instalar el APK en emulador/dispositivo y probar el flujo Handy.
+
+<!-- Plantilla para nuevas entradas:
+### AAAA-MM-DD — <título>
+- <hallazgo> (comando: `…`) → resultado.
+-->

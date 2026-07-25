@@ -13,6 +13,7 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(desktop)]
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
 
@@ -1068,28 +1069,37 @@ struct UpdateInfo {
 /// firma del paquete contra la clave pública embebida en `tauri.conf.json`.
 #[tauri::command]
 async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = app
-        .updater()
-        .map_err(|e| format!("updater no disponible: {e}"))?;
+    #[cfg(desktop)]
+    {
+        let updater = app
+            .updater()
+            .map_err(|e| format!("updater no disponible: {e}"))?;
 
-    match updater.check().await {
-        Ok(Some(update)) => {
-            // Aviso "actualización disponible" a los administradores. Dedupe por versión → una sola
-            // notificación por versión aunque el chequeo se repita (arranque + reintentos).
-            notify_update_available(&app, &update.version).await;
-            Ok(Some(UpdateInfo {
-                version: update.version.clone(),
-                current_version: update.current_version.clone(),
-                notes: update.body.clone(),
-            }))
+        match updater.check().await {
+            Ok(Some(update)) => {
+                // Aviso "actualización disponible" a los administradores. Dedupe por versión → una sola
+                // notificación por versión aunque el chequeo se repita (arranque + reintentos).
+                notify_update_available(&app, &update.version).await;
+                Ok(Some(UpdateInfo {
+                    version: update.version.clone(),
+                    current_version: update.current_version.clone(),
+                    notes: update.body.clone(),
+                }))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Err(format!("error comprobando actualización: {e}")),
         }
-        Ok(None) => Ok(None),
-        Err(e) => Err(format!("error comprobando actualización: {e}")),
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("updater no disponible en esta plataforma".into())
     }
 }
 
 /// Emite (best-effort) una notificación de actualización disponible a los administradores. Si no
 /// hay notifier disponible aún (sin modo/BD), no hace nada.
+#[cfg(desktop)]
 async fn notify_update_available(app: &AppHandle, version: &str) {
     use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
@@ -1116,25 +1126,33 @@ async fn notify_update_available(app: &AppHandle, version: &str) {
 /// usuario lo decida (p. ej. al cerrar caja), no en automático.
 #[tauri::command]
 async fn updater_install(app: AppHandle) -> Result<(), String> {
-    let updater = app
-        .updater()
-        .map_err(|e| format!("updater no disponible: {e}"))?;
+    #[cfg(desktop)]
+    {
+        let updater = app
+            .updater()
+            .map_err(|e| format!("updater no disponible: {e}"))?;
 
-    let update = updater
-        .check()
-        .await
-        .map_err(|e| format!("error comprobando actualización: {e}"))?
-        .ok_or_else(|| "no hay actualización disponible".to_string())?;
+        let update = updater
+            .check()
+            .await
+            .map_err(|e| format!("error comprobando actualización: {e}"))?
+            .ok_or_else(|| "no hay actualización disponible".to_string())?;
 
-    update
-        .download_and_install(|_chunk, _total| {}, || {})
-        .await
-        .map_err(|e| format!("error instalando actualización: {e}"))?;
+        update
+            .download_and_install(|_chunk, _total| {}, || {})
+            .await
+            .map_err(|e| format!("error instalando actualización: {e}"))?;
 
-    // En Windows el instalador cierra la app; `restart` reabre tras aplicar.
-    app.restart();
-    #[allow(unreachable_code)]
-    Ok(())
+        // En Windows el instalador cierra la app; `restart` reabre tras aplicar.
+        app.restart();
+        #[allow(unreachable_code)]
+        Ok(())
+    }
+    #[cfg(not(desktop))]
+    {
+        let _ = app;
+        Err("updater no disponible en esta plataforma".into())
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1153,14 +1171,31 @@ pub fn run() {
         release: Some(env!("CARGO_PKG_VERSION").to_string()),
     });
     // Minidumps (crashes nativos) sólo con DSN real, para no lanzar el proceso crash-handler en vano.
+    // El minidump lanza un proceso helper de crashes nativos → solo escritorio. En Android/iOS los
+    // crashes nativos los captura el SDK de Sentry por plataforma (Gradle), no este mecanismo.
+    #[cfg(desktop)]
     let _minidump_guard =
         option_env!("TPV_SENTRY_DSN").map(|_| tauri_plugin_sentry::minidump::init(&sentry_guard));
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_sentry::init(&sentry_guard))
+    // En móvil el guard no se pasa a ningún plugin, pero debe seguir vivo todo el proceso para que
+    // el cliente de Sentry (crate) capture panics de Rust. Lo marcamos como usado sin moverlo.
+    #[cfg(not(desktop))]
+    let _ = &sentry_guard;
+
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init());
+
+    // Sentry (bridge webview+core) es solo escritorio: el plugin arrastra el minidump (proceso
+    // helper) y native-tls. En móvil el crate `sentry` (rustls) sigue capturando panics de Rust.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_sentry::init(&sentry_guard));
+
+    // El updater es solo escritorio (el plugin no cross-compila a móvil).
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .setup(|app| {
             let handle = app.handle();
 
@@ -1230,6 +1265,7 @@ pub fn run() {
             // versión nueva, emite `update:available`; la UI muestra un aviso no intrusivo y el
             // usuario decide cuándo instalar. Falla en silencio (offline / feed caído): se
             // reintenta en el siguiente arranque y la app sigue funcionando.
+            #[cfg(desktop)]
             {
                 let h = handle.clone();
                 tauri::async_runtime::spawn(async move {

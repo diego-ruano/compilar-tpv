@@ -23,8 +23,6 @@ tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2.6"
-# Auto-actualización (descarga + verifica firma del instalador desde el feed de tpv-api).
-tauri-plugin-updater = "2"
 
 # ───────────── Async / Runtime ─────────────
 tokio = { version = "1", features = ["full"] }
@@ -72,6 +70,13 @@ tpv-telemetry = { workspace = true }
 # Fachada de logging: el shell y los comandos emiten con las macros de `tracing`; el destino
 # (consola/fichero/nube) lo monta `tpv-telemetry` al arrancar.
 tracing = { workspace = true }
-# Plugin de Sentry para Tauri: unifica el ciclo de vida de Sentry entre la Webview (JS) y el
-# Core (Rust) y captura crashes nativos vía minidump. Reutiliza el cliente que crea tpv-telemetry.
+# ───────────── Solo escritorio (no cross-compilan / no aplican a móvil) ─────────────
+# Estos plugins no cross-compilan a móvil; en Android se sustituyen por su equivalente de plataforma.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+# Auto-actualización (descarga + verifica firma del instalador desde el feed de tpv-api).
+# En Android las actualizaciones van por Google Play.
+tauri-plugin-updater = "2"
+# Plugin de Sentry (bridge webview+core + minidump de crashes nativos). Arrastra
+# `sentry-rust-minidump` (proceso helper) y native-tls → openssl, que no cross-compilan a Android.
+# Allí los crashes nativos los captura el SDK de Sentry (Gradle); el crate `sentry` (rustls) sigue vivo.
 tauri-plugin-sentry = "0.5"
