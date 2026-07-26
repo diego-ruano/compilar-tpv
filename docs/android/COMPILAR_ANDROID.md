@@ -150,13 +150,19 @@ libsql = { version = "0.3", default-features = false, features = ["core"] }
   - `#[cfg(not(target_os="android"))]` → `keyring` (idéntico al comportamiento anterior).
   - `#[cfg(target_os="android")]` → **JNI puro a clases del framework**: clave maestra AES-256-GCM **no
     exportable** en el **Android Keystore** + valores cifrados en **SharedPreferences privadas** de la
-    app. El `Context`/`JavaVM` se obtienen con `ndk_context` (sin `AppHandle`). **No usa AndroidX ni
-    Kotlin ni toca `gen/android`** (solo clases del sistema, findables por JNI) → sobrevive a
-    `tauri android init`. Deps target-android: `jni`, `ndk-context`.
+    app. **No usa AndroidX ni Kotlin ni toca `gen/android`** (solo clases del sistema, findables por
+    JNI) → sobrevive a `tauri android init`. Dep target-android: `jni`.
+  - **Obtención de `JavaVM` y `Context`** (⚠️ el punto que más costó, ver §4.7): la VM se captura en
+    `JNI_OnLoad` del **cdylib** de la app ([lib.rs](../../apps/tpv-main/src-tauri/src/lib.rs)) y se
+    pasa a `secret_store::init_java_vm`; el `Context` se obtiene con `ActivityThread.currentApplication()`.
+    **`ndk_context` NO sirve** (Tauri usa WryActivity, no inicializa ese global) y **`JNI_GetCreatedJavaVMs`
+    vía `dlsym` tampoco** (el aislamiento de namespaces del linker de Android no expone ese símbolo a la app).
   - `keyring` pasa a dependencia `[target.'cfg(not(target_os = "android"))'.dependencies]` (no se
     compila en Android; su backend allí sería mock).
-  - **Verificado:** compila para Android (arm64) **y** escritorio. ⚠️ El **runtime** está **pendiente**
-    de validar en dispositivo/emulador (los fallos de firma JNI solo aparecen al ejecutar).
+  - **✅ Verificado en runtime (emulador Pixel_7 x86_64, 2026-07-26):** el primer arranque genera y
+    **cifra** la identidad (`tpv_secret_store.xml` con la clave ed25519 + device-id en AES-GCM); tras
+    matar y relanzar la app, el `device_id` es **el mismo** → lee/descifra correctamente y **persiste**.
+    Sin crashes.
   - **Nota de diseño:** se descartó el plugin Kotlin + `EncryptedSharedPreferences` (opción A2) porque
     obligaba a tocar `gen/android` + Gradle y a resolver el classloader de la app desde hilos nativos
     (tokio). El JNI a clases del framework (A1) es autocontenido en la crate y más robusto ante re-init.
@@ -191,6 +197,35 @@ libsql = { version = "0.3", default-features = false, features = ["core"] }
   con `"platforms": ["linux","macOS","windows"]`. En Android ese capability se ignora → no exige esos
   permisos. **Regla general:** todo permiso de un plugin gateado a escritorio debe vivir en un
   capability con `platforms` de escritorio.
+
+### 4.7 Bugs de RUNTIME en Android (compilaban, fallaban al ejecutar) ✅ resueltos
+Estos NO se ven compilando; solo aparecen ejecutando en dispositivo/emulador. Fueron los que más costaron.
+
+**A) La app estaba en `main.rs` y `lib.rs` era el stub por defecto de Tauri.** En escritorio el binario
+usa `main.rs`; en **móvil Tauri arranca por el cdylib `libtpv_lib.so`**, cuyo `mobile_entry_point` es el
+`run()` de **`lib.rs`**. Como ahí solo estaba el stub (`greet` + `tauri_plugin_opener`), en Android
+cargaba una app vacía: el frontend renderizaba (mismo `dist`) pero **ningún comando funcionaba** y los
+taps no navegaban. **Síntoma:** UI visible pero muerta; ningún log ni fichero de la app.
+- **Fix (estructura correcta de Tauri 2):** mover **toda** la app a
+  [lib.rs](../../apps/tpv-main/src-tauri/src/lib.rs) (AppState, comandos, `run()` con
+  `#[cfg_attr(mobile, tauri::mobile_entry_point)]`), y dejar `main.rs` como shim: `fn main() { tpv_lib::run() }`.
+
+**B) `secret_store` abortaba el proceso: `ndk_context` no está inicializado.** `ndk_context::android_context()`
+hace `.expect(...)` y Tauri (WryActivity) **nunca puebla** ese global → panic **no-unwinding → SIGABRT**.
+**Síntoma:** la app llega a `setup()` y muere sin firma clara (el crash se rota si hay spam de logs).
+- **Fix:** capturar la `JavaVM` en **`JNI_OnLoad`** del cdylib y el `Context` con
+  `ActivityThread.currentApplication()` (ver §4.3). `JNI_GetCreatedJavaVMs` vía `dlsym` **no** funciona
+  (namespaces del linker). `JNI_OnLoad` debe estar en el **cdylib** (no en un rlib) para que se exporte;
+  no choca con wry (wry no define `JNI_OnLoad`).
+
+**Herramienta de diagnóstico (queda en el repo):** en Android no hay salida de `tracing`/`eprintln` a
+logcat de forma fiable. Se añadió **`android_logger`** (dep target-android) inicializado al principio de
+`run()` con tag **`TPVRust`** y las macros `log::` (p. ej. `log::warn!("[secret_store] …")`). Claves:
+- Nivel **Info** (no Trace): la crate `jni` loguea CADA llamada a Trace → a Trace inunda logcat (miles de
+  líneas/seg), rota el buffer y **ralentiza tanto que el sistema mata la app**.
+- El puente `log`→`tracing` de `tpv_telemetry` no roba estos logs: su `try_init()` falla al ver que
+  `android_logger` ya fijó el logger `log` (se ignora), así que `log::` sigue yendo a logcat.
+- Leerlos: `adb logcat -d -s TPVRust`.
 
 ---
 
@@ -241,10 +276,10 @@ pnpm tauri android dev                                     # dev sobre emulador/
 - [x] Gatear `#[cfg(desktop)]`: `tauri-plugin-sentry` (plugin + minidump) + sentry→rustls (§4.2, §4.5) ✅
 - [x] Capabilities: mover `updater:default`/`sentry:default` a `desktop.json` (§4.6) ✅
 - [x] **`tauri android build --debug --apk --target aarch64` → APK generado** ✅ (§8, 2026-07-25)
-- [x] SecretStore Android real: JNI Android Keystore (AES-256-GCM) + SharedPreferences (§4.3) ✅ *(compila; runtime por validar)*
-- [ ] Instalar/arrancar el APK en emulador o dispositivo real
-- [ ] Validar en runtime el SecretStore (persistencia de identidad/pairing tras reinicio)
-- [ ] Probar flujo Handy en dispositivo (pairing, lectura REST, WS)
+- [x] SecretStore Android real: JNI Android Keystore (AES-256-GCM) + SharedPreferences (§4.3) ✅
+- [x] Instalar/arrancar el APK en emulador (Pixel_7 x86_64) → app real corre sin crash ✅
+- [x] Validar en runtime el SecretStore: identidad cifrada y **persiste** tras reinicio (§4.3, §4.7) ✅
+- [ ] Probar flujo Handy en dispositivo (pairing, lectura REST, WS) — requiere backend
 - [ ] Revisar usabilidad de las pantallas Handy en móvil/tablet (diseño, no build)
 - [ ] (Opcional) build release/AAB firmado para Google Play
 
@@ -297,6 +332,20 @@ Cadena de bloqueos resuelta hasta generar el APK debug (arm64):
 - Verificado: `cargo ndk -t arm64-v8a build -p tpv-infra-licensing` ✅ y `cargo check` host ✅.
 - ⚠️ Runtime **sin validar** aún (requiere dispositivo/emulador): confirmar que persiste la identidad
   ed25519 y el handy-token entre reinicios y que el descifrado AES-GCM funciona.
+
+### 2026-07-26 — App real corriendo en Android + SecretStore validado ✅ (emulador)
+Dos bugs de **runtime** resueltos (§4.7), que compilaban pero fallaban al ejecutar:
+1. La app vivía en `main.rs` y el cdylib usaba el **stub** de `lib.rs` → en móvil arrancaba una app
+   vacía (UI sí, comandos no). Movida toda a `lib.rs`; `main.rs` = shim `tpv_lib::run()`.
+2. `secret_store` abortaba (SIGABRT) porque **`ndk_context` no está inicializado** en Tauri. Ahora la
+   `JavaVM` se captura en **`JNI_OnLoad`** (cdylib) y el `Context` con `ActivityThread.currentApplication()`.
+- Añadido **`android_logger`** (tag `TPVRust`, nivel Info) como herramienta de diagnóstico permanente.
+- **Validado en emulador Pixel_7 (x86_64):** la app corre estable; el SecretStore **escribe cifrado**
+  (`tpv_secret_store.xml`, AES-GCM) y el `device_id` **persiste idéntico tras reinicio** (lee+descifra OK).
+- Herramientas: emulador por CLI (`emulator -avd Pixel_7 -wipe-data -no-snapshot`), `adb install/logcat/run-as`,
+  `adb exec-out screencap` para ver la UI. El APK debug pesa ~250MB → si el emulador se queda sin espacio
+  (`INSTALL_FAILED_INSUFFICIENT_STORAGE`), relanzar con `-wipe-data`.
+- **Pendiente:** flujo Handy completo (pairing + REST + WS) contra backend.
 
 <!-- Plantilla para nuevas entradas:
 ### AAAA-MM-DD — <título>

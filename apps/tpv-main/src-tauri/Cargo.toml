@@ -70,6 +70,8 @@ tpv-telemetry = { workspace = true }
 # Fachada de logging: el shell y los comandos emiten con las macros de `tracing`; el destino
 # (consola/fichero/nube) lo monta `tpv-telemetry` al arrancar.
 tracing = { workspace = true }
+# Fachada `log` (además de `tracing`): en Android la enruta `android_logger` a logcat (ver run()).
+log = "0.4"
 # ───────────── Solo escritorio (no cross-compilan / no aplican a móvil) ─────────────
 # Estos plugins no cross-compilan a móvil; en Android se sustituyen por su equivalente de plataforma.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
@@ -80,3 +82,8 @@ tauri-plugin-updater = "2"
 # `sentry-rust-minidump` (proceso helper) y native-tls → openssl, que no cross-compilan a Android.
 # Allí los crashes nativos los captura el SDK de Sentry (Gradle); el crate `sentry` (rustls) sigue vivo.
 tauri-plugin-sentry = "0.5"
+
+# ───────────── Solo Android ─────────────
+[target.'cfg(target_os = "android")'.dependencies]
+# Enruta las macros de `log` a logcat (diagnóstico de arranque/JNI en dispositivo).
+android_logger = "0.14"

@@ -50,6 +50,8 @@ mod imp {
     use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
     use jni::objects::{GlobalRef, JByteArray, JObject, JString, JValue};
     use jni::{JNIEnv, JavaVM};
+    use std::os::raw::c_void;
+    use std::sync::OnceLock;
 
     /// Nombre del fichero de SharedPreferences (privado de la app).
     const PREFS_NAME: &str = "tpv_secret_store";
@@ -57,7 +59,9 @@ mod imp {
     const MASTER_ALIAS: &str = "tpv_secret_master_v1";
 
     fn je<E: std::fmt::Display>(e: E) -> String {
-        format!("secret_store(android): {e}")
+        let s = format!("secret_store(android): {e}");
+        log::warn!("[secret_store] ERR {s}");
+        s
     }
 
     /// Clave de la entrada en SharedPreferences a partir de `(service, key)` (separador 0x1F, que no
@@ -67,11 +71,48 @@ mod imp {
     }
 
     /// Ejecuta `f` con un `JNIEnv` adjunto al hilo actual y el `Context` de la app (vía `ndk_context`).
+    static JAVA_VM: OnceLock<JavaVM> = OnceLock::new();
+
+    /// Guarda la `JavaVM` del proceso. La invoca `JNI_OnLoad` del cdylib de la app (ver app `lib.rs`),
+    /// que el runtime de Android llama al cargar `libtpv_lib.so`, pasándole la VM del proceso. No
+    /// usamos `ndk_context` (Tauri no lo inicializa) ni `JNI_GetCreatedJavaVMs` (el aislamiento de
+    /// namespaces del linker de Android no lo expone vía `dlsym` desde la app).
+    pub fn init_java_vm(raw_vm: *mut c_void) {
+        if raw_vm.is_null() {
+            return;
+        }
+        match unsafe { JavaVM::from_raw(raw_vm as *mut jni::sys::JavaVM) } {
+            Ok(vm) => {
+                let _ = JAVA_VM.set(vm);
+            }
+            Err(e) => log::warn!("[secret_store] init_java_vm: from_raw falló: {e}"),
+        }
+    }
+
+    fn java_vm() -> Result<&'static JavaVM, String> {
+        JAVA_VM
+            .get()
+            .ok_or_else(|| je("JavaVM no inicializada (¿JNI_OnLoad no se llamó?)"))
+    }
+
     fn with_env<R>(f: impl FnOnce(&mut JNIEnv, &JObject) -> Result<R, String>) -> Result<R, String> {
-        let ctx = ndk_context::android_context();
-        let vm = unsafe { JavaVM::from_raw(ctx.vm().cast()) }.map_err(je)?;
+        let vm = java_vm()?;
         let mut env = vm.attach_current_thread().map_err(je)?;
-        let context = unsafe { JObject::from_raw(ctx.context().cast()) };
+        // Context de la app sin que nadie nos lo pase: ActivityThread.currentApplication() devuelve la
+        // Application (que es un Context). Suficiente para getSharedPreferences (el Keystore no lo usa).
+        let context = env
+            .call_static_method(
+                "android/app/ActivityThread",
+                "currentApplication",
+                "()Landroid/app/Application;",
+                &[],
+            )
+            .map_err(je)?
+            .l()
+            .map_err(je)?;
+        if context.is_null() {
+            return Err(je("ActivityThread.currentApplication() devolvió null"));
+        }
         f(&mut env, &context)
     }
 
@@ -405,3 +446,7 @@ mod imp {
 }
 
 pub use imp::{delete, get, set};
+
+/// Guarda la `JavaVM` del proceso (la llama `JNI_OnLoad` del cdylib de la app). Solo Android.
+#[cfg(target_os = "android")]
+pub use imp::init_java_vm;
