@@ -202,9 +202,11 @@ function LicenseExpiryBanner({
 
 function HandyWaitingMain({
     connecting,
+    onRetry,
     onUnlink,
 }: {
     connecting: boolean;
+    onRetry: () => void;
     onUnlink: () => void;
 }) {
     return (
@@ -220,13 +222,22 @@ function HandyWaitingMain({
                         : "Este Handy no puede usarse mientras el punto de venta principal esté apagado o en modo offline. Volverá a estar disponible en cuanto la Main se active."}
                 </p>
 
-                <button
-                    type="button"
-                    onClick={onUnlink}
-                    className="mt-6 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-                >
-                    ← Ir a vinculación
-                </button>
+                <div className="mt-6 flex flex-col items-center gap-2">
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                    >
+                        Reintentar conexión
+                    </button>
+                    <button
+                        type="button"
+                        onClick={onUnlink}
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                    >
+                        ← Ir a vinculación
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -961,6 +972,7 @@ export default function AppBoot({ router }: { router: any }) {
                             // Emparejado pero sin Main activa: bloqueo total (login incluido).
                             <HandyWaitingMain
                                 connecting={mainOnline === null}
+                                onRetry={() => useMainPresence.getState().requestReconnect()}
                                 onUnlink={() => {
                                     setHandyPairErr(null);
                                     setHandyPair({ step: "idle" });

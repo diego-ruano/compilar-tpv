@@ -21,9 +21,16 @@ import { create } from "zustand";
 type MainPresenceStore = {
 	mainOnline: boolean | null;
 	setMainOnline: (v: boolean | null) => void;
+	// Nonce para forzar una reconexión manual del WS del Handy (botón "Reintentar" en la pantalla de
+	// espera). `useHandySocket` lo incluye en las deps de su efecto: al incrementarlo, el efecto se
+	// re-ejecuta = conexión WS fresca (el equivalente a recargar la página en escritorio).
+	retryTick: number;
+	requestReconnect: () => void;
 };
 
 export const useMainPresence = create<MainPresenceStore>((set) => ({
 	mainOnline: null,
 	setMainOnline: (v) => set({ mainOnline: v }),
+	retryTick: 0,
+	requestReconnect: () => set((s) => ({ retryTick: s.retryTick + 1 })),
 }));
