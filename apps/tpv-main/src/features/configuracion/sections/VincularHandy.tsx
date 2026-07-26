@@ -7,6 +7,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { cloudPost } from "../../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../../shared/lib/deviceFingerprint";
+import { useConnectionMode } from "../../../shared/stores/useConnectionMode";
 
 type PairPendingItem = {
 	pairCode: string;
@@ -56,6 +57,10 @@ export function VincularHandy({
 	onRegenerate: () => void;
 	onShowCode: () => void;
 }) {
+	// La vinculación de Handy solo tiene sentido si la Main está en modo "Con conexión (nube)": en
+	// solo-local los Handy no podrían conectarse. Si no está online, cubrimos la UI (ver return).
+	const online = useConnectionMode((s) => s.mode) === "online";
+
 	const qrValue = useMemo(() => {
 		if (!pairCode || !pairSecret) return "";
 		return `tpv://pair?code=${encodeURIComponent(pairCode)}&secret=${encodeURIComponent(pairSecret)}`;
@@ -188,7 +193,7 @@ export function VincularHandy({
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="relative flex flex-col gap-4">
 			<Panel
 				title="Vincular Handy"
 				subtitle="Escanea este QR con el dispositivo que quieras emparejar."
@@ -569,6 +574,24 @@ export function VincularHandy({
 					</div>
 				)}
 			</Panel>
+
+			{/* Solo-local: la vinculación no sirve (los Handy no podrían conectarse). Cubrimos toda
+			    la UI con una capa gris que bloquea la interacción y explica cómo habilitarla. */}
+			{!online ? (
+				<div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-slate-900/50 p-6 backdrop-blur-[1px]">
+					<div className="max-w-md rounded-2xl border border-border bg-surface p-5 text-center shadow-xl">
+						<div className="text-base font-semibold text-fg">
+							Activa “Con conexión” para vincular
+						</div>
+						<p className="mt-2 text-sm text-fg-muted">
+							La vinculación de dispositivos Handy solo tiene sentido con este TPV en modo{" "}
+							<span className="font-semibold">Con conexión (nube)</span>: en modo solo local
+							los Handy no podrían conectarse. Cámbialo en{" "}
+							<span className="font-semibold">Configuración → Conectividad</span>.
+						</p>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }
