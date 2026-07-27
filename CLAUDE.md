@@ -60,9 +60,10 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │   │   └── src-tauri/         # Backend local (invocador/orquestador de las crates)
 │   │       ├── tauri.conf.json · Cargo.toml · build.rs   (schema en packages/database)
 │   │       └── src/
-│   │           ├── main.rs    # entrada Tauri
-│   │           ├── lib.rs     # registro de comandos + estado (AppState)
-│   │           └── commands/  # mapeadores finos → llaman a tpv-application (objetivo)
+│   │           ├── lib.rs     # crate `tpv_lib`: TODA la app (AppState, comandos, run()). Punto de
+│   │           │              #   entrada COMPARTIDO escritorio+móvil (run() con #[cfg_attr(mobile, mobile_entry_point)])
+│   │           ├── main.rs    # shim del binario de escritorio: fn main() { tpv_lib::run() }
+│   │           └── commands/  # mapeadores finos → llaman a tpv-application
 │   │
 │   └── cloud-worker-licensing/   # Worker ÚNICO `tpv-api` (fusión de tpv-server + tpv-licensing):
 │                                  #   Hono + DO TenantHub + pairing + licencia. (Carpeta sin renombrar.)
@@ -202,12 +203,20 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ Patrón hexagonal compartido establecido: `tpv-infra-sqlite::mapping`, `tpv-application::{ports,use_cases}`, `AppError`→`String`.
 - ✅ **Módulo `clientes` migrado (PILOTO/REFERENCIA)** end-to-end: domain → ports → repo sqlite → use cases → contracts (DTOs ts-rs) → comando Tauri fino + **rewire frontend a `@tpv/client`** (sin dualCall). Verificado: `cargo check -p tpv` ✅, `cargo test -p tpv-contracts` ✅, `tsc` frontend ✅.
 - ✅ `pnpm install` ejecutado (workspace enlazado). Frontend pasa `tsc` (la antigua duda de `lucide-react` en `Carousel.tsx` ya no bloquea: el componente quedó sin uso y el type-check es verde).
-- ✅ **Todos los dominios migrados** siguiendo el patrón de `clientes` (monolito estrangulado por completo): `clientes`, `stats`, `tareas`, `trabajadores`, `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `configuracion`, `login`; y `licensing`/`pairing` (a `tpv-infra-licensing`). `apps/tpv-main/src-tauri/src/` ya sólo contiene `main.rs` (shell), `lib.rs` y `commands/` (capa fina). Alta/edición local de trabajador añadida (`trabajadores_create`/`trabajadores_update`).
+- ✅ **Todos los dominios migrados** siguiendo el patrón de `clientes` (monolito estrangulado por completo): `clientes`, `stats`, `tareas`, `trabajadores`, `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `configuracion`, `login`; y `licensing`/`pairing` (a `tpv-infra-licensing`). `apps/tpv-main/src-tauri/src/` ya sólo contiene `lib.rs` (toda la app), `main.rs` (shim) y `commands/` (capa fina). Alta/edición local de trabajador añadida (`trabajadores_create`/`trabajadores_update`).
 - ✅ Auditoría de fidelidad multi-agente de `licensing`/`pairing`; bug detectado y corregido (`AppError::Raw` para propagar verbatim los códigos de negocio del worker, p. ej. `not_approved` del pairing Handy).
 - ✅ Eliminada la capa `dualCall` antigua + auxiliares: frontend `net/*` (`dualCall`, `cloudSync`, `outboxSync`, `realtimeSocket`, `healthCheck`) y stores `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + wiring y comandos `*_after_remote_ok`. Reemplazada por el sistema outbox + WebSocket + TenantHub (§9). Pairing Handy se conserva activo.
-- ✅ Conexión/seed de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db(app_data_dir)`); el esquema lo construyen las migraciones embebidas (`packages/database/migrations/`, ver `migrations.rs`), el shell `main.rs` sólo aporta la ruta AppData.
+- ✅ Conexión/seed de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db(app_data_dir)`); el esquema lo construyen las migraciones embebidas (`packages/database/migrations/`, ver `migrations.rs`), el shell (`lib.rs::run`) sólo aporta la ruta AppData.
 - ✅ Reestructuración del frontend a `app/ · features/ · shared/` (+ `assets/`). `pages/` y `layoutComponent` viven bajo `app/`; los dominios bajo `features/`; stores/ui/toast/ticket/lib bajo `shared/`. Entry `index.html` → `/src/app/main.tsx`.
 - ✅ Verificación final: `cargo build` (workspace completo) + `cargo test -p tpv-contracts` (176 ok) + `tsc` frontend + `pnpm generate-types` (turbo) OK. Reparado el pipeline turbo (claves `"//"` inline y `packageManager` ausente).
+- ✅ **Compilación a Android** (modo Handy) operativa. La app se movió a la crate de librería `tpv_lib`
+  (`lib.rs`) como **entry compartido escritorio+móvil**; el cdylib `libtpv_lib.so` arranca por
+  `#[tauri::mobile_entry_point]`, y `main.rs` es un shim. Almacén de secretos por plataforma
+  (`tpv-infra-licensing::secret_store`: `keyring` en escritorio, **Android Keystore AES-GCM vía JNI**
+  en Android — la `JavaVM` se captura en `JNI_OnLoad`); `tauri-plugin-updater` y `tauri-plugin-sentry`
+  (+minidump) gateados a `#[cfg(desktop)]`; `sentry` a **rustls** (evita openssl); permiso `wss:` en el
+  CSP. Validado en emulador (identidad persiste tras reinicio, pairing + sync Handy OK). **Toolchain,
+  bugs resueltos y bitácora completa en [docs/android/COMPILAR_ANDROID.md](docs/android/COMPILAR_ANDROID.md).**
 
 ### Patrón de referencia para migrar un módulo (seguir `clientes`)
 1. `tpv-domain/src/<m>.rs`: entidades + validación pura. Registrar en `domain/src/lib.rs`.
@@ -215,14 +224,16 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 3. `tpv-application/src/ports/<m>.rs`: trait `…Repository` (async). Registrar en `ports/mod.rs`.
 4. `tpv-application/src/use_cases/<m>.rs`: orquestación + validación de dominio. Registrar en `use_cases/mod.rs`.
 5. `tpv-infra-sqlite/src/<m>.rs`: `Sqlite…Repository` con el SQL (sin outbox/Applied_Operations — Local-First). Usa `crate::mapping`. Registrar en `infra-sqlite/src/lib.rs`.
-6. `apps/tpv-main/src-tauri/src/commands/<m>.rs`: comandos finos (mismos nombres). Registrar en `commands/mod.rs` y reapuntar `main.rs` (quitar `mod <m>;` viejo + registrar `commands::<m>::…`). Borrar el `<m>.rs` monolítico.
+6. `apps/tpv-main/src-tauri/src/commands/<m>.rs`: comandos finos (mismos nombres). Registrar en `commands/mod.rs` y reapuntar `lib.rs` (quitar `mod <m>;` viejo + registrar `commands::<m>::…`). Borrar el `<m>.rs` monolítico.
 7. Frontend `…Apis.ts`: cambiar `dualCall` por `invokeClient` de `@tpv/client`, tipos de `@tpv/contracts`, sin `op_id`/outbox.
 
 ### Backend monolítico de origen (desmontado ✅)
 El backend monolítico previo (`mesas.rs`, `cloud_sync.rs`, `venta_rapida.rs`, `stats.rs`, …) se ha
 vaciado por completo hacia las crates hexagonales. `apps/tpv-main/src-tauri/src/` ya sólo contiene
-`main.rs` (shell: modo device, AppData, registro de comandos, `run()`), `lib.rs` (boilerplate Tauri)
-y `commands/` (un fichero fino por dominio). Toda la lógica/SQL vive en `crates/*`.
+`lib.rs` (crate `tpv_lib`: modo device, AppData, registro de comandos, `run()` con
+`#[cfg_attr(mobile, tauri::mobile_entry_point)]` — entry compartido escritorio+móvil), `main.rs`
+(shim del binario: `fn main() { tpv_lib::run() }`) y `commands/` (un fichero fino por dominio). Toda
+la lógica/SQL vive en `crates/*`.
 
 ---
 

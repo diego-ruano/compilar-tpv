@@ -347,6 +347,24 @@ Dos bugs de **runtime** resueltos (§4.7), que compilaban pero fallaban al ejecu
   (`INSTALL_FAILED_INSUFFICIENT_STORAGE`), relanzar con `-wipe-data`.
 - **Pendiente:** flujo Handy completo (pairing + REST + WS) contra backend.
 
+### 2026-07-26 (tarde) — Flujo Handy validado en Android + fix de CSP (WebSocket)
+- **Bug (Android-only):** el WebSocket del Handy (`wss://tpv-api…/ws`) lo **bloqueaba el CSP**. El
+  `tauri.conf.json` tenía `default-src 'self' ipc: https:` sin `connect-src`, y el Chromium de Android
+  es estricto: `wss:` no cae bajo `https:`. → el Handy **nunca conectaba** y se quedaba en "Conectando
+  con la Main" para siempre. (En escritorio/WebView2 colaba por ser más laxo.) **Fix:** añadir
+  `connect-src 'self' ipc: https: wss: ws:` al CSP. Diagnóstico: `adb logcat` → `Tauri/Console: Refused
+  to connect … Content Security Policy`.
+- **Validado en emulador (Pixel_7 x86_64) con una Main online:** el Handy conecta, autentica, recibe
+  `main_status`/`main_online`, se desbloquea y opera; la app carga en modo Handy sin problemas.
+- **Gotcha de uso (no es bug):** la **Main solo abre su WS a la nube en modo "Con conexión (online)"**
+  (`useMainSocket` corta si `connMode !== "online"`; por defecto arranca `offline`). Con la Main en
+  solo-local, el worker no ve ninguna Main → el Handy muestra "La Main no está activa" aunque la Main
+  esté arrancada. Se añadió un **overlay gris que bloquea la UI de "Vincular Handy"** en la Main
+  cuando está en solo-local (no tiene sentido emparejar si el Handy no podrá conectar).
+- **Mejora del banner (frontend, aplica a escritorio y Android):** el freeze del Handy ya no se queda
+  pegado — gracia de 5 s antes de bloquear, reconexión al volver a primer plano/red (`visibilitychange`/
+  `online`/`focus`), y botón "Reintentar conexión".
+
 <!-- Plantilla para nuevas entradas:
 ### AAAA-MM-DD — <título>
 - <hallazgo> (comando: `…`) → resultado.
