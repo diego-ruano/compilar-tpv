@@ -19,5 +19,16 @@ thiserror = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
-keyring = { workspace = true }
 rand = { workspace = true }
+# Fachada de logging (diagnostico de secret_store en Android -> logcat via android_logger de la app).
+log = "0.4"
+
+# keyring (keychain del SO) solo en escritorio; en Android su backend seria mock (no persistente),
+# asi que alli se sustituye por el almacen JNI Android Keystore + SharedPreferences (secret_store.rs).
+[target.'cfg(not(target_os = "android"))'.dependencies]
+keyring = { workspace = true }
+
+# Android: clases del framework (jni) para el almacen de secretos cifrado con Android Keystore. La
+# JavaVM se obtiene con JNI_GetCreatedJavaVMs (dlsym) y el Context con ActivityThread. Ver secret_store.rs.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"

@@ -25,10 +25,6 @@
         "fs:scope-desktop",
         "fs:scope-document",
 
-        "fs:allow-write-file",
-
-        "updater:default",
-
-        "sentry:default"
+        "fs:allow-write-file"
     ]
 }
