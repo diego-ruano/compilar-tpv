@@ -67,15 +67,29 @@ impl CloudClient {
     }
 
     /// Crea un `RequestBuilder` con las cabeceras device-proof firmadas para `method`/`path`.
+    ///
+    /// SYNC-04 — `x-client-now`: el reloj lo pone el dispositivo EMISOR, no el servidor. El worker
+    /// usa esta hora local para resolver a literal fijo los `datetime('now',…)` de las escrituras,
+    /// de modo que la fila salga idéntica en nube, Main y Handy (replicación determinista). Si falta,
+    /// el guard del DO **rechaza** el comando con `missing_client_now` en vez de escribir en UTC en
+    /// silencio; sin esta cabecera, toda escritura del Handy cuyo SQL lleve `datetime('now')` fallaba
+    /// (crear ticket, añadir línea, lotes, mesas, tareas, reservas…).
+    ///
+    /// Se fija aquí, en el ÚNICO punto por el que pasan todas las peticiones (GET incluidos, donde
+    /// es inocua), y no en `write_body`: así ninguna ruta futura puede olvidarla — de hecho
+    /// `delete_json` ya se saltaba `write_body`. Espejo de `tpv_server_post_json`
+    /// (`tpv-infra-licensing`), que es el otro transporte y siempre la ha puesto.
     fn signed_req(&self, method: Method, path: &str) -> AppResult<RequestBuilder> {
         let method_str = method.as_str().to_string();
         let h = self.signed(&method_str, path)?;
+        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         Ok(self
             .http
             .request(method, self.url(path))
             .header("authorization", h.authorization)
             .header("x-device-ts", h.x_device_ts)
-            .header("x-device-sig", h.x_device_sig))
+            .header("x-device-sig", h.x_device_sig)
+            .header("x-client-now", client_now))
     }
 
     /// GET firmado que deserializa la respuesta JSON en `T`.
