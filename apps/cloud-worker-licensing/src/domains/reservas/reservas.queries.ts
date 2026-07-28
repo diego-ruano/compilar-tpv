@@ -25,8 +25,8 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 		ORDER BY ID_Zona ASC;
 	`);
 
-	// RES-06: `Es_Sistema` existe siempre en el esquema (NOT NULL DEFAULT 0); el antiguo
-	// fallback a la query sin filtro era código muerto y se ha eliminado. Espejo del repo local.
+	// Todas las mesas son reservables: ya no existen "mesas de sistema" (la venta rápida no usa
+	// mesa, ver `Comandas.Canal`), así que no hay nada que excluir. Espejo del repo local.
 	const mesasRs = await db.execute(`
 		SELECT
 			ID_Mesa AS id_mesa,
@@ -34,7 +34,6 @@ export async function meta(db: Client): Promise<ReservasMetaDto> {
 			Numero_Mesa AS numero_mesa,
 			Capacidad AS capacidad
 		FROM Mesas
-		WHERE COALESCE(Es_Sistema, 0) = 0
 		ORDER BY ID_Zona ASC, ID_Mesa ASC;
 	`);
 

@@ -86,20 +86,19 @@ export async function mesas(
 
 	const total = await one(
 		db,
-		"SELECT COUNT(*) AS n FROM Mesas WHERE COALESCE(Es_Sistema,0)=0;",
+		"SELECT COUNT(*) AS n FROM Mesas;",
 	);
 	// Ingresos al nivel de PAGO (fuente de verdad = Pagos, coherente con caja), semántica por-mesa:
-	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = SUM(Importe_Total). Se
-	// excluyen las mesas de sistema (p. ej. venta rápida) del tablero de mesas. Mismo modelo que
-	// Main/Rust (STAT-01/02/06).
+	// 'ocupadas' = nº de mesas reales con cobro en el rango; ingresos = SUM(Importe_Total). La venta
+	// rápida no tiene mesa (Canal='BARRA', ID_Mesa NULL), así que el JOIN con Mesas ya la excluye
+	// sin filtro extra. Mismo modelo que Main/Rust (STAT-01/02/06).
 	const ingresos = await one(
 		db,
 		`SELECT ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS total, COUNT(DISTINCT c.ID_Mesa) AS ocupadas
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(m.Es_Sistema,0)=0;`,
+		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end};`,
 	);
 	const top = await one(
 		db,
@@ -109,7 +108,6 @@ export async function mesas(
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(m.Es_Sistema,0)=0
 		 GROUP BY m.ID_Mesa
 		 ORDER BY comandas DESC, m.Numero_Mesa ASC
 		 LIMIT 1;`,
@@ -120,7 +118,6 @@ export async function mesas(
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(m.Es_Sistema,0)=0
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const topRs = await db.execute(
@@ -130,7 +127,6 @@ export async function mesas(
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
-		   AND COALESCE(m.Es_Sistema,0)=0
 		 GROUP BY m.ID_Mesa
 		 ORDER BY total DESC LIMIT 10;`,
 	);
@@ -264,7 +260,7 @@ export async function reservas(
 	);
 	const totalMesas = await one(
 		db,
-		"SELECT COUNT(*) AS total FROM Mesas WHERE COALESCE(Es_Sistema,0)=0;",
+		"SELECT COUNT(*) AS total FROM Mesas;",
 	);
 	const br = rows(bucketRs);
 	const er = rows(estadoRs);

@@ -28,6 +28,10 @@
   Handy bloquean su UI.
 - **Determinismo temporal:** el emisor fija la hora (`X-Client-Now`); el DO y el `WriteGuard`
   reescriben `datetime('now','localtime')` a literal antes de ejecutar/replicar.
+- **Hibernación (SYNC-16):** el DO usa la **WebSocket Hibernation API**. Las conexiones siguen
+  abiertas mientras el objeto está evacuado de memoria (no factura duración) y el runtime lo despierta
+  al llegar un mensaje real; el latido se contesta en el edge sin despertarlo. Consecuencia de diseño:
+  **no puede haber estado de sesión en campos de la instancia** — ver la sección SYNC-16.
 
 ---
 
@@ -41,8 +45,8 @@
 | SYNC-04 | 🟠 | Escrituras de Handy pueden quedar con **timestamp UTC** si el constructor de comando no manda `clientNow` → filas con zona horaria inconsistente | `tenantHub.ts:232-240`, `hub.ts:68` |
 | SYNC-05 | 🟡 | Reescritura de tiempo **de cobertura estrecha** (espejo de DB-15): solo formas exactas; cualquier otra función temporal replica verbatim | `db.rs:116`, `tenantHub.ts:244-250` |
 | SYNC-06 | 🟡 | `invalidateQueries()` **sin filtro** en cada cambio (Main y Handy) → refetch de todo lo montado; tormentas bajo actividad multi-dispositivo | `useMainSocket.ts:124`, `useHandySocket.ts:157` |
-| SYNC-07 | 🟡 | El challenge WS **no es de un solo uso**: no se borra tras verificar → replay dentro de la ventana de 60 s | `tenantHub.ts:1088-1123` |
-| SYNC-08 | 🟡 | `touchLastSeen` escribe en la BD central **en cada ping** (30 s) por dispositivo → amplificación de escrituras | `tenantHub.ts:696-703,1318-1321` |
+| SYNC-07 | ✅ | El challenge WS **no era de un solo uso**: no se borraba tras verificar → replay dentro de la ventana de 60 s | `tenantHub.ts` (`webSocketMessage`, rama `helloSigned`) |
+| SYNC-08 | ✅ | `touchLastSeen` escribía en la BD central **en cada ping** (30 s) por dispositivo → amplificación de escrituras | `tenantHub.ts` (`touchLastSeen`) |
 | SYNC-09 | 🟡 | **Sin backoff** de reconexión: 3 s fijos en ambos hooks → reconexiones constantes ante un corte prolongado | `useMainSocket.ts:261-267`, `useHandySocket.ts:68-74` |
 | SYNC-10 | 🟡 | `storageResult` best-effort → el **reintento idempotente devuelve un resultado degradado** (campos derivados de DB en null) distinto al de la primera vez | `tenantHub.ts:826-828,935-952` |
 | SYNC-11 | 🟡 | `evalValueStep`: **acoplamiento frágil** al set cerrado de 3 regex; un nuevo `*.commands.ts` con otra forma rompe la replicación en runtime | `tenantHub.ts:461-470` |
@@ -50,6 +54,7 @@
 | SYNC-13 | 🔵 | Catch-up limitado a 2000×500 = 1M ops; una Main mucho tiempo offline podría **cortar el catch-up** en silencio | `useMainSocket.ts:240` |
 | SYNC-14 | 🔵 | Falta **observabilidad de salud** al usuario: profundidad del outbox / lag de catch-up / pipeline atascado son invisibles | (transversal) |
 | SYNC-15 | 🔵 | Token en el **query string** del WS (`?token=`) → visible en logs de proxy/CF | `useMainSocket.ts:279-281` |
+| SYNC-16 | ✅ | El DO permanecía **cargado en memoria facturando duración** mientras hubiera un WS abierto, aunque estuviera ocioso → migrado a la WebSocket Hibernation API | `tenantHub.ts` (clase completa) |
 
 ---
 
@@ -135,22 +140,24 @@
 - **Arreglo:** derivar de `statements` (ya se hace parcialmente con `affectedComandas`) las **claves
   de feature afectadas** e invalidar solo esas (`invalidateQueries({ queryKey: [feature] })`).
 
-### SYNC-07 🟡 Challenge WS no es de un solo uso
-- **Ubicación:** `verifyHelloSigned` (`tenantHub.ts:1088-1123`) lee `challengeByDevice.get(deviceId)`
-  pero **nunca lo borra** tras verificar.
-- **Fallo:** el mismo `nonce`/firma podría reenviarse dentro de la ventana de 60 s (hasta expirar)
-  para re-autenticar. Exploit acotado (mismo dispositivo, misma clave) pero rompe la propiedad de
-  "un challenge = un uso".
-- **Arreglo:** `this.challengeByDevice.delete(deviceId)` en cuanto la firma se valida (y también al
-  fallar), forzando reemisión.
+### SYNC-07 ✅ Challenge WS no era de un solo uso — RESUELTO
+- **Ubicación:** rama `helloSigned` de `webSocketMessage`.
+- **Fallo (original):** el mismo `nonce`/firma podía reenviarse dentro de la ventana de 60 s (hasta
+  expirar) para re-autenticar. Exploit acotado (mismo dispositivo, misma clave) pero rompía la
+  propiedad de "un challenge = un uso".
+- **Arreglo aplicado:** el challenge vive en el **attachment del socket** y se consume poniéndolo a
+  `null` de forma **síncrona, antes de cualquier `await`**, en cuanto llega un `helloSigned` (éxito o
+  fallo). Hacerlo antes del primer `await` es lo que impide que dos `helloSigned` seguidos lean el
+  mismo nonce. Un reintento legítimo obliga a reconectar (nueva conexión → nuevo challenge).
 
-### SYNC-08 🟡 `touchLastSeen` en cada ping
-- **Ubicación:** `tenantHub.ts:1318-1321` (ping) y `:1280` (connect) → `UPDATE devices SET
-  last_seen_at_ms=?` en la BD central por cada ping (cada 30 s) y por dispositivo.
-- **Fallo:** escritura periódica constante en la BD central proporcional a nº de dispositivos. No es
-  crítico pero es coste evitable y ruido de escrituras.
-- **Arreglo:** throttlear (p. ej. actualizar como mucho cada N minutos por dispositivo, guardando el
-  último `last_seen` empujado en memoria del DO).
+### SYNC-08 ✅ `touchLastSeen` en cada ping — RESUELTO
+- **Fallo (original):** `UPDATE devices SET last_seen_at_ms=?` en la BD central por cada ping (30 s)
+  y por dispositivo → escritura periódica constante proporcional al nº de dispositivos.
+- **Arreglo aplicado:** dos capas. (1) Throttle en memoria del DO (`LAST_SEEN_THROTTLE_MS`, 5 min) por
+  dispositivo. (2) Con SYNC-16 el ping **ya ni siquiera llega al DO** (lo contesta el auto-response en
+  el edge), así que `last_seen` se alimenta solo de la **conexión** (`force`) y de la **actividad
+  real** (`apply`/`event`). El throttle se pierde al hibernar: como mucho un UPDATE extra por
+  despertar.
 
 ### SYNC-09 🟡 Sin backoff de reconexión
 - **Ubicación:** `RECONNECT_MS = 3000` fijo en ambos hooks.
@@ -205,6 +212,58 @@
   queda en logs de proxies/CF y en historiales.
 - **Arreglo:** aceptable por limitación del protocolo, pero preferir un **ticket de un solo uso y
   corta vida** (canjear el JWT por un ticket efímero para el WS) para minimizar exposición.
+
+### SYNC-16 ✅ El DO facturaba duración mientras hubiera un WS abierto — RESUELTO
+
+- **Fallo (original):** con `server.accept()`, **cualquier** WebSocket abierto mantenía el
+  `TenantHub` cargado en memoria y facturando **duración (GB-s)** de forma continua, aunque no
+  pasara ni un solo mensaje. Como el DO es **uno por tenant**, un cliente con la app abierta durante
+  su jornada tenía el hub despierto toda la jornada. El coste escala **lineal con el nº de tenants**
+  y es un medidor distinto (y mucho más restrictivo) que el de requests.
+- **Arreglo aplicado:** migración a la **WebSocket Hibernation API**:
+  - `state.acceptWebSocket(server, [deviceId])` en lugar de `server.accept()`.
+  - Los `server.addEventListener("message"|"close"|"error")` pasan a métodos de clase
+    `webSocketMessage` / `webSocketClose` / `webSocketError`.
+  - `state.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}',
+    '{"type":"pong"}'))` en el constructor: el latido de 30 s se responde **en el edge**, sin
+    despertar al DO ni facturar. **El frontend no cambió** (el par casa la cadena exacta que ya
+    enviaban `useMainSocket`/`useHandySocket`).
+- **Sin cambios de despliegue:** misma clase, mismo binding, `migrations` intacto. Los clientes no se
+  enteran: hibernar **no cierra** las conexiones.
+
+#### Reglas de diseño que impone la hibernación (leer antes de tocar el DO)
+
+1. **Prohibido el estado de sesión en campos de instancia.** Al despertar, la instancia es **nueva**
+   (campos vacíos, sin closures). Todo lo que describe a un socket va en su **attachment**
+   (`WsAttachment`: `tenantId`, `deviceId`, `role`, `authed`, `pubkeyB64`, `challenge`) vía
+   `ws.serializeAttachment()`. Hay que **re-serializar tras cada mutación** (p. ej. al autenticar).
+   Los antiguos `Map`s (`sockets`/`roles`/`authed`/`pubkeyByDevice`/`challengeByDevice`) han
+   desaparecido.
+2. **El censo de conexiones es `state.getWebSockets()`**, con etiqueta `deviceId` para buscar uno
+   concreto. Ojo: `getWebSockets()` **puede devolver sockets ya cerrados**, por eso `liveSocketsFor()`
+   filtra por `readyState` y `isMainConnected(except)` permite excluir el socket que se está cerrando
+   (sin ese `except`, el freeze `main_offline` no se dispararía nunca).
+3. **Nada que mantenga el DO vivo.** Ni `setInterval`/`setTimeout` en el DO, ni un `alarm()`
+   periódico: despertarían el objeto y anularían el ahorro. Por eso `last_seen` **no** se refresca con
+   un temporizador (ver SYNC-08).
+4. **Las cachés en memoria son best-effort y se pierden al hibernar.** Afecta a
+   `lastSeenPushedAtMs` (throttle de `last_seen`), `lastPurgeAtMs` (SYNC-12: la purga podrá correr algo
+   más a menudo) y la resolución cacheada de la BD del tenant (`TENANT_DB_CACHE_TTL_MS`: se
+   re-resuelve tras cada despertar, una query extra). Ninguna es crítica; si alguna molestara, se
+   movería a `state.storage`.
+5. **Si cambia el formato del latido en el frontend**, hay que cambiar el par del auto-response en el
+   constructor: casa **cadenas exactas**. Si dejan de coincidir, todo seguirá funcionando pero el DO
+   despertará en cada ping y se pierde el ahorro (fallo silencioso de coste, no de función).
+6. **Los cierres iniciados por el servidor no son de fiar para la contabilidad.** La documentación de
+   Cloudflare no garantiza que llamar a `ws.close()` desde el DO dispare `webSocketClose`. Por eso la
+   presencia/freeze vive en `sessionGone(ws, att)`, que se invoca desde `webSocketClose` **y**
+   explícitamente en el revoke. Es idempotente y se auto-inhibe si queda otro socket vivo del mismo
+   dispositivo, así que da igual que se llame una o dos veces. **Cualquier cierre nuevo iniciado por
+   el DO debe llamar a `sessionGone` igual.**
+
+> **Sentry:** `instrumentDurableObjectWithSentry` (v10) envuelve explícitamente `webSocketMessage`,
+> `webSocketClose` y `webSocketError`, así que la instrumentación sigue cubriendo el ciclo de vida del
+> WebSocket tras la migración.
 
 ---
 

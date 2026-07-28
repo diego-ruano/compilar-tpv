@@ -1419,7 +1419,6 @@ pub fn run() {
             commands::mesas::cerrar_comanda,
             commands::mesas::get_lineas_comanda,
             commands::mesas::add_linea_comanda,
-            commands::mesas::get_or_create_mesa_barra,
             commands::mesas::get_or_create_comanda_barra,
             commands::mesas::cobrar_venta_rapida,
             commands::mesas::create_comanda_barra,

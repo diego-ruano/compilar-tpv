@@ -31,10 +31,11 @@ pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// UUID fijos de los seeds (idénticos en local y nube). Ver `packages/database/migrations/0001_inicial.sql`.
-/// La mesa/zona BARRA usa un id fijo para que la venta rápida cuadre entre dispositivos.
-pub const BARRA_MESA_ID: &str = "00000000-0000-7000-8000-000000000401";
-pub const BARRA_ZONA_ID: &str = "00000000-0000-7000-8000-000000000303";
+/// Canal de una comanda (`Comandas.Canal`). 'MESA' = consumo en sala (lleva mesa);
+/// 'BARRA' = venta rápida (sin mesa). Ver la nota de la tabla `Comandas` en
+/// `packages/database/migrations/0001_inicial.sql`.
+pub const CANAL_MESA: &str = "MESA";
+pub const CANAL_BARRA: &str = "BARRA";
 
 /// UUID FIJO del administrador inicial. DEBE ser idéntico en la Main (`seed_admin_if_empty`) y en
 /// la nube (`ensureTenantInitialAdmin`): cada lado siembra su admin por separado, así que si el id

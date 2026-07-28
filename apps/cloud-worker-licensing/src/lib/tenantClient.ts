@@ -57,19 +57,30 @@ function isAuthError(e: unknown): boolean {
 /**
  * Ejecuta una lectura contra la DB del tenant. Reintenta una vez con credenciales
  * rotadas si el token había caducado (401).
+ *
+ * ⚠️ La resolución del cliente va DENTRO del `try` a propósito. `getTenantClient` habla con Turso
+ * por dos vías (resolver credenciales y, sobre todo, el guard de migración `ensureTenantMigrated`),
+ * así que también puede lanzar 401. Cuando esa llamada quedaba fuera del `try`, un token caducado
+ * hacía que el guard lanzase el 401 antes de llegar al `catch`: la rotación no se ejecutaba NUNCA y
+ * **todas** las lecturas REST de la Handy se quedaban en 500 permanente (`internal_error`), sin
+ * recuperarse solas. El sync seguía funcionando porque el Durable Object tiene su propio reintento
+ * con rotación (`withTenantDbRetry`), de ahí que fallasen las lecturas pero no la replicación.
  */
 export async function tenantQuery<T>(
 	env: Env,
 	tenantId: string,
 	fn: (db: Client) => Promise<T>,
 ): Promise<T> {
-	const db = await getTenantClient(env, tenantId);
 	try {
+		const db = await getTenantClient(env, tenantId);
 		return await fn(db);
 	} catch (e) {
 		if (!isAuthError(e)) throw e;
 		cache.delete(tenantId);
 		const fresh = await build(env, tenantId, true);
+		// Si el 401 vino del guard de migración, su entrada ya se invalidó al fallar: hay que
+		// reintentarlo con el token nuevo antes de la query (si ya estaba migrado, es un no-op).
+		await ensureTenantMigrated(fresh, tenantId);
 		return await fn(fresh);
 	}
 }

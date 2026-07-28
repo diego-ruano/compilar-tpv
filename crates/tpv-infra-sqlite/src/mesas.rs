@@ -21,7 +21,7 @@ use tpv_contracts::mesas::{
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
 
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
-use crate::util::{new_id, BARRA_MESA_ID};
+use crate::util::{new_id, CANAL_BARRA};
 
 pub struct SqliteMesasRepository {
     db: Arc<Db>,
@@ -283,28 +283,22 @@ async fn consumir_stock_fefo<C: Writer>(
     Ok(())
 }
 
-/// La mesa BARRA se siembra con un id fijo (idéntico en local y nube), así que basta devolverlo.
-async fn get_or_create_mesa_barra_inner<C>(_db: &C) -> AppResult<String> {
-    Ok(BARRA_MESA_ID.to_string())
-}
-
-/// Get-or-create de la comanda de barra abierta (Local-First: id UUIDv7 explícito).
+/// Get-or-create del ticket de barra abierto (Local-First: id UUIDv7 explícito). Los tickets de
+/// venta rápida no tienen mesa: se identifican por `Canal='BARRA'`.
 async fn get_or_create_comanda_barra_inner<C: Writer>(
     db: &C,
     id_trabajador: Option<String>,
 ) -> AppResult<String> {
-    let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
-
     if let Some(idc) = select_one_string(
         db,
         r#"
         SELECT ID_Comanda
         FROM Comandas
-        WHERE ID_Mesa=?1 AND Estado='Abierta'
+        WHERE Canal=?1 AND Estado='Abierta'
         ORDER BY datetime(Fecha_Hora_Apertura) DESC
         LIMIT 1;
         "#,
-        vec![Value::Text(id_mesa_barra.clone())],
+        vec![Value::Text(CANAL_BARRA.to_string())],
     )
     .await?
     {
@@ -315,14 +309,14 @@ async fn get_or_create_comanda_barra_inner<C: Writer>(
     db.execute(
         r#"
         INSERT INTO Comandas (
-          ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
+          ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado, Canal
         )
-        VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
+        VALUES (?1, NULL, ?2, datetime('now','localtime'), 0, 'Abierta', ?3);
         "#,
         vec![
             Value::Text(id_comanda.clone()),
-            Value::Text(id_mesa_barra),
             id_trabajador.map(Value::Text).unwrap_or(Value::Null),
+            Value::Text(CANAL_BARRA.to_string()),
         ],
     )
     .await
@@ -410,12 +404,12 @@ impl MesasRepository for SqliteMesasRepository {
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             // ── 1. Eliminar las zonas borradas en el editor (las que ya no llegan) ──────
-            // Primero sus mesas libres; las de sistema y las con comanda/reserva quedan, y
-            // esas mesas residuales impiden borrar su zona (así BARRA queda protegida).
+            // Primero sus mesas libres; las que tienen comanda/reserva quedan, y esas mesas
+            // residuales impiden borrar su zona (no se pierde histórico).
             db.execute(
                 &format!(
                     r#"DELETE FROM Mesas
-                       WHERE Es_Sistema = 0{not_in_clause}
+                       WHERE 1 = 1{not_in_clause}
                          AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
                          AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);"#
                 ),
@@ -526,7 +520,6 @@ impl MesasRepository for SqliteMesasRepository {
                     r#"
                     DELETE FROM Mesas
                     WHERE ID_Zona = ?1
-                      AND Es_Sistema = 0
                     "#,
                 );
                 let mut sql_args: Vec<Value> = vec![Value::Text(zone_id.clone())];
@@ -604,11 +597,11 @@ impl MesasRepository for SqliteMesasRepository {
                               ID_Mesa, ID_Zona, Numero_Mesa, Capacidad,
                               Ubicacion_X, Ubicacion_Y,
                               Shape, Width, Height, Radius,
-                              Updated_At, Es_Sistema
+                              Updated_At
                             )
                             VALUES (
                               ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-                              datetime('now','localtime'), 0
+                              datetime('now','localtime')
                             )
                             ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
                               Capacidad   = excluded.Capacidad,
@@ -672,7 +665,6 @@ impl MesasRepository for SqliteMesasRepository {
                 SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad,
                        Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius
                 FROM Mesas
-                WHERE Es_Sistema = 0
                 ORDER BY ID_Zona ASC, ID_Mesa ASC;
                 "#,
                 (),
@@ -1130,11 +1122,6 @@ impl MesasRepository for SqliteMesasRepository {
 
     /* ===== BARRA ===== */
 
-    async fn get_or_create_mesa_barra(&self) -> AppResult<String> {
-        let db = self.db.read().await;
-        get_or_create_mesa_barra_inner(&db).await
-    }
-
     async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String> {
         let db = self.db.write().await;
         get_or_create_comanda_barra_inner(
@@ -1312,20 +1299,19 @@ impl MesasRepository for SqliteMesasRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<String> = async {
-            let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
             let id_comanda = new_id();
 
             db.execute(
                 r#"
                 INSERT INTO Comandas (
-                  ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado
+                  ID_Comanda, ID_Mesa, ID_Trabajador, Fecha_Hora_Apertura, Total_Comanda, Estado, Canal
                 )
-                VALUES (?1, ?2, ?3, datetime('now','localtime'), 0, 'Abierta');
+                VALUES (?1, NULL, ?2, datetime('now','localtime'), 0, 'Abierta', ?3);
                 "#,
                 vec![
                     Value::Text(id_comanda.clone()),
-                    Value::Text(id_mesa_barra),
                     id_trabajador.map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(CANAL_BARRA.to_string()),
                 ],
             )
             .await
@@ -1354,7 +1340,6 @@ impl MesasRepository for SqliteMesasRepository {
     ) -> AppResult<Vec<ComandaBarraListItem>> {
         let g = self.db.read().await;
         let db = &g;
-        let id_mesa_barra = get_or_create_mesa_barra_inner(db).await?;
 
         let sql = format!(
             r#"
@@ -1388,7 +1373,7 @@ impl MesasRepository for SqliteMesasRepository {
                 WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
               ) AS Pendientes_Pago
             FROM Comandas c
-            WHERE c.ID_Mesa = ?1
+            WHERE c.Canal = ?1
               {estado_filter}
               AND EXISTS (
                 SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda
@@ -1404,7 +1389,10 @@ impl MesasRepository for SqliteMesasRepository {
         );
 
         let mut rows = db
-            .query(&sql, vec![Value::Text(id_mesa_barra), Value::Integer(limit)])
+            .query(
+                &sql,
+                vec![Value::Text(CANAL_BARRA.to_string()), Value::Integer(limit)],
+            )
             .await
             .map_err(db_err)?;
 

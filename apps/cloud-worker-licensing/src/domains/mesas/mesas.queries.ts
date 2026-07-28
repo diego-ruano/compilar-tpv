@@ -72,7 +72,6 @@ export async function loadLayout(db: Client): Promise<SalonOut[]> {
 			Height,
 			Radius
 		FROM Mesas
-		WHERE Es_Sistema = 0
 		ORDER BY ID_Zona ASC, ID_Mesa ASC;
 	`);
 

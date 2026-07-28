@@ -165,10 +165,9 @@ impl ReservasRepository for SqliteReservasRepository {
             });
         }
 
-        // Mesas, excluyendo las de sistema. RES-06: `Es_Sistema` existe siempre en el esquema
-        // (NOT NULL DEFAULT 0), así que el antiguo fallback a la query sin filtro era código
-        // muerto y se ha eliminado.
-        let msql = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas WHERE COALESCE(Es_Sistema, 0) = 0 ORDER BY ID_Zona ASC, ID_Mesa ASC;";
+        // Todas las mesas son reservables: ya no existen "mesas de sistema" (la venta rápida no
+        // usa mesa, ver `Comandas.Canal`), así que no hay nada que excluir.
+        let msql = "SELECT ID_Mesa, ID_Zona, Numero_Mesa, Capacidad FROM Mesas ORDER BY ID_Zona ASC, ID_Mesa ASC;";
         let mut mrows = conn.query(msql, ()).await.map_err(db_err)?;
         let mut mesas: Vec<MesaDto> = Vec::new();
         while let Some(row) = mrows.next().await.map_err(db_err)? {

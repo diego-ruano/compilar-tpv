@@ -144,10 +144,6 @@ pub async fn add_linea_comanda(
 
 /* Barra */
 
-pub async fn get_or_create_mesa_barra(repo: &dyn MesasRepository) -> AppResult<String> {
-    repo.get_or_create_mesa_barra().await
-}
-
 pub async fn get_or_create_comanda_barra(
     repo: &dyn MesasRepository,
     input: MesasGetOrCreateComandaBarraInput,

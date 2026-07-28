@@ -42,7 +42,6 @@ pub trait MesasRepository: Send + Sync {
     ) -> AppResult<Vec<MesaLineaComandaRow>>;
 
     /* Barra */
-    async fn get_or_create_mesa_barra(&self) -> AppResult<String>;
     async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>)
         -> AppResult<String>;
     async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()>;

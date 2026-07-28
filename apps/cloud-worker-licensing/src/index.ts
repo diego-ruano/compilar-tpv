@@ -209,6 +209,12 @@ app.onError((err, c) => {
 	// Reporta a Sentry también los errores que aquí traducimos a JSON: Hono los captura antes de
 	// que lleguen al wrapper global de Sentry, así que hay que notificarlos explícitamente.
 	Sentry.captureException(err);
+	// Traza server-side: sin esto un 500 no deja NINGÚN rastro en `wrangler tail` (el detalle solo
+	// viajaba en el cuerpo de la respuesta al cliente), lo que hace imposible diagnosticar en vivo.
+	console.error(
+		`[onError] ${c.req.method} ${new URL(c.req.url).pathname} → ${(err as any)?.name || "Error"}: ` +
+		`${(err as any)?.message || err}\n${(err as any)?.stack || ""}`,
+	);
 	const status = (err as any)?.status;
 	if (typeof status === "number") {
 		return c.json(

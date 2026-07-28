@@ -15,7 +15,7 @@
 | RES-03 | 🟡 | El INSERT de `Reservas` **omite `Created_At`** → depende del DEFAULT no determinista → diverge Main↔nube | `reservas.rs:266` (instancia de DB-02) |
 | RES-04 | 🟡 | `mes` con **INNER JOIN** a Mesas/Zonas → reserva sin mesa/zona existente desaparece del listado | `reservas.rs:191-194` |
 | RES-05 | 🔵 | **Tercer punto** de gestión de clientes (además de D5 y mesas) → lógica dispersa y dedup heurístico frágil | `reservas.rs:52-142` |
-| RES-06 | 🔵 | `meta` con **fallback muerto** (`Es_Sistema` siempre existe) | `reservas.rs:167-170` |
+| RES-06 | ✅ | `meta` con **fallback muerto** (`Es_Sistema` siempre existe) | `reservas.rs` |
 | RES-07 | 🔵 | Doble implementación Rust/worker (parity) | `reservas.rs` ↔ `reservas.commands.ts` |
 
 ---
@@ -68,9 +68,10 @@
   (mesas) y `upsert_cliente` (reservas), cada uno con reglas propias. Difícil de mantener coherente.
 - **Arreglo:** centralizar la resolución/creación de cliente en un único servicio de dominio.
 
-### RES-06 🔵 `meta` con fallback muerto
-- **Ubicación:** `:167-170`: intenta la query con `Es_Sistema` y cae a la versión sin filtro si falla;
-  `Es_Sistema` ya existe siempre en el esquema. **Arreglo:** eliminar el fallback.
+### RES-06 ✅ `meta` con fallback muerto — RESUELTO
+- El fallback se eliminó, y con el rediseño de venta rápida (`Comandas.Canal`) desapareció también
+  la propia columna `Es_Sistema`: ya no existen "mesas de sistema" que excluir, así que la query de
+  mesas reservables no lleva filtro. Igual en el espejo del worker (`reservas.queries.ts`).
 
 ### RES-07 🔵 Doble implementación Rust/worker
 - Parity risk, incluida la lógica de `upsert_cliente`. **Arreglo:** tests de contrato.

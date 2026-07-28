@@ -1,6 +1,6 @@
 //! Adaptador HTTP del repositorio de mesas/comandas/cocina (dominio `/v1/mesas` del worker).
 //!
-//! Los métodos de **barra** (`get_or_create_mesa_barra`, `get_or_create_comanda_barra`,
+//! Los métodos de **barra** (`get_or_create_comanda_barra`,
 //! `cobrar_venta_rapida`, `create_comanda_barra`, `list_comandas_barra`,
 //! `delete_comanda_barra_if_safe`) NO tienen endpoint en el dominio `mesas` del worker: la
 //! barra se sirve bajo `venta_rapida`. Aquí devuelven un error explícito.
@@ -133,10 +133,6 @@ impl MesasRepository for HttpMesasRepository {
     }
 
     /* Barra — sin endpoint en el dominio `mesas` del worker (lo cubre venta_rapida) */
-    async fn get_or_create_mesa_barra(&self) -> AppResult<String> {
-        Err(barra_no_disponible("get_or_create_mesa_barra"))
-    }
-
     async fn get_or_create_comanda_barra(&self, _id_trabajador: Option<String>) -> AppResult<String> {
         Err(barra_no_disponible("get_or_create_comanda_barra"))
     }

@@ -48,12 +48,12 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 		? `AND ID_Zona NOT IN (${keptZoneIds.map((_, i) => `?${i + 1}`).join(",")})`
 		: "";
 
-	// Borra mesas de zonas eliminadas (las no-sistema sin comanda/reserva activa)
+	// Borra mesas de zonas eliminadas (las que no tengan comanda/reserva asociada)
 	steps.push({
 		kind: "execute",
 		sql: `
 			DELETE FROM Mesas
-			WHERE Es_Sistema = 0
+			WHERE 1 = 1
 				${zoneNotInClause}
 				AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
 				AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
@@ -129,7 +129,6 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 			sql: `
 				DELETE FROM Mesas
 				WHERE ID_Zona = COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1))
-					AND Es_Sistema = 0
 					${keptClause}
 					AND NOT EXISTS (SELECT 1 FROM Comandas C WHERE C.ID_Mesa = Mesas.ID_Mesa)
 					AND NOT EXISTS (SELECT 1 FROM Reservas R WHERE R.ID_Mesa = Mesas.ID_Mesa);
@@ -191,15 +190,13 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 							Width,
 							Height,
 							Radius,
-							Updated_At,
-							Es_Sistema
+							Updated_At
 						)
 						SELECT
 							?11,
 							COALESCE(?1, (SELECT ID_Zona FROM Zonas WHERE Nombre_Zona = ?2 LIMIT 1)),
 							?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-							datetime('now','localtime'),
-							0
+							datetime('now','localtime')
 						ON CONFLICT(ID_Zona, Numero_Mesa) DO UPDATE SET
 							Capacidad = excluded.Capacidad,
 							Ubicacion_X = excluded.Ubicacion_X,

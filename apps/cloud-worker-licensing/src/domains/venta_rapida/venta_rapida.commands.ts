@@ -18,14 +18,15 @@ export type BuiltCommand = {
 	cloudPayload: any;
 };
 
-const REF_ID_ZONA = { $ref: "id_zona" } as const;
-const REF_ID_MESA_BARRA = { $ref: "id_mesa_barra" } as const;
 const REF_ID_COMANDA = { $ref: "id_comanda" } as const;
 const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 
-// UUIDs fijos (idénticos en local y nube; sembrados en la migración inicial 0001).
-const BARRA_ZONA_ID = "00000000-0000-7000-8000-000000000303";
-const BARRA_MESA_ID = "00000000-0000-7000-8000-000000000401";
+// Canal de la comanda (`Comandas.Canal`). Los tickets de venta rápida NO tienen mesa: antes se
+// anclaban a una mesa/zona "BARRA" sembrada en el seed, que el usuario veía como un salón fantasma
+// y que además hacía que todos los tickets compartieran mesa (chocando con el índice único de
+// "una comanda abierta por mesa"). Ver la nota de la tabla Comandas en 0001_inicial.sql.
+// ESPEJO OBLIGATORIO de crates/tpv-infra-sqlite/src/venta_rapida.rs: ambos generan el mismo SQL.
+const CANAL_BARRA = "BARRA";
 
 const UPDATE_TOTAL = `
 	UPDATE Comandas
@@ -37,58 +38,11 @@ const UPDATE_TOTAL = `
 	WHERE ID_Comanda = ?1;
 `;
 
-function ensureBarraSteps() {
-	return [
-		{
-			kind: "execute",
-			sql: `
-				INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At)
-				VALUES (?1, 'BARRA', '[]', datetime('now','localtime'));
-			`,
-			args: [BARRA_ZONA_ID],
-		},
-		{
-			kind: "value",
-			saveAs: "id_zona",
-			sql: "SELECT ?1;",
-			args: [BARRA_ZONA_ID],
-		},
-		{
-			kind: "execute",
-			sql: `
-				INSERT OR IGNORE INTO Mesas (
-					ID_Mesa,
-					ID_Zona,
-					Numero_Mesa,
-					Capacidad,
-					Ubicacion_X,
-					Ubicacion_Y,
-					Shape,
-					Width,
-					Height,
-					Radius,
-					Updated_At,
-					Es_Sistema
-				)
-				VALUES (?1, ?2, 'BARRA', 0, 0, 0, 'rect', 80, 50, NULL, datetime('now','localtime'), 1);
-			`,
-			args: [BARRA_MESA_ID, REF_ID_ZONA],
-		},
-		{
-			kind: "value",
-			saveAs: "id_mesa_barra",
-			sql: "SELECT ?1;",
-			args: [BARRA_MESA_ID],
-		},
-	];
-}
-
 export function createComandaBarra(
 	input: CreateComandaBarraInput,
 	idTrabajadorReal: string | null,
 ): BuiltCommand {
 	const steps: any[] = [
-		...ensureBarraSteps(),
 		{
 			kind: "value",
 			saveAs: "id_comanda",
@@ -96,6 +50,9 @@ export function createComandaBarra(
 			args: [crypto.randomUUID()],
 		},
 		{
+			// Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
+			// abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
+			// (existía solo para esquivar el índice único que compartían todas por la mesa BARRA).
 			kind: "execute",
 			sql: `
 				INSERT INTO Comandas (
@@ -104,32 +61,18 @@ export function createComandaBarra(
 					Estado,
 					Total_Comanda,
 					ID_Trabajador,
-					ID_Mesa
+					ID_Mesa,
+					Canal
 				)
-				VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, ?3)
+				VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, NULL, ?3)
 				ON CONFLICT(ID_Comanda) DO UPDATE SET
 					Estado = excluded.Estado,
 					Total_Comanda = COALESCE(Comandas.Total_Comanda, excluded.Total_Comanda),
 					ID_Trabajador = excluded.ID_Trabajador,
-					ID_Mesa = excluded.ID_Mesa;
+					ID_Mesa = excluded.ID_Mesa,
+					Canal = excluded.Canal;
 			`,
-			args: [REF_ID_COMANDA, idTrabajadorReal, REF_ID_MESA_BARRA],
-		},
-		{
-			kind: "execute",
-			sql: `
-				DELETE FROM Comandas
-				WHERE ID_Mesa = ?1
-					AND ID_Comanda <> ?2
-					AND COALESCE(Total_Comanda,0) <= 0
-					AND NOT EXISTS (
-						SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = Comandas.ID_Comanda
-					)
-					AND NOT EXISTS (
-						SELECT 1 FROM Pagos p WHERE p.ID_Comanda = Comandas.ID_Comanda
-					);
-			`,
-			args: [REF_ID_MESA_BARRA, REF_ID_COMANDA],
+			args: [REF_ID_COMANDA, idTrabajadorReal, CANAL_BARRA],
 		},
 	];
 
@@ -157,11 +100,9 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 							args: [crypto.randomUUID()],
 					},
 					{
-						// Garantía idempotente: la comanda de barra es efímera hasta que tiene
-						// líneas, así que un create(get_or_create=false) concurrente (nuevo ticket
-						// o bootstrap de otro dispositivo) puede haberla barrido por "vacía" justo
-						// antes de este add. Con defer_foreign_keys ON, re-crearla aquí en la misma
-						// transacción evita el FK constraint failed en Detalle_Comanda.ID_Comanda.
+						// Garantía idempotente: si la comanda no existiese (p. ej. el `change` del
+						// create aún no ha llegado a este lado), la re-creamos en la MISMA
+						// transacción para no fallar por FK en Detalle_Comanda.ID_Comanda.
 						kind: "execute",
 						sql: `
 							INSERT INTO Comandas (
@@ -170,12 +111,13 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 								Estado,
 								Total_Comanda,
 								ID_Trabajador,
-								ID_Mesa
+								ID_Mesa,
+								Canal
 							)
-							VALUES (?1, datetime('now','localtime'), 'Abierta', 0, NULL, ?2)
+							VALUES (?1, datetime('now','localtime'), 'Abierta', 0, NULL, NULL, ?2)
 							ON CONFLICT(ID_Comanda) DO NOTHING;
 						`,
-						args: [input.id_comanda, BARRA_MESA_ID],
+						args: [input.id_comanda, CANAL_BARRA],
 					},
 					{
 						kind: "execute",

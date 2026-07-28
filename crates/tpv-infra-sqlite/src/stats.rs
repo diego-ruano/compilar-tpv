@@ -166,8 +166,7 @@ impl SqliteStatsRepository {
             .query(
                 r#"
                 SELECT COUNT(*)
-                FROM Mesas
-                WHERE COALESCE(Es_Sistema,0)=0;
+                FROM Mesas;
                 "#,
                 (),
             )
@@ -181,8 +180,9 @@ impl SqliteStatsRepository {
 
         // Ingresos y ocupación al nivel de PAGO (fuente de verdad = Pagos, coherente con caja):
         // cada Pago cuenta en su propia Fecha_Hora. Sin exigir comanda 100% pagada ni imputar al
-        // último pago (STAT-01/02). Mismo modelo que el worker/Handy (STAT-06). Se excluyen las
-        // mesas de sistema (p. ej. venta rápida) del tablero de mesas.
+        // último pago (STAT-01/02). Mismo modelo que el worker/Handy (STAT-06). La venta rápida
+        // queda fuera del tablero de mesas sin filtro extra: sus comandas no tienen mesa
+        // (Canal='BARRA', ID_Mesa NULL), así que el JOIN con Mesas ya no las incluye.
         let sql_occ_ing = format!(
             r#"
             SELECT
@@ -191,8 +191,7 @@ impl SqliteStatsRepository {
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(m.Es_Sistema,0)=0;
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end};
             "#,
             start = start_expr,
             end = end_expr
@@ -225,7 +224,6 @@ impl SqliteStatsRepository {
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(m.Es_Sistema,0)=0
             GROUP BY m.ID_Mesa
             ORDER BY comandas DESC, m.Numero_Mesa ASC
             LIMIT 1;
@@ -252,7 +250,6 @@ impl SqliteStatsRepository {
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(m.Es_Sistema,0)=0
             GROUP BY b
             ORDER BY b ASC;
             "#,
@@ -287,7 +284,6 @@ impl SqliteStatsRepository {
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
-              AND COALESCE(m.Es_Sistema,0)=0
             GROUP BY m.ID_Mesa
             ORDER BY total DESC
             LIMIT 10;
@@ -576,8 +572,7 @@ impl SqliteStatsRepository {
             .query(
                 r#"
                 SELECT COUNT(*)
-                FROM Mesas
-                WHERE COALESCE(Es_Sistema,0)=0;
+                FROM Mesas;
                 "#,
                 (),
             )
@@ -602,7 +597,6 @@ impl SqliteStatsRepository {
                 datetime(r.Dia_YMD || ' ' || r.Hora) AS res_at
               FROM Reservas r
               JOIN Mesas m ON m.ID_Mesa = r.ID_Mesa
-              WHERE COALESCE(m.Es_Sistema,0)=0
             ),
             res_rng AS (
               SELECT res.*

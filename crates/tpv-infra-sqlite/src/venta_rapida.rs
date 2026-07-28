@@ -16,7 +16,7 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
-use crate::util::{new_id, BARRA_MESA_ID};
+use crate::util::{new_id, CANAL_BARRA};
 
 pub struct SqliteVentaRapidaRepository {
     db: Arc<Db>,
@@ -123,29 +123,20 @@ async fn trabajador_id_from_comanda<C: Reader>(db: &C, id_comanda: &str) -> AppR
     Ok(None)
 }
 
-/// La mesa BARRA se siembra con un id fijo (idéntico en local y nube).
-async fn ensure_barra_mesa_id<C>(_db: &C) -> AppResult<String> {
-    Ok(BARRA_MESA_ID.to_string())
-}
-
-async fn find_open_barra_comanda_id<C: Reader>(
-    db: &C,
-    id_mesa_barra: &str,
-) -> AppResult<Option<String>> {
-    if id_mesa_barra.trim().is_empty() {
-        return Ok(None);
-    }
+/// Último ticket de barra abierto (el más reciente). La venta rápida admite VARIOS tickets
+/// abiertos a la vez; esto solo resuelve el "get_or_create", que reengancha con el último.
+async fn find_open_barra_comanda_id<C: Reader>(db: &C) -> AppResult<Option<String>> {
     let mut rows = db
         .query(
             r#"
             SELECT ID_Comanda
             FROM Comandas
-            WHERE ID_Mesa = ?1
+            WHERE Canal = ?1
               AND Estado = 'Abierta'
             ORDER BY datetime(Fecha_Hora_Apertura) DESC
             LIMIT 1;
             "#,
-            vec![Value::Text(id_mesa_barra.to_string())],
+            vec![Value::Text(CANAL_BARRA.to_string())],
         )
         .await
         .map_err(db_err)?;
@@ -324,7 +315,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
               ),0) AS Pendientes_Pago
             FROM Comandas c
-            WHERE c.ID_Mesa = ?2
+            WHERE c.Canal = ?2
               AND ({where_clause})
             ORDER BY c.ID_Comanda DESC
             LIMIT ?1;
@@ -333,10 +324,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             where_clause = where_clause
         );
 
-        let id_mesa_barra = ensure_barra_mesa_id(db).await?;
-
         let mut rows = db
-            .query(&sql, vec![Value::Integer(lim), Value::Text(id_mesa_barra)])
+            .query(
+                &sql,
+                vec![Value::Integer(lim), Value::Text(CANAL_BARRA.to_string())],
+            )
             .await
             .map_err(db_err)?;
 
@@ -520,10 +512,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
     ) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
-        let id_mesa_barra = ensure_barra_mesa_id(db).await?;
 
         if get_or_create {
-            if let Some(existing_open) = find_open_barra_comanda_id(db, &id_mesa_barra).await? {
+            if let Some(existing_open) = find_open_barra_comanda_id(db).await? {
                 return Ok(existing_open);
             }
         }
@@ -533,41 +524,27 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<String> = async {
+            // Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
+            // abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
+            // (existía solo para esquivar el índice único que compartían todas por la mesa BARRA).
             db.execute(
                 r#"
                 INSERT INTO Comandas (
-                  ID_Comanda, Fecha_Hora_Apertura, Estado, Total_Comanda, ID_Trabajador, ID_Mesa
+                  ID_Comanda, Fecha_Hora_Apertura, Estado, Total_Comanda, ID_Trabajador, ID_Mesa, Canal
                 )
-                VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, ?3)
+                VALUES (?1, datetime('now','localtime'), 'Abierta', 0, ?2, NULL, ?3)
                 ON CONFLICT(ID_Comanda) DO UPDATE SET
                   Estado = excluded.Estado,
                   Total_Comanda = COALESCE(Comandas.Total_Comanda, excluded.Total_Comanda),
                   ID_Trabajador = excluded.ID_Trabajador,
-                  ID_Mesa = excluded.ID_Mesa;
+                  ID_Mesa = excluded.ID_Mesa,
+                  Canal = excluded.Canal;
                 "#,
                 vec![
                     Value::Text(id_comanda_final.clone()),
                     id_trabajador_real.map(Value::Text).unwrap_or(Value::Null),
-                    Value::Text(id_mesa_barra.clone()),
+                    Value::Text(CANAL_BARRA.to_string()),
                 ],
-            )
-            .await
-            .map_err(db_err)?;
-
-            db.execute(
-                r#"
-                DELETE FROM Comandas
-                WHERE ID_Mesa = ?1
-                  AND ID_Comanda <> ?2
-                  AND COALESCE(Total_Comanda,0) <= 0
-                  AND NOT EXISTS (
-                    SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = Comandas.ID_Comanda
-                  )
-                  AND NOT EXISTS (
-                    SELECT 1 FROM Pagos p WHERE p.ID_Comanda = Comandas.ID_Comanda
-                  );
-                "#,
-                vec![Value::Text(id_mesa_barra.clone()), Value::Text(id_comanda_final.clone())],
             )
             .await
             .map_err(db_err)?;

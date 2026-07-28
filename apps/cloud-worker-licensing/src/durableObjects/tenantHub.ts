@@ -8,6 +8,23 @@ import { ingestToAxiom } from "../observability/axiom";
 
 type Role = "tpv" | "handy" | "unknown";
 
+// SYNC-16 (hibernación): TODO el estado de una sesión WS vive aquí, adosado al propio socket
+// (`serializeAttachment`), no en campos de la instancia del DO. Con la WebSocket Hibernation API el
+// DO se evacúa de memoria mientras las conexiones están ociosas y vuelve con los campos vacíos, así
+// que cualquier `Map` por dispositivo se perdería. El attachment sobrevive a la hibernación.
+// Límite: 16 KB serializados (aquí ocupamos ~200 bytes).
+type WsAttachment = {
+	tenantId: string;
+	deviceId: string;
+	/** Rol vigente: el de la cabecera `x-role` al conectar; lo pisa el rol real (BD central) al autenticar. */
+	role: Role;
+	authed: boolean;
+	/** Clave pública conocida del dispositivo (pista de cabecera o la confirmada en el hello). */
+	pubkeyB64: string | null;
+	/** Challenge pendiente. SYNC-07: se consume (a `null`) en el primer intento de verificación. */
+	challenge: { nonceB64: string; expiresAtMs: number } | null;
+};
+
 type PingMsg = { type: "ping" };
 
 type HelloSignedMsg = {
@@ -568,15 +585,15 @@ function readEnvelopeMetadata(body: any, req: Request) {
 }
 
 export class TenantHub {
-	private sockets = new Map<string, WebSocket>();
-	private roles = new Map<string, Role>();
-	private authed = new Set<string>();
-	private challengeByDevice = new Map<
-		string,
-		{ nonceB64: string; expiresAtMs: number; issuedAtMs: number }
-	>();
-	private pubkeyByDevice = new Map<string, string>();
+	// SYNC-16: este DO usa la WebSocket Hibernation API. Mientras las conexiones están ociosas el
+	// runtime evacúa el objeto de memoria (deja de facturar duración) y lo despierta al llegar un
+	// mensaje real. Consecuencia de diseño: NO puede haber estado de sesión en campos de instancia.
+	//   · lo que describe a un socket        → su attachment (`WsAttachment`)
+	//   · el censo de conexiones             → `state.getWebSockets()` (etiquetadas por deviceId)
+	// Lo único que queda abajo son cachés best-effort que pueden perderse sin consecuencias.
+
 	// SYNC-08: último `last_seen` empujado a la BD central por dispositivo (throttle en memoria).
+	// Se pierde al hibernar: como mucho provoca un UPDATE extra tras despertar. Aceptable.
 	private lastSeenPushedAtMs = new Map<string, number>();
 	// SYNC-12: instante de la última purga del log de sync (throttle en memoria del DO).
 	private lastPurgeAtMs = 0;
@@ -589,7 +606,52 @@ export class TenantHub {
 	private tenantDbRotatedAtMs: number | null = null;
 	private tenantDbResolvedAtMs: number | null = null;
 
-	constructor(private state: DurableObjectState, private env: any) { }
+	constructor(private state: DurableObjectState, private env: any) {
+		// SYNC-16: el latido (cada 30 s por dispositivo) se responde EN EL EDGE, sin despertar al DO
+		// ni facturar duración. Es lo que hace que un hub con conexiones abiertas pero ociosas (la
+		// mayor parte del día en hostelería) cueste prácticamente cero.
+		// ⚠️ El par casa cadenas EXACTAS: debe coincidir byte a byte con lo que envían
+		// `useMainSocket`/`useHandySocket` (`JSON.stringify({ type: "ping" })`). Si algún día cambia
+		// el formato del latido en el frontend, hay que cambiarlo aquí o el DO despertará en cada uno.
+		this.state.setWebSocketAutoResponse(
+			new WebSocketRequestResponsePair(
+				JSON.stringify({ type: "ping" }),
+				JSON.stringify({ type: "pong" }),
+			),
+		);
+	}
+
+	// ---- SYNC-16: helpers de sesión sobre la Hibernation API --------------------------------
+
+	/** Lee el attachment de un socket (o `null` si no lo tiene / está corrupto). */
+	private att(ws: WebSocket): WsAttachment | null {
+		try {
+			return (ws.deserializeAttachment() as WsAttachment | null) ?? null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Persiste el attachment. Hay que llamarlo tras CADA mutación del estado de sesión. */
+	private setAtt(ws: WebSocket, att: WsAttachment): void {
+		try {
+			ws.serializeAttachment(att);
+		} catch {
+			/* nunca romper el flujo del WS por el attachment */
+		}
+	}
+
+	/** Sockets vivos de un dispositivo (los cerrados pueden seguir apareciendo en getWebSockets). */
+	private liveSocketsFor(deviceId: string, except?: WebSocket): WebSocket[] {
+		const out: WebSocket[] = [];
+		for (const ws of this.state.getWebSockets(deviceId)) {
+			if (except && ws === except) continue;
+			// 1 = OPEN. Filtramos explícitamente porque `getWebSockets` puede devolver sockets ya
+			// cerrados (documentado), lo que falsearía el "¿me han reemplazado?" y el freeze.
+			if (ws.readyState === 1) out.push(ws);
+		}
+		return out;
+	}
 
 	private getCentralDb(): Client {
 		if (!this.centralDb) {
@@ -747,6 +809,9 @@ export class TenantHub {
 		// amplificación de escrituras proporcional al nº de dispositivos. Guardamos en memoria del
 		// DO el último instante empujado y solo re-escribimos pasada la ventana (o si `force`, p. ej.
 		// al conectar). La precisión de `last_seen` no necesita ser al segundo.
+		// SYNC-16: el ping ya NO llega hasta aquí (lo contesta el auto-response sin despertar al DO),
+		// así que ahora esto se alimenta de: conexión (force) y actividad real (apply/event). El
+		// throttle en memoria se pierde al hibernar → como mucho un UPDATE extra por despertar.
 		const now = nowMs();
 		if (!force) {
 			const last = this.lastSeenPushedAtMs.get(deviceId) ?? 0;
@@ -1142,7 +1207,7 @@ export class TenantHub {
 				service: "tpv-sync",
 				event: name,
 				tenant_id: this.tenantDbTenantId ?? undefined,
-				connected_devices: this.authed.size,
+				connected_devices: this.authedCount(),
 				main_connected: this.isMainConnected(),
 				...fields,
 			};
@@ -1160,8 +1225,10 @@ export class TenantHub {
 
 	private broadcast(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
-		for (const [did, ws] of this.sockets) {
-			if (exceptDeviceId && did === exceptDeviceId) continue;
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (!a) continue;
+			if (exceptDeviceId && a.deviceId === exceptDeviceId) continue;
 			try {
 				ws.send(msg);
 			} catch { }
@@ -1171,9 +1238,10 @@ export class TenantHub {
 	private broadcastAuthed(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
 
-		for (const [did, ws] of this.sockets) {
-			if (exceptDeviceId && did === exceptDeviceId) continue;
-			if (!this.authed.has(did)) continue;
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (!a || !a.authed) continue;
+			if (exceptDeviceId && a.deviceId === exceptDeviceId) continue;
 
 			try {
 				ws.send(msg);
@@ -1182,11 +1250,24 @@ export class TenantHub {
 	}
 
 	// ¿Hay alguna Main (rol tpv) autenticada y conectada ahora mismo?
-	private isMainConnected(): boolean {
-		for (const did of this.authed) {
-			if (this.roles.get(did) === "tpv") return true;
+	// `except` excluye un socket concreto: al procesar `webSocketClose` el socket que se va puede
+	// seguir apareciendo en `getWebSockets()`, y sin excluirlo nunca detectaríamos el freeze.
+	private isMainConnected(except?: WebSocket): boolean {
+		for (const ws of this.state.getWebSockets()) {
+			if (except && ws === except) continue;
+			const a = this.att(ws);
+			if (a?.authed && a.role === "tpv") return true;
 		}
 		return false;
+	}
+
+	/** Nº de dispositivos autenticados ahora mismo (telemetría). */
+	private authedCount(): number {
+		let n = 0;
+		for (const ws of this.state.getWebSockets()) {
+			if (this.att(ws)?.authed) n++;
+		}
+		return n;
 	}
 
 	// Propaga un cambio aplicado (payload + resultado) a los dispositivos
@@ -1222,37 +1303,31 @@ export class TenantHub {
 		);
 	}
 
-	private issueChallenge(deviceId: string) {
+	// SYNC-16: ya no se guarda en un Map del DO; el llamante lo adosa al socket (attachment) para
+	// que sobreviva a la hibernación.
+	private issueChallenge(): { nonceB64: string; expiresAtMs: number } {
 		const nonce = new Uint8Array(32);
 		crypto.getRandomValues(nonce);
 		const nonceB64 = bytesToB64(nonce);
 
-		const issuedAtMs = nowMs();
-		const expiresAtMs = issuedAtMs + 60_000;
-
-		this.challengeByDevice.set(deviceId, {
-			nonceB64,
-			expiresAtMs,
-			issuedAtMs,
-		});
+		const expiresAtMs = nowMs() + 60_000;
 
 		return { nonceB64, expiresAtMs };
 	}
 
+	// SYNC-16: el challenge y la pista de pubkey llegan desde el attachment del socket (el llamante
+	// ya ha consumido el challenge antes de invocarnos) y devolvemos la pubkey confirmada para que
+	// el llamante la persista de vuelta en el attachment.
 	private async verifyHelloSigned(params: {
 		tenantId: string;
 		deviceId: string;
 		msg: HelloSignedMsg;
+		challenge: { nonceB64: string; expiresAtMs: number } | null;
 		pubkeyB64Hint?: string | null;
-	}): Promise<{ roleFinal: Role }> {
-		const { tenantId, deviceId, msg, pubkeyB64Hint } = params;
+	}): Promise<{ roleFinal: Role; pubkeyB64: string }> {
+		const { tenantId, deviceId, msg, challenge: ch, pubkeyB64Hint } = params;
 
-		const ch = this.challengeByDevice.get(deviceId);
 		if (!ch) throw new Error("missing_challenge");
-		// SYNC-07: challenge de un SOLO uso. Lo consumimos aquí (éxito o fallo) para que un mismo
-		// nonce/firma no pueda reenviarse dentro de la ventana de 60 s. Un reintento legítimo
-		// fuerza una reemisión (nueva conexión → nuevo challenge).
-		this.challengeByDevice.delete(deviceId);
 		if (msg.nonceB64 !== ch.nonceB64) throw new Error("challenge_mismatch");
 		if (nowMs() > ch.expiresAtMs) throw new Error("challenge_expired");
 
@@ -1263,7 +1338,6 @@ export class TenantHub {
 		}
 
 		let pubkeyB64 = (pubkeyB64Hint || "").trim();
-		if (!pubkeyB64) pubkeyB64 = (this.pubkeyByDevice.get(deviceId) || "").trim();
 
 		const centralInfo = await this.loadDeviceFromCentral(tenantId, deviceId);
 		if (centralInfo.revoked) throw new Error("device_revoked");
@@ -1277,8 +1351,6 @@ export class TenantHub {
 
 		if (!pubkeyB64) throw new Error("device_pubkey_not_registered");
 
-		this.pubkeyByDevice.set(deviceId, pubkeyB64);
-
 		const payload = new TextEncoder().encode(
 			`${msg.ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
 		);
@@ -1289,7 +1361,7 @@ export class TenantHub {
 		const ok = await ed25519Verify(sig, payload, pub);
 		if (!ok) throw new Error("bad_ws_signature");
 
-		return { roleFinal };
+		return { roleFinal, pubkeyB64 };
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -1298,16 +1370,19 @@ export class TenantHub {
 		if (url.pathname === "/internal/revoke" && request.method === "POST") {
 			const body = safeJsonParse(await request.text()) || {};
 			const deviceId = String(body.deviceId || "").trim();
-			const ws = deviceId ? this.sockets.get(deviceId) : null;
 
-			if (ws) {
-				try {
-					ws.close(4001, "revoked");
-				} catch { }
-				this.sockets.delete(deviceId);
-				this.roles.delete(deviceId);
-				this.authed.delete(deviceId);
-				this.challengeByDevice.delete(deviceId);
+			// SYNC-16: no hay estado que limpiar a mano (el attachment muere con el socket). Pero el
+			// cierre lo inicia el SERVIDOR, y Cloudflare no garantiza que eso dispare
+			// `webSocketClose`, así que hacemos la contabilidad de presencia/freeze explícitamente:
+			// revocar la Main debe congelar las Handy igual que si se hubiera caído.
+			if (deviceId) {
+				for (const ws of this.liveSocketsFor(deviceId)) {
+					const a = this.att(ws);
+					try {
+						ws.close(4001, "revoked");
+					} catch { }
+					if (a) this.sessionGone(ws, a);
+				}
 			}
 
 			return new Response("OK", { status: 200 });
@@ -1433,22 +1508,33 @@ export class TenantHub {
 		const pair = new WebSocketPair();
 		const client = pair[0];
 		const server = pair[1];
-		server.accept();
 
-		const prev = this.sockets.get(deviceId);
-		if (prev) {
+		// SYNC-16: `acceptWebSocket` (en vez de `server.accept()`) entrega el socket al runtime, que
+		// puede entonces evacuar el DO de memoria mientras la conexión está ociosa SIN cerrarla. La
+		// etiqueta `deviceId` sustituye al antiguo `Map<deviceId, WebSocket>` → `getWebSockets(id)`.
+		this.state.acceptWebSocket(server, [deviceId]);
+
+		const ch = this.issueChallenge();
+
+		// Todo el estado de la sesión va adosado al socket: sobrevive a la hibernación.
+		this.setAtt(server, {
+			tenantId,
+			deviceId,
+			role: roleHeader,
+			authed: false,
+			pubkeyB64: pubkeyHint,
+			challenge: ch,
+		});
+
+		// Reconexión con el mismo deviceId: se echa la sesión anterior. Se cierra DESPUÉS de aceptar
+		// la nueva para que su `webSocketClose` vea que ya hay un socket vivo y no dispare el freeze.
+		for (const prev of this.liveSocketsFor(deviceId, server)) {
 			try {
 				prev.close(4000, "replaced");
 			} catch { }
 		}
 
-		this.sockets.set(deviceId, server);
-		this.roles.set(deviceId, roleHeader);
-		this.authed.delete(deviceId);
-
 		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId, true));
-
-		const ch = this.issueChallenge(deviceId);
 
 		this.send(server, {
 			type: "connected",
@@ -1475,167 +1561,237 @@ export class TenantHub {
 			deviceId,
 		);
 
-		server.addEventListener("message", (ev) => {
-			const data = typeof ev.data === "string" ? ev.data : "";
-			const msg = safeJsonParse(data) as AnyMsg | null;
+		return new Response(null, { status: 101, webSocket: client });
+	}
 
-			if (!msg || typeof msg.type !== "string") {
-				this.send(server, { type: "error", error: "bad_json" });
-				return;
-			}
+	// ---- SYNC-16: handlers de la Hibernation API --------------------------------------------
+	// Sustituyen a los antiguos `server.addEventListener(...)`. Al despertar de la hibernación la
+	// instancia es NUEVA (campos vacíos, sin closures), así que el runtime invoca estos métodos y
+	// todo el contexto de la sesión se recupera del attachment del socket.
 
-			if (msg.type === "ping") {
-				this.send(server, { type: "pong", ts: nowMs() });
-				this.state.waitUntil(this.touchLastSeen(tenantId, deviceId));
-				return;
-			}
+	async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
+		const a = this.att(ws);
+		if (!a) {
+			// Socket sin attachment: no sabemos ni quién es. No debería ocurrir.
+			this.send(ws, { type: "error", error: "no_session" });
+			return;
+		}
+		const { tenantId, deviceId } = a;
 
-			if (msg.type === "helloSigned") {
-				this.state.waitUntil(
-					(async () => {
-						try {
-							const { roleFinal } = await this.verifyHelloSigned({
-								tenantId,
+		const data = typeof message === "string" ? message : "";
+		const msg = safeJsonParse(data) as AnyMsg | null;
+
+		if (!msg || typeof msg.type !== "string") {
+			this.send(ws, { type: "error", error: "bad_json" });
+			return;
+		}
+
+		// El latido normal lo contesta el auto-response SIN despertar al DO (constructor), así que
+		// aquí sólo caen pings con otra serialización. Se responde igual por compatibilidad.
+		if (msg.type === "ping") {
+			this.send(ws, { type: "pong", ts: nowMs() });
+			return;
+		}
+
+		if (msg.type === "helloSigned") {
+			// SYNC-07: challenge de un SOLO uso. Se consume AQUÍ, de forma síncrona y antes de
+			// cualquier `await`, para que dos helloSigned seguidos no puedan reutilizar el nonce.
+			const challenge = a.challenge;
+			this.setAtt(ws, { ...a, challenge: null });
+
+			this.state.waitUntil(
+				(async () => {
+					try {
+						const { roleFinal, pubkeyB64 } = await this.verifyHelloSigned({
+							tenantId,
+							deviceId,
+							msg,
+							challenge,
+							pubkeyB64Hint: a.pubkeyB64,
+						});
+
+						// Persistimos el resultado de la autenticación en el attachment: es lo que
+						// leerán los futuros mensajes, broadcasts y el cierre (incluso tras hibernar).
+						this.setAtt(ws, {
+							...a,
+							role: roleFinal,
+							authed: true,
+							pubkeyB64,
+							challenge: null,
+						});
+
+						this.send(ws, {
+							type: "hello_ok",
+							role: roleFinal,
+							authed: true,
+						});
+
+						this.broadcast(
+							{
+								type: "presence",
+								action: "auth",
 								deviceId,
-								msg,
-								pubkeyB64Hint: pubkeyHint,
-							});
-
-							this.authed.add(deviceId);
-							this.roles.set(deviceId, roleFinal);
-
-							this.send(server, {
-								type: "hello_ok",
 								role: roleFinal,
 								authed: true,
-							});
+							},
+							deviceId,
+						);
 
-							this.broadcast(
-								{
-									type: "presence",
-									action: "auth",
-									deviceId,
-									role: roleFinal,
-									authed: true,
-								},
-								deviceId,
-							);
+						// Freeze por presencia de Main: informamos a este
+						// dispositivo de si hay Main conectada (una Handy recién
+						// autenticada necesita saberlo para bloquear/desbloquear su
+						// UI). Y si quien se autentica ES la Main, avisamos a las
+						// Handy de que ya pueden operar.
+						this.send(ws, {
+							type: "main_status",
+							online: this.isMainConnected(),
+						});
 
-							// Freeze por presencia de Main: informamos a este
-							// dispositivo de si hay Main conectada (una Handy recién
-							// autenticada necesita saberlo para bloquear/desbloquear su
-							// UI). Y si quien se autentica ES la Main, avisamos a las
-							// Handy de que ya pueden operar.
-							this.send(server, {
-								type: "main_status",
-								online: this.isMainConnected(),
-							});
-
-							if (roleFinal === "tpv") {
-								this.broadcast({ type: "main_online", deviceId }, deviceId);
-								this.emitSyncEvent("main_online", { device_id: deviceId });
-							}
-						} catch (e: any) {
-							const err = String(e?.message || e);
-							this.send(server, {
-								type: "error",
-								error: "hello_failed",
-								details: err,
-							});
-							try {
-								server.close(4003, "auth_failed");
-							} catch { }
+						if (roleFinal === "tpv") {
+							this.broadcast({ type: "main_online", deviceId }, deviceId);
+							this.emitSyncEvent("main_online", { device_id: deviceId });
 						}
-					})(),
-				);
-				return;
-			}
+					} catch (e: any) {
+						const err = String(e?.message || e);
+						this.send(ws, {
+							type: "error",
+							error: "hello_failed",
+							details: err,
+						});
+						try {
+							ws.close(4003, "auth_failed");
+						} catch { }
+					}
+				})(),
+			);
+			return;
+		}
 
-			if (!this.authed.has(deviceId)) {
-				this.send(server, { type: "error", error: "not_authenticated" });
-				return;
-			}
+		if (!a.authed) {
+			this.send(ws, { type: "error", error: "not_authenticated" });
+			return;
+		}
 
-			// Escritura de la Main por WS: se aplica al MISMO motor idempotente que
-			// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
-			// al resto). La Main no se bloquea esperando; recibe un `apply_ack`
-			// asíncrono solo para reconciliar/revertir si algo falla.
-			if (msg.type === "apply") {
-				const m = msg as ApplyMsg;
+		// Actividad real del dispositivo (ya no hay pings que la reflejen): refrescamos `last_seen`
+		// de forma throttleada y fire-and-forget.
+		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId));
 
-				// Autorización por rol: solo la Main (`tpv`) puede ejecutar SQL crudo
-				// por WS. El rol viene del helloSigned (BD central), nunca de la
-				// cabecera x-role del cliente. Las escrituras de la Handy van por
-				// REST → comandos de dominio acotados (hub.ts → /internal/apply).
-				if (this.roles.get(deviceId) !== "tpv") {
-					this.send(server, {
-						type: "apply_ack",
-						opId: String(m.opId ?? m.op_id ?? "").trim(),
-						ok: false,
-						error: "forbidden_not_tpv",
-					});
-					return;
-				}
+		// Escritura de la Main por WS: se aplica al MISMO motor idempotente que
+		// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
+		// al resto). La Main no se bloquea esperando; recibe un `apply_ack`
+		// asíncrono solo para reconciliar/revertir si algo falla.
+		if (msg.type === "apply") {
+			const m = msg as ApplyMsg;
 
-				const inner = m.command;
-				const cmdType = String(inner?.type || "").trim();
-				const opId = String(m.opId ?? m.op_id ?? "").trim();
-				const commandName = String(m.commandName ?? m.command_name ?? "").trim();
-
-				if (!cmdType || !opId || !commandName) {
-					this.send(server, {
-						type: "apply_ack",
-						opId,
-						ok: false,
-						error: "missing_apply_fields",
-					});
-					return;
-				}
-
-				const cmd = {
-					type: inner!.type,
-					payload: inner!.payload,
-				} as InternalApplyCommand;
-
-				const fallback = buildInternalPayloadForHash(cmd);
-				const requestPayloadJson = readRequestPayloadJson(m, fallback);
-				const cloudPayloadJson = readCloudPayloadJson({
-					body: m,
-					opId,
-					commandName,
-					fallbackPayloadForHash: fallback,
+			// Autorización por rol: solo la Main (`tpv`) puede ejecutar SQL crudo
+			// por WS. El rol viene del helloSigned (BD central), nunca de la
+			// cabecera x-role del cliente. Las escrituras de la Handy van por
+			// REST → comandos de dominio acotados (hub.ts → /internal/apply).
+			if (a.role !== "tpv") {
+				this.send(ws, {
+					type: "apply_ack",
+					opId: String(m.opId ?? m.op_id ?? "").trim(),
+					ok: false,
+					error: "forbidden_not_tpv",
 				});
-				// La Main ya manda sus sentencias con el tiempo resuelto a literal; aun así
-				// honramos un X-Client-Now si viniera (no hace daño: el rewrite es no-op).
-				const clientNow = String(
-					getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
-				);
+				return;
+			}
 
+			const inner = m.command;
+			const cmdType = String(inner?.type || "").trim();
+			const opId = String(m.opId ?? m.op_id ?? "").trim();
+			const commandName = String(m.commandName ?? m.command_name ?? "").trim();
+
+			if (!cmdType || !opId || !commandName) {
+				this.send(ws, {
+					type: "apply_ack",
+					opId,
+					ok: false,
+					error: "missing_apply_fields",
+				});
+				return;
+			}
+
+			const cmd = {
+				type: inner!.type,
+				payload: inner!.payload,
+			} as InternalApplyCommand;
+
+			const fallback = buildInternalPayloadForHash(cmd);
+			const requestPayloadJson = readRequestPayloadJson(m, fallback);
+			const cloudPayloadJson = readCloudPayloadJson({
+				body: m,
+				opId,
+				commandName,
+				fallbackPayloadForHash: fallback,
+			});
+			// La Main ya manda sus sentencias con el tiempo resuelto a literal; aun así
+			// honramos un X-Client-Now si viniera (no hace daño: el rewrite es no-op).
+			const clientNow = String(
+				getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
+			);
+
+			this.state.waitUntil(
+				(async () => {
+					try {
+						const { result, seq } = await this.applyInternalCommandIdempotent({
+							tenantId,
+							cmd,
+							opId,
+							commandName,
+							deviceId,
+							requestPayloadJson,
+							cloudPayloadJson,
+							clientNow,
+						});
+						this.send(ws, {
+							type: "apply_ack",
+							opId,
+							ok: true,
+							result,
+							// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
+							seq,
+						});
+					} catch (e: any) {
+						this.send(ws, {
+							type: "apply_ack",
+							opId,
+							ok: false,
+							error: String(e?.message || e),
+						});
+					}
+				})(),
+			);
+			return;
+		}
+
+		if (msg.type === "event") {
+			// El rol para autorizar viene del helloSigned (BD central); la
+			// cabecera x-role del cliente jamás decide permisos.
+			const role = a.role ?? "unknown";
+			const name = String(msg.name || "");
+
+			if (!isEventAllowed(role, name)) {
+				this.send(ws, {
+					type: "error",
+					error: "forbidden_event",
+					name,
+				});
+				return;
+			}
+
+			if (name === "tenantDb.ping") {
 				this.state.waitUntil(
 					(async () => {
 						try {
-							const { result, seq } = await this.applyInternalCommandIdempotent({
-								tenantId,
-								cmd,
-								opId,
-								commandName,
-								deviceId,
-								requestPayloadJson,
-								cloudPayloadJson,
-								clientNow,
+							await this.withTenantDbRetry(tenantId, async (db) => {
+								await db.execute({ sql: "SELECT 1", args: [] });
 							});
-							this.send(server, {
-								type: "apply_ack",
-								opId,
-								ok: true,
-								result,
-								// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
-								seq,
-							});
+							this.send(ws, { type: "event_ack", name, ok: true });
 						} catch (e: any) {
-							this.send(server, {
-								type: "apply_ack",
-								opId,
+							this.send(ws, {
+								type: "event_ack",
+								name,
 								ok: false,
 								error: String(e?.message || e),
 							});
@@ -1645,87 +1801,70 @@ export class TenantHub {
 				return;
 			}
 
-			if (msg.type === "event") {
-				// El rol para autorizar viene del helloSigned (BD central); la
-				// cabecera x-role del cliente jamás decide permisos.
-				const role = this.roles.get(deviceId) ?? "unknown";
-				const name = String(msg.name || "");
+			this.broadcast(
+				{
+					type: "event",
+					from: deviceId,
+					role,
+					name,
+					payload: msg.payload ?? null,
+					ts: nowMs(),
+				},
+				deviceId,
+			);
+			return;
+		}
 
-				if (!isEventAllowed(role, name)) {
-					this.send(server, {
-						type: "error",
-						error: "forbidden_event",
-						name,
-					});
-					return;
-				}
+		this.send(ws, { type: "error", error: "unknown_type" });
+	}
 
-				if (name === "tenantDb.ping") {
-					this.state.waitUntil(
-						(async () => {
-							try {
-								await this.withTenantDbRetry(tenantId, async (db) => {
-									await db.execute({ sql: "SELECT 1", args: [] });
-								});
-								this.send(server, { type: "event_ack", name, ok: true });
-							} catch (e: any) {
-								this.send(server, {
-									type: "event_ack",
-									name,
-									ok: false,
-									error: String(e?.message || e),
-								});
-							}
-						})(),
-					);
-					return;
-				}
+	/**
+	 * Contabilidad de una sesión que se va: presencia + freeze. Se invoca desde `webSocketClose`
+	 * (cierre del cliente / caída de red) y TAMBIÉN de forma explícita en los cierres que inicia el
+	 * servidor (revoke), porque la documentación de Cloudflare no garantiza que `webSocketClose` se
+	 * dispare cuando el cierre lo provoca el propio DO. Es **idempotente y auto-inhibida**: si queda
+	 * otro socket vivo del mismo dispositivo no hace nada, y repetirla solo reemite señales que el
+	 * cliente ya trata como idempotentes.
+	 */
+	private sessionGone(ws: WebSocket, a: WsAttachment): void {
+		const { deviceId } = a;
 
-				this.broadcast(
-					{
-						type: "event",
-						from: deviceId,
-						role,
-						name,
-						payload: msg.payload ?? null,
-						ts: nowMs(),
-					},
-					deviceId,
-				);
-				return;
-			}
+		// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no dispares presencia ni
+		// main_offline en falso: la sesión nueva sigue viva.
+		if (this.liveSocketsFor(deviceId, ws).length > 0) return;
 
-			this.send(server, { type: "error", error: "unknown_type" });
-		});
+		const wasMain = a.role === "tpv";
 
-		server.addEventListener("close", () => {
-			// Si ya nos reemplazó una reconexión bajo el mismo deviceId, no toques el
-			// estado nuevo ni dispares main_offline en falso.
-			if (this.sockets.get(deviceId) !== server) return;
+		this.lastSeenPushedAtMs.delete(deviceId);
+		this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
 
-			const wasMain = this.roles.get(deviceId) === "tpv";
+		// Si se va la Main y no queda ninguna conectada, congelamos todo: las
+		// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.
+		// `ws` se excluye explícitamente del censo: un socket cerrándose puede seguir apareciendo
+		// en `getWebSockets()` y nos haría creer que la Main sigue ahí.
+		if (wasMain && !this.isMainConnected(ws)) {
+			this.broadcast({ type: "main_offline", deviceId }, deviceId);
+			this.emitSyncEvent("main_offline", { device_id: deviceId });
+		}
+	}
 
-			this.sockets.delete(deviceId);
-			this.roles.delete(deviceId);
-			this.authed.delete(deviceId);
-			this.challengeByDevice.delete(deviceId);
-			this.lastSeenPushedAtMs.delete(deviceId);
-			this.broadcast({ type: "presence", action: "leave", deviceId }, deviceId);
+	async webSocketClose(
+		ws: WebSocket,
+		_code: number,
+		_reason: string,
+		_wasClean: boolean,
+	): Promise<void> {
+		const a = this.att(ws);
+		if (!a) return;
+		this.sessionGone(ws, a);
+	}
 
-			// Si se va la Main y no queda ninguna conectada, congelamos todo: las
-			// Handy reciben main_offline y deben bloquear su UI hasta que vuelva.
-			if (wasMain && !this.isMainConnected()) {
-				this.broadcast({ type: "main_offline", deviceId }, deviceId);
-				this.emitSyncEvent("main_offline", { device_id: deviceId });
-			}
-		});
-
-		server.addEventListener("error", () => {
-			try {
-				server.close(1011, "ws_error");
-			} catch { }
-		});
-
-		return new Response(null, { status: 101, webSocket: client });
+	async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+		const a = this.att(ws);
+		try {
+			ws.close(1011, "ws_error");
+		} catch { }
+		// Cierre iniciado por el servidor → contabilizamos la salida nosotros (ver `sessionGone`).
+		if (a) this.sessionGone(ws, a);
 	}
 }

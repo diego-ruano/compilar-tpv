@@ -77,6 +77,9 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │
 └── packages/                  # CÓDIGO JS COMPARTIDO
     ├── database/              # migrations/*.sql (esquema ÚNICO; runner Rust include_dir! + worker tenantMigrations.ts)
+    │                          #   Hoy solo 0001_inicial.sql: antes del lanzamiento se consolidaron
+    │                          #   ahí las incrementales 0002..0008. A partir del lanzamiento, todo
+    │                          #   cambio va en una migración NUEVA (editar una publicada rompe el hash).
     ├── contracts/             # @tpv/contracts — tipos autogenerados (src/generated/bindings.ts)
     └── client/                # @tpv/client — invokeClient.ts (envoltura de invoke de Tauri)
 ```
@@ -314,7 +317,7 @@ la lógica/SQL vive en `crates/*`.
 | WS Main | `shared/lib/useMainSocket.ts` | Drena outbox, aplica cambios remotos, hace catch-up al reconectar |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
 | Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
-| Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast |
+| Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast. **Usa la WebSocket Hibernation API** (ver regla abajo) |
 | Escrituras Handy | `lib/hub.ts` → `/internal/apply` | Cada dominio construye un comando y lo aplica vía DO |
 | Constructores de comandos | `domains/*/*.commands.ts` | Construyen la transacción SQL replicable con UUIDs deterministas |
 | Catch-up | `domains/sync/sync.routes.ts` | La Main pide lo perdido desde su `Last_Seq` al autenticarse |
@@ -324,5 +327,19 @@ la lógica/SQL vive en `crates/*`.
 - **Escritor único (Main):** todas las escrituras locales pasan por `db.rs` (no por `raw()`), que captura en `_Sync_Outbox`.
 - **Idempotencia:** `Op_Id` en la nube (`Applied_Operations`) + `_Sync_Applied_Ops` en la Main evitan duplicados en catch-up/live y ecos de las propias escrituras.
 - **IDs deterministas:** los `*.commands.ts` generan el UUID en un paso `kind:"value"` (`crypto.randomUUID()`) **antes** del INSERT, para que nube y Main tengan la misma fila. **Toda columna `TEXT PRIMARY KEY` debe seguir este patrón** (sin DEFAULT ni trigger en el esquema).
+- **Canal de la comanda:** una `Comandas` es un ticket y su origen lo marca `Canal` (`'MESA'` con
+  `ID_Mesa`, `'BARRA'` = venta rápida **sin** mesa). El índice único `idx_comandas_una_abierta_por_mesa`
+  garantiza una comanda abierta por mesa real; los tickets de barra no compiten entre sí porque en
+  SQLite los `NULL` son distintos en un índice UNIQUE. Un `CHECK` impide mezclar canal y mesa. Si
+  añades un canal nuevo ('LLEVAR', 'DELIVERY'…), basta ampliar el `CHECK`: no se tocan índices ni seeds.
 - **Freeze:** si no hay una Main conectada al DO, las Handy reciben `main_offline` y bloquean su UI. El modo por defecto de la Main es `offline` (se activa en Configuración → Conectividad).
 - **Modo offline puro:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al volver a online.
+- **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
+  de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
+  despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el
+  edge sin despertarlo. **Consecuencia al tocar `tenantHub.ts`: prohibido guardar estado de sesión en
+  campos de la instancia** (al despertar está vacía): va en el *attachment* de cada socket
+  (`ws.serializeAttachment`, re-serializar tras cada cambio) y el censo se saca de
+  `state.getWebSockets()`. Tampoco puede haber `setInterval`/`alarm` periódicos: mantendrían el DO
+  despierto. Detalle completo y reglas en
+  [docs/analisis/transversal/sync-tenanthub.md](docs/analisis/transversal/sync-tenanthub.md) §SYNC-16.

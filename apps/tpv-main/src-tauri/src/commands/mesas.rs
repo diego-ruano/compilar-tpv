@@ -116,12 +116,6 @@ pub async fn add_linea_comanda(
 /* ===== BARRA ===== */
 
 #[tauri::command]
-pub async fn get_or_create_mesa_barra(state: State<'_, AppState>) -> Result<String, String> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::get_or_create_mesa_barra(repo.as_ref()).await?)
-}
-
-#[tauri::command]
 pub async fn get_or_create_comanda_barra(
     state: State<'_, AppState>,
     args: MesasGetOrCreateComandaBarraInput,

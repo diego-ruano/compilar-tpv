@@ -1,7 +1,12 @@
 /* =========================================================
    TPV SCHEMA — MIGRACION INICIAL (0001) · UNICA Y COMPARTIDA (app local + nube Turso)
    - La FUENTE UNICA DE VERDAD del esquema son los ficheros .sql de
-     packages/database/migrations/, aplicados EN ORDEN. Este es el primero.
+     packages/database/migrations/, aplicados EN ORDEN. Hoy este es el UNICO:
+     antes del lanzamiento se CONSOLIDARON aqui las migraciones incrementales
+     0002..0008 (contact settings, email unico de cliente, movimientos de stock,
+     intentos de login, comanda unica por mesa, stock suelto y notificaciones).
+     No habia instalaciones en produccion, asi que arrancar de un esquema plano
+     es mas simple de leer y de mantener que una cadena de parches historicos.
      Los consumen los dos runners espejo:
        * App de escritorio (Rust): crates/tpv-infra-sqlite/src/migrations.rs los
          embebe con include_dir! y aplica lo pendiente en cada arranque.
@@ -9,8 +14,9 @@
          los registra y aplica igual sobre cada BD por-tenant (Turso).
      Cada BD lleva una tabla _migrations (name, hash, applied_at): una BD nueva se
      construye desde 0001 y una existente solo aplica lo que le falte.
-   - REGLA DE ORO: nunca edites una migracion ya publicada (rompe el hash → error
-     duro en ambos runners). Todo cambio va en una migracion NUEVA y aditiva.
+   - REGLA DE ORO (vigente desde el lanzamiento): nunca edites una migracion ya
+     publicada (rompe el hash → error duro `migration_altered` en ambos runners).
+     Todo cambio va en una migracion NUEVA y aditiva: 0002, 0003, ...
    - Inventario con LOTES + FEFO.
    - Idempotencia/atomicidad: Applied_Operations (ver §10).
    - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
@@ -21,8 +27,8 @@
      cliente: Rust en la Main, repo HTTP del Handy). Las claves foraneas son
      TEXT a juego. Esto hace que una fila tenga el MISMO id en todos los
      dispositivos y en la nube → no hay divergencia de ids al sincronizar.
-   - Los seeds (Roles, Turnos, Alergenos, Zonas, mesa BARRA) usan UUID FIJOS
-     identicos en local y nube, para que sus ids coincidan siempre.
+   - Los seeds (Roles, Turnos, Alergenos) usan UUID FIJOS identicos en local y
+     nube, para que sus ids coincidan siempre.
    - Excepciones que NO son ids de negocio y siguen siendo INTEGER:
      singletons de configuracion (Business_Settings / Ticket_Settings, ID=1)
      y la tabla interna Applied_Operations.
@@ -59,6 +65,26 @@ CREATE TABLE IF NOT EXISTS Usuarios (
   Estado TEXT DEFAULT 'Activo',
   Requiere_Setup INTEGER DEFAULT 0,
   FOREIGN KEY (ID_Rol) REFERENCES Roles(ID_Rol)
+);
+
+-- Anti brute-force del PIN (LOGIN-01): estado de intentos fallidos y bloqueo temporal por usuario.
+-- Tabla del ESQUEMA COMPARTIDO (existe igual en la BD local de la Main y en la de tenant en Turso),
+-- pero su contenido es DEVICE-LOCAL: no se sincroniza.
+--   - MAIN:  escribe/lee su propio estado con la conexion `raw` (sin outbox), para throttlear los
+--            logins locales. No se replica a la nube.
+--   - WORKER: escribe/lee este estado en la BD de tenant (directo, sin hub), para throttlear los
+--            logins de Handy.
+-- Cada lado throttlea de forma independiente; las filas de uno no viajan al otro.
+--
+-- Bloqueado_Hasta_Ms / Ultimo_Intento_Ms: epoch en milisegundos (reloj del dispositivo/worker). Se
+-- comparan contra "ahora" en la capa de aplicacion; no se usan funciones de tiempo de SQL (no es
+-- una escritura replicable, asi que no aplica el determinismo temporal del outbox).
+CREATE TABLE IF NOT EXISTS Intentos_Login (
+  ID_Usuario TEXT PRIMARY KEY,
+  Intentos_Fallidos INTEGER NOT NULL DEFAULT 0,
+  Bloqueado_Hasta_Ms INTEGER NOT NULL DEFAULT 0,
+  Ultimo_Intento_Ms INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE CASCADE
 );
 
 /* =========================================================
@@ -158,6 +184,11 @@ CREATE TABLE IF NOT EXISTS Productos (
   Nombre_Imagen TEXT,
   Ruta_Imagen TEXT,
   Cantidad_Pedido_Esperada REAL,
+  -- VR-04: stock "suelto" fuera de lotes. Contador simple por producto, OPCIONAL (NULL = el producto
+  -- no usa stock suelto y se vende sin descontar de aqui). A diferencia de los lotes (que nunca bajan
+  -- de 0), este contador SI puede quedar negativo: es la senal honesta de sobreventa. El stock total
+  -- mostrado de un producto es SUM(lotes) + COALESCE(Stock_Suelto, 0).
+  Stock_Suelto REAL,
   FOREIGN KEY (ID_Categoria) REFERENCES Categorias_Producto(ID_Categoria),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor)
 );
@@ -195,6 +226,36 @@ ON Lotes_Producto(ID_Producto, Stock_Disponible);
 
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_entrada
 ON Lotes_Producto(ID_Producto, Fecha_Entrada);
+
+-- Auditoria de movimientos de stock (INV-01b). Cada cambio manual de Stock_Disponible de un lote
+-- (alta y ajuste) deja una fila trazable en vez de sobrescribir el valor a pelo sin rastro. Base
+-- para la reconciliacion (INV-06): Stock_Disponible == Cantidad_Inicial - SUM(consumo) + SUM(ajustes).
+--
+-- Tipo: 'ALTA' (creacion del lote) | 'AJUSTE' (correccion manual del disponible).
+-- Delta: variacion aplicada a Stock_Disponible (+entrada / -salida).
+-- Stock_Resultante: disponible tras el movimiento (snapshot para reconciliar sin recomputar).
+-- Motivo: texto libre (las Notas del alta/ajuste).
+-- ID_Usuario: quien lo hizo (NULLABLE: no siempre disponible en la capa de comando todavia).
+-- Fecha: instante local; el outbox/tenantHub lo congela a literal antes de replicar.
+CREATE TABLE IF NOT EXISTS Movimientos_Stock (
+  ID_Movimiento TEXT PRIMARY KEY,
+  ID_Lote TEXT NOT NULL,
+  Tipo TEXT NOT NULL,
+  Delta REAL NOT NULL,
+  Stock_Resultante REAL NOT NULL,
+  Motivo TEXT,
+  ID_Usuario TEXT,
+  Fecha DATETIME NOT NULL,
+  FOREIGN KEY (ID_Lote) REFERENCES Lotes_Producto(ID_Lote) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
+  CHECK (Tipo IN ('ALTA', 'AJUSTE'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mov_stock_lote
+ON Movimientos_Stock(ID_Lote);
+
+CREATE INDEX IF NOT EXISTS idx_mov_stock_fecha
+ON Movimientos_Stock(Fecha);
 
 CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
   ID_Pedido TEXT PRIMARY KEY,
@@ -270,7 +331,6 @@ CREATE TABLE IF NOT EXISTS Mesas (
   Height INTEGER NOT NULL,
   Radius INTEGER,
   Updated_At DATETIME,
-  Es_Sistema INTEGER NOT NULL DEFAULT 0,
   UNIQUE (ID_Zona, Numero_Mesa),
   FOREIGN KEY (ID_Zona) REFERENCES Zonas(ID_Zona) ON DELETE CASCADE
 );
@@ -284,6 +344,13 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Total_Gastado REAL NOT NULL DEFAULT 0,
   Created_At TEXT DEFAULT (datetime('now','localtime'))
 );
+
+-- CLI-01: el email de cliente identifica de forma unica cuando existe. Indice UNICO PARCIAL sobre
+-- lower(Email): case-insensitive, y solo aplica a los que tienen email (NULL/'' no colisionan, que
+-- es el caso mayoritario: un cliente puede no tener email).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_clientes_email
+ON Clientes(lower(Email))
+WHERE Email IS NOT NULL AND Email <> '';
 
 -- Reservas.ID_Cliente es NULLABLE a propósito: una reserva puede existir sin cliente
 -- asignado. El gasto solo se atribuye/revierte cuando hay cliente real
@@ -313,22 +380,56 @@ ON Reservas(ID_Cliente);
 /* =========================================================
    6. Comandas / Detalles / Cuentas
 ========================================================= */
+-- Una comanda es un TICKET. Su origen lo define `Canal`:
+--   'MESA'  -> consumo en sala; SIEMPRE lleva ID_Mesa.
+--   'BARRA' -> venta rapida; NUNCA lleva mesa (ID_Mesa IS NULL).
+-- Antes la venta rapida se anclaba a una mesa "de sistema" (BARRA) sembrada en el seed, lo que
+-- obligaba a inventarse una zona y una mesa fantasma que el usuario veia y no podia borrar, y ademas
+-- chocaba con el invariante "una comanda abierta por mesa" (todos los tickets de barra compartian
+-- mesa → el segundo ticket abierto violaba el indice unico). Modelando el canal explicitamente:
+--   * desaparecen la mesa y la zona fantasma (ya no se siembran),
+--   * los tickets sin mesa no compiten entre si (ver el indice unico de abajo),
+--   * anadir canales futuros ('LLEVAR', 'DELIVERY'...) no obliga a tocar indices ni seeds.
+--
+-- El CHECK de coherencia hace el modelo autoconsistente: es imposible insertar una comanda de mesa
+-- sin mesa, o una de barra con mesa, aunque una ruta futura se despiste.
 CREATE TABLE IF NOT EXISTS Comandas (
   ID_Comanda TEXT PRIMARY KEY,
-  ID_Mesa TEXT NOT NULL,
+  ID_Mesa TEXT NULL,
   ID_Reserva TEXT NULL,
   ID_Trabajador TEXT NULL,
+  Canal TEXT NOT NULL DEFAULT 'MESA',
   Fecha_Hora_Apertura TEXT NOT NULL,
   Fecha_Hora_Cierre TEXT NULL,
   Total_Comanda REAL NOT NULL DEFAULT 0,
   Estado TEXT NOT NULL DEFAULT 'Abierta',
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa),
   FOREIGN KEY (ID_Reserva) REFERENCES Reservas(ID_Reserva),
-  FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL
+  FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
+  CHECK (Canal IN ('MESA', 'BARRA')),
+  -- Estado es la clave del invariante de abajo: si se colase un valor con otra capitalizacion
+  -- ('abierta'), el indice unico parcial dejaria de aplicar EN SILENCIO. El CHECK lo impide.
+  CHECK (Estado IN ('Abierta', 'Pagada')),
+  CHECK ((Canal = 'MESA') = (ID_Mesa IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_comandas_mesa_estado
 ON Comandas(ID_Mesa, Estado);
+
+-- MESA-03: como mucho UNA comanda 'Abierta' por mesa. Evita que dos aperturas concurrentes de la
+-- misma mesa (doble toque, o Main + Handy a la vez) dejen dos comandas abiertas repartiendo lineas.
+-- La capa de aplicacion ya hace la apertura idempotente; esto es la RED DE SEGURIDAD del esquema.
+--
+-- Los tickets de barra NO se ven afectados aunque no se excluyan explicitamente: en SQLite los NULL
+-- se consideran DISTINTOS entre si en un indice UNIQUE, y las comandas de barra tienen ID_Mesa NULL.
+-- Es decir, el invariante dice exactamente lo que debe decir: "una comanda abierta por mesa real;
+-- tickets sin mesa, los que hagan falta".
+CREATE UNIQUE INDEX IF NOT EXISTS idx_comandas_una_abierta_por_mesa
+ON Comandas(ID_Mesa) WHERE Estado = 'Abierta';
+
+-- Listado de tickets de venta rapida (y, en general, filtrar por canal en estadisticas).
+CREATE INDEX IF NOT EXISTS idx_comandas_canal_estado
+ON Comandas(Canal, Estado);
 
 CREATE INDEX IF NOT EXISTS idx_comandas_reserva
 ON Comandas(ID_Reserva);
@@ -593,9 +694,92 @@ CREATE TABLE IF NOT EXISTS Ticket_Settings (
 
 INSERT OR IGNORE INTO Ticket_Settings (ID) VALUES (1);
 
+-- Datos de contacto/recuperacion del negocio (singleton, ID=1).
+CREATE TABLE IF NOT EXISTS Contact_Settings (
+  ID INTEGER PRIMARY KEY CHECK (ID = 1),
+  Recovery_Email TEXT NOT NULL DEFAULT '',
+  Contact_Email TEXT NOT NULL DEFAULT '',
+  Contact_Phone TEXT NOT NULL DEFAULT '',
+  Updated_At TEXT DEFAULT (datetime('now','localtime'))
+);
+
+INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);
+
 -- (La tabla Email_Settings se retiro: todo el correo se envia por el worker
 --  (Cloudflare Email Service / Resend), asi que ya no hay configuracion ni
 --  credenciales SMTP locales ni replicadas a la nube. Ver DB-04.)
+
+/* =========================================================
+   12. Notificaciones (NOTIF-01)
+   Avisos persistentes que cualquier modulo puede emitir (stock bajo, aprobar pedido,
+   expiracion de licencia, gracia offline, avisos manuales) y que se pueden dirigir a un
+   usuario concreto, a un rol o a todos.
+
+   Modelo "fan-out on read": UNA fila por mensaje (aunque vaya "a todos") en Notificaciones;
+   el estado "leido" es POR USUARIO en Notificacion_Lecturas (un recibo por quien la lee). Asi
+   una notificacion "a todos"/"por rol" es una sola fila y cada usuario marca su propia lectura
+   sin duplicar el mensaje (escala sin explosion de filas por destinatario).
+
+   Sincronizacion (ver §9 CLAUDE.md): son tablas del ESQUEMA COMPARTIDO (se replican a la nube
+   y a las Handy por el outbox/WS). Por eso el ID lo genera el repositorio en Rust ANTES del
+   INSERT (TEXT PRIMARY KEY sin DEFAULT ni trigger) y las marcas de tiempo se escriben con
+   datetime('now','localtime'), que el outbox/tenantHub congela a literal antes de replicar.
+========================================================= */
+-- Destino_Tipo / Destino_Valor: a quien apunta ('todos' -> Valor NULL; 'usuario' -> ID_Usuario;
+--   'rol' -> ID_Rol, que es estable frente al renombrado del rol). El rol de un usuario vive en
+--   Usuarios.ID_Rol, asi que la visibilidad "por rol" se resuelve contra esa tabla.
+-- Accion / Payload: accion opcional que ofrece la notificacion y sus datos en JSON. El backend es
+--   agnostico: el frontend decide como pintar cada Tipo y que hace cada Accion.
+-- Clave_Dedupe: clave anti-duplicado mientras la notificacion esta 'activa' (p.ej.
+--   'stock_bajo:<ID_Producto>') para no repetir el mismo aviso.
+-- Estado: ciclo de vida. Al reponer stock / aprobar el pedido, el emisor marca 'resuelta' en vez
+--   de acumular avisos.
+CREATE TABLE IF NOT EXISTS Notificaciones (
+  ID_Notificacion TEXT PRIMARY KEY,
+  Tipo            TEXT NOT NULL,
+  Severidad       TEXT NOT NULL DEFAULT 'info',
+  Titulo          TEXT NOT NULL,
+  Cuerpo          TEXT,
+  Destino_Tipo    TEXT NOT NULL,
+  Destino_Valor   TEXT,
+  Accion          TEXT,
+  Payload         TEXT,
+  Clave_Dedupe    TEXT,
+  Estado          TEXT NOT NULL DEFAULT 'activa',
+  Creada_En       DATETIME NOT NULL,
+  Expira_En       DATETIME,
+  CHECK (Destino_Tipo IN ('todos', 'usuario', 'rol')),
+  CHECK (Severidad IN ('info', 'exito', 'aviso', 'error')),
+  CHECK (Estado IN ('activa', 'resuelta', 'descartada'))
+);
+
+-- Anti-duplicado: como mucho UNA notificacion 'activa' por Clave_Dedupe. Las resueltas/descartadas
+-- no cuentan, asi que el aviso puede volver a emitirse si la condicion reaparece tras resolverse.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_dedupe_activa
+ON Notificaciones(Clave_Dedupe)
+WHERE Clave_Dedupe IS NOT NULL AND Estado = 'activa';
+
+-- Listado del centro de notificaciones: filtrar por estado y ordenar por fecha.
+CREATE INDEX IF NOT EXISTS idx_notif_estado_fecha
+ON Notificaciones(Estado, Creada_En);
+
+-- Recibo de lectura por usuario. La AUSENCIA de fila = no leida para ese usuario. El estado "leido"
+-- es por usuario (una notificacion "a todos" la leen distintos usuarios en distinto momento). Se
+-- clava en ID_Usuario (el principal de la sesion, que siempre existe tras login) y no en
+-- ID_Trabajador (que puede ser NULL, p.ej. el admin semilla sin ficha de trabajador).
+-- ON DELETE CASCADE: al purgar/borrar una notificacion, sus recibos se van con ella. El DELETE del
+-- padre se replica y cada motor re-deriva la cascada localmente (FK activadas en todas las conexiones).
+CREATE TABLE IF NOT EXISTS Notificacion_Lecturas (
+  ID_Notificacion TEXT NOT NULL,
+  ID_Usuario      TEXT NOT NULL,
+  Leida_En        DATETIME NOT NULL,
+  PRIMARY KEY (ID_Notificacion, ID_Usuario),
+  FOREIGN KEY (ID_Notificacion) REFERENCES Notificaciones(ID_Notificacion) ON DELETE CASCADE
+);
+
+-- Resolver "mis no leidas": buscar los recibos de un usuario.
+CREATE INDEX IF NOT EXISTS idx_notif_lectura_usuario
+ON Notificacion_Lecturas(ID_Usuario);
 
 /* =========================================================
    13. Vistas
@@ -663,39 +847,7 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
   ('00000000-0000-7000-8000-00000000020d', 'Altramuces', 'altramuces.png', '/alergenos/altramuces.png'),
   ('00000000-0000-7000-8000-00000000020e', 'Moluscos', 'moluscos.png', '/alergenos/moluscos.png');
 
--- Solo se siembra la zona BARRA: es el ancla de la venta rápida (id fijo, idéntico en local y
--- nube). Las zonas de ejemplo (Salon/Terraza) se eliminaron del seed; el usuario crea las suyas.
--- Updated_At: literal FIJO (no datetime('now')). Cada runner (Main y cada tenant) siembra por su
--- lado en instantes distintos y en otra zona horaria; un literal fijo hace que la fila sea
--- IDENTICA en todos los dispositivos y en la nube, y que cualquier edicion real (localtime, mas
--- reciente) gane siempre en la resolucion por Updated_At.
-INSERT OR IGNORE INTO Zonas (ID_Zona, Nombre_Zona, Room_Points, Updated_At) VALUES
-  ('00000000-0000-7000-8000-000000000303', 'BARRA', '[]', '2024-01-01 00:00:00');
-
-INSERT OR IGNORE INTO Mesas (
-  ID_Mesa,
-  ID_Zona,
-  Numero_Mesa,
-  Capacidad,
-  Ubicacion_X,
-  Ubicacion_Y,
-  Shape,
-  Width,
-  Height,
-  Radius,
-  Updated_At,
-  Es_Sistema
-) VALUES (
-  '00000000-0000-7000-8000-000000000401',
-  '00000000-0000-7000-8000-000000000303',
-  'BARRA',
-  0,
-  0,
-  0,
-  'rect',
-  1,
-  1,
-  NULL,
-  '2024-01-01 00:00:00',  -- Updated_At: literal FIJO (ver nota en el seed de Zonas BARRA)
-  1
-);
+-- NO se siembra ninguna zona ni mesa: el usuario crea las suyas desde el editor de salones.
+-- (Antes se sembraban una zona y una mesa "BARRA" como ancla de la venta rapida. Ya no hacen falta:
+--  los tickets de venta rapida son Comandas con Canal='BARRA' y sin mesa. Ver la nota de la tabla
+--  Comandas en §6.)

@@ -3,7 +3,8 @@
 > **Ámbito.** Modelo de datos único compartido por la app local (SQLite/libsql) y las BDs por-tenant
 > de la nube (Turso), su sistema de migraciones espejo (Rust `include_dir!` ↔ worker registro
 > manual), y la coherencia entre ambos runners. Ficheros:
-> `packages/database/migrations/0001_inicial.sql`, `0002_contact_settings.sql`,
+> `packages/database/migrations/0001_inicial.sql` (**única** migración: antes del lanzamiento se
+> consolidaron aquí las incrementales 0002..0008, ver la cabecera del propio fichero),
 > `packages/database/schema.snapshot.sql`, `crates/tpv-infra-sqlite/src/migrations.rs`,
 > `crates/tpv-infra-sqlite/src/db.rs` (`init_sync_tables`, `rewrite_now_literals`),
 > `apps/cloud-worker-licensing/src/server/tenantMigrations.ts`.

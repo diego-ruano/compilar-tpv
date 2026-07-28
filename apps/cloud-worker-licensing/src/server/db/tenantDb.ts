@@ -166,6 +166,15 @@ export async function tursoCreateDbToken(
 }
 
 function toNumOrNull(v: any): number | null {
+	// ⚠️ `Number(null)` es 0 (y es finito), así que sin este guardia una columna SQL NULL se
+	// convertía en 0 en vez de en null. Eso rompía la rotación del token del tenant de dos formas:
+	//   · `oldRotatedAtMs` valía 0 → el CAS `WHERE rotated_at_ms IS 0` NUNCA casaba con la fila real
+	//     (`rotated_at_ms IS NULL`) → 0 filas afectadas → `won=false` → se devolvía el token VIEJO y
+	//     la rotación no se persistía jamás. Al caducar el token (7 d) toda lectura del tenant
+	//     quedaba en 401 permanente, sin recuperación posible.
+	//   · `getTenantTokenAgeBaseMs` devolvía 0 en vez de caer a `created_at_ms` → `shouldRotate`
+	//     siempre true → se acuñaba un token de Turso en cada arranque de isolate (desperdicio).
+	if (v === null || v === undefined || v === "") return null;
 	const n = Number(v);
 	return Number.isFinite(n) ? n : null;
 }
@@ -231,6 +240,15 @@ export async function resolveTenantDbCredentials(
 		}
 
 		// Otro isolate ganó la carrera: leer y descifrar su token (no sobreescribir).
+		// Si esto se repite con `forceRotate` (es decir, veníamos de un 401), NO es una carrera:
+		// significa que el CAS no casa y la rotación es inefectiva → el token caducado se reusará y
+		// el tenant se queda en 401 permanente. Lo hacemos ruidoso para que no vuelva a pasar mudo.
+		if (forceRotate) {
+			console.warn(
+				`[tenantDb] rotacion forzada NO persistida para tenant=${tenantId} ` +
+				`(CAS sin filas, oldRotatedAtMs=${oldRotatedAtMs}). Se reutiliza el token almacenado.`,
+			);
+		}
 		const updated = await getTenantDbRow(dbCentral, tenantId);
 		if (!updated?.turso_auth_token_enc) throw new Error("tenant_db_not_provisioned");
 		const token = await aesGcmDecryptFromB64(

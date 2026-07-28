@@ -131,6 +131,14 @@ comando + ids + error truncado, **sin** el comando ni sus args (ni datos ni volu
 | `main_online` | una Main (tpv) se autentica | `device_id`, `connected_devices` |
 | `main_offline` | se va la última Main → freeze | `device_id`, `connected_devices` |
 
+> **Nota (SYNC-16, hibernación del DO).** `connected_devices` se calcula recorriendo
+> `state.getWebSockets()` y contando los sockets con sesión autenticada (antes era el tamaño de un
+> `Set` en memoria); el valor es el mismo. Además, el latido de 30 s ya **no despierta** al DO (lo
+> contesta el auto-response en el edge), así que `last_seen_at_ms` de un dispositivo se refresca al
+> **conectar** y con su **actividad real** (`apply`/`event`), no cada 30 s: no interpretes un
+> `last_seen` de hace minutos como que el dispositivo se ha ido — la presencia real la dan
+> `main_online`/`main_offline`.
+
 ## 8. Notas y próximos pasos
 
 - **Logpush → Axiom** (logs de petición HTTP del Worker, sin código) requiere plan de pago de
