@@ -87,7 +87,7 @@ export default function ProveedorFotoField({
 						<button
 							type="button"
 							onClick={pickFile}
-							className="cursor-pointer rounded-xl bg-accent px-3 py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover"
+							className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover"
 						>
 							{shownUrl ? "Cambiar foto" : "Añadir foto"}
 						</button>

@@ -56,7 +56,7 @@ export default function Modal({
 	return (
 		<div
 			style={{ zIndex }}
-			className="fixed inset-0 flex items-center justify-center"
+			className="fixed inset-0 flex items-center justify-center overflow-y-auto p-2 sm:p-4"
 			aria-modal="true"
 			role="dialog"
 		>
@@ -72,11 +72,11 @@ export default function Modal({
 			<div
 				ref={panelRef}
 				tabIndex={-1}
-				className={`relative w-[92vw] ${widthClass} rounded-2xl border border-border bg-surface p-5 text-fg shadow-xl outline-none`}
+				className={`relative flex max-h-[calc(100dvh-1rem)] w-full ${widthClass} flex-col overflow-hidden rounded-2xl border border-border bg-surface p-3 text-fg shadow-xl outline-none sm:max-h-[calc(100dvh-2rem)] sm:p-5`}
 				onClick={(e) => e.stopPropagation()}
 			>
-				<div className="mb-4 flex items-center justify-between gap-3">
-					<h3 className="text-xl font-bold text-fg">{title ?? ""}</h3>
+				<div className="mb-4 flex shrink-0 items-center justify-between gap-3">
+					<h3 className="min-w-0 break-words text-lg font-bold text-fg sm:text-xl">{title ?? ""}</h3>
 					<button
 						type="button"
 						onClick={() => onCloseRef.current()}
@@ -87,7 +87,9 @@ export default function Modal({
 					</button>
 				</div>
 
-				{children}
+				<div className="min-h-0 overflow-y-auto overscroll-contain pr-1 [scrollbar-gutter:stable]">
+					{children}
+				</div>
 			</div>
 		</div>
 	);
