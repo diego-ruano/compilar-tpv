@@ -15,6 +15,19 @@ function idField(field: string) {
 	return z.coerce.string().trim().min(1, `${field} invalido`);
 }
 
+/**
+ * Id que el DISPOSITIVO genera y envía (UUIDv7). Opcional: si no llega, el comando genera uno.
+ * Convención del proyecto (ver `idStep` en cada `*.commands.ts`): una fila tiene UN id, elegido
+ * por quien la crea, y la nube lo honra. Se acepta `null` porque los clientes lo mandan así
+ * cuando no lo conocen.
+ */
+const optionalIdField = z.coerce
+	.string()
+	.trim()
+	.min(1)
+	.nullish()
+	.transform((v) => (v == null ? undefined : v));
+
 function positiveNumber(field: string) {
 	return z.coerce.number().positive(`${field} invalido`);
 }
@@ -68,15 +81,18 @@ export const idsSchema = z
 
 export const createComandaBarraSchema = z
 	.object({
+		id_comanda: optionalIdField,
 		id_trabajador: z.any().optional().nullable(),
 		get_or_create: z.boolean().optional().default(false),
 	})
 	.transform((v) => ({
+		id_comanda: v.id_comanda,
 		id_trabajador: optIdStr(v.id_trabajador),
 		get_or_create: Boolean(v.get_or_create),
 	}));
 
 export const addLineaSchema = z.object({
+	id_detalle: optionalIdField,
 	id_comanda: idField("id_comanda"),
 	id_producto: idField("id_producto"),
 	cantidad: positiveNumber("cantidad"),
@@ -140,15 +156,21 @@ export const restarStockSchema = z
 			: [],
 	}));
 
+// `id_comanda`/`id_detalle` NO están en los DTOs de `@tpv/contracts` a propósito: esos describen la
+// frontera frontend↔Rust, donde el id no viaja (lo pone el repositorio). Aquí, en la frontera HTTP,
+// el dispositivo sí lo envía para que la fila tenga el MISMO id en el Handy y en la nube.
 export type CreateComandaBarraInput = Omit<
 	VrCreateComandaBarraInput,
 	"id_trabajador" | "get_or_create"
 > & {
+	id_comanda?: string;
 	id_trabajador: string | null;
 	get_or_create: boolean;
 };
 
-export type AddLineaInput = VrAddLineaComandaInput;
+export type AddLineaInput = VrAddLineaComandaInput & {
+	id_detalle?: string;
+};
 export type RemoveLastLineaInput = VrRemoveLastUnpaidLineaInput;
 export type DeleteLineaInput = VrDeleteLineaIfUnpaidInput;
 

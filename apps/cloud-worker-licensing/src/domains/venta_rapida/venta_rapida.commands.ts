@@ -38,17 +38,20 @@ const UPDATE_TOTAL = `
 	WHERE ID_Comanda = ?1;
 `;
 
+// Local-First/UUIDv7: el id lo genera el dispositivo y lo envía; si faltara, generamos uno.
+// Misma convención que el resto de dominios (ver `idStep` en clientes/inventario/…): una fila
+// tiene UN id, elegido por quien la crea, e idéntico en el dispositivo y en la nube.
+function idStep(saveAs: string, provided?: string) {
+	const id = (provided ?? "").trim() || crypto.randomUUID();
+	return { kind: "value", saveAs, sql: "SELECT ?1;", args: [id] };
+}
+
 export function createComandaBarra(
 	input: CreateComandaBarraInput,
 	idTrabajadorReal: string | null,
 ): BuiltCommand {
 	const steps: any[] = [
-		{
-			kind: "value",
-			saveAs: "id_comanda",
-			sql: "SELECT ?1;",
-			args: [crypto.randomUUID()],
-		},
+		idStep("id_comanda", input.id_comanda),
 		{
 			// Ticket de venta rápida: SIN mesa (Canal='BARRA'). Ya no compite con otros tickets
 			// abiertos, así que tampoco hace falta la antigua purga de comandas de barra vacías
@@ -93,12 +96,7 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 			type: "tenantDb.transaction",
 			payload: {
 				steps: [
-					{
-						kind: "value",
-						saveAs: "id_detalle",
-						sql: "SELECT ?1;",
-							args: [crypto.randomUUID()],
-					},
+					idStep("id_detalle", input.id_detalle),
 					{
 						// Garantía idempotente: si la comanda no existiese (p. ej. el `change` del
 						// create aún no ha llegado a este lado), la re-creamos en la MISMA

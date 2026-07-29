@@ -16,19 +16,17 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::CloudClient;
 
-/// Extrae del cuerpo de la respuesta el id que la NUBE asignó a la fila recién creada.
+/// Confirma con el cuerpo de la respuesta el id de la fila creada.
 ///
-/// El id de estas escrituras lo genera el worker (paso `kind:"value"` con `crypto.randomUUID()`
-/// **antes** del INSERT) y se replica desde ahí a la Main, que es lo que exige la regla de IDs
-/// deterministas (CLAUDE.md §9): una fila, un id, igual en todos los lados.
+/// Convención del proyecto (CLAUDE.md §9 · `idStep` en cada `*.commands.ts`): **el id lo genera el
+/// dispositivo** y lo envía; la nube lo honra y solo genera uno si no llega. Aun así leemos el id de
+/// la respuesta en lugar de dar por hecho el nuestro: es la autoridad, y así es imposible que la UI
+/// y la nube se desincronicen aunque el servidor decidiera otro (p. ej. un `get_or_create` que
+/// reengancha con un ticket ya abierto, que devuelve un id distinto del que mandamos).
 ///
-/// Antes el Handy se inventaba aquí un UUIDv7 propio, lo mandaba en el cuerpo (donde el esquema zod
-/// lo descartaba) e **ignoraba la respuesta**, devolviendo el suyo. Resultado: la UI creía que la
-/// línea era `A` y la nube la había guardado como `B`, así que el primer cobro mandaba ids que no
-/// existían y fallaba con `no_valid_pending_details`; sólo funcionaba al segundo intento, porque el
-/// fallo provocaba un refetch que traía los ids buenos. Con las comandas pasaba lo mismo, pero se
-/// disimulaba porque `addLinea` recrea la comanda si falta (dejando una comanda huérfana vacía por
-/// cada ticket).
+/// Ese desajuste era justo el bug del primer cobro: el Handy se inventaba el id, el worker lo
+/// descartaba y generaba otro, y la UI acababa cobrando líneas con ids inexistentes
+/// (`no_valid_pending_details`) hasta que un refetch traía los buenos.
 fn id_from_response(resp: &JsonValue, field: &str) -> AppResult<String> {
     let id = resp
         .get(field)
@@ -116,6 +114,7 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         get_or_create: bool,
     ) -> AppResult<String> {
         let body = json!({
+            "id_comanda": uuid::Uuid::now_v7().to_string(),
             "id_trabajador": id_trabajador,
             "get_or_create": get_or_create,
         });
@@ -123,6 +122,8 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
             .client
             .post_json("/v1/venta-rapida/comandas/barra", &body)
             .await?;
+        // Ojo: con `get_or_create` el worker puede devolver el id de un ticket ya abierto, distinto
+        // del que acabamos de proponer. Por eso manda la respuesta, no nuestro uuid.
         id_from_response(&resp, "id_comanda")
     }
 
@@ -134,6 +135,7 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         precio_unitario: f64,
     ) -> AppResult<String> {
         let body = json!({
+            "id_detalle": uuid::Uuid::now_v7().to_string(),
             "id_comanda": id_comanda,
             "id_producto": id_producto,
             "cantidad": cantidad,
