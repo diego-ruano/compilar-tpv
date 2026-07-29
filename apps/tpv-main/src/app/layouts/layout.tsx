@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import NavBar from "../layoutComponent/NavBar";
 import Titlebar from "../layoutComponent/Titlebar";
@@ -6,9 +6,23 @@ import Titlebar from "../layoutComponent/Titlebar";
 function Layout({ children }: { children: React.ReactNode }) {
   // Estado del sidebar controlado desde layout (para overlay en móvil).
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const previousWindowWidth = useRef(window.innerWidth);
 
   const toggleSidebar = () => setSidebarOpen((v) => !v);
   const closeSidebar = () => setSidebarOpen(false);
+
+  useEffect(() => {
+    const closeWhenWindowGetsNarrower = () => {
+      const currentWidth = window.innerWidth;
+      if (currentWidth < previousWindowWidth.current) {
+        setSidebarOpen(false);
+      }
+      previousWindowWidth.current = currentWidth;
+    };
+
+    window.addEventListener("resize", closeWhenWindowGetsNarrower);
+    return () => window.removeEventListener("resize", closeWhenWindowGetsNarrower);
+  }, []);
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-bg text-fg">
