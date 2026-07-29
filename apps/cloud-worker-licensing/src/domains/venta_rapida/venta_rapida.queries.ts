@@ -16,6 +16,8 @@ import type {
 	RestarStockInput,
 } from "./venta_rapida.schemas";
 
+import { CANAL_BARRA } from "./venta_rapida.commands";
+
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
 	return (rs?.rows ?? []).map((r: any) => {
@@ -102,32 +104,25 @@ export async function searchProductos(
 	return rows(rs) as ProductoRow[];
 }
 
-export async function barraMesaId(db: Client): Promise<string> {
-	const rs = await db.execute(`
-		SELECT ID_Mesa AS id
-		FROM Mesas
-		WHERE Numero_Mesa = 'BARRA'
-		ORDER BY ID_Mesa ASC
-		LIMIT 1;
-	`);
-	return String(rows(rs)[0]?.id ?? "");
-}
-
-export async function openBarraComanda(
-	db: Client,
-	idMesaBarra: string,
-): Promise<string> {
-	if (!idMesaBarra.trim()) return "";
+/**
+ * Último ticket de barra abierto (el más reciente). La venta rápida admite VARIOS tickets abiertos
+ * a la vez; esto solo resuelve el `get_or_create`, que reengancha con el último.
+ *
+ * Los tickets de barra se identifican por `Canal='BARRA'` y NO tienen mesa. (Antes se buscaban por
+ * la mesa "de sistema" BARRA, que ya no existe: ver la nota de la tabla Comandas en
+ * 0001_inicial.sql.) Espejo de `find_open_barra_comanda_id` en tpv-infra-sqlite.
+ */
+export async function openBarraComanda(db: Client): Promise<string> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Comanda AS id
 			FROM Comandas
-			WHERE ID_Mesa = ?1
+			WHERE Canal = ?1
 				AND Estado = 'Abierta'
 			ORDER BY datetime(Fecha_Hora_Apertura) DESC
 			LIMIT 1;
 		`,
-		args: [idMesaBarra],
+		args: [CANAL_BARRA],
 	});
 	return String(rows(rs)[0]?.id ?? "");
 }
@@ -155,8 +150,6 @@ export async function listComandas(
 	includePagadas: boolean,
 	limit: number,
 ): Promise<ComandaBarraRow[]> {
-	const idMesaBarra = await barraMesaId(db);
-	if (!idMesaBarra.trim()) return [];
 	const whereClause = includePagadas
 		? "EXISTS (SELECT 1 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda)"
 		: `(${PENDING_EXPR}) > 0
@@ -185,12 +178,12 @@ export async function listComandas(
 						AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 				),0) AS Pendientes_Pago
 			FROM Comandas c
-			WHERE c.ID_Mesa = ?2
+			WHERE c.Canal = ?2
 				AND (${whereClause})
 			ORDER BY c.ID_Comanda DESC
 			LIMIT ?1;
 		`,
-		args: [limit, idMesaBarra],
+		args: [limit, CANAL_BARRA],
 	});
 	return rows(rs) as ComandaBarraRow[];
 }

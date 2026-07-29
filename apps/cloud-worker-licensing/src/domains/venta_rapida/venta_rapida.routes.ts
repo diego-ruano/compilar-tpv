@@ -141,10 +141,9 @@ ventaRapidaRoutes.post("/comandas/barra", async (c) => {
 	if (!p.ok) return p.res;
 
 	if (p.data.get_or_create) {
-		const existing = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-			const idMesa = await q.barraMesaId(db);
-			return q.openBarraComanda(db, idMesa);
-		});
+		const existing = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.openBarraComanda(db),
+		);
 		if (existing) return c.json({ ok: true, id_comanda: existing });
 	}
 

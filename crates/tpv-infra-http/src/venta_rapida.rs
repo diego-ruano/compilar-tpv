@@ -11,9 +11,37 @@ use tpv_contracts::venta_rapida::{
     CategoriaRow, ComandaBarraRow, IndexRow, LineaComandaRow, ProductoRow, StockLinea,
     VerTicketsDetalleRow,
 };
+use tpv_application::error::AppError;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::CloudClient;
+
+/// Extrae del cuerpo de la respuesta el id que la NUBE asignó a la fila recién creada.
+///
+/// El id de estas escrituras lo genera el worker (paso `kind:"value"` con `crypto.randomUUID()`
+/// **antes** del INSERT) y se replica desde ahí a la Main, que es lo que exige la regla de IDs
+/// deterministas (CLAUDE.md §9): una fila, un id, igual en todos los lados.
+///
+/// Antes el Handy se inventaba aquí un UUIDv7 propio, lo mandaba en el cuerpo (donde el esquema zod
+/// lo descartaba) e **ignoraba la respuesta**, devolviendo el suyo. Resultado: la UI creía que la
+/// línea era `A` y la nube la había guardado como `B`, así que el primer cobro mandaba ids que no
+/// existían y fallaba con `no_valid_pending_details`; sólo funcionaba al segundo intento, porque el
+/// fallo provocaba un refetch que traía los ids buenos. Con las comandas pasaba lo mismo, pero se
+/// disimulaba porque `addLinea` recrea la comanda si falta (dejando una comanda huérfana vacía por
+/// cada ticket).
+fn id_from_response(resp: &JsonValue, field: &str) -> AppResult<String> {
+    let id = resp
+        .get(field)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if id.is_empty() {
+        return Err(AppError::external(format!("respuesta sin {field}")));
+    }
+    Ok(id)
+}
 
 pub struct HttpVentaRapidaRepository {
     client: Arc<CloudClient>,
@@ -87,18 +115,15 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         id_trabajador: Option<String>,
         get_or_create: bool,
     ) -> AppResult<String> {
-        // El id lo genera el cliente (UUIDv7), idéntico en local y nube.
-        let id_comanda = uuid::Uuid::now_v7().to_string();
         let body = json!({
-            "id_comanda": id_comanda,
             "id_trabajador": id_trabajador,
             "get_or_create": get_or_create,
         });
-        let _: JsonValue = self
+        let resp: JsonValue = self
             .client
             .post_json("/v1/venta-rapida/comandas/barra", &body)
             .await?;
-        Ok(id_comanda)
+        id_from_response(&resp, "id_comanda")
     }
 
     async fn add_linea_comanda(
@@ -108,16 +133,14 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         cantidad: f64,
         precio_unitario: f64,
     ) -> AppResult<String> {
-        let id_detalle = uuid::Uuid::now_v7().to_string();
         let body = json!({
-            "id_detalle": id_detalle,
             "id_comanda": id_comanda,
             "id_producto": id_producto,
             "cantidad": cantidad,
             "precio_unitario": precio_unitario,
         });
-        let _: JsonValue = self.client.post_json("/v1/venta-rapida/lineas", &body).await?;
-        Ok(id_detalle)
+        let resp: JsonValue = self.client.post_json("/v1/venta-rapida/lineas", &body).await?;
+        id_from_response(&resp, "id_detalle")
     }
 
     async fn remove_last_unpaid_linea(

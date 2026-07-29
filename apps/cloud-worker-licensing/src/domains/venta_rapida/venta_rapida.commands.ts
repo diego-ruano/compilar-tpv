@@ -26,7 +26,7 @@ const REF_ID_DETALLE = { $ref: "id_detalle" } as const;
 // y que además hacía que todos los tickets compartieran mesa (chocando con el índice único de
 // "una comanda abierta por mesa"). Ver la nota de la tabla Comandas en 0001_inicial.sql.
 // ESPEJO OBLIGATORIO de crates/tpv-infra-sqlite/src/venta_rapida.rs: ambos generan el mismo SQL.
-const CANAL_BARRA = "BARRA";
+export const CANAL_BARRA = "BARRA";
 
 const UPDATE_TOTAL = `
 	UPDATE Comandas
