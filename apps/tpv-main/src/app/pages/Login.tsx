@@ -501,7 +501,7 @@ export default function Login() {
     ]);
 
     return (
-        <div className="relative h-screen overflow-hidden bg-bg text-fg">
+        <div className="relative h-dvh overflow-hidden bg-bg text-fg">
             {/* Glow decorativo de fondo (sutil, más visible en oscuro) */}
             <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 <div className="absolute -left-24 -top-24 size-80 rounded-full bg-accent/10 blur-3xl" />
@@ -511,7 +511,7 @@ export default function Login() {
             {/* Barra de título (drag region + controles de ventana) */}
             <div className="absolute top-0 left-0 right-0 z-50 flex justify-between shrink-0 border-b border-border bg-surface">
                 <div
-                    className="flex w-full items-center gap-2 p-1.5 sm:gap-3"
+                    className="flex min-w-0 flex-1 items-center gap-2 p-1.5 sm:gap-3"
                     data-tauri-drag-region
                 >
                     <img
@@ -522,7 +522,7 @@ export default function Login() {
                     />
                     <p
                         data-tauri-drag-region
-                        className="truncate max-w-[45vw] text-sm font-semibold text-fg sm:max-w-60"
+                        className="min-w-0 max-w-[35vw] truncate text-sm font-semibold text-fg sm:max-w-60"
                     >
                         {businessName || "TPV"}
                     </p>
@@ -546,8 +546,8 @@ export default function Login() {
                 </div>
             </div>
 
-            <div className="h-full overflow-y-auto pt-11 sm:pt-12 lg:overflow-hidden">
-                <div className="mx-auto flex min-h-[calc(100vh-44px)] w-full max-w-6xl items-center justify-center px-2 py-3 sm:min-h-[calc(100vh-48px)] sm:px-4 sm:py-4">
+            <div className="h-full touch-pan-y overflow-y-auto overscroll-contain pt-11 sm:pt-12">
+                <div className="mx-auto flex min-h-[calc(100dvh-44px)] w-full max-w-6xl items-start justify-center px-2 py-3 sm:min-h-[calc(100dvh-48px)] sm:px-4 sm:py-4 lg:items-center">
                     <div className="grid w-full grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-6">
                     {/* ===== Columna izquierda: selección de usuario + fichaje ===== */}
                     <section
@@ -555,10 +555,10 @@ export default function Login() {
                             "relative flex flex-col rounded-3xl border border-border bg-surface shadow-sm",
                             "p-3 sm:p-5",
                             "min-h-0",
-                            "lg:h-[680px] lg:max-h-[calc(100vh-72px)] lg:min-h-[520px]",
+                            "lg:h-[clamp(520px,calc(100dvh-80px),680px)]",
                         )}
                     >
-                        <div className="flex items-start justify-between gap-3">
+                        <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-start xs:justify-between">
                             <div className="flex min-w-0 items-center gap-3">
                                 <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                                     <Store className="size-5" aria-hidden />
@@ -575,7 +575,7 @@ export default function Login() {
                             </div>
 
                             {selectedUser ? (
-                                <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] sm:text-sm">
+                                <div className="flex max-w-full shrink-0 self-end items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] xs:self-auto sm:text-sm">
                                     <span className="grid size-5 place-items-center rounded-full bg-accent/15 text-accent">
                                         <UserRound className="size-3" aria-hidden />
                                     </span>
@@ -584,7 +584,7 @@ export default function Login() {
                                     </span>
                                 </div>
                             ) : (
-                                <div className="flex shrink-0 items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-fg-muted sm:text-sm">
+                                <div className="flex max-w-full shrink-0 self-end items-center gap-2 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-[11px] font-medium text-fg-muted xs:self-auto sm:text-sm">
                                     <UserRound className="size-3.5" aria-hidden />
                                     Sin usuario
                                 </div>
@@ -883,11 +883,11 @@ export default function Login() {
                             "flex flex-col rounded-3xl border border-border bg-surface shadow-sm",
                             "p-3 sm:p-5",
                             "min-h-0",
-                            "lg:h-[680px] lg:max-h-[calc(100vh-72px)] lg:min-h-[520px]",
-                            "overflow-hidden",
+                            "lg:h-[clamp(520px,calc(100dvh-80px),680px)]",
+                            "overflow-y-auto overscroll-contain",
                         )}
                     >
-                        <div className="flex items-start justify-between gap-3 sm:gap-4">
+                        <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-start xs:justify-between sm:gap-4">
                             <div className="flex min-w-0 items-center gap-3">
                                 <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                                     <Lock className="size-5" aria-hidden />
@@ -914,7 +914,7 @@ export default function Login() {
                                 disabled={!selectedUser || isSubmitting}
                                 title="Cambiar usuario"
                                 leftIcon={<RotateCw className="size-4" aria-hidden />}
-                                className="shrink-0"
+                                className="w-full shrink-0 xs:w-auto"
                             >
                                 Cambiar usuario
                             </Button>
@@ -975,7 +975,7 @@ export default function Login() {
                         </div>
 
                         {/* Teclado numérico */}
-                        <div className="mt-2 grid grid-cols-3 gap-2 sm:mt-5 sm:gap-3">
+                        <div className="mt-2 grid shrink-0 grid-cols-3 gap-2 sm:mt-[clamp(0.75rem,2dvh,1.25rem)] sm:gap-[clamp(0.5rem,1.2dvh,0.75rem)]">
                             {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((d) => (
                                 <button
                                     key={d}
@@ -983,7 +983,7 @@ export default function Login() {
                                     onClick={() => handleDigit(d)}
                                     disabled={!canType}
                                     className={cn(
-                                        "h-11 w-full rounded-xl border sm:h-16 sm:rounded-2xl",
+                                        "h-11 w-full rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                         "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
                                         !canType
                                             ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
@@ -999,7 +999,7 @@ export default function Login() {
                                 onClick={() => handleDigit("0")}
                                 disabled={!canType}
                                 className={cn(
-                                    "h-11 w-full rounded-xl border sm:h-16 sm:rounded-2xl",
+                                    "h-11 w-full rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                     "text-lg font-semibold sm:text-2xl transition active:scale-[0.97]",
                                     !canType
                                         ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
@@ -1016,7 +1016,7 @@ export default function Login() {
                                 aria-label="Borrar último"
                                 title="Borrar último"
                                 className={cn(
-                                    "inline-flex h-11 w-full items-center justify-center rounded-xl border sm:h-16 sm:rounded-2xl",
+                                    "inline-flex h-11 w-full items-center justify-center rounded-xl border sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                     "transition active:scale-[0.97]",
                                     !canType
                                         ? "cursor-not-allowed border-border bg-surface-2 text-fg-subtle opacity-50"
@@ -1031,7 +1031,7 @@ export default function Login() {
                                 onClick={handleSubmit}
                                 disabled={!canEnter}
                                 className={cn(
-                                    "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl sm:h-16 sm:rounded-2xl",
+                                    "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",
                                     "text-base font-semibold sm:text-lg transition active:scale-[0.97]",
                                     canEnter
                                         ? "cursor-pointer bg-accent text-accent-fg shadow-sm hover:bg-accent-hover"
@@ -1044,7 +1044,7 @@ export default function Login() {
                         </div>
 
                         {/* Consejos rotativos (rellenan el espacio inferior del panel) */}
-                        <div className="mt-3 hidden flex-1 items-end sm:flex">
+                        <div className="mt-3 hidden min-h-fit shrink-0 items-end sm:flex lg:mt-[clamp(0.5rem,1.5dvh,0.75rem)]">
                             <div className="w-full rounded-2xl border border-border bg-surface-2 p-4">
                                 <div className="flex items-center gap-2 text-accent">
                                     <Lightbulb className="size-4" aria-hidden />

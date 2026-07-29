@@ -28,7 +28,7 @@ export default function Modal({
         className={`
           relative w-full ${maxWidthClass}
           overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl
-          max-h-[calc(100vh-1rem)] sm:max-h-[calc(100vh-1.5rem)]
+          max-h-[calc(100dvh-1rem)] sm:max-h-[calc(100dvh-1.5rem)]
         `}
       >
         <button
@@ -46,7 +46,7 @@ export default function Modal({
           </div>
         ) : null}
 
-        <div className="overflow-y-auto p-4 max-h-[calc(100vh-6.5rem)] sm:p-5">{children}</div>
+        <div className="max-h-[calc(100dvh-6.5rem)] overflow-y-auto p-4 sm:p-5">{children}</div>
       </div>
     </div>
   );

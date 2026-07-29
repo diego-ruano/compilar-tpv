@@ -160,9 +160,8 @@ export default function TicketPanel({
   return (
     <div
       className="
-        order-2 grid min-h-0 w-full grid-rows-[auto_auto_minmax(0,1fr)_auto] overflow-hidden p-3
-        lg:order-none lg:h-[calc(100dvh-7.25rem)] lg:max-h-[calc(100dvh-7.25rem)] lg:w-[380px] lg:shrink-0
-        xl:w-[420px] sm:p-4
+        grid min-h-0 w-full grid-rows-[auto_auto_auto_auto] overflow-hidden p-3
+        sm:p-4 lg:h-full lg:grid-rows-[auto_auto_minmax(0,1fr)_auto]
       "
     >
       <div className="min-h-0">
@@ -227,7 +226,7 @@ export default function TicketPanel({
         </button>
       </div>
 
-      <div className="mt-4 min-h-0 overflow-hidden rounded-2xl border border-border bg-bg">
+      <div className="mt-4 max-h-[55dvh] min-h-0 overflow-hidden rounded-2xl border border-border bg-bg lg:max-h-none">
         {ticket.length === 0 ? (
           <div className="flex h-full min-h-[220px] flex-col items-center justify-center gap-2 p-8 text-center">
             <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
@@ -478,7 +477,7 @@ export default function TicketPanel({
             aria-label="Cerrar"
           />
 
-          <div className="absolute left-1/2 top-1/2 max-h-[calc(100vh-1.5rem)] w-[560px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
+          <div className="absolute left-1/2 top-1/2 max-h-[calc(100dvh-1.5rem)] w-[560px] max-w-[92vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface shadow-xl">
             <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
               <div className="min-w-0">
                 <h3 className="text-base font-bold text-fg sm:text-lg">Nota del producto</h3>
@@ -497,7 +496,7 @@ export default function TicketPanel({
               </button>
             </div>
 
-            <div className="max-h-[calc(100vh-9rem)] overflow-y-auto p-3 sm:p-4">
+            <div className="max-h-[calc(100dvh-9rem)] overflow-y-auto p-3 sm:p-4">
               <label className="text-sm font-semibold text-fg">
                 Escribe una nota para cocina
               </label>
