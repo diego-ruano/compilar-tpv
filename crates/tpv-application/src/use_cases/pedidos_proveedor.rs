@@ -114,6 +114,7 @@ pub async fn actualizar(
 
 pub async fn cambiar_estado(
     repo: &dyn PedidoProveedorRepository,
+    notifier: Option<&dyn Notifier>,
     input: PedidosCambiarEstadoInput,
 ) -> AppResult<bool> {
     let id = input.id_pedido.trim().to_string();
@@ -124,7 +125,21 @@ pub async fn cambiar_estado(
     if !matches!(estado.as_str(), "cancelado" | "enviado") {
         return Err(AppError::validation("estado inválido (cancelado|enviado)"));
     }
-    repo.cambiar_estado(&id, &estado, input.fecha_envio).await
+    let cambiado = repo.cambiar_estado(&id, &estado, input.fecha_envio).await?;
+
+    // El pedido deja de estar en borrador (se envió o se canceló), así que el aviso "pendiente de
+    // aprobar" que emitió `crear` ya no aplica: lo resolvemos. Sin esto la notificación se quedaba
+    // activa para siempre y el usuario veía el pedido como pendiente aunque acabara de enviarlo.
+    // Best-effort: si falla, no tumba el cambio de estado (que es lo que de verdad importa).
+    if cambiado {
+        if let Some(notifier) = notifier {
+            let _ = notifier
+                .resolver_por_clave(&format!("pedido_pendiente:{id}"))
+                .await;
+        }
+    }
+
+    Ok(cambiado)
 }
 
 #[cfg(test)]
@@ -272,14 +287,78 @@ mod tests {
         let repo = FakeRepo::default();
         let sin_id = PedidosCambiarEstadoInput { id_pedido: " ".into(), estado: "enviado".into(), fecha_envio: None };
         let estado_mal = PedidosCambiarEstadoInput { id_pedido: "p1".into(), estado: "pendiente".into(), fecha_envio: None };
-        assert!(matches!(cambiar_estado(&repo, sin_id).await, Err(AppError::Validation(_))));
-        assert!(matches!(cambiar_estado(&repo, estado_mal).await, Err(AppError::Validation(_))));
+        assert!(matches!(cambiar_estado(&repo, None, sin_id).await, Err(AppError::Validation(_))));
+        assert!(matches!(cambiar_estado(&repo, None, estado_mal).await, Err(AppError::Validation(_))));
     }
 
     #[tokio::test]
     async fn cambiar_estado_exige_valor_canonico_en_minusculas() {
         let repo = FakeRepo::default();
         let input = PedidosCambiarEstadoInput { id_pedido: "p1".into(), estado: " ENVIADO ".into(), fecha_envio: None };
-        assert!(matches!(cambiar_estado(&repo, input).await, Err(AppError::Validation(_))));
+        assert!(matches!(cambiar_estado(&repo, None, input).await, Err(AppError::Validation(_))));
+    }
+
+    /// Repo cuyo `cambiar_estado` confirma el cambio (para probar la resolución del aviso).
+    struct RepoCambiarOk;
+    #[async_trait]
+    impl PedidoProveedorRepository for RepoCambiarOk {
+        async fn get_page(&self, _: i64, _: i64, _: Option<String>) -> AppResult<PedidosPageDto> {
+            unimplemented!("no usado")
+        }
+        async fn crear(&self, _: PedidoProveedorNuevo, _: Vec<LineaPedidoNueva>) -> AppResult<String> {
+            unimplemented!("no usado")
+        }
+        async fn actualizar(
+            &self,
+            _: &str,
+            _: Option<String>,
+            _: Option<String>,
+            _: Option<String>,
+            _: Vec<LineaPedidoNueva>,
+        ) -> AppResult<bool> {
+            unimplemented!("no usado")
+        }
+        async fn cambiar_estado(&self, _: &str, _: &str, _: Option<String>) -> AppResult<bool> {
+            Ok(true)
+        }
+    }
+
+    /// Notifier que registra las claves resueltas.
+    #[derive(Default)]
+    struct NotifierResoluciones {
+        resueltas: Mutex<Vec<String>>,
+    }
+    #[async_trait]
+    impl Notifier for NotifierResoluciones {
+        async fn emitir(&self, _: NuevaNotificacion) -> AppResult<String> {
+            Ok("n1".into())
+        }
+        async fn resolver_por_clave(&self, clave: &str) -> AppResult<bool> {
+            self.resueltas.lock().unwrap().push(clave.to_string());
+            Ok(true)
+        }
+    }
+
+    /// Al enviar (o cancelar) el pedido, el aviso "pendiente de aprobar" que emitió `crear` deja de
+    /// aplicar y debe resolverse; si no, el usuario lo ve pendiente para siempre.
+    #[tokio::test]
+    async fn cambiar_estado_resuelve_el_aviso_de_pendiente() {
+        for estado in ["enviado", "cancelado"] {
+            let notifier = NotifierResoluciones::default();
+            let input = PedidosCambiarEstadoInput {
+                id_pedido: " ped-1 ".into(),
+                estado: estado.into(),
+                fecha_envio: None,
+            };
+            let ok = cambiar_estado(&RepoCambiarOk, Some(&notifier), input)
+                .await
+                .unwrap();
+            assert!(ok);
+            assert_eq!(
+                *notifier.resueltas.lock().unwrap(),
+                vec!["pedido_pendiente:ped-1".to_string()],
+                "estado {estado} debe resolver el aviso"
+            );
+        }
     }
 }

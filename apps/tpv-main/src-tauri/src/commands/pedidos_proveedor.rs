@@ -46,5 +46,8 @@ pub async fn pedidos_proveedor_cambiar_estado(
     args: PedidosCambiarEstadoInput,
 ) -> Result<bool, String> {
     let repo = state.pedidos_proveedor_repo().await?;
-    uc::cambiar_estado(repo.as_ref(), args).await.map_err(|e| e.to_string())
+    let notifier = state.notifier().await.ok();
+    uc::cambiar_estado(repo.as_ref(), notifier.as_deref(), args)
+        .await
+        .map_err(|e| e.to_string())
 }

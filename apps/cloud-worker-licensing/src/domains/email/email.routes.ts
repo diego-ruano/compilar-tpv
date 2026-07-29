@@ -27,12 +27,20 @@ const lineaSchema = z.object({
 	unidad: z.string().max(50).nullable().optional(),
 });
 
-const enviarPedidoSchema = z.object({
-	email_destino: z.string().email("email_destino inválido"),
-	nombre_proveedor: z.string().min(1).max(200),
-	notas: z.string().max(2000).nullable().optional(),
-	lineas: z.array(lineaSchema).min(1, "El pedido debe tener al menos una línea").max(500),
-});
+// Un pedido se puede enviar con líneas, con notas, o con ambas — pero NO vacío: un correo sin nada
+// que pedir no le dice nada al proveedor. Antes se exigía `min(1)` línea, lo que impedía el caso
+// legítimo de "pedido solo con notas" (p. ej. "mándame lo de siempre").
+const enviarPedidoSchema = z
+	.object({
+		email_destino: z.string().email("email_destino inválido"),
+		nombre_proveedor: z.string().min(1).max(200),
+		notas: z.string().max(2000).nullable().optional(),
+		lineas: z.array(lineaSchema).max(500).default([]),
+	})
+	.refine((v) => v.lineas.length > 0 || (v.notas ?? "").trim().length > 0, {
+		message: "El pedido debe llevar al menos una línea o unas notas",
+		path: ["lineas"],
+	});
 
 emailRoutes.post("/enviar-pedido", async (c) => {
 	const body = await c.req.json().catch(() => null);
@@ -79,12 +87,16 @@ type Linea = {
 
 function buildText(proveedor: string, notas: string | null, lineas: Linea[]): string {
 	let s = `Pedido a ${proveedor}\n\n`;
-	s += "Producto                   Cantidad   Precio     Unidad\n";
-	s += "------------------------------------------------------\n";
-	for (const l of lineas) {
-		const precio = l.precio_unitario != null ? `${l.precio_unitario.toFixed(2)} €` : "-";
-		const unidad = l.unidad ?? "-";
-		s += `${l.nombre_producto.padEnd(26).slice(0, 26)} ${String(l.cantidad).padEnd(10)} ${precio.padEnd(10)} ${unidad}\n`;
+	// Sin líneas (pedido solo con notas) no pintamos la tabla: una cabecera con nada debajo parece
+	// un correo roto.
+	if (lineas.length > 0) {
+		s += "Producto                   Cantidad   Precio     Unidad\n";
+		s += "------------------------------------------------------\n";
+		for (const l of lineas) {
+			const precio = l.precio_unitario != null ? `${l.precio_unitario.toFixed(2)} €` : "-";
+			const unidad = l.unidad ?? "-";
+			s += `${l.nombre_producto.padEnd(26).slice(0, 26)} ${String(l.cantidad).padEnd(10)} ${precio.padEnd(10)} ${unidad}\n`;
+		}
 	}
 	if (notas?.trim()) {
 		s += `\nNotas: ${notas.trim()}\n`;
@@ -111,12 +123,11 @@ function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): st
 			? `<p style="margin-top:16px;color:#6b7280;font-size:14px"><strong>Notas:</strong> ${esc(notas.trim())}</p>`
 			: "";
 
-	return `<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="utf-8"><title>Pedido</title></head>
-<body style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
-  <h2 style="color:#111827;margin-bottom:4px">Pedido a ${esc(proveedor)}</h2>
-  <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
+	// Sin líneas (pedido solo con notas) omitimos la tabla entera: una cabecera sin filas parece un
+	// correo roto.
+	const tablaHtml =
+		lineas.length > 0
+			? `<table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
     <thead>
       <tr style="background:#f9fafb">
         <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #e5e7eb">Producto</th>
@@ -126,7 +137,15 @@ function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): st
       </tr>
     </thead>
     <tbody>${rows}</tbody>
-  </table>
+  </table>`
+			: "";
+
+	return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Pedido</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#111827">
+  <h2 style="color:#111827;margin-bottom:4px">Pedido a ${esc(proveedor)}</h2>
+  ${tablaHtml}
   ${notasHtml}
   <p style="margin-top:24px;font-size:12px;color:#9ca3af">Enviado desde TPV · Altaria Lights</p>
 </body>

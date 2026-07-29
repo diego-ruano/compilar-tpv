@@ -145,10 +145,33 @@ export default function PedidosSection({ proveedores }: Props) {
   }
 
   async function handleMandar(updated: PedidoRow) {
-    const tieneEmail = !!(updated.emailDestino && updated.lineas.length > 0);
+    // Condiciones para enviar un pedido:
+    //   · correo destino (es a donde va);
+    //   · y ALGO que comunicar: al menos una línea, o unas notas.
+    // El proveedor no es condición: solo sirve para autorrellenar el correo, y si falta se manda
+    // igual con un nombre genérico.
+    //
+    // Antes esto era un único flag mal llamado `tieneEmail` (= email Y líneas) que, al no cumplirse,
+    // SE SALTABA EL ENVÍO EN SILENCIO y marcaba el pedido como enviado igualmente: creabas un pedido
+    // con correo y notas, te decía "Pedido enviado" y no salía ningún correo.
+    const notas = (updated.notas ?? "").trim();
+    const tieneContenido = updated.lineas.length > 0 || notas.length > 0;
+
+    if (!updated.emailDestino) {
+      toast.error("Falta el correo", "Indica el correo del proveedor para enviar el pedido.");
+      return;
+    }
+    if (!tieneContenido) {
+      toast.error(
+        "El pedido está vacío",
+        "Añade al menos una línea o escribe algo en las notas antes de enviarlo.",
+      );
+      return;
+    }
+
     try {
       // Email primero: si falla aquí, la DB no se toca
-      if (tieneEmail) {
+      {
         await emailEnviarPedido({
           email_destino: updated.emailDestino!,
           nombre_proveedor: updated.nombreProveedor ?? "Proveedor",
@@ -162,7 +185,7 @@ export default function PedidosSection({ proveedores }: Props) {
         });
       }
 
-      // Solo llegamos aquí si el email fue OK (o no había email)
+      // Solo llegamos aquí si el correo salió de verdad.
       if (isNewPedido) {
         await crearMutation.mutateAsync(toCrearInput(updated));
       } else {
@@ -171,11 +194,7 @@ export default function PedidosSection({ proveedores }: Props) {
       const fecha = new Date().toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" });
       await enviarMutation.mutateAsync({ idPedido: updated.id, estado: "enviado", fechaEnvio: fecha });
 
-      if (tieneEmail) {
-        toast.success("Pedido enviado", `Correo enviado a ${updated.emailDestino}`);
-      } else {
-        toast.success("Pedido enviado", updated.emailDestino ? "Marcado como enviado" : "Sin correo destino — pedido marcado como enviado");
-      }
+      toast.success("Pedido enviado", `Correo enviado a ${updated.emailDestino}`);
 
       cerrarModal();
     } catch (e: any) {

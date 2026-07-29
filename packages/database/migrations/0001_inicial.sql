@@ -393,6 +393,12 @@ ON Reservas(ID_Cliente);
 --
 -- El CHECK de coherencia hace el modelo autoconsistente: es imposible insertar una comanda de mesa
 -- sin mesa, o una de barra con mesa, aunque una ruta futura se despiste.
+--
+-- CHECK de `Estado`: es la clave del indice unico de mas abajo. Si se colase un valor con otra
+-- capitalizacion ('abierta'), el indice parcial dejaria de aplicar EN SILENCIO; el CHECK lo impide.
+--
+-- (Los comentarios van FUERA del CREATE TABLE a proposito: el snapshot anti-drift colapsa cada
+--  sentencia a una linea, y un `--` dentro se comeria el resto de la linea.)
 CREATE TABLE IF NOT EXISTS Comandas (
   ID_Comanda TEXT PRIMARY KEY,
   ID_Mesa TEXT NULL,
@@ -407,8 +413,6 @@ CREATE TABLE IF NOT EXISTS Comandas (
   FOREIGN KEY (ID_Reserva) REFERENCES Reservas(ID_Reserva),
   FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
   CHECK (Canal IN ('MESA', 'BARRA')),
-  -- Estado es la clave del invariante de abajo: si se colase un valor con otra capitalizacion
-  -- ('abierta'), el indice unico parcial dejaria de aplicar EN SILENCIO. El CHECK lo impide.
   CHECK (Estado IN ('Abierta', 'Pagada')),
   CHECK ((Canal = 'MESA') = (ID_Mesa IS NOT NULL))
 );
