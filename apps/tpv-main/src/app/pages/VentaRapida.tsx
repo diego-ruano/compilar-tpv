@@ -1839,7 +1839,7 @@ export default function VentaRapida() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-bg text-fg">
-      <div className="flex items-center justify-between gap-3 border-b border-border bg-surface px-3 py-3 sm:px-4">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-surface py-3 pl-16 pr-3 sm:flex-row sm:items-center sm:justify-between sm:pl-16 sm:pr-4 lg:px-4">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-extrabold text-fg sm:text-xl">Venta rápida</h1>
           <p className="truncate text-xs text-fg-muted sm:text-sm">
@@ -1847,11 +1847,11 @@ export default function VentaRapida() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
           <button
             type="button"
             onClick={nuevoTicket}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
+            className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
           >
             <Plus className="size-4" aria-hidden />
             Nuevo ticket
@@ -1861,7 +1861,7 @@ export default function VentaRapida() {
             type="button"
             onClick={abrirVerTickets}
             className={cn(
-              "inline-flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
+              "inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
               loadingComandas && "opacity-60",
             )}
           >
@@ -1871,8 +1871,8 @@ export default function VentaRapida() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-hidden p-3 lg:grid-cols-[1fr_420px]">
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
+      <div className="grid min-h-0 flex-1 touch-pan-y auto-rows-max grid-cols-1 content-start gap-3 overflow-y-scroll overscroll-contain p-3 [scrollbar-gutter:stable] lg:auto-rows-auto lg:content-stretch lg:grid-cols-[minmax(0,1fr)_minmax(360px,38vw)] lg:overflow-hidden xl:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="flex h-[clamp(20rem,58dvh,44rem)] min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface md:h-[clamp(24rem,62dvh,44rem)] lg:h-auto">
           <div className="border-b border-border bg-surface p-3">
             <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
               <div className="min-w-0">
@@ -1880,7 +1880,7 @@ export default function VentaRapida() {
                 <p className="text-xs text-fg-muted sm:text-sm">{leftSubtitle}</p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-col gap-2 xs:flex-row xs:items-center">
                 {categoriaSeleccionada && paso !== "efectivo" && (
                   <button
                     type="button"
@@ -1896,7 +1896,7 @@ export default function VentaRapida() {
                   value={query}
                   onValueChange={setQuery}
                   placeholder="Buscar producto..."
-                  className="w-48 sm:w-64"
+                  className="w-full xs:w-48 sm:w-64"
                 />
               </div>
             </div>

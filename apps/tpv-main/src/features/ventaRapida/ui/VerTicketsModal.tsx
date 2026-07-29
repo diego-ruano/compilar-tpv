@@ -317,7 +317,7 @@ export default function VerTicketsModal({
         aria-label="Cerrar"
       />
 
-      <div className="absolute left-1/2 top-1/2 max-h-[calc(100vh-1.5rem)] w-[980px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
+      <div className="absolute left-1/2 top-1/2 max-h-[calc(100dvh-1.5rem)] w-[980px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-3 sm:items-center sm:p-4">
           <div className="min-w-0">
             <h3 className="text-base font-bold text-fg sm:text-lg">Tickets (Barra) · Hoy</h3>
