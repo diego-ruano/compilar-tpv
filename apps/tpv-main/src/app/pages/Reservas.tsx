@@ -535,9 +535,9 @@ export default function Reservas() {
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-bg text-fg">
-      <div className="flex h-full flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:px-10 lg:py-5">
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+    <div className="h-full w-full touch-pan-y overflow-y-auto overscroll-contain bg-bg text-fg xl:overflow-hidden">
+      <div className="flex min-h-full flex-col gap-3 p-2 pt-3 sm:p-4 lg:px-6 lg:py-5 xl:h-full xl:overflow-hidden">
+        <div className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm xs:flex-row xs:items-center xs:justify-between sm:p-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
               <CalendarDays className="size-6" aria-hidden />
@@ -547,7 +547,7 @@ export default function Reservas() {
               <p className="text-sm text-fg-muted">Gestiona las reservas por día.</p>
             </div>
           </div>
-          <div className="shrink-0 rounded-full border border-border bg-surface-2 px-3 py-1.5 text-sm text-fg-muted">
+          <div className="shrink-0 self-end rounded-full border border-border bg-surface-2 px-3 py-1.5 text-xs text-fg-muted xs:self-auto sm:text-sm">
             Día: <span className="font-bold text-fg">{seleccionadoClave}</span>
           </div>
         </div>
@@ -561,7 +561,7 @@ export default function Reservas() {
             <ChevronLeft className="size-5" aria-hidden />
           </button>
 
-          <div className="font-extrabold uppercase tracking-widest text-fg">
+          <div className="min-w-0 truncate text-center text-sm font-extrabold uppercase tracking-widest text-fg sm:text-base">
             {nombreMesYAnioLocal(mesActual)}
           </div>
 
@@ -574,9 +574,9 @@ export default function Reservas() {
           </button>
         </div>
 
-        <div className="flex flex-1 gap-6 overflow-hidden">
-          <div className="w-[520px] shrink-0 overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="grid grid-cols-7 gap-2 text-center text-xs font-bold text-fg-muted">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 xl:flex-row xl:gap-6 xl:overflow-hidden">
+          <div className="w-full shrink-0 overflow-hidden rounded-2xl border border-border bg-surface p-2.5 shadow-sm sm:p-4 xl:w-[min(42vw,520px)]">
+            <div className="grid grid-cols-7 gap-1 text-center text-xs font-bold text-fg-muted sm:gap-2">
               {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
                 <div key={d} className="py-1">
                   {d}
@@ -584,7 +584,7 @@ export default function Reservas() {
               ))}
             </div>
 
-            <div className="mt-2 grid grid-cols-7 gap-2">
+            <div className="mt-2 grid grid-cols-7 gap-1 sm:gap-2">
               {celdas.map(({ fecha, esMes }) => {
                 const clave = ymdLocal(fecha);
                 const total = reservasPorDia.get(clave) ?? 0;
@@ -597,7 +597,7 @@ export default function Reservas() {
                     key={clave}
                     onClick={() => seleccionarDia(fecha)}
                     className={[
-                      "relative h-20 rounded-xl border p-2 text-left transition",
+                      "relative h-[clamp(2.75rem,9vw,5rem)] rounded-lg border p-1.5 text-left transition sm:rounded-xl sm:p-2",
                       esMes ? "bg-surface" : "bg-surface-2 text-fg-subtle",
                       esSel ? "border-accent ring-2 ring-ring" : "border-border",
                       "hover:bg-surface-2",
@@ -620,8 +620,8 @@ export default function Reservas() {
             </div>
           </div>
 
-          <div className="flex flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="flex min-h-[34rem] flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4 xl:min-h-0">
+            <div className="mb-3 flex flex-col items-stretch gap-3 xs:flex-row xs:items-start xs:justify-between">
               <div>
                 <div className="font-extrabold tracking-widest">
                   RESERVAS {diaSeleccionado.toLocaleDateString("es-ES")}
@@ -632,7 +632,7 @@ export default function Reservas() {
               {!mostrarFormulario ? (
                 <button
                   onClick={() => abrirFormulario()}
-                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-xs font-bold tracking-widest text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                  className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2 text-xs font-bold tracking-widest text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
                 >
                   <Plus className="size-4" aria-hidden />
                   AÑADIR RESERVA
@@ -640,7 +640,7 @@ export default function Reservas() {
               ) : (
                 <button
                   onClick={cerrarFormulario}
-                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-danger/30 bg-danger-soft px-4 py-2 text-xs font-bold tracking-widest text-danger transition hover:opacity-90 active:scale-[0.98]"
+                  className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-full border border-danger/30 bg-danger-soft px-4 py-2 text-xs font-bold tracking-widest text-danger transition hover:opacity-90 active:scale-[0.98] xs:w-auto"
                 >
                   <X className="size-4" aria-hidden />
                   CERRAR
@@ -650,10 +650,10 @@ export default function Reservas() {
 
             <div className="flex-1 overflow-hidden overflow-y-auto">
               {mostrarFormulario ? (
-                <div className="relative h-full">
+                <div className="relative min-h-full">
                   <form
                     onSubmit={guardarReserva}
-                    className="h-full rounded-xl border border-border bg-surface-2 p-3"
+                    className="min-h-full rounded-xl border border-border bg-surface-2 p-3"
                   >
                     <div className="mb-2 text-xs font-extrabold tracking-widest text-fg-muted">
                       {reservaEditandoId != null
@@ -779,7 +779,7 @@ export default function Reservas() {
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Mesa *
                         </label>
-                        <div className="flex gap-2">
+                        <div className="flex flex-col gap-2 xs:flex-row">
                           <input
                             readOnly
                             value={mesaSeleccionada ? mesaSeleccionada.nombre : ""}
@@ -790,7 +790,7 @@ export default function Reservas() {
                           <button
                             type="button"
                             onClick={() => setMostrarMapaMesas(true)}
-                            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover"
+                            className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-xs font-extrabold tracking-widest text-white shadow-sm transition hover:bg-accent-hover xs:w-auto"
                           >
                             <MapIcon className="size-4" aria-hidden />
                             VISUALIZAR
@@ -804,7 +804,7 @@ export default function Reservas() {
                       </div>
                     </div>
 
-                    <div className="mt-3 flex items-center justify-end gap-2">
+                    <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                       <button
                         type="button"
                         onClick={cerrarFormulario}
@@ -855,10 +855,10 @@ export default function Reservas() {
                   {reservasDelDia.map((r) => (
                     <div
                       key={r.id}
-                      className="flex items-stretch justify-between gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm"
+                      className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm md:flex-row md:justify-between md:gap-4 md:p-4"
                     >
-                      <div className="flex min-w-0 gap-4">
-                        <div className="flex w-[92px] flex-col items-center justify-center rounded-xl bg-accent px-3 py-2 text-white">
+                      <div className="flex min-w-0 flex-col gap-3 xs:flex-row xs:gap-4">
+                        <div className="flex w-full shrink-0 flex-row items-center justify-between rounded-xl bg-accent px-3 py-2 text-white xs:w-[92px] xs:flex-col xs:justify-center">
                           <div className="text-[11px] font-semibold tracking-wider text-white/70">
                             HORA
                           </div>
@@ -901,10 +901,10 @@ export default function Reservas() {
                         </div>
                       </div>
 
-                      <div className="flex shrink-0 items-center gap-2">
+                      <div className="grid shrink-0 grid-cols-2 gap-2 md:flex md:items-center">
                         <button
                           onClick={() => abrirFormulario(r)}
-                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2"
+                          className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg transition hover:bg-surface-2 md:px-4"
                         >
                           <Pencil className="size-3.5" aria-hidden />
                           MODIFICAR
@@ -913,7 +913,7 @@ export default function Reservas() {
                         <button
                           type="button"
                           onClick={() => setConfirmBorrar({ open: true, reserva: r })}
-                          className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90"
+                          className="inline-flex cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-extrabold tracking-widest text-danger transition hover:opacity-90 md:px-4"
                         >
                           <Trash2 className="size-3.5" aria-hidden />
                           BORRAR
@@ -928,11 +928,11 @@ export default function Reservas() {
 
           {confirmBorrar.open && (
             <div
-              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4"
               onClick={() => (borrando ? null : setConfirmBorrar({ open: false, reserva: null }))}
             >
               <div
-                className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-xl"
+                className="max-h-[calc(100dvh-1rem)] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-xl sm:p-5"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="text-lg font-extrabold tracking-widest text-fg">
@@ -965,7 +965,7 @@ export default function Reservas() {
                   </div>
                 )}
 
-                <div className="mt-5 flex items-center justify-end gap-2">
+                <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                   <button
                     type="button"
                     disabled={borrando}

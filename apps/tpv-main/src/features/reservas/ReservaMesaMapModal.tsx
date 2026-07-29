@@ -114,8 +114,8 @@ export default function ReservaMesaMapModal({
         const ro = new ResizeObserver(() => {
             const r = el.getBoundingClientRect();
             setMapSize({
-                width: Math.max(320, Math.floor(r.width)),
-                height: Math.max(320, Math.floor(r.height)),
+                width: Math.max(1, Math.floor(r.width)),
+                height: Math.max(1, Math.floor(r.height)),
             });
         });
 
@@ -124,8 +124,8 @@ export default function ReservaMesaMapModal({
         // medida inicial
         const r = el.getBoundingClientRect();
         setMapSize({
-            width: Math.max(320, Math.floor(r.width)),
-            height: Math.max(320, Math.floor(r.height)),
+            width: Math.max(1, Math.floor(r.width)),
+            height: Math.max(1, Math.floor(r.height)),
         });
 
         return () => ro.disconnect();
@@ -137,16 +137,16 @@ export default function ReservaMesaMapModal({
 
     return (
         <div
-            className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-4"
+            className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-1.5 sm:p-4"
             onMouseDown={onClose}
         >
             <div
-                className="w-full max-w-6xl rounded-2xl border border-border bg-surface p-4 text-fg shadow-xl"
+                className="flex max-h-[calc(100dvh-0.75rem)] w-full max-w-6xl flex-col overflow-y-auto rounded-2xl border border-border bg-surface p-2.5 text-fg shadow-xl sm:max-h-[calc(100dvh-2rem)] sm:p-4"
                 onMouseDown={(e) => e.stopPropagation()}
             >
                 {/* Header */}
                 <div className="mb-3 flex items-center justify-between gap-3">
-                    <div className="font-extrabold tracking-widest text-fg">{title}</div>
+                    <div className="min-w-0 truncate text-sm font-extrabold tracking-widest text-fg sm:text-base">{title}</div>
 
                     <button
                         type="button"
@@ -164,7 +164,7 @@ export default function ReservaMesaMapModal({
                 {/* Canvas container */}
                 <div className="mt-3 overflow-hidden rounded-2xl border border-border bg-surface-2">
                     {/* OJO: este div es el que MapCanvas usa para medir */}
-                    <div ref={mapBoxRef} className="h-[520px] w-full">
+                    <div ref={mapBoxRef} className="flex h-[clamp(20rem,62dvh,32.5rem)] w-full">
                         <MapCanvas
                             loading={false}
                             activeSalon={activeSalon}
