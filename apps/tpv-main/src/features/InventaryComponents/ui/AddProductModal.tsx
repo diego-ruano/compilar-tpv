@@ -377,7 +377,7 @@ export function AddProductModal({
             title={isEdit ? "Editar producto" : "Añadir producto"}
             maxWidthClass="max-w-[980px]"
         >
-            <div className="max-h-[78vh] overflow-y-auto pr-1">
+            <div className="pr-1">
                 <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="md:col-span-2">
                         <label htmlFor="producto-nombre" className="block font-semibold">

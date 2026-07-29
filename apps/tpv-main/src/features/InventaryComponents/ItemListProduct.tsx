@@ -17,12 +17,12 @@ function ItemListProduct({
     <div
       className={`
         w-full
-        px-4
-        py-3
+        px-3
+        py-2.5
         flex
         justify-between
         items-center
-        text-base
+        text-sm
         leading-6
         ${className}
       `}

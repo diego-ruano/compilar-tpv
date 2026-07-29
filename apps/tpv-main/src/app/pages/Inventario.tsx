@@ -59,8 +59,8 @@ export default function Inventario() {
     };
 
     return (
-        <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-            <div className="flex w-full flex-col gap-4">
+        <div className="flex min-h-full w-full touch-pan-y flex-col items-center gap-3 bg-bg p-2 pt-3 sm:gap-4 sm:p-4 lg:p-6 lg:pt-5">
+            <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4">
                 <InventoryHeader
                     titulo={titulo}
                     categoriaSeleccionada={categoriaSeleccionada}

@@ -18,7 +18,8 @@ function SummaryList({
 }) {
     return (
         <ListProducts title={title}>
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-border">
+            <div className="flex min-h-0 flex-1 overflow-x-auto rounded-2xl border border-border [scrollbar-gutter:stable]">
+              <div className="flex min-w-[620px] flex-1 flex-col">
                 <div className="flex-none bg-surface-2 text-fg-muted">
                     <ItemListProduct
                         className="font-bold"
@@ -30,7 +31,7 @@ function SummaryList({
                     />
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-auto pr-2 pb-4">
+                <div className="min-h-0 flex-1 overflow-y-auto pb-4 pr-2">
                     {rows.length === 0 ? (
                         <p className="py-4 text-center text-fg-muted">{emptyText}</p>
                     ) : (
@@ -47,6 +48,7 @@ function SummaryList({
                         ))
                     )}
                 </div>
+              </div>
             </div>
         </ListProducts>
     );
@@ -60,7 +62,7 @@ export default function SummarySection({
     menosCantidad: ProductoResumen[];
 }) {
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-4">
             <SummaryList
                 title="MÁS PRÓXIMO A CADUCAR"
                 rows={proximosCaducar}

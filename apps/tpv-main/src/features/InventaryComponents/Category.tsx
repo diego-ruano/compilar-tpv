@@ -23,7 +23,7 @@ export default function Category({ img, name, onSelect }: Props) {
       onClick={onSelect}
       className="group w-full max-w-[260px] text-left"
     >
-      <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
+      <div className="rounded-2xl border border-border bg-surface p-2.5 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md sm:p-4">
         {/* Imagen */}
         <div className="flex aspect-[4/3] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
           <ImageWithFallback
@@ -35,7 +35,7 @@ export default function Category({ img, name, onSelect }: Props) {
         </div>
 
         {/* Nombre */}
-        <p className="mt-3 line-clamp-1 text-base font-bold text-fg sm:text-lg">
+        <p className="mt-2 line-clamp-1 text-sm font-bold text-fg sm:mt-3 sm:text-lg">
           {name}
         </p>
       </div>
