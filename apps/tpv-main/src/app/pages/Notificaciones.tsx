@@ -63,15 +63,15 @@ export default function Notificaciones() {
   }
 
   return (
-    <div className="flex min-h-full w-full flex-col gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
+    <div className="flex h-full min-h-0 w-full flex-col gap-3 overflow-y-auto overscroll-contain bg-bg p-2 pt-3 [scrollbar-gutter:stable] sm:gap-4 sm:p-4 sm:pt-4 lg:p-6 lg:pt-5">
       {/* HEADER */}
-      <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+      <div className="flex w-full shrink-0 flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm xs:flex-row xs:items-center xs:justify-between sm:p-4">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
             <Bell className="size-6" aria-hidden />
           </div>
           <div className="min-w-0">
-            <h2 className="text-xl font-bold text-fg sm:text-2xl">Notificaciones</h2>
+            <h2 className="break-words text-xl font-bold leading-tight text-fg sm:text-2xl">Notificaciones</h2>
             <p className="text-sm text-fg-muted">
               {noLeidas > 0
                 ? `${noLeidas} sin leer`
@@ -80,7 +80,7 @@ export default function Notificaciones() {
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="grid shrink-0 grid-cols-[auto_1fr] items-center gap-2 xs:flex">
           <button
             type="button"
             onClick={() => notificaciones.refetch()}
@@ -96,14 +96,14 @@ export default function Notificaciones() {
             onClick={onMarcarTodas}
             disabled={noLeidas === 0}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-sm font-semibold transition",
+              "inline-flex min-w-0 items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl px-3 py-2 text-center text-sm font-semibold leading-tight transition",
               noLeidas === 0
                 ? "cursor-not-allowed border border-border bg-surface text-fg-subtle"
                 : "cursor-pointer bg-accent text-accent-fg shadow-sm hover:bg-accent-hover active:scale-[0.98]",
             )}
           >
             <CheckCheck className="size-4" aria-hidden />
-            <span className="hidden sm:inline">Marcar todas</span>
+            <span>Marcar todas</span>
           </button>
         </div>
       </div>
@@ -112,7 +112,7 @@ export default function Notificaciones() {
       {notificaciones.isLoading ? (
         <p className="text-sm text-fg-muted">Cargando notificaciones…</p>
       ) : items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-10 text-center shadow-sm">
+        <div className="flex min-h-[240px] flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-border bg-surface p-5 text-center shadow-sm sm:p-10">
           <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
             <Bell className="size-6" aria-hidden />
           </div>
@@ -120,7 +120,7 @@ export default function Notificaciones() {
           <p className="text-xs text-fg-muted">Aquí aparecerán tus avisos.</p>
         </div>
       ) : (
-        <div className="flex w-full flex-col gap-2">
+        <div className="flex w-full min-w-0 flex-col gap-2">
           {items.map((n) => {
             const a = aspecto(n.severidad);
             const Icon = a.icon;
@@ -130,7 +130,7 @@ export default function Notificaciones() {
                 type="button"
                 onClick={() => onCardClick(n)}
                 className={cn(
-                  "group flex w-full items-start gap-3 rounded-2xl border p-4 text-left shadow-sm transition",
+                  "group flex w-full min-w-0 items-start gap-2 rounded-2xl border p-3 text-left shadow-sm transition sm:gap-3 sm:p-4",
                   n.leida
                     ? "border-border bg-surface hover:bg-surface-2"
                     : "border-accent/40 bg-accent-soft/40 hover:bg-accent-soft/60",
@@ -138,7 +138,7 @@ export default function Notificaciones() {
               >
                 <div
                   className={cn(
-                    "grid size-10 shrink-0 place-items-center rounded-xl",
+                    "grid size-9 shrink-0 place-items-center rounded-xl sm:size-10",
                     a.className,
                   )}
                 >
@@ -146,28 +146,28 @@ export default function Notificaciones() {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-col gap-0.5 xs:flex-row xs:items-start xs:justify-between xs:gap-2">
                     <p
                       className={cn(
-                        "truncate text-sm",
+                        "min-w-0 break-words text-sm xs:truncate",
                         n.leida ? "font-medium text-fg" : "font-bold text-fg",
                       )}
                     >
                       {n.titulo}
                     </p>
-                    <span className="shrink-0 text-xs text-fg-subtle">
+                    <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-subtle sm:text-xs">
                       {fmtFecha(n.creada_en)}
                     </span>
                   </div>
 
                   {n.cuerpo ? (
-                    <p className="mt-0.5 line-clamp-2 text-sm text-fg-muted">{n.cuerpo}</p>
+                    <p className="mt-1 line-clamp-3 break-words text-sm text-fg-muted sm:mt-0.5 sm:line-clamp-2">{n.cuerpo}</p>
                   ) : null}
                 </div>
 
                 {!n.leida && (
                   <span
-                    className="mt-1.5 size-2.5 shrink-0 rounded-full bg-accent"
+                    className="mt-1.5 size-2 shrink-0 rounded-full bg-accent sm:size-2.5"
                     aria-label="No leída"
                     title="No leída"
                   />
