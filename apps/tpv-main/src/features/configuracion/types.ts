@@ -17,7 +17,9 @@ export type SectionKey =
 	| "VINCULAR_HANDY"
 	| "DISPOSITIVO"
 	| "EMAIL_CONFIG"
-	| "ACTUALIZACIONES";
+	| "ACTUALIZACIONES"
+	// TEMPORAL (v0.2.0): testigo de la auto-actualización, ver SeccionPrueba.tsx.
+	| "PRUEBA";
 
 export type NavItem = {
 	key: SectionKey;
