@@ -110,6 +110,10 @@ export default function UpdateBanner() {
                             Más tarde
                         </button>
                     </div>
+
+                    <div className="mt-2 text-[11px] text-slate-400">
+                        Si lo dejas para luego, la tienes en Configuración → Actualizaciones.
+                    </div>
                 </div>
             </div>
         </div>

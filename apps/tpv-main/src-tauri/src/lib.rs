@@ -1065,36 +1065,110 @@ struct UpdateInfo {
     notes: Option<String>,
 }
 
-/// Comprueba el feed (`tpv-api`) y devuelve los metadatos de la nueva versión, o `None` si ya
-/// está al día. La comparación de versiones la hace el plugin de Tauri verificando además la
-/// firma del paquete contra la clave pública embebida en `tauri.conf.json`.
+/// Estado completo para la pantalla Configuración → Actualizaciones. A diferencia de
+/// `updater_check`, NUNCA falla: quedarse sin internet o un feed caído se reportan en `error`, para
+/// que la pantalla siga pudiendo pintar la versión instalada en vez de quedarse en blanco.
+#[derive(Debug, Clone, Serialize)]
+struct UpdateStatus {
+    /// Versión instalada en este equipo (siempre disponible, haya feed o no).
+    current_version: String,
+    /// `false` en plataformas sin updater (móvil/Handy Android): la UI oculta los botones.
+    supported: bool,
+    /// Actualización pendiente de instalar, si la hay.
+    update: Option<UpdateInfo>,
+    /// Motivo por el que no se pudo comprobar (sin conexión, feed caído…).
+    error: Option<String>,
+}
+
+/// Cada cuánto se vuelve a preguntar al feed mientras la app está abierta. Un TPV puede pasar
+/// semanas encendido sin reiniciarse: sin este tick, una release nueva no se vería hasta el
+/// siguiente arranque.
+#[cfg(desktop)]
+const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+/// Margen antes del primer chequeo: deja que el arranque (BD, licencia, WS) termine primero y da
+/// tiempo a que el notifier exista, para que el aviso in-app salga ya en la primera pasada.
+#[cfg(desktop)]
+const UPDATE_CHECK_DELAY_SECS: u64 = 30;
+
+/// Consulta el feed (`tpv-api`) y, si hay versión nueva, la **anuncia**: evento `update:available`
+/// (banner) + notificación in-app a los administradores (campana + toast, con dedupe por versión).
+/// Es el único sitio donde se avisa, así que da igual quién dispare el chequeo —tick periódico,
+/// banner o botón de Configuración—: el aviso es siempre el mismo y no se duplica.
+///
+/// La comparación de versiones la hace el plugin de Tauri, que además verifica la firma del paquete
+/// contra la clave pública embebida en `tauri.conf.json`.
+#[cfg(desktop)]
+async fn check_and_announce(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
+    let updater = app
+        .updater()
+        .map_err(|e| format!("updater no disponible: {e}"))?;
+
+    let found = updater
+        .check()
+        .await
+        .map_err(|e| format!("error comprobando actualización: {e}"))?;
+
+    let Some(update) = found else {
+        return Ok(None);
+    };
+
+    let info = UpdateInfo {
+        version: update.version.clone(),
+        current_version: update.current_version.clone(),
+        notes: update.body.clone(),
+    };
+    let _ = app.emit("update:available", info.clone());
+    notify_update_available(app, &info.version).await;
+    Ok(Some(info))
+}
+
+/// Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
 #[tauri::command]
 async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     #[cfg(desktop)]
     {
-        let updater = app
-            .updater()
-            .map_err(|e| format!("updater no disponible: {e}"))?;
-
-        match updater.check().await {
-            Ok(Some(update)) => {
-                // Aviso "actualización disponible" a los administradores. Dedupe por versión → una sola
-                // notificación por versión aunque el chequeo se repita (arranque + reintentos).
-                notify_update_available(&app, &update.version).await;
-                Ok(Some(UpdateInfo {
-                    version: update.version.clone(),
-                    current_version: update.current_version.clone(),
-                    notes: update.body.clone(),
-                }))
-            }
-            Ok(None) => Ok(None),
-            Err(e) => Err(format!("error comprobando actualización: {e}")),
-        }
+        check_and_announce(&app).await
     }
     #[cfg(not(desktop))]
     {
         let _ = app;
         Err("updater no disponible en esta plataforma".into())
+    }
+}
+
+/// Estado para la pantalla de actualizaciones: versión instalada + resultado de comprobar el feed.
+/// Comprueba de verdad (no devuelve nada cacheado), así que el botón "Buscar actualizaciones"
+/// también dispara el aviso si aparece una versión nueva.
+#[tauri::command]
+async fn updater_status(app: AppHandle) -> Result<UpdateStatus, String> {
+    let current_version = app.package_info().version.to_string();
+
+    #[cfg(desktop)]
+    {
+        match check_and_announce(&app).await {
+            Ok(update) => Ok(UpdateStatus {
+                current_version,
+                supported: true,
+                update,
+                error: None,
+            }),
+            Err(e) => Ok(UpdateStatus {
+                current_version,
+                supported: true,
+                update: None,
+                error: Some(e),
+            }),
+        }
+    }
+    #[cfg(not(desktop))]
+    {
+        Ok(UpdateStatus {
+            current_version,
+            supported: false,
+            update: None,
+            error: None,
+        })
     }
 }
 
@@ -1289,34 +1363,6 @@ pub fn run() {
                 );
             }
 
-            // Chequeo de actualización en arranque (en Rust, independiente del frontend). Si hay
-            // versión nueva, emite `update:available`; la UI muestra un aviso no intrusivo y el
-            // usuario decide cuándo instalar. Falla en silencio (offline / feed caído): se
-            // reintenta en el siguiente arranque y la app sigue funcionando.
-            #[cfg(desktop)]
-            {
-                let h = handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    match h.updater() {
-                        Ok(updater) => match updater.check().await {
-                            Ok(Some(update)) => {
-                                let _ = h.emit(
-                                    "update:available",
-                                    UpdateInfo {
-                                        version: update.version.clone(),
-                                        current_version: update.current_version.clone(),
-                                        notes: update.body.clone(),
-                                    },
-                                );
-                            }
-                            Ok(None) => {}
-                            Err(e) => tracing::warn!(target: "tpv::updater", error = %e, "check de actualización falló"),
-                        },
-                        Err(e) => tracing::warn!(target: "tpv::updater", error = %e, "updater no disponible"),
-                    }
-                });
-            }
-
             let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
                 // está SIEMPRE activa (también offline); se drena en "online".
@@ -1351,6 +1397,29 @@ pub fn run() {
                 mode: Arc::new(Mutex::new(mode)),
                 mode_sync,
             });
+
+            // Chequeo de actualización (en Rust, independiente del frontend): al arrancar y luego
+            // cada 6 h mientras la app siga abierta —un TPV puede estar semanas encendido—. Si hay
+            // versión nueva emite `update:available` (banner) y la notificación in-app a los
+            // administradores. Va DESPUÉS de `app.manage` porque el aviso necesita el `AppState`
+            // (notifier). Falla en silencio (offline / feed caído): lo reintenta el siguiente tick.
+            #[cfg(desktop)]
+            {
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(UPDATE_CHECK_DELAY_SECS))
+                        .await;
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+                        UPDATE_CHECK_INTERVAL_SECS,
+                    ));
+                    loop {
+                        interval.tick().await;
+                        if let Err(e) = check_and_announce(&h).await {
+                            tracing::warn!(target: "tpv::updater", error = %e, "check de actualización falló");
+                        }
+                    }
+                });
+            }
 
             // Escáner periódico de avisos (tareas vencidas / reservas próximas). Corre en un hilo
             // de fondo cada 10 min; solo hace algo cuando hay BD (modo Main): en Handy/arranque sin
@@ -1393,6 +1462,7 @@ pub fn run() {
             get_app_data_path,
             // auto-actualización (updater)
             updater_check,
+            updater_status,
             updater_install,
             // impresión (host/Windows — printing.rs)
             printer_list,

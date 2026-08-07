@@ -32,6 +32,7 @@ import { Conectividad } from "../../features/configuracion/sections/Conectividad
 import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 import { EmailConfig } from "../../features/configuracion/sections/EmailConfig";
+import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
 
 
 export default function Configuracion() {
@@ -142,6 +143,20 @@ export default function Configuracion() {
             title: "Correos automatizados",
             desc: "Envío de pedidos a proveedores",
             keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "cloudflare"],
+        },
+        {
+            key: "ACTUALIZACIONES",
+            title: "Actualizaciones",
+            desc: "Versión instalada y novedades",
+            keywords: [
+                "actualizacion",
+                "actualizaciones",
+                "update",
+                "versión",
+                "version",
+                "novedades",
+                "instalar",
+            ],
         },
     ], []);
 
@@ -757,6 +772,10 @@ export default function Configuracion() {
 
                                         {section === "EMAIL_CONFIG" ? (
                                             <EmailConfig darkMode={darkMode} />
+                                        ) : null}
+
+                                        {section === "ACTUALIZACIONES" ? (
+                                            <Actualizaciones darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "TICKET" ? (

@@ -12,10 +12,13 @@ GitHub Actions (release.yml)
   ├─ Sube .exe + .sig a R2
   └─ POST /v1/update/publish al worker  →  INSERT en app_releases
 
-Cliente (arranque de la app)
-  ├─ Rust: spawn(updater.check())  →  consulta el feed del worker
-  ├─ Si hay update → emit("update:available", UpdateInfo)
-  └─ UpdateBanner.tsx lo recibe, muestra banner
+Cliente (arranque + cada 6 h mientras está abierta)
+  ├─ Rust: tick → check_and_announce()  →  consulta el feed del worker
+  ├─ Si hay update:
+  │     ├─ emit("update:available", UpdateInfo)      → UpdateBanner.tsx muestra el banner
+  │     └─ Notifier.emitir(actualizacion_disponible) → campana + toast a los administradores
+  │                                                     (dedupe por versión → un aviso por release)
+  └─ Configuración → Actualizaciones: estado, novedades y botón de instalar
         └─ Usuario pulsa "Actualizar"  →  descarga, verifica firma, instala, reinicia
 
 Rollback (sin tocar el cliente)
@@ -30,10 +33,12 @@ Rollback (sin tocar el cliente)
 |---|---|---|
 | Config updater | `apps/tpv-main/src-tauri/tauri.conf.json` líneas 44-52 | ✅ |
 | Plugin Rust | `tauri-plugin-updater = "2"` en `apps/tpv-main/src-tauri/Cargo.toml` | ✅ |
-| Comandos Tauri | `updater_check` / `updater_install` en `src-tauri/src/main.rs`:973-1014 | ✅ |
-| Chequeo automático al arrancar | `main.rs`:1034-1054 — spawn en background + `emit("update:available")` | ✅ |
+| Comandos Tauri | `updater_check` / `updater_status` / `updater_install` en `src-tauri/src/lib.rs` | ✅ |
+| Chequeo automático (arranque + cada 6 h) | `lib.rs` — tick en background tras `app.manage` → `check_and_announce` | ✅ |
+| Aviso in-app | `notify_update_available` (`lib.rs`) → notificación a `ADMIN_ROL_ID`, dedupe `actualizacion:<version>` | ✅ |
 | Componente frontend | `apps/tpv-main/src/shared/ui/UpdateBanner.tsx` — banner sticky bottom-right | ✅ |
-| Montaje | `apps/tpv-main/src/app/AppBoot.tsx`:656 — una sola instancia | ✅ |
+| Pantalla de Configuración | `apps/tpv-main/src/features/configuracion/sections/Actualizaciones.tsx` | ✅ |
+| Montaje del banner | `apps/tpv-main/src/app/AppBoot.tsx` — una sola instancia | ✅ |
 | Feed público (worker) | `GET /v1/update/:target/:arch/:current` → 204 ó manifest JSON | ✅ |
 | Publicación admin | `POST /v1/update/publish` — protegido con `RELEASE_ADMIN_TOKEN` | ✅ |
 | Rollback | `POST /v1/update/deactivate` — pone `is_active=0` en la BD | ✅ |
@@ -50,30 +55,57 @@ Rollback (sin tocar el cliente)
 - `windows.installMode`: `"passive"` (sin interacción del usuario)
 - `createUpdaterArtifacts`: `true`
 
-### 2. Backend Rust (`src-tauri/src/main.rs`)
+### 2. Backend Rust (`src-tauri/src/lib.rs`)
 
-**Struct de datos (líneas 960-968):**
+**Structs de datos:**
 ```rust
-struct UpdateInfo {
-    version: String,
-    current_version: String,
-    notes: Option<String>,
-}
+struct UpdateInfo { version, current_version, notes: Option<String> }
+
+// Para la pantalla de Configuración. NUNCA falla: el fallo de feed viaja en `error`,
+// para poder pintar la versión instalada aunque no haya internet.
+struct UpdateStatus { current_version, supported: bool, update: Option<UpdateInfo>, error: Option<String> }
 ```
 
-**`updater_check()` (líneas 973-988):** consulta el feed, devuelve `Option<UpdateInfo>`. Tolera errores (offline/feed caído falla en silencio).
+**`check_and_announce()`** — punto único de detección + aviso. Consulta el feed y, si hay versión
+nueva, emite `update:available` (banner) **y** `notify_update_available` (notificación in-app a
+`ADMIN_ROL_ID`, con `clave_dedupe = actualizacion:<version>` → un solo aviso por release, aunque el
+chequeo se repita). Lo usan por igual el tick automático, `updater_check` y `updater_status`.
 
-**`updater_install()` (líneas 994-1014):** descarga, verifica firma e instala. Llama a `app.restart()` automáticamente.
+**`updater_check()`** — devuelve `Option<UpdateInfo>`; lo llama el banner al montarse.
 
-**Chequeo automático al arrancar (líneas 1034-1054):** corre en segundo plano tras el setup, emite `update:available` si hay actualización.
+**`updater_status()`** — versión instalada + resultado real de consultar el feed; lo llama la
+pantalla de Configuración. Comprueba de verdad (nada cacheado), así que "Buscar actualizaciones"
+también deja puesto el aviso.
 
-### 3. Frontend (`UpdateBanner.tsx`)
+**`updater_install()`** — descarga, verifica firma e instala. Llama a `app.restart()`.
+
+**Tick automático:** arranca 30 s después del setup (`UPDATE_CHECK_DELAY_SECS`) y repite cada 6 h
+(`UPDATE_CHECK_INTERVAL_SECS`). Va **después de `app.manage`** porque el aviso in-app necesita el
+`AppState` (notifier). Falla en silencio (offline / feed caído) y lo reintenta el siguiente tick:
+un TPV puede estar semanas encendido, así que sin este tick una release nueva no se vería hasta el
+siguiente arranque.
+
+### 3. Frontend
+
+**Pantalla `Configuración → Actualizaciones`** (`features/configuracion/sections/Actualizaciones.tsx`):
+versión instalada, estado ("Estás al día" / "Actualización disponible" / "No se pudo comprobar"),
+hora de la última comprobación, novedades de la versión y botones "Buscar actualizaciones" /
+"Actualizar y reiniciar" (con confirmación, porque reinicia la app). En plataformas sin updater
+(Handy Android, `supported: false`) solo muestra la versión instalada.
+
+**Banner (`UpdateBanner.tsx`)**
 
 - Al montarse: `invoke("updater_check")` (cubre race condition con el evento de arranque)
 - Escucha: `listen("update:available", ...)` para recibir el evento del backend
 - Botón "Actualizar y reiniciar": llama a `invoke("updater_install")`, muestra "Actualizando…", la app se reinicia sola si va bien
-- Botón "Más tarde": oculta el banner (`dismissed`)
+- Botón "Más tarde": oculta el banner (`dismissed`) y recuerda que la actualización sigue en
+  Configuración → Actualizaciones
 - Posición: sticky bottom-right, z-index 1000
+
+**Notificación in-app:** la emite el backend (no la UI), tipo `actualizacion_disponible`, severidad
+`info`, destino rol admin. Aparece en la campana y dispara el toast de notificaciones. Al ir por el
+`Notifier` mode-switched, se replica por el outbox → DO → broadcast, así que también llega a las
+Handy emparejadas.
 
 ### 4. Worker (`apps/cloud-worker-licensing/`)
 
@@ -130,27 +162,21 @@ Registro en el router: `app.route("/v1/update", updatesRoutes)` en `src/index.ts
 ### Clave de firma
 - [x] `apps/tpv-main/src-tauri/.tauri/updater.key` existe (348 bytes) ✅
 
-### Secretos en GitHub Actions (Settings → Secrets)
-- [ ] `TAURI_SIGNING_PRIVATE_KEY` = contenido de `updater.key`
-- [ ] `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` = contraseña (vacía si no tiene)
-- [ ] `R2_ACCESS_KEY_ID`
-- [ ] `R2_SECRET_ACCESS_KEY`
-- [ ] `R2_ACCOUNT_ID`
-- [ ] `RELEASE_ADMIN_TOKEN`
+### Secretos y variables (GitHub Actions + Worker)
+Configurados y **verificados en producción**: la release `v0.1.0` se publicó con el workflow y el
+feed la sirve (`GET /v1/update/windows/x86_64/0.0.1` → 200 + manifest firmado, 2026-08-07).
 
-### Variables en GitHub Actions (Settings → Variables)
-- [ ] `R2_BUCKET` (ej. `tpv-releases`)
-- [ ] `R2_PUBLIC_BASE_URL` (URL pública del bucket R2)
-- [ ] `TPV_API_BASE` = `https://tpv-api.altarialights.workers.dev`
-
-### Secret en Cloudflare Worker
-- [ ] `wrangler secret put RELEASE_ADMIN_TOKEN` (mismo valor que el de GitHub)
+- Secretos (Settings → Secrets): `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`
+- Variables (Settings → Variables): `R2_BUCKET`, `R2_PUBLIC_BASE_URL`,
+  `TPV_API_BASE` = `https://tpv-api.altarialights.workers.dev`
+- Worker: `wrangler secret put RELEASE_ADMIN_TOKEN` (mismo valor que el de GitHub)
 
 ### Verificación end-to-end
-- [ ] `git tag v0.1.0 && git push origin v0.1.0`
-- [ ] Verificar que `release.yml` se ejecute sin errores
-- [ ] Verificar que el feed devuelva 200 + manifest (`GET /v1/update/windows/x86_64/0.0.0`)
-- [ ] Verificar que el cliente muestre el banner de actualización
+- [x] `release.yml` se ejecuta sin errores al pushear el tag
+- [x] El feed devuelve 200 + manifest
+- [ ] Publicar una versión nueva y comprobar en un cliente con la anterior: banner + notificación +
+      Configuración → Actualizaciones + instalar y reiniciar
 
 ---
 
