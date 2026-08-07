@@ -314,7 +314,7 @@ function IconButton({
     variant?: BtnVariant;
 }) {
     const base =
-        "h-10 px-4 rounded-xl border text-sm font-semibold shadow-sm transition inline-flex items-center gap-2 select-none";
+        "h-10 min-w-0 justify-center px-3 sm:px-4 rounded-xl border text-xs sm:text-sm font-semibold shadow-sm transition inline-flex items-center gap-2 select-none";
     const variants: Record<BtnVariant, string> = {
         neutral: disabled
             ? "border-border bg-surface-2 text-fg-subtle cursor-not-allowed"
@@ -337,7 +337,7 @@ function IconButton({
             className={cn(base, variants[variant])}
         >
             {icon ? <span className="text-base leading-none">{icon}</span> : null}
-            <span>{children}</span>
+            <span className="min-w-0 truncate">{children}</span>
         </button>
     );
 }
@@ -380,9 +380,9 @@ function Modal({
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4">
-            <div className="w-full max-w-[520px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden">
-                <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-2 sm:p-4">
+            <div className="max-h-[calc(100dvh-1rem)] w-full max-w-[520px] overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:max-h-[calc(100dvh-2rem)]">
+                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
                     <div className="text-base font-bold text-fg">
                         {title}
                     </div>
@@ -393,7 +393,7 @@ function Modal({
                         ✕
                     </button>
                 </div>
-                <div className="p-4">{children}</div>
+                <div className="max-h-[calc(100dvh-5.5rem)] overflow-y-auto p-3 sm:p-4">{children}</div>
             </div>
         </div>
     );
@@ -1223,7 +1223,7 @@ export default function EditTables() {
     }
 
     return (
-        <div className="w-full h-full bg-surface-2 overflow-hidden">
+        <div className="h-full w-full touch-pan-y overflow-y-auto overscroll-contain bg-surface-2 lg:overflow-hidden">
             <Modal
                 open={guard.open}
                 title="Cambios sin guardar"
@@ -1254,19 +1254,31 @@ export default function EditTables() {
                 </div>
             </Modal>
 
-            <div className="h-full p-4 grid grid-cols-[360px_1fr] gap-4">
-                <div className="rounded-2xl border border-border bg-surface shadow-sm p-4 flex flex-col gap-4 overflow-hidden">
-                    <div className="flex items-center justify-between">
-                        <div className="text-lg font-extrabold text-fg">
+            <div className="grid min-h-full w-full grid-cols-1 gap-3 p-2 sm:p-3 lg:h-full lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)] lg:gap-4 lg:p-4">
+                <div className="flex h-[min(72dvh,46rem)] min-h-[32rem] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-surface p-3 shadow-sm sm:gap-4 sm:p-4 lg:h-auto lg:min-h-0">
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                        <div className="min-w-0 justify-self-start">
+                            <IconButton
+                                icon="←"
+                                variant="neutral"
+                                onClick={() => guard.guardedNavigate("/Mesas")}
+                            >
+                                Volver
+                            </IconButton>
+                        </div>
+
+                        <div className="text-center text-lg font-extrabold text-fg">
                             Zonas
                         </div>
-                        <IconButton
-                            icon="➕"
-                            variant="primary"
-                            onClick={createNewSalon}
-                        >
-                            Nueva
-                        </IconButton>
+                        <div className="min-w-0 justify-self-end">
+                            <IconButton
+                                icon="➕"
+                                variant="primary"
+                                onClick={createNewSalon}
+                            >
+                                Nueva
+                            </IconButton>
+                        </div>
                     </div>
 
                     <div className="flex-1 overflow-auto pr-1">
@@ -1555,11 +1567,11 @@ export default function EditTables() {
                     </div>
                 </div>
 
-                <div className="rounded-2xl border border-border bg-surface shadow-sm overflow-hidden">
-                    <div className="w-full h-full p-3">
+                <div className="h-[clamp(26rem,72dvh,52rem)] min-w-0 overflow-hidden rounded-2xl border border-border bg-surface shadow-sm lg:h-auto">
+                    <div className="flex h-full w-full min-h-0 flex-col p-2 sm:p-3">
                         <div
                             ref={canvasBoxRef}
-                            className="w-full h-full rounded-2xl border border-border overflow-hidden bg-surface"
+                            className="min-h-0 w-full flex-1 overflow-hidden rounded-2xl border border-border bg-surface"
                         >
                             {!activeSalon ? (
                                 <div className="w-full h-full grid place-items-center text-fg-muted">
@@ -1633,7 +1645,7 @@ export default function EditTables() {
                             )}
                         </div>
 
-                        <div className="mt-3 text-xs text-fg-muted">
+                        <div className="mt-2 text-[11px] text-fg-muted sm:mt-3 sm:text-xs">
                             • Zoom con rueda. • Mover mapa arrastrando el fondo. •
                             Deshacer revierte mesas y paredes.
                         </div>

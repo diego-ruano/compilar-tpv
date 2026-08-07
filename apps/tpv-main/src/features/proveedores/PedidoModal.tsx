@@ -99,7 +99,7 @@ export default function PedidoModal({
       widthClass="max-w-[860px]"
     >
       {/* Estado */}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-2 sm:gap-3">
         <span
           className={cn(
             "inline-flex items-center rounded-lg px-3 py-1 text-sm font-semibold",
@@ -114,7 +114,7 @@ export default function PedidoModal({
       </div>
 
       {/* Proveedor + Email */}
-      <div className="mb-4 grid grid-cols-2 gap-4">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         <div>
           <label className="text-sm font-semibold text-fg">Proveedor</label>
           <select
@@ -162,13 +162,13 @@ export default function PedidoModal({
 
       {/* Líneas */}
       <div className="mb-4">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex flex-col items-stretch gap-2 xs:flex-row xs:items-center xs:justify-between">
           <label className="text-sm font-semibold text-fg">Líneas del pedido</label>
           {esEditable && (
             <button
               type="button"
               onClick={addLinea}
-              className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-accent px-2.5 py-1 text-xs font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover"
+              className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1 whitespace-normal break-words rounded-lg bg-accent px-2.5 py-1.5 text-center text-xs font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover xs:w-auto"
             >
               <Plus className="size-3.5" />
               Añadir línea
@@ -181,8 +181,8 @@ export default function PedidoModal({
             Sin líneas.{esEditable && " Añade productos al pedido."}
           </div>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-[1fr_80px_96px_72px_32px] gap-2 border-b border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-fg-muted">
+          <div className="touch-pan-x overflow-x-auto overscroll-x-contain rounded-xl border border-border pb-1 [scrollbar-gutter:stable]">
+            <div className="grid min-w-[620px] grid-cols-[1fr_80px_96px_72px_32px] gap-2 border-b border-border bg-surface-2 px-3 py-1.5 text-xs font-semibold text-fg-muted">
               <div>Producto</div>
               <div>Cantidad</div>
               <div>Precio unit.</div>
@@ -194,7 +194,7 @@ export default function PedidoModal({
               <div
                 key={l.id}
                 className={cn(
-                  "grid grid-cols-[1fr_80px_96px_72px_32px] items-center gap-2 px-3 py-2",
+                  "grid min-w-[620px] grid-cols-[1fr_80px_96px_72px_32px] items-center gap-2 px-3 py-2",
                   i < lineas.length - 1 && "border-b border-border",
                 )}
               >
@@ -260,14 +260,14 @@ export default function PedidoModal({
       </div>
 
       {/* Acciones */}
-      <div className="mt-6 flex items-center justify-between gap-3">
-        <div>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="w-full sm:w-auto">
           {pedido.estado === "borrador" && (
             <button
               type="button"
               onClick={() => onCancelarPedido(pedido.id)}
               disabled={isBusy}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger transition hover:opacity-90 disabled:opacity-50"
+              className="inline-flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-3 py-2 text-sm font-semibold text-danger transition hover:opacity-90 disabled:opacity-50 sm:w-auto"
             >
               <XCircle className="size-4" />
               Cancelar pedido
@@ -275,11 +275,11 @@ export default function PedidoModal({
           )}
         </div>
 
-        <div className="flex gap-3">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:gap-3">
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2"
+            className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center font-semibold leading-tight text-fg transition hover:bg-surface-2 sm:px-4"
           >
             Cerrar
           </button>
@@ -290,7 +290,7 @@ export default function PedidoModal({
                 type="button"
                 onClick={() => onSave(buildPedido())}
                 disabled={isBusy}
-                className="cursor-pointer rounded-xl border border-border bg-surface-2 px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 disabled:opacity-50"
+                className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl border border-border bg-surface-2 px-3 py-2 text-center font-semibold leading-tight text-fg transition hover:bg-surface-2 disabled:opacity-50 sm:px-4"
               >
                 {isBusy ? "Guardando…" : "Guardar"}
               </button>
@@ -299,7 +299,7 @@ export default function PedidoModal({
                 type="button"
                 onClick={() => onMandarPedido(buildPedido())}
                 disabled={isBusy}
-                className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:opacity-50"
+                className="col-span-2 inline-flex min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:opacity-50 sm:col-span-1 sm:px-4"
               >
                 <Send className="size-4" />
                 {isBusy ? "Enviando…" : "Mandar pedido"}

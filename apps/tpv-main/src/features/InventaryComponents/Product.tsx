@@ -29,13 +29,13 @@ export default function Product({ img, name, onSelect }: Props) {
           />
         </div>
 
-        <div className="flex flex-col gap-2 p-4">
-          <h5 className="line-clamp-2 text-lg font-bold text-fg">{name}</h5>
+        <div className="flex flex-col gap-2 p-2.5 sm:p-4">
+          <h5 className="line-clamp-2 text-base font-bold text-fg sm:text-lg">{name}</h5>
 
           <div className="flex items-center justify-between">
-            <p className="text-sm font-semibold text-fg-muted">Ver detalles</p>
+            <p className="text-xs font-semibold text-fg-muted sm:text-sm">Ver detalles</p>
 
-            <span className="inline-flex size-9 items-center justify-center rounded-xl border border-border text-fg-muted transition-all duration-200 group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg">
+            <span className="inline-flex size-8 items-center justify-center rounded-xl border border-border text-fg-muted transition-all duration-200 group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg sm:size-9">
               <ChevronRight className="size-5" aria-hidden />
             </span>
           </div>

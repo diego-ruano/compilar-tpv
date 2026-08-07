@@ -29,7 +29,7 @@ export default function MapCanvas({
     const roomStroke = dark ? "rgba(148,163,184,0.45)" : "rgba(15,23,42,0.55)";
 
     return (
-        <div className="mt-4 min-h-0 w-full flex-1 overflow-hidden rounded-2xl border border-border bg-surface">
+        <div className="mt-3 min-h-0 w-full flex-1 overflow-hidden rounded-2xl border border-border bg-surface sm:mt-4">
             <div
                 ref={mapBoxRef}
                 className="h-full min-h-0 w-full"

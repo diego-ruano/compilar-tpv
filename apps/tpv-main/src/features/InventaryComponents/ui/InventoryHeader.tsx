@@ -16,8 +16,8 @@ export default function InventoryHeader({
     onNewProduct: () => void;
 }) {
     return (
-        <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
+        <div className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:gap-4 sm:p-4">
+            <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-center xs:justify-between">
                 {/* Izquierda: chip + título (lista) o volver + nombre categoría (detalle) */}
                 {!categoriaSeleccionada ? (
                     <div className="flex min-w-0 items-center gap-3">
@@ -33,7 +33,7 @@ export default function InventoryHeader({
                     <button
                         type="button"
                         onClick={onBack}
-                        className="inline-flex min-w-0 shrink cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
+                        className="inline-flex min-w-0 cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 xs:shrink"
                     >
                         <ArrowLeft className="size-4 shrink-0" aria-hidden />
                         <span className="truncate">{titulo}</span>
@@ -45,7 +45,7 @@ export default function InventoryHeader({
                     <button
                         type="button"
                         onClick={onNewCategory}
-                        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
                     >
                         <FolderPlus className="size-4" aria-hidden />
                         <span className="hidden xs:inline">Nueva categoría</span>
@@ -54,7 +54,7 @@ export default function InventoryHeader({
                     <button
                         type="button"
                         onClick={onNewProduct}
-                        className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+                        className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
                     >
                         <Plus className="size-4" aria-hidden />
                         <span className="hidden xs:inline">Nuevo producto</span>

@@ -99,9 +99,9 @@ function Modal({
 }) {
     if (!open) return null;
     return (
-        <div className="fixed inset-0 z-[9999] bg-black/50 p-2 grid place-items-center">
-            <div className="w-full max-w-375 h-[90vh] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between gap-3 p-4 border-b border-border">
+        <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/50 p-1.5 sm:p-2">
+            <div className="flex h-[calc(100dvh-0.75rem)] w-full max-w-375 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:h-[min(90dvh,900px)]">
+                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
                     <div className="text-lg font-extrabold text-fg">
                         {title}
                     </div>
@@ -117,7 +117,7 @@ function Modal({
                     </div>
                 </div>
 
-                <div className="p-4 flex-1 min-h-0">{children}</div>
+                <div className="min-h-0 flex-1 p-2 sm:p-4">{children}</div>
             </div>
         </div>
     );
@@ -148,9 +148,9 @@ function NotaLineaModal({
     if (!open) return null;
 
     return (
-        <div className="fixed inset-0 z-[10000] bg-black/50 p-4 grid place-items-center">
+        <div className="fixed inset-0 z-[10000] grid place-items-center bg-black/50 p-2 sm:p-4">
             <div className="w-full max-w-[520px] rounded-2xl border border-border bg-surface shadow-xl overflow-hidden">
-                <div className="p-4 border-b border-border flex items-center justify-between gap-3">
+                <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
                     <div className="min-w-0">
                         <p className="text-sm text-fg-subtle font-semibold">
                             Nota de producto
@@ -171,7 +171,7 @@ function NotaLineaModal({
                     </button>
                 </div>
 
-                <div className="p-4">
+                <div className="p-3 sm:p-4">
                     <textarea
                         value={value}
                         onChange={(e) => setValue(e.target.value)}
@@ -191,7 +191,7 @@ function NotaLineaModal({
                         guardar rápidamente
                     </p>
 
-                    <div className="mt-4 flex items-center justify-end gap-2">
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end">
                         <button
                             type="button"
                             onClick={onCancel}
@@ -1019,8 +1019,8 @@ export default function MesaComandaModal({
                     </div>
                 ) : null}
 
-                <div className="flex flex-1 min-h-0 gap-4">
-                    <div className="flex-1 min-h-0 bg-surface rounded-xl border border-border p-4 flex flex-col">
+                <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain lg:flex-row lg:gap-4 lg:overflow-hidden">
+                    <div className="flex min-h-[32rem] flex-none flex-col rounded-xl border border-border bg-surface p-3 sm:p-4 lg:min-h-0 lg:flex-1">
                         <div className="flex items-center justify-between gap-3">
                             <div className="min-w-0">
                                 <h3 className="text-lg font-bold text-fg">
@@ -1207,7 +1207,7 @@ export default function MesaComandaModal({
                                                 No hay resultados.
                                             </p>
                                         ) : (
-                                            <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+                                            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] sm:gap-3 lg:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
                                                 {busqueda.map((p) => (
                                                     <ProductCard
                                                         key={p.ID_Producto}
@@ -1221,7 +1221,7 @@ export default function MesaComandaModal({
                                             </div>
                                         )
                                     ) : !categoriaSeleccionada ? (
-                                        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(170px,1fr))]">
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(135px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] sm:gap-3">
                                             {categorias.map((c) => (
                                                 <button
                                                     key={c.ID_Categoria}
@@ -1252,7 +1252,7 @@ export default function MesaComandaModal({
                                             No hay productos en esta categoría.
                                         </p>
                                     ) : (
-                                        <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
+                                        <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2 sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] sm:gap-3 lg:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
                                             {productos.map((p) => (
                                                 <ProductCard
                                                     key={p.ID_Producto}
@@ -1270,7 +1270,7 @@ export default function MesaComandaModal({
                         </div>
                     </div>
 
-                    <div className="w-[420px] shrink-0 bg-surface rounded-xl border border-border p-4 flex flex-col min-h-0">
+                    <div className="flex min-h-[32rem] w-full shrink-0 flex-col rounded-xl border border-border bg-surface p-3 sm:p-4 lg:min-h-0 lg:w-[420px]">
                         <div className="flex items-center justify-between">
                             <h3 className="text-lg font-bold text-fg">Ticket</h3>
                             <div className="text-sm font-semibold text-fg-muted">

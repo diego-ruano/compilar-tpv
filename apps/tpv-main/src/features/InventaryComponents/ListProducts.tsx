@@ -11,12 +11,12 @@ function ListProducts({
   return (
     <div
       className="
-        flex h-[320px] min-h-0 flex-col
+        flex h-[280px] min-h-0 flex-col sm:h-[320px]
         rounded-2xl border border-border bg-surface
         p-3 shadow-sm sm:p-4
       "
     >
-      <h3 className="mb-3 flex-none text-center text-lg font-extrabold text-fg">{title}</h3>
+      <h3 className="mb-3 flex-none text-center text-sm font-extrabold text-fg sm:text-lg">{title}</h3>
 
       <div className="flex-1 min-h-0 flex flex-col">{children}</div>
     </div>

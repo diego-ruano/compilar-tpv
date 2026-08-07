@@ -19,7 +19,7 @@ export default function ProveedorCard({
 		<button
 			type="button"
 			onClick={onClick}
-			className="group w-full max-w-[240px] text-left"
+			className="group w-full min-w-0 text-left"
 		>
 			<div className="rounded-2xl border border-border bg-surface p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-border-strong hover:shadow-md">
 				{/* IMAGEN */}

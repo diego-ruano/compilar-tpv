@@ -179,12 +179,12 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-3"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-2 sm:p-3"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-surface text-fg w-full max-w-[820px] rounded-2xl shadow-xl border border-border relative overflow-hidden max-h-[88vh] flex flex-col">
+      <div className="relative flex max-h-[calc(100dvh-1rem)] w-full max-w-[820px] flex-col overflow-hidden rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[calc(100dvh-1.5rem)]">
         <button
           type="button"
           onClick={onClose}
@@ -194,19 +194,19 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
           <X className="size-4" aria-hidden />
         </button>
 
-        <div className="px-6 pt-6 pb-4 border-b border-border">
-          <h2 className="text-xl font-extrabold text-center text-fg">{title}</h2>
+        <div className="shrink-0 border-b border-border px-4 pb-3 pt-4 sm:px-6 sm:pb-4 sm:pt-6">
+          <h2 className="text-center text-lg font-extrabold text-fg sm:text-xl">{title}</h2>
         </div>
 
-        <div className="p-6 overflow-y-auto">
+        <div className="min-h-0 overflow-y-auto p-3 sm:p-6">
           {loading ? (
             <p className="text-center text-fg-muted">Cargando...</p>
           ) : !p ? (
             <p className="text-center text-fg-muted">No se encontró el producto.</p>
           ) : (
             <>
-              <div className="flex items-center gap-4">
-                <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2">
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border bg-surface-2 sm:size-20">
                   <ImageWithFallback
                     src={imgUrl}
                     alt={(p as any).Nombre}
@@ -221,7 +221,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <div className="min-w-0">
                   <p className="text-xs font-extrabold uppercase tracking-wide text-fg-subtle">Producto</p>
-                  <p className="truncate text-2xl font-extrabold text-fg">{(p as any).Nombre || "—"}</p>
+                  <p className="truncate text-xl font-extrabold text-fg sm:text-2xl">{(p as any).Nombre || "—"}</p>
 
                   <span
                     className={
@@ -246,7 +246,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 </div>
               </div>
 
-              <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:mt-5 sm:grid-cols-3 sm:gap-3">
                 <div className="rounded-2xl border border-border bg-surface-2 p-4">
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-fg-muted">
                     <Boxes className="size-4 text-accent" aria-hidden />
@@ -373,7 +373,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
 
                 <div className={["overflow-hidden transition-all duration-300", lotesOpen ? "max-h-[560px] opacity-100 mt-3" : "max-h-0 opacity-0 mt-0"].join(" ")}>
                   <div className="rounded-2xl border border-border bg-surface-2 p-4">
-                    <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="mb-3 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm font-semibold text-fg-muted">
                         Gestiona entradas de almacén (FEFO sale de aquí)
                       </p>
@@ -384,7 +384,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                           setEditingLote(null);
                           setAddLoteOpen(true);
                         }}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
+                        className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-accent px-4 py-2 font-extrabold text-accent-fg shadow-sm transition hover:bg-accent-hover cursor-pointer"
                       >
                         <Plus className="size-4" aria-hidden />
                         Añadir lote
@@ -394,8 +394,9 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                     {!lotes?.length ? (
                       <p className="text-sm text-fg-muted text-center py-4">No hay lotes para este producto.</p>
                     ) : (
-                      <div className="rounded-2xl border border-border bg-surface overflow-hidden">
-                        <div className="grid grid-cols-12 gap-2 px-4 py-3 bg-surface-2 text-xs font-extrabold text-fg-muted">
+                      <div className="overflow-x-auto rounded-2xl border border-border bg-surface [scrollbar-gutter:stable]">
+                       <div className="min-w-[680px]">
+                        <div className="grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-extrabold text-fg-muted">
                           <div className="col-span-3">Lote</div>
                           <div className="col-span-2">Caducidad</div>
                           <div className="col-span-1 text-right">Stock</div>
@@ -431,6 +432,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                             );
                           })}
                         </div>
+                       </div>
                       </div>
                     )}
                   </div>
@@ -438,7 +440,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
               </div>
 
               {/* Acciones */}
-              <div className="grid grid-cols-2 gap-3 mt-5">
+              <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => onEdit?.((p as any).ID_Producto)}
@@ -463,7 +465,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 <button
                   type="button"
                   onClick={() => setConfirmDelete(true)}
-                  className="col-span-2 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-danger/30 bg-danger-soft py-3 font-extrabold text-danger transition hover:opacity-90 cursor-pointer sm:col-span-2"
                 >
                   <Trash2 className="size-4" aria-hidden />
                   Eliminar producto

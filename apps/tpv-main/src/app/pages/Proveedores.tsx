@@ -593,11 +593,11 @@ export default function Proveedores() {
   }, [categoriaActivaId, categorias]);
 
   return (
-    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-      <div className="flex w-full flex-col gap-4 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+    <div className="flex h-full min-h-0 w-full flex-col items-center gap-3 overflow-y-auto overscroll-contain bg-bg p-2 pt-3 [scrollbar-gutter:stable] sm:gap-4 sm:p-4 lg:p-6 lg:pt-5">
+      <div className="flex w-full min-w-0 shrink-0 flex-col gap-4 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
         {vista === "list" ? (
-          <div className="flex items-center gap-3">
-            <div className="flex min-w-0 shrink-0 items-center gap-3">
+          <div className="flex flex-col items-stretch gap-3 xs:grid xs:grid-cols-[minmax(0,1fr)_auto] xs:items-center sm:flex sm:flex-row">
+            <div className="flex min-w-0 items-center gap-3">
               <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
                 <Truck className="size-6" aria-hidden />
               </div>
@@ -610,27 +610,27 @@ export default function Proveedores() {
               </div>
             </div>
 
-            <div className="flex flex-1 justify-center">
+            <div className="order-3 flex min-w-0 justify-center xs:col-span-2 sm:order-none sm:col-span-1 sm:flex-1">
               <SearchInput
                 value={busqueda}
                 onValueChange={setBusqueda}
                 placeholder="Buscar proveedor..."
-                className="w-full max-w-xs"
+                className="w-full sm:max-w-xs"
               />
             </div>
 
             <button
               type="button"
               onClick={abrirNuevoProveedorModal}
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+              className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto xs:shrink-0"
             >
               <Plus className="size-4" aria-hidden />
-              <span className="hidden xs:inline">Nuevo proveedor</span>
+              <span>Nuevo proveedor</span>
             </button>
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3">
               <button
                 type="button"
                 onClick={volverALista}
@@ -643,7 +643,7 @@ export default function Proveedores() {
               <button
                 type="button"
                 onClick={() => setBusqueda("")}
-                className="inline-flex shrink-0 cursor-pointer items-center rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+                className="inline-flex min-w-0 shrink cursor-pointer items-center justify-center whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center text-sm font-semibold leading-tight text-fg-muted transition hover:bg-surface-2 hover:text-fg"
               >
                 Limpiar búsqueda
               </button>
@@ -672,7 +672,7 @@ export default function Proveedores() {
                 <p className="text-xs text-fg-muted">No hay proveedores con ese filtro.</p>
               </div>
             ) : (
-              <div className="max-h-88 overflow-y-auto">
+              <div className="max-h-88 overflow-y-auto overscroll-contain [scrollbar-gutter:stable]">
                 <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
                   {proveedoresFiltrados.map((p) => (
                     <ProveedorCard key={p.ID_Proveedor} proveedor={p} onClick={() => abrirDetalleProveedor(p)} />
@@ -688,8 +688,8 @@ export default function Proveedores() {
 
       {vista === "detail" && proveedorActivo && (
         <>
-          <div className="flex w-full flex-col gap-6 rounded-2xl border border-border bg-surface p-4 shadow-sm sm:flex-row">
-            <div className="flex h-[240px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-[280px] sm:w-[280px] sm:shrink-0">
+          <div className="flex w-full min-w-0 flex-col gap-4 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4 lg:flex-row lg:gap-6">
+            <div className="flex h-[200px] w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:h-[240px] lg:h-[280px] lg:w-[280px] lg:shrink-0">
               <ImageWithFallback
                 src={proveedorActivo.urlImagen}
                 alt={proveedorActivo.Nombre_Empresa}
@@ -728,7 +728,7 @@ export default function Proveedores() {
                 </p>
               </div>
 
-              <div className="mt-2 grid max-w-[560px] grid-cols-2 gap-3">
+              <div className="mt-2 grid w-full max-w-[560px] grid-cols-1 gap-2 xs:grid-cols-2 sm:gap-3">
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent py-2 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                   onClick={abrirEditarProveedorModal}
@@ -746,7 +746,7 @@ export default function Proveedores() {
                 </button>
 
                 <button
-                  className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-danger/30 bg-danger-soft py-2 font-semibold text-danger transition hover:opacity-90 cursor-pointer xs:col-span-2"
                   onClick={eliminarProveedor}
                 >
                   <Trash2 className="size-4" aria-hidden />
@@ -757,13 +757,13 @@ export default function Proveedores() {
           </div>
 
           <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm">
-            <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="mb-4 flex flex-col items-stretch gap-3 xs:flex-row xs:items-center xs:justify-between">
               <h4 className="text-xl font-bold text-fg">Productos vinculados</h4>
 
               <button
                 type="button"
                 onClick={abrirVincularProductos}
-                className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
+                className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center text-sm font-semibold leading-tight text-fg transition hover:bg-surface-2"
               >
                 <Link2 className="size-4" aria-hidden />
                 Gestionar vínculos
@@ -773,7 +773,7 @@ export default function Proveedores() {
             {productosProveedorFiltrados.length === 0 ? (
               <p className="text-fg-muted">No hay productos vinculados.</p>
             ) : (
-              <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+              <div className="grid w-full grid-cols-1 gap-4 xs:grid-cols-[repeat(auto-fill,minmax(200px,1fr))]">
                 {productosProveedorFiltrados.map((p) => (
                   <div key={p.ID_Producto} className="w-full">
                     <Product
@@ -808,8 +808,8 @@ export default function Proveedores() {
         zIndex={60}
         widthClass="max-w-[780px]"
       >
-        <div className="mb-4 flex items-start gap-4">
-          <div className="flex h-[140px] w-[140px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2">
+        <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-start sm:gap-4">
+          <div className="flex h-[140px] w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2 sm:w-[140px]">
             {fotoNuevaPreview ? (
               <img src={fotoNuevaPreview} className="h-full w-full object-cover" draggable={false} />
             ) : proveedorActivo?.urlImagen && modalProveedorModo === "editar" && !fotoEliminar ? (
@@ -822,7 +822,7 @@ export default function Proveedores() {
           <div className="flex-1">
             <label className="text-sm font-semibold text-fg">Foto del proveedor</label>
 
-            <div className="mt-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 px-4 py-3">
+            <div className="mt-1 flex flex-col items-stretch gap-3 rounded-xl border border-border bg-surface-2 px-3 py-3 xs:flex-row xs:items-center xs:justify-between sm:px-4">
               <div className="text-sm text-fg-muted">
                 {fotoEliminar
                   ? "Se eliminará la foto"
@@ -833,8 +833,8 @@ export default function Proveedores() {
                       : "No hay foto aún"}
               </div>
 
-              <div className="flex gap-2">
-                <label className="cursor-pointer rounded-xl bg-accent px-3 py-1.5 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover">
+              <div className="grid grid-cols-1 gap-2 xs:grid-cols-2 sm:flex">
+                <label className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl bg-accent px-3 py-1.5 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover">
                   {fotoNuevaFile || (modalProveedorModo === "editar" && proveedorActivo?.Ruta_Imagen && !fotoEliminar)
                     ? "Cambiar"
                     : "Subir"}
@@ -873,7 +873,7 @@ export default function Proveedores() {
 
                         resetFotoInput();
                       }}
-                      className="cursor-pointer rounded-xl border border-danger/30 bg-danger-soft px-3 py-1.5 text-sm font-semibold text-danger transition hover:opacity-90"
+                      className="min-w-0 cursor-pointer whitespace-normal break-words rounded-xl border border-danger/30 bg-danger-soft px-3 py-1.5 text-center text-sm font-semibold leading-tight text-danger transition hover:opacity-90"
                     >
                       Eliminar
                     </button>
@@ -890,7 +890,7 @@ export default function Proveedores() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
           <Campo label="Nombre empresa *" value={fNombre} onChange={setFNombre} placeholder="Ej: Coca-Cola" />
           <Campo label="Contacto" value={fContacto} onChange={setFContacto} placeholder="Ej: Juan Pérez" />
 
@@ -899,7 +899,7 @@ export default function Proveedores() {
 
           <Campo label="CIF" value={fCif} onChange={setFCif} placeholder="Ej: B12345678" />
 
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="text-sm font-semibold text-fg">Otros datos</label>
             <textarea
               value={fOtros}
@@ -910,7 +910,7 @@ export default function Proveedores() {
           </div>
         </div>
 
-        <div className="mt-6 flex gap-3 justify-end">
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:justify-end sm:gap-3">
           <button
             type="button"
             onClick={() => {
@@ -949,8 +949,8 @@ export default function Proveedores() {
         zIndex={70}
         widthClass="max-w-[1100px]"
       >
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <div className="flex-1">
+        <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1">
             <SearchInput
               value={busquedaProductos}
               onValueChange={setBusquedaProductos}
@@ -961,7 +961,7 @@ export default function Proveedores() {
           <button
             type="button"
             onClick={abrirCrearProductoEnModal}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+            className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
           >
             <Plus className="size-4" aria-hidden />
             Crear producto
@@ -975,12 +975,12 @@ export default function Proveedores() {
         {loadingVincular ? (
           <p className="text-fg-muted">Cargando...</p>
         ) : (
-          <div className="flex gap-4">
-            <div className="w-[280px] shrink-0">
+          <div className="flex flex-col gap-3 md:flex-row md:gap-4">
+            <div className="w-full shrink-0 md:w-[280px]">
               <div className="overflow-hidden rounded-2xl border border-border bg-surface">
                 <div className="border-b border-border px-3 py-2 font-semibold text-fg">Categorías</div>
 
-                <div className="max-h-[55vh] overflow-auto">
+                <div className="max-h-[220px] overflow-auto md:max-h-[55vh]">
                   <button
                     type="button"
                     onClick={() => setCategoriaActivaId(null)}
@@ -1035,7 +1035,7 @@ export default function Proveedores() {
                 </div>
               ) : (
                 <div className="max-h-[55vh] overflow-auto pr-1">
-                  <div className="grid w-full grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+                  <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
                     {productosDisponiblesFiltrados.map((p) => {
                       const checked = seleccionProductoIds.has(p.ID_Producto);
                       return (
@@ -1076,7 +1076,7 @@ export default function Proveedores() {
           </div>
         )}
 
-        <div className="mt-5 flex items-center justify-end gap-3">
+        <div className="mt-5 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-3">
           <button
             type="button"
             onClick={() => setModalVincularOpen(false)}
@@ -1108,7 +1108,7 @@ export default function Proveedores() {
         zIndex={80}
         widthClass="max-w-[760px]"
       >
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
           <Campo label="Nombre *" value={pNombre} onChange={setPNombre} placeholder="Ej: Coca-Cola 33cl" />
           <Campo label="Precio venta" value={pPrecio} onChange={setPPrecio} placeholder="Ej: 1.80" />
 
@@ -1139,7 +1139,7 @@ export default function Proveedores() {
           <Campo label="Stock mínimo" value={pStockMin} onChange={setPStockMin} placeholder="Ej: 5" />
         </div>
 
-        <div className="mt-6 flex items-center justify-end gap-3">
+        <div className="mt-6 grid grid-cols-2 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-3">
           <button
             type="button"
             onClick={() => setModalCrearProductoOpen(false)}

@@ -385,8 +385,8 @@ function EditTrabajador() {
 
   if (loading) {
     return (
-      <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-        <div className="w-full rounded-2xl border border-border bg-surface p-4 shadow-sm sm:p-6">
+      <div className="flex min-h-full w-full flex-col items-center gap-3 bg-bg p-2 pt-3 sm:gap-4 sm:p-4 lg:p-6 lg:pt-5">
+        <div className="w-full rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-6">
           <p className="text-fg-muted">Cargando...</p>
         </div>
       </div>
@@ -394,10 +394,10 @@ function EditTrabajador() {
   }
 
   return (
-    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-      <div className="flex w-full flex-col gap-4">
+    <div className="flex min-h-full w-full touch-pan-y flex-col items-center gap-3 bg-bg p-2 pt-3 sm:gap-4 sm:p-4 lg:p-6 lg:pt-5">
+      <div className="flex w-full flex-col gap-3 sm:gap-4">
         {/* HEADER */}
-        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+        <div className="flex flex-col items-stretch gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm xs:flex-row xs:items-center xs:justify-between sm:p-4">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
               <UserCog className="size-6" aria-hidden />
@@ -413,7 +413,7 @@ function EditTrabajador() {
           <button
             type="button"
             onClick={() => navigate(-1)}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2"
+            className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 xs:w-auto"
           >
             <ArrowLeft className="size-4" aria-hidden />
             <span className="hidden xs:inline">Volver</span>

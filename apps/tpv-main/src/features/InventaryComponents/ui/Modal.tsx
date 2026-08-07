@@ -19,13 +19,13 @@ export default function Modal({
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-3"
             onMouseDown={(e) => {
                 if (e.target === e.currentTarget) onClose();
             }}
         >
             <div
-                className={`relative w-full ${maxWidthClass} rounded-2xl border border-border bg-surface text-fg shadow-xl`}
+                className={`relative flex max-h-[calc(100dvh-1rem)] w-full flex-col overflow-hidden ${maxWidthClass} rounded-2xl border border-border bg-surface text-fg shadow-xl sm:max-h-[calc(100dvh-1.5rem)]`}
             >
                 <button
                     type="button"
@@ -37,12 +37,12 @@ export default function Modal({
                 </button>
 
                 {title && (
-                    <div className="border-b border-border px-5 pt-5 pb-3">
+                    <div className="shrink-0 border-b border-border px-4 pb-3 pt-4 sm:px-5 sm:pt-5">
                         <h2 className="text-center text-lg font-extrabold text-fg">{title}</h2>
                     </div>
                 )}
 
-                <div className="p-5">{children}</div>
+                <div className="min-h-0 overflow-y-auto p-3 sm:p-5">{children}</div>
             </div>
         </div>
     );

@@ -645,11 +645,11 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   };
 
   const btnBase =
-    "border-2 rounded-xl font-medium transition-all duration-300 whitespace-nowrap shrink-0 px-2 py-2 text-[11px] sm:px-3 sm:py-2 sm:text-sm";
+    "min-w-0 border-2 rounded-xl font-medium transition-all duration-300 whitespace-normal break-words text-center leading-tight px-2 py-2 text-[11px] sm:px-3 sm:py-2 sm:text-sm";
 
   return (
-    <div className="w-full bg-surface rounded-xl p-3 sm:p-4 shadow-xs flex flex-col gap-3">
-      <div className="w-full flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+    <div className="flex w-full shrink-0 flex-col gap-3 rounded-xl bg-surface p-3 shadow-xs sm:p-4">
+      <div className="flex w-full flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-col">
           <h3 className="text-lg sm:text-xl font-bold">HORARIO SEMANAL</h3>
           <p className="text-sm text-fg-muted">
@@ -659,12 +659,12 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
           </p>
         </div>
 
-        <div className="w-full lg:w-auto">
+        <div className="w-full xl:w-auto">
           <div
             className="
               grid grid-cols-2 gap-2
               sm:flex sm:flex-wrap sm:items-center sm:justify-end sm:gap-2
-              lg:flex-nowrap
+              xl:flex-nowrap
             "
           >
             {isAdmin && (
@@ -736,7 +736,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         </div>
       )}
 
-      <div className="md:hidden flex flex-col gap-3">
+      <div className="hidden">
         {trabajadoresVisibles.map((t) => (
           <div
             key={t.ID_Trabajador}
@@ -852,8 +852,8 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
         ))}
       </div>
 
-      <div className="hidden md:block">
-        <div className="w-full overflow-x-auto border border-border rounded-xl">
+      <div className="block min-w-0">
+        <div className="w-full touch-pan-x overflow-x-auto overscroll-x-contain rounded-xl border border-border pb-2 [scrollbar-gutter:stable]">
           <div className="min-w-[900px]">
             <div className="grid grid-cols-[260px_repeat(7,1fr)] border-b border-border bg-surface-2">
               <div className="p-3 font-semibold">Trabajador</div>
@@ -965,9 +965,9 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
       </div>
 
       {modalOpen && (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-xl bg-surface rounded-2xl shadow-lg border border-border p-5 flex flex-col gap-4">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="flex max-h-[calc(100dvh-1rem)] w-full max-w-xl flex-col gap-3 overflow-y-auto rounded-2xl border border-border bg-surface p-3 shadow-lg sm:gap-4 sm:p-5">
+            <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-start xs:justify-between sm:gap-4">
               <div className="flex flex-col">
                 <h4 className="text-lg font-bold">
                   {modalMode === "create" ? "Nueva asignacion" : "Editar asignacion"}
@@ -983,7 +983,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <button
                 type="button"
                 onClick={closeModal}
-                className="border-2 border-border-strong text-fg rounded-xl px-3 py-2 font-medium hover:bg-accent hover:text-white transition-all"
+                className="w-full rounded-xl border-2 border-border-strong px-3 py-2 font-medium text-fg transition-all hover:bg-accent hover:text-white xs:w-auto"
               >
                 Cerrar
               </button>
@@ -995,7 +995,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-medium">Turno</label>
                 <select
@@ -1024,7 +1024,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 </select>
               </div>
 
-              <div className="md:col-span-2 flex items-center gap-2">
+              <div className="flex items-center gap-2 sm:col-span-2">
                 <input
                   id="partido"
                   type="checkbox"
@@ -1082,7 +1082,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                 </>
               )}
 
-              <div className="flex flex-col gap-1 md:col-span-2">
+              <div className="flex flex-col gap-1 sm:col-span-2">
                 <label className="text-sm font-medium">Notas (opcional)</label>
                 <input
                   value={notas}
@@ -1093,7 +1093,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="grid grid-cols-2 gap-2 pt-2 sm:flex sm:items-center sm:justify-end">
               <button
                 type="button"
                 onClick={closeModal}
@@ -1156,9 +1156,9 @@ function Trabajadores() {
   }, [location.key]);
 
   return (
-    <div className="flex min-h-full w-full flex-col items-center gap-4 bg-bg p-3 pt-3 sm:p-6 sm:pt-4 lg:p-10 lg:pt-5">
-      <div className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
+    <div className="flex h-full min-h-0 w-full touch-pan-y flex-col items-center gap-3 overflow-y-auto overscroll-contain bg-bg p-2 pt-3 [scrollbar-gutter:stable] sm:gap-4 sm:p-4 lg:p-6 lg:pt-5">
+      <div className="flex w-full shrink-0 flex-col gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
+        <div className="flex flex-col items-stretch gap-3 xs:flex-row xs:items-center xs:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
               <Users className="size-6" aria-hidden />
@@ -1175,7 +1175,7 @@ function Trabajadores() {
           {isAdmin && (
             <Link
               to="/Trabajadores/nuevo-trabajador"
-              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+              className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto"
             >
               <Plus className="size-4" aria-hidden />
               <span className="hidden xs:inline">Nuevo trabajador</span>
@@ -1186,14 +1186,14 @@ function Trabajadores() {
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
 
-      <div className="w-full bg-surface rounded-xl p-4 shadow-xs flex flex-col gap-2">
+      <div className="flex w-full shrink-0 flex-col gap-2 rounded-xl bg-surface p-3 shadow-xs sm:p-4">
         {trabajadoresSafe.length === 0 ? (
           <p className="text-fg-muted">No hay trabajadores todavía.</p>
         ) : (
           trabajadoresSafe.map((t) => (
             <div
               key={t.ID_Trabajador}
-              className="w-full flex flex-col md:flex-row md:items-center md:justify-between gap-3 border border-border rounded-xl px-3 py-3"
+              className="flex w-full flex-col gap-3 rounded-xl border border-border px-3 py-3 lg:flex-row lg:items-center lg:justify-between"
             >
               <div className="flex flex-col gap-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -1228,16 +1228,17 @@ function Trabajadores() {
               </div>
 
               {isAdmin && (
-                <div className="w-full md:w-auto flex justify-center md:justify-end">
-                  <div className="flex flex-wrap justify-center md:justify-end gap-2">
+                <div className="flex w-full justify-center lg:w-auto lg:justify-end">
+                  <div className="grid w-full grid-cols-2 gap-2 xs:w-auto xs:flex xs:flex-wrap xs:justify-center lg:justify-end">
                     <button
                       type="button"
                       onClick={() => navigate(`/Trabajadores/editar/${t.ID_Trabajador}`)}
                       className="
+                        min-w-0 w-full justify-center whitespace-normal break-words text-center leading-tight
                         border-2 border-accent text-accent rounded-xl
                         font-medium transition-all duration-300 hover:bg-accent hover:text-white
                         px-3 py-1.5 text-xs
-                        sm:px-4 sm:py-2 sm:text-sm
+                        xs:w-auto sm:px-4 sm:py-2 sm:text-sm
                       "
                     >
                       Editar
@@ -1247,10 +1248,11 @@ function Trabajadores() {
                       type="button"
                       onClick={() => toast.info("Por implementar", "Dar de baja (pendiente)")}
                       className="
+                        min-w-0 w-full justify-center whitespace-normal break-words text-center leading-tight
                         border-2 border-danger text-danger rounded-xl
                         font-medium transition-all duration-300 hover:bg-danger hover:text-white
                         px-3 py-1.5 text-xs
-                        sm:px-4 sm:py-2 sm:text-sm
+                        xs:w-auto sm:px-4 sm:py-2 sm:text-sm
                       "
                     >
                       Dar de baja

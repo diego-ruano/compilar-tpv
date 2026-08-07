@@ -210,10 +210,10 @@ export default function PedidosSection({ proveedores }: Props) {
 
   return (
     <>
-      <div className="flex w-full flex-col gap-3 rounded-2xl border border-border bg-surface p-4 shadow-sm">
+      <div className="flex w-full min-w-0 flex-col gap-3 rounded-2xl border border-border bg-surface p-3 shadow-sm sm:p-4">
         {/* Header igual al de proveedores */}
-        <div className="flex items-center gap-3">
-          <div className="flex min-w-0 shrink-0 items-center gap-3">
+        <div className="flex flex-col items-stretch gap-3 xs:grid xs:grid-cols-[minmax(0,1fr)_auto] xs:items-center sm:flex sm:flex-row">
+          <div className="flex min-w-0 items-center gap-3">
             <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
               <ShoppingCart className="size-6" aria-hidden />
             </div>
@@ -225,22 +225,22 @@ export default function PedidosSection({ proveedores }: Props) {
             </div>
           </div>
 
-          <div className="flex flex-1 justify-center">
+          <div className="order-3 flex min-w-0 justify-center xs:col-span-2 sm:order-none sm:col-span-1 sm:flex-1">
             <SearchInput
               value={busqueda}
               onValueChange={setBusqueda}
               placeholder="Buscar pedido..."
-              className="w-full max-w-xs"
+              className="w-full sm:max-w-xs"
             />
           </div>
 
           <button
             type="button"
             onClick={abrirNuevoPedido}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+            className="inline-flex w-full min-w-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl bg-accent px-3 py-2 text-center text-sm font-semibold leading-tight text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] xs:w-auto xs:shrink-0"
           >
             <Plus className="size-4" aria-hidden />
-            <span className="hidden xs:inline">Nuevo pedido</span>
+            <span>Nuevo pedido</span>
           </button>
         </div>
 
@@ -260,14 +260,14 @@ export default function PedidosSection({ proveedores }: Props) {
             </p>
           </div>
         ) : (
-          <div className="max-h-90 overflow-y-auto rounded-xl border border-border">
+          <div className="max-h-90 overflow-y-auto overscroll-contain rounded-xl border border-border [scrollbar-gutter:stable]">
             {pedidos.map((p, i) => (
               <button
                 key={p.id}
                 type="button"
                 onClick={() => abrirPedido(p)}
                 className={cn(
-                  "flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition hover:bg-surface-2",
+                  "grid w-full cursor-pointer grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-1 px-3 py-2.5 text-left transition hover:bg-surface-2 sm:flex sm:gap-3",
                   i < pedidos.length - 1 && "border-b border-border",
                 )}
               >
@@ -286,13 +286,13 @@ export default function PedidosSection({ proveedores }: Props) {
                   )}
                 </span>
 
-                <span className="shrink-0 text-xs text-fg-muted">{p.fechaCreacion}</span>
+                <span className="col-span-2 min-w-0 text-xs text-fg-muted sm:col-span-1 sm:shrink-0">{p.fechaCreacion}</span>
 
-                <span className="shrink-0 text-xs text-fg-muted">
+                <span className="min-w-0 text-right text-xs text-fg-muted sm:shrink-0 sm:text-left">
                   {p.lineas.length} {p.lineas.length === 1 ? "línea" : "líneas"}
                 </span>
 
-                <ChevronRight className="size-4 shrink-0 text-fg-subtle" aria-hidden />
+                <ChevronRight className="col-start-3 row-start-1 size-4 shrink-0 text-fg-subtle sm:col-auto sm:row-auto" aria-hidden />
               </button>
             ))}
 
