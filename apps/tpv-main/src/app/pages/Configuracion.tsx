@@ -372,12 +372,8 @@ export default function Configuracion() {
 
     return (
         <div className="w-full h-full overflow-hidden bg-bg">
-            <style>{`
-        @keyframes cfgFadeSlide { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-        .cfg-animate { animation: cfgFadeSlide 180ms ease-out; }
-        @media (prefers-reduced-motion: reduce) { .cfg-animate { animation: none; } }
-      `}</style>
-
+            {/* `.cfg-animate` vive en Global.css: un <style> inline aquí lo bloquearía la CSP
+                del build de producción (ver features/estadisticas/apexBase.ts). */}
             <div className="h-full w-full p-3 sm:p-4 lg:px-10 lg:py-5">
                 <div className="flex h-full w-full flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-sm">
                     {/* Header */}

@@ -34,12 +34,9 @@ function ItemListClients({
           flex-nowrap
           overflow-x-auto
           [-ms-overflow-style:none] [scrollbar-width:none]
+          [&::-webkit-scrollbar]:hidden
         "
       >
-        <style>{`
-          div::-webkit-scrollbar { display: none; }
-        `}</style>
-
         <button
           className="
             cursor-pointer

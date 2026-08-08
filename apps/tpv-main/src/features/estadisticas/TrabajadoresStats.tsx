@@ -5,6 +5,7 @@ import type { ApexOptions } from "apexcharts";
 import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
+import { APEX_CHART_BASE } from "./apexBase";
 import {
     type StatsRange,
     type TrabajadoresStatsResponse,
@@ -203,7 +204,7 @@ function HorasBarChart({
 
     const options: ApexOptions = useMemo(
         () => ({
-            chart: { type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
             colors: [color], // ✅ color directo
             stroke: { width: 0 }, // ✅ sin borde negro
             plotOptions: {
@@ -298,7 +299,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
 
     const rankingOptions: ApexOptions = useMemo(
         () => ({
-            chart: { type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
             colors: ["#0ea5e9"], // ✅ azul Mesas
             stroke: { width: 0 }, // ✅ sin borde negro
             plotOptions: {

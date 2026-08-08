@@ -2,6 +2,7 @@
 import React, { useMemo } from "react";
 import Chart from "react-apexcharts";
 
+import { APEX_CHART_BASE } from "./apexBase";
 import type { MesasStatsResponse } from "./statsApis";
 import { useMesasStats } from "./statsQueries";
 
@@ -40,7 +41,7 @@ export default function MesasStats({ range }: { range: StatsRange }) {
 
     const donutOptions = useMemo(() => {
         return {
-            chart: { type: "donut" as const, toolbar: { show: false } },
+            chart: { ...APEX_CHART_BASE, type: "donut" as const, toolbar: { show: false } },
             labels: ["Ocupadas", "Libres"],
             legend: { position: "bottom" as const },
             dataLabels: { enabled: false },
@@ -70,7 +71,7 @@ export default function MesasStats({ range }: { range: StatsRange }) {
     const serviciosOptions = useMemo(() => {
         const labels = data?.servicios?.labels ?? [];
         return {
-            chart: { type: "bar" as const, toolbar: { show: false } },
+            chart: { ...APEX_CHART_BASE, type: "bar" as const, toolbar: { show: false } },
             xaxis: { categories: labels },
             dataLabels: { enabled: false },
             plotOptions: {
@@ -97,7 +98,7 @@ export default function MesasStats({ range }: { range: StatsRange }) {
         const rows = data?.top_mesas_ingresos ?? [];
         const categories = rows.map((r) => `${r.mesa} · ${r.zona}`);
         return {
-            chart: { type: "bar" as const, toolbar: { show: false } },
+            chart: { ...APEX_CHART_BASE, type: "bar" as const, toolbar: { show: false } },
             xaxis: { categories },
             dataLabels: { enabled: false },
             plotOptions: {

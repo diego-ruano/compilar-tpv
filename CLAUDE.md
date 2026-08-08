@@ -282,6 +282,35 @@ la lógica/SQL vive en `crates/*`.
   el estado de la comanda), `configuracion` (se carga una vez en stores Zustand) y `login` (flujo de
   arranque/auth). Cachearlas aportaba poco y arriesgaba el núcleo de ventas.
 
+### CSP: prohibido inyectar `<style>` en runtime
+
+La CSP de `tauri.conf.json` (`app.security.csp`) declara **`style-src 'self'`**, sin
+`'unsafe-inline'`. Por tanto **todo CSS debe pasar por el bundle de Vite** y llegar como
+`<link rel="stylesheet">`. Quedan prohibidos:
+
+- `<style>{`…`}</style>` renderizado por React,
+- `document.createElement("style")` en tiempo de ejecución,
+- librerías que se auto-inyecten su CSS (ver más abajo).
+
+⚠️ **Esta clase de bug no se ve en `pnpm tauri dev`.** La CSP sólo se aplica a los assets que
+sirve el protocolo `tauri://`, o sea al **build empaquetado**. En escritorio-dev
+`PROXY_DEV_SERVER` es `false` (`tauri/src/manager/webview.rs`), así que el webview carga el
+servidor de Vite (`http://localhost:1420`) tal cual, **sin ninguna cabecera CSP**. Un `<style>`
+inline se ve perfecto en dev y roto en el `.exe` instalado. No hay forma de replicarlo con
+`devCsp`: en escritorio Tauri no puede inyectar la cabecera en un `devUrl` externo, y además el
+servidor de Vite en dev *necesita* estilos inline para el HMR del CSS.
+
+**Caso real (ApexCharts):** v5 lleva su CSS embebido como string dentro del JS y lo inyecta al
+montar la primera gráfica. Al bloquearse, las gráficas se quedaban sin ninguna regla (tooltips
+estáticos siempre visibles, leyenda sin flex, sensores de resize sin ocultar) y Estadísticas se
+descuadraba entera. Solución: `injectStyleSheet: false` vía `APEX_CHART_BASE`
+(`features/estadisticas/apexBase.ts`, que **toda gráfica nueva debe esparcir en su `chart: {}`**)
++ `@import` de las dos hojas de ApexCharts al principio de `Global.css`.
+
+**Al meter una librería con estilos, compruébalo:** si trae un `.css` en `dist/`, impórtalo; si
+se lo auto-inyecta, busca su opción para desactivarlo. Y verifica siempre en un build empaquetado,
+no sólo en dev.
+
 ---
 
 ## 9. Arquitectura de sincronización (Main ↔ Nube ↔ Handy)

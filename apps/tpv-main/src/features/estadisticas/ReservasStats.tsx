@@ -6,6 +6,7 @@ import type { ApexOptions } from "apexcharts";
 import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
+import { APEX_CHART_BASE } from "./apexBase";
 import {
     type StatsRange,
     type StatsTurno,
@@ -88,7 +89,7 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
 
     const donutBase = useCallback(
         (labels: string[], colors: string[]): ApexOptions => ({
-            chart: { type: "donut", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "donut", toolbar: { show: false }, fontFamily: "inherit" },
             labels,
             colors,
             legend: legendClean,
@@ -224,7 +225,7 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
     // ✅ Barras: azul Mesas + sin borde negro + leyenda “circulito”
     const barOptions: ApexOptions = useMemo(
         () => ({
-            chart: { type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
             colors: ["#0ea5e9"],
             stroke: { width: 0 },
             plotOptions: {

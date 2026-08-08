@@ -2,6 +2,7 @@
 import React, { useMemo } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
+import { APEX_CHART_BASE } from "./apexBase";
 import { useClientesStats } from "./statsQueries";
 
 /* =========================
@@ -180,7 +181,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
     const donutOptions: ApexOptions = useMemo(
         () => ({
-            chart: { type: "donut", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "donut", toolbar: { show: false }, fontFamily: "inherit" },
             labels: ["Recurrentes", "No recurrentes"],
             colors: ["#0ea5e9", "#94a3b8"], // ✅ azul Mesas + gris
             legend: legendClean,
@@ -230,7 +231,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
     const lineOptions: ApexOptions = useMemo(
         () => ({
-            chart: { type: "line", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "line", toolbar: { show: false }, fontFamily: "inherit" },
             colors: ["#0ea5e9"], // ✅ azul Mesas
             stroke: { width: 3, curve: "smooth" },
             dataLabels: { enabled: false },
@@ -274,7 +275,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
     const topOptions: ApexOptions = useMemo(
         () => ({
-            chart: { type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
+            chart: { ...APEX_CHART_BASE, type: "bar", toolbar: { show: false }, fontFamily: "inherit" },
             colors: ["#0ea5e9"], // ✅ azul Mesas
             stroke: { width: 0 }, // ✅ sin borde negro
             plotOptions: {

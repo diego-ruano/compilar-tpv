@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 
+import { APEX_CHART_BASE } from "./apexBase";
 import {
   type ProveedoresStatsResponse,
   type StatsRange,
@@ -134,6 +135,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
   const evoOptions: ApexOptions = useMemo(
     () => ({
       chart: {
+        ...APEX_CHART_BASE,
         type: "line",
         toolbar: { show: false },
         zoom: { enabled: false },
@@ -178,6 +180,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
   const barsOptions: ApexOptions = useMemo(
     () => ({
       chart: {
+        ...APEX_CHART_BASE,
         type: "bar",
         toolbar: { show: false },
         fontFamily: "inherit",

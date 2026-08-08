@@ -1,6 +1,25 @@
 @import "tailwindcss";
 
 /* =========================================================================
+   CSS base de ApexCharts.
+
+   ApexCharts v5 lleva su CSS embebido como string en el JS y lo inyecta en runtime
+   creando un `<style>`. La CSP del build de producción declara `style-src 'self'`
+   (sin `unsafe-inline`), así que ese `<style>` se bloquea y las gráficas se quedan
+   sin estilos: tooltips estáticos siempre visibles, leyenda sin flex y los sensores
+   de resize sin ocultar. En dev no se notaba porque el webview carga el servidor de
+   Vite directamente, sin CSP.
+
+   Importándolas aquí, Vite las mete en el CSS del bundle (un `<link rel=stylesheet>`
+   del propio origen, permitido por la CSP). La auto-inyección se desactiva con
+   `injectStyleSheet: false` — ver features/estadisticas/apexBase.ts.
+
+   ⚠️ Van ANTES del bloque de tematizado de ApexCharts de más abajo, que las pisa.
+   ========================================================================= */
+@import "apexcharts/dist/apexcharts.css";
+@import "apexcharts/dist/apexcharts-legend.css";
+
+/* =========================================================================
    Variante dark basada en clase (.dark en <html>), no en prefers-color-scheme.
    El tema lo controla el store useTheme (persistido en localStorage).
    ========================================================================= */
@@ -278,6 +297,26 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
     .animate-tip {
+        animation: none;
+    }
+}
+
+/* Aparición suave de los paneles de Configuración */
+@keyframes cfgFadeSlide {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.cfg-animate {
+    animation: cfgFadeSlide 180ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .cfg-animate {
         animation: none;
     }
 }

@@ -5,6 +5,7 @@ import type { ApexOptions } from "apexcharts";
 import { useToast } from "../../shared/toast";
 import { cn } from "../ventaRapida/utils";
 
+import { APEX_CHART_BASE } from "./apexBase";
 import {
   type StatsRange,
   type StatsCategoriaRow,
@@ -69,6 +70,7 @@ export default function ProductosStats({ range }: { range: StatsRange }) {
   const barOptions = useCallback(
     (labels: string[], title: string, color: string): ApexOptions => ({
       chart: {
+        ...APEX_CHART_BASE,
         type: "bar",
         toolbar: { show: false },
         animations: { enabled: true },
