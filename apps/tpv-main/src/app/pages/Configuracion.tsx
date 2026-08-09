@@ -33,7 +33,6 @@ import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 import { EmailConfig } from "../../features/configuracion/sections/EmailConfig";
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
-import { SeccionPrueba } from "../../features/configuracion/sections/SeccionPrueba";
 
 
 export default function Configuracion() {
@@ -158,13 +157,6 @@ export default function Configuracion() {
                 "novedades",
                 "instalar",
             ],
-        },
-        // TEMPORAL (v0.2.0): testigo de la auto-actualización. Quitar tras la prueba.
-        {
-            key: "PRUEBA",
-            title: "Sección de prueba",
-            desc: "Testigo de la actualización",
-            keywords: ["prueba", "test", "actualizacion"],
         },
     ], []);
 
@@ -780,10 +772,6 @@ export default function Configuracion() {
 
                                         {section === "ACTUALIZACIONES" ? (
                                             <Actualizaciones darkMode={darkMode} />
-                                        ) : null}
-
-                                        {section === "PRUEBA" ? (
-                                            <SeccionPrueba />
                                         ) : null}
 
                                         {section === "TICKET" ? (
