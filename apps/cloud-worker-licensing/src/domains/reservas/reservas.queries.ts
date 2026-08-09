@@ -126,9 +126,15 @@ export async function findClienteReserva(
 	`;
 
 	if (email) {
+		// Case-insensitive: el email llega ya en minúsculas del schema, pero en la tabla puede
+		// haber filas antiguas con mayúsculas. Es además el criterio del índice único
+		// `ux_clientes_email` (sobre `lower(Email)`), o sea que buscamos por el mismo criterio por
+		// el que luego nos rechazaría el INSERT. Espejo de `upsert_cliente` en la Main.
 		const rs = await db.execute({
-			sql: `SELECT ${COLS} FROM Clientes WHERE Email = ?1 ORDER BY ID_Cliente DESC LIMIT 1;`,
-			args: [email],
+			sql: `SELECT ${COLS} FROM Clientes
+			      WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1
+			      ORDER BY ID_Cliente DESC LIMIT 1;`,
+			args: [email.toLowerCase()],
 		});
 		const row = rows(rs)[0];
 		if (row) return row as ClienteExistente;

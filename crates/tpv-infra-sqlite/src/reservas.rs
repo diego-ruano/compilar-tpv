@@ -80,10 +80,19 @@ async fn upsert_cliente<C: Writer>(conn: &C, c: &ClienteReserva) -> AppResult<St
     let mut existing: Option<ClienteExistente> = None;
 
     if let Some(ref e) = email {
+        // Búsqueda case-insensitive: el email llega ya en minúsculas del dominio, pero en la tabla
+        // puede haber filas antiguas con mayúsculas. Comparar contra `lower(Email)` es además lo
+        // que hace el índice único `ux_clientes_email`, así que buscamos por el mismo criterio por
+        // el que luego nos rechazaría el INSERT. El `Email IS NOT NULL AND Email <> ''` replica el
+        // predicado del índice parcial para que pueda usarlo.
         let mut rows = conn
             .query(
-                &format!("SELECT {COLS} FROM Clientes WHERE Email = ?1 ORDER BY ID_Cliente DESC LIMIT 1;"),
-                vec![Value::Text(e.clone())],
+                &format!(
+                    "SELECT {COLS} FROM Clientes \
+                     WHERE Email IS NOT NULL AND Email <> '' AND lower(Email) = ?1 \
+                     ORDER BY ID_Cliente DESC LIMIT 1;"
+                ),
+                vec![Value::Text(e.to_lowercase())],
             )
             .await
             .map_err(db_err)?;

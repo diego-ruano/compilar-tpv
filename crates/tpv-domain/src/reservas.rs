@@ -113,6 +113,18 @@ fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
+/// Igual que `limpia` pero **pasando a minúsculas**: el email identifica al cliente y la unicidad
+/// es case-insensitive (índice `ux_clientes_email` sobre `lower(Email)`, y el dominio de clientes
+/// normaliza igual). Sin esto, reservar con `Juan@Mail.com` no encontraba al cliente guardado como
+/// `juan@mail.com` y el alta chocaba contra ese índice.
+///
+/// Nota: aquí NO se valida el formato del email (a diferencia de `tpv_domain::clientes`). Una
+/// reserva se toma a menudo por teléfono y con datos incompletos; rechazarla por un email mal
+/// escrito sería peor que aceptarlo.
+fn limpia_email(o: Option<String>) -> Option<String> {
+    o.map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty())
+}
+
 /// Datos de cliente embebidos en una reserva (para el upsert de cliente).
 #[derive(Debug, Clone)]
 pub struct ClienteReserva {
@@ -187,7 +199,7 @@ impl ReservaValidada {
             estado,
             cliente: ClienteReserva {
                 nombre,
-                email: limpia(email),
+                email: limpia_email(email),
                 telefono: limpia(telefono),
                 notas: limpia(notas_cliente),
             },
@@ -251,6 +263,31 @@ mod tests {
 
     fn reserva_base(id: Option<String>, comensales: i64, mesa: &str, nombre: &str) -> Result<ReservaValidada, String> {
         ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.into(), nombre.into(), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
+    }
+
+    /// El email del cliente identifica de forma única (índice `ux_clientes_email` sobre
+    /// `lower(Email)`), así que tiene que llegar en minúsculas: si no, reservar con `Juan@Mail.com`
+    /// no encuentra al cliente guardado como `juan@mail.com` y el alta choca contra el índice.
+    #[test]
+    fn email_del_cliente_se_normaliza_a_minusculas() {
+        let r = ReservaValidada::validar(
+            None, "2026-07-22", "14:30", None, 2, None, None,
+            "m1".into(), "Ana".into(), None, Some("  Juan@Mail.COM  ".into()), None,
+        )
+        .unwrap();
+        assert_eq!(r.cliente.email.as_deref(), Some("juan@mail.com"));
+    }
+
+    #[test]
+    fn email_vacio_o_ausente_queda_en_none() {
+        for valor in [None, Some("".to_string()), Some("   ".to_string())] {
+            let r = ReservaValidada::validar(
+                None, "2026-07-22", "14:30", None, 2, None, None,
+                "m1".into(), "Ana".into(), None, valor, None,
+            )
+            .unwrap();
+            assert_eq!(r.cliente.email, None);
+        }
     }
 
     #[test]

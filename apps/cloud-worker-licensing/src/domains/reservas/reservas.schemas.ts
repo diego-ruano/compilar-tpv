@@ -18,6 +18,14 @@ function cleanOrNull(v: unknown): string | null {
 	return s.length ? s : null;
 }
 
+// Igual que `cleanOrNull` pero en minúsculas. El email identifica al cliente y su unicidad es
+// case-insensitive (índice `ux_clientes_email` sobre `lower(Email)`). Espejo de `limpia_email` en
+// `tpv_domain::reservas`: Main y Handy tienen que guardar exactamente el mismo valor.
+function cleanEmailOrNull(v: unknown): string | null {
+	const s = String(v ?? "").trim().toLowerCase();
+	return s.length ? s : null;
+}
+
 function normalizeDia(raw: unknown): string {
 	const s = String(raw ?? "").trim();
 	const candidate = s.length >= 10 ? s.slice(0, 10) : "";
@@ -134,7 +142,7 @@ export const reservaSaveSchema = z
 			id_mesa: v.id_mesa,
 			nombre_cliente: v.nombre_cliente,
 			telefono: cleanOrNull(v.telefono),
-			email: cleanOrNull(v.email),
+			email: cleanEmailOrNull(v.email),
 			notas_cliente: cleanOrNull(v.notas_cliente),
 		};
 	});
