@@ -10,16 +10,18 @@
 | STAT-06 | 🔵 | Paridad Main↔Handy: la lógica ya se igualó a mano; falta el **harness de tests de contrato** (infra de tests). | [estadisticas.md](dominios/estadisticas.md) |
 | INV-06 | 🔵 | Reconciliación de stock: la tabla `Movimientos_Stock` es su cimiento, pero la fórmula depende de **VR-06** (modelo de consumo, venta-rápida) y de decisiones de producto (dónde corre, qué alerta). | [inventario.md](dominios/inventario.md) |
 | INV-07 | 🔵 | Doble implementación Rust/worker: lógica igualada a mano; falta el **harness de tests de contrato** (misma infra que STAT-06). | [inventario.md](dominios/inventario.md) |
-| LOGIN-04 | 🟡 | **Subir PBKDF2 a 600k (OWASP) al activar el plan de pago de Cloudflare Workers.** Ahora en 100k porque el plan **Free** tiene un tope de 10 ms de CPU/petición y 600k lo superaría → rompería el login de Handy (el worker verifica el hash en cada login/fichaje). El rehash-en-login ya está cableado (`crates/tpv-infra-sqlite/src/login.rs`): basta subir `PBKDF2_ITERS` (Rust) y `DEFAULT_ITERS` (`login.crypto.ts`) y la Main migra los hashes viejos en el primer login de cada usuario. | [login.md](dominios/login.md) |
+| LOGIN-04 | 🔵 | **PBKDF2 a 600k (OWASP): BLOQUEADO por el runtime, no por el plan.** ⚠️ Corregido 2026-08-09: el tope de 100k **no** viene del plan Free sino de `crypto.subtle` de Cloudflare Workers, que **rechaza** PBKDF2 con más de 100.000 iteraciones (ver la nota en `crates/tpv-domain/src/login.rs:11-15`). Como el worker **verifica** el hash en cada login/fichaje de Handy, 100k es el techo común de ambos runtimes; tener el plan de pago **no lo desbloquea**. Además, con un PIN de 4 dígitos (10⁴) pasar de 100k a 600k solo multiplica por 6 el coste del crackeo offline: irrelevante frente al tamaño del espacio de claves. **Lo que sí movería la aguja** (por orden): un **pepper** fuera de la BD (hace inútil el hash replicado), ampliar el espacio de PIN, o dejar de replicar `Password_Hash` (LOGIN-02 hash nube). El anti-brute-force online ya está resuelto por el lockout escalado de LOGIN-01. | [login.md](dominios/login.md) |
 | LOGIN-05 | 🔵 | Doble implementación login/verify Rust↔worker: falta **harness de tests de contrato** de todos los caminos (setup, login, punch). Misma infra que STAT-06/INV-07. | [login.md](dominios/login.md) |
-| LOGIN-02 (hash nube) | 🟠 | *(Opcional, no necesario)* No replicar / segregar `Password_Hash` de la nube. Con LOGIN-04 (600k) el crackeo offline ya se encarece mucho, así que este rediseño (que Handy delegue la auth en la Main, o un pepper fuera de la BD) queda como extra, no como pendiente. | [login.md](dominios/login.md) |
+| LIC-07 | 🟡 | **Stripe: reembolsos y chargebacks no revocan la licencia.** El webhook solo escucha `checkout.session.completed` y `checkout.session.async_payment_succeeded` (`stripe.routes.ts:53`), así que un pago devuelto o disputado deja la licencia **activa hasta que caduque**. Mitigación actual: revocar a mano con `pnpm license:revoke`. **Arreglo:** suscribir `charge.refunded` y `charge.dispute.created`, resolver la licencia por `stripe_customer_id`/sesión y revocarla (o recortar `expires_at`), registrando el motivo en `admin_audit`. Pequeño y acotado; se hará cuando haya volumen de ventas real. | [PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md) |
 | MESA-11 | 🟡 | Doble implementación Main (Rust) ↔ worker (TS) del dominio mesas: la lógica se iguala a mano y **diverge** (ya pasó con MESA-04/MESA-07). Falta el **harness de tests de contrato** y un plan de unificación (ver §[Unificación de la doble implementación](#unificación-de-la-doble-implementación-mainworker)). | [mesas.md](dominios/mesas.md) |
 | MESA-14 | 🔵 | Componentes de UI monolíticos (`MesaComandaModal.tsx` ~70 KB, `KitchenBoard.tsx` ~18 KB): troceo en subcomponentes (ticket / panel de cobro / selector de productos) + hooks. **Pospuesto por prioridad**, no hay bug de negocio detrás. | [mesas.md](dominios/mesas.md) |
 | SYNC-17 | 🟡 | **Conectividad automática (eliminar el interruptor online/offline).** Hoy la Main sólo abre el WS si el usuario activa "online" en Configuración → Conectividad (`useConnectionMode`, por defecto `offline`). Objetivo: que el modo sea un **estado derivado** del WebSocket (intentar siempre con `tpv` + licencia válida + identidad; el badge refleja el estado real) en vez de un ajuste manual. Pendiente decidir dónde vive el gate de licencia (hoy `set_connection_mode` lo valida en Rust; lo natural sería que `/v1/ws/ticket` sea la autoridad y el cliente simplemente reintente con backoff). Incluye dos arreglos de fiabilidad detectados: **timeout de pong** (hoy se envía `ping` pero no se verifica respuesta → un socket medio-muerto no se detecta) y **reconexión inmediata en la Main** ante `online`/`focus` (la Handy ya lo hace). Prerrequisito de coste ya resuelto: SYNC-16 (hibernación) — es ese cambio el que hace que la Main tenga el WS abierto toda la jornada. | [sync-tenanthub.md](transversal/sync-tenanthub.md) |
 | FABLE-G | 🟠 | **CSP del cliente Tauri con comodín `https:`** (`script-src`/`connect-src` heredan de `default-src` → cualquier XSS futuro podría cargar código remoto y usar las APIs de Tauri). La investigación está **hecha y la solución redactada** (CSP estricta + `devCsp` + recorte de capacidades, ver §[Endurecimiento de la CSP](#endurecimiento-de-la-csp-del-cliente-tauri-fable-g--solución-lista-pendiente-de-aplicar)); aplazado porque aplicarla exige **probar a mano muchos flujos** (la CSP falla en runtime, no en compilación). | [auditoria-fable.md](../../auditoria-fable.md) |
 
-**Nota:** el harness de tests de contrato Rust↔worker cubriría de una vez STAT-06, INV-07, MESA-11 (y
-LOGIN-05 si acaba aplazado). Es una tarea transversal de infraestructura de testing, no de un dominio.
+**Nota:** el harness de tests de contrato Rust↔worker cubriría de una vez STAT-06, INV-07, MESA-11,
+LOGIN-05 y el resto de `-parity` (CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05, VR-05). Es una
+tarea transversal de infraestructura de testing, no de un dominio. Ver
+[00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
 ---
 
@@ -61,29 +63,26 @@ refactor.
 
 ---
 
-## Dependiente del plan de pago de Cloudflare Workers
+## Desbloqueado por el plan de pago de Cloudflare Workers
 
-> Mejoras **bloqueadas por el plan Free** de Cloudflare Workers (tope de **10 ms de CPU/petición** y
-> features de pago). Se activan al migrar al plan de pago.
+> **Actualizado 2026-08-09: el plan de pago ya está contratado.** Lo de abajo dejó de estar
+> bloqueado y pasa a ser trabajo pendiente normal, a hacer cuando toque.
 
-- **PBKDF2 100k → 600k (OWASP).** Ya detallado en **LOGIN-04** (arriba). El plan Free no admite 600k
-  (superaría el tope de CPU/petición del worker en cada login/fichaje de Handy). El rehash-en-login
-  ya está cableado: al activar el plan de pago basta subir `PBKDF2_ITERS` (Rust) y `DEFAULT_ITERS`
-  (`login.crypto.ts`) y la Main migra los hashes viejos en el primer login de cada usuario.
+> ⚠️ **PBKDF2 100k → 600k NO va en esta lista** (corregido 2026-08-09): el tope lo impone el
+> `crypto.subtle` de Workers (máx. 100.000 iteraciones), y es del **runtime**, no del plan. Tener el
+> plan de pago **no** lo desbloquea. Ver **LOGIN-04** arriba.
+
 - **Logpush.** Exportar los logs de petición HTTP del Worker a un destino (Axiom/R2/…) sin código,
-  vía Cloudflare Logpush — requiere plan de pago. Da retención/observabilidad más allá de
-  `wrangler tail` y del SDK de telemetría actual. Ya anotado en
+  vía Cloudflare Logpush. Da retención/observabilidad más allá de `wrangler tail` y del SDK de
+  telemetría actual. Ya anotado en
   [observability.md §8](../observability.md#8-notas-y-próximos-pasos).
-- **Envío de correo con Cloudflare Email Service (dejar de depender de Resend).** El objetivo es
-  enviar los correos de pedido a proveedor con el servicio nativo de Cloudflare en vez de Resend
-  (ya previsto en los comentarios de `apps/cloud-worker-licensing/src/domains/email/email.routes.ts`
-  y `commands/email_config.rs`). **Requiere plan de pago:** enviar a destinatarios arbitrarios
-  (los proveedores) exige el **Workers Paid plan** ($5/mes mínimo). En el plan Free solo se puede
-  enviar a **direcciones de destino verificadas** de la cuenta (vía Email Routing), lo que **no**
-  sirve para mandar pedidos a cualquier proveedor. Precio en el plan de pago: **3.000 correos/mes
-  incluidos**, luego **$0,35 por 1.000**. Al activarlo basta sustituir el `fetch` a la API de Resend
-  en `email.routes.ts` por el binding/servicio de Cloudflare (gateado por env), sin tocar el resto
-  del flujo (la Main/Handy siguen llamando a `POST /v1/email/enviar-pedido`).
+- **Envío de correo con Cloudflare Email Service (dejar de depender de Resend).** Enviar los correos
+  de pedido a proveedor con el servicio nativo de Cloudflare (ya previsto en los comentarios de
+  `apps/cloud-worker-licensing/src/domains/email/email.routes.ts` y `commands/email_config.rs`).
+  Enviar a destinatarios arbitrarios —los proveedores— exige el plan de pago, que ya está.
+  Precio: **3.000 correos/mes incluidos**, luego **$0,35 por 1.000**. El cambio es sustituir el
+  `fetch` a la API de Resend en `email.routes.ts` por el binding/servicio de Cloudflare (gateado por
+  env), sin tocar el resto del flujo (Main/Handy siguen llamando a `POST /v1/email/enviar-pedido`).
   Ref.: [Cloudflare Email Service — Pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
 
 ---
@@ -99,7 +98,7 @@ refactor.
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
 | ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker) de la lógica de escritura. Mitigada a mano; falta el **harness de tests de contrato** (SQL golden) y, a medio plazo, una única fuente de generación de sentencias. Es el paraguas de todos los `-parity` (MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05). Ver §Unificación. | Refactor gradual post-lanzamiento |
-| ARCH-02 | 🟡 | **Errores estructurados** en la frontera: hoy `AppError`→`String`. Pasar a un DTO `{ kind, code, message }` (ts-rs) para que el FE ramifique por tipo/código en vez de string-matching. El worker debe devolver la misma forma. | **Al pasar al worker de pago** (junto con el resto de la infra) |
+| ARCH-02 | 🟡 | **Errores estructurados** en la frontera: hoy `AppError`→`String`. Pasar a un DTO `{ kind, code, message }` (ts-rs) para que el FE ramifique por tipo/código en vez de string-matching. El worker debe devolver la misma forma. | Refactor gradual post-lanzamiento (ya no espera al plan de pago: está contratado) |
 | ARCH-05 | 🔵 | **Catálogo de códigos de error** estable y compartido (Rust/worker/FE); retirar `AppError::Raw`. Es la misma pieza que ARCH-02. | Con ARCH-02 |
 | ARCH-03 | 🟡 | **Tipos del worker** (zod `*.schemas.ts`) desde fuente única ts-rs. Patrón ya probado en el repo: **drift-guard de tipos** como en OBS-05 (`SpoolEvent`→`telemetry.ts` + guard en `telemetry.routes.ts`), replicado por dominio. | Refactor gradual post-lanzamiento |
 
@@ -115,11 +114,16 @@ refactor.
 > se abordará **más adelante, cuando se decida el modelo de precios** (planes, activación, etc.), ya
 > que el diseño concreto depende de eso. Ficha: [licensing-pairing.md](transversal/licensing-pairing.md).
 
+> **Actualizado 2026-08-09:** **LIC-01 y LIC-06 ya están resueltos** por el sistema de licencias
+> propio ([PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md)): el worker firma el estado con
+> ed25519 y el cliente lo verifica contra la clave pública **pineada en el binario**
+> (`LICENSE_SIGNING_PUBLIC_KEY_B64`, `crates/tpv-infra-licensing/src/lib.rs:55-61`), y las dos
+> constantes de host se unificaron en una. Queda solo lo de abajo.
+
 | ID | Sev | Qué falta | Notas |
 |----|-----|-----------|-------|
-| LIC-01 | 🟡 | La respuesta de licencia **no se verifica criptográficamente** (`call_status`, `lib.rs:217`): solo se confía en TLS. Un usuario con proxy local + CA propia podría forzar `allowed=true` y saltarse el gate. **Arreglo:** el servidor **firma** el estado de licencia (ed25519) y el cliente lo verifica contra una **clave pública pineada** en el binario. | Mayor retorno de seguridad; el gate sigue en cliente (evadible en última instancia), pero eleva mucho la barrera. |
-| LIC-02 | 🟡 | Sin **certificate pinning** del host de la API (habilita el MITM de LIC-01). En pairing el impacto es bajo (handshake ed25519 + JWT firmado). | Opcional si se implementa LIC-01 (la firma pineada es más robusta que el pinning de transporte). |
-| LIC-06 | 🔵 | `LICENSE_API_BASE` y `TPV_SERVER_BASE` son **dos constantes al mismo host** (`lib.rs:37-38`, legacy de la fusión de workers). | Limpieza; unificar en una sola constante. |
+| LIC-02 | 🔵 | Sin **certificate pinning** del host de la API. | Prácticamente *moot* con LIC-01 resuelto: la firma pineada es más robusta que el pinning de transporte. Un MITM ya no puede falsificar el estado de licencia. |
+| LIC-04 | 🔵 | Documentar el **modelo de amenaza** del gate (corre en cliente → evadible en última instancia). | Tarea de documentación. |
 
 > **LIC-03** verificado como **no explotable** en pairing (todos los caminos firmados validan `ts` a
 > 2 min; `fetch-token` con nonce de un solo uso). **LIC-05** (SMTP al keyring) quedó **moot**: DB-04

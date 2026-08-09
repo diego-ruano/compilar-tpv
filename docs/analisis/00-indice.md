@@ -2,14 +2,14 @@
 
 > **Propósito.** Auditoría profunda del monorepo TPV (escritorio Tauri/React + worker Cloudflare
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
-> cuellos de rendimiento y deuda de calidad/consistencia**. Cada módulo tiene su propio `.md` con
-> hallazgos priorizados y un **workflow de corrección** paso a paso.
+> cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Cómo usar este documento.** Se trabaja **un módulo a la vez**. Abre el `.md` del módulo, revisa
-> la tabla de hallazgos (ordenados por severidad), y sigue el workflow. Marca el estado en la tabla
-> de progreso de abajo a medida que se resuelven.
+> **Estado (revisado 2026-08-09).** De los ~136 hallazgos del análisis original **quedan 16 abiertos**.
+> Los corregidos se han **retirado** de las fichas: cada `.md` conserva solo lo abierto más una tabla
+> "Qué se corrigió" con la traza de cómo quedó. Si buscas un hallazgo que ya no aparece, es que está
+> resuelto.
 
----                                 
+---
 
 ## Metodología
 
@@ -17,15 +17,11 @@
   frontend (`apps/tpv-main/src/features/*`), worker (`apps/cloud-worker-licensing/src/domains/*`),
   y backend Rust (`crates/*` + `apps/tpv-main/src-tauri/src/commands/*`)— además del esquema SQL y
   la ruta de sincronización (outbox → TenantHub → broadcast).
-- **Severidades:**
-  - 🔴 **Crítico** — corrupción de datos, pérdida de dinero, fallo de seguridad, o caída del flujo de venta.
-  - 🟠 **Alto** — bug funcional visible, inconsistencia FE↔BE, o riesgo de seguridad acotado.
-  - 🟡 **Medio** — comportamiento incorrecto en casos límite, rendimiento degradado, o UX rota.
-  - 🔵 **Bajo / Mejora** — refactor, consistencia, tipos, deuda técnica, tests ausentes.
-- **Cada hallazgo lleva:** ID estable (`<MOD>-NN`), ubicación `archivo:línea`, descripción del
-  fallo, escenario reproductor concreto, impacto y propuesta de arreglo.
-- **Verificación:** los hallazgos marcados **CONFIRMADO** se han razonado hasta un escenario
-  reproductor; los **PLAUSIBLE** requieren validación en ejecución (se indica cómo).
+- **Severidades:** 🔴 crítico · 🟠 alto · 🟡 medio · 🔵 bajo/mejora.
+- **Cada hallazgo lleva:** ID estable (`<MOD>-NN`), ubicación, descripción, escenario reproductor,
+  impacto y propuesta de arreglo.
+- **Trazabilidad en el código:** las correcciones llevan el ID del hallazgo en un comentario
+  (`// MESA-01: …`), así que `grep -rn "MESA-01" crates/` lleva directo al arreglo.
 
 ---
 
@@ -60,57 +56,44 @@
 
 ---
 
-## Tabla de progreso
+## Lo que queda abierto
 
-Leyenda: ⬜ pendiente · 🔍 análisis hecho (doc generado) · 🛠️ en corrección · ✅ resuelto
+| Módulo | Abiertos | Cuáles |
+|--------|----------|--------|
+| T5 Arquitectura | 4 | ARCH-01 🟠 · ARCH-02 🟡 · ARCH-03 🟡 · ARCH-05 🔵 |
+| D1 Mesas | 2 | MESA-11 🟡 · MESA-14 🔵 |
+| D2 Venta rápida | 3 | VR-05 🟡 · VR-06 🟡 · VR-07 🔵 |
+| D4 Inventario | 2 | INV-06 🔵 · INV-07 🔵 |
+| D6 Reservas | 2 | RES-05 🔵 · RES-07 🔵 |
+| D8 Tareas | 2 | TAR-04 🔵 · TAR-05 🔵 |
+| D9 Trabajadores | 2 | TRAB-03 🟡 · TRAB-06 🔵 |
+| D11 Login | 3 | LOGIN-03 🔵 · LOGIN-04 🔵 · LOGIN-05 🔵 |
+| T1 Esquema DB | 1 | DB-14 🔵 |
+| T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
+| D3 Cuentas | 1 | CUENTA-06 🔵 |
+| D5 Clientes · D7 Proveedores · D10 Configuración · D12 Estadísticas | 1 c/u | CLI-05 · PROV-07 · CONF-06 · STAT-06 (todos 🔵 parity) |
+| T2 Sync | 0 | *(SYNC-17 vive en el [BACKLOG](BACKLOG.md))* |
+| T4 Observabilidad | 0 | — |
 
-Recuento por severidad (🔴 crítico / 🟠 alto / 🟡 medio / 🔵 bajo-mejora). No se han encontrado
-🔴 críticos "en frío" (varios 🟠 son serios y dependen de condiciones concretas — ver cada doc).
+### Nota importante sobre el recuento
 
-| Módulo | Análisis | Corrección | Nº hallazgos (🔴/🟠/🟡/🔵) |
-|--------|----------|-----------|----------------------------|
-| T1 Esquema DB | 🔍 | ⬜ | 0 / 4 / 5 / 6 (15) |
-| T2 Sync/TenantHub | 🔍 | ⬜ | 0 / 4 / 7 / 4 (15) |
-| D1 Mesas | 🔍 | ⬜ | 0 / 5 / 6 / 4 (15) |
-| D2 Venta rápida | 🔍 | ⬜ | 0 / 2 / 4 / 4 (10) |
-| D3 Cuentas | 🔍 | ⬜ | 0 / 2 / 3 / 1 (6) |
-| D4 Inventario | 🔍 | ⬜ | 0 / 0 / 4 / 4 (8) |
-| D5 Clientes | 🔍 | ⬜ | 0 / 1 / 2 / 3 (6) |
-| D6 Reservas | 🔍 | ⬜ | 0 / 1 / 3 / 3 (7) |
-| D7 Proveedores | 🔍 | ⬜ | 0 / 0 / 4 / 3 (7) |
-| D8 Tareas | 🔍 | ⬜ | 0 / 0 / 1 / 4 (5) |
-| D9 Trabajadores | 🔍 | ⬜ | 0 / 0 / 4 / 2 (6) |
-| D10 Configuración | 🔍 | ⬜ | 0 / 1 / 3 / 2 (6) |
-| D11 Login | 🔍 | ⬜ | 0 / 1 / 3 / 2 (6) |
-| D12 Estadísticas | 🔍 | ⬜ | 0 / 0 / 4 / 2 (6) |
-| T3 Licensing/pairing | 🔍 | ⬜ | 0 / 0 / 3 / 3 (6) |
-| T4 Observabilidad | 🔍 | ⬜ | 0 / 0 / 2 / 3 (5) |
-| T5 Arquitectura general | 🔍 | ⬜ | 0 / 1 / 3 / 3 (7) |
-| **TOTAL** | | | **0 / 22 / 61 / 53 (≈136)** |
+**11 de los abiertos son la misma cosa**: la doble implementación Main(Rust)/Handy(worker). ARCH-01
+es el paraguas y MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04,
+TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness de tests de contrato
+(SQL golden)— los cierra todos.** Es, con diferencia, el pendiente de mayor retorno.
 
-### Temas transversales más importantes (leer primero)
-
-1. **Doble implementación Main(Rust)/Handy(worker)** (ARCH-01): cada escritura está codificada dos
-   veces y debe converger; la deriva **ya ocurre** (MESA-04, MESA-07, CUENTA-03). Es la deuda #1.
-2. **Determinismo temporal del sync** (DB-02, SYNC-04/05, RES-03, TAR-01): columnas con `DEFAULT`
-   temporal e `INSERT…SELECT` sobre catálogo divergen entre Main y nube.
-3. **Modelo de cobro inconsistente** (MESA-01/05, CUENTA-01/02, CLI-01, STAT-01/02): stock, gasto de
-   cliente, caja y KPIs no comparten una única fuente de verdad ni revierten al anular.
-4. **Seguridad** (LOGIN-01 PIN débil + hash en nube, DB-04/CONF-01 SMTP en claro, TRAB-02/03 fraude
-   horario + PII, LIC-01 licencia sin firma pineada, OBS-01 scrubbing).
-5. **Robustez del sync** (SYNC-01 poison-op atasca el pipeline, SYNC-02 outbox no atómico).
+El resto se agrupa en:
+- **Reconciliación de datos derivados:** INV-06 y VR-06 (stock) + DB-14 (`Total_Gastado`). Misma
+  clase de tarea: un chequeo que compare el valor guardado con el recalculado y avise de la deriva.
+- **Contrato de errores:** ARCH-02 + ARCH-05, aplazados a la migración de infra del worker.
+- **Seguridad de datos:** TRAB-03 (PII replicada) y LOGIN-04 (keyspace del PIN).
+- **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
+  MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.
 
 ---
 
-## Orden de trabajo recomendado
+## Dónde está el resto
 
-1. **T1 Esquema DB** y **T2 Sync** primero: son la base sobre la que se apoyan todos los dominios;
-   entender sus reglas (idempotencia, IDs deterministas, captura de outbox) hace más afilado el
-   resto del análisis.
-2. Luego el **núcleo del POS** (D1 Mesas, D2 Venta rápida, D3 Cuentas): es donde vive el dinero y
-   el mayor volumen de lógica transaccional.
-3. Después el resto de dominios (D4–D12).
-4. Cierre con **T3 Licensing**, **T4 Observabilidad** y **T5 Arquitectura**.
-
-> Nota de método: los `.md` se generan **uno a uno** con análisis a fondo (no en lote), para
-> maximizar la calidad del detalle en cada módulo.
+- **Aplazados con motivo** (incluido SYNC-17 y la deuda transversal): [BACKLOG.md](BACKLOG.md).
+- **Seguridad de red / superficie de ataque:** [auditoria-fable.md](../../auditoria-fable.md).
+- **Sistema de licencias propio:** [PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md).

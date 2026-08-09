@@ -5,119 +5,84 @@
 > **Capas:** `crates/tpv-domain/src/login.rs` (hash/verify PBKDF2), `crates/tpv-infra-sqlite/src/login.rs`
 > (repo), `use_cases/login.rs`, `apps/cloud-worker-licensing/src/domains/login/*`,
 > FE `apps/tpv-main/src/features/login/*`.
+>
+> **Estado (revisado 2026-08-09).** Resueltos y retirados: LOGIN-01, LOGIN-06. LOGIN-04 reclasificado
+> (ver abajo: el tope de iteraciones **no** depende del plan de Cloudflare).
 
 ## Valoración de seguridad
 
 **Aciertos:** verificación en **tiempo constante** (`verify_pin`, XOR-acumulado), PBKDF2-HMAC-SHA256
-**con sal** (16 B) y 100 000 iteraciones, gate de setup inicial, y validaciones de entrada. **Riesgo
-principal:** el **espacio de claves** (PIN de 4 dígitos) combinado con la ausencia de lockout y la
-**replicación del hash a la nube**.
+con sal aleatoria de 16 B por usuario, **lockout escalado** tras 5 fallos, gate de setup inicial,
+auto-logout por inactividad (10 min) y validaciones de entrada.
 
-## Resumen de hallazgos
+**Riesgo que queda:** el **espacio de claves**. Un PIN de 4 dígitos son 10⁴ combinaciones, y el
+`Password_Hash` se replica a la BD del tenant en Turso. El coste de romper un hash offline es de
+**décimas de segundo por usuario en una GPU de consumo**, y eso **no lo arregla subir iteraciones**
+(ver LOGIN-04). El lockout protege el ataque *online*, que es el realista hoy; el *offline* exige
+antes acceso de lectura a la BD de la nube.
 
-| ID | Sev | Estado | Título | Ubicación |
-|----|-----|--------|--------|-----------|
-| LOGIN-01 | 🟠 | ✅ | **Auth débil**: PIN de 4 dígitos (~10⁴) + sin lockout + `Password_Hash` replicado a la nube → brute-force trivial | `login.rs:534`, `domain/login.rs`, esquema |
-| LOGIN-02 | 🟡 | ❌ | **Sin autorización server-side**: cualquier comando Tauri es invocable por cualquier rol (gating solo en FE) — **descartado por decisión** (ver nota) | `commands/*`, worker |
-| LOGIN-03 | 🟡 | 🟡 | `list_login_users` **enumera usuarios** (reduce la seguridad efectiva con LOGIN-01) | `login.rs:481` |
-| LOGIN-04 | 🟡 | ⏳ | PBKDF2 **100k iter** (bajo la guía OWASP ~600k); Argon2 explícitamente no soportado | `domain/login.rs:11,61` |
-| LOGIN-05 | 🔵 | ⬜ | Doble implementación Rust/worker de login/verify (parity, crítico) | `login.rs` ↔ `login.commands.ts` |
-| LOGIN-06 | 🔵 | ✅ | Fallbacks silenciosos (`email='admin@local'`, `rol='Sin rol'`) ocultan datos faltantes | `login.rs:180,199` |
+## Hallazgos abiertos
 
-> **Resolución (2026-07-05).**
-> - **LOGIN-01 ✅ (lockout):** contador de intentos fallidos con bloqueo escalado (5 libres → 30 s /
->   1 min / 5 min / 15 min, reset al acertar), en Main y worker, sobre **login** y **fichaje**. Estado
->   en la tabla `Intentos_Login` (migración `0005`, esquema compartido pero device-local: la Main la
->   escribe con la conexión `raw`, sin replicar; el worker en su BD de tenant). Política pura en
->   `tpv-domain::login::login_bloqueo_ms`; verificador en `tpv-infra-sqlite::auth` y `lib/adminAuth.ts`.
->   *(No se aborda el keyspace del PIN ni la replicación del hash; ver LOGIN-04 y notas.)*
-> - **LOGIN-06 ✅:** fallbacks explícitos (email ausente → `""`; rol ausente → error, por ser crítico
->   para la autorización), en Rust y worker.
-> - **LOGIN-04 ⏳:** rehash-en-login **cableado** (latente); las iteraciones siguen en **100k** por el
->   tope de 10 ms de CPU del plan **Free** de Cloudflare (600k lo superaría y rompería el login de
->   Handy). Subir a 600k al activar el plan de pago — ver [BACKLOG](../BACKLOG.md).
-> - **LOGIN-02 ❌ (descartado por decisión):** se llegó a implementar un re-PIN de administrador por
->   operación sensible (con enforcement en el ejecutor) para inventario/cobros/trabajadores, pero se
->   **retiró por completo** a petición del responsable: no aportaba frente a un PIN de admin ya
->   conocido y añadía fricción (un camarero no debería teclear el PIN de admin para cada acción; el
->   gating por rol del FE ya oculta lo que no le corresponde). Todo funciona como antes: **no se pide
->   el PIN de admin en ninguna operación**. La única defensa que queda contra el uso indebido de
->   credenciales es LOGIN-01 (lockout) + LOGIN-04 (hash fuerte al pasar a plan de pago).
-> - **LOGIN-03 🟡:** su mitigación real (el lockout de LOGIN-01) está hecha; no se cambió la enumeración
->   en sí (aceptable en kiosco).
-> - **LOGIN-05 ⬜:** tests de contrato Rust↔worker — infra de tests, ver [BACKLOG](../BACKLOG.md).
->
-> **Extra (no era un hallazgo):** **auto-logout por inactividad** (10 min sin interacción → login),
-> hook `shared/lib/useInactivityLogout.ts` montado en el root. Cualquier interacción reinicia el reloj.
+| ID | Sev | Título | Ubicación |
+|----|-----|--------|-----------|
+| LOGIN-04 | 🔵 | El hash del PIN es **crackeable offline** si alguien lee la BD del tenant; subir iteraciones no lo arregla | `domain/login.rs:11-16`, `login.crypto.ts` |
+| LOGIN-03 | 🔵 | `list_login_users` **enumera usuarios** | `login.rs` (`list_login_users`) |
+| LOGIN-05 | 🔵 | Doble implementación Rust/worker de login/verify (parity, crítico) | `login.rs` ↔ `login.commands.ts` |
 
----
+### LOGIN-04 🔵 El hash es crackeable offline (y las iteraciones no son la palanca)
 
-## Detalle de hallazgos
+- **Situación:** PBKDF2-HMAC-SHA256, 100.000 iteraciones, sal única por usuario. El
+  `Usuarios.Password_Hash` viaja por el outbox a la BD del tenant (Turso), porque el **worker**
+  verifica el PIN en el login de Handy (que no tiene BD local).
+- **Por qué 100k y no 600k (OWASP):** el `crypto.subtle` de Cloudflare Workers **rechaza** PBKDF2
+  con más de 100.000 iteraciones. Es un límite del **runtime**, no del plan de pago: tenerlo
+  contratado no lo desbloquea. Está anotado en `crates/tpv-domain/src/login.rs:11-16`.
+- **Por qué tampoco importaría:** con 10⁴ candidatos, probarlos todos contra un hash de 100k
+  iteraciones cuesta ~10⁹ iteraciones PBKDF2, del orden de **décimas de segundo** en una GPU de
+  consumo. A 600k serían ~0,5 s. Multiplicar por 6 el coste de algo que ya se hace en menos de un
+  segundo no cambia nada: la variable que manda es el **tamaño del espacio de claves**, no el KDF.
+- **Opciones reales**, por relación coste/beneficio:
+  1. **PIN más largo para roles sensibles.** El dominio solo exige `len >= 4`. Permitir (o exigir)
+     8 dígitos al admin multiplica por 10.000 el coste del ataque. Es el cambio más barato con
+     diferencia.
+  2. **Pepper**: un secreto que se mezcla con el PIN antes del PBKDF2 y que **no vive en la BD**
+     (secreto del worker + keyring/SecretStore en la Main, entregado en la activación). Sin él, el
+     hash replicado no se puede atacar por diccionario. Requiere tocar las dos implementaciones,
+     distribuir y custodiar el secreto, y un rehash-en-login para migrar los hashes existentes.
+     Ojo: perder el pepper = nadie puede entrar.
+  3. **KDF más fuerte** (Argon2id/scrypt vía WASM en el Worker). El más caro y el que menos aporta
+     frente a (1) y (2), por el mismo motivo del keyspace.
+- **No aplica:** dejar de replicar `Password_Hash` a la nube — **descartado por decisión del
+  responsable**: la Handy necesita que el worker verifique el PIN.
+- **Ya hecho y aprovechable:** el **rehash-en-login** está cableado (`crates/tpv-infra-sqlite/src/login.rs`),
+  así que cualquier cambio de esquema de hash migra solo en el primer login de cada usuario.
 
-### LOGIN-01 🟠 Autenticación débil por combinación de factores — CONFIRMADO
-- **Evidencia:**
-  - El setup exige `pin_nuevo.len() >= 4` (`use_cases/login.rs:60`) → PINs de **4 dígitos**
-    ⇒ ~10 000 combinaciones.
-  - `login` (`login.rs:534-551`) hace `verify_pin` y devuelve; **no hay** contador de intentos,
-    retardo ni bloqueo. Intentos ilimitados.
-  - `Usuarios.Password_Hash` está en el esquema compartido → **se replica a Turso** (nube).
-- **Fallo:** con 10⁴ posibilidades, un atacante con acceso a la BD de la nube puede **brute-forcear
-  offline** todos los PINs (PBKDF2 100k × 10⁴ ≈ 10⁹ ops, factible); y en local/Handy puede probar
-  online sin límite. PBKDF2 no compensa un keyspace tan pequeño.
-- **Impacto:** suplantación de cualquier trabajador (incluido admin) → acceso a caja, control horario,
-  datos.
-- **Arreglo (defensa en profundidad):** (1) **lockout/rate-limiting** con backoff tras N fallos por
-  usuario/dispositivo; (2) **no replicar** `Password_Hash` a la nube si no es imprescindible (o
-  segregarlo); (3) permitir PINs más largos / segundo factor para roles sensibles (admin); (4)
-  subir iteraciones (LOGIN-04). Priorizar (1) y (2).
-
-### LOGIN-02 🟡 Sin autorización a nivel de comando
-- **Ubicación:** los `#[tauri::command]` no comprueban rol; la restricción por rol vive en el FE. En
-  la Handy, el worker autentica el **dispositivo** (tpv/handy) pero conviene revisar la autorización
-  por **rol** dentro del tenant.
-- **Fallo:** un FE comprometido/modificado puede invocar comandos administrativos con una sesión de
-  camarero. Amenaza acotada en un kiosco local, mayor con Handy en red.
-- **Arreglo:** enforcar el rol en la frontera (comando/worker) para las operaciones sensibles
-  (gestión de personal, borrado de pagos, configuración).
-
-### LOGIN-03 🟡 Enumeración de usuarios
-- **Ubicación:** `list_login_users` (`login.rs:481`) devuelve la lista de usuarios para que el
-  operador elija su nombre. Típico de kiosco, pero publica los identificadores válidos y, junto con
-  LOGIN-01, deja la seguridad efectiva en solo el PIN.
-- **Arreglo:** aceptable para kiosco físico; reforzar con lockout (LOGIN-01) si el acceso no es de
-  confianza.
-
-### LOGIN-04 🟡 Parámetros de hashing
-- **Ubicación:** `PBKDF2_ITERS = 100_000` (`domain/login.rs:11`), espejado en el worker
-  (`login.crypto.ts` y `licensing.helpers.ts`); `parse_pbkdf2_phc` **rechaza** argon2 (`:61`).
-- **Fallo:** 100k está por debajo de la recomendación OWASP actual (~600k). **Pero no se puede
-  subir:** el `crypto.subtle` PBKDF2 de Cloudflare Workers tiene un tope duro de 100.000 iteraciones
-  (límite del runtime, no del plan), y el worker es quien verifica el PIN en el login de Handy
-  online. Un intento previo de subirlo a 600k rompió la activación (creación del admin del tenant) y
-  habría roto el login de Handy. Para PINs numéricos la protección real es el lockout (LOGIN-01), no
-  las iteraciones.
-- **Arreglo:** si se quisiera endurecer de verdad, migrar a un KDF más fuerte disponible en Workers
-  (Argon2/scrypt vía WASM); subir las iteraciones de PBKDF2 no es una opción en este runtime.
+### LOGIN-03 🔵 Enumeración de usuarios
+`list_login_users` devuelve la lista de usuarios para que el operador elija su nombre: publica los
+identificadores válidos, así que la seguridad efectiva queda solo en el PIN. Es el patrón normal de
+un kiosco y su mitigación real (el lockout) ya está. Se deja como está.
 
 ### LOGIN-05 🔵 Doble implementación crítica
-- Login/verify existe en Rust y worker. Una divergencia en la verificación sería grave. **Arreglo:**
-  tests de contrato de todos los caminos (setup, login, punch).
-
-### LOGIN-06 🔵 Fallbacks silenciosos
-- `login.rs:180` (`email → "admin@local"`) y `:199`/`:207` (`rol → "Sin rol"`) enmascaran datos
-  ausentes en vez de fallar o avisar. **Arreglo:** tratar la ausencia explícitamente.
+Login/verify existe en Rust y en el worker; una divergencia en la verificación sería grave.
+**Arreglo:** tests de contrato de todos los caminos (setup, login, punch) → ver
+[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
 ---
 
-## Workflow de corrección (D11)
+## Decisiones tomadas (no son pendientes)
 
-1. **LOGIN-01 (prioridad).** Lockout/rate-limiting + segregar/no replicar el hash + PIN más largo o
-   2FA para admin. Coordinar con [sync-tenanthub.md](../transversal/sync-tenanthub.md) (qué se
-   replica) y [trabajadores.md](trabajadores.md) (PII).
-2. **LOGIN-02 (authz).** Enforcar rol en la frontera para operaciones sensibles.
-3. **LOGIN-04 (hashing).** Subir iteraciones / Argon2id con rehash.
-4. **LOGIN-03/05/06 (endurecimiento y parity).** Tests de contrato; fallbacks explícitos.
+- **LOGIN-02 — autorización server-side por rol: descartada.** Se llegó a implementar un re-PIN de
+  administrador por operación sensible (con enforcement en el ejecutor) y se **retiró por completo**
+  a petición del responsable: no aportaba frente a un PIN de admin ya conocido y añadía fricción. El
+  gating por rol del FE oculta lo que no corresponde; **no se pide el PIN de admin en ninguna
+  operación**.
 
-**Invariante clave:** el acceso a operaciones sensibles debe requerir **credenciales robustas** y
-autorización verificada en el backend, no solo en el FE; el material de credenciales no debe
-exponerse más de lo imprescindible.
+## Qué se corrigió (referencia rápida)
+
+| ID | Cómo quedó |
+|----|------------|
+| LOGIN-01 | **Lockout escalado**: 5 intentos libres → 30 s / 1 min / 5 min / 15 min, reset al acertar; en Main y worker, sobre login **y** fichaje. Estado en `Intentos_Login` (device-local, no replicada). Política pura en `tpv_domain::login::login_bloqueo_ms`. Cierra el brute-force *online*, que era el vector realista. |
+| LOGIN-06 | Fallbacks explícitos: email ausente → `""`; rol ausente → **error** (es crítico para la autorización). En Rust y worker. |
+
+**Extra (no era un hallazgo):** auto-logout por inactividad (10 min sin interacción → login), hook
+`shared/lib/useInactivityLogout.ts` montado en el root.
