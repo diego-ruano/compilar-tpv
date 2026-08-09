@@ -5,9 +5,6 @@
 > **Capas:** `crates/tpv-domain/src/login.rs` (hash/verify PBKDF2), `crates/tpv-infra-sqlite/src/login.rs`
 > (repo), `use_cases/login.rs`, `apps/cloud-worker-licensing/src/domains/login/*`,
 > FE `apps/tpv-main/src/features/login/*`.
->
-> **Estado (revisado 2026-08-09).** Resueltos y retirados: LOGIN-01, LOGIN-06. LOGIN-04 reclasificado
-> (ver abajo: el tope de iteraciones **no** depende del plan de Cloudflare).
 
 ## Valoración de seguridad
 
@@ -83,13 +80,3 @@ Login/verify existe en Rust y en el worker; una divergencia en la verificación 
   a petición del responsable: no aportaba frente a un PIN de admin ya conocido y añadía fricción. El
   gating por rol del FE oculta lo que no corresponde; **no se pide el PIN de admin en ninguna
   operación**.
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| LOGIN-01 | **Lockout escalado**: 5 intentos libres → 30 s / 1 min / 5 min / 15 min, reset al acertar; en Main y worker, sobre login **y** fichaje. Estado en `Intentos_Login` (device-local, no replicada). Política pura en `tpv_domain::login::login_bloqueo_ms`. Cierra el brute-force *online*, que era el vector realista. |
-| LOGIN-06 | Fallbacks explícitos: email ausente → `""`; rol ausente → **error** (es crítico para la autorización). En Rust y worker. |
-
-**Extra (no era un hallazgo):** auto-logout por inactividad (10 min sin interacción → login), hook
-`shared/lib/useInactivityLogout.ts` montado en el root.

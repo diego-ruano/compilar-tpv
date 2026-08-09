@@ -87,7 +87,7 @@ Como estos datos son **operativos** (no de negocio), conviene una retención cor
 | Capa | Archivo |
 |---|---|
 | Crate de telemetría (Rust) | `crates/tpv-telemetry/` (subscriber, fichero rotado, cola durable, worker de subida, cliente Sentry) |
-| Cableado escritorio | `apps/tpv-main/src-tauri/src/main.rs` (`init`, plugin Sentry, firmante, contexto) |
+| Cableado escritorio | `apps/tpv-main/src-tauri/src/lib.rs` (`init`, plugin Sentry, firmante, contexto). **No en `main.rs`**: desde la compilación a Android, `main.rs` es solo el shim del binario de escritorio (`fn main() { tpv_lib::run() }`) y toda la app vive en `lib.rs`. |
 | Sentry Webview | `apps/tpv-main/src/shared/observability/sentry.ts` (+ error boundary y listener global) |
 | Sentry Worker | `apps/cloud-worker-licensing/src/observability/sentry.ts` + `src/index.ts` |
 | Axiom (helper) | `apps/cloud-worker-licensing/src/observability/axiom.ts` |

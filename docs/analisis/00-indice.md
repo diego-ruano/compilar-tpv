@@ -4,10 +4,10 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (revisado 2026-08-09).** De los ~136 hallazgos del análisis original **quedan 16 abiertos**.
-> Los corregidos se han **retirado** de las fichas: cada `.md` conserva solo lo abierto más una tabla
-> "Qué se corrigió" con la traza de cómo quedó. Si buscas un hallazgo que ya no aparece, es que está
-> resuelto.
+> **Estado (revisado 2026-08-09).** De los ~136 hallazgos del análisis original **quedan 16 abiertos**,
+> y son lo único que contienen estas fichas. **Un hallazgo corregido se borra de aquí**: la traza del
+> arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
+> aparece, está resuelto.
 
 ---
 
@@ -21,7 +21,9 @@
 - **Cada hallazgo lleva:** ID estable (`<MOD>-NN`), ubicación, descripción, escenario reproductor,
   impacto y propuesta de arreglo.
 - **Trazabilidad en el código:** las correcciones llevan el ID del hallazgo en un comentario
-  (`// MESA-01: …`), así que `grep -rn "MESA-01" crates/` lleva directo al arreglo.
+  (`// MESA-01: …`), así que `grep -rn "MESA-01" crates/ apps/` lleva directo al arreglo. Por eso al
+  cerrar un hallazgo **se borra de la ficha** en vez de moverlo a una lista de "ya corregidos": el
+  código y el historial de git son la traza, y una lista paralela solo se queda vieja.
 
 ---
 

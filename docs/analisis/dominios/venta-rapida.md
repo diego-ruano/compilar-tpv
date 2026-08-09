@@ -7,9 +7,6 @@
 > `apps/tpv-main/src-tauri/src/commands/venta_rapida.rs`,
 > `apps/cloud-worker-licensing/src/domains/venta_rapida/*` (implementación paralela Handy + cálculo
 > del `plan` FEFO), FE `apps/tpv-main/src/features/ventaRapida/*`.
->
-> **Estado (revisado 2026-08-09).** Los hallazgos corregidos se han retirado; abajo queda solo lo
-> abierto. Resueltos o decididos: VR-01, VR-02, VR-03, VR-04, VR-08, VR-09, VR-10.
 
 ## Cómo funciona hoy
 
@@ -48,17 +45,3 @@ descuadre solo se ve mirando los números a mano. Gemelo de **INV-06**; su cimie
 El consumo FEFO lee los lotes del producto y emite dos escrituras por lote dentro de la
 transacción. Con pocas líneas es irrelevante; conviene tenerlo presente si algún día una venta pasa
 a tener decenas de líneas. Sin impacto medido hoy.
-
----
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| VR-01 | El reparto FEFO del Handy se calcula con estado de lotes **en memoria** y se emite como `UPDATE` literales; varias líneas del mismo producto ya no re-leen el mismo stock (se acabó la sobre-asignación). |
-| VR-02 | Clamp unificado: los lotes **nunca** quedan negativos en ninguna de las dos rutas ni en ninguna de las dos implementaciones. |
-| VR-03 | Absorbido por la decisión de VR-04: ya no hay validación de suficiencia previa que pueda quedar desfasada respecto al consumo. |
-| VR-04 | Decisión explícita y documentada en el código: no se valida suficiencia ni se bloquea el cobro; el sobrante va al stock suelto. |
-| VR-08 | Eliminado el predicado muerto `ID_Trabajador <= 0`. |
-| VR-09 | El `format!` se limita a generar **placeholders** (`?1, ?2…`); los valores siguen bindeados. |
-| VR-10 | Aceptado a propósito: `vrBootstrap` **no** se migra a React Query (ver [CLAUDE.md §Capa de datos del frontend](../../../CLAUDE.md)); cachear el núcleo transaccional del POS aportaba poco y arriesgaba mucho. |

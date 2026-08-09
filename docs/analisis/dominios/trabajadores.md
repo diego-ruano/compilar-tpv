@@ -6,8 +6,6 @@
 > `crates/tpv-infra-sqlite/src/login.rs` (**fichajes** `exec_punch`), `stats.rs` (lectura de horas),
 > `use_cases/{trabajadores,login}.rs`, `apps/cloud-worker-licensing/src/domains/{trabajadores,login}/*`,
 > FE `apps/tpv-main/src/features/trabajadores/*`.
->
-> **Estado (revisado 2026-08-09).** Resueltos y retirados: TRAB-01, TRAB-02, TRAB-04, TRAB-05.
 
 ## Nota de cohesión
 
@@ -31,14 +29,3 @@ arquitectura/GDPR transversal, aplazada a un pase dedicado → ver [BACKLOG.md](
 La lógica de fichaje está codificada en Rust (Main) y en TS (worker, para Handy). Es la instancia
 más delicada de **ARCH-01** porque de ella salen las horas trabajadas. Lo cubre el harness de tests
 de contrato → ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
-
----
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| TRAB-01 | Cierre automático de jornadas colgadas: los fichajes `ABIERTO` de días anteriores se cierran marcándolos con `Cerrado_Automatico`/`Cierre_Motivo`, para que no corrompan las horas que lee `stats`. |
-| TRAB-02 | El `punch` **ignora deliberadamente** la fecha/hora que envía el cliente y usa siempre el reloj de confianza del backend: se acabó el backdating/forward-dating desde un dispositivo. |
-| TRAB-04 | Guard de doble asignación (mismo trabajador + fecha + turno). El lock de escritura serializa el check-then-insert. |
-| TRAB-05 | `copy_semana` y `set_predeterminado_desde_semana` son transaccionales (BEGIN/COMMIT) y generan un UUIDv7 propio por copia, para que las filas sincronicen igual en Main y nube. |

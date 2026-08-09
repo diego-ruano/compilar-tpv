@@ -7,8 +7,6 @@
 > **Capas:** `packages/contracts` (ts-rs), `packages/client` (`invokeClient`),
 > `crates/tpv-application/src/error.rs`, `crates/tpv-domain`, worker `domains/*/*.schemas.ts`,
 > FE `shared/lib/queryClient.ts` + `*Queries.ts`.
->
-> **Estado (revisado 2026-08-09).** Resueltos y retirados: ARCH-04 (= SYNC-06) y ARCH-06 (= DB-10).
 
 ## Valoración general
 
@@ -59,12 +57,3 @@ patrón ya probado en OBS-05 (drift-guard de tipos: `SpoolEvent` → `telemetry.
 `AppError::Raw` permite propagar verbatim códigos de negocio del worker (p. ej. `not_approved` del
 pairing), lo que mezcla mensajes con código y mensajes en prosa. Es la misma pieza que ARCH-02: al
 introducir el catálogo de códigos compartido, `Raw` se retira.
-
----
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| ARCH-04 | Invalidación **selectiva** de React Query (= SYNC-06): de la tabla que toca cada sentencia se derivan las claves de feature afectadas. |
-| ARCH-06 | Deriva de documentación corregida (= DB-10): ya no se cita `schema.sql` ni mecanismos retirados. |

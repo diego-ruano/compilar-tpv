@@ -5,8 +5,6 @@
 > **Capas:** `crates/tpv-infra-sqlite/src/tareas.rs`, `use_cases/tareas.rs`,
 > `crates/tpv-domain/src/tareas.rs`, `apps/cloud-worker-licensing/src/domains/tareas/*`,
 > FE `apps/tpv-main/src/features/tareas/*` (React Query).
->
-> **Estado (revisado 2026-08-09).** Resueltos o decididos y retirados: TAR-01, TAR-02, TAR-03.
 
 ## Valoración general
 
@@ -30,13 +28,3 @@ Instancia de **ARCH-01**; lo cubre el harness de tests de contrato → ver
 `delete_tarea` borra la fila (y sus asignaciones por CASCADE). No hay papelera ni forma de reabrir
 una tarea finalizada. Es una decisión de producto pendiente, no un bug: hoy nadie ha pedido
 recuperar una tarea borrada.
-
----
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| TAR-01 | El INSERT escribe `Fecha_Creacion` explícita con `datetime('now','localtime')` → mismo valor en Main y nube (ya no depende del DEFAULT). |
-| TAR-02 | **Semántica decidida**, no bug: `INSERT OR IGNORE` es intencional. Si quien ya finalizó sigue en el conjunto de asignados, su fila `FINALIZADA` se conserva; solo quien se quita del conjunto se borra, y si se le vuelve a añadir entra como fila nueva (`PENDIENTE`). Documentado en el código. |
-| TAR-03 | Se valida que todos los trabajadores existan antes de asignar, sin delegar en la FK (en la nube podría no aplicarse — DB-03 — y dejar asignaciones huérfanas). |

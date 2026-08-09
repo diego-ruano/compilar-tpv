@@ -10,11 +10,6 @@
 > `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts`,
 > `apps/cloud-worker-licensing/src/lib/hub.ts`,
 > `apps/cloud-worker-licensing/src/domains/sync/sync.routes.ts`.
->
-> **Estado (revisado 2026-08-09).** **SYNC-01 a SYNC-16 están todos resueltos** y se han retirado de
-> este documento; queda la referencia rápida al final. Lo único abierto es **SYNC-17** (conectividad
-> automática), que vive en [BACKLOG.md](../BACKLOG.md). La sección **§SYNC-16 (hibernación)** se
-> conserva íntegra porque **no es un hallazgo, son las reglas de diseño vigentes del DO**.
 
 ## Cómo funciona hoy (resumen)
 
@@ -95,28 +90,6 @@
 > `webSocketClose` y `webSocketError`, así que la instrumentación cubre el ciclo de vida del WebSocket.
 
 ---
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| SYNC-01 | Política de poison-message: 5 reintentos y **cuarentena** (se salta, avanza checkpoint, se señala). El contador de op en cuarentena y de fallando se expone en el DTO de estado de sync. |
-| SYNC-02 | La escritura de negocio y su `write_op` en el outbox van en **una sola transacción**, también en la rama autocommit: o ambas o ninguna. |
-| SYNC-03 | Si el DO se reinició entre el commit y el broadcast, al reintentar el emisor entra por el camino idempotente y **se re-emite el broadcast** (la Main secundaria lo descarta por `Op_Id`). |
-| SYNC-04 | Las escrituras de Handy mandan `X-Client-Now`, así que no quedan con timestamp UTC. |
-| SYNC-05 | Resuelto junto con DB-15: guard `uncovered_time_source` + `debug_assert` que restringe a una única forma canónica de tiempo en SQL replicable. |
-| SYNC-06 | Invalidación **selectiva** de React Query: de la tabla que toca cada sentencia se derivan las claves de feature afectadas (`TABLE_TO_FEATURES` en `syncStatements.ts`). |
-| SYNC-07 | El challenge del WS se borra tras verificar: es de un solo uso. |
-| SYNC-08 | `touchLastSeen` con throttle; ya no escribe en la BD central en cada ping. |
-| SYNC-09 | Backoff exponencial con tope y jitter en ambos hooks (se resetea al autenticarse). |
-| SYNC-10 | Si el resultado real de un apply difiere del `Result_Json` best-effort guardado por el gate, se persiste el bueno para que el reintento idempotente devuelva lo mismo. |
-| SYNC-11 | Contrato de los pasos `value`: mirror en Rust + escaneo que garantiza que ningún `*.commands.ts` introduzca una forma que la nube no sepa evaluar. |
-| SYNC-12 | Purga del log de cambios con suelo por checkpoint (`since`, lo que la Main ya tiene confirmado). |
-| SYNC-13 | El corte del catch-up (2000 páginas × 500 ops) ya no es silencioso: continúa en el siguiente ciclo y se señala por telemetría. |
-| SYNC-14 | Panel de salud del sync en Configuración → Conectividad (profundidad de outbox, cuarentena, lag). |
-| SYNC-15 | El WS se abre con **ticket efímero de un solo uso**; el JWT ya no viaja en la URL (se retiró el respaldo `?token=`). |
-| SYNC-16 | WebSocket Hibernation API (ver sección arriba). |
-| DB-03 (nota) | La duda sobre si `PRAGMA foreign_keys=ON` persiste entre peticiones HTTP a Turso dejó de importar: las cascadas críticas se hacen **explícitas** en los comandos, sin depender del motor. |
 
 **Invariante a preservar en cualquier cambio:** escritor único en la Main, idempotencia por `Op_Id`
 (nube `Applied_Operations` + Main `_Sync_Applied_Ops`), IDs y tiempos **deterministas** resueltos a

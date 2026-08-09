@@ -8,8 +8,6 @@
 > `apps/cloud-worker-licensing/src/domains/{licensing,stripe,admin}`, `routes/pairing.ts`.
 > El diseño completo del sistema propio de licencias está en
 > [PLAN_LICENCIAS_PROPIAS.md](../../PLAN_LICENCIAS_PROPIAS.md).
->
-> **Estado (revisado 2026-08-09).** Resueltos y retirados: LIC-01, LIC-03, LIC-05, LIC-06.
 
 ## Valoración de seguridad
 
@@ -39,14 +37,3 @@ robusta que el pinning de transporte, así que esto queda como extra opcional.
 El gate de licencia corre en el cliente, así que un bypass local siempre es posible en última
 instancia (parchear el binario). Lo que falta es **documentarlo** explícitamente para no dar por
 supuesta una garantía que no existe. Tarea de documentación, no de código.
-
----
-
-## Qué se corrigió (referencia rápida)
-
-| ID | Cómo quedó |
-|----|------------|
-| LIC-01 | El worker **firma** el estado de licencia con ed25519 y el cliente lo verifica contra la clave pública **pineada en el binario**. Cierra el bypass por proxy local + CA propia / DNS spoofing. |
-| LIC-03 | Anti-replay verificado: todos los caminos firmados validan `ts` a 2 minutos y `fetch-token` usa además un nonce de un solo uso. |
-| LIC-05 | Moot: DB-04 eliminó el SMTP propio, así que no hay credenciales que mover al keyring. |
-| LIC-06 | `LICENSE_API_BASE` y `TPV_SERVER_BASE` unificadas en una sola constante de host. |
