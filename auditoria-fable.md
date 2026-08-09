@@ -24,13 +24,15 @@ correcto (tenant/device SIEMPRE derivados del token, nunca del cliente), tokens 
 Stripe. **No se han encontrado inyecciones SQL, XSS, ni secretos commiteados, ni dependencias con
 CVEs abiertos conocidos.**
 
-Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa en profundidad**. El
-único que conviene priorizar es el **A** (un Handy autenticado puede ejecutar SQL arbitrario en la BD
-de su tenant por el canal WebSocket).
+Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa en profundidad**.
+
+> **Corregido y retirado de esta lista:** el hallazgo 🔴 **A** (el `apply` por WebSocket no
+> comprobaba el rol, así que una Handy autenticada podía ejecutar SQL arbitrario en su tenant) está
+> **arreglado**: el `apply` exige `role === "tpv"` y el rol lo dicta la BD central, no la cabecera
+> del cliente ([tenantHub.ts:1686-1698](apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L1686-L1698)).
 
 | # | Severidad | Título | OWASP |
 |---|-----------|--------|-------|
-| **A** | 🔴 Alta | WS `apply` no comprueba el rol → Handy autenticado ejecuta SQL arbitrario en su tenant | A01 Broken Access Control |
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
 | **G** | 🟠 Media | CSP del cliente Tauri demasiado permisiva (`https:` comodín) | A05 Security Misconfiguration |
 | **C** | 🟡 Baja-Media | Envío de correo a destinatario arbitrario sin límite por tenant | A04 / abuso |
@@ -43,72 +45,6 @@ de su tenant por el canal WebSocket).
 ---
 
 ## 1. Hallazgos detallados
-
-### 🔴 A — El `apply` por WebSocket no restringe el rol: un Handy autenticado puede ejecutar SQL arbitrario en la BD de su tenant
-
-**OWASP:** A01 Broken Access Control (escalada de privilegios dentro del tenant).
-**Ubicación:** [apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts:1553-1630](apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L1553-L1630)
-
-**Descripción.** En el manejador de mensajes del WebSocket, tras autenticarse (`helloSigned`), el
-único gate antes de procesar un mensaje `apply` es:
-
-```ts
-if (!this.authed.has(deviceId)) {           // línea 1553
-    this.send(server, { type: "error", error: "not_authenticated" });
-    return;
-}
-// ...
-if (msg.type === "apply") {                 // línea 1562 — NO comprueba el rol
-    // construye InternalApplyCommand { type: "tenantDb.exec"|"tenantDb.transaction", ... }
-    // y lo pasa a applyInternalCommandIdempotent → db.batch(...) contra Turso del tenant
-}
-```
-
-El comando `apply` acepta `tenantDb.exec` / `tenantDb.transaction` con **SQL arbitrario** (`sql` +
-`args`), que se ejecuta contra la base de datos Turso del tenant. El modelo previsto es que **solo la
-Main (rol `tpv`)** escriba por WS, y que las escrituras de la Handy pasen por REST → `hub.ts` →
-`/internal/apply` (firmado por HMAC del worker) construyendo comandos **acotados por dominio**
-(`*.commands.ts`). Pero aquí **nada comprueba que `this.roles.get(deviceId) === "tpv"`**: un
-dispositivo autenticado como `handy` puede enviar por el mismo socket:
-
-```json
-{ "type":"apply", "opId":"...", "commandName":"x",
-  "command": { "type":"tenantDb.exec",
-               "payload": { "sql":"DELETE FROM Comandas;", "args": [] } } }
-```
-
-y se ejecutará (el único freno adicional es el *freeze* `main_offline`, que exige que **haya** una
-Main conectada, no que sea ella quien envía). Esto salta por completo la capa de comandos de dominio:
-la Handy podría **leer, modificar o borrar cualquier tabla** de su tenant (cambiar precios, vaciar
-comandas, alterar fichajes, etc.).
-
-**Precondición / modelo de amenaza.** El atacante debe poseer las credenciales de una Handy ya
-emparejada: el token de sesión JWT **y** la clave privada ed25519 del dispositivo (para superar el
-ticket de WS y el `helloSigned`). Es decir, un **empleado malicioso con su Handy** o un **dispositivo
-Handy comprometido**. No permite acceso entre tenants (el `tenantId` lo fija el worker desde el ticket
-de un solo uso). Aun así, rompe la frontera de confianza «la Handy solo hace operaciones de camarero».
-
-**Impacto.** Integridad/confidencialidad de **todos** los datos del tenant desde un rol que debería
-estar limitado a un subconjunto de operaciones. Severidad intrínseca alta; exploitabilidad media (hace
-falta una Handy autenticada).
-
-**Solución.**
-1. Restringir el `apply` por WS al rol `tpv`:
-   ```ts
-   if (msg.type === "apply") {
-       if (this.roles.get(deviceId) !== "tpv") {
-           this.send(server, { type: "apply_ack", opId, ok: false, error: "forbidden_not_tpv" });
-           return;
-       }
-       // ...
-   }
-   ```
-   (idealmente reconfirmando el rol contra la BD central, no solo el mapa en memoria).
-2. Defensa en profundidad: que el motor `applyInternalCommandIdempotent` rechace `tenantDb.exec`
-   crudo salvo cuando proceda de un canal de confianza; para la Handy, exigir siempre el paso por los
-   `*.commands.ts` validados del worker (que ya llevan `zod` + comando acotado).
-
----
 
 ### 🟠 B — Fuga de stack traces y mensajes internos en las respuestas de error
 
@@ -401,12 +337,11 @@ Durante la auditoría se confirmó explícitamente que **no** existen estos prob
 
 ## 4. Plan de acción sugerido (por prioridad)
 
-1. **A** — Añadir el gate de rol `tpv` al `apply` por WebSocket. *(cambio pequeño, alto valor)*
-2. **B** — Quitar `stack`/`message`/`cause` de las respuestas de error (dejar solo el código).
-3. **G** — Endurecer la CSP de Tauri (`script-src 'self'`, `connect-src` a orígenes concretos).
-4. **H / I** — Añadir `cargo audit` + `pnpm audit` + Dependabot en CI; borrar los lockfiles npm y los
+1. **B** — Quitar `stack`/`message`/`cause` de las respuestas de error (dejar solo el código).
+2. **G** — Endurecer la CSP de Tauri (`script-src 'self'`, `connect-src` a orígenes concretos).
+3. **H / I** — Añadir `cargo audit` + `pnpm audit` + Dependabot en CI; borrar los lockfiles npm y los
    `pnpm-lock.yaml` por-app.
-5. **C, D, E, F** — Endurecimientos de defensa en profundidad, según capacidad.
+4. **C, D, E, F** — Endurecimientos de defensa en profundidad, según capacidad.
 
 ---
 
