@@ -16,6 +16,7 @@
 | MESA-11 | 🟡 | Doble implementación Main (Rust) ↔ worker (TS) del dominio mesas: la lógica se iguala a mano y **diverge** (ya pasó con MESA-04/MESA-07). Falta el **harness de tests de contrato** y un plan de unificación (ver §[Unificación de la doble implementación](#unificación-de-la-doble-implementación-mainworker)). | [mesas.md](dominios/mesas.md) |
 | MESA-14 | 🔵 | Componentes de UI monolíticos (`MesaComandaModal.tsx` ~70 KB, `KitchenBoard.tsx` ~18 KB): troceo en subcomponentes (ticket / panel de cobro / selector de productos) + hooks. **Pospuesto por prioridad**, no hay bug de negocio detrás. | [mesas.md](dominios/mesas.md) |
 | SYNC-17 | 🟡 | **Conectividad automática (eliminar el interruptor online/offline).** Hoy la Main sólo abre el WS si el usuario activa "online" en Configuración → Conectividad (`useConnectionMode`, por defecto `offline`). Objetivo: que el modo sea un **estado derivado** del WebSocket (intentar siempre con `tpv` + licencia válida + identidad; el badge refleja el estado real) en vez de un ajuste manual. Pendiente decidir dónde vive el gate de licencia (hoy `set_connection_mode` lo valida en Rust; lo natural sería que `/v1/ws/ticket` sea la autoridad y el cliente simplemente reintente con backoff). Incluye dos arreglos de fiabilidad detectados: **timeout de pong** (hoy se envía `ping` pero no se verifica respuesta → un socket medio-muerto no se detecta) y **reconexión inmediata en la Main** ante `online`/`focus` (la Handy ya lo hace). Prerrequisito de coste ya resuelto: SYNC-16 (hibernación) — es ese cambio el que hace que la Main tenga el WS abierto toda la jornada. | [sync-tenanthub.md](transversal/sync-tenanthub.md) |
+| INFRA-01 | 🟡 | **No hay entorno de staging: se prueba contra producción.** Hoy existe un único worker (`tpv-api`) con una sola BD de control y los binarios apuntan a él por constante. No hay dónde validar un cambio de worker, de esquema o de licencias antes de que lo vea un cliente real. Ver §[Entorno de staging](#entorno-de-staging-infra-01--pendiente-completo). **Aplazado a cuando el SaaS esté más asentado** (decisión 2026-08-09): es un montaje completo, no un ajuste. | §Entorno de staging |
 | FABLE-G | 🟠 | **CSP del cliente Tauri con comodín `https:`** (`script-src`/`connect-src` heredan de `default-src` → cualquier XSS futuro podría cargar código remoto y usar las APIs de Tauri). La investigación está **hecha y la solución redactada** (CSP estricta + `devCsp` + recorte de capacidades, ver §[Endurecimiento de la CSP](#endurecimiento-de-la-csp-del-cliente-tauri-fable-g--solución-lista-pendiente-de-aplicar)); aplazado porque aplicarla exige **probar a mano muchos flujos** (la CSP falla en runtime, no en compilación). | [auditoria-fable.md](../../auditoria-fable.md) |
 
 **Nota:** el harness de tests de contrato Rust↔worker cubriría de una vez STAT-06, INV-07, MESA-11,
@@ -60,6 +61,60 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
 la clase de divergencia más frecuente → **(3) WASM** como objetivo a largo plazo si la duplicación
 sigue doliendo. **(4)** es más decisión de producto (¿puede el negocio operar Handy sin Main?) que
 refactor.
+
+---
+
+## Entorno de staging (INFRA-01) — pendiente completo
+
+> **Decisión (2026-08-09): se deja para cuando el SaaS esté más asentado.** No es "añadir una
+> variable": es duplicar la infraestructura de la nube y hacer configurable en compilación algo que
+> hoy está clavado en el binario. Se documenta ahora para no volver a investigarlo desde cero.
+
+**El problema:** hoy hay **un** worker (`tpv-api`), **una** BD de control y **un** conjunto de
+secretos. Los clientes apuntan ahí por constante compilada. Cualquier prueba de un cambio del
+worker, del esquema de la nube o del flujo de licencias se hace **contra producción**, con datos de
+clientes reales delante. También significa que un error de un desarrollador probando entra en Sentry
+etiquetado como `prod` y es indistinguible de uno de un bar.
+
+**Lo que hay que montar, por orden de dependencia:**
+
+1. **Worker aparte.** Un bloque `env.staging` en `wrangler.json` con su propio `name`
+   (p. ej. `tpv-api-staging`) y sus `vars` (`ENVIRONMENT: "staging"` + los `TURSO_*`, `EMAIL_*` y
+   `R2_PUBLIC_BASE_URL` propios). Se despliega con `wrangler deploy --env staging`. Al ser otro
+   worker, su **Durable Object `TenantHub` es otro namespace**: no comparte estado con producción.
+2. **Secretos propios.** Los secretos son **por entorno**: hay que repetir `wrangler secret put X
+   --env staging` para todos (`SENTRY_DSN`, `AXIOM_TOKEN`, `LICENSE_JWT_SECRET`,
+   `LICENSE_STORE_KEY`, `LICENSE_SIGNING_PRIVATE_KEY`, `ADMIN_API_TOKEN`, `PAIR_PEPPER`,
+   `STRIPE_*`, `RELEASE_ADMIN_TOKEN`, `TURSO_*`).
+3. **Turso aparte.** Otra BD de control (licencias, tenants) y otras BDs de tenant. **Es el punto
+   crítico:** si staging comparte Turso con producción, escribe sobre datos de clientes reales y no
+   sirve de nada.
+4. **R2 aparte.** Otro bucket de imágenes (o al menos otro prefijo) con su `R2_PUBLIC_BASE_URL`.
+5. **Stripe en modo test.** Claves `sk_test_`, un endpoint de webhook apuntando al worker de
+   staging con su propio `whsec_`, y Prices de prueba con su `metadata.term_months`.
+6. **Cliente compilable contra staging.** Esto es lo que hoy **no se puede hacer sin tocar código**:
+   - `CLOUD_API_BASE` (`crates/tpv-infra-licensing/src/lib.rs:52`) y `CLOUD_WS_URL`
+     (`apps/tpv-main/src/shared/lib/cloudApi.ts:20`) están **clavados** al host de producción. Hay
+     que hacerlos configurables en compilación (patrón `option_env!`, como ya se hace con
+     `TPV_SENTRY_DSN`) o por *feature* de Cargo.
+   - `LICENSE_SIGNING_PUBLIC_KEY_B64` (misma `lib.rs`) es la clave pública **pineada**: un build de
+     staging necesita la del par de staging, así que también tiene que ser configurable. Sin esto,
+     un cliente de staging **no puede validar** licencias emitidas por el worker de staging.
+7. **Etiqueta de entorno en el escritorio.** `tpv_telemetry::Environment` solo tiene `Dev` y `Prod`
+   (`config.rs:21`, por `debug_assertions`). Añadir `Staging` y una forma de fijarlo en el build.
+8. **Separación en observabilidad.** Con `ENVIRONMENT` bien puesto basta con **filtrar por el tag**
+   en Sentry (mismo proyecto) y por campo en Axiom; o datasets separados si molesta el ruido.
+9. **Canal de actualizaciones.** `app_releases` ya tiene columna `channel` (hoy siempre `stable`):
+   un build de staging debería pedir su propio canal para no auto-actualizarse a producción.
+10. **Correo contenido.** Staging **no puede** mandar pedidos a proveedores reales: o remitente y
+    destinatarios de prueba, o un modo que no envíe.
+11. **CI.** Un workflow que despliegue a staging al mergear en una rama, para que el entorno no
+    dependa de que alguien lo despliegue a mano.
+
+**Atajo intermedio, si algún día urge y no da tiempo a todo:** los puntos 1-4 (worker + secretos +
+Turso + R2) ya permiten probar **el backend** de forma segura llamando a la API con `curl` o desde
+el CLI de licencias, sin cliente de escritorio. Lo caro es el punto 6, que es lo que hace falta para
+probar la **app** completa contra staging.
 
 ---
 

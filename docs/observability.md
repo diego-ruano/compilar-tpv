@@ -50,7 +50,8 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 |---|---|---|
 | DSN escritorio | build de la app | variable de entorno **`TPV_SENTRY_DSN`** al compilar (`option_env!`). DSN público, embebido. |
 | DSN worker | secreto del Worker | `wrangler secret put SENTRY_DSN` (en `apps/cloud-worker-licensing`) |
-| Entorno worker | `wrangler.json` `vars` | `ENVIRONMENT` = `prod`/`staging` (por defecto `prod`) |
+| Entorno worker | `wrangler.json` `vars` | `ENVIRONMENT`. **Hoy NO está puesta**, así que todo entra en Sentry como `prod` (`env.ENVIRONMENT ?? "prod"` en `observability/sentry.ts`). Es correcto mientras solo haya producción; separar entornos de verdad exige montar staging → ver [BACKLOG §Entorno de staging](analisis/BACKLOG.md#entorno-de-staging-infra-01--pendiente-completo). |
+| Entorno escritorio | automático | No hay variable: `Environment::detect()` (`tpv-telemetry/src/config.rs`) etiqueta `dev` en builds de debug y `prod` en release. Solo existen esas dos variantes; un canal `staging` exigiría añadirla. |
 
 - Crea **2 proyectos** en Sentry: `tpv-desktop` (Rust+JS, comparten cliente vía el plugin) y
   `tpv-api` (Worker).
