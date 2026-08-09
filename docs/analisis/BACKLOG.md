@@ -63,27 +63,20 @@ refactor.
 
 ---
 
-## Desbloqueado por el plan de pago de Cloudflare Workers
+## Plan de pago de Cloudflare Workers — ya no bloquea nada
 
-> **Actualizado 2026-08-09: el plan de pago ya está contratado.** Lo de abajo dejó de estar
-> bloqueado y pasa a ser trabajo pendiente normal, a hacer cuando toque.
+> **Actualizado 2026-08-09.** El plan de pago está contratado y las dos mejoras que dependían de él
+> **ya están hechas**; esta sección se queda solo como traza.
 
-> ⚠️ **PBKDF2 100k → 600k NO va en esta lista** (corregido 2026-08-09): el tope lo impone el
-> `crypto.subtle` de Workers (máx. 100.000 iteraciones), y es del **runtime**, no del plan. Tener el
-> plan de pago **no** lo desbloquea. Ver **LOGIN-04** arriba.
+- **Envío de correo con Cloudflare Email Service — ✅ HECHO.** Resend está fuera. El worker envía por
+  el binding `EMAIL` (`send_email` en `wrangler.json`, remitente `EMAIL_FROM_ADDRESS`), sin claves de
+  API: el binding autentica solo. Ver `apps/cloud-worker-licensing/src/domains/email/email.routes.ts`.
+- **Logpush — ✅ ACTIVADO en el worker** (`"logpush": true` en `wrangler.json`). El destino del job
+  (Axiom/R2/…) se configura en el panel de Cloudflare, fuera del repo.
 
-- **Logpush.** Exportar los logs de petición HTTP del Worker a un destino (Axiom/R2/…) sin código,
-  vía Cloudflare Logpush. Da retención/observabilidad más allá de `wrangler tail` y del SDK de
-  telemetría actual. Ya anotado en
-  [observability.md §8](../observability.md#8-notas-y-próximos-pasos).
-- **Envío de correo con Cloudflare Email Service (dejar de depender de Resend).** Enviar los correos
-  de pedido a proveedor con el servicio nativo de Cloudflare (ya previsto en los comentarios de
-  `apps/cloud-worker-licensing/src/domains/email/email.routes.ts` y `commands/email_config.rs`).
-  Enviar a destinatarios arbitrarios —los proveedores— exige el plan de pago, que ya está.
-  Precio: **3.000 correos/mes incluidos**, luego **$0,35 por 1.000**. El cambio es sustituir el
-  `fetch` a la API de Resend en `email.routes.ts` por el binding/servicio de Cloudflare (gateado por
-  env), sin tocar el resto del flujo (Main/Handy siguen llamando a `POST /v1/email/enviar-pedido`).
-  Ref.: [Cloudflare Email Service — Pricing](https://developers.cloudflare.com/email-service/platform/pricing/).
+> ⚠️ **PBKDF2 100k → 600k nunca dependió del plan** (corregido 2026-08-09): el tope lo impone el
+> `crypto.subtle` de Workers (máx. 100.000 iteraciones), y es del **runtime**. Tener el plan de pago
+> **no** lo desbloquea. Ver **LOGIN-04** arriba.
 
 ---
 

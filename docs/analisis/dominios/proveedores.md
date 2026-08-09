@@ -20,9 +20,9 @@
 Instancia de **ARCH-01**; lo cubre el harness de tests de contrato → ver
 [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
-> **Nota de futuro (no es un hallazgo):** el envío del correo de pedido sigue apoyado en Resend. El
-> plan es pasarlo a Cloudflare Email Service; está anotado en
-> [BACKLOG.md §Dependiente del plan de pago](../BACKLOG.md#dependiente-del-plan-de-pago-de-cloudflare-workers).
+> **Nota (no es un hallazgo):** el correo de pedido lo envía el worker con **Cloudflare Email
+> Service** (binding `EMAIL`); Resend quedó retirado. Sin claves de API en el cliente ni
+> credenciales SMTP en ningún sitio.
 
 ---
 

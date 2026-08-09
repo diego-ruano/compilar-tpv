@@ -31,6 +31,5 @@ autenticación del reenvío. Conviene no perderlos al tocar `tpv-telemetry`.
 | OBS-04 | Muestreo acotado: del sync solo se emiten **fallos** (no un evento por `apply`), con la retención documentada. |
 | OBS-05 | El esquema de evento se genera con ts-rs desde una **fuente única** (`event.rs` → `telemetry.ts`), con drift-guard en `telemetry.routes.ts`. Es el patrón que ARCH-03 quiere replicar por dominio. |
 
-> **Pendiente de infraestructura, no de código:** Logpush (exportar los logs de petición del Worker a
-> un destino con retención) — anotado en
-> [BACKLOG.md §Dependiente del plan de pago](../BACKLOG.md#dependiente-del-plan-de-pago-de-cloudflare-workers).
+> **Logpush:** activado en el worker (`"logpush": true` en `wrangler.json`). El destino del job
+> (Axiom/R2/…) se configura en el panel de Cloudflare, fuera del repo.

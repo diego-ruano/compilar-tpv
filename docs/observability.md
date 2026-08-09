@@ -141,8 +141,9 @@ comando + ids + error truncado, **sin** el comando ni sus args (ni datos ni volu
 
 ## 8. Notas y próximos pasos
 
-- **Logpush → Axiom** (logs de petición HTTP del Worker, sin código) requiere plan de pago de
-  Cloudflare. Pendiente hasta tenerlo; de momento la telemetría va por el SDK/fetch directo.
+- **Logpush → Axiom** (logs de petición HTTP del Worker, sin código): **activado** en el worker
+  (`"logpush": true` en `wrangler.json`). El destino del job se configura en el panel de Cloudflare,
+  fuera del repo. La telemetría de negocio sigue yendo por el SDK/fetch directo, que es otra cosa.
 - **Rate-limit por dispositivo** en `/v1/telemetry`: hoy el guardarraíl son los topes de tamaño y
   la autenticación. Un límite por `device_id` (KV/DO) es el siguiente endurecimiento si hiciera
   falta.
