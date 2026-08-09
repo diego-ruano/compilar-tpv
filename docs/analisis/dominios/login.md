@@ -54,6 +54,13 @@ antes acceso de lectura a la BD de la nube.
      frente a (1) y (2), por el mismo motivo del keyspace.
 - **No aplica:** dejar de replicar `Password_Hash` a la nube — **descartado por decisión del
   responsable**: la Handy necesita que el worker verifique el PIN.
+- **Decisión (2026-08-09): aplazado a cambios futuros.** El riesgo es bajo porque el ataque exige
+  **primero** acceso de lectura a la BD del tenant en Turso (fuga de credenciales, incidente del
+  proveedor o acceso administrativo), que es un escenario raro; y el ataque online, que es el
+  realista, ya lo corta el lockout. Se retomará si el volumen de clientes lo justifica. De hacerse,
+  el orden sería PIN largo para admin (barato) y luego el pepper. Ojo con el pepper: **si se pierde,
+  nadie puede entrar en ningún sitio** y no se recupera de los datos, así que exige custodia y copia
+  de seguridad reales.
 - **Ya hecho y aprovechable:** el **rehash-en-login** está cableado (`crates/tpv-infra-sqlite/src/login.rs`),
   así que cualquier cambio de esquema de hash migra solo en el primer login de cada usuario.
 
