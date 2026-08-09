@@ -2,9 +2,13 @@
 //
 // Centro de notificaciones del usuario logueado. Lee por `id_usuario` (de useAuth) y permite
 // marcar como leída / todas como leídas. El estado "leído" es por usuario.
+//
+// Al pulsar una notificación se marca como leída y, si su `accion` tiene destino conocido
+// (ver `features/notificaciones/acciones.ts`), se navega a la pantalla que resuelve el aviso.
 import {
   Bell,
   CheckCheck,
+  ChevronRight,
   Info,
   CheckCircle2,
   AlertTriangle,
@@ -12,10 +16,12 @@ import {
   RefreshCw,
   type LucideIcon,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../shared/stores/useAuth";
 import { cn } from "../../shared/lib/cn";
 import type { NotificacionRow } from "../../features/notificaciones/notificacionesApis";
+import { destinoDeAccion } from "../../features/notificaciones/acciones";
 import {
   useMarcarLeida,
   useMarcarTodasLeidas,
@@ -42,6 +48,7 @@ function fmtFecha(s: string): string {
 
 export default function Notificaciones() {
   const idUsuario = useAuth((s) => s.idUsuario);
+  const navigate = useNavigate();
 
   const notificaciones = useNotificaciones(idUsuario);
   const marcarLeida = useMarcarLeida();
@@ -53,8 +60,13 @@ export default function Notificaciones() {
     notificaciones.isFetching || marcarLeida.isPending || marcarTodas.isPending;
 
   function onCardClick(n: NotificacionRow) {
-    if (!idUsuario || n.leida) return;
-    marcarLeida.mutate({ idNotificacion: n.id_notificacion, idUsuario });
+    if (idUsuario && !n.leida) {
+      marcarLeida.mutate({ idNotificacion: n.id_notificacion, idUsuario });
+    }
+    // Navegar es lo último: la mutación (y su invalidación en `onSuccess`) sobrevive al desmontaje
+    // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
+    const destino = destinoDeAccion(n.accion);
+    if (destino) navigate(destino.to, { state: destino.state });
   }
 
   function onMarcarTodas() {
@@ -124,11 +136,13 @@ export default function Notificaciones() {
           {items.map((n) => {
             const a = aspecto(n.severidad);
             const Icon = a.icon;
+            const destino = destinoDeAccion(n.accion);
             return (
               <button
                 key={n.id_notificacion}
                 type="button"
                 onClick={() => onCardClick(n)}
+                title={destino ? "Ir a la pantalla relacionada" : undefined}
                 className={cn(
                   "group flex w-full min-w-0 items-start gap-2 rounded-2xl border p-3 text-left shadow-sm transition sm:gap-3 sm:p-4",
                   n.leida
@@ -170,6 +184,13 @@ export default function Notificaciones() {
                     className="mt-1.5 size-2 shrink-0 rounded-full bg-accent sm:size-2.5"
                     aria-label="No leída"
                     title="No leída"
+                  />
+                )}
+
+                {destino && (
+                  <ChevronRight
+                    className="mt-0.5 size-4 shrink-0 text-fg-subtle transition group-hover:translate-x-0.5 group-hover:text-fg-muted"
+                    aria-hidden
                   />
                 )}
               </button>

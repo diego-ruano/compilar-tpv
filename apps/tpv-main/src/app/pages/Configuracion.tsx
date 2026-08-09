@@ -1,6 +1,7 @@
 // src/pages/Configuracion.tsx
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 import { invokeClient } from "@tpv/client";
 import type { PairCreateResult } from "@tpv/contracts";
@@ -74,7 +75,20 @@ export default function Configuracion() {
         [],
     );
 
-    const [section, setSection] = useState<SectionKey>("NEGOCIO");
+    // Sección de arranque. Se puede pedir una concreta al navegar
+    // (`navigate("/Configuracion", { state: { seccion: "LICENCIA" } })`); lo usan las
+    // notificaciones con acción para caer directamente en la pantalla que resuelve el aviso.
+    const location = useLocation();
+    const seccionSolicitada = (location.state as { seccion?: SectionKey } | null)
+        ?.seccion;
+    const [section, setSection] = useState<SectionKey>(
+        seccionSolicitada ?? "NEGOCIO",
+    );
+
+    // Si ya estábamos en Configuración, un `navigate` nuevo no remonta: hay que reaccionar aquí.
+    useEffect(() => {
+        if (seccionSolicitada) setSection(seccionSolicitada);
+    }, [seccionSolicitada]);
 
     // Sincroniza el draft con el store la primera vez que carga
     const contactSyncedRef = useRef(false);
