@@ -118,3 +118,129 @@ impl JobsStateRepository for SqliteJobsStateRepository {
         Ok(out)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Unicidad entre tests en paralelo: contador atómico + PID, igual que en `migrations.rs`.
+    // (No usar el reloj: en Windows su resolución es baja y dos tests simultáneos colisionarían.)
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{}_{}", std::process::id(), n)
+    }
+
+    /// BD local en un fichero temporal, abierta como en producción (`Db::open` aplica migraciones
+    /// y crea las tablas de control, `_Jobs_State` incluida). Devuelve también el directorio para
+    /// poder limpiarlo al final del test.
+    async fn db_temp() -> (std::sync::Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_jobs_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.db");
+        let db = Db::open(path.to_str().unwrap())
+            .await
+            .expect("abrir la BD temporal");
+        (db, dir)
+    }
+
+    fn estado_completo() -> EstadoJob {
+        // Valores DISTINTOS entre sí a propósito: si dos columnas se cruzaran, el `assert_eq!`
+        // del ida y vuelta lo detecta. Con valores iguales, un cruce pasaría desapercibido.
+        EstadoJob {
+            last_run_ms: Some(1_700_000_000_000),
+            last_ok_ms: Some(1_699_111_111_111),
+            last_error: Some("feed caído".to_string()),
+            fallos: 7,
+        }
+    }
+
+    #[tokio::test]
+    async fn un_job_sin_historial_no_tiene_estado() {
+        let (db, dir) = db_temp().await;
+        let repo = SqliteJobsStateRepository::new(db);
+
+        assert_eq!(repo.cargar("jamas_ejecutado").await.unwrap(), None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El test que de verdad importa. `COLS` y `fila_a_estado` están acopladas **por posición**:
+    /// nada en el compilador garantiza que el orden coincida. Si alguien añade una columna en medio
+    /// sin tocar los índices, `last_ok_ms` acabaría leyendo otro valor —y `last_ok_ms` es el dato
+    /// con el que se decide si un job está vencido, así que el job dejaría de correr (o correría
+    /// sin parar) sin un solo error visible. Este ida y vuelta fija esa correspondencia entera.
+    #[tokio::test]
+    async fn el_estado_va_y_vuelve_intacto() {
+        let (db, dir) = db_temp().await;
+        let repo = SqliteJobsStateRepository::new(db);
+        let guardado = estado_completo();
+
+        repo.guardar("licencia", &guardado).await.unwrap();
+        let leido = repo.cargar("licencia").await.unwrap();
+
+        assert_eq!(leido, Some(guardado));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Los campos vacíos deben viajar como NULL y volver como `None`, no como 0 ni cadena vacía:
+    /// `last_ok_ms = None` es lo que significa "nunca se ejecutó con éxito" y decide que el job
+    /// arranque con su `retardo_inicial` en vez de creerse vencido.
+    #[tokio::test]
+    async fn los_campos_vacios_van_y_vuelven_como_none() {
+        let (db, dir) = db_temp().await;
+        let repo = SqliteJobsStateRepository::new(db);
+
+        repo.guardar("avisos", &EstadoJob::default()).await.unwrap();
+
+        assert_eq!(repo.cargar("avisos").await.unwrap(), Some(EstadoJob::default()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// El runner guarda tras CADA intento: si el upsert no funcionara, la tabla crecería sin
+    /// límite y `listar` devolvería duplicados en el panel.
+    #[tokio::test]
+    async fn guardar_dos_veces_actualiza_en_vez_de_duplicar() {
+        let (db, dir) = db_temp().await;
+        let repo = SqliteJobsStateRepository::new(db);
+
+        repo.guardar("updater", &estado_completo()).await.unwrap();
+        let segundo = EstadoJob {
+            last_run_ms: Some(1_800_000_000_000),
+            last_ok_ms: Some(1_800_000_000_000),
+            last_error: None,
+            fallos: 0,
+        };
+        repo.guardar("updater", &segundo).await.unwrap();
+
+        let todos = repo.listar().await.unwrap();
+        assert_eq!(todos.len(), 1, "el upsert no debe crear una fila nueva");
+        assert_eq!(todos[0].1, segundo, "debe quedar el último estado");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn listar_devuelve_todos_los_jobs_ordenados_por_nombre() {
+        let (db, dir) = db_temp().await;
+        let repo = SqliteJobsStateRepository::new(db);
+
+        for nombre in ["updater", "avisos", "licencia"] {
+            repo.guardar(nombre, &estado_completo()).await.unwrap();
+        }
+
+        let nombres: Vec<String> = repo
+            .listar()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(nombres, vec!["avisos", "licencia", "updater"]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -120,7 +120,30 @@ fn ahora_ms() -> i64 {
 /// Arranca un bucle por job del catálogo. Se llama una vez, en el `setup()` de Tauri y **después**
 /// de `app.manage(AppState)`: los cuerpos resuelven sus repositorios desde el estado global.
 pub(crate) fn arrancar(app: &AppHandle) {
-    for job in registro::catalogo() {
+    let jobs = registro::catalogo();
+
+    // Guarda de nombres duplicados. El `nombre` es la clave primaria en `_Jobs_State`: dos jobs
+    // homónimos compartirían fila, y cada uno leería como suya la última ejecución del otro —se
+    // creerían recién ejecutados y dejarían de correr— sin dar un solo error. Es el error fácil de
+    // cometer al añadir un job (duplicar el bloque y olvidar cambiar el nombre), así que en
+    // desarrollo revienta para cazarlo en el acto; en release se registra y se sigue, que un
+    // horario raro es mejor que quedarse sin tareas de fondo.
+    //
+    // Va aquí y no en un test porque referenciar `catalogo()` desde un test arrastra al binario de
+    // pruebas todo el grafo de enlazado de Tauri (updater, WebView2) y este deja de poder cargarse.
+    let mut vistos = std::collections::HashSet::new();
+    for job in &jobs {
+        if !vistos.insert(job.nombre) {
+            debug_assert!(false, "job duplicado en el catálogo: '{}'", job.nombre);
+            tracing::error!(
+                target: "tpv::jobs",
+                job = job.nombre,
+                "nombre de job duplicado en el catálogo: compartirá estado con su homónimo"
+            );
+        }
+    }
+
+    for job in jobs {
         let app = app.clone();
         tauri::async_runtime::spawn(async move {
             tracing::info!(
