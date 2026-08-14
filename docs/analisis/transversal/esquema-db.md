@@ -20,8 +20,11 @@
 - **Runner worker** (`tenantMigrations.ts`): espejo del anterior para las BDs de tenant en Turso;
   **registro manual** de migraciones (esbuild no soporta glob dinámico), con guard anti-drift en CI
   (`scripts/check-migration-registry.mjs`).
-- **Tablas de sync locales** (`_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`) NO están en las
-  migraciones: las crea `init_sync_tables` en `db.rs` (solo en local).
+- **Tablas de sync locales** (`_Sync_Outbox`, `_Sync_Applied_Ops`, `_Sync_State`, `_Sync_Failed`) NO
+  están en las migraciones: las crea `init_sync_tables` en `db.rs` (solo en local).
+- **Estado de los jobs** (`_Jobs_State`, ver §10 de `CLAUDE.md`) sigue la misma regla: la crea
+  `init_jobs_table` en `db.rs` y es local del dispositivo. Sus escrituras van por `raw()` para no
+  capturarse en el outbox.
 
 ## Hallazgos abiertos
 

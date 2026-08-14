@@ -19,7 +19,9 @@ fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Error obteniendo AppData: {e}"))
 }
 
-fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
+/// `pub(crate)` porque el job periódico de licencia (`jobs/registro.rs`) construye el mismo
+/// servicio: el pulso de fondo y los comandos de la UI deben hablar con el MISMO adaptador.
+pub(crate) fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
     Ok(LicensingAdapter::new(app_data_dir(app)?))
 }
 

@@ -6,6 +6,7 @@ pub mod cloud_sync;
 pub mod configuracion;
 pub mod cuentas;
 pub mod inventario;
+pub mod jobs;
 pub mod licensing;
 pub mod login;
 pub mod mesas;

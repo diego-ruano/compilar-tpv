@@ -34,7 +34,7 @@ type UpdateStatus = {
 	error: string | null;
 };
 
-/** Cada cuánto comprueba el backend por su cuenta (UPDATE_CHECK_INTERVAL_SECS en lib.rs). */
+/** Cada cuánto comprueba el backend por su cuenta (job `updater`, en jobs/registro.rs). */
 const INTERVALO_AUTOMATICO = "cada 6 horas";
 
 function horaCorta(d: Date): string {

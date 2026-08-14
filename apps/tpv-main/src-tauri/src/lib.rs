@@ -3,6 +3,7 @@
 //! cdylib `libtpv_lib.so` arranca por el `#[tauri::mobile_entry_point]` de este mismo `run()`.
 
 mod commands;
+mod jobs;
 mod printing;
 
 use base64::prelude::*;
@@ -24,7 +25,8 @@ use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     avisos::AvisosScanRepository,
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
-    cuentas::CuentasRepository, inventario::InventarioRepository, login::LoginRepository,
+    cuentas::CuentasRepository, inventario::InventarioRepository, jobs::JobsStateRepository,
+    login::LoginRepository,
     mesas::MesasRepository,
     notificaciones::{NotificacionesRepository, Notifier},
     pedidos_proveedor::PedidoProveedorRepository,
@@ -46,6 +48,7 @@ use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
+    jobs::SqliteJobsStateRepository,
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
     notificaciones::SqliteNotificacionesRepository,
     pedidos_proveedor::SqlitePedidoProveedorRepository, proveedores::SqliteProveedoresRepository,
@@ -475,8 +478,28 @@ impl AppState {
         Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn)) as Arc<dyn PedidoProveedorRepository>)
     }
 
+    /// ¿Es esta la Main (modo TPV) con la BD local ya abierta? Es la condición que exige
+    /// `Requiere::MainConBd` del runner de jobs: antes de elegir modo, o en Handy, no hay nada que
+    /// escanear ni dónde persistir.
+    pub(crate) async fn es_main_con_bd(&self) -> bool {
+        *self.mode.lock().await == Some(DeviceMode::Tpv) && self.db.lock().await.is_some()
+    }
+
+    /// Estado de los jobs periódicos (`_Jobs_State`). NO es mode-switched: es una tabla de control
+    /// LOCAL del dispositivo, siempre SQLite, que no viaja a la nube.
+    pub(crate) async fn jobs_state_repo(&self) -> Result<Arc<dyn JobsStateRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (jobs requieren modo Main)".to_string())?;
+        Ok(Arc::new(SqliteJobsStateRepository::new(conn)) as Arc<dyn JobsStateRepository>)
+    }
+
     /// Escáner de avisos (tareas vencidas / reservas próximas): solo Main (SQLite). En Handy no hay
-    /// BD local → devuelve error y el tick periódico lo salta.
+    /// BD local → devuelve error y el job lo salta por su `Requiere`.
     pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, String> {
         let conn = self
             .db
@@ -747,8 +770,15 @@ async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, Strin
 /// al bucket R2 (PUT firmado, según el modo del dispositivo). Las subidas confirmadas se quitan
 /// de la cola; si una falla (típicamente offline), se conserva y se reintenta en la próxima
 /// pasada. Es idempotente: subir dos veces la misma clave simplemente la sobrescribe.
-#[tauri::command]
-async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+///
+/// Tiene dos disparadores, con papeles distintos: el **evento** (el frontend lo llama tras guardar
+/// una imagen y al reconectar el WebSocket) cubre el caso fresco, y el **job `imagenes`** del
+/// runner es la red de seguridad que recupera lo que quedó sin subir. La cola vive en un fichero
+/// de AppData, no en la BD, así que también aplica a Handy.
+pub(crate) async fn drenar_imagenes(
+    app: &AppHandle,
+    state: &AppState,
+) -> Result<String, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -820,6 +850,11 @@ async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Res
     } else {
         Ok(resultado)
     }
+}
+
+#[tauri::command]
+async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    drenar_imagenes(&app, &state).await
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
@@ -1079,17 +1114,6 @@ struct UpdateStatus {
     /// Motivo por el que no se pudo comprobar (sin conexión, feed caído…).
     error: Option<String>,
 }
-
-/// Cada cuánto se vuelve a preguntar al feed mientras la app está abierta. Un TPV puede pasar
-/// semanas encendido sin reiniciarse: sin este tick, una release nueva no se vería hasta el
-/// siguiente arranque.
-#[cfg(desktop)]
-const UPDATE_CHECK_INTERVAL_SECS: u64 = 6 * 60 * 60;
-
-/// Margen antes del primer chequeo: deja que el arranque (BD, licencia, WS) termine primero y da
-/// tiempo a que el notifier exista, para que el aviso in-app salga ya en la primera pasada.
-#[cfg(desktop)]
-const UPDATE_CHECK_DELAY_SECS: u64 = 30;
 
 /// Consulta el feed (`tpv-api`) y, si hay versión nueva, la **anuncia**: evento `update:available`
 /// (banner) + notificación in-app a los administradores (campana + toast, con dedupe por versión).
@@ -1398,50 +1422,11 @@ pub fn run() {
                 mode_sync,
             });
 
-            // Chequeo de actualización (en Rust, independiente del frontend): al arrancar y luego
-            // cada 6 h mientras la app siga abierta —un TPV puede estar semanas encendido—. Si hay
-            // versión nueva emite `update:available` (banner) y la notificación in-app a los
-            // administradores. Va DESPUÉS de `app.manage` porque el aviso necesita el `AppState`
-            // (notifier). Falla en silencio (offline / feed caído): lo reintenta el siguiente tick.
-            #[cfg(desktop)]
-            {
-                let h = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_secs(UPDATE_CHECK_DELAY_SECS))
-                        .await;
-                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(
-                        UPDATE_CHECK_INTERVAL_SECS,
-                    ));
-                    loop {
-                        interval.tick().await;
-                        if let Err(e) = check_and_announce(&h).await {
-                            tracing::warn!(target: "tpv::updater", error = %e, "check de actualización falló");
-                        }
-                    }
-                });
-            }
-
-            // Escáner periódico de avisos (tareas vencidas / reservas próximas). Corre en un hilo
-            // de fondo cada 10 min; solo hace algo cuando hay BD (modo Main): en Handy/arranque sin
-            // BD, `avisos_scan_repo` devuelve error y se salta. Emite con dedupe → idempotente.
-            let scan_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(10 * 60));
-                loop {
-                    interval.tick().await;
-                    let state = scan_handle.state::<AppState>();
-                    if let (Ok(scan), Ok(notifier)) =
-                        (state.avisos_scan_repo().await, state.notifier().await)
-                    {
-                        let _ = tpv_application::use_cases::avisos::escanear(
-                            scan.as_ref(),
-                            notifier.as_ref(),
-                            tpv_application::use_cases::avisos::VENTANA_RESERVA_MIN,
-                        )
-                        .await;
-                    }
-                }
-            });
+            // Tareas periódicas de fondo (licencia, avisos, actualizaciones): las declara
+            // `jobs/registro.rs` y las corre el runner con una política común —vencimiento en reloj
+            // de pared, jitter, backoff y gating por modo—. Va DESPUÉS de `app.manage` porque los
+            // cuerpos resuelven sus repositorios desde el `AppState`.
+            jobs::arrancar(handle);
 
             Ok(())
         })
@@ -1636,6 +1621,8 @@ pub fn run() {
             commands::sync::sync_outbox_mark_sent,
             commands::sync::sync_purge_applied_ops,
             commands::sync::sync_health,
+            // tareas periódicas de fondo (runner de jobs)
+            commands::jobs::jobs_status,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
             commands::configuracion::config_get_business_settings,
             commands::configuracion::config_patch_business_settings,

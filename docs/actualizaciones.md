@@ -79,11 +79,16 @@ también deja puesto el aviso.
 
 **`updater_install()`** — descarga, verifica firma e instala. Llama a `app.restart()`.
 
-**Tick automático:** arranca 30 s después del setup (`UPDATE_CHECK_DELAY_SECS`) y repite cada 6 h
-(`UPDATE_CHECK_INTERVAL_SECS`). Va **después de `app.manage`** porque el aviso in-app necesita el
-`AppState` (notifier). Falla en silencio (offline / feed caído) y lo reintenta el siguiente tick:
-un TPV puede estar semanas encendido, así que sin este tick una release nueva no se vería hasta el
-siguiente arranque.
+**Tick automático:** es el job `updater` del runner de tareas de fondo
+(`src-tauri/src/jobs/registro.rs`), no un `spawn` suelto. Arranca 30 s después del setup
+(`UPDATE_CHECK_DELAY_SECS`) y vence cada 6 h (`UPDATE_CHECK_INTERVAL_SECS`), ambas constantes
+declaradas en ese catálogo. Un TPV puede estar semanas encendido, así que sin este tick una release
+nueva no se vería hasta el siguiente arranque.
+
+Del resto se encarga el motor del runner (ver §10 de `CLAUDE.md`): si el feed está caído reintenta
+con backoff en vez de esperar las 6 h enteras, el vencimiento se mide contra la última comprobación
+correcta persistida (así que también se dispara tras días apagado), y el último error queda visible
+en Configuración → Conectividad → "Tareas en segundo plano".
 
 ### 3. Frontend
 

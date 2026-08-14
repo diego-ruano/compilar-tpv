@@ -15,6 +15,7 @@ pub mod configuracion;
 pub mod email_config;
 pub mod cuentas;
 pub mod inventario;
+pub mod jobs;
 pub mod licensing;
 pub mod login;
 pub mod mesas;

@@ -522,6 +522,9 @@ impl Db {
         // Tablas de control de la sincronización (locales; no forman parte del esquema compartido).
         init_sync_tables(&write_conn).await?;
 
+        // Estado de los jobs periódicos (también local; ver `init_jobs_table`).
+        init_jobs_table(&write_conn).await?;
+
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
         for _ in 0..READ_POOL_SIZE {
@@ -612,6 +615,32 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
             Last_Error TEXT,
             First_Failed_At_Ms INTEGER NOT NULL,
             Last_Failed_At_Ms INTEGER NOT NULL
+        );
+        "#,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// Crea (idempotente) la tabla de estado de los **jobs periódicos**. Igual que las `_Sync_*`: es
+/// estado LOCAL del dispositivo (cuándo corrió por última vez cada job en ESTE equipo), no forma
+/// parte del esquema compartido y no existe en la nube.
+///
+/// `Last_Ok_Ms` es la razón de ser de la tabla: permite decidir el vencimiento en reloj de pared
+/// ("¿ha pasado el intervalo desde el último éxito?") en vez de por tiempo de proceso, de modo que
+/// un job de 6 h se ejecute igualmente en un equipo que se apaga cada noche.
+///
+/// ⚠️ Las escrituras deben ir por `WriteGuard::raw()`: por `execute()` se capturarían en el outbox
+/// y cada tick de cada job acabaría replicándose a la nube.
+async fn init_jobs_table(conn: &Connection) -> Result<(), LibsqlError> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS _Jobs_State (
+            Nombre TEXT PRIMARY KEY,
+            Last_Run_Ms INTEGER,
+            Last_Ok_Ms INTEGER,
+            Last_Error TEXT,
+            Fallos INTEGER NOT NULL DEFAULT 0
         );
         "#,
     )

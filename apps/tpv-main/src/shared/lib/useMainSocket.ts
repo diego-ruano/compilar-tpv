@@ -203,7 +203,6 @@ export function useMainSocket() {
 		async function drainOutbox(socket: WebSocket) {
 			if (draining || !authed || socket.readyState !== WebSocket.OPEN) return;
 			draining = true;
-			let drainedAny = false;
 			try {
 				for (let i = 0; i < 1000 && !cancelled && authed; i++) {
 					const pending = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
@@ -230,7 +229,6 @@ export function useMainSocket() {
 								seq: Number(seq ?? 0),
 							});
 							progressed = true;
-							drainedAny = true;
 						} catch (e) {
 							console.warn("sync_outbox_mark_sent falló:", e);
 							break;
@@ -239,17 +237,9 @@ export function useMainSocket() {
 					if (!progressed) break;
 				}
 
-				// Si esta pasada subió algo, el outbox quedó (todo lo confirmado) vacío: aprovechamos
-				// para purgar los registros de idempotencia antiguos ya subidos (red de seguridad
-				// para anti-ecos que no se ascendieron por `seq`). Es idempotente y solo borra lo que
-				// ya no está pendiente en el outbox, así que nunca pierde una escritura sin sincronizar.
-				if (drainedAny && !cancelled && authed) {
-					try {
-						await invoke("sync_purge_applied_ops");
-					} catch (e) {
-						console.warn("sync_purge_applied_ops falló:", e);
-					}
-				}
+				// La purga de `_Sync_Applied_Ops` ya NO se hace aquí: es mantenimiento periódico, no
+				// parte del drenado, y colgarla de "esta pasada subió algo" la dejaba sin correr en
+				// un equipo online y ocioso. Ahora es el job `purga_sync` (jobs/registro.rs).
 			} catch (e) {
 				console.warn("drenado del outbox falló:", e);
 			} finally {
@@ -384,12 +374,13 @@ export function useMainSocket() {
 					void invoke<string>("images_drain_pending")
 						.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/hello_ok]", r); })
 						.catch((e) => console.error("[images_drain/hello_ok] error:", e));
+					// Solo el outbox: es lo que pertenece a esta conexión. La subida de imágenes a R2
+					// va por HTTP y no necesita el socket, así que su red de seguridad periódica es
+					// el job `imagenes` (jobs/registro.rs); aquí se queda el intento del `hello_ok`,
+					// que es un evento útil ("acabamos de recuperar conectividad"), no un poll.
 					if (drainTimer) clearInterval(drainTimer);
 					drainTimer = window.setInterval(() => {
 						void drainOutbox(socket);
-						void invoke<string>("images_drain_pending")
-							.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/interval]", r); })
-							.catch((e) => console.error("[images_drain/interval] error:", e));
 					}, DRAIN_INTERVAL_MS);
 					return;
 				}

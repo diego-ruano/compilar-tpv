@@ -151,6 +151,37 @@ export type IndexRow = { ID_Comanda: string, Productos: string | null, NumLineas
 
 export type InventarioResumenResponse = { proximosCaducar: Array<ProductoResumenDto>, menosCantidad: Array<ProductoResumenDto>, };
 
+/**
+ * Estado de un job periódico. Lo devuelve el comando `jobs_status`, una fila por job registrado
+ * (los que no aplican a este dispositivo —modo o plataforma— ni siquiera aparecen).
+ */
+export type JobStatus = { 
+/**
+ * Identificador estable: es la clave en `_Jobs_State` y lo que aparece en logs y telemetría.
+ */
+nombre: string, 
+/**
+ * Cada cuánto vence el job, en segundos.
+ */
+cada_secs: number, 
+/**
+ * Último intento, haya ido bien o mal. `null` si no se ha ejecutado nunca en este equipo.
+ */
+last_run_ms: number | null, 
+/**
+ * Última ejecución CORRECTA. Es la que marca el vencimiento del siguiente ciclo, así que
+ * sobrevive a reinicios de la app y a suspensiones del equipo.
+ */
+last_ok_ms: number | null, 
+/**
+ * Error del último intento fallido. `null` si el último intento fue bien.
+ */
+last_error: string | null, 
+/**
+ * Fallos consecutivos (0 si el último intento fue bien). El runner los usa para el backoff.
+ */
+fallos: number, };
+
 export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_Apertura: string, ID_Detalle: string, Cantidad: number, Nombre_Producto: string, Notas: string | null, Estado_Cocina: string | null, Pagado: number, };
 
 /**

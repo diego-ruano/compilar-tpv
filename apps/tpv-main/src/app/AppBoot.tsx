@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { invokeClient } from "@tpv/client";
+import { listen } from "@tauri-apps/api/event";
 import type {
     LicenseActivateOutcome,
     LicenseGateResult,
@@ -626,25 +627,30 @@ export default function AppBoot({ router }: { router: any }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [mode]);
 
+    // El pulso periódico de la licencia lo lleva el job `licencia` en Rust (jobs/registro.rs), no
+    // un temporizador de este componente: así sobrevive a una recarga del webview y sigue
+    // corriendo aunque el gate esté bloqueando la UI (una licencia renovada la desbloquea sola).
+    // Aquí solo se escucha el resultado de cada pulso.
     useEffect(() => {
         if (mode !== "tpv") return;
-        if (gate === "loading") return;
-        if (!gate.allowed) return;
 
-        const everyMs = 6 * 60 * 60 * 1000;
-        const id = window.setInterval(() => {
-            invokeClient<LicenseGateResult>("license_check_now")
-                .then((r) => {
-                    setGate(r);
-                    setLic(r.state);
-                })
-                .catch(() => {
-                    // noop
-                });
-        }, everyMs);
+        let vivo = true;
+        let desuscribir: (() => void) | null = null;
 
-        return () => window.clearInterval(id);
-    }, [mode, gate]);
+        void listen<LicenseGateResult>("license:changed", (ev) => {
+            if (!vivo) return;
+            setGate(ev.payload);
+            setLic(ev.payload.state);
+        }).then((un) => {
+            if (vivo) desuscribir = un;
+            else un();
+        });
+
+        return () => {
+            vivo = false;
+            desuscribir?.();
+        };
+    }, [mode]);
 
     async function choose(m: DeviceMode) {
         setBusy(true);

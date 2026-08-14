@@ -1,7 +1,7 @@
 // src/features/configuracion/sections/Conectividad.tsx
 import React from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { SyncHealth } from "@tpv/contracts";
+import type { JobStatus, SyncHealth } from "@tpv/contracts";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import {
@@ -142,6 +142,122 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 	);
 }
 
+/** Nombre legible de cada job (el `nombre` que llega de Rust es el identificador estable). */
+const JOB_ETIQUETA: Record<string, string> = {
+	licencia: "Comprobación de licencia",
+	avisos: "Avisos de tareas y reservas",
+	updater: "Búsqueda de actualizaciones",
+	imagenes: "Subida de imágenes pendientes",
+	purga_sync: "Limpieza de registros de sincronización",
+};
+
+function cadaTexto(secs: number): string {
+	if (secs % 3600 === 0) return `cada ${secs / 3600} h`;
+	if (secs % 60 === 0) return `cada ${secs / 60} min`;
+	return `cada ${secs} s`;
+}
+
+function haceCuanto(ms: number | null): string {
+	if (ms == null) return "nunca";
+	const d = Date.now() - ms;
+	if (d < 60_000) return "hace un momento";
+	const min = Math.floor(d / 60_000);
+	if (min < 60) return `hace ${min} min`;
+	const h = Math.floor(min / 60);
+	if (h < 24) return `hace ${h} h`;
+	return `hace ${Math.floor(h / 24)} d`;
+}
+
+// Panel de diagnóstico del runner de jobs: hace visible una tarea de fondo que lleva tiempo
+// fallando (licencia sin verificar, feed caído…) en vez de dejarla enterrada en los logs.
+function TareasFondo({ darkMode }: { darkMode: boolean }) {
+	const [jobs, setJobs] = React.useState<JobStatus[] | null>(null);
+	const [err, setErr] = React.useState<string | null>(null);
+
+	React.useEffect(() => {
+		let cancelled = false;
+		const tick = async () => {
+			try {
+				const j = await invoke<JobStatus[]>("jobs_status");
+				if (!cancelled) {
+					setJobs(j);
+					setErr(null);
+				}
+			} catch (e) {
+				if (!cancelled) setErr(String((e as any)?.message ?? e ?? ""));
+			}
+		};
+		void tick();
+		// Los jobs se mueven despacio (minutos u horas): no hace falta refrescar más a menudo.
+		const timer = window.setInterval(tick, 30000);
+		return () => {
+			cancelled = true;
+			clearInterval(timer);
+		};
+	}, []);
+
+	return (
+		<Panel
+			title="Tareas en segundo plano"
+			subtitle="Comprobaciones periódicas que la app hace por su cuenta."
+		>
+			{err && (
+				<div className="rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
+					No se pudo leer el estado de las tareas: {err}
+				</div>
+			)}
+
+			{jobs && jobs.length > 0 && (
+				<div className="flex flex-col gap-2">
+					{jobs.map((j) => {
+						const fallando = j.fallos > 0;
+						return (
+							<div
+								key={j.nombre}
+								className={cn(
+									"rounded-xl border p-3",
+									fallando
+										? "border-warning/40 bg-warning/10"
+										: darkMode
+											? "border-border bg-surface-2"
+											: "border-border bg-surface",
+								)}
+							>
+								<div className="flex items-center justify-between gap-3">
+									<div
+										className={cn(
+											"text-sm font-semibold",
+											darkMode ? "text-white" : "text-fg",
+										)}
+									>
+										{JOB_ETIQUETA[j.nombre] ?? j.nombre}
+									</div>
+									<div
+										className={cn(
+											"text-[11px] tabular-nums",
+											fallando ? "text-warning" : "text-fg-muted",
+										)}
+									>
+										{cadaTexto(j.cada_secs)} · última {haceCuanto(j.last_ok_ms)}
+									</div>
+								</div>
+
+								{fallando && (
+									<div className="mt-2 text-[11px] text-warning">
+										{j.fallos} intento(s) fallido(s) seguidos
+										{j.last_error ? `: ${j.last_error}` : ""}. Se sigue
+										reintentando cada vez más espaciado.
+									</div>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</Panel>
+	);
+}
+
 export function Conectividad({ darkMode }: { darkMode: boolean }) {
 	const mode = useConnectionMode((s) => s.mode);
 	const setMode = useConnectionMode((s) => s.setMode);
@@ -241,6 +357,10 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 
 			{/* SYNC-14: salud de la sincronización (solo la Main con BD local y en modo online). */}
 			{deviceMode === "tpv" && mode === "online" && <SaludSync darkMode={darkMode} />}
+
+			{/* Runner de jobs: corre también offline (licencia con gracia, avisos), así que no
+			    depende del modo de conexión, solo de que esta sea la Main. */}
+			{deviceMode === "tpv" && <TareasFondo darkMode={darkMode} />}
 		</div>
 	);
 }

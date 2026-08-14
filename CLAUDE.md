@@ -372,3 +372,50 @@ no sólo en dev.
   `state.getWebSockets()`. Tampoco puede haber `setInterval`/`alarm` periódicos: mantendrían el DO
   despierto. Detalle completo y reglas en
   [docs/analisis/transversal/sync-tenanthub.md](docs/analisis/transversal/sync-tenanthub.md) §SYNC-16.
+
+---
+
+## 10. Tareas periódicas de fondo (runner de jobs)
+
+Todo lo que la app hace "cada X tiempo" **por su cuenta** vive en un único runner
+(`apps/tpv-main/src-tauri/src/jobs/`), no en `spawn`s sueltos repartidos por `lib.rs` ni en
+`setInterval` del frontend.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Motor | `jobs/mod.rs` | Bucle común: vencimiento, jitter, backoff, gating, panics, registro |
+| **Catálogo** | `jobs/registro.rs` | **El único fichero a tocar para añadir un job** |
+| Estado persistido | `_Jobs_State` (`infra-sqlite/src/jobs.rs`, tabla creada en `db.rs`) | `Last_Ok_Ms` por job |
+| Diagnóstico | `commands/jobs.rs` → `jobs_status` | Panel en Configuración → Conectividad |
+
+### Añadir un job
+
+1. Escribe `async fn <nombre>(app: AppHandle) -> Result<(), String>` en `jobs/registro.rs`.
+   Devolver `Err` **es** la forma de decir "ha fallado" (activa el backoff y sale en el panel):
+   no captures el error para devolver `Ok`.
+2. Añade su `Job` a `catalogo()` con `cada`, `retardo_inicial` y `requiere`.
+3. Nada más: ni bucles, ni tocar `lib.rs`.
+
+El cuerpo debe ser **idempotente** (el motor puede adelantarlo si el job quedó vencido, o repetirlo
+tras un fallo parcial).
+
+### Qué garantiza el motor
+
+- **Vencimiento en reloj de pared**: el ciclo se mide contra `Last_Ok_Ms` persistido, no contra el
+  tiempo de proceso. Un job de 6 h se ejecuta igual en un equipo que se apaga cada noche.
+- **Jitter** (≤10 % del intervalo, tope 5 min), **backoff** exponencial acotado (60 s → 30 min),
+  **gating** por modo reevaluado en cada vencimiento (un cambio de modo no reinicia nada), y el
+  cuerpo en su propia task para que un panic sea un fallo registrado y no un job muerto.
+- La política de planificación (`proxima_espera`) es una función **pura** con tests.
+
+### Qué NO va aquí (a propósito)
+
+- **Ciclo de vida del WebSocket** (ping, drenado del outbox, reconexión): es una máquina de estados
+  de la conexión, no un pulso periódico. Vive en `useMainSocket` (§9).
+- **Ciclo de vida de una pantalla** (polling de un panel abierto, cuentas atrás, debounces): ahí el
+  montaje/desmontaje del componente ya es la política correcta.
+- **Telemetría**: mantiene su hilo propio y su spool con backoff; su drenado (1 s) es una cola
+  caliente fuera del camino de emisión, no una comprobación periódica.
+
+⚠️ Las escrituras a `_Jobs_State` van por `WriteGuard::raw()`: por `execute()` se capturarían en
+`_Sync_Outbox` y cada tick de cada job se replicaría a la nube.
