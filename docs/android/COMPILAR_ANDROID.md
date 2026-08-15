@@ -380,6 +380,31 @@ Dos bugs de **runtime** resueltos (§4.7), que compilaban pero fallaban al ejecu
   dev` — apunta a `http://<IP-LAN>:1420` y **no aplica CSP ninguna**. Para cualquier prueba de CSP
   hay que usar un APK de `tauri android build` (el `universal/debug/` lo es).
 
+### 2026-08-15 (tarde) — CSP estricta verificada en Android ✅
+Con la CSP nueva (`script-src 'self'`, `connect-src` acotado) se reconstruyó el APK y se repitió la
+sonda por CDP sobre el emulador. Resultado, idéntico al de escritorio:
+
+| Prueba | Resultado |
+|---|---|
+| `<script>` inline del anti-FOUC (`index.html`) | ✅ se ejecuta (Tauri le mete el `sha256` al empaquetar) |
+| inyectar un `<script>` inline nuevo | ❌ bloqueado (`script-src-elem`) |
+| `<script src>` de un host externo | ❌ bloqueado (`script-src-elem`) |
+| `fetch()` a un host externo | ❌ bloqueado (`connect-src`) |
+| imagen del bucket R2 | ✅ permitida (el bug de la mañana, ya arreglado) |
+
+La app arranca sin ninguna violación en `logcat` y pinta bien la pantalla de elección de modo (o
+sea: CSS cargado y el IPC hacia Rust funcionando bajo la CSP nueva).
+
+**Receta de la sonda** (sirve para cualquier duda futura de CSP):
+```bash
+adb shell cat /proc/net/unix | grep webview_devtools     # saca el <pid>
+adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>
+curl -s http://localhost:9222/json/list                  # webSocketDebuggerUrl
+# y por CDP: Runtime.evaluate cargando el recurso + listener de "securitypolicyviolation"
+```
+En escritorio es lo mismo arrancando el `.exe` con
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223`.
+
 <!-- Plantilla para nuevas entradas:
 ### AAAA-MM-DD — <título>
 - <hallazgo> (comando: `…`) → resultado.
