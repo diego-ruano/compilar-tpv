@@ -1,0 +1,37 @@
+# Dependabot — avisos de dependencias (FABLE-H).
+#
+# Abre PRs cuando una dependencia tiene versión nueva y, sobre todo, cuando tiene un aviso de
+# seguridad publicado. NO despliega nada: cada actualización es un PR que se revisa y se mergea a
+# mano. El escaneo activo (que falla el CI) vive en `.github/workflows/audit.yml`.
+#
+# Nota pnpm: Dependabot lee el `pnpm-lock.yaml` de la RAÍZ (el único válido del workspace, §8 de
+# CLAUDE.md) y cubre desde ahí todos los `apps/*` y `packages/*`. No hay que declarar un `directory`
+# por paquete.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Un PR por tanda en vez de uno por paquete: menos ruido y menos builds.
+      dependencias-js:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dependencias-rust:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

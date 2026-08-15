@@ -1,0 +1,66 @@
+name: Auditoría de dependencias
+
+# Escaneo de vulnerabilidades conocidas de las dependencias (FABLE-H).
+#
+# Qué hace: NO actualiza nada. Solo comprueba si alguna dependencia que ya usamos tiene un aviso
+# de seguridad publicado (RustSec para Cargo, GitHub Advisory Database para npm). Las
+# actualizaciones rutinarias las propone Dependabot (.github/dependabot.yml).
+#
+# Por qué también semanal y no solo en los PRs: un aviso nuevo aparece sin que nosotros toquemos
+# nada. Sin el `schedule`, una dependencia se volvería vulnerable un martes y no nos enteraríamos
+# hasta el siguiente PR.
+#
+# ⚠️ `continue-on-error: true` mientras se ve el ruido real (decisión 2026-08-15). El job sale en
+# verde con un aviso ⚠️ en el resumen; cuando confirmemos que no da falsos positivos, se quita esa
+# línea y pasa a bloquear de verdad.
+
+on:
+  pull_request:
+  schedule:
+    # Lunes a las 6:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo:
+    name: cargo audit (Rust)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.91.1
+
+      # Acción oficial de RustSec: instala y ejecuta cargo-audit sobre el Cargo.lock de la raíz
+      # (el único del workspace).
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  npm:
+    name: pnpm audit (JS)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # --prod: solo lo que acaba en el binario/worker. Las devDependencies (vite, tsc, wrangler…)
+      # no las ejecuta ningún cliente y son la fuente principal de ruido.
+      - name: Auditar dependencias de producción
+        run: pnpm audit --prod --audit-level moderate
