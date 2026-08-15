@@ -30,17 +30,29 @@ Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa
 > comprobaba el rol, así que una Handy autenticada podía ejecutar SQL arbitrario en su tenant) está
 > **arreglado**: el `apply` exige `role === "tpv"` y el rol lo dicta la BD central, no la cabecera
 > del cliente ([tenantHub.ts:1686-1698](apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L1686-L1698)).
+>
+> **Cerrados el 2026-08-15:**
+> - **C** — el destinatario ya no lo elige el dispositivo: `/v1/email/enviar-pedido` solo envía al
+>   `Email` de un proveedor dado de alta en ese tenant, y cada envío deja traza en `email_sends`
+>   (control-plane). ⚠️ El **límite por número de correos se descartó a propósito** (decisión del
+>   responsable): la vigilancia es a posteriori sobre esa tabla. El control efectivo es *a quién* se
+>   puede escribir, no *cuánto*.
+> - **H** — añadidos [.github/dependabot.yml](.github/dependabot.yml) (npm + cargo + actions) y
+>   [.github/workflows/audit.yml](.github/workflows/audit.yml) (`cargo audit` + `pnpm audit --prod`,
+>   en PR y cada lunes). Arranca con `continue-on-error` hasta calibrar el ruido.
+> - **I** — borrados los 4 lockfiles parásitos y añadido el patrón al `.gitignore`.
+>
+> **Corregido de rebote:** la `img-src` de la CSP no incluía el bucket R2 → en la **Handy** no
+> cargaba ninguna imagen. Confirmado en emulador por CDP y arreglado (no era el hallazgo G, pero
+> salió investigándolo).
 
 | # | Severidad | Título | OWASP |
 |---|-----------|--------|-------|
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
 | **G** | 🟠 Media | CSP del cliente Tauri demasiado permisiva (`https:` comodín) | A05 Security Misconfiguration |
-| **C** | 🟡 Baja-Media | Envío de correo a destinatario arbitrario sin límite por tenant | A04 / abuso |
 | **D** | 🟡 Baja | Pairing "solo código" permite reclamar sin secreto (carrera de claim) | A07 Auth |
 | **E** | 🟡 Baja | Sin anti-replay (nonce) en device-proof e internal-HMAC (solo ventana temporal) | A07 |
 | **F** | 🟡 Baja | `/internal/revoke` del DO sin verificación HMAC | A01 (defensa en profundidad) |
-| **H** | 🟡 Baja | CI sin escaneo de dependencias (`cargo audit` / `pnpm audit` / Dependabot) | A06 |
-| **I** | 🟡 Baja | Lockfiles obsoletos/duplicados commiteados (npm + pnpm por-app) | A08 / higiene |
 
 ---
 
@@ -337,11 +349,16 @@ Durante la auditoría se confirmó explícitamente que **no** existen estos prob
 
 ## 4. Plan de acción sugerido (por prioridad)
 
+*(Actualizado 2026-08-15: C, H e I ya están hechos; ver la nota del §0.)*
+
 1. **B** — Quitar `stack`/`message`/`cause` de las respuestas de error (dejar solo el código).
+   **Aplazado con plan escrito** en [BACKLOG.md](docs/analisis/BACKLOG.md) (fila `FABLE-B`).
 2. **G** — Endurecer la CSP de Tauri (`script-src 'self'`, `connect-src` a orígenes concretos).
-3. **H / I** — Añadir `cargo audit` + `pnpm audit` + Dependabot en CI; borrar los lockfiles npm y los
-   `pnpm-lock.yaml` por-app.
-4. **C, D, E, F** — Endurecimientos de defensa en profundidad, según capacidad.
+   Con el método de sonda por CDP ya no hace falta ir a ciegas: ver el BACKLOG.
+3. **D, E, F** — Endurecimientos de defensa en profundidad, según capacidad. **E no es un cambio
+   suelto**: la firma la producen los clientes instalados y la verifica el worker, así que exige un
+   despliegue en tres pasos (worker tolerante → clientes nuevos → worker estricto) y un almacén de
+   nonces (hoy no hay binding de KV).
 
 ---
 
