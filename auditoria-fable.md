@@ -26,30 +26,13 @@ CVEs abiertos conocidos.**
 
 Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa en profundidad**.
 
-> **Corregido y retirado de esta lista:** el hallazgo 🔴 **A** (el `apply` por WebSocket no
-> comprobaba el rol, así que una Handy autenticada podía ejecutar SQL arbitrario en su tenant) está
-> **arreglado**: el `apply` exige `role === "tpv"` y el rol lo dicta la BD central, no la cabecera
-> del cliente ([tenantHub.ts:1686-1698](apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L1686-L1698)).
->
-> **Cerrados el 2026-08-15:**
-> - **C** — el destinatario ya no lo elige el dispositivo: `/v1/email/enviar-pedido` solo envía al
->   `Email` de un proveedor dado de alta en ese tenant, y cada envío deja traza en `email_sends`
->   (control-plane). ⚠️ El **límite por número de correos se descartó a propósito** (decisión del
->   responsable): la vigilancia es a posteriori sobre esa tabla. El control efectivo es *a quién* se
->   puede escribir, no *cuánto*.
-> - **H** — añadidos [.github/dependabot.yml](.github/dependabot.yml) (npm + cargo + actions) y
->   [.github/workflows/audit.yml](.github/workflows/audit.yml) (`cargo audit` + `pnpm audit --prod`,
->   en PR y cada lunes). Arranca con `continue-on-error` hasta calibrar el ruido.
-> - **I** — borrados los 4 lockfiles parásitos y añadido el patrón al `.gitignore`.
->
-> **Corregido de rebote:** la `img-src` de la CSP no incluía el bucket R2 → en la **Handy** no
-> cargaba ninguna imagen. Confirmado en emulador por CDP y arreglado (no era el hallazgo G, pero
-> salió investigándolo).
+> **Un hallazgo corregido se borra de este documento.** La traza del arreglo vive en el código y en
+> el historial de git, no en una lista paralela que se queda vieja (misma convención que
+> [docs/analisis](docs/analisis/00-indice.md)). Si buscas una letra que no aparece, está resuelta.
 
 | # | Severidad | Título | OWASP |
 |---|-----------|--------|-------|
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
-| **G** | 🟠 Media | CSP del cliente Tauri demasiado permisiva (`https:` comodín) | A05 Security Misconfiguration |
 | **D** | 🟡 Baja | Pairing "solo código" permite reclamar sin secreto (carrera de claim) | A07 Auth |
 | **E** | 🟡 Baja | Sin anti-replay (nonce) en device-proof e internal-HMAC (solo ventana temporal) | A07 |
 | **F** | 🟡 Baja | `/internal/revoke` del DO sin verificación HMAC | A01 (defensa en profundidad) |
@@ -93,60 +76,6 @@ export function serverError(req: Request, error: string) {
 
 Mantener el `console.error(e?.stack)` que ya existe en algunos handlers (visible en `wrangler tail`)
 es correcto; lo que hay que quitar es el `details` en la respuesta HTTP.
-
----
-
-### 🟠 G — CSP del cliente Tauri demasiado permisiva (`https:` comodín)
-
-**OWASP:** A05 Security Misconfiguration.
-**Ubicación:** [apps/tpv-main/src-tauri/tauri.conf.json:23](apps/tpv-main/src-tauri/tauri.conf.json#L23)
-y capacidades en [apps/tpv-main/src-tauri/capabilities/default.json](apps/tpv-main/src-tauri/capabilities/default.json)
-
-**Descripción.** La CSP es:
-
-```
-default-src 'self' ipc: https:; img-src 'self' asset: ... blob: data:;
-```
-
-Como no se declaran `script-src` ni `connect-src` explícitos, ambos **heredan** de `default-src`, que
-incluye el comodín `https:`. Esto significa que la webview puede cargar **scripts** y abrir
-**conexiones** hacia **cualquier** origen HTTPS. Combinado con las capacidades amplias del cliente
-(`fs:allow-write-file`, `fs:scope-download/desktop/document`, `opener:default`), si en el futuro
-apareciera un XSS (p. ej. por un dato no escapado inyectado en el DOM), el atacante podría cargar
-código remoto arbitrario y usar las APIs de Tauri (escribir ficheros, abrir rutas/URLs).
-
-**Impacto.** No hay XSS hoy (no se usa `dangerouslySetInnerHTML`/`eval`), así que es riesgo latente:
-amplifica cualquier XSS futuro de "molesto" a "grave".
-
-**Solución.** Endurecer la CSP a orígenes concretos:
-
-```json
-"csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: https://tpv-api.altarialights.workers.dev wss://tpv-api.altarialights.workers.dev; img-src 'self' asset: http://asset.localhost https://asset.localhost blob: data:;"
-```
-
-(ajustar `style-src` a lo que exija Tailwind/Vite). Y revisar si las capacidades `fs:scope-*` y
-`opener` son todas necesarias; reducir al mínimo el alcance.
-
----
-
-### 🟡 C — Envío de correo a destinatario arbitrario sin límite por tenant
-
-**OWASP:** A04 Insecure Design / abuso de recursos (reputación del dominio remitente).
-**Ubicación:** [apps/cloud-worker-licensing/src/domains/email/email.routes.ts:37-69](apps/cloud-worker-licensing/src/domains/email/email.routes.ts#L37-L69)
-
-**Descripción.** Cualquier dispositivo autenticado del tenant puede `POST /v1/email/enviar-pedido`
-con un `email_destino` **arbitrario** (validado solo como email bien formado). El worker envía desde
-tu dominio con SPF/DKIM. El contenido va **HTML-escapado** (`esc()`, líneas 136-142) y los campos van
-estructurados al binding `EMAIL.send()` (no hay inyección de cabeceras ni de HTML). El único freno es
-el rate limit **global** de Cloudflare Email Service (`E_RATE_LIMIT_EXCEEDED`), no uno por
-tenant/dispositivo.
-
-**Impacto.** Un token comprometido puede emitir correos "de pedido" a direcciones arbitrarias con la
-firma de tu dominio → spam/uso indebido que daña la reputación de envío (deliverability) del dominio.
-
-**Solución.** Añadir límite por tenant/dispositivo (p. ej. contador con ventana en la BD central) y,
-si el caso de uso lo permite, restringir `email_destino` a correos de proveedores ya dados de alta en
-el tenant en lugar de aceptar cualquiera.
 
 ---
 
@@ -211,100 +140,26 @@ petición en `revokeDevice.ts`, igual que hace `hub.ts` para `/internal/apply`).
 
 ---
 
-### 🟡 H — CI sin escaneo de vulnerabilidades de dependencias
+## 2. Dependencias — ahora lo vigila CI
 
-**OWASP:** A06 Vulnerable and Outdated Components (proceso).
-**Ubicación:** [.github/workflows/ci.yml](.github/workflows/ci.yml) · [.github/workflows/release.yml](.github/workflows/release.yml)
+La versión original de este apartado era un **inventario a mano** de las versiones instaladas y sus
+CVEs, con fecha 2026-07-17. Se ha borrado: esa foto envejece sola y engaña. El 2026-08-15, con el
+mismo árbol que la tabla daba por limpio, `pnpm audit --prod` sacaba **25 avisos**.
 
-**Descripción.** No hay ningún job de auditoría de dependencias: ni `pnpm audit`, ni `cargo audit`
-(RustSec `advisory-db`), ni Dependabot, ni CodeQL. Hoy el árbol está limpio (§2), pero sin escaneo
-continuo una regresión futura pasaría desapercibida.
+La verdad vive ahora en [.github/workflows/audit.yml](.github/workflows/audit.yml) (`cargo audit` +
+`pnpm audit --prod`, en cada PR y los lunes) y en [.github/dependabot.yml](.github/dependabot.yml).
+Para consultarlo en local:
 
-**Solución.**
-- Rust: añadir `cargo audit` (o `cargo deny check advisories`) como job de CI.
-- JS: `pnpm audit --prod` (o Socket/Snyk) en CI.
-- Activar **Dependabot** (o Renovate) para PRs automáticos de actualización.
-
----
-
-### 🟡 I — Lockfiles obsoletos y duplicados commiteados (viola CLAUDE.md: solo pnpm)
-
-**OWASP:** A08 Software & Data Integrity Failures / higiene de cadena de suministro.
-**Ubicación:** ficheros rastreados:
-- `apps/cloud-worker-licensing/package-lock.json` (npm) + `apps/cloud-worker-licensing/pnpm-lock.yaml` (obsoleto)
-- `apps/tpv-main/package-lock.json` (npm) + `apps/tpv-main/pnpm-lock.yaml`
-- `pnpm-lock.yaml` (raíz — el **autoritativo** del workspace)
-
-**Descripción.** El monorepo es un workspace pnpm: el **único** lock válido es el de la raíz, y CI usa
-`pnpm install --frozen-lockfile` sobre él (por eso el árbol desplegado es correcto: `hono@4.12.23`,
-`zod@3.25.76`, etc.). Pero se han commiteado además:
-- `package-lock.json` de **npm** en dos apps → exactamente lo que CLAUDE.md **prohíbe** (mezclar npm
-  rompe el aislamiento de pnpm).
-- `pnpm-lock.yaml` **por-app** que están **desincronizados**: el del worker, por ejemplo, en su
-  sección `importers` solo lista `@libsql/client`, `@noble/ed25519` y `jose` — **le faltan `hono`,
-  `@sentry/cloudflare` y `zod`**, y fija `zod@3.22.3` (mientras el lock raíz instala `zod@3.25.76`).
-
-Estos ficheros son "trampas": si alguien ejecuta `npm ci` o `pnpm install` **dentro** de una subcarpeta,
-obtendrá un árbol de dependencias **distinto y más antiguo** que el desplegado — builds no
-reproducibles y potencial de instalar versiones no auditadas.
-
-**Solución.**
 ```bash
-git rm apps/cloud-worker-licensing/package-lock.json apps/tpv-main/package-lock.json
-git rm apps/cloud-worker-licensing/pnpm-lock.yaml apps/tpv-main/pnpm-lock.yaml
-```
-Mantener **solo** el `pnpm-lock.yaml` de la raíz y añadir a `.gitignore`:
-```
-**/package-lock.json
-apps/*/pnpm-lock.yaml
-packages/*/pnpm-lock.yaml
+pnpm audit --prod --audit-level moderate
+cargo audit          # requiere: cargo install cargo-audit
 ```
 
----
-
-## 2. Dependencias — CVEs conocidos y documentados
-
-Se revisaron las versiones **realmente instaladas** (lock raíz autoritativo, `--frozen-lockfile`).
-**No se encontró ninguna dependencia con CVE/advisory abierto conocido.** Detalle:
-
-### 2.1 JavaScript / worker + frontend
-
-| Paquete | Versión instalada | Estado | Notas |
-|---|---|---|---|
-| hono | 4.12.23 | ✅ Al día | Los advisories antiguos (path traversal en `serveStatic` de 4.5.x, etc.) están muy por detrás. |
-| @noble/ed25519 | 3.0.0 | ✅ Sin CVE | Librería auditada, criptografía constante. |
-| jose | 6.1.3 | ✅ Sin CVE | v6 actual. |
-| zod | 3.25.76 | ✅ Al día | (El `3.22.3` del lock por-app **obsoleto no se instala**; ver hallazgo I.) |
-| @libsql/client | 0.17.0 | ✅ Sin CVE | |
-| @sentry/cloudflare | 10.62.0 | ✅ Al día | |
-| vite | 7.2.6 | ✅ Al día | Los CVEs de dev-server (`?raw`, `server.fs.deny`) son de las líneas 5/6; además es *devDependency* y producción es un bundle Tauri. |
-| esbuild | 0.25.12 / 0.27.0 | ✅ Parcheado | ≥ 0.25.0 → **no** afectado por GHSA-67mh-4wv8-2f99 (dev-server). Solo *dev*. |
-| nanoid | 3.3.11 | ✅ Parcheado | ≥ 3.3.8 → **no** afectado por CVE-2024-55565. |
-| semver | 6.3.1 | ✅ Parcheado | **No** afectado por CVE-2022-25883 (ReDoS, corregido en 6.3.1). |
-| postcss | 8.5.6 | ✅ Parcheado | ≥ 8.4.31 → **no** afectado por CVE-2023-44270. |
-| react / react-dom | 19.2.1 | ✅ Al día | |
-| react-router-dom | 7.10.1 | ✅ Al día | |
-| pdf-lib | 1.17.1 | ✅ Sin CVE conocido | |
-| apexcharts / konva | 5.3.6 / 10.0.12 | ✅ Sin CVE conocido | Renderizan datos propios; sin sinks HTML peligrosos en el uso actual. |
-
-### 2.2 Rust (Cargo.lock)
-
-| Crate | Versión | Estado | Notas |
-|---|---|---|---|
-| tauri | 2.11.2 | ✅ Al día | |
-| tauri-plugin-updater | 2.10.1 | ✅ Al día | Updater con firma minisign (clave pública pineada en `tauri.conf.json`). |
-| ed25519-dalek | 2.2.0 | ✅ Seguro | El oráculo de doble-pubkey (RUSTSEC-2022-0093) afectaba a < 2.0. |
-| ring | 0.17.14 | ✅ Al día | Por delante de RUSTSEC-2025-0009 (overflow AES) corregido en 0.17.12. |
-| rustls | 0.23.40 / 0.22.4 | ✅ Al día | 0.23.40 es muy reciente; 0.22.4 es el último de la línea 0.22. |
-| openssl / openssl-sys | 0.10.81 / 0.9.117 | ✅ Al día | Por delante de RUSTSEC-2025-0022 (corregido en 0.10.70). |
-| reqwest | 0.12.28 / 0.13.4 | ✅ Al día | |
-| hyper | 1.10.1 / 0.14.32 | ✅ Al día | |
-| tokio | 1.52.3 | ✅ Al día | |
-| libsql | 0.3.5 | ✅ Sin CVE conocido | |
-| keyring | 2.3.3 | ✅ Sin CVE conocido | Almacena el token de sesión (bien: no en disco plano). |
-
-> **Recomendación:** las tablas anteriores son un snapshot manual a fecha de hoy. La forma correcta de
-> mantenerlas verdes es el **hallazgo H** (`cargo audit` + `pnpm audit` + Dependabot en CI).
+⚠️ Un aviso **no** es un fallo explotable aquí: hay que mirar si el camino vulnerable se usa. En la
+pasada del 2026-08-15, de los 9 avisos altos ninguno aplicaba (adaptadores de `hono` para AWS
+Lambda, que en Workers no se usan; el de CORS de `hono` tampoco, porque el worker no usa
+`hono/cors` sino su propia allowlist en `response.ts`; y el DoS de `react-router` necesita un
+servidor, que en una app de escritorio no hay).
 
 ---
 
@@ -349,13 +204,11 @@ Durante la auditoría se confirmó explícitamente que **no** existen estos prob
 
 ## 4. Plan de acción sugerido (por prioridad)
 
-*(Actualizado 2026-08-15: C, H e I ya están hechos; ver la nota del §0.)*
-
 1. **B** — Quitar `stack`/`message`/`cause` de las respuestas de error (dejar solo el código).
    **Aplazado con plan escrito** en [BACKLOG.md](docs/analisis/BACKLOG.md) (fila `FABLE-B`).
 2. **G** — Endurecer la CSP de Tauri (`script-src 'self'`, `connect-src` a orígenes concretos).
    Con el método de sonda por CDP ya no hace falta ir a ciegas: ver el BACKLOG.
-3. **D, E, F** — Endurecimientos de defensa en profundidad, según capacidad. **E no es un cambio
+2. **D, E, F** — Endurecimientos de defensa en profundidad, según capacidad. **E no es un cambio
    suelto**: la firma la producen los clientes instalados y la verifica el worker, así que exige un
    despliegue en tres pasos (worker tolerante → clientes nuevos → worker estricto) y un almacén de
    nonces (hoy no hay binding de KV).

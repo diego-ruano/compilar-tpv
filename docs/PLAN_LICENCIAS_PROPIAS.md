@@ -1,25 +1,9 @@
-# Plan — Sistema de licencias propio (retirada de Lemon Squeezy + Stripe)
+# Sistema de licencias propio (Stripe) — diseño y operación
 
-> **Estado:** EN EJECUCIÓN.
-> · **Fase 0 (preparación del cliente) — ✅ hecha** (`a610d9a`): la política del gate se sacó del
->   adaptador a `tpv-domain::licensing`, se unificó el host de la nube en una constante, se retiró el
->   comando duplicado `license_read_state_for_ui` y los alias muertos de `LicenseActivateInput`.
->   El cliente ya está listo para recibir la firma ed25519 y el enforcement de `expires_at` sin
->   tocar infraestructura.
-> · **Worker (fases 1+2) — ✅ hecho**: modelo propio, emisión (Stripe + admin/CLI), activación con
->   `main_device_id` + OTP de cambio de dispositivo, `/status` firmado ed25519, `/refresh`, fuera
->   Lemon. El worker se auto-provisiona el esquema. `typecheck` verde. **Sin desplegar** (va junto a
->   la fase 3).
-> · **Cliente Rust (fase 3) — ✅ hecho**: clave pública pineada + verificación de la firma en
->   `consultar_estado`, enforcement de `expires_at` vía estado firmado, clasificación de errores con
->   `/refresh` transparente, flujo de OTP de cambio de dispositivo end-to-end (comando + UI en
->   AppBoot). `cargo build` + `cargo test` + `tsc` verdes.
-> · **Frontend (fase 4) — ✅ hecho**: `Licencia.tsx` cableado a datos reales (estado, plan, días
->   restantes, dispositivo), banner de aviso de caducidad (`warn`/`expiry_grace`) sobre la app, y
->   `BlockedScreen` con textos por motivo. `tsc` verde.
-> · **Pendiente de ti**: secretos, `DROP` de las 3 tablas viejas (✅ ya aplicado) y config de Stripe
->   (§16). Luego desplegar worker **y** app juntos.
-> **Fecha:** 2026-07-09 (actualizado 2026-07-14) · **Rama:** `main`
+> **Estado: EN PRODUCCIÓN** (2026-08-15). Las licencias se emiten y validan de verdad: secretos
+> puestos, esquema del control-plane aplicado y Stripe configurado y cobrando. Lo que sigue abajo es
+> el **diseño** del sistema (modelo de datos, flujos, seguridad), no una lista de tareas.
+> **Escrito:** 2026-07-09 · **En producción desde:** 2026-08
 > **Ámbito:** subsistema de **licencias** (activación, gate, cobro, alta manual). El **pairing** de
 > Handy y la **sincronización** (§9 de [CLAUDE.md](../CLAUDE.md)) se mantienen intactos y solo se
 > mencionan donde comparten cripto/identidad de dispositivo.
@@ -60,13 +44,11 @@ despliegue. Es viable porque **no hay ninguna licencia real en producción** (ca
 7. [Cambios por capa (borrar / modificar / añadir)](#7-cambios-por-capa)
 8. [Configuración de Stripe](#8-configuracion-de-stripe)
 9. [Secretos y variables de entorno](#9-secretos)
-10. [Plan de implementación por fases](#10-plan-por-fases)
 11. [Testing y verificación](#11-testing)
-12. [Checklist de retirada de Lemon](#12-checklist-lemon)
 13. [Riesgos y decisiones abiertas](#13-riesgos)
 14. [Referencias](#14-referencias)
 15. [Pendientes (futuro)](#15-pendientes-futuros)
-16. [Checklist de operación — lo que tienes que hacer tú](#16-checklist-de-operacion)
+16. [Operación: secretos, esquema y Stripe (referencia)](#16-checklist-de-operacion)
 
 ---
 
@@ -698,48 +680,6 @@ console.log("LICENSE_SIGNING_PUBLIC_KEY_B64 =", b64(pub)); // → constante en l
 
 ---
 
-## 10. Plan por fases
-
-Orden respetando dependencias del Cargo workspace (contracts → application → infra → app) y
-verificando en cada paso (`cargo build`, `cargo test -p tpv-contracts`, `tsc`, `pnpm generate-types`).
-
-**Fase 0 — Preparación (sin tocar producto).**
-- Generar el par de firma ed25519. Crear los 3 Prices + Payment Links + webhook en Stripe **test**.
-- `wrangler secret put` de los 4 secretos nuevos. Escribir el script SQL de migración del control-plane.
-
-**Fases 1 + 2 — Worker completo (una sola tanda, ver §0).**
-Se fusionan porque la migración del esquema rompe el `activate` actual: dejarlas separadas
-implicaría desplegar un worker roto entre medias. Orden interno:
-1. Migración SQL del control-plane (drop `lemon_*`, nuevas columnas, `license_device_otp`,
-   `license_device_swaps`).
-2. `licenseStore.ts`: `issueLicense`/`extendLicense`/`activateLicense`/`getLicenseByHash`/
-   `getLicenseByStripeCustomer` + helpers del OTP. Fuera todo lo `lemon_*`.
-3. `shared.ts` / `env.ts` / `index.ts`: tipos, secretos nuevos, montaje de rutas.
-4. Dominio `admin/` (issue/list/revoke/extend) + `requireAdmin` *timing-safe* + CLI. **Primero**,
-   porque permite emitir claves y probar el resto end-to-end sin depender de Stripe.
-5. `activate` reescrito (validación contra BD, `main_device_id`, OTP de cambio de dispositivo,
-   provisión de tenant, persistir tenantInfo) + `device-change/request` + emails.
-6. `status` firmado (ed25519) + `warn`/`grace` + refresco de token. Nuevo `refresh` por device-proof.
-7. 🟥 Borrar Lemon (`lemonActivate`, `verifyLemonSignature`, `lemonWebhookRoutes`,
-   `LemonWebhookPayload`, `LEMON_WEBHOOK_SECRET`).
-8. Dominio `stripe/` (webhook + verificación + fulfillment + email). Probar con Stripe CLI.
-
-**Fase 3 — Cliente Rust.**
-- Contracts: nuevos campos + `reason`s. `pnpm generate-types`.
-- `lib.rs`: pública pineada + verificación de firma + enforcement `expires_at` + clasificación de
-  errores + `refresh` + unificar constantes de host. `cargo build` + `cargo test -p tpv-contracts`.
-
-**Fase 4 — Frontend.**
-- Ajustar formulario de activación, `BlockedScreen`, banner de caducidad. Cablear `Licencia.tsx` a
-  datos reales. `tsc` verde.
-
-**Fase 5 — Verificación end-to-end + go-live.**
-- Pruebas de §11 en Stripe **test**. Revisión de seguridad (`/security-review`).
-- Cambiar Stripe a **live**, `wrangler secret put` de las claves `live`, desplegar. Validar una compra
-  real de bajo importe + activación + gate + renovación.
-
----
-
 ## 11. Testing
 
 **Webhook / firma (Stripe):**
@@ -767,22 +707,6 @@ implicaría desplegar un worker roto entre medias. Orden interno:
   = revoked → cliente bloquea.
 
 **Anti-copia (sin regresión):** activar en un 2º dispositivo con otra pubkey → `device_key_mismatch`.
-
----
-
-## 12. Checklist de retirada de Lemon
-
-- [ ] `licensing.helpers.ts`: borrar `lemonActivate`, `verifyLemonSignature`.
-- [ ] `licensing.routes.ts`: borrar `lemonWebhookRoutes` (`POST /v1/webhooks/lemon`).
-- [ ] `index.ts`: quitar import y `app.route("/v1/webhooks", lemonWebhookRoutes)`.
-- [ ] `shared.ts`: borrar `LemonWebhookPayload`; alinear `LicenseStatus`.
-- [ ] `env.ts`: borrar `LEMON_WEBHOOK_SECRET`. `wrangler secret delete LEMON_WEBHOOK_SECRET`.
-- [ ] `licenseStore.ts`: quitar todas las columnas/props `lemon_*` (+ `activation_limit`,
-      `instances_count` si no se reutilizan).
-- [ ] Control-plane Turso: `ALTER TABLE licenses DROP COLUMN lemon_*` (script versionado).
-- [ ] Stripe Dashboard: eliminar la app/webhook de Lemon; revocar la API key de Lemon.
-- [ ] Docs: `CLAUDE.md` (§4.5), `BACKLOG.md`, marcar auditorías como *superseded*.
-- [ ] `grep -ri "lemon" apps/ crates/ packages/` → **0 resultados** en código (solo histórico en docs).
 
 ---
 
@@ -856,10 +780,10 @@ como recomendado, no como opcional.
 
 ---
 
-## 16. Checklist de operación
+## 16. Operación: secretos, esquema y Stripe (referencia)
 
-Lo que **no puede hacer el código por ti**: secretos, esquema de la BD central y configuración de
-Stripe. Nada de esto bloquea escribir código, pero **todo** bloquea el despliegue.
+**Ya está todo aplicado en producción.** Se conserva como referencia para reponer un secreto, rotar
+la clave de firma o montar un entorno nuevo (ver INFRA-01 en el BACKLOG).
 
 > ⛔ **No despliegues el worker suelto.** `GET /v1/license/status` cambia de forma (ahora devuelve
 > la aserción firmada) y el cliente Rust actual no sabe leerla: se quedaría sin poder validar. El

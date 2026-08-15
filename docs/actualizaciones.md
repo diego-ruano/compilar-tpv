@@ -162,26 +162,19 @@ Registro en el router: `app.route("/v1/update", updatesRoutes)` en `src/index.ts
 
 ---
 
-## Checklist para activar el sistema
+## Sistema verificado end-to-end (2026-08-15)
 
-### Clave de firma
-- [x] `apps/tpv-main/src-tauri/.tauri/updater.key` existe (348 bytes) ✅
+El ciclo completo está probado en real: se publica la versión, al cliente con la anterior le sale el
+banner, pulsa, se cierra la app, corre el instalador y vuelve a abrirse actualizada.
 
-### Secretos y variables (GitHub Actions + Worker)
-Configurados y **verificados en producción**: la release `v0.1.0` se publicó con el workflow y el
-feed la sirve (`GET /v1/update/windows/x86_64/0.0.1` → 200 + manifest firmado, 2026-08-07).
+Secretos y variables ya configurados, por si hay que reponerlos algún día:
 
 - Secretos (Settings → Secrets): `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`,
   `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`, `RELEASE_ADMIN_TOKEN`
 - Variables (Settings → Variables): `R2_BUCKET`, `R2_PUBLIC_BASE_URL`,
   `TPV_API_BASE` = `https://tpv-api.altarialights.workers.dev`
 - Worker: `wrangler secret put RELEASE_ADMIN_TOKEN` (mismo valor que el de GitHub)
-
-### Verificación end-to-end
-- [x] `release.yml` se ejecuta sin errores al pushear el tag
-- [x] El feed devuelve 200 + manifest
-- [ ] Publicar una versión nueva y comprobar en un cliente con la anterior: banner + notificación +
-      Configuración → Actualizaciones + instalar y reiniciar
+- Clave de firma del updater: `apps/tpv-main/src-tauri/.tauri/updater.key` (fuera de git)
 
 ---
 
