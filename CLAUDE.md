@@ -175,6 +175,16 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 > ⚠️ Tras clonar o tras esta migración hay que ejecutar **`pnpm install`** en la raíz (se purgaron
 > todos los `node_modules` durante la reestructuración para evitar problemas de rutas largas de pnpm
 > en Windows). El Cargo workspace regenera su `target/` y `Cargo.lock` en el primer build.
+>
+> ⚠️ **Windows — `Failed("Are you sure you have RC.EXE in your $PATH…")`.** Si un build de escritorio
+> revienta con eso, no es el código: es que `embed-resource` (vía `tauri-build`) busca `rc.exe` del
+> SDK de Windows leyendo `HKLM\SOFTWARE\Microsoft\Windows Kits\Installed Roots\KitsRoot10`, y en
+> algunas máquinas esa clave apunta a `C:\Program Files\Windows Kits\10\` mientras el SDK real está
+> en `C:\Program Files (x86)\Windows Kits\10\`. Solución: apuntar la variable de entorno **`RC`** al
+> ejecutable real, p. ej.
+> `setx RC "C:\Program Files (x86)\Windows Kits\10\bin\<version>\x64\rc.exe"` (abre una terminal
+> nueva después). Solo salta cuando el build script se re-ejecuta, o sea al tocar `tauri.conf.json`
+> o las capabilities — por eso puede aparecer "de repente" en un repo que compilaba.
 
 ```bash
 pnpm install                       # instala todo el workspace (raíz)
@@ -282,23 +292,48 @@ la lógica/SQL vive en `crates/*`.
   el estado de la comanda), `configuracion` (se carga una vez en stores Zustand) y `login` (flujo de
   arranque/auth). Cachearlas aportaba poco y arriesgaba el núcleo de ventas.
 
-### CSP: prohibido inyectar `<style>` en runtime
+### CSP: política estricta (qué puede cargar la webview)
 
-La CSP de `tauri.conf.json` (`app.security.csp`) declara **`style-src 'self'`**, sin
-`'unsafe-inline'`. Por tanto **todo CSS debe pasar por el bundle de Vite** y llegar como
-`<link rel="stylesheet">`. Quedan prohibidos:
+`tauri.conf.json` (`app.security`) declara una CSP **cerrada** y su `devCsp` gemela:
+
+| Directiva | Valor | Por qué |
+|---|---|---|
+| `script-src` | `'self'` | Solo el bundle. Un XSS **no** puede ejecutar código inyectado ni traerlo de fuera. En `devCsp` lleva `'unsafe-inline'` porque el preámbulo de react-refresh lo necesita |
+| `connect-src` | `'self' ipc: http://ipc.localhost wss://tpv-api…` | El IPC de Tauri y **solo** el WebSocket de la nube. El REST no va por aquí: lo hace Rust. En `devCsp` se añade `ws:` para el HMR |
+| `img-src` | `'self' asset: …asset.localhost <bucket R2> blob: data:` | `asset:` = imágenes locales de la Main; el bucket = imágenes de la **Handy** |
+| `style-src` | `'self'` | Ver abajo |
+| `object-src` `frame-src` | `'none'` | La app no usa plugins ni iframes |
+
+**Regla al añadir cualquier origen externo** (un CDN de imágenes propio, otro host de API, una
+fuente): hay que meterlo en **las dos**, `csp` y `devCsp`, o funcionará en dev y fallará en el
+build. El `<script>` inline de `index.html` (anti-FOUC) sigue funcionando con `script-src 'self'`
+porque Tauri le calcula el **sha256 al empaquetar** y lo añade a la directiva; eso vale solo para
+HTML embebido, de ahí el `'unsafe-inline'` de la `devCsp`.
+
+**Cómo se verifica** (no hace falta recorrer pantallas): arranca un build **empaquetado**, abre su
+DevTools remoto y pregunta a la CSP directamente —
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9223` en escritorio, o
+`adb forward tcp:9222 localabstract:webview_devtools_remote_<pid>` en Android — y desde CDP evalúa
+la carga del recurso escuchando `securitypolicyviolation`, que te dice la directiva culpable. En
+`docs/android/COMPILAR_ANDROID.md` está la receta completa con los comandos.
+
+#### Prohibido inyectar `<style>` en runtime
+
+`style-src 'self'` no lleva `'unsafe-inline'`. Por tanto **todo CSS debe pasar por el bundle de
+Vite** y llegar como `<link rel="stylesheet">`. Quedan prohibidos:
 
 - `<style>{`…`}</style>` renderizado por React,
 - `document.createElement("style")` en tiempo de ejecución,
 - librerías que se auto-inyecten su CSS (ver más abajo).
 
-⚠️ **Esta clase de bug no se ve en `pnpm tauri dev`.** La CSP sólo se aplica a los assets que
-sirve el protocolo `tauri://`, o sea al **build empaquetado**. En escritorio-dev
+⚠️ **Esta clase de bug no se ve en `pnpm tauri dev` (escritorio).** La CSP sólo se aplica a los
+assets que sirve el protocolo `tauri://`, o sea al **build empaquetado**. En escritorio-dev
 `PROXY_DEV_SERVER` es `false` (`tauri/src/manager/webview.rs`), así que el webview carga el
 servidor de Vite (`http://localhost:1420`) tal cual, **sin ninguna cabecera CSP**. Un `<style>`
-inline se ve perfecto en dev y roto en el `.exe` instalado. No hay forma de replicarlo con
-`devCsp`: en escritorio Tauri no puede inyectar la cabecera en un `devUrl` externo, y además el
-servidor de Vite en dev *necesita* estilos inline para el HMR del CSS.
+inline se ve perfecto en dev y roto en el `.exe` instalado. La `devCsp` no lo replica: en
+escritorio Tauri no puede inyectar la cabecera en un `devUrl` externo, y además el servidor de Vite
+en dev *necesita* estilos inline para el HMR del CSS. **En Android sí aplica** (el Chromium de la
+webview además es más estricto que WebView2), así que el emulador es el mejor sitio para cazarlo.
 
 **Caso real (ApexCharts):** v5 lleva su CSS embebido como string dentro del JS y lo inyecta al
 montar la primera gráfica. Al bloquearse, las gráficas se quedaban sin ninguna regla (tooltips
