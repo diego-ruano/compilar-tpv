@@ -7,12 +7,19 @@
 // Backend de envío: Cloudflare Email Service, vía el binding `EMAIL` (send_email en wrangler.json).
 // El remitente (`from`) sale de las vars EMAIL_FROM_ADDRESS/EMAIL_FROM_NAME y su dominio debe estar
 // dado de alta en Email Sending (SPF+DKIM). No se usan claves de API: el binding autentica solo.
+//
+// Anti-abuso (FABLE-C, 2026-08-15): el destinatario debe ser el `Email` de un proveedor dado de
+// alta en el tenant — el dispositivo no puede escribir a una dirección arbitraria con nuestro
+// dominio. **No hay límite por número de correos**: es decisión de producto; en su lugar cada
+// envío deja traza en `email_sends` (control-plane) para poder revisarlo a posteriori.
 
 import { Hono } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
+import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { getDb } from "../../server/db";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -50,6 +57,26 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 	}
 
 	const { email_destino, nombre_proveedor, notas, lineas } = parsed.data;
+	const tenantId = c.get("tenantId");
+	const deviceId = c.get("deviceId");
+
+	// FABLE-C — el destinatario NO lo elige libremente el dispositivo: tiene que ser el correo de un
+	// proveedor dado de alta en ESTE tenant. Sin esto, un token robado podía usar nuestro dominio
+	// (con su SPF/DKIM) para mandar correo a cualquier dirección del mundo. Es el control real de
+	// abuso: acota a quién se puede escribir, en vez de cuánto.
+	const autorizado = await tenantQuery(c.env, tenantId, async (db) => {
+		const r = await db.execute({
+			sql: `SELECT 1 FROM Proveedores
+			      WHERE Email IS NOT NULL AND lower(trim(Email)) = lower(trim(?1))
+			      LIMIT 1`,
+			args: [email_destino],
+		});
+		return (r.rows?.length ?? 0) > 0;
+	});
+
+	if (!autorizado) {
+		return c.json({ error: "email_destino_no_autorizado" }, 403);
+	}
 
 	const html = buildHtml(nombre_proveedor, notas ?? null, lineas);
 	const text = buildText(nombre_proveedor, notas ?? null, lineas);
@@ -70,11 +97,54 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 		// El binding lanza Error con `.code` (E_SENDER_NOT_VERIFIED, E_RATE_LIMIT_EXCEEDED, …).
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
+		await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, false, e.code ?? null);
 		return c.json({ error: "email_send_failed", code: e.code ?? null }, 500);
 	}
 
+	await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, true, null);
 	return c.json({ ok: true });
 });
+
+/**
+ * Deja traza del envío en el control-plane (tabla `email_sends`, ver
+ * `docs/sql/control-plane/2026-08-15_email_sends.sql`).
+ *
+ * **No hay límite de envíos por decisión de producto** (2026-08-15): esto no corta nada, solo
+ * permite mirar a posteriori quién envía y cuánto. Si algún día hiciera falta un tope, el COUNT
+ * sobre `(tenant_id, sent_at_ms)` ya está indexado y sale de aquí mismo.
+ *
+ * Es **best-effort a propósito**: si la tabla no existe todavía o Turso falla, se registra en el
+ * log del worker y ya está. Un fallo del registro no puede impedir que un bar mande su pedido.
+ */
+async function registrarEnvio(
+	env: Env,
+	tenantId: string,
+	deviceId: string,
+	toEmail: string,
+	proveedor: string,
+	ok: boolean,
+	errorCode: string | null,
+): Promise<void> {
+	try {
+		await getDb(env).execute({
+			sql: `INSERT INTO email_sends
+			        (id, tenant_id, device_id, to_email, proveedor, ok, error_code, sent_at_ms)
+			      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+			args: [
+				crypto.randomUUID(),
+				tenantId,
+				deviceId,
+				toEmail,
+				proveedor,
+				ok ? 1 : 0,
+				errorCode,
+				Date.now(),
+			],
+		});
+	} catch (e: any) {
+		console.error("[email] no se pudo registrar el envío:", String(e?.message || e));
+	}
+}
 
 /* ── Plantillas de email ─────────────────────────────────────────────── */
 

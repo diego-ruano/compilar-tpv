@@ -198,7 +198,17 @@ export default function PedidosSection({ proveedores }: Props) {
 
       cerrarModal();
     } catch (e: any) {
-      toast.error("Error", String(e?.message ?? e));
+      const msg = String(e?.message ?? e);
+      // El worker solo envía a correos de proveedores dados de alta (FABLE-C). El código que
+      // devuelve es estable pero no se le puede enseñar a un hostelero tal cual.
+      if (msg.includes("email_destino_no_autorizado")) {
+        toast.error(
+          "Ese correo no está dado de alta",
+          `Para enviar pedidos a ${updated.emailDestino} primero tienes que guardarlo como correo de un proveedor en la pestaña Proveedores.`,
+        );
+        return;
+      }
+      toast.error("Error", msg);
     }
   }
 
