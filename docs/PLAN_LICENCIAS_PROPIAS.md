@@ -134,8 +134,9 @@ Cambios de alto nivel:
 | Puerto | [ports/licensing.rs](../crates/tpv-application/src/ports/licensing.rs) | `trait LicensingService` |
 | Caso de uso | [use_cases/licensing.rs](../crates/tpv-application/src/use_cases/licensing.rs) | valida entrada, invoca el servicio |
 | Comandos Tauri | [commands/licensing.rs](../apps/tpv-main/src-tauri/src/commands/licensing.rs) | `license_get_state/clear_state/gate/check_now/activate` |
-| Frontend · gate/activación | [AppBoot.tsx](../apps/tpv-main/src/app/AppBoot.tsx) | formulario de activación inline + gate cada 6 h + `BlockedScreen` |
-| Frontend · config | [Licencia.tsx](../apps/tpv-main/src/features/configuracion/sections/Licencia.tsx) | hoy solo un *placeholder* “pendiente de implementar” |
+| Frontend · gate/activación | [AppBoot.tsx](../apps/tpv-main/src/app/AppBoot.tsx) | formulario de activación inline + gate al arrancar + `listen("license:changed")` + `BlockedScreen` |
+| Pulso periódico del gate | job `licencia` del runner ([jobs/registro.rs](../apps/tpv-main/src-tauri/src/jobs/registro.rs)) | cada 6 h en Rust: revalida, avisa a administradores y emite `license:changed` |
+| Frontend · config | [Licencia.tsx](../apps/tpv-main/src/features/configuracion/sections/Licencia.tsx) | estado real de la licencia: estado, plan, días restantes y dispositivo (lee `license_get_state`, sin red propia) |
 
 > **Control-plane sin migraciones.** El esquema de la BD central de Turso (`tpvcontrol-altarialights`)
 > **se creó a mano** (ver comentario en `licenseStore.ts`: *“Tu schema principal ya lo has creado en
@@ -158,7 +159,8 @@ De las auditorías [AUDITORIA_LICENCIAS.md](AUDITORIA_LICENCIAS.md) y
 7. ⚪ **`LICENSE_JWT_SECRET` con triple propósito.** *(Se recomienda separar; ver §9.)*
 
 Ya **no** aplican (eliminados desde la auditoría de junio): `Activacion.tsx`, `api_get_auth_headers`,
-`/v1/license/validate`. La sección `Licencia.tsx` ya no muestra el mock antiguo (es un *placeholder*).
+`/v1/license/validate`. `Licencia.tsx` ya no muestra el mock antiguo: desde la fase 4 lee el estado
+real (`license_get_state`).
 
 ---
 

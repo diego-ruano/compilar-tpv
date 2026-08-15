@@ -4,8 +4,10 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (revisado 2026-08-09).** De los ~136 hallazgos del análisis original **quedan 16 abiertos**,
-> y son lo único que contienen estas fichas. **Un hallazgo corregido se borra de aquí**: la traza del
+> **Estado (recuento corregido 2026-08-14).** De los ~136 hallazgos del análisis original **quedan 28
+> abiertos** (la cabecera decía 16, pero la tabla de abajo —que es la buena— suma 28), y son lo único
+> que contienen estas fichas. De esos 28, **11 son el mismo trabajo** (la familia `-parity`, ver la
+> nota del recuento) y **8 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
 > arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
 > aparece, está resuelto.
 

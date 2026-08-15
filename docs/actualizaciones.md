@@ -34,7 +34,7 @@ Rollback (sin tocar el cliente)
 | Config updater | `apps/tpv-main/src-tauri/tauri.conf.json` líneas 44-52 | ✅ |
 | Plugin Rust | `tauri-plugin-updater = "2"` en `apps/tpv-main/src-tauri/Cargo.toml` | ✅ |
 | Comandos Tauri | `updater_check` / `updater_status` / `updater_install` en `src-tauri/src/lib.rs` | ✅ |
-| Chequeo automático (arranque + cada 6 h) | `lib.rs` — tick en background tras `app.manage` → `check_and_announce` | ✅ |
+| Chequeo automático (arranque + cada 6 h) | job `updater` del runner (`src-tauri/src/jobs/registro.rs`) → `check_and_announce` | ✅ |
 | Aviso in-app | `notify_update_available` (`lib.rs`) → notificación a `ADMIN_ROL_ID`, dedupe `actualizacion:<version>` | ✅ |
 | Componente frontend | `apps/tpv-main/src/shared/ui/UpdateBanner.tsx` — banner sticky bottom-right | ✅ |
 | Pantalla de Configuración | `apps/tpv-main/src/features/configuracion/sections/Actualizaciones.tsx` | ✅ |
