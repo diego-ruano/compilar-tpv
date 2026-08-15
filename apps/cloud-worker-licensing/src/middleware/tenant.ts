@@ -26,7 +26,11 @@ export const tenantAuth: MiddlewareHandler<{
 	try {
 		const dbCentral = getDb(c.env);
 		const { token, claims } = await verifyJwt(c.env, c.req.raw);
-		await verifyDeviceProofOrThrow(c.req.raw, dbCentral, claims, token);
+
+		// El cuerpo entra en la firma (FABLE-E). Se lee aquí una vez; Hono cachea el texto, así
+		// que el handler puede seguir haciendo `c.req.json()` sin quedarse sin body.
+		const rawBody = c.req.raw.body ? await c.req.text() : "";
+		await verifyDeviceProofOrThrow(c.req.raw, dbCentral, claims, token, rawBody);
 
 		c.set("tenantId", claims.tenantId);
 		c.set("deviceId", claims.deviceId);

@@ -78,13 +78,21 @@ async function getDevicePubKeyB64(dbCentral: Client, tenantId: string, deviceId:
 
 /**
  * Verifica el “device proof”:
- * msg = "{ts}\n{METHOD}\n{PATH}\n{sha256(token)}"
+ * msg = "{ts}\n{METHOD}\n{PATH}\n{sha256(token)}\n{sha256(body)}"
+ *
+ * `rawBody` es el cuerpo **tal cual llegó** (cadena vacía si no hay). Cubrirlo con la firma
+ * (FABLE-E) es lo que impide alterar el contenido de una petición ya firmada; antes la firma solo
+ * ataba método y ruta. Quien llame a esto tiene que leer el cuerpo con `c.req.text()` y pasarlo:
+ * Hono cachea esa lectura, así que el handler puede seguir usando `c.req.json()` después.
+ *
+ * ⚠️ El formato debe ser idéntico al de `sign_device_proof` (`tpv-infra-licensing/src/device.rs`).
  */
 export async function verifyDeviceProofOrThrow(
 	req: Request,
 	dbCentral: Client,
 	claims: { tenantId: string; deviceId: string },
-	bearerToken: string
+	bearerToken: string,
+	rawBody: string
 ): Promise<void> {
 	const tsStr = (req.headers.get("X-Device-Ts") || "").trim();
 	const sigB64Raw = (req.headers.get("X-Device-Sig") || "").trim();
@@ -102,7 +110,8 @@ export async function verifyDeviceProofOrThrow(
 
 	const url = new URL(req.url);
 	const tokenHash = await sha256HexStr(bearerToken);
-	const msg = `${ts}\n${req.method.toUpperCase()}\n${url.pathname}\n${tokenHash}`;
+	const bodyHash = await sha256HexStr(rawBody ?? "");
+	const msg = `${ts}\n${req.method.toUpperCase()}\n${url.pathname}\n${tokenHash}\n${bodyHash}`;
 
 	// por si llega con comillas
 	const sigB64 = sigB64Raw.replace(/^"+|"+$/g, "");

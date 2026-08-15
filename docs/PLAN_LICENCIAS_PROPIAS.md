@@ -357,7 +357,7 @@ migrar filas. Recomendación: **DROP** limpio (no hay ventas Lemon reales que pr
 
 - Clave privada ed25519 del **dispositivo** en keyring del SO; pubkey ligada a `device_id` en la 1ª
   activación; *mismatch* → error (`device_key_mismatch`, anti-copia).
-- **Device-proof** en cada llamada sensible: `sign(ts \n MÉTODO \n path \n sha256(token))`, ventana
+- **Device-proof** en cada llamada sensible: `sign(ts \n MÉTODO \n path \n sha256(token) \n sha256(cuerpo))`, ventana
   anti-replay 2 min en cliente y worker. Se mantiene igual.
 
 ### 5.5 Endpoint admin (alta manual)

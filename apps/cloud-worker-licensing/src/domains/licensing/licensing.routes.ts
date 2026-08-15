@@ -329,10 +329,14 @@ licenseRoutes.get("/status", async (c) => {
 
 	const db = getDb(env);
 
-	const proof = await verifyDeviceProof(c.req.raw, db, {
-		tenantId: claims.tenantId,
-		deviceId: claims.deviceId,
-	});
+	const rawBody = c.req.raw.body ? await c.req.text() : "";
+	const proof = await verifyDeviceProof(
+		c.req.raw,
+		db,
+		{ tenantId: claims.tenantId, deviceId: claims.deviceId },
+		undefined,
+		rawBody,
+	);
 	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
 
 	const lic = await getLicenseByHash(db, claims.licHash);
@@ -390,10 +394,14 @@ licenseRoutes.post("/refresh", async (c) => {
 
 	const db = getDb(env);
 
-	const proof = await verifyDeviceProof(c.req.raw, db, {
-		tenantId: claims.tenantId,
-		deviceId: claims.deviceId,
-	});
+	const rawBody = c.req.raw.body ? await c.req.text() : "";
+	const proof = await verifyDeviceProof(
+		c.req.raw,
+		db,
+		{ tenantId: claims.tenantId, deviceId: claims.deviceId },
+		undefined,
+		rawBody,
+	);
 	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
 
 	const lic = await getLicenseByHash(db, claims.licHash);

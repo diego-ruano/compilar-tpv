@@ -301,12 +301,12 @@ struct PairingTelemetrySigner {
 }
 
 impl tpv_telemetry::IngestSigner for PairingTelemetrySigner {
-    fn sign(&self, method: &str, path: &str) -> Option<Vec<(String, String)>> {
+    fn sign(&self, method: &str, path: &str, body: &[u8]) -> Option<Vec<(String, String)>> {
         let mode = (*self.mode.read().ok()?)?;
         let mode_str = signing_mode(Some(mode))?;
         let pairing = PairingAdapter::new(self.app_data_dir.clone());
         let h = pairing
-            .tpv_server_signed_headers(mode_str, method, path)
+            .tpv_server_signed_headers(mode_str, method, path, body)
             .ok()?;
         Some(vec![
             ("authorization".to_string(), h.authorization),

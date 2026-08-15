@@ -66,11 +66,15 @@ pub trait PairingService: Send + Sync {
     /// Credenciales (token + tenant) para abrir el WebSocket del Handy. Error si no hay token.
     fn handy_get_ws_auth(&self) -> AppResult<HandyWsAuth>;
     /// Cabeceras firmadas para tpv-server según el modo (anon|tpv|handy).
+    ///
+    /// `body` son los bytes exactos del cuerpo que se enviará (vacío si no hay). Entra en la firma
+    /// (FABLE-E), así que el llamante **debe** mandar ese mismo cuerpo sin re-serializarlo.
     fn tpv_server_signed_headers(
         &self,
         mode: &str,
         method: &str,
         path: &str,
+        body: &[u8],
     ) -> AppResult<ApiSignedHeaders>;
     /// POST JSON al worker tpv-server (evita CORS/WebView).
     async fn tpv_server_post_json(

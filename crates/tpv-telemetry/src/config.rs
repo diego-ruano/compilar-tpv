@@ -40,8 +40,10 @@ impl Environment {
 /// de cabeceras a adjuntar, o `None` si **todavía no se puede firmar** (dispositivo sin identidad
 /// o sin licencia): en ese caso el worker de telemetría **retiene** los lotes en disco y reintenta
 /// más tarde, sin perderlos.
+/// `body` son los bytes exactos del lote que se va a subir: entran en la firma (FABLE-E), así que
+/// el llamante debe enviar **ese mismo** cuerpo.
 pub trait IngestSigner: Send + Sync {
-    fn sign(&self, method: &str, path: &str) -> Option<Vec<(String, String)>>;
+    fn sign(&self, method: &str, path: &str, body: &[u8]) -> Option<Vec<(String, String)>>;
 }
 
 /// Configuración de la subida a la nube (Fase 4). Mientras `enabled` sea `false` o no haya

@@ -14,7 +14,8 @@
 **Aciertos (buena higiene criptográfica):**
 - **Secretos fuera de la BD**: device-id, clave privada ed25519 y token del Handy viven en el
   keyring del SO (escritorio) o en Android Keystore cifrados con AES-GCM (Handy).
-- **ed25519** para firmar las peticiones del dispositivo (`ts\nMETHOD\npath\nsha256(token)`).
+- **ed25519** para firmar las peticiones del dispositivo
+  (`ts\nMETHOD\npath\nsha256(token)\nsha256(cuerpo)`; el cuerpo entra en la firma desde 2026-08-15).
 - **Estado de licencia firmado por el servidor** y verificado contra una **clave pública pineada en
   el binario** (`LICENSE_SIGNING_PUBLIC_KEY_B64`): un proxy local con CA propia ya no puede
   falsificar `allowed=true`.

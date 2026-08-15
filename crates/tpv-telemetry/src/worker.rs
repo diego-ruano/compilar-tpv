@@ -124,12 +124,23 @@ async fn try_upload_one(
     let Some(signer) = ingest.signer.as_ref() else {
         return UploadOutcome::CannotSign;
     };
-    let Some(headers) = signer.sign("POST", &ingest.path) else {
+
+    // El cuerpo se serializa una vez: se firma y se envía tal cual (FABLE-E). Si fallara la
+    // serialización el lote es basura, así que se descarta en vez de atascar la cola.
+    let body = serde_json::json!({ "events": events });
+    let Ok(body_bytes) = serde_json::to_vec(&body) else {
+        let _ = std::fs::remove_file(&file);
+        return UploadOutcome::Empty;
+    };
+
+    let Some(headers) = signer.sign("POST", &ingest.path, &body_bytes) else {
         return UploadOutcome::CannotSign;
     };
 
-    let body = serde_json::json!({ "events": events });
-    let mut req = client.post(&ingest.url).json(&body);
+    let mut req = client
+        .post(&ingest.url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body_bytes);
     for (k, v) in headers {
         req = req.header(k, v);
     }

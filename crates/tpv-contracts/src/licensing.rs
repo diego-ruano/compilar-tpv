@@ -176,6 +176,11 @@ pub struct TpvServerSignedHeadersArgs {
     pub mode: String,
     pub method: String,
     pub path: String,
+    /// Cuerpo exacto que se enviará con esas cabeceras (vacío si la petición no lleva). Entra en
+    /// la firma (FABLE-E): pedir cabeceras para un cuerpo y mandar otro da 401 en el worker.
+    #[serde(default)]
+    #[ts(optional)]
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

@@ -306,8 +306,9 @@ impl LicensingAdapter {
 
         let (sk, _) =
             get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
-        let sig =
-            sign_device_proof(&sk, ts, "GET", PATH, token).map_err(|_| FalloConsulta::Inalcanzable)?;
+        // GET sin cuerpo → se firma la cadena vacía.
+        let sig = sign_device_proof(&sk, ts, "GET", PATH, token, b"")
+            .map_err(|_| FalloConsulta::Inalcanzable)?;
 
         let resp = client
             .get(api_url(PATH))
@@ -347,7 +348,8 @@ impl LicensingAdapter {
 
         let (sk, _) =
             get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
-        let sig = sign_device_proof(&sk, ts, "POST", PATH, token)
+        // `/v1/license/refresh` se manda sin cuerpo: se firma la cadena vacía.
+        let sig = sign_device_proof(&sk, ts, "POST", PATH, token, b"")
             .map_err(|_| FalloConsulta::Inalcanzable)?;
 
         let resp = client
@@ -570,11 +572,15 @@ impl PairingAdapter {
         get_license_token().map_err(AppError::not_found)
     }
 
+    /// Cabeceras device-proof. `body` son los bytes EXACTOS del cuerpo que se va a enviar (cadena
+    /// vacía si no hay): entran en la firma, así que quien las use tiene que mandar **ese mismo**
+    /// cuerpo, sin volver a serializarlo por su cuenta (ver FABLE-E en `device.rs`).
     fn signed_headers_inner(
         &self,
         mode: &str,
         method: &str,
         path: &str,
+        body: &[u8],
     ) -> AppResult<ApiSignedHeaders> {
         let device_id = get_or_create_device_id().map_err(ext)?;
         let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
@@ -590,8 +596,8 @@ impl PairingAdapter {
         };
 
         let ts = now_ms();
-        let sig =
-            sign_device_proof(&sk, ts, &method.to_uppercase(), path, token.trim()).map_err(ext)?;
+        let sig = sign_device_proof(&sk, ts, &method.to_uppercase(), path, token.trim(), body)
+            .map_err(ext)?;
 
         Ok(ApiSignedHeaders {
             authorization: format!("Bearer {}", token.trim()),
@@ -644,8 +650,9 @@ impl PairingService for PairingAdapter {
         mode: &str,
         method: &str,
         path: &str,
+        body: &[u8],
     ) -> AppResult<ApiSignedHeaders> {
-        self.signed_headers_inner(mode, method, path)
+        self.signed_headers_inner(mode, method, path, body)
     }
 
     async fn tpv_server_post_json(
@@ -672,8 +679,14 @@ impl PairingService for PairingAdapter {
             headers.insert("x-client-now", v);
         }
 
+        // El cuerpo se serializa UNA vez: es lo que se firma y lo que se envía. Si se dejase que
+        // reqwest lo volviera a serializar con `.json(&body)`, cualquier diferencia de bytes
+        // (orden, espacios) invalidaría la firma en el worker.
+        let body_str =
+            serde_json::to_string(&body).map_err(|e| ext(format!("bad_json_body:{e}")))?;
+
         if mode == "tpv" || mode == "handy" {
-            let signed = self.signed_headers_inner(mode, "POST", path)?;
+            let signed = self.signed_headers_inner(mode, "POST", path, body_str.as_bytes())?;
 
             headers.insert(
                 AUTHORIZATION,
@@ -695,7 +708,7 @@ impl PairingService for PairingAdapter {
         let resp = client
             .post(&url)
             .headers(headers)
-            .json(&body)
+            .body(body_str)
             .send()
             .await
             .map_err(|e| ext(format!("reqwest_send_failed:{e}")))?;
@@ -746,7 +759,7 @@ impl PairingService for PairingAdapter {
         // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
         // escritura directa a R2 (no pasa por el hub).
         let url = api_url(path);
-        let signed = self.signed_headers_inner(mode, "PUT", path)?;
+        let signed = self.signed_headers_inner(mode, "PUT", path, &bytes)?;
         let client = http_client()?;
 
         let resp = client
@@ -779,7 +792,7 @@ impl PairingService for PairingAdapter {
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
         let url = api_url(path);
-        let signed = self.signed_headers_inner(mode, "DELETE", path)?;
+        let signed = self.signed_headers_inner(mode, "DELETE", path, b"")?;
         let client = http_client()?;
 
         let resp = client
@@ -804,11 +817,13 @@ impl PairingService for PairingAdapter {
 
     async fn download_image(&self, mode: &str, rel_path: &str) -> AppResult<Option<Vec<u8>>> {
         // POST firmado a `/v1/images/download`. El tenant lo deriva el worker del token, así que
-        // la Main no necesita conocerlo; `rel_path` viaja en el cuerpo (no entra en la firma, que
-        // es sobre método+path). 404 → None (el binario aún no está en R2).
+        // la Main no necesita conocerlo; `rel_path` viaja en el cuerpo, que **ahora sí entra en la
+        // firma** (FABLE-E). 404 → None (el binario aún no está en R2).
         let path = "/v1/images/download";
         let url = api_url(path);
-        let signed = self.signed_headers_inner(mode, "POST", path)?;
+        let body_str = serde_json::to_string(&serde_json::json!({ "rel_path": rel_path }))
+            .map_err(|e| ext(format!("bad_json_body:{e}")))?;
+        let signed = self.signed_headers_inner(mode, "POST", path, body_str.as_bytes())?;
         let client = http_client()?;
 
         let resp = client
@@ -817,7 +832,7 @@ impl PairingService for PairingAdapter {
             .header("x-device-ts", signed.x_device_ts)
             .header("x-device-sig", signed.x_device_sig)
             .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .json(&serde_json::json!({ "rel_path": rel_path }))
+            .body(body_str)
             .send()
             .await
             .map_err(|e| ext(format!("image_download_send_failed:{e}")))?;

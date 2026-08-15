@@ -5,8 +5,8 @@
 //! `tpv-infra-licensing`, que ya gestiona el token Handy (keyring) y la firma ed25519.
 //!
 //! Contrato del worker (ver `apps/cloud-worker-licensing`):
-//! - Auth: JWT Bearer + device-proof `{ts}\n{METHOD}\n{pathname}\n{sha256(token)}` (la firma
-//!   va sobre el path SIN query string).
+//! - Auth: JWT Bearer + device-proof `{ts}\n{METHOD}\n{pathname}\n{sha256(token)}\n{sha256(body)}`
+//!   (la firma va sobre el path SIN query string, y sobre los bytes exactos del cuerpo).
 //! - Escrituras (POST/PUT/PATCH/DELETE): requieren la cabecera `X-Idempotency-Key`; se aplican
 //!   vía el Durable Object contra la Main conectada (si no hay Main, responde `main_offline`).
 
@@ -59,11 +59,11 @@ impl CloudClient {
         format!("{}{}", self.base_url.trim_end_matches('/'), path)
     }
 
-    /// Firma device-proof sobre el path **canónico** (sin query string).
-    fn signed(&self, method: &str, path: &str) -> AppResult<ApiSignedHeaders> {
+    /// Firma device-proof sobre el path **canónico** (sin query string) y el cuerpo exacto.
+    fn signed(&self, method: &str, path: &str, body: &[u8]) -> AppResult<ApiSignedHeaders> {
         let path_only = path.split('?').next().unwrap_or(path);
         self.pairing
-            .tpv_server_signed_headers(&self.mode, method, path_only)
+            .tpv_server_signed_headers(&self.mode, method, path_only, body)
     }
 
     /// Crea un `RequestBuilder` con las cabeceras device-proof firmadas para `method`/`path`.
@@ -79,9 +79,12 @@ impl CloudClient {
     /// es inocua), y no en `write_body`: así ninguna ruta futura puede olvidarla — de hecho
     /// `delete_json` ya se saltaba `write_body`. Espejo de `tpv_server_post_json`
     /// (`tpv-infra-licensing`), que es el otro transporte y siempre la ha puesto.
-    fn signed_req(&self, method: Method, path: &str) -> AppResult<RequestBuilder> {
+    /// `body` son los bytes que se van a enviar (vacío en GET/DELETE): entran en la firma, así que
+    /// el llamante tiene que adjuntar **exactamente** esos bytes con `.body(...)`, nunca volver a
+    /// serializar con `.json(...)` (FABLE-E).
+    fn signed_req(&self, method: Method, path: &str, body: &[u8]) -> AppResult<RequestBuilder> {
         let method_str = method.as_str().to_string();
-        let h = self.signed(&method_str, path)?;
+        let h = self.signed(&method_str, path, body)?;
         let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
         Ok(self
             .http
@@ -94,7 +97,7 @@ impl CloudClient {
 
     /// GET firmado que deserializa la respuesta JSON en `T`.
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> AppResult<T> {
-        let rb = self.signed_req(Method::GET, path)?;
+        let rb = self.signed_req(Method::GET, path, b"")?;
         Self::send(rb).await
     }
 
@@ -104,7 +107,7 @@ impl CloudClient {
         path: &str,
         query: &[(&str, String)],
     ) -> AppResult<T> {
-        let rb = self.signed_req(Method::GET, path)?.query(query);
+        let rb = self.signed_req(Method::GET, path, b"")?.query(query);
         Self::send(rb).await
     }
 
@@ -138,7 +141,7 @@ impl CloudClient {
     /// DELETE firmado (escritura sin cuerpo): añade `X-Idempotency-Key`.
     pub async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> AppResult<T> {
         let rb = self
-            .signed_req(Method::DELETE, path)?
+            .signed_req(Method::DELETE, path, b"")?
             .header("x-idempotency-key", Uuid::new_v4().to_string());
         Self::send(rb).await
     }
@@ -148,10 +151,17 @@ impl CloudClient {
         B: Serialize + ?Sized,
         T: DeserializeOwned,
     {
+        // Se serializa UNA vez: esos bytes son los que se firman y los que se envian. Con
+        // `.json(body)` reqwest volveria a serializar y cualquier diferencia de bytes tiraria la
+        // firma abajo en el worker.
+        let bytes = serde_json::to_vec(body)
+            .map_err(|e| AppError::external(format!("bad_json_body: {e}")))?;
+
         let rb = self
-            .signed_req(method, path)?
+            .signed_req(method, path, &bytes)?
             .header("x-idempotency-key", Uuid::new_v4().to_string())
-            .json(body);
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(bytes);
         Self::send(rb).await
     }
 

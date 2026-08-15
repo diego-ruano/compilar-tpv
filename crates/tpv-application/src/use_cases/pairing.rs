@@ -70,7 +70,8 @@ pub fn tpv_server_signed_headers(
     let mode = normalize_mode(&args.mode)?;
     let method = requerido(&args.method, "method")?;
     let path = normalize_path(&args.path)?;
-    svc.tpv_server_signed_headers(&mode, &method, &path)
+    let body = args.body.unwrap_or_default();
+    svc.tpv_server_signed_headers(&mode, &method, &path, body.as_bytes())
 }
 
 pub async fn tpv_server_post_json(

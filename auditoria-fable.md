@@ -34,7 +34,7 @@ Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa
 |---|-----------|--------|-------|
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
 | **D** | 🟡 Baja | Pairing "solo código" permite reclamar sin secreto (carrera de claim) | A07 Auth |
-| **E** | 🟡 Baja | Sin anti-replay (nonce) en device-proof e internal-HMAC (solo ventana temporal) | A07 |
+| **E** | 🟡 Baja | Sin anti-replay (nonce) en el device-proof (la firma del cuerpo ya está hecha) | A07 |
 | **F** | 🟡 Baja | `/internal/revoke` del DO sin verificación HMAC | A01 (defensa en profundidad) |
 
 ---
@@ -104,23 +104,26 @@ riesgo.
 
 ---
 
-### 🟡 E — Sin anti-replay (nonce) en device-proof e internal-HMAC (solo ventana temporal)
+### 🟡 E — Sin anti-replay (nonce) en el device-proof
 
 **OWASP:** A07.
-**Ubicación:**
-- device-proof: [apps/cloud-worker-licensing/src/server/middleware/auth.ts:83-119](apps/cloud-worker-licensing/src/server/middleware/auth.ts#L83-L119) y [licensing.helpers.ts:247-295](apps/cloud-worker-licensing/src/domains/licensing/licensing.helpers.ts#L247-L295)
-- internal-HMAC: [apps/cloud-worker-licensing/src/lib/internalAuth.ts:74-99](apps/cloud-worker-licensing/src/lib/internalAuth.ts#L74-L99)
+**Ubicación:** [server/middleware/auth.ts](apps/cloud-worker-licensing/src/server/middleware/auth.ts) y [licensing.helpers.ts](apps/cloud-worker-licensing/src/domains/licensing/licensing.helpers.ts)
 
-**Descripción.** El "device proof" firma `ts\nMÉTODO\nPATH\nsha256(token)` con una ventana de deriva
-de 2 min, **sin nonce de un solo uso** y **sin cubrir el cuerpo** de la petición. El HMAC interno
-(worker→DO) tiene ventana de 60 s, también sin nonce. Sobre TLS no es explotable (no hay captura del
-tráfico), y las escrituras están protegidas por idempotencia (`Op_Id`), pero es un hueco de defensa en
-profundidad: dentro de la ventana, una misma petición firmada podría reproducirse, y como la firma no
-cubre el body, no hay integridad sobre el payload en ese canal.
+> **La mitad de este hallazgo está cerrada (2026-08-15):** la firma **ya cubre el cuerpo**
+> (`…\nsha256(body)`), así que el contenido de una petición firmada no se puede alterar. Y la parte
+> del internal-HMAC nunca fue cierta: `buildInternalPayload` siempre incluyó el `rawBody`.
 
-**Solución (opcional, defensa en profundidad).** Cachear nonces de un solo uso para el device-proof en
-endpoints sensibles (Cloudflare KV/DO con TTL = ventana), e incluir un `sha256(body)` dentro del
-mensaje firmado del device-proof y del internal-HMAC.
+**Lo que queda.** La firma no lleva **nonce de un solo uso**: dentro de la ventana de 2 minutos, una
+petición firmada podría **reproducirse tal cual**.
+
+**Por qué no corre prisa.** Para reproducirla hay que haberla capturado, y todo va por TLS. Además
+las escrituras son idempotentes por `Op_Id`: repetir una no duplica nada. Queda como defensa en
+profundidad para un atacante con posición de red.
+
+**Solución (aplazada).** Guardar los nonces ya vistos durante la ventana. Necesita almacén
+compartido —los isolates del worker no comparten memoria—: KV (barato pero eventualmente
+consistente, justo lo que no conviene aquí), un Durable Object (consistente, pero un salto más por
+petición) o una tabla en Turso. Ver el BACKLOG.
 
 ---
 
