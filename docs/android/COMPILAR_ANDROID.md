@@ -365,6 +365,21 @@ Dos bugs de **runtime** resueltos (§4.7), que compilaban pero fallaban al ejecu
   pegado — gracia de 5 s antes de bloquear, reconexión al volver a primer plano/red (`visibilitychange`/
   `online`/`focus`), y botón "Reintentar conexión".
 
+### 2026-08-15 — La CSP bloqueaba TODAS las imágenes de la Handy (bucket R2) ✅ arreglado
+- **Bug (Android-only, mismo patrón que el del WebSocket de julio):** la `img-src` de
+  `tauri.conf.json` no incluía el bucket R2, y al estar **declarada explícitamente no hereda** el
+  comodín `https:` de `default-src`. Resultado: en la Handy **ninguna foto de producto/categoría
+  cargaba** (la Main no se entera: usa `asset:` con el fichero local). **Fix:** añadir
+  `https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev` a `img-src`.
+- **Cómo se confirmó, sin necesidad de emparejar ni tener datos** (método nuevo, mejor que mirar
+  pantallas): APK **empaquetado** en el emulador → `adb forward` del socket
+  `webview_devtools_remote_<pid>` → CDP `Runtime.evaluate` cargando una `Image()` y escuchando
+  `securitypolicyviolation`. Devuelve la directiva culpable y la URI bloqueada. Detalle y tabla de
+  resultados en [BACKLOG §Cómo probar la CSP de verdad](../analisis/BACKLOG.md).
+- ⚠️ **Gotcha que costó un rato:** el APK de `outputs/apk/x86_64/debug/` era de un `tauri android
+  dev` — apunta a `http://<IP-LAN>:1420` y **no aplica CSP ninguna**. Para cualquier prueba de CSP
+  hay que usar un APK de `tauri android build` (el `universal/debug/` lo es).
+
 <!-- Plantilla para nuevas entradas:
 ### AAAA-MM-DD — <título>
 - <hallazgo> (comando: `…`) → resultado.
