@@ -1368,7 +1368,22 @@ export class TenantHub {
 		const url = new URL(request.url);
 
 		if (url.pathname === "/internal/revoke" && request.method === "POST") {
-			const body = safeJsonParse(await request.text()) || {};
+			const raw = await request.text();
+
+			// FABLE-F: mismo HMAC que `/internal/apply`. El DO no es direccionable desde
+			// Internet, pero cerrar sockets por `deviceId` sin autenticar era una asimetría
+			// que sólo se sostenía por esa suposición.
+			try {
+				await verifyInternalWorkerRequest(
+					request,
+					String(this.env.LICENSE_JWT_SECRET || ""),
+					raw,
+				);
+			} catch (e: any) {
+				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
+			}
+
+			const body = safeJsonParse(raw) || {};
 			const deviceId = String(body.deviceId || "").trim();
 
 			// SYNC-16: no hay estado que limpiar a mano (el attachment muere con el socket). Pero el

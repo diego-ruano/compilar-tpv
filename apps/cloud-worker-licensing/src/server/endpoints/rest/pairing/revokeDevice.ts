@@ -3,6 +3,7 @@ import type { Client } from "@libsql/client/web";
 import { buildTenantContext } from "../../../middleware/withTenant";
 import { createDbClient } from "../../../db/clients";
 import { json, unauthorized, serverError } from "../../../utils/response";
+import { signInternalWorkerRequest } from "../../../../lib/internalAuth";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	try {
@@ -117,10 +118,21 @@ export async function handleRevokeDevice(
 			const id = hubNs.idFromName(tenantId);
 			const stub = hubNs.get(id);
 
+			const rawBody = JSON.stringify({ deviceId: targetDeviceId });
+
+			// FABLE-F: misma firma HMAC que `/internal/apply` (lib/hub.ts). `pathname`
+			// y `rawBody` deben coincidir exactamente con los que verá el verificador.
+			const sigHeaders = await signInternalWorkerRequest(
+				String(env.LICENSE_JWT_SECRET || ""),
+				"POST",
+				"/internal/revoke",
+				rawBody,
+			);
+
 			await stub.fetch("https://do/internal/revoke", {
 				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify({ deviceId: targetDeviceId }),
+				headers: { "content-type": "application/json", ...sigHeaders },
+				body: rawBody,
 			});
 		} catch {
 			// Best-effort. Si falla, el dispositivo quedará bloqueado en el próximo reconnect.

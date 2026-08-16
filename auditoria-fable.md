@@ -35,7 +35,6 @@ Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
 | **D** | 🟡 Baja | Pairing "solo código" permite reclamar sin secreto (carrera de claim) | A07 Auth |
 | **E** | 🟡 Baja | Sin anti-replay (nonce) en el device-proof (la firma del cuerpo ya está hecha) | A07 |
-| **F** | 🟡 Baja | `/internal/revoke` del DO sin verificación HMAC | A01 (defensa en profundidad) |
 
 ---
 
@@ -127,22 +126,6 @@ petición) o una tabla en Turso. Ver el BACKLOG.
 
 ---
 
-### 🟡 F — `/internal/revoke` del Durable Object sin verificación HMAC
-
-**OWASP:** A01 (defensa en profundidad).
-**Ubicación:** [apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts:1296-1312](apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L1296-L1312)
-
-**Descripción.** `/internal/apply` verifica `verifyInternalWorkerRequest` (HMAC con
-`LICENSE_JWT_SECRET`), pero `/internal/revoke` **no**: cierra el socket del `deviceId` que venga en el
-body sin autenticar. El DO **no es direccionable desde Internet** (solo vía binding del worker), así
-que el impacto real es bajo (a lo sumo, inconsistencia si algún día una ruta reenviara peticiones del
-usuario al DO). Es una asimetría que conviene cerrar por coherencia.
-
-**Solución.** Aplicar también `verifyInternalWorkerRequest` en la rama `/internal/revoke` (y firmar la
-petición en `revokeDevice.ts`, igual que hace `hub.ts` para `/internal/apply`).
-
----
-
 ## 2. Dependencias — ahora lo vigila CI
 
 La versión original de este apartado era un **inventario a mano** de las versiones instaladas y sus
@@ -211,7 +194,7 @@ Durante la auditoría se confirmó explícitamente que **no** existen estos prob
    **Aplazado con plan escrito** en [BACKLOG.md](docs/analisis/BACKLOG.md) (fila `FABLE-B`).
 2. **G** — Endurecer la CSP de Tauri (`script-src 'self'`, `connect-src` a orígenes concretos).
    Con el método de sonda por CDP ya no hace falta ir a ciegas: ver el BACKLOG.
-2. **D, E, F** — Endurecimientos de defensa en profundidad, según capacidad. **E no es un cambio
+2. **D, E** — Endurecimientos de defensa en profundidad, según capacidad. **E no es un cambio
    suelto**: la firma la producen los clientes instalados y la verifica el worker, así que exige un
    despliegue en tres pasos (worker tolerante → clientes nuevos → worker estricto) y un almacén de
    nonces (hoy no hay binding de KV).
