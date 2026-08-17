@@ -213,7 +213,7 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ Esqueleto de los 3 packages (`@tpv/database`, `@tpv/contracts`, `@tpv/client` con `invokeClient.ts`).
 - ✅ `git init` en la raíz (+ commit base `757f0b9`).
 - ✅ `ts-rs` verificado y cableado (fichero único `bindings.ts`, ruta `../../../packages/...`, `cargo test -p tpv-contracts`). Ver §4.3.
-- ✅ Patrón hexagonal compartido establecido: `tpv-infra-sqlite::mapping`, `tpv-application::{ports,use_cases}`, `AppError`→`String`.
+- ✅ Patrón hexagonal compartido establecido: `tpv-infra-sqlite::mapping`, `tpv-application::{ports,use_cases}`, `AppError`→`AppErrorDto`.
 - ✅ **Módulo `clientes` migrado (PILOTO/REFERENCIA)** end-to-end: domain → ports → repo sqlite → use cases → contracts (DTOs ts-rs) → comando Tauri fino + **rewire frontend a `@tpv/client`** (sin dualCall). Verificado: `cargo check -p tpv` ✅, `cargo test -p tpv-contracts` ✅, `tsc` frontend ✅.
 - ✅ `pnpm install` ejecutado (workspace enlazado). Frontend pasa `tsc` (la antigua duda de `lucide-react` en `Carousel.tsx` ya no bloquea: el componente quedó sin uso y el type-check es verde).
 - ✅ **Todos los dominios migrados** siguiendo el patrón de `clientes` (monolito estrangulado por completo): `clientes`, `stats`, `tareas`, `trabajadores`, `venta_rapida`, `mesas`, `inventario`, `cuentas`, `reservas`, `proveedores`, `configuracion`, `login`; y `licensing`/`pairing` (a `tpv-infra-licensing`). `apps/tpv-main/src-tauri/src/` ya sólo contiene `lib.rs` (toda la app), `main.rs` (shim) y `commands/` (capa fina). Alta/edición local de trabajador añadida (`trabajadores_create`/`trabajadores_update`).
@@ -271,7 +271,13 @@ la lógica/SQL vive en `crates/*`.
   prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
   `attribution.commit/pr: ""`).
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
-- Errores de caso de uso: `tpv_application::error::AppError` → se mapea a `String` en la frontera Tauri.
+- Errores de caso de uso: `tpv_application::error::AppError` → se mapea a **`AppErrorDto { code, message }`**
+  en la frontera Tauri (ARCH-02/05). El `code` sale del catálogo cerrado `ErrorCode`
+  (`crates/tpv-contracts/src/errors.rs`, exportado a TS por ts-rs y consumido también por el worker),
+  y es **lo único por lo que se ramifica**: el `message` es texto diagnóstico y nunca se compara.
+  Un código nuevo se añade sólo si alguien necesita **hacer algo distinto** con ese caso; si sólo se
+  muestra, es un `message` con el código genérico que corresponda. En el frontend, `toAppError(e)` /
+  `esError(e, "…")` de `@tpv/client` normalizan lo capturado.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
 - El frontend en **modo TPV** no hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`. En **modo Handy**, las lecturas van por REST al worker y las escrituras también (no hay BD local).
 

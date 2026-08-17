@@ -23,9 +23,7 @@ Local-First y React Query con hooks co-locados por feature.
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
 | ARCH-01 | 🟠 | **(Sistémico) Doble implementación** Main/Handy + doble tipado (ts-rs vs zod) + doble validación | todo el repo |
-| ARCH-02 | 🟡 | Errores cruzan la frontera como **strings opacos** (`AppError`→String) → el FE no distingue por tipo/código | `error.rs`, `commands/*` |
 | ARCH-03 | 🟡 | Tipos del worker (zod) **no derivan** de la misma fuente que los contracts ts-rs → la Handy puede divergir | `contracts` vs `domains/*/schemas.ts` |
-| ARCH-05 | 🔵 | `AppError::Raw` mezcla el **contrato de error** (unos con código, otros prosa) | `error.rs` |
 
 ### ARCH-01 🟠 Doble implementación de la lógica de negocio — SISTÉMICO
 - **Evidencia:** cada operación de **escritura** existe dos veces: en Rust (`crates/tpv-infra-sqlite/*`,
@@ -43,17 +41,8 @@ Local-First y React Query con hooks co-locados por feature.
   WASM, codegen) en [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 - **Decisión del responsable:** refactor **gradual post-lanzamiento**; el producto funciona y converge.
 
-### ARCH-02 🟡 Errores como strings opacos
-`AppError` se mapea a `String` en la frontera Tauri, así que el FE ramifica por *string matching*.
-**Arreglo:** un DTO `{ kind, code, message }` (ts-rs) que el worker devuelva con la misma forma.
-**Cuándo:** junto con el resto de la infra al pasar el worker a plan de pago.
-
 ### ARCH-03 🟡 Tipos del worker sin fuente única
 Los `*.schemas.ts` (zod) se escriben a mano en vez de derivar de los contracts ts-rs. **Arreglo:** el
 patrón ya probado en OBS-05 (drift-guard de tipos: `SpoolEvent` → `telemetry.ts` + guard en
 `telemetry.routes.ts`), replicado por dominio.
 
-### ARCH-05 🔵 Contrato de error inconsistente
-`AppError::Raw` permite propagar verbatim códigos de negocio del worker (p. ej. `not_approved` del
-pairing), lo que mezcla mensajes con código y mensajes en prosa. Es la misma pieza que ARCH-02: al
-introducir el catálogo de códigos compartido, `Raw` se retira.

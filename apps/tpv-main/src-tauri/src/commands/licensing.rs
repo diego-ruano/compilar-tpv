@@ -12,6 +12,7 @@ use tpv_contracts::licensing::{
     LicenseLocalState,
 };
 use tpv_infra_licensing::LicensingAdapter;
+use tpv_contracts::errors::AppErrorDto;
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -26,18 +27,18 @@ pub(crate) fn svc(app: &AppHandle) -> Result<LicensingAdapter, String> {
 }
 
 #[tauri::command]
-pub fn license_get_state(app: AppHandle) -> Result<Option<LicenseLocalState>, String> {
+pub fn license_get_state(app: AppHandle) -> Result<Option<LicenseLocalState>, AppErrorDto> {
     Ok(uc::get_state(&svc(&app)?)?)
 }
 
 #[tauri::command]
-pub fn license_clear_state(app: AppHandle) -> Result<String, String> {
+pub fn license_clear_state(app: AppHandle) -> Result<String, AppErrorDto> {
     uc::clear_state(&svc(&app)?)?;
     Ok("OK".into())
 }
 
 #[tauri::command]
-pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, String> {
+pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, AppErrorDto> {
     // Notifier (mode-switched) para avisar de licencia por caducar / caducada-en-gracia / gracia
     // offline. `None` si aún no hay modo/BD → no se avisa. La decisión del gate NO depende de esto.
     let notifier = app.state::<crate::AppState>().notifier().await.ok();
@@ -46,7 +47,7 @@ pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, String> {
 }
 
 #[tauri::command]
-pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, String> {
+pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, AppErrorDto> {
     Ok(uc::check_now(&svc(&app)?).await?)
 }
 
@@ -54,7 +55,7 @@ pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, Stri
 pub async fn license_activate(
     app: AppHandle,
     args: LicenseActivateInput,
-) -> Result<LicenseActivateOutcome, String> {
+) -> Result<LicenseActivateOutcome, AppErrorDto> {
     Ok(uc::activate(&svc(&app)?, args).await?)
 }
 
@@ -63,7 +64,7 @@ pub async fn license_activate(
 pub async fn license_request_device_change(
     app: AppHandle,
     args: LicenseDeviceChangeInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     uc::request_device_change(&svc(&app)?, args).await?;
     Ok("OK".into())
 }

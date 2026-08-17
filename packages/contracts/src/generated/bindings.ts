@@ -12,6 +12,19 @@ export type AlergenoMiniDto = { ID_Alergeno: string, Nombre: string, Ruta_Imagen
 export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };
 
 /**
+ * Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri.
+ */
+export type AppErrorDto = { 
+/**
+ * Código estable. Es lo único por lo que se debe ramificar.
+ */
+code: ErrorCode, 
+/**
+ * Texto diagnóstico, legible. Se muestra y se registra; nunca se compara.
+ */
+message: string, };
+
+/**
  * Args del comando que aplica un lote de cambios en orden de `seq`.
  */
 export type ApplySyncChangesArgs = { changes: Array<SyncChange>, };
@@ -130,6 +143,11 @@ export type DeviceSignB64Args = { payload: string, };
 export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
 
 export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: string, notas?: string, lineas: Array<LineaEmailInput>, };
+
+/**
+ * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
+ */
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin";
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 

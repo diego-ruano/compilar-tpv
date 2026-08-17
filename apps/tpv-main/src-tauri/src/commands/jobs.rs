@@ -4,10 +4,11 @@
 use tauri::AppHandle;
 
 use tpv_contracts::jobs::JobStatus;
+use tpv_contracts::errors::AppErrorDto;
 
 /// Foto de las tareas periódicas para el panel de Configuración → Conectividad: cuándo corrió cada
 /// una por última vez, si va bien y, si no, con qué error.
 #[tauri::command]
-pub async fn jobs_status(app: AppHandle) -> Result<Vec<JobStatus>, String> {
-    crate::jobs::estado_actual(&app).await
+pub async fn jobs_status(app: AppHandle) -> Result<Vec<JobStatus>, AppErrorDto> {
+    crate::jobs::estado_actual(&app).await.map_err(AppErrorDto::from)
 }

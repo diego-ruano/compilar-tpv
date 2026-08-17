@@ -13,12 +13,13 @@ use tpv_contracts::clientes::{
 };
 
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn clientes_get_overview(
     state: State<'_, AppState>,
     args: ClientesOverviewArgs,
-) -> Result<Vec<ClienteOverview>, String> {
+) -> Result<Vec<ClienteOverview>, AppErrorDto> {
     let repo = state.clientes_repo().await?;
     Ok(uc::listar_overview(repo.as_ref(), &args.ranking).await?)
 }
@@ -27,7 +28,7 @@ pub async fn clientes_get_overview(
 pub async fn clientes_get_cliente_form(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
-) -> Result<Option<ClienteForm>, String> {
+) -> Result<Option<ClienteForm>, AppErrorDto> {
     let repo = state.clientes_repo().await?;
     Ok(uc::obtener_form(repo.as_ref(), args.id_cliente).await?)
 }
@@ -36,7 +37,7 @@ pub async fn clientes_get_cliente_form(
 pub async fn clientes_create_cliente(
     state: State<'_, AppState>,
     args: CreateClienteInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.clientes_repo().await?;
     Ok(uc::crear_cliente(repo.as_ref(), args).await?)
 }
@@ -45,7 +46,7 @@ pub async fn clientes_create_cliente(
 pub async fn clientes_update_cliente(
     state: State<'_, AppState>,
     args: UpdateClienteInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.clientes_repo().await?;
     Ok(uc::actualizar_cliente(repo.as_ref(), args).await?)
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Stage, Layer, Rect, Line, Group, Text, Circle } from "react-konva";
+import { toAppError } from "@tpv/client";
 import {
     mesasLoadLayout,
     mesasSaveLayout,
@@ -1500,7 +1501,7 @@ export default function EditTables() {
                                         setDirty(false);
                                     } catch (e) {
                                         console.error("No se pudo guardar el layout:", e);
-                                        alert(`No se pudo guardar el layout:\n${String(e)}`);
+                                        alert(`No se pudo guardar el layout:\n${toAppError(e).message}`);
                                     }
                                 }}
                             >

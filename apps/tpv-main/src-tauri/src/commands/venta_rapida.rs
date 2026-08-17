@@ -11,13 +11,14 @@ use tpv_contracts::venta_rapida::{
     VrSearchProductosArgs, VrUpdateNotaDetalleInput,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 /* Lecturas */
 
 #[tauri::command]
 pub async fn vr_list_categorias_vendibles(
     state: State<'_, AppState>,
-) -> Result<Vec<CategoriaRow>, String> {
+) -> Result<Vec<CategoriaRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::list_categorias_vendibles(repo.as_ref()).await?)
 }
@@ -26,7 +27,7 @@ pub async fn vr_list_categorias_vendibles(
 pub async fn vr_list_productos_by_categoria(
     state: State<'_, AppState>,
     args: VrIdCategoriaArgs,
-) -> Result<Vec<ProductoRow>, String> {
+) -> Result<Vec<ProductoRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::list_productos_by_categoria(repo.as_ref(), args).await?)
 }
@@ -35,7 +36,7 @@ pub async fn vr_list_productos_by_categoria(
 pub async fn vr_search_productos(
     state: State<'_, AppState>,
     args: VrSearchProductosArgs,
-) -> Result<Vec<ProductoRow>, String> {
+) -> Result<Vec<ProductoRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::search_productos(repo.as_ref(), args).await?)
 }
@@ -44,7 +45,7 @@ pub async fn vr_search_productos(
 pub async fn vr_list_comandas_barra(
     state: State<'_, AppState>,
     args: VrListComandasArgs,
-) -> Result<Vec<ComandaBarraRow>, String> {
+) -> Result<Vec<ComandaBarraRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::list_comandas_barra(repo.as_ref(), args).await?)
 }
@@ -53,7 +54,7 @@ pub async fn vr_list_comandas_barra(
 pub async fn vr_get_lineas_comanda(
     state: State<'_, AppState>,
     args: VrIdComandaArgs,
-) -> Result<Vec<LineaComandaRow>, String> {
+) -> Result<Vec<LineaComandaRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::get_lineas_comanda(repo.as_ref(), args).await?)
 }
@@ -62,7 +63,7 @@ pub async fn vr_get_lineas_comanda(
 pub async fn vr_get_index_rows(
     state: State<'_, AppState>,
     args: VrIdsArgs,
-) -> Result<Vec<IndexRow>, String> {
+) -> Result<Vec<IndexRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::get_index_rows(repo.as_ref(), args).await?)
 }
@@ -71,7 +72,7 @@ pub async fn vr_get_index_rows(
 pub async fn vr_get_detalles_ver_ticket(
     state: State<'_, AppState>,
     args: VrIdComandaArgs,
-) -> Result<Vec<VerTicketsDetalleRow>, String> {
+) -> Result<Vec<VerTicketsDetalleRow>, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::get_detalles_ver_ticket(repo.as_ref(), args).await?)
 }
@@ -82,7 +83,7 @@ pub async fn vr_get_detalles_ver_ticket(
 pub async fn vr_create_comanda_barra(
     state: State<'_, AppState>,
     args: VrCreateComandaBarraInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::create_comanda_barra(repo.as_ref(), args).await?)
 }
@@ -91,7 +92,7 @@ pub async fn vr_create_comanda_barra(
 pub async fn vr_add_linea_comanda(
     state: State<'_, AppState>,
     args: VrAddLineaComandaInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::add_linea_comanda(repo.as_ref(), args).await?)
 }
@@ -100,7 +101,7 @@ pub async fn vr_add_linea_comanda(
 pub async fn vr_remove_last_unpaid_linea(
     state: State<'_, AppState>,
     args: VrRemoveLastUnpaidLineaInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::remove_last_unpaid_linea(repo.as_ref(), args).await?)
 }
@@ -109,7 +110,7 @@ pub async fn vr_remove_last_unpaid_linea(
 pub async fn vr_delete_linea_if_unpaid(
     state: State<'_, AppState>,
     args: VrDeleteLineaIfUnpaidInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::delete_linea_if_unpaid(repo.as_ref(), args).await?)
 }
@@ -118,7 +119,7 @@ pub async fn vr_delete_linea_if_unpaid(
 pub async fn vr_update_nota_detalle(
     state: State<'_, AppState>,
     args: VrUpdateNotaDetalleInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::update_nota_detalle(repo.as_ref(), args).await?)
 }
@@ -127,7 +128,7 @@ pub async fn vr_update_nota_detalle(
 pub async fn vr_cobrar_fraccionado(
     state: State<'_, AppState>,
     args: VrCobrarFraccionadoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::cobrar_fraccionado(repo.as_ref(), args).await?)
 }
@@ -136,7 +137,7 @@ pub async fn vr_cobrar_fraccionado(
 pub async fn vr_restar_stock(
     state: State<'_, AppState>,
     args: VrRestarStockInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::restar_stock(repo.as_ref(), args).await?)
 }
@@ -145,7 +146,7 @@ pub async fn vr_restar_stock(
 pub async fn vr_delete_comanda_if_safe(
     state: State<'_, AppState>,
     args: VrDeleteComandaIfSafeInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
     Ok(uc::delete_comanda_if_safe(repo.as_ref(), args).await?)
 }

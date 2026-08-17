@@ -10,12 +10,13 @@ use tpv_contracts::stats::{
     TrabajadoresStatsResponse,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn stats_mesas_get(
     state: State<'_, AppState>,
     range: StatsRange,
-) -> Result<MesasStatsResponse, String> {
+) -> Result<MesasStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::mesas(repo.as_ref(), range).await?)
 }
@@ -23,7 +24,7 @@ pub async fn stats_mesas_get(
 #[tauri::command]
 pub async fn stats_productos_list_categorias(
     state: State<'_, AppState>,
-) -> Result<Vec<StatsCategoriaRow>, String> {
+) -> Result<Vec<StatsCategoriaRow>, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::list_categorias(repo.as_ref()).await?)
 }
@@ -32,7 +33,7 @@ pub async fn stats_productos_list_categorias(
 pub async fn stats_productos_resumen(
     state: State<'_, AppState>,
     args: ProductosStatsArgs,
-) -> Result<ProductosStatsResponse, String> {
+) -> Result<ProductosStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::productos(repo.as_ref(), args).await?)
 }
@@ -41,7 +42,7 @@ pub async fn stats_productos_resumen(
 pub async fn stats_reservas_resumen(
     state: State<'_, AppState>,
     args: ReservasStatsArgs,
-) -> Result<ReservasStatsResponse, String> {
+) -> Result<ReservasStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::reservas(repo.as_ref(), args).await?)
 }
@@ -50,7 +51,7 @@ pub async fn stats_reservas_resumen(
 pub async fn stats_trabajadores_resumen(
     state: State<'_, AppState>,
     args: TrabajadoresStatsArgs,
-) -> Result<TrabajadoresStatsResponse, String> {
+) -> Result<TrabajadoresStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::trabajadores(repo.as_ref(), args).await?)
 }
@@ -59,7 +60,7 @@ pub async fn stats_trabajadores_resumen(
 pub async fn stats_clientes_resumen(
     state: State<'_, AppState>,
     args: ClientesStatsArgs,
-) -> Result<ClientesStatsResponse, String> {
+) -> Result<ClientesStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::clientes(repo.as_ref(), args).await?)
 }
@@ -68,7 +69,7 @@ pub async fn stats_clientes_resumen(
 pub async fn stats_proveedores_resumen(
     state: State<'_, AppState>,
     args: ProveedoresStatsArgs,
-) -> Result<ProveedoresStatsResponse, String> {
+) -> Result<ProveedoresStatsResponse, AppErrorDto> {
     let repo = state.stats_repo().await?;
     Ok(uc::proveedores(repo.as_ref(), args).await?)
 }

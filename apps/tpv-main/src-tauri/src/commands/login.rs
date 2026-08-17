@@ -10,15 +10,16 @@ use tpv_contracts::login::{
 };
 
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 /// Hash de un PIN. Síncrono y sin estado (lo usa también el arranque en main.rs).
 #[tauri::command]
-pub fn hash_password(pin: String) -> Result<String, String> {
+pub fn hash_password(pin: String) -> Result<String, AppErrorDto> {
     Ok(uc::hash_password(&pin)?)
 }
 
 #[tauri::command]
-pub async fn list_login_users(state: State<'_, AppState>) -> Result<Vec<UserListItem>, String> {
+pub async fn list_login_users(state: State<'_, AppState>) -> Result<Vec<UserListItem>, AppErrorDto> {
     let repo = state.login_repo().await?;
     Ok(uc::list_login_users(repo.as_ref()).await?)
 }
@@ -27,7 +28,7 @@ pub async fn list_login_users(state: State<'_, AppState>) -> Result<Vec<UserList
 pub async fn login_user(
     state: State<'_, AppState>,
     args: LoginUserArgs,
-) -> Result<LoginOk, String> {
+) -> Result<LoginOk, AppErrorDto> {
     let repo = state.login_repo().await?;
     let notifier = state.notifier().await.ok();
     Ok(uc::login_user(repo.as_ref(), notifier.as_deref(), args).await?)
@@ -37,7 +38,7 @@ pub async fn login_user(
 pub async fn get_today_punch_status(
     state: State<'_, AppState>,
     args: PunchStatusArgs,
-) -> Result<PunchStatus, String> {
+) -> Result<PunchStatus, AppErrorDto> {
     let repo = state.login_repo().await?;
     Ok(uc::get_today_punch_status(repo.as_ref(), args).await?)
 }
@@ -46,7 +47,7 @@ pub async fn get_today_punch_status(
 pub async fn set_turno_partido_hoy(
     state: State<'_, AppState>,
     args: SetTurnoPartidoInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.login_repo().await?;
     uc::set_turno_partido_hoy(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -56,7 +57,7 @@ pub async fn set_turno_partido_hoy(
 pub async fn complete_initial_setup(
     state: State<'_, AppState>,
     args: CompleteInitialSetupInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.login_repo().await?;
     uc::complete_initial_setup(repo.as_ref(), args).await?;
     Ok("OK".to_string())
@@ -66,7 +67,7 @@ pub async fn complete_initial_setup(
 pub async fn punch(
     state: State<'_, AppState>,
     args: PunchInput,
-) -> Result<PunchStatus, String> {
+) -> Result<PunchStatus, AppErrorDto> {
     let repo = state.login_repo().await?;
     Ok(uc::punch(repo.as_ref(), args).await?)
 }

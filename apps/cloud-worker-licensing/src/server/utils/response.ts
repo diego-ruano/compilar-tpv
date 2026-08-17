@@ -1,5 +1,7 @@
 // src/server/utils/response.ts
 
+import { wireToCode } from "../../lib/errorCodes";
+
 export type HeaderBag = Record<string, string>;
 
 export function corsHeaders(req?: Request): HeaderBag {
@@ -37,12 +39,15 @@ export function json(data: any, status = 200, req?: Request) {
 	});
 }
 
+// ARCH-05: toda respuesta de error lleva `code` del catálogo compartido, además del
+// `error` de siempre. Se ramifica por `code`; `error` queda como diagnóstico.
+
 export function unauthorized(req: Request, error: string, details?: any) {
-	return json({ ok: false, error, details }, 401, req);
+	return json({ ok: false, code: wireToCode(error, 401), error, details }, 401, req);
 }
 
 export function forbidden(req: Request, error: string, details?: any) {
-	return json({ ok: false, error, details }, 403, req);
+	return json({ ok: false, code: wireToCode(error, 403), error, details }, 403, req);
 }
 
 export function serverError(req: Request, error: string, details?: any) {
@@ -54,10 +59,22 @@ export function serverError(req: Request, error: string, details?: any) {
 	return json(
 		{
 			ok: false,
+			code: wireToCode(error, 500),
 			error,
 			details: d,
 		},
 		500,
 		req,
+	);
+}
+
+/**
+ * Error de validación de una ruta de dominio (400). Estaba duplicado **literalmente**
+ * en los 12 `*.routes.ts`; ahora vive aquí para que el `code` se añada en un solo sitio.
+ */
+export function badRequest(c: any, error: string, err?: { issues?: unknown }) {
+	return c.json(
+		{ ok: false, code: wireToCode(error, 400), error, issues: err?.issues },
+		400,
 	);
 }

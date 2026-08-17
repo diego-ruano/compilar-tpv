@@ -19,6 +19,7 @@ import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import * as q from "./inventario.queries";
 import * as cmd from "./inventario.commands";
 import * as S from "./inventario.schemas";
+import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -27,10 +28,6 @@ export const inventarioRoutes = new Hono<Ctx>();
 inventarioRoutes.use("*", tenantAuth);
 
 // ───────────────── helpers ─────────────────
-
-function badRequest(c: any, error: string, err?: z.ZodError) {
-	return c.json({ error, issues: err?.issues }, 400);
-}
 
 function parseId(raw: string | undefined): string | null {
 	const t = (raw ?? "").trim();

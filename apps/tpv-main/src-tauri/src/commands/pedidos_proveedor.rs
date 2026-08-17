@@ -9,45 +9,46 @@ use tpv_contracts::pedidos_proveedor::{
 };
 
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn pedidos_proveedor_get_page(
     state: State<'_, AppState>,
     args: PedidosGetPageInput,
-) -> Result<PedidosPageDto, String> {
+) -> Result<PedidosPageDto, AppErrorDto> {
     let repo = state.pedidos_proveedor_repo().await?;
-    uc::get_page(repo.as_ref(), args).await.map_err(|e| e.to_string())
+    uc::get_page(repo.as_ref(), args).await.map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn pedidos_proveedor_crear(
     state: State<'_, AppState>,
     args: PedidosCrearInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.pedidos_proveedor_repo().await?;
     let notifier = state.notifier().await.ok();
     uc::crear(repo.as_ref(), notifier.as_deref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn pedidos_proveedor_actualizar(
     state: State<'_, AppState>,
     args: PedidosActualizarInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.pedidos_proveedor_repo().await?;
-    uc::actualizar(repo.as_ref(), args).await.map_err(|e| e.to_string())
+    uc::actualizar(repo.as_ref(), args).await.map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn pedidos_proveedor_cambiar_estado(
     state: State<'_, AppState>,
     args: PedidosCambiarEstadoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.pedidos_proveedor_repo().await?;
     let notifier = state.notifier().await.ok();
     uc::cambiar_estado(repo.as_ref(), notifier.as_deref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }

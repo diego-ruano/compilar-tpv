@@ -10,11 +10,12 @@ use tpv_contracts::inventario::{
     UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn inventario_list_categorias(
     state: State<'_, AppState>,
-) -> Result<Vec<CategoriaInvDto>, String> {
+) -> Result<Vec<CategoriaInvDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_categorias(repo.as_ref()).await?)
 }
@@ -23,7 +24,7 @@ pub async fn inventario_list_categorias(
 pub async fn inventario_create_categoria(
     state: State<'_, AppState>,
     args: UpsertCategoriaInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::create_categoria(repo.as_ref(), args).await?)
 }
@@ -31,7 +32,7 @@ pub async fn inventario_create_categoria(
 #[tauri::command]
 pub async fn inventario_list_proveedores_mini(
     state: State<'_, AppState>,
-) -> Result<Vec<ProveedorMiniDto>, String> {
+) -> Result<Vec<ProveedorMiniDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_proveedores_mini(repo.as_ref()).await?)
 }
@@ -40,7 +41,7 @@ pub async fn inventario_list_proveedores_mini(
 pub async fn inventario_list_productos_by_categoria(
     state: State<'_, AppState>,
     args: IdCategoriaArgs,
-) -> Result<Vec<ProductoListDto>, String> {
+) -> Result<Vec<ProductoListDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_productos_by_categoria(repo.as_ref(), args.id_categoria).await?)
 }
@@ -49,7 +50,7 @@ pub async fn inventario_list_productos_by_categoria(
 pub async fn inventario_get_resumen(
     state: State<'_, AppState>,
     args: SummaryArgs,
-) -> Result<InventarioResumenResponse, String> {
+) -> Result<InventarioResumenResponse, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
@@ -57,7 +58,7 @@ pub async fn inventario_get_resumen(
 #[tauri::command]
 pub async fn inventario_list_alergenos(
     state: State<'_, AppState>,
-) -> Result<Vec<AlergenoInvDto>, String> {
+) -> Result<Vec<AlergenoInvDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_alergenos(repo.as_ref()).await?)
 }
@@ -66,7 +67,7 @@ pub async fn inventario_list_alergenos(
 pub async fn inventario_get_alergenos_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_alergenos_producto(repo.as_ref(), args.id_producto).await?)
 }
@@ -75,7 +76,7 @@ pub async fn inventario_get_alergenos_producto(
 pub async fn inventario_set_alergenos_producto(
     state: State<'_, AppState>,
     args: SetProductoAlergenosInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::set_alergenos_producto(repo.as_ref(), args).await?)
 }
@@ -84,7 +85,7 @@ pub async fn inventario_set_alergenos_producto(
 pub async fn inventario_get_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<Option<ProductoBaseDto>, String> {
+) -> Result<Option<ProductoBaseDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_producto(repo.as_ref(), args.id_producto).await?)
 }
@@ -93,7 +94,7 @@ pub async fn inventario_get_producto(
 pub async fn inventario_get_product_detail(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<ProductDetailResponse, String> {
+) -> Result<ProductDetailResponse, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_product_detail(repo.as_ref(), args.id_producto).await?)
 }
@@ -102,7 +103,7 @@ pub async fn inventario_get_product_detail(
 pub async fn inventario_get_producto_detalle(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<Option<ProductoDetalleDto>, String> {
+) -> Result<Option<ProductoDetalleDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_producto_detalle(repo.as_ref(), args.id_producto).await?)
 }
@@ -111,7 +112,7 @@ pub async fn inventario_get_producto_detalle(
 pub async fn inventario_delete_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::delete_producto(repo.as_ref(), args.id_producto).await?)
 }
@@ -120,7 +121,7 @@ pub async fn inventario_delete_producto(
 pub async fn inventario_upsert_producto(
     state: State<'_, AppState>,
     args: UpsertProductoInput,
-) -> Result<UpsertProductoResult, String> {
+) -> Result<UpsertProductoResult, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::upsert_producto(repo.as_ref(), args).await?)
 }
@@ -129,7 +130,7 @@ pub async fn inventario_upsert_producto(
 pub async fn inventario_list_lotes_by_producto(
     state: State<'_, AppState>,
     args: IdProductoArgs,
-) -> Result<Vec<LoteDto>, String> {
+) -> Result<Vec<LoteDto>, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::list_lotes_by_producto(repo.as_ref(), args.id_producto).await?)
 }
@@ -138,7 +139,7 @@ pub async fn inventario_list_lotes_by_producto(
 pub async fn inventario_create_lote(
     state: State<'_, AppState>,
     args: CreateLoteInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::create_lote(repo.as_ref(), args).await?)
 }
@@ -147,7 +148,7 @@ pub async fn inventario_create_lote(
 pub async fn inventario_update_lote(
     state: State<'_, AppState>,
     args: UpdateLoteInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::update_lote(repo.as_ref(), args).await?)
 }
@@ -156,7 +157,7 @@ pub async fn inventario_update_lote(
 pub async fn inventario_ajustar_lote(
     state: State<'_, AppState>,
     args: AjusteLoteInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::ajustar_lote(repo.as_ref(), args).await?)
 }

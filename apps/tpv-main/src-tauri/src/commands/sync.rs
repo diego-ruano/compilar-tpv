@@ -9,20 +9,21 @@ use tpv_application::use_cases::sync as uc;
 use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry, SyncHealth};
 
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 /// Aplica un lote de cambios (idempotente por op_id) y devuelve el nuevo checkpoint (`seq`).
 #[tauri::command]
 pub async fn sync_apply_changes(
     state: State<'_, AppState>,
     args: ApplySyncChangesArgs,
-) -> Result<i64, String> {
+) -> Result<i64, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::apply_changes(repo.as_ref(), args).await?)
 }
 
 /// Último `seq` aplicado localmente (cursor para pedir el catch-up al reconectar).
 #[tauri::command]
-pub async fn sync_get_checkpoint(state: State<'_, AppState>) -> Result<i64, String> {
+pub async fn sync_get_checkpoint(state: State<'_, AppState>) -> Result<i64, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::get_checkpoint(repo.as_ref()).await?)
 }
@@ -32,7 +33,7 @@ pub async fn sync_get_checkpoint(state: State<'_, AppState>) -> Result<i64, Stri
 pub async fn sync_outbox_pending(
     state: State<'_, AppState>,
     limit: i64,
-) -> Result<Vec<OutboxEntry>, String> {
+) -> Result<Vec<OutboxEntry>, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::outbox_pending(repo.as_ref(), limit).await?)
 }
@@ -44,7 +45,7 @@ pub async fn sync_outbox_mark_sent(
     state: State<'_, AppState>,
     op_id: String,
     seq: i64,
-) -> Result<(), String> {
+) -> Result<(), AppErrorDto> {
     let repo = state.sync_repo().await?;
     uc::outbox_mark_sent(repo.as_ref(), &op_id, seq).await?;
     Ok(())
@@ -53,7 +54,7 @@ pub async fn sync_outbox_mark_sent(
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo registros antiguos ya subidos a la nube).
 /// El frontend la invoca cuando el outbox queda vacío tras drenar.
 #[tauri::command]
-pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
     let repo = state.sync_repo().await?;
     uc::purge_applied_ops(repo.as_ref()).await?;
     Ok(())
@@ -61,7 +62,7 @@ pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), St
 
 /// Foto de salud de la sincronización (SYNC-14) para el panel de Configuración → Conectividad.
 #[tauri::command]
-pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, String> {
+pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::health(repo.as_ref()).await?)
 }

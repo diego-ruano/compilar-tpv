@@ -11,16 +11,13 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import * as cmd from "./venta_rapida.commands";
 import * as q from "./venta_rapida.queries";
 import * as S from "./venta_rapida.schemas";
+import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const ventaRapidaRoutes = new Hono<Ctx>();
 
 ventaRapidaRoutes.use("*", tenantAuth);
-
-function badRequest(c: any, error: string, err?: z.ZodError) {
-	return c.json({ error, issues: err?.issues }, 400);
-}
 
 function parseId(raw: string | undefined): string | null {
 	const t = (raw ?? "").trim();

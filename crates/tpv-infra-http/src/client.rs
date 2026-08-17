@@ -176,14 +176,13 @@ impl CloudClient {
 
         if !status.is_success() {
             // El worker devuelve los errores de negocio en `{ "error": "..." }`
-            // (p. ej. `PIN incorrecto`, `main_offline`, `missing_op_id`). Se propagan
-            // VERBATIM (AppError::raw, sin prefijo) porque son mensajes/códigos que el
-            // frontend muestra o compara por igualdad. Si no hay `{error}`, error genérico.
+            // (p. ej. `main_offline`, `not_approved`, `missing_op_id`). ARCH-05: se traducen
+            // al catálogo compartido; el string original queda como `message`.
             if let Some(err) = serde_json::from_str::<serde_json::Value>(&text)
                 .ok()
                 .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
             {
-                return Err(AppError::raw(err));
+                return Err(AppError::from_wire(err));
             }
             return Err(AppError::external(format!("http_{}: {}", status.as_u16(), text)));
         }

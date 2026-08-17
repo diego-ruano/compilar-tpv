@@ -43,6 +43,7 @@ use tpv_infra_http::{
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
 };
+use tpv_contracts::errors::{AppErrorDto, ErrorCode};
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
@@ -517,7 +518,7 @@ impl AppState {
 // ──────────────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, String> {
+fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -531,7 +532,7 @@ fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, String> {
 /// Lee el modo de funcionamiento (offline/online) persistido en `device_config.json`.
 /// Si nunca se eligió, devuelve `None` (la UI asume `offline`).
 #[tauri::command]
-fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, String> {
+fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -546,7 +547,7 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, Strin
 async fn set_connection_mode(
     app: AppHandle,
     args: SetConnectionModeArgs,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -558,7 +559,12 @@ async fn set_connection_mode(
         let svc = LicensingAdapter::new(app_data_dir.clone());
         let gate = tpv_application::use_cases::licensing::check_now(&svc).await?;
         if !gate.allowed {
-            return Err(format!("licencia_no_valida: {}", gate.reason));
+            // Código genérico a propósito: nadie ramifica por esto en la UI, sólo lo
+            // muestra. El motivo concreto del gate viaja en el mensaje.
+            return Err(AppErrorDto::new(
+                ErrorCode::Conflict,
+                format!("licencia_no_valida: {}", gate.reason),
+            ));
         }
     }
 
@@ -574,7 +580,7 @@ async fn set_device_mode(
     app: AppHandle,
     state: State<'_, AppState>,
     args: SetDeviceModeArgs,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -618,7 +624,7 @@ async fn set_device_mode(
 }
 
 #[tauri::command]
-async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
     let mode = *state.mode.lock().await;
 
     if mode != Some(DeviceMode::Tpv) {
@@ -680,7 +686,7 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 /// selector Main/Handy. La licencia local (modo Main) NO se toca: si se vuelve a elegir Main,
 /// el gate de licencia sigue resolviéndose con el estado guardado.
 #[tauri::command]
-async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -730,7 +736,7 @@ async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result
 /// (el frontend lo dispara tras guardar y, en la Main online, también periódicamente). Esto
 /// hace la subida resiliente a estar offline en el momento de crear la imagen.
 #[tauri::command]
-async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, String> {
+async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -853,8 +859,8 @@ pub(crate) async fn drenar_imagenes(
 }
 
 #[tauri::command]
-async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
-    drenar_imagenes(&app, &state).await
+async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
+    drenar_imagenes(&app, &state).await.map_err(AppErrorDto::from)
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
@@ -864,7 +870,7 @@ async fn images_delete(
     app: AppHandle,
     state: State<'_, AppState>,
     args: DeleteImageArgs,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -901,7 +907,7 @@ async fn images_ensure_local(
     app: AppHandle,
     state: State<'_, AppState>,
     args: EnsureImageArgs,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -945,7 +951,7 @@ async fn images_ensure_local(
 /// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
 /// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
 #[tauri::command]
-async fn images_backfill(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+async fn images_backfill(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -991,7 +997,7 @@ async fn images_backfill(app: AppHandle, state: State<'_, AppState>) -> Result<S
 }
 
 #[tauri::command]
-fn get_app_data_path(app: AppHandle) -> Result<String, String> {
+fn get_app_data_path(app: AppHandle) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -1013,22 +1019,23 @@ fn app_data_dir_of(app: &AppHandle) -> Result<PathBuf, String> {
 /// Lista las impresoras visibles por el SO (locales + conexiones de red/WiFi). Se ejecuta en un
 /// hilo bloqueante para no congelar el runtime async (la API de Windows es síncrona).
 #[tauri::command]
-async fn printer_list() -> Result<Vec<printing::PrinterInfo>, String> {
+async fn printer_list() -> Result<Vec<printing::PrinterInfo>, AppErrorDto> {
     tokio::task::spawn_blocking(printing::list_printers)
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| AppErrorDto::internal(e.to_string()))?
+        .map_err(AppErrorDto::from)
 }
 
 /// Devuelve la impresora seleccionada en este dispositivo (o `None`).
 #[tauri::command]
-fn printer_get_selected(app: AppHandle) -> Result<Option<String>, String> {
+fn printer_get_selected(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     let dir = app_data_dir_of(&app)?;
     Ok(load_config(&dir).printer_name)
 }
 
 /// Persiste la impresora seleccionada en `device_config.json` (nombre vacío => deselecciona).
 #[tauri::command]
-fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, String> {
+fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, AppErrorDto> {
     let dir = app_data_dir_of(&app)?;
     let mut cfg = load_config(&dir);
     let name = args.name.trim();
@@ -1056,7 +1063,7 @@ fn resolve_printer(app: &AppHandle, explicit: Option<String>) -> Result<String, 
 async fn printer_print_ticket(
     app: AppHandle,
     payload: printing::PrintTicketPayload,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(&app, payload.printer_name.clone())?;
     let bytes = printing::build_ticket(&payload);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Ticket TPV", &bytes))
@@ -1070,7 +1077,7 @@ async fn printer_print_ticket(
 async fn printer_print_test(
     app: AppHandle,
     args: Option<SetPrinterArgs>,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(&app, args.map(|a| a.name))?;
     let bytes = printing::build_test_ticket(&printer);
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Prueba TPV", &bytes))
@@ -1149,10 +1156,10 @@ async fn check_and_announce(app: &AppHandle) -> Result<Option<UpdateInfo>, Strin
 
 /// Comprueba el feed y devuelve los metadatos de la nueva versión, o `None` si ya está al día.
 #[tauri::command]
-async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, AppErrorDto> {
     #[cfg(desktop)]
     {
-        check_and_announce(&app).await
+        check_and_announce(&app).await.map_err(AppErrorDto::from)
     }
     #[cfg(not(desktop))]
     {
@@ -1165,7 +1172,7 @@ async fn updater_check(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
 /// Comprueba de verdad (no devuelve nada cacheado), así que el botón "Buscar actualizaciones"
 /// también dispara el aviso si aparece una versión nueva.
 #[tauri::command]
-async fn updater_status(app: AppHandle) -> Result<UpdateStatus, String> {
+async fn updater_status(app: AppHandle) -> Result<UpdateStatus, AppErrorDto> {
     let current_version = app.package_info().version.to_string();
 
     #[cfg(desktop)]
@@ -1224,7 +1231,7 @@ async fn notify_update_available(app: &AppHandle, version: &str) {
 /// feed antes de instalar (no se fía de un estado cacheado). Pensado para invocarse cuando el
 /// usuario lo decida (p. ej. al cerrar caja), no en automático.
 #[tauri::command]
-async fn updater_install(app: AppHandle) -> Result<(), String> {
+async fn updater_install(app: AppHandle) -> Result<(), AppErrorDto> {
     #[cfg(desktop)]
     {
         let updater = app

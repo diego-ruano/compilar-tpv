@@ -14,16 +14,13 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import * as cmd from "./notificaciones.commands";
 import * as q from "./notificaciones.queries";
 import * as S from "./notificaciones.schemas";
+import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const notificacionesRoutes = new Hono<Ctx>();
 
 notificacionesRoutes.use("*", tenantAuth);
-
-function badRequest(c: any, error: string, err?: z.ZodError) {
-	return c.json({ error, issues: err?.issues }, 400);
-}
 
 function parseId(raw: string | undefined): string | null {
 	const t = (raw ?? "").trim();

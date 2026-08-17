@@ -11,11 +11,12 @@ use tpv_contracts::trabajadores::{
     TrabajadorUpdateInput, TurnoRow,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 /* Lecturas */
 
 #[tauri::command]
-pub async fn trabajadores_get_roles(state: State<'_, AppState>) -> Result<Vec<RolRow>, String> {
+pub async fn trabajadores_get_roles(state: State<'_, AppState>) -> Result<Vec<RolRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_roles(repo.as_ref()).await?)
 }
@@ -23,7 +24,7 @@ pub async fn trabajadores_get_roles(state: State<'_, AppState>) -> Result<Vec<Ro
 #[tauri::command]
 pub async fn trabajadores_get_all(
     state: State<'_, AppState>,
-) -> Result<Vec<TrabajadorRow>, String> {
+) -> Result<Vec<TrabajadorRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_all(repo.as_ref()).await?)
 }
@@ -32,7 +33,7 @@ pub async fn trabajadores_get_all(
 pub async fn trabajadores_get_detail(
     state: State<'_, AppState>,
     args: TrabajadorDetailArgs,
-) -> Result<Option<TrabajadorDetailRow>, String> {
+) -> Result<Option<TrabajadorDetailRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_detail(repo.as_ref(), args).await?)
 }
@@ -41,13 +42,13 @@ pub async fn trabajadores_get_detail(
 pub async fn trabajadores_get_trabajador_id_by_usuario(
     state: State<'_, AppState>,
     args: TrabajadorIdByUsuarioArgs,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_trabajador_id_by_usuario(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]
-pub async fn turnos_get_all(state: State<'_, AppState>) -> Result<Vec<TurnoRow>, String> {
+pub async fn turnos_get_all(state: State<'_, AppState>) -> Result<Vec<TurnoRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::turnos_get_all(repo.as_ref()).await?)
 }
@@ -56,7 +57,7 @@ pub async fn turnos_get_all(state: State<'_, AppState>) -> Result<Vec<TurnoRow>,
 pub async fn horarios_get_asignaciones_semana(
     state: State<'_, AppState>,
     args: HorariosSemanaArgs,
-) -> Result<Vec<AsignacionRow>, String> {
+) -> Result<Vec<AsignacionRow>, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_asignaciones_semana(repo.as_ref(), args).await?)
 }
@@ -67,7 +68,7 @@ pub async fn horarios_get_asignaciones_semana(
 pub async fn trabajadores_create(
     state: State<'_, AppState>,
     args: TrabajadorCreateInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::create_trabajador(repo.as_ref(), args).await?)
 }
@@ -76,7 +77,7 @@ pub async fn trabajadores_create(
 pub async fn trabajadores_update(
     state: State<'_, AppState>,
     args: TrabajadorUpdateInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::update_trabajador(repo.as_ref(), args).await?)
 }
@@ -87,7 +88,7 @@ pub async fn trabajadores_update(
 pub async fn horarios_create_asignacion(
     state: State<'_, AppState>,
     args: AsignacionCreateInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::create_asignacion(repo.as_ref(), args).await?)
 }
@@ -96,7 +97,7 @@ pub async fn horarios_create_asignacion(
 pub async fn horarios_update_asignacion(
     state: State<'_, AppState>,
     args: AsignacionUpdateInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::update_asignacion(repo.as_ref(), args).await?)
 }
@@ -105,7 +106,7 @@ pub async fn horarios_update_asignacion(
 pub async fn horarios_delete_asignacion(
     state: State<'_, AppState>,
     args: AsignacionDeleteInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::delete_asignacion(repo.as_ref(), args).await?)
 }
@@ -114,7 +115,7 @@ pub async fn horarios_delete_asignacion(
 pub async fn horarios_copy_semana_asignaciones(
     state: State<'_, AppState>,
     args: CopySemanaInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::copy_semana_asignaciones(repo.as_ref(), args).await?)
 }
@@ -123,7 +124,7 @@ pub async fn horarios_copy_semana_asignaciones(
 pub async fn horarios_set_predeterminado_desde_semana(
     state: State<'_, AppState>,
     args: SetPredeterminadoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.trabajadores_repo().await?;
     Ok(uc::set_predeterminado_desde_semana(repo.as_ref(), args).await?)
 }

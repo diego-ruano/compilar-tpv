@@ -13,16 +13,13 @@ import * as cmd from "./login.commands";
 import { hashPin, verifyPin } from "./login.crypto";
 import * as q from "./login.queries";
 import * as S from "./login.schemas";
+import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const loginRoutes = new Hono<Ctx>();
 
 loginRoutes.use("*", tenantAuth);
-
-function badRequest(c: any, error: string, err?: z.ZodError) {
-	return c.json({ error, issues: err?.issues }, 400);
-}
 
 function parseId(raw: string | undefined): string | null {
 	const t = (raw ?? "").trim();

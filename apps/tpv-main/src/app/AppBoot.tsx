@@ -1,7 +1,7 @@
 // src/AppBoot.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
-import { invokeClient } from "@tpv/client";
+import { invokeClient, esError, toAppError } from "@tpv/client";
 import { listen } from "@tauri-apps/api/event";
 import type {
     LicenseActivateOutcome,
@@ -513,9 +513,11 @@ export default function AppBoot({ router }: { router: any }) {
                     });
 
                     return;
-                } catch (e: any) {
-                    const m = String(e?.message || e);
-                    if (m === "not_approved") continue;
+                } catch (e: unknown) {
+                    // ARCH-05: "todavía sin aprobar en la Main" no es un fallo, es que
+                    // seguimos esperando. Se ramifica por CÓDIGO del catálogo: antes se
+                    // comparaba el texto del mensaje y por eso existía `AppError::Raw`.
+                    if (esError(e, "not_approved")) continue;
                     throw e;
                 }
             }
@@ -539,7 +541,7 @@ export default function AppBoot({ router }: { router: any }) {
                 const rawMode = await invokeClient("get_device_mode");
                 setMode(isDeviceMode(rawMode) ? rawMode : null);
             } catch (e: any) {
-                setErr(String(e));
+                setErr(toAppError(e).message);
                 setMode(null);
             }
         })();
@@ -611,7 +613,7 @@ export default function AppBoot({ router }: { router: any }) {
         } catch (e: any) {
             setGate({
                 allowed: false,
-                reason: `gate_error:${String(e)}`,
+                reason: `gate_error:${toAppError(e).code}`,
                 state: null,
             });
             setLic(null);
@@ -667,7 +669,7 @@ export default function AppBoot({ router }: { router: any }) {
 
             await refreshLicense();
         } catch (e: any) {
-            setErr(String(e));
+            setErr(toAppError(e).message);
         } finally {
             setBusy(false);
         }
@@ -682,7 +684,7 @@ export default function AppBoot({ router }: { router: any }) {
                 args: { activation_key: act.licenseKey },
             });
         } catch (e: any) {
-            setErr(String(e));
+            setErr(toAppError(e).message);
         } finally {
             setOtpSending(false);
         }
@@ -724,7 +726,7 @@ export default function AppBoot({ router }: { router: any }) {
             await refreshLicense();
             await refreshGate(true);
         } catch (e: any) {
-            setErr(String(e));
+            setErr(toAppError(e).message);
         } finally {
             setBusy(false);
         }
@@ -741,7 +743,7 @@ export default function AppBoot({ router }: { router: any }) {
             await invokeClient("device_reset_mode");
             setMode(null);
         } catch (e: any) {
-            setErr(String(e));
+            setErr(toAppError(e).message);
         } finally {
             setBusy(false);
         }
@@ -1606,7 +1608,7 @@ export default function AppBoot({ router }: { router: any }) {
                             onRetry={() => refreshGate(true)}
                             onClear={() => {
                                 invokeClient("license_clear_state")
-                                    .catch((e: unknown) => setErr(String(e)))
+                                    .catch((e: unknown) => setErr(toAppError(e).message))
                                     .finally(() => {
                                         void refreshLicense().finally(() => refreshGate(false));
                                     });

@@ -9,9 +9,10 @@ use tpv_contracts::proveedores::{
     ProveedoresSetVinculosInput,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
-pub async fn proveedores_get_all(state: State<'_, AppState>) -> Result<Vec<ProveedorDto>, String> {
+pub async fn proveedores_get_all(state: State<'_, AppState>) -> Result<Vec<ProveedorDto>, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::get_all(repo.as_ref()).await?)
 }
@@ -20,7 +21,7 @@ pub async fn proveedores_get_all(state: State<'_, AppState>) -> Result<Vec<Prove
 pub async fn proveedores_get_productos(
     state: State<'_, AppState>,
     args: ProveedoresGetProductosArgs,
-) -> Result<Vec<ProductoProveedorDto>, String> {
+) -> Result<Vec<ProductoProveedorDto>, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::get_productos(repo.as_ref(), args.id_proveedor).await?)
 }
@@ -28,7 +29,7 @@ pub async fn proveedores_get_productos(
 #[tauri::command]
 pub async fn proveedores_get_categorias(
     state: State<'_, AppState>,
-) -> Result<Vec<CategoriaProveedorDto>, String> {
+) -> Result<Vec<CategoriaProveedorDto>, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::get_categorias(repo.as_ref()).await?)
 }
@@ -36,7 +37,7 @@ pub async fn proveedores_get_categorias(
 #[tauri::command]
 pub async fn proveedores_get_productos_all(
     state: State<'_, AppState>,
-) -> Result<Vec<ProductoProveedorDto>, String> {
+) -> Result<Vec<ProductoProveedorDto>, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::get_productos_all(repo.as_ref()).await?)
 }
@@ -45,7 +46,7 @@ pub async fn proveedores_get_productos_all(
 pub async fn proveedores_save(
     state: State<'_, AppState>,
     args: ProveedorSaveInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::guardar(repo.as_ref(), args).await?)
 }
@@ -54,7 +55,7 @@ pub async fn proveedores_save(
 pub async fn proveedores_delete(
     state: State<'_, AppState>,
     args: ProveedoresDeleteInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::eliminar(repo.as_ref(), args.id_proveedor).await?)
 }
@@ -63,7 +64,7 @@ pub async fn proveedores_delete(
 pub async fn proveedores_set_vinculos(
     state: State<'_, AppState>,
     args: ProveedoresSetVinculosInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::set_vinculos(repo.as_ref(), args).await?)
 }
@@ -72,7 +73,7 @@ pub async fn proveedores_set_vinculos(
 pub async fn proveedores_create_producto(
     state: State<'_, AppState>,
     args: ProveedoresCreateProductoInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let repo = state.proveedores_repo().await?;
     Ok(uc::crear_producto(repo.as_ref(), args).await?)
 }

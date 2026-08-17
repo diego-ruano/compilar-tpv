@@ -8,12 +8,13 @@ use tpv_contracts::cuentas::{
     ResumenCajaDto, SalidaDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
-) -> Result<Vec<EntradaDto>, String> {
+) -> Result<Vec<EntradaDto>, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_entradas(repo.as_ref(), args).await?)
 }
@@ -22,7 +23,7 @@ pub async fn cuentas_get_entradas(
 pub async fn cuentas_get_salidas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
-) -> Result<Vec<SalidaDto>, String> {
+) -> Result<Vec<SalidaDto>, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_salidas(repo.as_ref(), args).await?)
 }
@@ -31,7 +32,7 @@ pub async fn cuentas_get_salidas(
 pub async fn cuentas_get_resumen(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
-) -> Result<ResumenCajaDto, String> {
+) -> Result<ResumenCajaDto, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
@@ -40,7 +41,7 @@ pub async fn cuentas_get_resumen(
 pub async fn cuentas_create_gasto(
     state: State<'_, AppState>,
     args: CreateGastoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::create_gasto(repo.as_ref(), args).await?)
 }
@@ -49,7 +50,7 @@ pub async fn cuentas_create_gasto(
 pub async fn cuentas_update_gasto(
     state: State<'_, AppState>,
     args: UpdateGastoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_gasto(repo.as_ref(), args).await?)
 }
@@ -58,7 +59,7 @@ pub async fn cuentas_update_gasto(
 pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_gasto(repo.as_ref(), args).await?)
 }
@@ -67,7 +68,7 @@ pub async fn cuentas_delete_gasto(
 pub async fn cuentas_update_pago(
     state: State<'_, AppState>,
     args: UpdatePagoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_pago(repo.as_ref(), args).await?)
 }
@@ -76,7 +77,7 @@ pub async fn cuentas_update_pago(
 pub async fn cuentas_delete_pago(
     state: State<'_, AppState>,
     args: DeletePagoInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_pago(repo.as_ref(), args).await?)
 }

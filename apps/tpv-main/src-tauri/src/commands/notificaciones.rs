@@ -12,56 +12,57 @@ use tpv_contracts::notificaciones::{
 };
 
 use crate::AppState;
+use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
 pub async fn notificaciones_listar(
     state: State<'_, AppState>,
     args: NotificacionesListArgs,
-) -> Result<Vec<NotificacionRow>, String> {
+) -> Result<Vec<NotificacionRow>, AppErrorDto> {
     let repo = state.notificaciones_repo().await?;
-    uc::listar(repo.as_ref(), args).await.map_err(|e| e.to_string())
+    uc::listar(repo.as_ref(), args).await.map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn notificaciones_no_leidas(
     state: State<'_, AppState>,
     args: NotificacionesUsuarioArgs,
-) -> Result<i64, String> {
+) -> Result<i64, AppErrorDto> {
     let repo = state.notificaciones_repo().await?;
     uc::contar_no_leidas(repo.as_ref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn notificaciones_marcar_leida(
     state: State<'_, AppState>,
     args: MarcarLeidaInput,
-) -> Result<bool, String> {
+) -> Result<bool, AppErrorDto> {
     let repo = state.notificaciones_repo().await?;
     uc::marcar_leida(repo.as_ref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn notificaciones_marcar_todas_leidas(
     state: State<'_, AppState>,
     args: MarcarTodasLeidasInput,
-) -> Result<i64, String> {
+) -> Result<i64, AppErrorDto> {
     let repo = state.notificaciones_repo().await?;
     uc::marcar_todas_leidas(repo.as_ref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }
 
 #[tauri::command]
 pub async fn notificaciones_crear(
     state: State<'_, AppState>,
     args: CrearNotificacionInput,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     let notifier = state.notifier().await?;
     uc::crear(notifier.as_ref(), args)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(AppErrorDto::from)
 }

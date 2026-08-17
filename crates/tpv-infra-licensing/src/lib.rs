@@ -33,6 +33,7 @@ use serde_json::Value as JsonValue;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
+use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
 };
@@ -440,18 +441,23 @@ impl LicensingService for LicensingAdapter {
                     return Ok(ResultadoActivacion::CambioDispositivoRequerido { email_hint });
                 }
 
-                // Resto de errores de negocio: verbatim (el frontend los compara por igualdad). Si
-                // el worker adjunta un `details` en texto (p. ej. el error de Turso en
-                // `tenant_db_provision_failed`), se anexa para que sea diagnosticable en la UI.
+                // ARCH-05: el código sale del catálogo (a partir del `error` del worker) y el
+                // texto queda como diagnóstico. Si el worker adjunta un `details` (p. ej. el
+                // error de Turso en `tenant_db_provision_failed`), se anexa al mensaje para
+                // que siga siendo diagnosticable en la UI, sin afectar al código.
                 let detalle = e.details.as_ref().and_then(|d| match d {
                     JsonValue::String(s) => Some(s.clone()),
                     JsonValue::Null => None,
                     other => Some(other.to_string()),
                 });
-                return Err(AppError::raw(match detalle {
-                    Some(d) if !d.trim().is_empty() => format!("{}: {}", e.error, d),
-                    _ => e.error,
-                }));
+                let code = ErrorCode::from_wire(&e.error);
+                return Err(AppError::coded(
+                    code,
+                    match detalle {
+                        Some(d) if !d.trim().is_empty() => format!("{}: {}", e.error, d),
+                        _ => e.error,
+                    },
+                ));
             }
             return Err(AppError::external(format!(
                 "activate_failed_http_{http}: {text}"
@@ -719,21 +725,21 @@ impl PairingService for PairingAdapter {
         let parsed: JsonValue =
             serde_json::from_str(&text).unwrap_or(JsonValue::Object(Default::default()));
 
-        // Fidelidad con el monolito: los códigos de error de negocio del worker se
-        // propagan VERBATIM (sin prefijo de AppError), porque el frontend los compara
-        // por igualdad estricta (p. ej. `not_approved` en el polling de pairing Handy).
+        // ARCH-05: los códigos de negocio del worker se traducen al catálogo compartido
+        // (`ErrorCode::from_wire`). El string original sigue viajando como `message`, pero
+        // ya no es lo que el frontend compara: eso lo hace por `code`.
         if !(200..300).contains(&status) {
             if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::raw(err.to_string()));
+                return Err(AppError::from_wire(err));
             }
-            return Err(AppError::raw(format!("http_{}", status)));
+            return Err(AppError::external(format!("http_{}", status)));
         }
 
         if parsed.get("ok").and_then(|v| v.as_bool()) == Some(false) {
             if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::raw(err.to_string()));
+                return Err(AppError::from_wire(err));
             }
-            return Err(AppError::raw("api_error"));
+            return Err(AppError::external("api_error"));
         }
 
         Ok(parsed)
@@ -782,7 +788,7 @@ impl PairingService for PairingAdapter {
             .ok()
             .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
         {
-            return Err(AppError::raw(err));
+            return Err(AppError::from_wire(err));
         }
         Err(AppError::external(format!(
             "image_upload_http_{}: {}",

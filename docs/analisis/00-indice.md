@@ -4,10 +4,11 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (recuento corregido 2026-08-14).** De los ~136 hallazgos del análisis original **quedan 28
-> abiertos** (la cabecera decía 16, pero la tabla de abajo —que es la buena— suma 28), y son lo único
-> que contienen estas fichas. De esos 28, **11 son el mismo trabajo** (la familia `-parity`, ver la
-> nota del recuento) y **8 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
+> **Estado (2026-08-17).** De los ~136 hallazgos del análisis original **quedan 26
+> abiertos** (la tabla de abajo es la buena; el recuento se corrigió el 2026-08-14 y el 2026-08-17
+> bajó de 28 a 26 al cerrarse ARCH-02 y ARCH-05), y son lo único
+> que contienen estas fichas. De esos 26, **11 son el mismo trabajo** (la familia `-parity`, ver la
+> nota del recuento) y **7 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
 > arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
 > aparece, está resuelto.
 
@@ -64,7 +65,7 @@
 
 | Módulo | Abiertos | Cuáles |
 |--------|----------|--------|
-| T5 Arquitectura | 4 | ARCH-01 🟠 · ARCH-02 🟡 · ARCH-03 🟡 · ARCH-05 🔵 |
+| T5 Arquitectura | 2 | ARCH-01 🟠 · ARCH-03 🟡 |
 | D1 Mesas | 2 | MESA-11 🟡 · MESA-14 🔵 |
 | D2 Venta rápida | 3 | VR-05 🟡 · VR-06 🟡 · VR-07 🔵 |
 | D4 Inventario | 2 | INV-06 🔵 · INV-07 🔵 |
@@ -89,7 +90,6 @@ TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness
 El resto se agrupa en:
 - **Reconciliación de datos derivados:** INV-06 y VR-06 (stock) + DB-14 (`Total_Gastado`). Misma
   clase de tarea: un chequeo que compare el valor guardado con el recalculado y avise de la deriva.
-- **Contrato de errores:** ARCH-02 + ARCH-05, aplazados a la migración de infra del worker.
 - **Seguridad de datos:** TRAB-03 (PII replicada) y LOGIN-04 (keyspace del PIN).
 - **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
   MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.

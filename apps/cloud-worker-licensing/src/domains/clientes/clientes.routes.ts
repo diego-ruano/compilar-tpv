@@ -11,16 +11,13 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import * as cmd from "./clientes.commands";
 import * as q from "./clientes.queries";
 import * as S from "./clientes.schemas";
+import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const clientesRoutes = new Hono<Ctx>();
 
 clientesRoutes.use("*", tenantAuth);
-
-function badRequest(c: any, error: string, err?: z.ZodError) {
-	return c.json({ error, issues: err?.issues }, 400);
-}
 
 function parseId(raw: string | undefined): string | null {
 	const t = (raw ?? "").trim();

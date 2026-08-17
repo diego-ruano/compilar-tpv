@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { isAppError } from "@tpv/client";
 
 type Props = {
     error?: unknown;
@@ -6,6 +7,10 @@ type Props = {
 };
 
 function formatError(err: unknown): string {
+    // ARCH-05: un error de un comando llega como `{ code, message }`. Sin este caso
+    // caería en el JSON.stringify de abajo y la pantalla de crash enseñaría el objeto
+    // crudo en vez del motivo.
+    if (isAppError(err)) return `${err.code}: ${err.message}`;
     if (err instanceof Error) {
         return `${err.name}: ${err.message}\n${err.stack ?? ""}`.trim();
     }

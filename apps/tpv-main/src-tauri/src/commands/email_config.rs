@@ -15,6 +15,7 @@ use tauri::{AppHandle, Manager};
 use tpv_application::use_cases::pairing as uc_pairing;
 use tpv_contracts::email_config::EnviarPedidoEmailInput;
 use tpv_infra_licensing::PairingAdapter;
+use tpv_contracts::errors::AppErrorDto;
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -30,7 +31,7 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
 pub async fn email_enviar_pedido(
     app: AppHandle,
     args: EnviarPedidoEmailInput,
-) -> Result<(), String> {
+) -> Result<(), AppErrorDto> {
     let app_data_dir = app_data(&app)?;
     let svc = PairingAdapter::new(app_data_dir);
 

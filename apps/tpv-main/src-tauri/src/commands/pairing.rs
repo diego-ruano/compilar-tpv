@@ -16,6 +16,7 @@ use tpv_contracts::licensing::{
     UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::PairingAdapter;
+use tpv_contracts::errors::AppErrorDto;
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
@@ -28,35 +29,35 @@ fn svc(app: &AppHandle) -> Result<PairingAdapter, String> {
 }
 
 #[tauri::command]
-pub fn handy_set_token(app: AppHandle, args: HandySetTokenArgs) -> Result<String, String> {
+pub fn handy_set_token(app: AppHandle, args: HandySetTokenArgs) -> Result<String, AppErrorDto> {
     uc::handy_set_token(&svc(&app)?, args)?;
     Ok("OK".into())
 }
 
 #[tauri::command]
-pub fn handy_clear_token(app: AppHandle) -> Result<String, String> {
+pub fn handy_clear_token(app: AppHandle) -> Result<String, AppErrorDto> {
     uc::handy_clear_token(&svc(&app)?)?;
     Ok("OK".into())
 }
 
 #[tauri::command]
-pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, String> {
+pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
 
 /// Credenciales (token + tenant) para abrir el WebSocket del Handy (`/ws?token=`).
 #[tauri::command]
-pub fn handy_get_ws_auth(app: AppHandle) -> Result<HandyWsAuth, String> {
+pub fn handy_get_ws_auth(app: AppHandle) -> Result<HandyWsAuth, AppErrorDto> {
     Ok(uc::handy_get_ws_auth(&svc(&app)?)?)
 }
 
 #[tauri::command]
-pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, String> {
+pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto> {
     Ok(uc::device_identity(&svc(&app)?)?)
 }
 
 #[tauri::command]
-pub fn device_sign_b64(app: AppHandle, args: DeviceSignB64Args) -> Result<SigB64, String> {
+pub fn device_sign_b64(app: AppHandle, args: DeviceSignB64Args) -> Result<SigB64, AppErrorDto> {
     Ok(uc::device_sign_b64(&svc(&app)?, args)?)
 }
 
@@ -64,7 +65,7 @@ pub fn device_sign_b64(app: AppHandle, args: DeviceSignB64Args) -> Result<SigB64
 pub fn tpv_server_signed_headers(
     app: AppHandle,
     args: TpvServerSignedHeadersArgs,
-) -> Result<ApiSignedHeaders, String> {
+) -> Result<ApiSignedHeaders, AppErrorDto> {
     Ok(uc::tpv_server_signed_headers(&svc(&app)?, args)?)
 }
 
@@ -72,13 +73,13 @@ pub fn tpv_server_signed_headers(
 pub async fn tpv_server_post_json(
     app: AppHandle,
     args: TpvServerPostJsonArgs,
-) -> Result<JsonValue, String> {
+) -> Result<JsonValue, AppErrorDto> {
     Ok(uc::tpv_server_post_json(&svc(&app)?, args).await?)
 }
 
 /// Genera un nuevo código de emparejamiento (lo pide al worker) y lo devuelve tipado a la UI.
 #[tauri::command]
-pub async fn pair_create(app: AppHandle) -> Result<PairCreateResult, String> {
+pub async fn pair_create(app: AppHandle) -> Result<PairCreateResult, AppErrorDto> {
     Ok(uc::pair_create(&svc(&app)?).await?)
 }
 
@@ -88,7 +89,7 @@ pub async fn pair_create(app: AppHandle) -> Result<PairCreateResult, String> {
 pub async fn config_upload_initial_setup(
     app: AppHandle,
     args: UploadInitialSetupArgs,
-) -> Result<String, String> {
+) -> Result<String, AppErrorDto> {
     uc_sync::upload_initial_setup(&svc(&app)?, args).await?;
     Ok("OK".into())
 }
