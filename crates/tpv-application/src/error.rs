@@ -109,6 +109,179 @@ impl From<AppError> for String {
 
 pub type AppResult<T> = Result<T, AppError>;
 
+impl AppError {
+    /// Construye el error a partir del **cuerpo de una respuesta del worker**.
+    ///
+    /// Es el único sitio donde se decide el código de un error que viene de la nube, para que
+    /// no haya dos criterios distintos según por qué adaptador entre (HTTP de negocio o
+    /// licencias).
+    ///
+    /// Orden de preferencia, y el porqué:
+    ///
+    /// 1. **`code` de la respuesta.** El worker ya lo resolvió y tiene información que aquí no
+    ///    hay —el status HTTP, el contexto de la ruta—. Re-derivarlo del texto haría que el
+    ///    mismo error fuese `validation` para el worker y `external` para el cliente, que es
+    ///    exactamente la divergencia que el catálogo compartido existe para evitar.
+    /// 2. **`from_wire(error)`**, si no hay `code` (worker anterior a ARCH-05) o si el `code`
+    ///    es uno que este cliente todavía no conoce (worker más nuevo).
+    /// 3. **`External`** con el status y el cuerpo, si no hay JSON del que sacar nada.
+    ///
+    /// El `message` sale siempre de `error`: el texto es diagnóstico y se conserva tal cual.
+    pub fn from_api_body(status: u16, body: &str) -> Self {
+        let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
+
+        let campo = |nombre: &str| -> Option<String> {
+            json.as_ref()
+                .and_then(|v| v.get(nombre))
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
+
+        let error = campo("error");
+        let code = campo("code").and_then(|c| ErrorCode::from_code(&c));
+
+        match (code, error) {
+            (Some(code), Some(error)) => AppError::Coded(code, error),
+            (Some(code), None) => AppError::Coded(code, code.default_message().to_string()),
+            (None, Some(error)) => AppError::from_wire(error),
+            (None, None) => AppError::external(format!("http_{status}: {body}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_respuesta_api {
+    //! `AppError::from_api_body` — el último salto del código de error, de la nube al cliente.
+
+    use super::*;
+
+    fn code_de(status: u16, body: &str) -> ErrorCode {
+        AppError::from_api_body(status, body).code()
+    }
+
+    /// El fallo que motivó esta función: el worker resuelve el código con información que el
+    /// cliente no tiene (el status), así que re-derivarlo del texto daba dos respuestas
+    /// distintas para el mismo error.
+    #[test]
+    fn se_respeta_el_codigo_que_manda_el_worker() {
+        let body = r#"{"ok":false,"code":"validation","error":"id_mesa invalido"}"#;
+
+        assert_eq!(code_de(400, body), ErrorCode::Validation);
+        assert_ne!(
+            code_de(400, body),
+            ErrorCode::External,
+            "re-derivar del texto degradaría a genérico un error que el worker ya clasificó"
+        );
+    }
+
+    #[test]
+    fn el_texto_del_worker_se_conserva_como_mensaje() {
+        let body = r#"{"ok":false,"code":"validation","error":"id_mesa invalido"}"#;
+        let err = AppError::from_api_body(400, body);
+        assert_eq!(err.to_string(), "id_mesa invalido");
+    }
+
+    /// Compatibilidad hacia atrás: un worker anterior a ARCH-05 no manda `code`.
+    #[test]
+    fn sin_code_se_traduce_el_string_de_negocio() {
+        let body = r#"{"ok":false,"error":"main_offline"}"#;
+        assert_eq!(code_de(409, body), ErrorCode::MainOffline);
+    }
+
+    /// Compatibilidad hacia delante: un worker más nuevo puede mandar un código que este
+    /// binario no conoce. No puede tumbar nada ni inventarse un significado.
+    #[test]
+    fn un_code_desconocido_cae_al_string_de_negocio() {
+        let body = r#"{"ok":false,"code":"codigo_del_futuro","error":"not_approved"}"#;
+        assert_eq!(
+            code_de(403, body),
+            ErrorCode::NotApproved,
+            "si el code no se reconoce, manda el string de negocio"
+        );
+    }
+
+    #[test]
+    fn un_code_desconocido_sin_string_conocido_degrada_a_generico() {
+        let body = r#"{"ok":false,"code":"codigo_del_futuro","error":"vete_a_saber"}"#;
+        assert_eq!(code_de(500, body), ErrorCode::External);
+    }
+
+    /// El caso de `not_approved` en el polling de emparejamiento: si se perdiera por el camino,
+    /// AppBoot dejaría de distinguir "sigue esperando" de un fallo y rompería el pairing.
+    #[test]
+    fn el_codigo_de_pairing_sobrevive_venga_como_venga() {
+        for body in [
+            r#"{"ok":false,"code":"not_approved","error":"not_approved"}"#,
+            r#"{"ok":false,"error":"not_approved"}"#,
+            r#"{"ok":false,"code":"not_approved"}"#,
+        ] {
+            assert_eq!(code_de(403, body), ErrorCode::NotApproved, "body: {body}");
+        }
+    }
+
+    /// Un 502 de un proxy, un HTML de error, un cuerpo vacío: nada de eso es JSON.
+    #[test]
+    fn un_cuerpo_que_no_es_json_no_rompe_nada() {
+        for body in ["", "   ", "<html>502 Bad Gateway</html>", "null", "[]", "42"] {
+            let err = AppError::from_api_body(502, body);
+            assert_eq!(err.code(), ErrorCode::External, "body: {body:?}");
+            assert!(
+                err.to_string().contains("502"),
+                "el status debe quedar en el mensaje para diagnosticar: {}",
+                err
+            );
+        }
+    }
+
+    /// Campos presentes pero vacíos o en blanco: equivalen a que no vengan.
+    #[test]
+    fn los_campos_en_blanco_se_tratan_como_ausentes() {
+        assert_eq!(
+            code_de(500, r#"{"ok":false,"code":"   ","error":"main_offline"}"#),
+            ErrorCode::MainOffline,
+        );
+        assert_eq!(
+            code_de(500, r#"{"ok":false,"code":"","error":""}"#),
+            ErrorCode::External,
+        );
+    }
+
+    /// El `code` puede venir con otra caja: no debe cambiar el resultado.
+    #[test]
+    fn el_code_se_normaliza_igual_que_el_resto() {
+        assert_eq!(
+            code_de(409, r#"{"ok":false,"code":" MAIN_OFFLINE ","error":"x"}"#),
+            ErrorCode::MainOffline,
+        );
+    }
+
+    /// Un `code` de tipo raro (número, objeto) se ignora en vez de reventar el parseo.
+    #[test]
+    fn un_code_que_no_es_string_se_ignora() {
+        assert_eq!(
+            code_de(409, r#"{"ok":false,"code":123,"error":"main_offline"}"#),
+            ErrorCode::MainOffline,
+        );
+        assert_eq!(
+            code_de(409, r#"{"ok":false,"code":{"x":1},"error":"main_offline"}"#),
+            ErrorCode::MainOffline,
+        );
+    }
+
+    /// Sin `error` pero con `code`, el mensaje no puede quedar vacío ni ser el código crudo.
+    #[test]
+    fn con_code_y_sin_texto_el_mensaje_es_legible() {
+        let err = AppError::from_api_body(409, r#"{"ok":false,"code":"main_offline"}"#);
+        let dto: AppErrorDto = err.into();
+
+        assert_eq!(dto.code, ErrorCode::MainOffline);
+        assert_eq!(dto.message, ErrorCode::MainOffline.default_message());
+        assert_ne!(dto.message, "main_offline");
+    }
+}
+
+
 #[cfg(test)]
 mod tests_contrato {
     //! Mapeo `AppError` → `AppErrorDto` (ARCH-05).

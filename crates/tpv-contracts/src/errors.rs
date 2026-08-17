@@ -98,6 +98,34 @@ impl ErrorCode {
         }
     }
 
+    /// Parsea un valor del **propio catálogo** (`{ "code": … }` de una respuesta del worker).
+    ///
+    /// Devuelve `None` si no lo reconoce, que es lo que pasa cuando un worker más nuevo manda
+    /// un código que este cliente todavía no conoce. El llamante debe entonces recurrir a
+    /// `from_wire`: degradar a genérico es preferible a inventarse un código.
+    ///
+    /// No es lo mismo que `from_wire`: aquélla traduce el *string de negocio*
+    /// (`"no_active_license_for_tenant"`), ésta lee el código ya resuelto (`"license_not_found"`).
+    pub fn from_code(s: &str) -> Option<Self> {
+        let s = s.trim().to_ascii_lowercase();
+        [
+            ErrorCode::Validation,
+            ErrorCode::NotFound,
+            ErrorCode::Conflict,
+            ErrorCode::Repository,
+            ErrorCode::External,
+            ErrorCode::Internal,
+            ErrorCode::NotApproved,
+            ErrorCode::MainOffline,
+            ErrorCode::DeviceRevoked,
+            ErrorCode::LicenseExpired,
+            ErrorCode::LicenseNotFound,
+            ErrorCode::InvalidPin,
+        ]
+        .into_iter()
+        .find(|c| c.wire() == s)
+    }
+
     /// Resuelve el código a partir del string que devuelve el worker en `{ "error": … }`.
     ///
     /// Normaliza espacios y mayúsculas antes de buscar: el código de error de una respuesta

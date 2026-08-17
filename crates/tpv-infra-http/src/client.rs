@@ -175,16 +175,10 @@ impl CloudClient {
         let text = resp.text().await.unwrap_or_default();
 
         if !status.is_success() {
-            // El worker devuelve los errores de negocio en `{ "error": "..." }`
-            // (p. ej. `main_offline`, `not_approved`, `missing_op_id`). ARCH-05: se traducen
-            // al catálogo compartido; el string original queda como `message`.
-            if let Some(err) = serde_json::from_str::<serde_json::Value>(&text)
-                .ok()
-                .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-            {
-                return Err(AppError::from_wire(err));
-            }
-            return Err(AppError::external(format!("http_{}: {}", status.as_u16(), text)));
+            // ARCH-05: el código lo resuelve `from_api_body`, que prefiere el `code` que
+            // manda el worker (él tiene el status y el contexto de la ruta) y sólo traduce el
+            // string de negocio si no viene.
+            return Err(AppError::from_api_body(status.as_u16(), &text));
         }
 
         serde_json::from_str::<T>(&text)

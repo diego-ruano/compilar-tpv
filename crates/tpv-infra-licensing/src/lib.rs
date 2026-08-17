@@ -121,6 +121,9 @@ fn api_url(path: &str) -> String {
 #[derive(Debug, Deserialize)]
 struct ApiErr {
     error: String,
+    /// ARCH-05: código ya resuelto por el worker. `Option` porque un worker anterior no lo
+    /// manda; en ese caso se traduce el `error` con `ErrorCode::from_wire`.
+    code: Option<String>,
     details: Option<JsonValue>,
 }
 
@@ -455,7 +458,13 @@ impl LicensingService for LicensingAdapter {
                     JsonValue::Null => None,
                     other => Some(other.to_string()),
                 });
-                let code = ErrorCode::from_wire(&e.error);
+                // Manda el `code` del worker; si no viene (o no se reconoce), se traduce el
+                // string de negocio. Mismo criterio que `AppError::from_api_body`.
+                let code = e
+                    .code
+                    .as_deref()
+                    .and_then(ErrorCode::from_code)
+                    .unwrap_or_else(|| ErrorCode::from_wire(&e.error));
                 return Err(AppError::coded(
                     code,
                     match detalle {
@@ -742,21 +751,16 @@ impl PairingService for PairingAdapter {
         let parsed: JsonValue =
             serde_json::from_str(&text).unwrap_or(JsonValue::Object(Default::default()));
 
-        // ARCH-05: los códigos de negocio del worker se traducen al catálogo compartido
-        // (`ErrorCode::from_wire`). El string original sigue viajando como `message`, pero
-        // ya no es lo que el frontend compara: eso lo hace por `code`.
+        // ARCH-05: un único criterio para resolver el código, compartido con el resto de
+        // adaptadores (`from_api_body`): manda el `code` del worker; si no viene, se traduce
+        // el string de negocio. El texto original sigue viajando como `message`.
         if !(200..300).contains(&status) {
-            if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::from_wire(err));
-            }
-            return Err(AppError::external(format!("http_{}", status)));
+            return Err(AppError::from_api_body(status, &text));
         }
 
+        // 200 con `ok:false`: el worker responde 200 y marca el fallo en el cuerpo.
         if parsed.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-            if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-                return Err(AppError::from_wire(err));
-            }
-            return Err(AppError::external("api_error"));
+            return Err(AppError::from_api_body(status, &text));
         }
 
         Ok(parsed)
@@ -801,16 +805,7 @@ impl PairingService for PairingAdapter {
             return Ok(());
         }
         let text = resp.text().await.unwrap_or_default();
-        if let Some(err) = serde_json::from_str::<JsonValue>(&text)
-            .ok()
-            .and_then(|v| v.get("error").and_then(|e| e.as_str()).map(String::from))
-        {
-            return Err(AppError::from_wire(err));
-        }
-        Err(AppError::external(format!(
-            "image_upload_http_{}: {}",
-            status, text
-        )))
+        Err(AppError::from_api_body(status, &text))
     }
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
