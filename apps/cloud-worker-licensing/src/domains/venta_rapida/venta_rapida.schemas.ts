@@ -1,6 +1,8 @@
 // src/domains/venta_rapida/venta_rapida.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	VrAddLineaComandaInput,
 	VrCobrarFraccionadoInput as ContractVrCobrarFraccionadoInput,
@@ -187,3 +189,15 @@ export type CobrarFraccionadoInput = Omit<
 };
 
 export type RestarStockInput = VrRestarStockInput;
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GCreateComandaBarra = Assert<SameKeys<z.infer<typeof createComandaBarraSchema>, CreateComandaBarraInput>>;
+type _GAddLinea = Assert<SameKeys<z.infer<typeof addLineaSchema>, AddLineaInput>>;
+type _GRemoveLastLinea = Assert<SameKeys<z.infer<typeof removeLastLineaSchema>, RemoveLastLineaInput>>;
+type _GDeleteLinea = Assert<SameKeys<z.infer<typeof deleteLineaSchema>, DeleteLineaInput>>;
+type _GUpdateNota = Assert<SameKeys<z.infer<typeof updateNotaSchema>, UpdateNotaInput>>;
+type _GCobrarFraccionado = Assert<SameKeys<z.infer<typeof cobrarFraccionadoSchema>, CobrarFraccionadoInput>>;
+type _GRestarStock = Assert<SameKeys<z.infer<typeof restarStockSchema>, RestarStockInput>>;

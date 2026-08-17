@@ -1,6 +1,8 @@
 // src/domains/cuentas/cuentas.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateGastoInput as ContractCreateGastoInput,
 	UpdateGastoInput as ContractUpdateGastoInput,
@@ -74,3 +76,11 @@ export type UpdateGastoInput = Omit<
 };
 
 export type UpdatePagoInput = Omit<ContractUpdatePagoInput, "id_pago">;
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GCreateGasto = Assert<SameKeys<z.infer<typeof createGastoSchema>, CreateGastoInput>>;
+type _GUpdateGasto = Assert<SameKeys<z.infer<typeof updateGastoSchema>, UpdateGastoInput>>;
+type _GUpdatePago = Assert<SameKeys<z.infer<typeof updatePagoSchema>, UpdatePagoInput>>;

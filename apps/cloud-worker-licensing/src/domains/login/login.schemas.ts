@@ -1,6 +1,8 @@
 // src/domains/login/login.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CompleteInitialSetupInput,
 	LoginUserArgs,
@@ -68,3 +70,12 @@ export type PunchInput = Omit<
 	fecha?: string | null;
 	hora_evento?: string | null;
 };
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GLoginUser = Assert<SameKeys<z.infer<typeof loginUserSchema>, LoginUserInput>>;
+type _GSetTurnoPartido = Assert<SameKeys<z.infer<typeof setTurnoPartidoSchema>, SetTurnoPartidoInput>>;
+type _GCompleteInitialSetup = Assert<SameKeys<z.infer<typeof completeInitialSetupSchema>, CompleteInitialSetupInput>>;
+type _GPunch = Assert<SameKeys<z.infer<typeof punchSchema>, PunchInput>>;

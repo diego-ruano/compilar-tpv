@@ -6,6 +6,8 @@
 // ids, default de stock) la hace el constructor de comandos.
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AjusteLoteInput as ContractAjusteLoteInput,
 	CreateLoteInput as ContractCreateLoteInput,
@@ -139,3 +141,14 @@ export type UpdateLoteInput = Omit<
 export type AjusteLoteInput = Omit<ContractAjusteLoteInput, "id_lote" | "notas"> & {
 	notas?: string | null;
 };
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GUpsertCategoria = Assert<SameKeys<z.infer<typeof upsertCategoriaSchema>, UpsertCategoriaInput>>;
+type _GUpsertProducto = Assert<SameKeys<z.infer<typeof upsertProductoSchema>, UpsertProductoInput>>;
+type _GSetAlergenos = Assert<SameKeys<z.infer<typeof setAlergenosSchema>, SetAlergenosInput>>;
+type _GCreateLote = Assert<SameKeys<z.infer<typeof createLoteSchema>, CreateLoteInput>>;
+type _GUpdateLote = Assert<SameKeys<z.infer<typeof updateLoteSchema>, UpdateLoteInput>>;
+type _GAjusteLote = Assert<SameKeys<z.infer<typeof ajusteLoteSchema>, AjusteLoteInput>>;

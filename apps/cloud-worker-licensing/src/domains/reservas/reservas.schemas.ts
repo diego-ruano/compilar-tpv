@@ -1,6 +1,8 @@
 // src/domains/reservas/reservas.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type { ReservaSaveInput as ContractReservaSaveInput } from "@tpv/contracts";
 
 const ESTADOS = new Set([
@@ -167,3 +169,9 @@ export type ReservaSaveInput = Omit<
 > & {
 	[K in NullableReservaFields]?: ContractReservaSaveInput[K] | null;
 };
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GReservaSave = Assert<SameKeys<z.infer<typeof reservaSaveSchema>, ReservaSaveInput>>;

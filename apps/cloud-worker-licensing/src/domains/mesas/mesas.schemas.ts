@@ -1,6 +1,8 @@
 // src/domains/mesas/mesas.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	MesasAbrirComandaInput,
 	MesasAddLineaComandaInput,
@@ -122,8 +124,15 @@ export const addLineaSchema = z
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})
+	// ARCH-03: se reconstruye el objeto en vez de esparcir `...v`, igual que hace
+	// `setTrabajadorSchema`. Con el spread, `id_usuario`/`id_trabajador` seguían en el
+	// resultado aunque `AddLineaInput` dice que desaparecen: el tipo declarado y lo que
+	// salía de verdad no coincidían. Nadie los leía, pero el drift-guard lo destapó.
 	.transform((v) => ({
-		...v,
+		id_comanda: v.id_comanda,
+		id_producto: v.id_producto,
+		cantidad: v.cantidad,
+		precio: v.precio,
 		id_trabajador_o_usuario:
 			optIdStr(v.id_trabajador) ?? optIdStr(v.id_usuario),
 	}));
@@ -207,3 +216,13 @@ export type CobrarDetallesInput = Omit<
 > & {
 	id_usuario: string | null;
 };
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GSaveLayout = Assert<SameKeys<z.infer<typeof saveLayoutSchema>, SaveLayoutInput>>;
+type _GAbrirComanda = Assert<SameKeys<z.infer<typeof abrirComandaSchema>, AbrirComandaInput>>;
+type _GSetTrabajador = Assert<SameKeys<z.infer<typeof setTrabajadorSchema>, SetTrabajadorInput>>;
+type _GAddLinea = Assert<SameKeys<z.infer<typeof addLineaSchema>, AddLineaInput>>;
+type _GCobrarDetalles = Assert<SameKeys<z.infer<typeof cobrarDetallesSchema>, CobrarDetallesInput>>;

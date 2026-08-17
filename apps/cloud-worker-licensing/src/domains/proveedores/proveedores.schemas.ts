@@ -1,6 +1,8 @@
 // src/domains/proveedores/proveedores.schemas.ts
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	ProveedorSaveInput as ContractProveedorSaveInput,
 	ProveedoresCreateProductoInput,
@@ -81,3 +83,11 @@ export type CreateProductoInput = Omit<
 	stock_minimo?: number | null;
 	unidad_medida?: string | null;
 };
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GProveedorSave = Assert<SameKeys<z.infer<typeof proveedorSaveSchema>, ProveedorSaveInput>>;
+type _GSetVinculos = Assert<SameKeys<z.infer<typeof setVinculosSchema>, SetVinculosInput>>;
+type _GCreateProducto = Assert<SameKeys<z.infer<typeof createProductoSchema>, CreateProductoInput>>;

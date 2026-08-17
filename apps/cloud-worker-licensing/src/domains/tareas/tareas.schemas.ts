@@ -5,6 +5,8 @@
 // al menos un trabajador asignado.
 
 import { z } from "zod";
+
+import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	CreateTareaInput as ContractCreateTareaInput,
 	FinalizarTareaInput as ContractFinalizarTareaInput,
@@ -74,3 +76,12 @@ export type SetAsignacionesTareaInput = Omit<
 >;
 
 export type FinalizarTareaInput = Omit<ContractFinalizarTareaInput, "id_tarea">;
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GCreateTarea = Assert<SameKeys<z.infer<typeof createTareaSchema>, CreateTareaInput>>;
+type _GUpdateTarea = Assert<SameKeys<z.infer<typeof updateTareaSchema>, UpdateTareaInput>>;
+type _GSetAsignacionesTarea = Assert<SameKeys<z.infer<typeof setAsignacionesTareaSchema>, SetAsignacionesTareaInput>>;
+type _GFinalizarTarea = Assert<SameKeys<z.infer<typeof finalizarTareaSchema>, FinalizarTareaInput>>;

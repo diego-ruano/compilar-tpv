@@ -6,6 +6,9 @@
 
 import { z } from "zod";
 
+import type { CrearNotificacionInput as ContractCrearNotificacionInput } from "@tpv/contracts";
+import type { Assert, SameKeys } from "../../lib/typeGuards";
+
 const optStr = z.string().nullish().transform((v) => {
 	const t = (v ?? "").toString().trim();
 	return t.length ? t : null;
@@ -42,3 +45,9 @@ export const resolverSchema = z.object({
 });
 
 export type CrearNotificacionBody = z.infer<typeof crearNotificacionSchema>;
+
+// ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
+// Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
+// las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
+// deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
+type _GCrearNotificacion = Assert<SameKeys<z.infer<typeof crearNotificacionSchema>, ContractCrearNotificacionInput>>;
