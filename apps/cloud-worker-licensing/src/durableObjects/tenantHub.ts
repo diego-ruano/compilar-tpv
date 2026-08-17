@@ -10,19 +10,41 @@ import type {
 	AnyMsg,
 	ApplyMsg,
 	EventMsg,
-	ExecPayload,
 	HelloSignedMsg,
 	InternalApplyCommand,
-	QueryPayload,
 	ResolvedStmt,
 	Role,
-	SqlArg,
-	SqlRef,
 	SqlScalar,
-	TransactionPayload,
-	TxStep,
 	WsAttachment,
 } from "./tenantHub.types";
+
+import {
+	buildCommandEnvelope,
+	buildInternalPayloadForHash,
+	getFirstOwnValue,
+	parseJsonStrict,
+	readCloudPayloadJson,
+	readEnvelopeMetadata,
+	readRequestPayloadJson,
+	sha256Hex,
+	stableStringify,
+	stringifyJsonValue,
+} from "./tenantHub.envelope";
+import {
+	allRowsFromResult,
+	evalValueStep,
+	firstRowFromResult,
+	isUniqueOpIdViolation,
+	normalizeSql,
+	resolveSqlArgs,
+	toPlainValue,
+} from "./tenantHub.sql";
+import {
+	commandHasNowLiteral,
+	parseClientNow,
+	rewriteCmdNowLiterals,
+	serverNowFixed,
+} from "./tenantHub.tiempo";
 
 
 // Caché en memoria (por instancia de DO) de las credenciales de la DB del
@@ -50,14 +72,6 @@ function safeJsonParse(s: string): any | null {
 		return JSON.parse(s);
 	} catch {
 		return null;
-	}
-}
-
-function parseJsonStrict(s: string, fieldName: string): any {
-	try {
-		return JSON.parse(s);
-	} catch {
-		throw new Error(`invalid_${fieldName}`);
 	}
 }
 
@@ -105,356 +119,6 @@ function jsonResponse(data: any, status = 200): Response {
 	});
 }
 
-function isSqlRef(v: any): v is SqlRef {
-	return !!v && typeof v === "object" && typeof v.$ref === "string";
-}
-
-function normalizeSql(sql: any): string {
-	const out = String(sql || "").trim();
-	if (!out) throw new Error("missing_sql");
-	return out;
-}
-
-function toPlainValue(v: any): any {
-	if (v == null) return null;
-	if (typeof v === "bigint") return Number(v);
-	if (v instanceof Uint8Array) return bytesToB64(v);
-	if (Array.isArray(v)) return v.map(toPlainValue);
-	if (typeof v === "object") {
-		const out: Record<string, any> = {};
-		for (const [k, val] of Object.entries(v)) out[k] = toPlainValue(val);
-		return out;
-	}
-	return v;
-}
-
-function stableNormalize(v: any): any {
-	if (v == null) return null;
-	if (typeof v === "bigint") return Number(v);
-	if (v instanceof Uint8Array) return bytesToB64(v);
-	if (Array.isArray(v)) return v.map(stableNormalize);
-	if (typeof v === "object") {
-		const out: Record<string, any> = {};
-		for (const k of Object.keys(v).sort()) {
-			out[k] = stableNormalize(v[k]);
-		}
-		return out;
-	}
-	return v;
-}
-
-function stableStringify(v: any): string {
-	return JSON.stringify(stableNormalize(v ?? null));
-}
-
-function stringifyJsonValue(v: any): string {
-	const s = JSON.stringify(toPlainValue(v ?? null));
-	return s === undefined ? "null" : s;
-}
-
-// ---- Determinismo del tiempo en las escrituras ------------------------------
-// El reloj lo pone el dispositivo emisor (Main o Handy) vía la cabecera
-// `X-Client-Now`, NO el servidor: una sentencia que viajara con `datetime('now')`
-// se reevaluaría aquí (UTC) y en cada re-apply, divergiendo entre Main/nube/Handy.
-// Resolvemos el `datetime('now','localtime')` a un literal fijo antes de ejecutar y
-// de registrarlo en `Sync_Changes`. Si el cliente no mandó hora, se fija una del
-// servidor UNA sola vez (sigue siendo determinista, solo que en UTC).
-
-const CLIENT_NOW_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-
-function serverNowFixed(): string {
-	return new Date().toISOString().slice(0, 19).replace("T", " ");
-}
-
-// Margen máximo: offset de zona horaria (±14 h) + 5 min de deriva de reloj.
-// Esto bloquea inyecciones de fechas arbitrarias (pasadas/futuras) sin romper
-// ningún timezone legítimo. El valor se trata como naive-UTC para la comparación.
-const MAX_CLIENT_NOW_DRIFT_MS = (14 * 60 + 5) * 60 * 1000;
-
-// Devuelve el literal `YYYY-MM-DD HH:MM:SS` SOLO si el emisor mandó una hora válida y dentro de la
-// deriva admisible; `null` si falta o es inaceptable (formato/deriva). NO cae a UTC en silencio: esa
-// decisión la toma el llamador (ver el guard `missing_client_now` en applyInternalCommandIdempotent).
-function parseClientNow(raw: unknown): string | null {
-	const s = String(raw ?? "").trim();
-	if (!CLIENT_NOW_RE.test(s)) return null;
-	const clientMs = new Date(s.replace(" ", "T") + "Z").getTime();
-	if (Math.abs(Date.now() - clientMs) > MAX_CLIENT_NOW_DRIFT_MS) return null;
-	return s;
-}
-
-// ¿Alguna sentencia del comando lleva una forma `datetime('now',...)`/`date('now',...)` SIN resolver?
-// (misma señal `('now'` que usa `rewriteNowInSql`.) Si la hay, EXIGIMOS X-Client-Now para fijarla a
-// literal determinista; si no, el comando ya viene con literales (p. ej. desde la Main) y no hace falta.
-function sqlHasNowLiteral(sql: unknown): boolean {
-	return typeof sql === "string" && sql.includes("('now'");
-}
-
-function commandHasNowLiteral(cmd: InternalApplyCommand): boolean {
-	switch (cmd.type) {
-		case "tenantDb.exec":
-		case "tenantDb.value":
-		case "tenantDb.row":
-		case "tenantDb.rows":
-			return sqlHasNowLiteral(cmd.payload?.sql);
-		case "tenantDb.transaction":
-			return (cmd.payload?.steps ?? []).some((s: any) => sqlHasNowLiteral(s?.sql));
-		default:
-			return false;
-	}
-}
-
-// Reemplaza SOLO las formas exactas (no las que llevan modificador, que acaban en
-// `,'…')`). El literal está validado por `CLIENT_NOW_RE`, así que no hay inyección.
-function rewriteNowInSql(sql: string, dt: string): string {
-	if (typeof sql !== "string" || !sql.includes("('now'")) return sql;
-	const d = dt.slice(0, 10);
-	return sql
-		.split("datetime('now','localtime')").join(`'${dt}'`)
-		.split("date('now','localtime')").join(`'${d}'`);
-}
-
-function rewriteCmdNowLiterals(
-	cmd: InternalApplyCommand,
-	dt: string,
-): InternalApplyCommand {
-	switch (cmd.type) {
-		case "tenantDb.exec":
-		case "tenantDb.value":
-		case "tenantDb.row":
-		case "tenantDb.rows":
-			return {
-				type: cmd.type,
-				payload: { ...cmd.payload, sql: rewriteNowInSql(cmd.payload.sql, dt) },
-			} as InternalApplyCommand;
-		case "tenantDb.transaction":
-			return {
-				type: cmd.type,
-				payload: {
-					...cmd.payload,
-					steps: (cmd.payload.steps ?? []).map((s: any) => ({
-						...s,
-						sql: rewriteNowInSql(s.sql, dt),
-					})),
-				},
-			} as InternalApplyCommand;
-		default:
-			return cmd;
-	}
-}
-
-function optionalJsonFieldToStableString(
-	value: unknown,
-	fieldName: string,
-): string | null {
-	if (value === undefined || value === null) return null;
-
-	const raw = String(value).trim();
-	if (!raw) return null;
-
-	return stableStringify(parseJsonStrict(raw, fieldName));
-}
-
-function hasOwn(obj: any, key: string): boolean {
-	return !!obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key);
-}
-
-function getFirstOwnValue(obj: any, keys: string[]): any {
-	if (!obj || typeof obj !== "object") return undefined;
-
-	for (const key of keys) {
-		if (hasOwn(obj, key)) return obj[key];
-	}
-
-	return undefined;
-}
-
-function buildInternalPayloadForHash(cmd: InternalApplyCommand): any {
-	return {
-		type: cmd.type,
-		payload: (cmd as any).payload ?? null,
-	};
-}
-
-function buildCommandEnvelope(opId: string, commandName: string, args: any): any {
-	return {
-		op_id: opId,
-		command_name: commandName,
-		args: args ?? {},
-	};
-}
-
-function readRequestPayloadJson(
-	body: any,
-	fallbackPayloadForHash: any,
-): string {
-	const requestPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["request_payload_json", "requestPayloadJson"]),
-		"request_payload_json",
-	);
-
-	if (requestPayloadJson) {
-		return requestPayloadJson;
-	}
-
-	const requestPayload = getFirstOwnValue(body, [
-		"request_payload",
-		"requestPayload",
-		"request_args",
-		"requestArgs",
-	]);
-
-	if (requestPayload !== undefined) {
-		return stableStringify(toPlainValue(requestPayload));
-	}
-
-	const cloudPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["cloud_payload_json", "cloudPayloadJson"]),
-		"cloud_payload_json",
-	);
-
-	if (cloudPayloadJson) {
-		return cloudPayloadJson;
-	}
-
-	const cloudPayload = getFirstOwnValue(body, [
-		"cloud_payload",
-		"cloudPayload",
-		"sync_payload",
-		"syncPayload",
-		"domain_payload",
-		"domainPayload",
-	]);
-
-	if (cloudPayload !== undefined) {
-		return stableStringify(toPlainValue(cloudPayload));
-	}
-
-	return stableStringify(fallbackPayloadForHash);
-}
-
-function readCloudPayloadJson(params: {
-	body: any;
-	opId: string;
-	commandName: string;
-	fallbackPayloadForHash: any;
-}): string {
-	const { body, opId, commandName, fallbackPayloadForHash } = params;
-
-	const cloudPayloadJson = optionalJsonFieldToStableString(
-		getFirstOwnValue(body, ["cloud_payload_json", "cloudPayloadJson"]),
-		"cloud_payload_json",
-	);
-
-	if (cloudPayloadJson) {
-		return cloudPayloadJson;
-	}
-
-	const cloudPayload = getFirstOwnValue(body, [
-		"cloud_payload",
-		"cloudPayload",
-		"sync_payload",
-		"syncPayload",
-		"domain_payload",
-		"domainPayload",
-	]);
-
-	if (cloudPayload !== undefined) {
-		return stableStringify(toPlainValue(cloudPayload));
-	}
-
-	const domainArgs = getFirstOwnValue(body, ["args", "input", "params"]);
-
-	if (domainArgs !== undefined) {
-		return stableStringify(buildCommandEnvelope(opId, commandName, domainArgs));
-	}
-
-	return stableStringify(fallbackPayloadForHash);
-}
-
-function resolveSqlArg(v: SqlArg, bag: Record<string, any>): SqlScalar {
-	if (isSqlRef(v)) {
-		const refVal = bag[v.$ref];
-		if (refVal === undefined) throw new Error(`missing_ref:${v.$ref}`);
-
-		if (
-			refVal === null ||
-			typeof refVal === "string" ||
-			typeof refVal === "number" ||
-			typeof refVal === "boolean"
-		) {
-			return refVal;
-		}
-
-		throw new Error(`bad_ref_value:${v.$ref}`);
-	}
-
-	if (
-		v === null ||
-		typeof v === "string" ||
-		typeof v === "number" ||
-		typeof v === "boolean"
-	) {
-		return v;
-	}
-
-	throw new Error("unsupported_sql_arg");
-}
-
-function resolveSqlArgs(raw: any, bag: Record<string, any>): SqlScalar[] {
-	if (raw == null) return [];
-	if (!Array.isArray(raw)) throw new Error("invalid_sql_args");
-	return raw.map((v) => resolveSqlArg(v as SqlArg, bag));
-}
-
-function firstRowFromResult(result: any): any {
-	const rows = result?.rows || [];
-	if (!Array.isArray(rows) || rows.length === 0) return null;
-	return toPlainValue(rows[0]);
-}
-
-function allRowsFromResult(result: any): any[] {
-	const rows = result?.rows || [];
-	if (!Array.isArray(rows)) return [];
-	return rows.map((r: any) => toPlainValue(r));
-}
-
-// Evalúa en JS un paso `value` para no gastar un round trip a Turso por cada uno.
-// Cubre el set CERRADO de formas que generan los *.commands.ts (echo de un literal,
-// constante numérica, o concatenación 'prefijo' || ?N). Cualquier otra forma lanza,
-// para no resolver mal en silencio (fail-fast: lo detectarían los tests).
-function evalValueStep(sql: string, args: SqlScalar[]): SqlScalar {
-	const s = String(sql || "").trim().replace(/;+\s*$/, "").trim();
-	let m = s.match(/^SELECT\s+\?(\d+)$/i);
-	if (m) return args[Number(m[1]) - 1] ?? null;
-	m = s.match(/^SELECT\s+(-?\d+(?:\.\d+)?)$/i);
-	if (m) return Number(m[1]);
-	m = s.match(/^SELECT\s+'([^']*)'\s*\|\|\s*\?(\d+)$/i);
-	if (m) return m[1] + String(args[Number(m[2]) - 1] ?? "");
-	throw new Error(`value_step_no_evaluable_en_batch: ${sql}`);
-}
-
-// ¿El error de un batch es una violación de UNIQUE(Op_Id) en Applied_Operations?
-// Es la señal de que la op ya estaba aplicada (reintento idempotente): el gate sin
-// ON CONFLICT viola la constraint y hace rollback de TODO el batch automáticamente.
-function isUniqueOpIdViolation(e: any): boolean {
-	const m = String(e?.message ?? e ?? "").toLowerCase();
-	return m.includes("unique constraint failed") && m.includes("op_id");
-}
-
-function toHex(bytes: Uint8Array): string {
-	return Array.from(bytes)
-		.map((b) => b.toString(16).padStart(2, "0"))
-		.join("");
-}
-
-async function sha256Hex(raw: string): Promise<string> {
-	const digest = await crypto.subtle.digest(
-		"SHA-256",
-		new TextEncoder().encode(raw),
-	);
-	return toHex(new Uint8Array(digest));
-}
-
 
 function isTursoAuthError(err: unknown): boolean {
 	const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
@@ -464,35 +128,6 @@ function isTursoAuthError(err: unknown): boolean {
 		msg.includes("http status 401") ||
 		msg.includes("unauthorized")
 	);
-}
-
-function readEnvelopeMetadata(body: any, req: Request) {
-	const opId = String(
-		body?.opId ??
-		body?.op_id ??
-		req.headers.get("x-idempotency-key") ??
-		"",
-	).trim();
-
-	const commandName = String(
-		body?.commandName ??
-		body?.command_name ??
-		req.headers.get("x-command-name") ??
-		"",
-	).trim();
-
-	const deviceId = String(
-		body?.deviceId ??
-		body?.device_id ??
-		req.headers.get("x-device-id") ??
-		"",
-	).trim();
-
-	return {
-		opId,
-		commandName,
-		deviceId: deviceId || null,
-	};
 }
 
 export class TenantHub {
