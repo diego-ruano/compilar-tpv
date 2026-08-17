@@ -55,5 +55,12 @@ function porEstado(status: number): ErrorCode {
  * que alguien decide algo distinto. Su texto sigue viajando en `error`.
  */
 export function wireToCode(error: string, status: number): ErrorCode {
-	return NEGOCIO[String(error || "").trim()] ?? porEstado(status);
+	// Se normaliza igual que `ErrorCode::from_wire` en Rust: recortar y bajar a minúsculas.
+	// El código de una respuesta no puede depender de cómo lo escribiera quien la emitió, y
+	// los dos lados tienen que coincidir — hay un fixture compartido que lo comprueba.
+	const clave = String(error ?? "")
+		.trim()
+		.toLowerCase();
+
+	return NEGOCIO[clave] ?? porEstado(status);
 }

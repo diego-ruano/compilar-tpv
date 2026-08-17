@@ -1,0 +1,53 @@
+{
+  "//": "Contrato compartido de códigos de error (ARCH-05). ÚNICA fuente de la verdad para el mapeo string->código: lo leen los tests de Rust (crates/tpv-contracts) y los del worker (tpv-api). Añadir un código de negocio sin entrada aquí pone un test en rojo.",
+
+  "negocio": [
+    { "wire": "not_approved", "code": "not_approved", "porque": "pairing Handy pendiente de aprobación; AppBoot lo trata como 'sigue esperando', no como error" },
+    { "wire": "main_offline", "code": "main_offline", "porque": "no hay Main conectada al TenantHub; las Handy congelan su UI" },
+    { "wire": "device_revoked", "code": "device_revoked", "porque": "el dispositivo fue revocado desde la Main" },
+    { "wire": "revoked", "code": "device_revoked", "porque": "alias corto que emite el cierre de socket del DO (código 4001)" },
+    { "wire": "license_expired", "code": "license_expired", "porque": "licencia caducada" },
+    { "wire": "expired", "code": "license_expired", "porque": "alias corto del gate de licencia" },
+    { "wire": "license_not_found", "code": "license_not_found", "porque": "el servidor no reconoce la licencia" },
+    { "wire": "no_active_license_for_tenant", "code": "license_not_found", "porque": "el tenant no tiene licencia activa" },
+    { "wire": "invalid_pin", "code": "invalid_pin", "porque": "PIN incorrecto en login/fichaje" },
+    { "wire": "validation_error", "code": "validation", "porque": "fallo de validación genérico del worker" },
+    { "wire": "not_found", "code": "not_found", "porque": "entidad inexistente" }
+  ],
+
+  "normalizacion": [
+    { "wire": "  not_approved  ", "code": "not_approved", "porque": "espacios alrededor: hay que recortarlos antes de buscar" },
+    { "wire": "MAIN_OFFLINE", "code": "main_offline", "porque": "la búsqueda no puede depender de mayúsculas" },
+    { "wire": "Device_Revoked", "code": "device_revoked", "porque": "mayúsculas mezcladas" },
+    { "wire": "\tinvalid_pin\n", "code": "invalid_pin", "porque": "tabuladores y saltos de línea también son espacio en blanco" }
+  ],
+
+  "desconocidos": [
+    { "wire": "id_mesa invalido", "porque": "código ad-hoc del worker que nadie ramifica" },
+    { "wire": "missing_tenant_id", "porque": "error interno de la API" },
+    { "wire": "", "porque": "cuerpo sin código" },
+    { "wire": "not_approved_todavia", "porque": "prefijo de un código real: NO debe colar como not_approved" },
+    { "wire": "xnot_approved", "porque": "sufijo de un código real: tampoco debe colar" },
+    { "wire": "revoked_at_ms", "porque": "empieza por un alias real ('revoked') pero es otra cosa" }
+  ],
+
+  "porEstadoHttp": [
+    { "status": 400, "code": "validation" },
+    { "status": 422, "code": "validation" },
+    { "status": 404, "code": "not_found" },
+    { "status": 409, "code": "conflict" },
+    { "status": 500, "code": "internal" },
+    { "status": 503, "code": "internal" },
+    { "status": 401, "code": "external" },
+    { "status": 403, "code": "external" }
+  ],
+
+  "codigosDeNegocio": [
+    "not_approved",
+    "main_offline",
+    "device_revoked",
+    "license_expired",
+    "license_not_found",
+    "invalid_pin"
+  ]
+}
