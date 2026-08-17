@@ -4,10 +4,10 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-17).** De los ~136 hallazgos del análisis original **quedan 25
+> **Estado (2026-08-17).** De los ~136 hallazgos del análisis original **quedan 24
 > abiertos** (la tabla de abajo es la buena; el recuento se corrigió el 2026-08-14 y el 2026-08-17
-> bajó de 28 a 25 al cerrarse ARCH-02, ARCH-03 y ARCH-05), y son lo único
-> que contienen estas fichas. De esos 25, **11 son el mismo trabajo** (la familia `-parity`, ver la
+> bajó de 28 a 24 al cerrarse ARCH-02, ARCH-03, ARCH-05 y TRAB-03), y son lo único
+> que contienen estas fichas. De esos 24, **11 son el mismo trabajo** (la familia `-parity`, ver la
 > nota del recuento) y **7 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
 > arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
 > aparece, está resuelto.
@@ -71,7 +71,7 @@
 | D4 Inventario | 2 | INV-06 🔵 · INV-07 🔵 |
 | D6 Reservas | 2 | RES-05 🔵 · RES-07 🔵 |
 | D8 Tareas | 2 | TAR-04 🔵 · TAR-05 🔵 |
-| D9 Trabajadores | 2 | TRAB-03 🟡 · TRAB-06 🔵 |
+| D9 Trabajadores | 1 | TRAB-06 🔵 |
 | D11 Login | 3 | LOGIN-03 🔵 · LOGIN-04 🔵 · LOGIN-05 🔵 |
 | T1 Esquema DB | 1 | DB-14 🔵 |
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
@@ -90,7 +90,7 @@ TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness
 El resto se agrupa en:
 - **Reconciliación de datos derivados:** INV-06 y VR-06 (stock) + DB-14 (`Total_Gastado`). Misma
   clase de tarea: un chequeo que compare el valor guardado con el recalculado y avise de la deriva.
-- **Seguridad de datos:** TRAB-03 (PII replicada) y LOGIN-04 (keyspace del PIN).
+- **Seguridad de datos:** LOGIN-04 (keyspace del PIN).
 - **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
   MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.
 

@@ -68,6 +68,9 @@ rand = "0.8"
 keyring = "2"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 sha2 = "0.10"
+# Cifrado de campo de la PII del personal (TRAB-03, ver ports/field_cipher.rs).
+aes-gcm = "0.10"
+hmac = "0.12"
 
 # ── Generación de tipos TS (ts-rs) ──
 # serde-compat va activo por defecto; chrono-impl añade soporte para tipos chrono.

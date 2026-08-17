@@ -27,6 +27,7 @@ import {
 	getLicenseByHash,
 	putDeviceOtp,
 	reassignMainDevice,
+	getOrCreateTenantFieldDek,
 	setDevicePubKeyB64IfEmptyOrThrow,
 	upsertTenantInfo,
 	type LicenseRow,
@@ -79,6 +80,10 @@ licenseRoutes.post("/activate", async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, [
 		"LICENSE_JWT_SECRET",
+		// TRAB-03: cifra la DEK del tenant en reposo. Fail-closed: sin este secreto no se
+		// activa, en vez de aprovisionar un tenant sin clave de cifrado que luego habría
+		// que rellenar a mano.
+		"LICENSE_STORE_KEY",
 		"TURSO_DATABASE_URL",
 		"TURSO_AUTH_TOKEN",
 		"TURSO_PLATFORM_TOKEN",
@@ -226,6 +231,11 @@ licenseRoutes.post("/activate", async (c) => {
 
 	const token = await signToken(env, { tenantId, deviceId, licHash });
 
+	// TRAB-03: la clave con la que la Main cifra DNI/IBAN/nº SS. Se entrega en cada
+	// activación (no sólo en la primera) porque es justo lo que necesita un equipo nuevo
+	// tras un cambio de dispositivo para poder volver a leer los datos del personal.
+	const fieldDek = await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId);
+
 	const out: ActivateResponse = {
 		ok: true,
 		tenantId,
@@ -233,6 +243,7 @@ licenseRoutes.post("/activate", async (c) => {
 		token,
 		status: esPrimeraActivacion ? "active" : lic.status,
 		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
+		fieldDek,
 	};
 
 	return c.json(out);

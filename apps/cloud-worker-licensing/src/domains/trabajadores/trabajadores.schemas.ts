@@ -58,11 +58,12 @@ export const trabajadorCreateSchema = z
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
 		estado: z.any(),
-		dni: z.any().optional().nullable(),
+		// TRAB-03: dni / iban / numero_seguridad_social NO se aceptan aquí. Van cifrados con una
+		// clave que sólo tiene la Main; si la Handy los mandara, se escribirían en claro en la
+		// nube. Rechazarlos en el borde es mejor que aceptarlos y tirarlos en silencio: quien
+		// los envíe recibe un error en vez de creerse que se han guardado.
 		telefono: z.any().optional().nullable(),
 		puesto: z.any().optional().nullable(),
-		iban: z.any().optional().nullable(),
-		numero_seguridad_social: z.any().optional().nullable(),
 		fecha_inicio_contrato: z.any().optional().nullable(),
 		fecha_fin_contrato: z.any().optional().nullable(),
 	})
@@ -70,11 +71,8 @@ export const trabajadorCreateSchema = z
 		...v,
 		apellido: cleanOrNull(v.apellido),
 		estado: normalizeEstado(v.estado),
-		dni: cleanOrNull(v.dni),
 		telefono: cleanOrNull(v.telefono),
 		puesto: cleanOrNull(v.puesto),
-		iban: cleanOrNull(v.iban),
-		numero_seguridad_social: cleanOrNull(v.numero_seguridad_social),
 		fecha_inicio_contrato: cleanOrNull(v.fecha_inicio_contrato),
 		fecha_fin_contrato: cleanOrNull(v.fecha_fin_contrato),
 	}));
@@ -88,11 +86,12 @@ export const trabajadorUpdateSchema = z
 		nombre: requiredString("nombre"),
 		apellido: z.any().optional().nullable(),
 		estado: z.any(),
-		dni: z.any().optional().nullable(),
+		// TRAB-03: dni / iban / numero_seguridad_social NO se aceptan aquí. Van cifrados con una
+		// clave que sólo tiene la Main; si la Handy los mandara, se escribirían en claro en la
+		// nube. Rechazarlos en el borde es mejor que aceptarlos y tirarlos en silencio: quien
+		// los envíe recibe un error en vez de creerse que se han guardado.
 		telefono: z.any().optional().nullable(),
 		puesto: z.any().optional().nullable(),
-		iban: z.any().optional().nullable(),
-		numero_seguridad_social: z.any().optional().nullable(),
 		fecha_inicio_contrato: z.any().optional().nullable(),
 		fecha_fin_contrato: z.any().optional().nullable(),
 		password_hash: z.any().optional().nullable(),
@@ -101,11 +100,8 @@ export const trabajadorUpdateSchema = z
 		...v,
 		apellido: cleanOrNull(v.apellido),
 		estado: normalizeEstado(v.estado),
-		dni: cleanOrNull(v.dni),
 		telefono: cleanOrNull(v.telefono),
 		puesto: cleanOrNull(v.puesto),
-		iban: cleanOrNull(v.iban),
-		numero_seguridad_social: cleanOrNull(v.numero_seguridad_social),
 		fecha_inicio_contrato: cleanOrNull(v.fecha_inicio_contrato),
 		fecha_fin_contrato: cleanOrNull(v.fecha_fin_contrato),
 		password_hash: cleanOrNull(v.password_hash),
@@ -154,13 +150,20 @@ export const fechaLunesSchema = z.object({
 	fecha_lunes: z.any().transform((v) => normalizeYmd(v)),
 });
 
+/**
+ * TRAB-03: campos que el worker **no gestiona**. Van cifrados con una clave que sólo tiene la
+ * Main, así que aquí no se aceptan, no se escriben y no se devuelven.
+ *
+ * Están declarados como un tipo con nombre, y no simplemente ausentes, porque el drift-guard
+ * de abajo compara claves en las dos direcciones: sin esta exclusión explícita el módulo no
+ * compila. Es deliberado — que quitar un campo del contrato obligue a decir *por qué*.
+ */
+type PiiSoloMain = "dni" | "iban" | "numero_seguridad_social";
+
 type NullableTrabajadorCreateFields =
 	| "apellido"
-	| "dni"
 	| "telefono"
 	| "puesto"
-	| "iban"
-	| "numero_seguridad_social"
 	| "fecha_inicio_contrato"
 	| "fecha_fin_contrato";
 
@@ -172,14 +175,14 @@ type NullableAsignacionFields = "hora_inicio" | "hora_fin" | "notas";
 
 export type TrabajadorCreateInput = Omit<
 	ContractTrabajadorCreateInput,
-	NullableTrabajadorCreateFields
+	NullableTrabajadorCreateFields | PiiSoloMain
 > & {
 	[K in NullableTrabajadorCreateFields]?: ContractTrabajadorCreateInput[K] | null;
 };
 
 export type TrabajadorUpdateInput = Omit<
 	ContractTrabajadorUpdateInput,
-	NullableTrabajadorUpdateFields
+	NullableTrabajadorUpdateFields | PiiSoloMain
 > & {
 	[K in NullableTrabajadorUpdateFields]?: ContractTrabajadorUpdateInput[K] | null;
 };

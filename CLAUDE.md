@@ -271,6 +271,14 @@ la lógica/SQL vive en `crates/*`.
   prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
   `attribution.commit/pr: ""`).
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
+- **PII del personal cifrada (TRAB-03).** `DNI`, `IBAN` y `Numero_Seguridad_Social` se guardan
+  cifrados (AES-256-GCM **determinista**, para que el `UNIQUE` del esquema siga detectando
+  duplicados). El cifrado ocurre en `tpv-infra-sqlite::trabajadores` **antes** de construir la
+  sentencia, así que el outbox replica ya el texto cifrado y el sync no se entera. La clave (DEK)
+  la genera el worker al aprovisionar, viaja en la respuesta de `/v1/license/activate` y vive en
+  el `secret_store` de la Main — **nunca en la BD que protege**. Consecuencia de diseño: la Handy
+  no tiene la clave, así que el worker **ni escribe ni devuelve** esas tres columnas y su UI las
+  oculta; se rellenan desde la Main. Detalle en `crates/tpv-infra-licensing/src/field_crypto.rs`.
 - **Al tocar un `*.schemas.ts` del worker**: cada schema con contrapartida en Rust lleva al final un
   drift-guard (`Assert<SameKeys<z.infer<typeof xSchema>, XInput>>`, ver `src/lib/typeGuards.ts`). Si
   añades un campo al zod, añádelo también al DTO de Rust (o al revés): el guard compara las claves en

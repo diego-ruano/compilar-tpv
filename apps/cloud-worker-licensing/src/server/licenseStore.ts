@@ -17,7 +17,7 @@
 import type { Client } from "@libsql/client/web";
 
 import type { LicenseOrigin, LicenseStatus } from "../shared";
-import { aesGcmEncrypt } from "./crypto";
+import { aesGcmDecrypt, aesGcmEncrypt } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
 import { exec } from "./db";
 
@@ -126,7 +126,10 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
 
 	// Datos del negocio en `tenants` (corrige el bug #5). ALTER no admite IF NOT EXISTS: si la
 	// columna ya está, Turso lanza "duplicate column name" y lo ignoramos.
-	for (const col of ["display_name", "legal_name", "email", "phone", "country"]) {
+	// TRAB-03: DEK del tenant para cifrar la PII del personal (DNI/IBAN/nº SS). Se guarda
+	// CIFRADA con LICENSE_STORE_KEY, que es un secreto del worker y no vive en esta BD: un
+	// volcado del control-plane no basta para descifrar los datos del personal.
+	for (const col of ["display_name", "legal_name", "email", "phone", "country", "field_dek"]) {
 		try {
 			await exec(db, `ALTER TABLE tenants ADD COLUMN ${col} TEXT;`);
 		} catch {
@@ -561,6 +564,70 @@ export async function ensureTenantExistsMinimal(db: Client, tenantId: string) {
     `,
 		[tenantId, now, now],
 	);
+}
+
+/* ============================================================
+   DEK de cifrado de campo del tenant (TRAB-03)
+============================================================ */
+
+/**
+ * Devuelve la DEK del tenant en base64 (texto claro, para entregársela al cliente),
+ * creándola la primera vez.
+ *
+ * En reposo se guarda cifrada con `LICENSE_STORE_KEY`. El worker NO usa esta clave para
+ * nada más: no descifra datos del personal, sólo la custodia para poder devolvérsela al
+ * cliente cuando cambie de equipo, que es lo que evita que el cliente tenga que apuntarse
+ * un código de recuperación.
+ */
+export async function getOrCreateTenantFieldDek(
+	db: Client,
+	storeKeyB64: string,
+	tenantId: string,
+): Promise<string> {
+	const existente = await leerFieldDek(db, storeKeyB64, tenantId);
+	if (existente) return existente;
+
+	const bytes = crypto.getRandomValues(new Uint8Array(32));
+	let bin = "";
+	for (const b of bytes) bin += String.fromCharCode(b);
+	const dekB64 = btoa(bin);
+
+	const cifrada = await aesGcmEncrypt(storeKeyB64, dekB64);
+
+	// Guarda condicionalmente: si dos activaciones del mismo tenant corren a la vez, sólo
+	// una escribe. La perdedora relee y usa la del ganador — dos DEKs distintas para el mismo
+	// tenant dejarían la mitad de las filas indescifrables.
+	const res = await db.execute({
+		sql: `
+    UPDATE tenants
+    SET field_dek=?, updated_at_ms=?
+    WHERE tenant_id=? AND (field_dek IS NULL OR field_dek='');
+    `,
+		args: [cifrada, Date.now(), tenantId],
+	});
+
+	const escribio = Number((res as any)?.rowsAffected ?? 0) > 0;
+	if (escribio) return dekB64;
+
+	const ganadora = await leerFieldDek(db, storeKeyB64, tenantId);
+	if (!ganadora) throw new Error("field_dek_no_persistida");
+	return ganadora;
+}
+
+async function leerFieldDek(
+	db: Client,
+	storeKeyB64: string,
+	tenantId: string,
+): Promise<string | null> {
+	const r = await db.execute({
+		sql: `SELECT field_dek FROM tenants WHERE tenant_id=? LIMIT 1;`,
+		args: [tenantId],
+	});
+
+	const guardada = String((r.rows?.[0] as any)?.field_dek ?? "").trim();
+	if (!guardada) return null;
+
+	return await aesGcmDecrypt(storeKeyB64, guardada);
 }
 
 /* ============================================================

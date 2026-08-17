@@ -330,6 +330,30 @@ pub(crate) struct AppState {
     mode_sync: Arc<std::sync::RwLock<Option<DeviceMode>>>,
 }
 
+/// TRAB-03: construye el cifrador de campo con la DEK guardada en el almacén de secretos.
+///
+/// Devuelve `None` cuando no hay clave (instalación todavía sin activar) o cuando la que hay
+/// no es utilizable. En ese caso el repositorio opera en claro: es preferible a impedir dar de
+/// alta a un trabajador. La DEK llega en la respuesta de activación y no se vuelve a pedir.
+fn field_cipher() -> Option<Arc<dyn tpv_application::ports::field_cipher::FieldCipher>> {
+    let dek = match tpv_infra_licensing::device::get_field_dek() {
+        Ok(Some(d)) => d,
+        Ok(None) => return None,
+        Err(e) => {
+            log::warn!("no se pudo leer la field_dek del almacén de secretos: {e}");
+            return None;
+        }
+    };
+
+    match tpv_infra_licensing::field_crypto::FieldCipherAes::new(&dek) {
+        Ok(c) => Some(Arc::new(c)),
+        Err(e) => {
+            log::warn!("field_dek inválida, se opera sin cifrado de campo: {e}");
+            None
+        }
+    }
+}
+
 /// Genera un accessor `<name>(&self) -> Arc<dyn $trait>` que devuelve el repositorio
 /// adecuado al modo activo (el "puntero dinámico"): el adaptador SQLite local en modo TPV
 /// o el adaptador HTTP a la nube en modo Handy. El comando que lo invoca no sabe contra qué
@@ -425,12 +449,39 @@ impl AppState {
         SqliteTareasRepository,
         HttpTareasRepository
     );
-    repo_accessor!(
-        trabajadores_repo,
-        TrabajadoresRepository,
-        SqliteTrabajadoresRepository,
-        HttpTrabajadoresRepository
-    );
+    // TRAB-03: `trabajadores` no usa `repo_accessor!` porque es el único repositorio que
+    // necesita el cifrador de campo inyectado (DNI/IBAN/nº SS). La rama Handy no lo lleva a
+    // propósito: la clave vive SOLO en la Main, así que la Handy ni escribe ni lee esas
+    // columnas (el worker las excluye de sus sentencias y de sus consultas).
+    pub(crate) async fn trabajadores_repo(&self) -> Result<Arc<dyn TrabajadoresRepository>, String> {
+        match *self.mode.lock().await {
+            Some(DeviceMode::Tpv) => {
+                let conn = self
+                    .db
+                    .lock()
+                    .await
+                    .as_ref()
+                    .cloned()
+                    .ok_or_else(|| "DB no inicializada (modo TPV)".to_string())?;
+                Ok(Arc::new(SqliteTrabajadoresRepository::with_cipher(
+                    conn,
+                    field_cipher(),
+                )) as Arc<dyn TrabajadoresRepository>)
+            }
+            Some(DeviceMode::Handy) => {
+                let client = self
+                    .cloud
+                    .lock()
+                    .await
+                    .as_ref()
+                    .cloned()
+                    .ok_or_else(|| "Cliente nube no inicializado (modo Handy)".to_string())?;
+                Ok(Arc::new(HttpTrabajadoresRepository::new(client))
+                    as Arc<dyn TrabajadoresRepository>)
+            }
+            None => Err("Modo de dispositivo no seleccionado".to_string()),
+        }
+    }
     repo_accessor!(
         venta_rapida_repo,
         VentaRapidaRepository,

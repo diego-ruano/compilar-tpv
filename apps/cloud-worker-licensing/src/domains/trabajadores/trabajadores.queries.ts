@@ -114,11 +114,14 @@ export async function detail(
 				u.Nombre AS Nombre,
 				u.Apellido AS Apellido,
 				COALESCE(u.Estado, 'Activo') AS Estado,
-				t.DNI AS DNI,
+				-- TRAB-03: DNI, IBAN y Numero_Seguridad_Social se omiten. Están cifrados con una
+				-- clave que sólo tiene la Main, así que devolverlos aquí sólo serviría para que
+				-- la Handy pintara un churro. Llegan como NULL y su UI no los muestra.
+				NULL AS DNI,
 				t.Telefono AS Telefono,
 				t.Puesto AS Puesto,
-				t.IBAN AS IBAN,
-				t.Numero_Seguridad_Social AS Numero_Seguridad_Social,
+				NULL AS IBAN,
+				NULL AS Numero_Seguridad_Social,
 				t.Fecha_Inicio_Contrato AS Fecha_Inicio_Contrato,
 				t.Fecha_Fin_Contrato AS Fecha_Fin_Contrato
 			FROM Trabajadores t

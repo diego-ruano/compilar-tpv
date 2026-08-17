@@ -16,14 +16,7 @@ La lógica de jornada laboral está **repartida** entre `login.rs`, `stats.rs` y
 
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
-| TRAB-03 | 🟡 | **PII sensible** (DNI, IBAN, Nº Seg. Social) en claro y **replicada a la nube** (Turso) | esquema `Trabajadores`, `create_trabajador` |
 | TRAB-06 | 🔵 | Doble implementación Rust/worker de la lógica de **fichaje** (crítica) | `login.rs` ↔ `login.commands.ts` |
-
-### TRAB-03 🟡 PII en claro y replicada
-La ficha del trabajador guarda DNI, IBAN y nº de Seguridad Social en texto plano, y esas columnas
-viajan por el outbox a la BD del tenant en Turso. **Arreglo:** cifrado a nivel de campo y/o
-minimizar la replicación (preguntarse si la nube/Handy necesitan esos datos). Es una tarea de
-arquitectura/GDPR transversal, aplazada a un pase dedicado → ver [BACKLOG.md](../BACKLOG.md).
 
 ### TRAB-06 🔵 Doble implementación del fichaje
 La lógica de fichaje está codificada en Rust (Main) y en TS (worker, para Handy). Es la instancia

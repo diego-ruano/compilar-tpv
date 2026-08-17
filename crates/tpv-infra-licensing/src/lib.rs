@@ -11,6 +11,7 @@
 //! NO depende de Tauri: el directorio de datos (AppData) lo inyecta el comando al construirlo.
 
 pub mod device;
+pub mod field_crypto;
 mod secret_store;
 
 /// Reexport para que el `JNI_OnLoad` del cdylib de la app pueda inicializar la `JavaVM` del proceso,
@@ -139,6 +140,10 @@ struct ActivateOk {
     status: String,
     expires_at: Option<String>,
     device_id: Option<String>,
+    /// TRAB-03: DEK del tenant para cifrar la PII del personal. `Option` porque un worker
+    /// anterior a este cambio no la manda; en ese caso el cifrado queda inactivo y las
+    /// columnas se leen/escriben en claro, como antes.
+    field_dek: Option<String>,
 }
 
 /// Datos del negocio que acompañan a la activación (el worker los espera en camelCase).
@@ -485,6 +490,18 @@ impl LicensingService for LicensingAdapter {
 
         // El token es una credencial: va directo al keyring, nunca a `license_state.json`.
         set_license_token(ok.token.trim()).map_err(ext)?;
+
+        // TRAB-03: la clave de cifrado de campo, al almacén de secretos del sistema. Va aquí y
+        // no en `license_state.json` porque guardarla junto a la base de datos que protege no
+        // serviría de nada. Si falla, se registra y se sigue: la activación NO se aborta —
+        // quedarse sin poder activar por esto sería peor que operar sin cifrado.
+        if let Some(dek) = ok.field_dek.as_deref().map(str::trim) {
+            if !dek.is_empty() {
+                if let Err(e) = device::set_field_dek(dek) {
+                    log::warn!("no se pudo guardar la field_dek: {e}");
+                }
+            }
+        }
 
         Ok(ResultadoActivacion::Activada(Concesion {
             tenant_id: ok.tenant_id.trim().to_string(),

@@ -59,28 +59,26 @@ export function createTrabajador(input: TrabajadorCreateInput): BuiltCommand {
 		},
 		{
 			kind: "execute",
+			// TRAB-03: DNI, IBAN y Numero_Seguridad_Social NO se escriben desde aquí. Van
+			// cifrados con una clave que sólo tiene la Main, así que si la Handy los
+			// insertara quedarían en claro en Turso — exactamente lo que el cifrado evita.
+			// Se dan de alta vacíos y se completan luego desde la Main.
 			sql: `
 				INSERT INTO Trabajadores (
 					ID_Trabajador,
 					ID_Usuario,
-					DNI,
 					Telefono,
 					Puesto,
-					IBAN,
-					Numero_Seguridad_Social,
 					Fecha_Inicio_Contrato,
 					Fecha_Fin_Contrato
 				)
-				VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
+				VALUES (?1, ?2, ?3, ?4, ?5, ?6);
 			`,
 			args: [
 				REF_ID_TRABAJADOR,
 				REF_ID_USUARIO,
-				input.dni,
 				input.telefono,
 				input.puesto,
-				input.iban,
-				input.numero_seguridad_social,
 				input.fecha_inicio_contrato,
 				input.fecha_fin_contrato,
 			],
@@ -156,24 +154,21 @@ export function updateTrabajador(
 					updateUsuario,
 					{
 						kind: "execute",
+						// TRAB-03: las tres columnas cifradas se omiten del SET. Omitirlas (en vez
+						// de ponerlas a NULL) es lo que hace que editar un trabajador desde la
+						// Handy CONSERVE lo que la Main guardó, en lugar de borrárselo.
 						sql: `
 							UPDATE Trabajadores
 							SET
-								DNI = ?1,
-								Telefono = ?2,
-								Puesto = ?3,
-								IBAN = ?4,
-								Numero_Seguridad_Social = ?5,
-								Fecha_Inicio_Contrato = ?6,
-								Fecha_Fin_Contrato = ?7
-							WHERE ID_Trabajador = ?8;
+								Telefono = ?1,
+								Puesto = ?2,
+								Fecha_Inicio_Contrato = ?3,
+								Fecha_Fin_Contrato = ?4
+							WHERE ID_Trabajador = ?5;
 						`,
 						args: [
-							input.dni,
 							input.telefono,
 							input.puesto,
-							input.iban,
-							input.numero_seguridad_social,
 							input.fecha_inicio_contrato,
 							input.fecha_fin_contrato,
 							idTrabajador,

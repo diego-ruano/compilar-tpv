@@ -20,6 +20,8 @@ const SVC_AUTH: &str = "tpv-auth";
 const KEY_LICENSE_TOKEN: &str = "license-token";
 const KEY_HANDY_TOKEN: &str = "handy-token";
 const KEY_HANDY_TENANT: &str = "handy-tenant-id";
+/// DEK del tenant para el cifrado de la PII del personal (TRAB-03).
+const KEY_FIELD_DEK: &str = "field-dek";
 
 pub fn sha256_hex(s: &str) -> String {
     sha256_hex_bytes(s.as_bytes())
@@ -240,4 +242,34 @@ pub fn handy_get_tenant() -> Result<Option<String>, String> {
         }
         _ => Ok(None),
     }
+}
+
+/* ===== DEK de cifrado de campo (TRAB-03) =====
+   Clave de datos del tenant con la que se cifran DNI/IBAN/nº de la Seguridad Social antes de
+   escribirlos. La genera el worker al aprovisionar y la entrega en la activación; aquí vive en
+   el almacén de secretos del sistema, NUNCA en `license_state.json` ni en la base de datos:
+   guardarla junto al dato cifrado no protegería de nada. */
+
+pub fn get_field_dek() -> Result<Option<String>, String> {
+    match secret_store::get(SVC_AUTH, KEY_FIELD_DEK) {
+        Ok(Some(v)) => {
+            let v = v.trim().to_string();
+            Ok(if v.is_empty() { None } else { Some(v) })
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+pub fn set_field_dek(dek_b64: &str) -> Result<(), String> {
+    let dek = dek_b64.trim();
+    if dek.is_empty() {
+        return Err("field_dek vacía".into());
+    }
+    secret_store::set(SVC_AUTH, KEY_FIELD_DEK, dek)
+}
+
+pub fn clear_field_dek() -> Result<(), String> {
+    let _ = secret_store::delete(SVC_AUTH, KEY_FIELD_DEK);
+    Ok(())
 }

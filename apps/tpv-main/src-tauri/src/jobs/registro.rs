@@ -35,6 +35,10 @@ const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
 const IMAGENES_INTERVAL_SECS: u64 = 15 * 60;
 
+/// Cada cuánto se busca PII del personal todavía en claro. No hace falta más: sólo hay trabajo
+/// la primera vez tras activar el cifrado (y tras un cambio de equipo que traiga filas viejas).
+const CIFRADO_PII_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
 /// Cada cuánto se poda `_Sync_Applied_Ops`. Los registros solo son purgables tras un TTL de 72 h,
 /// así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
@@ -86,6 +90,15 @@ pub(crate) fn catalogo() -> Vec<Job> {
             retardo_inicial: Duration::from_secs(5 * 60),
             requiere: Requiere::MainConBd,
             ejecutar: tarea(purga_sync),
+        },
+        Job {
+            nombre: "cifrado_pii",
+            cada: Duration::from_secs(CIFRADO_PII_INTERVAL_SECS),
+            // Al minuto del arranque: da tiempo a que la activación haya guardado la DEK,
+            // sin retrasar la conversión hasta el siguiente ciclo de 6 h.
+            retardo_inicial: Duration::from_secs(60),
+            requiere: Requiere::MainConBd,
+            ejecutar: tarea(cifrado_pii),
         },
     ];
 
@@ -165,6 +178,34 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
+    Ok(())
+}
+
+/// TRAB-03: convierte a texto cifrado la PII del personal (DNI/IBAN/nº SS) que siga en claro.
+///
+/// Existe porque el cifrado se activó sobre una base de datos que ya tenía trabajadores dados de
+/// alta: las escrituras nuevas ya nacen cifradas, pero las filas antiguas no se convierten solas.
+/// Idempotente y barato: si no hay nada pendiente, es un SELECT y se acabó.
+async fn cifrado_pii(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+
+    let conn = state
+        .db
+        .lock()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "DB no inicializada".to_string())?;
+
+    let repo = tpv_infra_sqlite::trabajadores::SqliteTrabajadoresRepository::with_cipher(
+        conn,
+        crate::field_cipher(),
+    );
+
+    let n = repo.cifrar_pii_pendiente().await?;
+    if n > 0 {
+        log::info!("cifrado_pii: {n} fichas de personal convertidas a texto cifrado");
+    }
     Ok(())
 }
 

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { UserPlus, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
+import { useMode } from "../../../shared/stores/useMode";
 
 type Rol = {
   ID_Rol: string;
@@ -191,6 +192,12 @@ function AddTrabajador() {
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
+
+  // TRAB-03: DNI, IBAN y nº de la Seguridad Social se guardan cifrados con una clave que
+  // sólo tiene la Main. Desde una Handy no se pueden ni leer ni escribir, así que se ocultan
+  // en vez de enseñar campos que no se guardarían.
+  const esMain = useMode((st) => st.mode) === "tpv";
+  const cnPii = esMain ? "flex flex-col gap-1" : "hidden";
 
   const [dni, setDni] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -417,7 +424,7 @@ function AddTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">DNI</label>
               <input
                 value={dni}
@@ -447,7 +454,7 @@ function AddTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">IBAN</label>
               <input
                 value={iban}
@@ -458,7 +465,7 @@ function AddTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">Nº Seguridad Social</label>
               <input
                 value={numeroSS}

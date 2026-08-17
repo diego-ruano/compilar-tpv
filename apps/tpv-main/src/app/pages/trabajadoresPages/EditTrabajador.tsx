@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { UserCog, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
+import { useMode } from "../../../shared/stores/useMode";
 
 type Rol = {
   ID_Rol: string;
@@ -248,6 +249,11 @@ function EditTrabajador() {
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [estado, setEstado] = useState<"Activo" | "Inactivo">("Activo");
+
+  // TRAB-03: cifrados con una clave que sólo tiene la Main; desde una Handy no se pueden
+  // ni leer ni escribir, así que se ocultan.
+  const esMain = useMode((st) => st.mode) === "tpv";
+  const cnPii = esMain ? "flex flex-col gap-1" : "hidden";
 
   const [dni, setDni] = useState("");
   const [telefono, setTelefono] = useState("");
@@ -523,7 +529,7 @@ function EditTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">DNI</label>
               <input
                 value={dni}
@@ -550,7 +556,7 @@ function EditTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">IBAN</label>
               <input
                 value={iban}
@@ -561,7 +567,7 @@ function EditTrabajador() {
               />
             </div>
 
-            <div className="flex flex-col gap-1">
+            <div className={cnPii}>
               <label className="text-sm font-medium">Nº Seguridad Social</label>
               <input
                 value={numeroSS}

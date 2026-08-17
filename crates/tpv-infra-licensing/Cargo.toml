@@ -19,6 +19,8 @@ thiserror = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { workspace = true }
 sha2 = { workspace = true }
+aes-gcm = { workspace = true }
+hmac = { workspace = true }
 rand = { workspace = true }
 # Fachada de logging (diagnostico de secret_store en Android -> logcat via android_logger de la app).
 log = "0.4"

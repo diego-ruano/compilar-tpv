@@ -9,6 +9,7 @@ use chrono::{Datelike, Duration, Local, NaiveDate, Weekday};
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
+use tpv_application::ports::field_cipher::FieldCipher;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_contracts::trabajadores::{
     AsignacionRow, RolRow, TrabajadorDetailRow, TrabajadorRow, TurnoRow,
@@ -23,11 +24,119 @@ use crate::util::new_id;
 
 pub struct SqliteTrabajadoresRepository {
     db: Arc<Db>,
+    /// TRAB-03: cifra DNI/IBAN/nº de la Seguridad Social antes de que el valor entre en la
+    /// sentencia. Como el outbox captura la sentencia YA construida, la replicación a la nube
+    /// se lleva el texto cifrado sin enterarse: no hay que tocar el sync.
+    ///
+    /// `None` = no hay clave en este dispositivo (instalación aún sin activar, o worker
+    /// antiguo que no la entrega). En ese caso se opera en claro, como antes: quedarse sin
+    /// poder dar de alta a un trabajador sería peor que operar sin cifrado.
+    cipher: Option<Arc<dyn FieldCipher>>,
 }
 
 impl SqliteTrabajadoresRepository {
     pub fn new(db: Arc<Db>) -> Self {
-        Self { db }
+        Self { db, cipher: None }
+    }
+
+    pub fn with_cipher(db: Arc<Db>, cipher: Option<Arc<dyn FieldCipher>>) -> Self {
+        Self { db, cipher }
+    }
+
+    /// Claro -> guardado. Sin cifrador, pasa de largo.
+    fn cifrar(&self, v: Option<String>) -> AppResult<Option<String>> {
+        match &self.cipher {
+            Some(c) => c.encrypt(v.as_deref()),
+            None => Ok(v),
+        }
+    }
+
+    /// Guardado -> claro. Sin cifrador, pasa de largo (y con cifrador, un valor sin prefijo
+    /// también: son las filas que el job de migración todavía no ha convertido).
+    fn descifrar(&self, v: Option<String>) -> AppResult<Option<String>> {
+        match &self.cipher {
+            Some(c) => c.decrypt(v.as_deref()),
+            None => Ok(v),
+        }
+    }
+
+    /// TRAB-03: cifra la PII del personal que todavía está en claro y devuelve cuántas filas
+    /// convirtió. Lo llama el job `cifrado_pii`.
+    ///
+    /// El UPDATE va por el camino normal de escritura (`execute`), no por `raw()`, **a
+    /// propósito**: así lo captura el outbox y la nube recibe también el texto cifrado. Si
+    /// fuera por `raw()`, el dato quedaría cifrado en local y seguiría legible en Turso, que
+    /// es justo lo que se quiere evitar.
+    ///
+    /// Es idempotente: una fila ya cifrada no entra en la selección, y aunque entrase, cifrar
+    /// dos veces devuelve el mismo valor.
+    pub async fn cifrar_pii_pendiente(&self) -> AppResult<usize> {
+        let Some(cipher) = self.cipher.clone() else {
+            // Sin clave no hay nada que hacer: el dispositivo aún no se ha activado.
+            return Ok(0);
+        };
+
+        // El personal de un negocio son decenas de filas: se leen todas y se filtra en Rust,
+        // que evita repetir el prefijo de versión dentro del SQL.
+        let pendientes: Vec<(String, Option<String>, Option<String>, Option<String>)> = {
+            let db = self.db.read().await;
+            let mut rows = db
+                .query(
+                    r#"
+                    SELECT ID_Trabajador, DNI, IBAN, Numero_Seguridad_Social
+                    FROM Trabajadores;
+                    "#,
+                    vec![],
+                )
+                .await
+                .map_err(db_err)?;
+
+            let mut out = Vec::new();
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                let id = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+                let dni = v_string(row.get_value(1).map_err(db_err)?);
+                let iban = v_string(row.get_value(2).map_err(db_err)?);
+                let nss = v_string(row.get_value(3).map_err(db_err)?);
+
+                let falta = [&dni, &iban, &nss].into_iter().flatten().any(|v| {
+                    !v.is_empty() && !cipher.is_encrypted(v)
+                });
+
+                if falta && !id.is_empty() {
+                    out.push((id, dni, iban, nss));
+                }
+            }
+            out
+        };
+
+        if pendientes.is_empty() {
+            return Ok(0);
+        }
+
+        let db = self.db.write().await;
+        let mut convertidas = 0usize;
+
+        for (id, dni, iban, nss) in pendientes {
+            db.execute(
+                r#"
+                UPDATE Trabajadores
+                   SET DNI = ?1, IBAN = ?2, Numero_Seguridad_Social = ?3
+                 WHERE ID_Trabajador = ?4;
+                "#,
+                vec![
+                    opt_text(cipher.encrypt(dni.as_deref())?),
+                    opt_text(cipher.encrypt(iban.as_deref())?),
+                    opt_text(cipher.encrypt(nss.as_deref())?),
+                    Value::Text(id),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            convertidas += 1;
+        }
+
+        Ok(convertidas)
     }
 }
 
@@ -170,11 +279,13 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             apellido: v_string(row.get_value(5).map_err(db_err)?),
             estado: v_string(row.get_value(6).map_err(db_err)?)
                 .unwrap_or_else(|| "Activo".into()),
-            dni: v_string(row.get_value(7).map_err(db_err)?),
+            // TRAB-03: las tres columnas sensibles vienen cifradas de la BD.
+            dni: self.descifrar(v_string(row.get_value(7).map_err(db_err)?))?,
             telefono: v_string(row.get_value(8).map_err(db_err)?),
             puesto: v_string(row.get_value(9).map_err(db_err)?),
-            iban: v_string(row.get_value(10).map_err(db_err)?),
-            numero_seguridad_social: v_string(row.get_value(11).map_err(db_err)?),
+            iban: self.descifrar(v_string(row.get_value(10).map_err(db_err)?))?,
+            numero_seguridad_social: self
+                .descifrar(v_string(row.get_value(11).map_err(db_err)?))?,
             fecha_inicio_contrato: v_string(row.get_value(12).map_err(db_err)?),
             fecha_fin_contrato: v_string(row.get_value(13).map_err(db_err)?),
         }))
@@ -436,11 +547,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 vec![
                     Value::Text(new_id()),
                     Value::Text(id_usuario.clone()),
-                    opt_text(data.dni.clone()),
+                    opt_text(self.cifrar(data.dni.clone())?),
                     opt_text(data.telefono.clone()),
                     opt_text(data.puesto.clone()),
-                    opt_text(data.iban.clone()),
-                    opt_text(data.numero_seguridad_social.clone()),
+                    opt_text(self.cifrar(data.iban.clone())?),
+                    opt_text(self.cifrar(data.numero_seguridad_social.clone())?),
                     opt_text(data.fecha_inicio_contrato.clone()),
                     opt_text(data.fecha_fin_contrato.clone()),
                 ],
@@ -525,11 +636,11 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                  WHERE ID_Trabajador = ?8;
                 "#,
                 vec![
-                    opt_text(cambios.dni.clone()),
+                    opt_text(self.cifrar(cambios.dni.clone())?),
                     opt_text(cambios.telefono.clone()),
                     opt_text(cambios.puesto.clone()),
-                    opt_text(cambios.iban.clone()),
-                    opt_text(cambios.numero_seguridad_social.clone()),
+                    opt_text(self.cifrar(cambios.iban.clone())?),
+                    opt_text(self.cifrar(cambios.numero_seguridad_social.clone())?),
                     opt_text(cambios.fecha_inicio_contrato.clone()),
                     opt_text(cambios.fecha_fin_contrato.clone()),
                     Value::Text(id_trabajador.to_string()),
@@ -915,5 +1026,247 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_cifrado {
+    //! TRAB-03 — verificación de extremo a extremo sobre una BD real.
+    //!
+    //! Lo que se comprueba aquí no es la criptografía (eso está en
+    //! `tpv-infra-licensing::field_crypto`), sino lo que de verdad puede salir mal al
+    //! integrarla: que el texto cifrado llegue **a la columna** y **al outbox**. Si el
+    //! cifrado se hiciera después de construir la sentencia, la BD local quedaría cifrada
+    //! y la nube seguiría recibiendo el DNI en claro; ese fallo sólo se ve mirando el outbox.
+
+    use std::sync::Arc;
+
+    use libsql::Value;
+    use tpv_application::error::AppResult;
+    use tpv_application::ports::field_cipher::FieldCipher;
+    use tpv_application::ports::trabajadores::TrabajadoresRepository;
+    use tpv_domain::trabajadores::TrabajadorNuevo;
+
+    use super::SqliteTrabajadoresRepository;
+    use crate::db::{Db, Reader};
+
+    const ROL_ADMIN: &str = "00000000-0000-7000-8000-000000000001";
+    const DNI: &str = "12345678Z";
+    const IBAN: &str = "ES9121000418450200051332";
+    const NSS: &str = "281234567840";
+    const PREFIJO: &str = "FAKE:";
+
+    /// Cifrador de juguete: invierte el texto y le pone un prefijo. No se usa el real a
+    /// propósito —eso ya tiene sus tests— sino uno cuyo resultado se puede predecir en las
+    /// aserciones, para que este test hable sólo del cableado.
+    struct CipherFalso;
+
+    impl FieldCipher for CipherFalso {
+        fn encrypt(&self, plain: Option<&str>) -> AppResult<Option<String>> {
+            Ok(plain.map(|v| {
+                if v.is_empty() || v.starts_with(PREFIJO) {
+                    v.to_string()
+                } else {
+                    format!("{PREFIJO}{}", v.chars().rev().collect::<String>())
+                }
+            }))
+        }
+
+        fn decrypt(&self, stored: Option<&str>) -> AppResult<Option<String>> {
+            Ok(stored.map(|v| match v.strip_prefix(PREFIJO) {
+                Some(resto) => resto.chars().rev().collect::<String>(),
+                None => v.to_string(),
+            }))
+        }
+
+        fn is_encrypted(&self, stored: &str) -> bool {
+            stored.starts_with(PREFIJO)
+        }
+    }
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!(
+            "{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    async fn abrir_db() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_pii_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.db");
+        let db = Db::open(path.to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    fn nuevo(email: &str) -> TrabajadorNuevo {
+        TrabajadorNuevo {
+            id_rol: ROL_ADMIN.to_string(),
+            email: email.to_string(),
+            password_hash: "hash".to_string(),
+            nombre: "Ada".to_string(),
+            apellido: Some("Lovelace".to_string()),
+            estado: "Activo".to_string(),
+            dni: Some(DNI.to_string()),
+            telefono: Some("600000000".to_string()),
+            puesto: Some("Camarera".to_string()),
+            iban: Some(IBAN.to_string()),
+            numero_seguridad_social: Some(NSS.to_string()),
+            fecha_inicio_contrato: None,
+            fecha_fin_contrato: None,
+        }
+    }
+
+    /// Columnas tal y como están guardadas, sin pasar por el repositorio.
+    async fn columnas_crudas(db: &Arc<Db>) -> (String, String, String, String) {
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT DNI, IBAN, Numero_Seguridad_Social, Telefono FROM Trabajadores LIMIT 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let txt = |i: i32| match row.get_value(i).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("se esperaba texto, había {otro:?}"),
+        };
+        (txt(0), txt(1), txt(2), txt(3))
+    }
+
+    async fn primer_id(db: &Arc<Db>) -> String {
+        let conn = db.read().await;
+        let mut rows = conn
+            .query(
+                "SELECT ID_Trabajador FROM Trabajadores LIMIT 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(t) => t,
+            otro => panic!("se esperaba texto, había {otro:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn la_pii_se_guarda_cifrada_y_se_lee_en_claro() {
+        let (db, _dir) = abrir_db().await;
+        let repo =
+            SqliteTrabajadoresRepository::with_cipher(db.clone(), Some(Arc::new(CipherFalso)));
+
+        repo.create_trabajador(nuevo("ada@test.local")).await.unwrap();
+
+        let (dni, iban, nss, telefono) = columnas_crudas(&db).await;
+
+        assert!(dni.starts_with(PREFIJO), "DNI sin cifrar: {dni}");
+        assert!(iban.starts_with(PREFIJO), "IBAN sin cifrar: {iban}");
+        assert!(nss.starts_with(PREFIJO), "NSS sin cifrar: {nss}");
+        assert!(!dni.contains(DNI));
+        assert!(!iban.contains(IBAN));
+
+        // El resto de columnas, intactas: sólo se cifra lo sensible.
+        assert_eq!(telefono, "600000000");
+
+        let detalle = repo.get_detail(&primer_id(&db).await).await.unwrap().unwrap();
+        assert_eq!(detalle.dni.as_deref(), Some(DNI));
+        assert_eq!(detalle.iban.as_deref(), Some(IBAN));
+        assert_eq!(detalle.numero_seguridad_social.as_deref(), Some(NSS));
+    }
+
+    /// El test que justifica el diseño entero: si el cifrado ocurriera después de construir la
+    /// sentencia, el outbox replicaría el DNI en claro y el cifrado no serviría de nada.
+    #[tokio::test]
+    async fn el_outbox_replica_texto_cifrado_no_el_dni_en_claro() {
+        let (db, _dir) = abrir_db().await;
+        let repo =
+            SqliteTrabajadoresRepository::with_cipher(db.clone(), Some(Arc::new(CipherFalso)));
+
+        repo.create_trabajador(nuevo("grace@test.local")).await.unwrap();
+
+        let conn = db.read().await;
+        let mut rows = conn
+            .query("SELECT Statements_Json FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+
+        let mut visto_cifrado = false;
+        let mut filas = 0;
+
+        while let Some(row) = rows.next().await.unwrap() {
+            let payload = match row.get_value(0).unwrap() {
+                Value::Text(t) => t,
+                _ => continue,
+            };
+            filas += 1;
+            assert!(!payload.contains(DNI), "el outbox lleva el DNI en claro: {payload}");
+            assert!(!payload.contains(IBAN), "el outbox lleva el IBAN en claro: {payload}");
+            assert!(!payload.contains(NSS), "el outbox lleva el nº SS en claro: {payload}");
+            if payload.contains(PREFIJO) {
+                visto_cifrado = true;
+            }
+        }
+
+        assert!(filas > 0, "la escritura debería haber dejado algo en el outbox");
+        assert!(visto_cifrado, "el outbox debería contener los valores cifrados");
+    }
+
+    #[tokio::test]
+    async fn sin_cifrador_todo_sigue_como_antes() {
+        let (db, _dir) = abrir_db().await;
+        let repo = SqliteTrabajadoresRepository::new(db.clone());
+
+        repo.create_trabajador(nuevo("sin@test.local")).await.unwrap();
+
+        let (dni, iban, nss, _) = columnas_crudas(&db).await;
+        assert_eq!(dni, DNI);
+        assert_eq!(iban, IBAN);
+        assert_eq!(nss, NSS);
+    }
+
+    /// Filas dadas de alta antes de activar el cifrado: el job las convierte, y es idempotente.
+    #[tokio::test]
+    async fn el_job_convierte_las_filas_antiguas_y_no_repite() {
+        let (db, _dir) = abrir_db().await;
+
+        SqliteTrabajadoresRepository::new(db.clone())
+            .create_trabajador(nuevo("vieja@test.local"))
+            .await
+            .unwrap();
+
+        let (dni_antes, _, _, _) = columnas_crudas(&db).await;
+        assert_eq!(dni_antes, DNI, "de partida debe estar en claro");
+
+        let repo =
+            SqliteTrabajadoresRepository::with_cipher(db.clone(), Some(Arc::new(CipherFalso)));
+
+        assert_eq!(repo.cifrar_pii_pendiente().await.unwrap(), 1);
+
+        let (dni, iban, nss, _) = columnas_crudas(&db).await;
+        assert!(dni.starts_with(PREFIJO));
+        assert!(iban.starts_with(PREFIJO));
+        assert!(nss.starts_with(PREFIJO));
+
+        // Segunda pasada: no queda nada pendiente y el valor no se cifra dos veces.
+        assert_eq!(repo.cifrar_pii_pendiente().await.unwrap(), 0);
+        let (dni_final, _, _, _) = columnas_crudas(&db).await;
+        assert_eq!(dni_final, dni);
+    }
+
+    /// Lo que se perdería con un nonce aleatorio: el UNIQUE dejaría de ver los duplicados.
+    #[tokio::test]
+    async fn el_unique_del_dni_sigue_detectando_duplicados() {
+        let (db, _dir) = abrir_db().await;
+        let repo =
+            SqliteTrabajadoresRepository::with_cipher(db.clone(), Some(Arc::new(CipherFalso)));
+
+        repo.create_trabajador(nuevo("uno@test.local")).await.unwrap();
+
+        let segundo = repo.create_trabajador(nuevo("dos@test.local")).await;
+        assert!(segundo.is_err(), "un DNI repetido debe seguir siendo un error");
     }
 }

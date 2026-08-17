@@ -56,6 +56,12 @@ export type ActivateResponse = {
 	token: string;
 	status: LicenseStatus;
 	expiresAt: string | null;
+	/**
+	 * DEK del tenant (base64, 32 bytes) para cifrar la PII del personal (TRAB-03).
+	 * La Main la guarda en el almacén de secretos del sistema y NO vuelve a pedirla.
+	 * Viaja sólo aquí, por TLS y en una respuesta que ya exige clave de activación válida.
+	 */
+	fieldDek: string;
 };
 
 /**
