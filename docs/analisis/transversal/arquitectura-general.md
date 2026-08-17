@@ -23,7 +23,6 @@ Local-First y React Query con hooks co-locados por feature.
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
 | ARCH-01 | 🟠 | **(Sistémico) Doble implementación** Main/Handy + doble tipado (ts-rs vs zod) + doble validación | todo el repo |
-| ARCH-03 | 🟡 | Tipos del worker (zod) **no derivan** de la misma fuente que los contracts ts-rs → la Handy puede divergir | `contracts` vs `domains/*/schemas.ts` |
 
 ### ARCH-01 🟠 Doble implementación de la lógica de negocio — SISTÉMICO
 - **Evidencia:** cada operación de **escritura** existe dos veces: en Rust (`crates/tpv-infra-sqlite/*`,
@@ -40,9 +39,4 @@ Local-First y React Query con hooks co-locados por feature.
   en un test rojo sin cambiar la arquitectura. Opciones más ambiciosas (SQL en fuente compartida,
   WASM, codegen) en [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 - **Decisión del responsable:** refactor **gradual post-lanzamiento**; el producto funciona y converge.
-
-### ARCH-03 🟡 Tipos del worker sin fuente única
-Los `*.schemas.ts` (zod) se escriben a mano en vez de derivar de los contracts ts-rs. **Arreglo:** el
-patrón ya probado en OBS-05 (drift-guard de tipos: `SpoolEvent` → `telemetry.ts` + guard en
-`telemetry.routes.ts`), replicado por dominio.
 

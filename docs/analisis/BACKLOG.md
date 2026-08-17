@@ -144,7 +144,6 @@ probar la **app** completa contra staging.
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
 | ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker) de la lógica de escritura. Mitigada a mano; falta el **harness de tests de contrato** (SQL golden) y, a medio plazo, una única fuente de generación de sentencias. Es el paraguas de todos los `-parity` (MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05). Ver §Unificación. | Refactor gradual post-lanzamiento |
-| ARCH-03 | 🟡 | **Tipos del worker** (zod `*.schemas.ts`) desde fuente única ts-rs. Patrón ya probado en el repo: **drift-guard de tipos** como en OBS-05 (`SpoolEvent`→`telemetry.ts` + guard en `telemetry.routes.ts`), replicado por dominio. | Refactor gradual post-lanzamiento |
 
 ---
 

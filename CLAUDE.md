@@ -271,6 +271,11 @@ la lógica/SQL vive en `crates/*`.
   prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
   `attribution.commit/pr: ""`).
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
+- **Al tocar un `*.schemas.ts` del worker**: cada schema con contrapartida en Rust lleva al final un
+  drift-guard (`Assert<SameKeys<z.infer<typeof xSchema>, XInput>>`, ver `src/lib/typeGuards.ts`). Si
+  añades un campo al zod, añádelo también al DTO de Rust (o al revés): el guard compara las claves en
+  **las dos direcciones** y el worker no compila hasta que coincidan. Los tipos de los valores ya los
+  cubre el paso de `p.data` al command builder, así que entre ambos el contrato queda cerrado.
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a **`AppErrorDto { code, message }`**
   en la frontera Tauri (ARCH-02/05). El `code` sale del catálogo cerrado `ErrorCode`
   (`crates/tpv-contracts/src/errors.rs`, exportado a TS por ts-rs y consumido también por el worker),
