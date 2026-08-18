@@ -50,8 +50,10 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      # `exec`, no `run`: @tpv/main no tiene script "tsc", y sin exec pnpm sale con 0 sin
+      # comprobar nada — este job llevaba siendo un no-op.
       - name: Typecheck frontend
-        run: pnpm --filter @tpv/main tsc --noEmit
+        run: pnpm --filter @tpv/main exec tsc --noEmit
 
   # Worker: typecheck, suite de tests (corre dentro de workerd con el pool de Cloudflare) y que el
   # registro manual de migraciones (tenantMigrations.ts) no se desincronice de la carpeta
