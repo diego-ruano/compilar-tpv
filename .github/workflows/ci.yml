@@ -53,10 +53,11 @@ jobs:
       - name: Typecheck frontend
         run: pnpm --filter @tpv/main tsc --noEmit
 
-  # Worker: typecheck + que el registro manual de migraciones (tenantMigrations.ts) no se
-  # desincronice de la carpeta packages/database/migrations/.
+  # Worker: typecheck, suite de tests (corre dentro de workerd con el pool de Cloudflare) y que el
+  # registro manual de migraciones (tenantMigrations.ts) no se desincronice de la carpeta
+  # packages/database/migrations/.
   worker:
-    name: Worker typecheck + registro de migraciones
+    name: Worker typecheck + tests + registro de migraciones
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +73,11 @@ jobs:
 
       - name: Typecheck del worker
         run: pnpm --filter tpv-api typecheck
+
+      # Los bindings remotos están desactivados en vitest.config.ts, así que no hacen falta
+      # credenciales de Cloudflare ni el .dev.vars local (que no se commitea).
+      - name: Tests del worker
+        run: pnpm --filter tpv-api test
 
       - name: Anti-drift del registro de migraciones del worker
         run: node scripts/check-migration-registry.mjs
