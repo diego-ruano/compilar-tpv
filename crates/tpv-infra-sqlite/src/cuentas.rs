@@ -450,6 +450,41 @@ impl CuentasRepository for SqliteCuentasRepository {
             .await
             .map_err(db_err)?;
 
+            // 2-bis) Y devolver el stock SUELTO que consumió el pago (lo que los lotes no
+            //    cubrieron, VR-04). Mismo trato que los lotes: se suma de vuelta y se borra la
+            //    traza. Sin esto, la parte suelta de una venta rápida anulada desaparecía del
+            //    inventario sin que nadie la hubiera vendido.
+            conn.execute(
+                r#"
+                UPDATE Productos
+                SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
+                    SELECT IFNULL(SUM(sc.Cantidad),0)
+                    FROM Suelto_Consumos sc
+                    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
+                    WHERE pd.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
+                )
+                WHERE ID_Producto IN (
+                    SELECT sc.ID_Producto
+                    FROM Suelto_Consumos sc
+                    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
+                    WHERE pd.ID_Pago = ?1
+                );
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+            conn.execute(
+                r#"
+                DELETE FROM Suelto_Consumos
+                WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
             // 3) Restar el gasto del cliente ligado a la comanda (vía Reservas), sin bajar de 0.
             let importe = (importe * 100.0).round() / 100.0;
             if importe > 0.0 && !id_comanda.is_empty() {
@@ -563,5 +598,129 @@ impl CuentasRepository for SqliteCuentasRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_devolucion_de_stock {
+    use super::*;
+    use crate::db::Db;
+    use libsql::Connection;
+    use tpv_application::ports::cuentas::CuentasRepository;
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!(
+            "{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_cuentas_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    async fn escalar(db: &Arc<Db>, sql: &str) -> f64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().expect("sin filas");
+        crate::mapping::v_f64(row.get_value(0).unwrap()).unwrap_or(0.0)
+    }
+
+    /// Una venta de barra de 5 unidades de un producto con stock SUELTO (sin lotes): quedan 5 de
+    /// los 10 que había, y el consumo queda anotado. Es el estado desde el que se anula.
+    const VENTA_DE_SUELTO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('prod', 'cat', 'Cafe', 1.2, 5);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'prod', 5, 1.2);",
+        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det', 'prod', 5);",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 6.0, 'TOTAL');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+    ];
+
+    /// El agujero que esto cierra: al anular, el stock que salió del contador suelto volvía a
+    /// nadie. Como no había traza de ese consumo, la cantidad se perdía para siempre y encima el
+    /// síntoma se confundía con una sobreventa (el contador admite negativos a propósito).
+    #[tokio::test]
+    async fn anular_un_pago_devuelve_el_stock_suelto() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_SUELTO).await;
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            5.0,
+            "punto de partida: se vendieron 5 de 10"
+        );
+
+        let repo = SqliteCuentasRepository::new(db.clone());
+        let borrado = repo.eliminar_pago("pago").await.unwrap();
+
+        assert!(borrado, "el pago existía");
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            10.0,
+            "las 5 unidades vuelven al contador"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Suelto_Consumos;").await,
+            0.0,
+            "y su traza se retira, para que una segunda anulación no las sume otra vez"
+        );
+    }
+
+    /// Un producto que NO usa stock suelto (Stock_Suelto NULL) no debe recibir nada al anular:
+    /// no se le descontó nada al vender.
+    #[tokio::test]
+    async fn un_producto_sin_stock_suelto_no_recibe_nada() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+                   VALUES ('prod', 'cat', 'Cafe', 1.2);",
+                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+                   VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+                   VALUES ('det', 'com', 'prod', 5, 1.2);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 6.0, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+            ],
+        )
+        .await;
+
+        let repo = SqliteCuentasRepository::new(db.clone());
+        repo.eliminar_pago("pago").await.unwrap();
+
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Productos WHERE ID_Producto='prod' AND Stock_Suelto IS NULL;"
+            )
+            .await,
+            1.0,
+            "sigue sin usar stock suelto"
+        );
     }
 }

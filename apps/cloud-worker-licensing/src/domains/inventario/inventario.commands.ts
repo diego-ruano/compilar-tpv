@@ -242,39 +242,65 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 	};
 }
 
-export function updateLote(idLote: string, input: UpdateLoteInput): BuiltCommand {
+// `stockActual` = Stock_Disponible previo (lo lee la ruta antes de aplicar), para el delta de
+// auditoría: editar un lote puede cambiar el disponible, y eso es un movimiento de stock como
+// cualquier otro. Sin anotarlo, la reconciliación (INV-06) no distinguiría una edición legítima de
+// un descuadre real.
+export function updateLote(
+	idLote: string,
+	input: UpdateLoteInput,
+	stockActual: number,
+): BuiltCommand {
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Lotes_Producto SET
+					ID_Producto = ?2,
+					Codigo_Lote = ?3,
+					Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
+					Caducidad = NULLIF(?5, ''),
+					Cantidad_Inicial = ?6,
+					Stock_Disponible = ?7,
+					Coste_Unitario = ?8,
+					ID_Proveedor = ?9,
+					Notas = ?10
+				WHERE ID_Lote = ?1;
+			`,
+			args: [
+				idLote,
+				input.id_producto,
+				input.codigo_lote.trim(),
+				cleanOrNull(input.fecha_entrada),
+				cleanOrNull(input.caducidad),
+				input.cantidad_inicial,
+				input.stock_disponible,
+				numOrNull(input.coste_unitario),
+				idOrNull(input.id_proveedor),
+				cleanOrNull(input.notas),
+			],
+		},
+	];
+
+	// Solo si cambió el disponible: renombrar el lote o cambiarle el proveedor no mueve stock.
+	if (Math.abs(input.stock_disponible - stockActual) > 1e-9) {
+		steps.push({
+			kind: "execute",
+			sql: SQL_INSERT_MOVIMIENTO,
+			args: [
+				crypto.randomUUID(),
+				idLote,
+				"AJUSTE",
+				input.stock_disponible - stockActual,
+				input.stock_disponible,
+				"Edición del lote",
+			],
+		});
+	}
+
 	return {
 		commandName: "inventario_update_lote",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: `
-					UPDATE Lotes_Producto SET
-						ID_Producto = ?2,
-						Codigo_Lote = ?3,
-						Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
-						Caducidad = NULLIF(?5, ''),
-						Cantidad_Inicial = ?6,
-						Stock_Disponible = ?7,
-						Coste_Unitario = ?8,
-						ID_Proveedor = ?9,
-						Notas = ?10
-					WHERE ID_Lote = ?1;
-				`,
-				args: [
-					idLote,
-					input.id_producto,
-					input.codigo_lote.trim(),
-					cleanOrNull(input.fecha_entrada),
-					cleanOrNull(input.caducidad),
-					input.cantidad_inicial,
-					input.stock_disponible,
-					numOrNull(input.coste_unitario),
-					idOrNull(input.id_proveedor),
-					cleanOrNull(input.notas),
-				],
-			},
-		},
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { ...input, id_lote: idLote },
 	};
 }

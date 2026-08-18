@@ -285,7 +285,10 @@ export type StockAllocation = {
 };
 
 // VR-04: cantidad que, tras agotar los lotes, se descuenta del stock suelto del producto.
-export type SueltoDecrement = { id_producto: string; take: number };
+// Lleva `id_detalle` (como `StockAllocation`) para poder anotar el consumo y devolverlo si el
+// pago se anula. Por eso NO se agrupa por producto: dos líneas del mismo producto son dos
+// consumos distintos, cada uno de su línea.
+export type SueltoDecrement = { id_producto: string; take: number; id_detalle?: string };
 
 export type CobroPlan =
 	| {
@@ -324,7 +327,7 @@ async function buildFefoAllocations(
 	};
 
 	const allocations: StockAllocation[] = [];
-	const sueltoMap = new Map<string, number>();
+	const suelto: SueltoDecrement[] = [];
 	for (const it of items) {
 		let remaining = it.cantidad;
 		for (const lot of await getLots(it.id_producto)) {
@@ -336,10 +339,9 @@ async function buildFefoAllocations(
 			remaining -= take;
 		}
 		if (remaining > 0) {
-			sueltoMap.set(it.id_producto, (sueltoMap.get(it.id_producto) ?? 0) + remaining);
+			suelto.push({ id_producto: it.id_producto, take: remaining, id_detalle: it.id_detalle });
 		}
 	}
-	const suelto = Array.from(sueltoMap, ([id_producto, take]) => ({ id_producto, take }));
 	return { allocations, suelto };
 }
 

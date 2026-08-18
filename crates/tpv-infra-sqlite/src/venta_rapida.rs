@@ -972,6 +972,30 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     )
                     .await
                     .map_err(db_err)?;
+
+                    // Y se anota, igual que se anota el consumo de lotes: sin esta traza, anular
+                    // el pago devolvía los lotes y perdía esta parte para siempre (no había de
+                    // dónde reconstruirla). El EXISTS repite la condición del UPDATE de arriba
+                    // para no apuntar un consumo que no llegó a producirse — devolverlo luego
+                    // sería inventar stock.
+                    db.execute(
+                        r#"
+                        INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
+                        SELECT ?1, ?2, ?3
+                        WHERE EXISTS (
+                            SELECT 1 FROM Productos
+                            WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
+                        )
+                        ON CONFLICT(ID_Detalle, ID_Producto) DO NOTHING;
+                        "#,
+                        vec![
+                            Value::Text(id_detalle.clone()),
+                            Value::Text(producto_id.clone()),
+                            Value::Real(remaining),
+                        ],
+                    )
+                    .await
+                    .map_err(db_err)?;
                 }
             }
 

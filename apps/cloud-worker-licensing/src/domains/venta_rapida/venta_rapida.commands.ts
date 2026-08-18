@@ -337,6 +337,25 @@ export function cobrarFraccionado(
 			`,
 			args: [s.id_producto, s.take],
 		});
+
+		// Y se anota, igual que el consumo de lotes: sin esta traza, anular el pago devolvía los
+		// lotes y perdía esta parte para siempre. El EXISTS repite la condición del UPDATE de
+		// arriba para no apuntar un consumo que no llegó a producirse.
+		if (s.id_detalle) {
+			steps.push({
+				kind: "execute",
+				sql: `
+					INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
+					SELECT ?1, ?2, ?3
+					WHERE EXISTS (
+						SELECT 1 FROM Productos
+						WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
+					)
+					ON CONFLICT(ID_Detalle, ID_Producto) DO NOTHING;
+				`,
+				args: [s.id_detalle, s.id_producto, s.take],
+			});
+		}
 	}
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });

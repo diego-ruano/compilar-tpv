@@ -325,12 +325,18 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
             if let Some(stock) = p.stock_actual {
                 if stock > 0.0 {
                     let codigo_lote = format!("INI-{}", id_producto);
-                    conn.execute(
+                    // El ID_Lote se genera aquí y va en el INSERT. Antes se omitía la columna y el
+                    // lote nacía con ID_Lote NULL (SQLite lo permite en una PK de tipo TEXT), lo que
+                    // lo dejaba INVISIBLE para el consumo FEFO —que descarta los lotes sin id— y su
+                    // stock no se descontaba nunca: la venta se iba entera al stock suelto. El
+                    // worker ya lo hacía bien, así que además eran dos comportamientos distintos.
+                    let id_lote = new_id();
+                    let insertadas = conn.execute(
                         r#"
                         INSERT OR IGNORE INTO Lotes_Producto
-                          (ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+                          (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
                         VALUES
-                          (?1, ?2, datetime('now','localtime'), NULL, ?3, ?4, NULL, ?5, ?6);
+                          (?7, ?1, ?2, datetime('now','localtime'), NULL, ?3, ?4, NULL, ?5, ?6);
                         "#,
                         vec![
                             Value::Text(id_producto.clone()),
@@ -339,10 +345,34 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                             Value::Real(stock),
                             Value::Text(p.id_proveedor.clone()),
                             Value::Text("Lote inicial creado desde Proveedores".into()),
+                            Value::Text(id_lote.clone()),
                         ],
                     )
                     .await
                     .map_err(db_err)?;
+
+                    // Auditoría (INV-01b): la entrada de stock deja su movimiento, igual que el
+                    // alta desde Inventario. Es lo que permite reconciliar después: sin el 'ALTA',
+                    // el lote no tiene origen contra el que cuadrar. Solo si el INSERT prosperó
+                    // (OR IGNORE: el lote pudo existir ya por el UNIQUE producto+código).
+                    if insertadas > 0 {
+                        conn.execute(
+                            r#"
+                            INSERT INTO Movimientos_Stock
+                              (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                            VALUES
+                              (?1, ?2, 'ALTA', ?3, ?3, ?4, NULL, datetime('now','localtime'));
+                            "#,
+                            vec![
+                                Value::Text(new_id()),
+                                Value::Text(id_lote),
+                                Value::Real(stock),
+                                Value::Text("Lote inicial creado desde Proveedores".into()),
+                            ],
+                        )
+                        .await
+                        .map_err(db_err)?;
+                    }
                 }
             }
 

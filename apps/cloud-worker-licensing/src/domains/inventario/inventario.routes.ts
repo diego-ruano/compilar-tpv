@@ -170,7 +170,10 @@ inventarioRoutes.put("/lotes/:id", async (c) => {
 	if (id == null) return badRequest(c, "id_lote inválido");
 	const p = await parseBody(c, S.updateLoteSchema);
 	if (!p.ok) return p.res;
-	await apply(c, cmd.updateLote(id, { ...p.data, id_lote: id }));
+	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
+	const info = await tenantQuery(c.env, c.get("tenantId"), (db) => q.getLoteStock(db, id));
+	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
+	await apply(c, cmd.updateLote(id, { ...p.data, id_lote: id }, info.stock_disponible));
 	return c.json({ ok: true });
 });
 

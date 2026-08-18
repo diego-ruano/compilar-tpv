@@ -164,6 +164,32 @@ export function deletePago(idPago: string): BuiltCommand {
 			sql: "DELETE FROM Lote_Consumos WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);",
 			args: [idPago],
 		},
+		// 1-bis) Y devolver el stock SUELTO que consumió el pago (lo que los lotes no cubrieron,
+		//    VR-04). Mismo trato que los lotes: se suma de vuelta y se borra la traza.
+		{
+			kind: "execute",
+			sql: `
+				UPDATE Productos
+				SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
+				    SELECT IFNULL(SUM(sc.Cantidad),0)
+				    FROM Suelto_Consumos sc
+				    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
+				    WHERE pd.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
+				)
+				WHERE ID_Producto IN (
+				    SELECT sc.ID_Producto
+				    FROM Suelto_Consumos sc
+				    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
+				    WHERE pd.ID_Pago = ?1
+				);
+			`,
+			args: [idPago],
+		},
+		{
+			kind: "execute",
+			sql: "DELETE FROM Suelto_Consumos WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);",
+			args: [idPago],
+		},
 		// 2) Restar el gasto del cliente ligado a la comanda del pago (sin bajar de 0).
 		{
 			kind: "execute",

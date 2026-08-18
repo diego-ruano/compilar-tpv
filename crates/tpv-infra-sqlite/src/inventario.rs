@@ -618,9 +618,35 @@ impl InventarioRepository for SqliteInventarioRepository {
         finish_tx(conn, res).await
     }
 
+    /// Edición de un lote. Si el editor cambia `Stock_Disponible`, eso es un movimiento de
+    /// stock como cualquier otro y queda anotado como 'AJUSTE': la tabla `Movimientos_Stock`
+    /// existe precisamente para que ningún cambio del disponible se haga "a pelo sin rastro"
+    /// (INV-01b). Sin esta anotación, la reconciliación (INV-06) no puede distinguir una edición
+    /// legítima de un descuadre real y avisaría en falso cada vez que alguien edita un lote.
     async fn update_lote(&self, l: LoteUpdate) -> AppResult<()> {
+        let id_mov = new_id();
+        let id_lote = l.id_lote.clone();
+        let nuevo_stock = l.stock_disponible;
+
         let db = self.db.write().await;
-        db.execute(
+        let conn = &db;
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+        let stock_previo = {
+            let mut rows = conn
+                .query(
+                    "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
+                    vec![Value::Text(id_lote.clone())],
+                )
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(r) => fl(r.get_value(0).map_err(db_err)?),
+                None => return Err(AppError::validation("Lote no encontrado")),
+            }
+        };
+
+        conn.execute(
                 r#"
                 UPDATE Lotes_Producto SET
                   ID_Producto = ?2,
@@ -652,7 +678,34 @@ impl InventarioRepository for SqliteInventarioRepository {
             )
             .await
             .map_err(db_err)?;
-        Ok(())
+
+            // Solo si cambió el disponible: renombrar el lote o cambiarle el proveedor no mueve
+            // stock. El delta es el físico (nuevo - previo), que es lo que hace que la suma de
+            // movimientos menos los consumos vuelva a dar el disponible.
+            if (nuevo_stock - stock_previo).abs() > 1e-9 {
+                conn.execute(
+                    r#"
+                    INSERT INTO Movimientos_Stock
+                      (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+                    VALUES
+                      (?1, ?2, 'AJUSTE', ?3, ?4, ?5, NULL, datetime('now','localtime'));
+                    "#,
+                    vec![
+                        Value::Text(id_mov),
+                        Value::Text(id_lote),
+                        Value::Real(nuevo_stock - stock_previo),
+                        Value::Real(nuevo_stock),
+                        Value::Text("Edición del lote".into()),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
+            Ok(())
+        }
+        .await;
+        finish_tx(conn, res).await
     }
 
     async fn ajustar_lote(&self, a: AjusteLote) -> AppResult<()> {

@@ -190,6 +190,7 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 	];
 
 	if (stock != null && stock > 0) {
+		const idLoteInicial = crypto.randomUUID();
 		steps.push({
 			kind: "execute",
 			sql: `
@@ -199,12 +200,32 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 					(?1, ?2, ?3, datetime('now','localtime'), NULL, ?4, ?5, NULL, ?6, ?7);
 			`,
 			args: [
-				crypto.randomUUID(),
+				idLoteInicial,
 				REF_ID,
 				{ $ref: "codigo_lote" },
 				stock,
 				stock,
 				cloudPayload.id_proveedor,
+				"Lote inicial creado desde Proveedores",
+			],
+		});
+
+		// Auditoría (INV-01b): la entrada de stock deja su movimiento, igual que el alta desde
+		// Inventario. Es el origen contra el que la reconciliación (INV-06) cuadra el lote.
+		// El INSERT de arriba es OR IGNORE, así que el movimiento se condiciona a que el lote
+		// exista con ESTE id (si ya había uno con el mismo producto+código, no se anota nada).
+		steps.push({
+			kind: "execute",
+			sql: `
+				INSERT INTO Movimientos_Stock
+					(ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Motivo, ID_Usuario, Fecha)
+				SELECT ?1, ?2, 'ALTA', ?3, ?3, ?4, NULL, datetime('now','localtime')
+				WHERE EXISTS (SELECT 1 FROM Lotes_Producto WHERE ID_Lote = ?2);
+			`,
+			args: [
+				crypto.randomUUID(),
+				idLoteInicial,
+				stock,
 				"Lote inicial creado desde Proveedores",
 			],
 		});
