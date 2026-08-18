@@ -17,13 +17,7 @@ ajustes, coherencia de datos, borrados).
 
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
-| INV-06 | 🔵 | Sin **reconciliación** `Stock_Disponible == Cantidad_Inicial − SUM(Lote_Consumos)` | (transversal stock) |
 | INV-07 | 🔵 | **Doble implementación** Rust/worker (parity risk) | `inventario.rs` ↔ `inventario.commands.ts` |
-
-### INV-06 🔵 Sin reconciliación de stock
-El cimiento ya existe (`Movimientos_Stock` registra cada alta y ajuste), pero no hay ningún chequeo
-que compare el stock declarado con el consumo real. Gemelo de **VR-06**; falta decidir dónde corre
-(¿tick en la Main? ¿informe bajo demanda?) y qué alerta genera.
 
 ### INV-07 🔵 Doble implementación
 Instancia de **ARCH-01**; misma infraestructura de tests que STAT-06 → ver

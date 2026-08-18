@@ -36,6 +36,11 @@ tiene que comportarse igual. Hoy están igualados a mano. **Arreglo:** tests de 
 golden) → ARCH-01, ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
 ### VR-06 🟡 Sin reconciliación de stock
+
+> **Parcialmente cubierto (INV-06 cerrado).** El job `reconciliacion` ya comprueba a diario el
+> invariante LOCAL de cada lote (`SUM(movimientos) − SUM(consumos)`) y avisa de lo que no cuadre.
+> Lo que sigue abierto es la comparación **Main ↔ nube**: si las dos copias divergen (una op en
+> cuarentena, por ejemplo), cada una cuadra consigo misma y nadie las contrasta entre sí.
 No hay ningún proceso que verifique `Stock_Disponible == Cantidad_Inicial − SUM(Lote_Consumos)`.
 Con el modelo actual (no se bloquea por falta de stock, el sobrante va al stock suelto), un
 descuadre solo se ve mirando los números a mano. Gemelo de **INV-06**; su cimiento (la tabla

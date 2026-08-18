@@ -39,6 +39,7 @@ pub mod mesas;
 pub mod notificaciones;
 pub mod pedidos_proveedor;
 pub mod proveedores;
+pub mod reconciliacion;
 pub mod reservas;
 pub mod stats;
 pub mod sync;

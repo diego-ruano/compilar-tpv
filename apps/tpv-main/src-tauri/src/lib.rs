@@ -24,6 +24,7 @@ use tpv_application::use_cases::pairing as uc_pairing;
 use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     avisos::AvisosScanRepository,
+    reconciliacion::ReconciliacionRepository,
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, jobs::JobsStateRepository,
     login::LoginRepository,
@@ -47,6 +48,7 @@ use tpv_contracts::errors::{AppErrorDto, ErrorCode};
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
+    reconciliacion::SqliteReconciliacionRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     jobs::SqliteJobsStateRepository,
@@ -552,6 +554,19 @@ impl AppState {
 
     /// Escáner de avisos (tareas vencidas / reservas próximas): solo Main (SQLite). En Handy no hay
     /// BD local → devuelve error y el job lo salta por su `Requiere`.
+    pub(crate) async fn reconciliacion_repo(
+        &self,
+    ) -> Result<Arc<dyn ReconciliacionRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (la reconciliación requiere modo Main)".to_string())?;
+        Ok(Arc::new(SqliteReconciliacionRepository::new(conn)) as Arc<dyn ReconciliacionRepository>)
+    }
+
     pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, String> {
         let conn = self
             .db

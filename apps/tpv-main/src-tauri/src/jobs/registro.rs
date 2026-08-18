@@ -19,6 +19,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use tpv_application::use_cases::avisos as uc_avisos;
+use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::sync as uc_sync;
 
@@ -38,6 +39,11 @@ const IMAGENES_INTERVAL_SECS: u64 = 15 * 60;
 /// Cada cuánto se busca PII del personal todavía en claro. No hace falta más: sólo hay trabajo
 /// la primera vez tras activar el cifrado (y tras un cambio de equipo que traiga filas viejas).
 const CIFRADO_PII_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+/// Cada cuánto se comprueba que los valores derivados (stock por lote, gasto por cliente)
+/// siguen cuadrando con lo que suman sus orígenes. Una vez al día basta: la deriva no aparece de
+/// golpe, y el chequeo recorre lotes y clientes enteros.
+const RECONCILIACION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
 /// Cada cuánto se poda `_Sync_Applied_Ops`. Los registros solo son purgables tras un TTL de 72 h,
 /// así que una pasada al día va sobrada.
@@ -92,6 +98,16 @@ pub(crate) fn catalogo() -> Vec<Job> {
             ejecutar: tarea(purga_sync),
         },
         Job {
+            nombre: "reconciliacion",
+            cada: Duration::from_secs(RECONCILIACION_INTERVAL_SECS),
+            // A los 10 min del arranque: fuera del pico de apertura, pero sin esperar al día
+            // siguiente en un equipo que se apaga cada noche (el motor mide el vencimiento en
+            // reloj de pared, así que un TPV apagado 12 h lo ejecuta al encender).
+            retardo_inicial: Duration::from_secs(10 * 60),
+            requiere: Requiere::MainConBd,
+            ejecutar: tarea(reconciliacion),
+        },
+        Job {
             nombre: "cifrado_pii",
             cada: Duration::from_secs(CIFRADO_PII_INTERVAL_SECS),
             // Al minuto del arranque: da tiempo a que la activación haya guardado la DEK,
@@ -139,6 +155,34 @@ async fn licencia(app: AppHandle) -> Result<(), String> {
     // La UI (AppBoot) escucha este evento para repintar el gate sin volver a preguntar.
     app.emit("license:changed", res)
         .map_err(|e| format!("no se pudo emitir license:changed: {e}"))?;
+    Ok(())
+}
+
+/// Reconciliación de los valores derivados (INV-06 / DB-14).
+///
+/// El stock de un lote y el gasto de un cliente se guardan ya sumados, así que un fallo parcial
+/// los deja mintiendo sin ningún síntoma: no hay error ni ticket que falte, el número simplemente
+/// se queda viejo. Esto los recalcula desde su origen; corrige el gasto (derivable al 100 %) y
+/// avisa del stock (donde no se puede saber si sobra en la columna o falta un movimiento).
+///
+/// Idempotente: recalcular dos veces da lo mismo, y el aviso lleva `clave_dedupe`.
+async fn reconciliacion(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.reconciliacion_repo().await?;
+    let notifier = state.notifier().await?;
+
+    let r = uc_reconciliacion::ejecutar(repo.as_ref(), notifier.as_ref()).await?;
+
+    // Que no sea silencioso en el log: si esto empieza a corregir clientes cada día, hay un bug
+    // aguas arriba y este job solo está tapando el síntoma.
+    if r.clientes_corregidos > 0 || r.lotes_descuadrados > 0 {
+        tracing::warn!(
+            target: "tpv::jobs",
+            clientes_corregidos = r.clientes_corregidos,
+            lotes_descuadrados = r.lotes_descuadrados,
+            "reconciliación: valores derivados fuera de cuadre"
+        );
+    }
     Ok(())
 }
 

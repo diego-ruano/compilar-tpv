@@ -30,13 +30,6 @@
 
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
-| DB-14 | 🔵 | `Clientes.Total_Gastado` denormalizado: riesgo de deriva si no se actualiza atómicamente | `0001_inicial.sql` (`Clientes`) |
-
-### DB-14 🔵 `Total_Gastado` denormalizado
-El gasto acumulado del cliente se mantiene como columna, actualizada en el cobro. Si esa
-actualización falla, el pago **commitea igualmente** (decisión de MESA-06: best-effort explícito con
-telemetría, porque el dato es reconciliable). Falta el reconciliador que lo recalcule desde `Pagos`
-y avise de la deriva. Misma familia que INV-06/VR-06 (chequeos de reconciliación).
 
 ---
 
