@@ -91,6 +91,19 @@ pub async fn ejecutar(
     })
 }
 
+/// Rehace el gasto acumulado de un cliente desde sus pagos. Acción manual: la lanza quien
+/// gestiona el negocio desde la ficha del cliente, normalmente tras recibir el aviso.
+pub async fn recalcular_gasto_de_cliente(
+    repo: &dyn ReconciliacionRepository,
+    id_cliente: &str,
+) -> AppResult<Option<f64>> {
+    let id = id_cliente.trim();
+    if id.is_empty() {
+        return Err(crate::error::AppError::validation("Falta el cliente"));
+    }
+    repo.recalcular_gasto(id).await
+}
+
 /// Emite el aviso, o lo cierra si la condición ya no se da (alguien lo arregló, o era una
 /// operación de sync que acabó aplicándose). Best-effort: que falle el notificador no aborta la
 /// otra mitad de la pasada.
@@ -178,6 +191,8 @@ mod tests {
     struct RepoFalso {
         lotes: Vec<LoteDescuadrado>,
         clientes: Vec<ClienteDescuadrado>,
+        /// Cuenta las correcciones: el job no debe provocar ninguna.
+        recalculos: Mutex<usize>,
     }
 
     #[async_trait]
@@ -187,6 +202,10 @@ mod tests {
         }
         async fn clientes_descuadrados(&self, _t: f64) -> AppResult<Vec<ClienteDescuadrado>> {
             Ok(self.clientes.clone())
+        }
+        async fn recalcular_gasto(&self, _id: &str) -> AppResult<Option<f64>> {
+            *self.recalculos.lock().unwrap() += 1;
+            Ok(Some(0.0))
         }
     }
 
@@ -262,9 +281,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn el_gasto_no_se_toca_nunca() {
-        // El repo del caso de uso no expone ninguna forma de escribir: la garantía es de tipos.
-        // Este test fija la intención por si alguien añade un método de corrección al puerto.
+    async fn el_job_no_corrige_el_gasto_de_nadie() {
+        // La corrección existe (`recalcular_gasto`), pero es una acción manual desde la ficha del
+        // cliente. Este test es la red que impide que alguien la enganche al job.
         let repo = RepoFalso {
             clientes: vec![cliente("Ana", 180.0, 220.0)],
             ..Default::default()
@@ -273,10 +292,8 @@ mod tests {
 
         let r = ejecutar(&repo, &notif).await.unwrap();
 
-        assert_eq!(
-            r.clientes_descuadrados, 1,
-            "se informa del descuadre, no se resuelve"
-        );
+        assert_eq!(r.clientes_descuadrados, 1, "se informa del descuadre");
+        assert_eq!(*repo.recalculos.lock().unwrap(), 0, "y no se corrige nada");
     }
 
     #[test]

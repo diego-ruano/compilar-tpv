@@ -117,6 +117,23 @@ export async function clientesCreateCliente(params: {
     });
 }
 
+/**
+ * Rehace el gasto acumulado del cliente desde sus pagos (DB-14) y devuelve el valor resultante,
+ * o `null` si el cliente ya no existe.
+ *
+ * El job de reconciliación solo AVISA de los descuadres; corregirlos es una decisión de quien
+ * lleva el negocio, y esta es la llamada que la ejecuta.
+ */
+export async function clientesRecalcularGasto(params: {
+    idCliente: string;
+}): Promise<number | null> {
+    const v = await invokeClient<number | null>("clientes_recalcular_gasto", {
+        args: { id_cliente: params.idCliente },
+    });
+
+    return v == null ? null : Number(v);
+}
+
 export async function clientesUpdateCliente(params: {
     idCliente: string;
     nombre: string;

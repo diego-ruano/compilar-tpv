@@ -63,4 +63,11 @@ pub trait ReconciliacionRepository: Send + Sync {
     /// lo cambie por su cuenta, de madrugada y sin decir nada, es peor que enseñarle el descuadre y
     /// dejarle decidir.
     async fn clientes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<ClienteDescuadrado>>;
+
+    /// Pone el `Total_Gastado` de un cliente en lo que suman sus pagos. Devuelve el valor
+    /// resultante, o `None` si el cliente no existe.
+    ///
+    /// Es la única escritura del puerto y **nunca la dispara el job**: la ejecuta una persona
+    /// desde la ficha del cliente, después de ver el descuadre.
+    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<f64>>;
 }

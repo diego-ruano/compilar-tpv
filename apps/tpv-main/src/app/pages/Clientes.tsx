@@ -29,6 +29,7 @@ import {
 } from "../../features/ClientsComponents/clientesApis";
 import {
   useClientesOverview,
+  useRecalcularGasto,
   useCreateCliente,
   useUpdateCliente,
 } from "../../features/ClientsComponents/clientesQueries";
@@ -98,6 +99,7 @@ export default function Clientes() {
   // Datos vía TanStack Query (caché): la lista se recachea por `ranking` y las
   // mutaciones (crear/editar) invalidan la clave para refrescarla automáticamente.
   const overview = useClientesOverview(ranking);
+  const recalcularGasto = useRecalcularGasto();
   const createCliente = useCreateCliente();
   const updateCliente = useUpdateCliente();
 
@@ -600,6 +602,26 @@ export default function Clientes() {
                   <span className="text-xs font-medium">Total gastado</span>
                 </div>
                 <p className="mt-1 text-2xl font-bold text-fg">{euro(clienteActivo.TotalGastado)}</p>
+
+                {/*
+                  DB-14: el gasto es una suma que se guarda aparte, así que puede quedarse vieja
+                  (un cobro que entra y falla al acreditarlo). El job de reconciliación avisa del
+                  descuadre pero NO lo corrige: la decisión es de quien lleva el negocio. Este es
+                  el botón que la ejecuta, y rehace el total desde los pagos del cliente.
+                */}
+                <button
+                  type="button"
+                  onClick={() => recalcularGasto.mutate({ idCliente: clienteActivo.ID_Cliente })}
+                  disabled={recalcularGasto.isPending}
+                  className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-fg-muted underline decoration-dotted underline-offset-2 hover:text-fg disabled:opacity-50"
+                  title="Rehace el total desde los cobros de este cliente"
+                >
+                  <RefreshCw
+                    className={`size-3 ${recalcularGasto.isPending ? "animate-spin" : ""}`}
+                    aria-hidden
+                  />
+                  {recalcularGasto.isPending ? "Recalculando…" : "Recalcular desde los cobros"}
+                </button>
               </div>
 
               <div className="rounded-xl border border-border bg-surface-2 p-4">

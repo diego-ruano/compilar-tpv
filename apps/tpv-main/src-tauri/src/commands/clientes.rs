@@ -7,6 +7,7 @@
 use tauri::State;
 
 use tpv_application::use_cases::clientes as uc;
+use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_contracts::clientes::{
     ClienteForm, ClienteIdArgs, ClienteOverview, ClientesOverviewArgs, CreateClienteInput,
     UpdateClienteInput,
@@ -22,6 +23,19 @@ pub async fn clientes_get_overview(
 ) -> Result<Vec<ClienteOverview>, AppErrorDto> {
     let repo = state.clientes_repo().await?;
     Ok(uc::listar_overview(repo.as_ref(), &args.ranking).await?)
+}
+
+/// Rehace el gasto acumulado de un cliente desde sus pagos (DB-14).
+///
+/// Acción MANUAL: el job de reconciliación solo avisa del descuadre; corregirlo es una decisión
+/// de quien lleva el negocio, y este comando es el botón que la ejecuta.
+#[tauri::command]
+pub async fn clientes_recalcular_gasto(
+    state: State<'_, AppState>,
+    args: ClienteIdArgs,
+) -> Result<Option<f64>, AppErrorDto> {
+    let repo = state.reconciliacion_repo().await?;
+    Ok(uc_reconciliacion::recalcular_gasto_de_cliente(repo.as_ref(), &args.id_cliente).await?)
 }
 
 #[tauri::command]

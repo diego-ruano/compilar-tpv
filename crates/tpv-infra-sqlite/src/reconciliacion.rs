@@ -13,7 +13,7 @@ use tpv_application::ports::reconciliacion::{
     ClienteDescuadrado, LoteDescuadrado, ReconciliacionRepository,
 };
 
-use crate::db::{Db, Reader};
+use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_f64, v_string};
 
 /// Tope de filas por pasada. Un descuadre masivo (BD corrupta, migración a medias) no debe
@@ -86,6 +86,21 @@ const SQL_CLIENTES: &str = r#"
     LIMIT ?2;
 "#;
 
+/// El gasto de UN cliente, por el mismo camino que `SQL_CLIENTES`: los pagos de las comandas
+/// que cuelgan de sus reservas.
+const SQL_GASTO_DE_UNO: &str = r#"
+    SELECT ROUND(COALESCE((
+        SELECT SUM(pg.Importe_Total)
+        FROM Pagos pg
+        JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
+        JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
+        WHERE r.ID_Cliente = c.ID_Cliente
+    ), 0), 2)
+    FROM Clientes c
+    WHERE c.ID_Cliente = ?1
+    LIMIT 1;
+"#;
+
 #[async_trait]
 impl ReconciliacionRepository for SqliteReconciliacionRepository {
     async fn lotes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<LoteDescuadrado>> {
@@ -131,6 +146,35 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
             });
         }
         Ok(out)
+    }
+
+    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<f64>> {
+        // Cálculo y escritura bajo el MISMO guard: entre leer los pagos y escribir el total no
+        // puede colarse un cobro que dejaría el valor obsoleto nada más nacer.
+        let w = self.db.write().await;
+
+        let calculado = {
+            let mut rows = w
+                .query(SQL_GASTO_DE_UNO, vec![Value::Text(id_cliente.to_string())])
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                // Sin fila no hay cliente: no se inventa una.
+                None => return Ok(None),
+            }
+        };
+
+        // Por `execute` (no por `raw`): es un dato de negocio y se replica a la nube como
+        // cualquier otra escritura de la Main.
+        w.execute(
+            "UPDATE Clientes SET Total_Gastado = ?2 WHERE ID_Cliente = ?1;",
+            vec![Value::Text(id_cliente.to_string()), Value::Real(calculado)],
+        )
+        .await
+        .map_err(db_err)?;
+
+        Ok(Some(calculado))
     }
 }
 
@@ -286,5 +330,26 @@ mod tests {
             0.0,
             "el job informa, no escribe"
         );
+
+        // La corrección es la acción manual, y esa sí escribe.
+        let nuevo = repo.recalcular_gasto("cli").await.unwrap();
+
+        assert_eq!(nuevo, Some(25.50));
+        assert_eq!(
+            escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
+            25.50
+        );
+        assert!(
+            repo.clientes_descuadrados(0.005).await.unwrap().is_empty(),
+            "y con eso deja de estar descuadrado"
+        );
+    }
+
+    #[tokio::test]
+    async fn recalcular_un_cliente_que_no_existe_no_inventa_nada() {
+        let (db, _dir) = db_temporal().await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        assert_eq!(repo.recalcular_gasto("fantasma").await.unwrap(), None);
     }
 }

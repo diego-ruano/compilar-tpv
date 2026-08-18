@@ -1619,6 +1619,7 @@ pub fn run() {
             commands::clientes::clientes_get_cliente_form,
             commands::clientes::clientes_create_cliente,
             commands::clientes::clientes_update_cliente,
+            commands::clientes::clientes_recalcular_gasto,
             // reservas (migrado a arquitectura hexagonal — commands/reservas.rs)
             commands::reservas::reservas_get_meta,
             commands::reservas::reservas_get_mes,

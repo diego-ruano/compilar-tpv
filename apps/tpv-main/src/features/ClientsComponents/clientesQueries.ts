@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   clientesCreateCliente,
   clientesGetOverview,
+  clientesRecalcularGasto,
   clientesUpdateCliente,
   type FiltroRanking,
 } from "./clientesApis";
@@ -48,5 +49,17 @@ export function useUpdateCliente() {
     onSuccess: (ok) => {
       if (ok) qc.invalidateQueries({ queryKey: clientesKeys.all });
     },
+  });
+}
+
+/**
+ * Rehace el gasto acumulado desde los pagos (DB-14). Invalida siempre: el valor mostrado cambia
+ * aunque el recálculo confirme el que ya había.
+ */
+export function useRecalcularGasto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: clientesRecalcularGasto,
+    onSuccess: () => qc.invalidateQueries({ queryKey: clientesKeys.all }),
   });
 }
