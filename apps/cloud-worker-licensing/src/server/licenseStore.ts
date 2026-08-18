@@ -124,6 +124,37 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
     `,
 	);
 
+	// LIC-07: historial de cobros. `licenses` solo guarda el ÚLTIMO (`attachStripeSession`
+	// sobrescribe en cada renovación), así que sin esto un reembolso no se puede atribuir: no hay
+	// forma de saber si el cargo devuelto fue el alta o una renovación, ni cuántos meses aportó.
+	// `reversed_*` deja constancia de la devolución y hace idempotente su aplicación.
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS license_payments (
+      payment_id                 TEXT PRIMARY KEY,
+      license_id                 TEXT NOT NULL,
+      kind                       TEXT NOT NULL,
+      term_months                INTEGER NOT NULL,
+      stripe_checkout_session_id TEXT,
+      stripe_payment_intent_id   TEXT,
+      reversed_at_ms             INTEGER,
+      reversed_reason            TEXT,
+      reversed_event_uid         TEXT,
+      at_ms                      INTEGER NOT NULL
+    );
+    `,
+	);
+	await exec(
+		db,
+		`CREATE INDEX IF NOT EXISTS ix_license_payments_intent
+       ON license_payments (stripe_payment_intent_id);`,
+	);
+	await exec(
+		db,
+		`CREATE INDEX IF NOT EXISTS ix_license_payments_license ON license_payments (license_id);`,
+	);
+
 	// Datos del negocio en `tenants` (corrige el bug #5). ALTER no admite IF NOT EXISTS: si la
 	// columna ya está, Turso lanza "duplicate column name" y lo ignoramos.
 	// TRAB-03: DEK del tenant para cifrar la PII del personal (DNI/IBAN/nº SS). Se guarda
@@ -502,6 +533,188 @@ export async function revokeLicense(db: Client, licenseId: string): Promise<void
 }
 
 /**
+ * LIC-07: deshace una revocación. Solo la usa el cierre de una disputa GANADA: el dinero vuelve,
+ * así que cortar el servicio deja de tener motivo.
+ *
+ * El estado al que regresa depende de si la licencia llegó a activarse: una que nunca se activó
+ * vuelve a `issued` (su reloj no había arrancado) y una activada a `active`. Si además caducó
+ * mientras tanto, `computeLicenseState` ya lo resuelve por `expires_at_ms`: aquí no se toca.
+ */
+export async function reactivateLicense(db: Client, licenseId: string): Promise<void> {
+	const now = Date.now();
+	await exec(
+		db,
+		`
+    UPDATE licenses
+    SET status = CASE WHEN activated_at_ms IS NULL THEN 'issued' ELSE 'active' END,
+        disabled = 0,
+        updated_at_ms = ?
+    WHERE license_id = ? AND status = 'revoked';
+    `,
+		[now, licenseId],
+	);
+}
+
+/**
+ * LIC-07: resta meses a la caducidad (reembolso de una renovación). Es el inverso de
+ * `extendLicense`: se quitan los meses que aportó ese cobro y la licencia vuelve a la fecha que
+ * tenía antes, sin tocar el periodo que el cliente sí pagó y usó.
+ *
+ * Puede dejar `expires_at_ms` en el pasado (renovación anticipada y devuelta): eso es
+ * exactamente "caducada", y el gate ya lo interpreta así.
+ */
+export async function shortenLicense(
+	db: Client,
+	licenseId: string,
+	months: number,
+): Promise<number | null> {
+	const lic = await getLicenseById(db, licenseId);
+	if (!lic || lic.expires_at_ms == null) return null;
+
+	const expiresAt = addMonths(lic.expires_at_ms, -months);
+	await exec(
+		db,
+		`UPDATE licenses SET expires_at_ms=?, updated_at_ms=? WHERE license_id=?;`,
+		[expiresAt, Date.now(), licenseId],
+	);
+
+	return expiresAt;
+}
+
+export type LicensePaymentKind = "issue" | "renewal";
+
+export type LicensePaymentRow = {
+	payment_id: string;
+	license_id: string;
+	kind: LicensePaymentKind;
+	term_months: number;
+	stripe_checkout_session_id: string | null;
+	stripe_payment_intent_id: string | null;
+	reversed_at_ms: number | null;
+	reversed_reason: string | null;
+	reversed_event_uid: string | null;
+	at_ms: number;
+};
+
+/** LIC-07: registra un cobro cumplido (alta o renovación) para poder revertirlo después. */
+export async function recordLicensePayment(
+	db: Client,
+	args: {
+		licenseId: string;
+		kind: LicensePaymentKind;
+		termMonths: number;
+		sessionId: string | null;
+		paymentIntentId: string | null;
+	},
+): Promise<void> {
+	await exec(
+		db,
+		`
+    INSERT INTO license_payments
+      (payment_id, license_id, kind, term_months, stripe_checkout_session_id,
+       stripe_payment_intent_id, at_ms)
+    VALUES (?, ?, ?, ?, ?, ?, ?);
+    `,
+		[
+			crypto.randomUUID(),
+			args.licenseId,
+			args.kind,
+			args.termMonths,
+			args.sessionId,
+			args.paymentIntentId,
+			Date.now(),
+		],
+	);
+}
+
+/** LIC-07: el cobro al que apunta un cargo de Stripe (por su PaymentIntent). */
+export async function getLicensePaymentByIntent(
+	db: Client,
+	paymentIntentId: string,
+): Promise<LicensePaymentRow | null> {
+	const r = await exec(
+		db,
+		`
+    SELECT * FROM license_payments
+    WHERE stripe_payment_intent_id = ?
+    ORDER BY at_ms DESC
+    LIMIT 1;
+    `,
+		[paymentIntentId],
+	);
+	return (r.rows?.[0] as unknown as LicensePaymentRow) ?? null;
+}
+
+/** LIC-07: marca un cobro como devuelto. Impide que dos eventos de Stripe lo reviertan dos veces. */
+export async function markLicensePaymentReversed(
+	db: Client,
+	paymentId: string,
+	args: { reason: string; eventUid: string },
+): Promise<void> {
+	await exec(
+		db,
+		`
+    UPDATE license_payments
+    SET reversed_at_ms=?, reversed_reason=?, reversed_event_uid=?
+    WHERE payment_id=? AND reversed_at_ms IS NULL;
+    `,
+		[Date.now(), args.reason, args.eventUid, paymentId],
+	);
+}
+
+/**
+ * LIC-07: deshace la marca de devolución (disputa ganada). Sin esto el cobro quedaría marcado
+ * como revertido para siempre y un reembolso posterior del mismo cargo no haría nada.
+ */
+export async function clearLicensePaymentReversal(
+	db: Client,
+	paymentId: string,
+): Promise<void> {
+	await exec(
+		db,
+		`
+    UPDATE license_payments
+    SET reversed_at_ms=NULL, reversed_reason=NULL, reversed_event_uid=NULL
+    WHERE payment_id=?;
+    `,
+		[paymentId],
+	);
+}
+
+/**
+ * LIC-07: la única licencia de un cliente de Stripe, o `null` si no hay exactamente una.
+ *
+ * Último recurso para atribuir un reembolso cuyo cargo no está en `license_payments` (una
+ * licencia anterior a esa tabla). Se exige unicidad a propósito: revocar a ojo la licencia
+ * equivocada de un cliente con varias sería peor que no hacer nada y avisar.
+ */
+export async function getSoleLicenseByStripeCustomer(
+	db: Client,
+	stripeCustomerId: string,
+): Promise<LicenseRow | null> {
+	const r = await exec(
+		db,
+		`SELECT * FROM licenses WHERE stripe_customer_id = ? LIMIT 2;`,
+		[stripeCustomerId],
+	);
+	const filas = (r.rows ?? []) as unknown as LicenseRow[];
+	return filas.length === 1 ? filas[0] : null;
+}
+
+/** LIC-07: la licencia sellada con ese PaymentIntent (el último cobro que la tocó). */
+export async function getLicenseByStripeIntent(
+	db: Client,
+	paymentIntentId: string,
+): Promise<LicenseRow | null> {
+	const r = await exec(
+		db,
+		`SELECT * FROM licenses WHERE stripe_payment_intent_id = ? LIMIT 1;`,
+		[paymentIntentId],
+	);
+	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
+}
+
+/**
  * Marca que el correo con la clave se entregó. Se llama SOLO si el envío devolvió `true`; si falla,
  * la columna queda NULL y ese cliente aparece como "pagó y no tiene su clave" (reenviable con
  * `pnpm license:resend`).
@@ -856,7 +1069,7 @@ export async function markWebhookProcessed(
 
 export async function auditAdmin(
 	db: Client,
-	action: "issue" | "revoke" | "extend" | "resend",
+	action: "issue" | "revoke" | "extend" | "resend" | "refund" | "dispute" | "reactivate",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

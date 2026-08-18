@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from "vitest";
 
+import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
 import { bytesToB64 } from "../src/server/utils/base64";
@@ -56,19 +57,6 @@ const ESQUEMA = [
 		created_at_ms INTEGER
 	);`,
 ];
-
-/** Adaptador de `Client` (libsql) sobre el SQLite del DO. Solo `execute`, que es lo que usa el claim. */
-function clienteSobre(sql: any) {
-	return {
-		async execute(entrada: any) {
-			const texto = typeof entrada === "string" ? entrada : entrada.sql;
-			const args = typeof entrada === "string" ? [] : (entrada.args ?? []);
-			const cursor = sql.exec(texto, ...args);
-			const rows = cursor.toArray();
-			return { rows, rowsAffected: cursor.rowsWritten ?? 0 };
-		},
-	} as any;
-}
 
 function peticion(cuerpo: Record<string, unknown>, ip: string): Request {
 	return new Request("https://api.test/v1/pair/claim", {

@@ -273,6 +273,25 @@ modelo “compra la clave y actívala cuando montes el TPV”.
   Al activarla en un TPV que ya tiene licencia, `activate` **suma** el término al `expires_at_ms`
   vigente (o desde `now` si ya venció).
 
+**Reembolso y chargeback (LIC-07):** un cobro puede deshacerse, así que el webhook también
+escucha `charge.refunded`, `charge.dispute.created` y `charge.dispute.closed`. La regla depende de
+**qué** se devolvió, y eso lo sabe `license_payments` (una fila por cobro cumplido; `licenses` solo
+recuerda el último, porque `attachStripeSession` lo sobrescribe en cada renovación):
+
+- **Alta devuelta** → licencia **revocada**.
+- **Renovación devuelta** → se **restan** los meses que aportó; el periodo anterior no se toca.
+- **Reembolso parcial** → no altera la licencia (es un ajuste): queda en `admin_audit`.
+- **Disputa abierta** → se revierte ya, que el dinero ya no está. **Ganada** → se deshace la
+  reversión. **Perdida** → se queda revertida.
+- Si el cargo no se puede imputar a una licencia, **no se toca nada** y se audita: revocar a ojo la
+  de otro cliente sería peor.
+
+La auditoría anota `dias_activada`, que es lo que permite ver de un vistazo si un reembolso se
+emitió fuera de la política comercial (devolver solo sin activar o dentro de la primera semana).
+
+⚠️ **Los tres eventos hay que suscribirlos en el endpoint de webhook del Dashboard de Stripe.** El
+worker solo recibe lo que esté marcado allí: sin eso, este código no llega a ejecutarse.
+
 ### 4.2 `webhook_events` (idempotencia) — se conserva y generaliza
 
 La tabla `webhook_events` (hoy usada para Lemon) se **reutiliza** para Stripe: guarda `event_uid`
