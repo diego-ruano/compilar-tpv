@@ -13,8 +13,9 @@
 // `loadDeviceFromCentral` (que va a la BD central) se sustituye en la instancia para poder
 // controlar qué dice el registro del dispositivo. Todo lo demás es el código real.
 
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, beforeAll } from "vitest";
+
+import { enElHub } from "./helpers/hub";
 
 import { bytesToB64 } from "../src/server/utils/base64";
 import type { HelloSignedMsg, Role } from "../src/durableObjects/tenantHub.types";
@@ -30,7 +31,9 @@ let PUB: string;
 let PUB_OTRA: string;
 
 async function pubB64(kp: CryptoKeyPair): Promise<string> {
-	const raw = await crypto.subtle.exportKey("raw", kp.publicKey);
+	// `exportKey` está tipado como `ArrayBuffer | JsonWebKey` (una sola firma, sin sobrecarga
+	// por formato): con "raw" siempre es lo primero.
+	const raw = (await crypto.subtle.exportKey("raw", kp.publicKey)) as ArrayBuffer;
 	return bytesToB64(new Uint8Array(raw));
 }
 
@@ -75,13 +78,10 @@ async function verificar(params: {
 	tenantId?: string;
 	deviceId?: string;
 }) {
-	const ns = (env as any).TenantHub as DurableObjectNamespace;
-	const stub = ns.get(ns.idFromName("tenant-hello-test"));
-
 	// El error se captura DENTRO del Durable Object: si se deja escapar, el runtime lo
 	// contabiliza como fallo no gestionado aunque el test lo espere, y la suite acaba en rojo
 	// con todos los casos en verde.
-	const res: any = await runInDurableObject(stub, async (hub: any) => {
+	const res: any = await enElHub("tenant-hello-test", async (hub) => {
 		hub.loadDeviceFromCentral = async () => params.central;
 		try {
 			return {
@@ -426,9 +426,7 @@ describe("verifyHelloSigned · estado del dispositivo", () => {
 
 describe("issueChallenge", () => {
 	async function emitir() {
-		const ns = (env as any).TenantHub as DurableObjectNamespace;
-		const stub = ns.get(ns.idFromName("tenant-hello-test"));
-		return runInDurableObject(stub, (hub: any) => hub.issueChallenge());
+		return enElHub("tenant-hello-test", (hub) => hub.issueChallenge());
 	}
 
 	it("emite un nonce de 32 bytes", async () => {

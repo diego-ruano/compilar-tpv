@@ -13,8 +13,9 @@
 // Es `private`, así que se llama a través de la instancia real del DO. Eso obliga a levantar
 // el Durable Object, pero prueba exactamente el código que corre en producción.
 
-import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
+
+import { enElHub } from "./helpers/hub";
 
 import type { InternalApplyCommand } from "../src/durableObjects/tenantHub.types";
 
@@ -26,11 +27,9 @@ type Batch = {
 };
 
 async function build(cmd: InternalApplyCommand): Promise<Batch> {
-	const ns = (env as any).TenantHub as DurableObjectNamespace;
-	const stub = ns.get(ns.idFromName("tenant-apply-test"));
 	// El error se captura DENTRO del DO: dejarlo escapar lo contabiliza como fallo no
 	// gestionado aunque el test lo espere.
-	const res: any = await runInDurableObject(stub, (hub: any) => {
+	const res: any = await enElHub("tenant-apply-test", (hub) => {
 		try {
 			return { ok: true, out: hub.buildApplyBatch(cmd) };
 		} catch (e: any) {
