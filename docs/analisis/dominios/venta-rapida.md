@@ -50,9 +50,30 @@ diferencia previa no se corrige sola: se arrastra. Y si la resta deja el lote po
 la Main, choca con el `CHECK (Stock_Disponible >= 0)` y la operación acaba en cuarentena
 (`_Sync_Failed`) — a partir de ahí la divergencia ya no es de un número, es de una venta entera.
 
-**Arreglo:** un contraste periódico de sumas por lote (o un hash por tabla) entre Main y nube, que
-señale las filas divergentes. Barato si se hace por agregados; el detalle solo hace falta cuando el
-agregado no cuadra.
+#### Con cuál de las dos copias nos quedamos
+
+Con la **Main**: es la escritora única y la nube es su réplica. Pero hay una excepción que decide el
+orden del arreglo — si la divergencia viene de una **operación en cuarentena**, la nube tiene una
+venta que la Main nunca aplicó, y quedarse con la Main **la borraría**.
+
+| Caso | Verdad |
+|------|--------|
+| Los números difieren sin más | La Main |
+| Hay operaciones en cuarentena | La nube **para esas operaciones**: hay que reaplicarlas, no sobrescribirlas |
+
+#### Arreglo, en este orden (importa)
+
+1. **Poder reintentar lo que quedó en cuarentena.** Hoy no se puede: `quarantine()` marca la op como
+   aplicada en `_Sync_Applied_Ops` y avanza el checkpoint, así que el gate de idempotencia la salta
+   para siempre. El panel de Conectividad la cuenta pero no dice **cuál** es ni deja hacer nada con
+   ella. Hace falta: listar las ops en cuarentena (`_Sync_Failed` ya guarda `Statements_Json` y
+   `Last_Error`), y un comando que borre su marca de aplicada y la vuelva a encolar.
+2. **Contraste de sumas Main ↔ nube.** Periódico y por agregados —suma de stock por producto, o un
+   hash por tabla—, bajando al detalle solo cuando el agregado no cuadre. Es barato porque no mueve
+   filas, solo totales.
+
+**Al revés no vale:** el contraste diría "no cuadran" y la única herramienta a mano sería la que
+pierde datos.
 
 ### VR-07 🔵 Round-trips por venta
 El consumo FEFO lee los lotes del producto y emite dos escrituras por lote dentro de la

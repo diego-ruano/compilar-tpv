@@ -9,7 +9,7 @@
 > bajó de 28 a 24 al cerrarse ARCH-02, ARCH-03, ARCH-05 y TRAB-03, y el 2026-08-18 a 22 al cerrarse
 > INV-06 y DB-14 con el job de reconciliación), y son lo único
 > que contienen estas fichas. De esos 22, **11 son el mismo trabajo** (la familia `-parity`, ver la
-> nota del recuento) y **5 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
+> nota del recuento) y **6 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
 > arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
 > aparece, está resuelto.
 
@@ -68,7 +68,7 @@
 |--------|----------|--------|
 | T5 Arquitectura | 1 | ARCH-01 🟠 |
 | D1 Mesas | 2 | MESA-11 🟡 · MESA-14 🔵 |
-| D2 Venta rápida | 3 | VR-05 🟡 · VR-06 🟡 · VR-07 🔵 |
+| D2 Venta rápida | 3 | VR-05 🟡 · VR-06 🟡 *(en el [BACKLOG](BACKLOG.md), con plan)* · VR-07 🔵 |
 | D4 Inventario | 1 | INV-07 🔵 |
 | D6 Reservas | 2 | RES-05 🔵 · RES-07 🔵 |
 | D8 Tareas | 2 | TAR-04 🔵 · TAR-05 🔵 |
