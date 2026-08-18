@@ -118,8 +118,10 @@ export async function handlePairClaim(
 
 		// Ruta dual: el `pairSecret` es OPCIONAL.
 		//  - QR/URI  → llega el secret → se verifica abajo (prueba criptográfica de posesión).
-		//  - Solo código → sin secret → se omite la verificación y la seguridad recae en la
-		//    aprobación manual del Main (+ el throttle por IP de arriba contra enumeración).
+		//  - Solo código → sin secret → se omite la verificación y la seguridad recae en tres
+		//    cosas: el throttle por IP de arriba (enumeración), que el claim se adjudique al
+		//    PRIMERO y no se pueda pisar (FABLE-D, más abajo), y la aprobación manual en la Main,
+		//    donde el dueño compara la huella del reclamante con la que muestra el Handy.
 
 		if (!deviceId) {
 			return json({ ok: false, error: "missing_deviceId" }, 400, req);
@@ -218,6 +220,11 @@ export async function handlePairClaim(
 			}
 		}
 
+		// FABLE-D: el claim se fija al PRIMER reclamante. Sin la condición sobre
+		// `claimed_by_device_id`, un segundo dispositivo podía pisar el claim del primero mientras
+		// el código siguiera pendiente y acabar siendo el que el dueño aprueba. Se exceptúa al
+		// propio reclamante para que un reintento suyo (app reiniciada, respuesta perdida) siga
+		// siendo idempotente en vez de dejarle fuera de su propio emparejamiento.
 		const claimRes = await dbCentral.execute({
 			sql: `
 				UPDATE pair_requests
@@ -231,7 +238,8 @@ export async function handlePairClaim(
 				WHERE pair_code=?
 				  AND used_at_ms IS NULL
 				  AND status='pending'
-				  AND expires_at_ms >= ?;
+				  AND expires_at_ms >= ?
+				  AND (claimed_by_device_id IS NULL OR claimed_by_device_id = ?);
 			`,
 			args: [
 				now,
@@ -241,10 +249,26 @@ export async function handlePairClaim(
 				now,
 				pairCode,
 				now,
+				deviceId,
 			],
 		});
 
 		if (rowsAffected(claimRes) <= 0) {
+			// FABLE-D: un claim rechazado (código ya reclamado por otro dispositivo, o estado
+			// inválido) cuenta como intento. Antes solo se contaban los secretos inválidos, así
+			// que por la ruta de "solo código" —donde no hay secreto que fallar— el tope de 8
+			// intentos de arriba no llegaba a activarse nunca y un código admitía martilleo
+			// indefinido hasta expirar.
+			await dbCentral.execute({
+				sql: `
+					UPDATE pair_requests
+					SET attempts = attempts + 1,
+					    last_attempt_at_ms=?
+					WHERE pair_code=?;
+				`,
+				args: [now, pairCode],
+			});
+
 			return json(
 				{ ok: false, error: "pair_claim_race_or_invalid_state" },
 				409,

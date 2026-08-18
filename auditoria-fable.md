@@ -33,7 +33,6 @@ Los hallazgos son, en su mayoría, de **endurecimiento** (hardening) y **defensa
 | # | Severidad | Título | OWASP |
 |---|-----------|--------|-------|
 | **B** | 🟠 Media | Fuga de stack traces / mensajes internos en respuestas de error | A05 / A09 |
-| **D** | 🟡 Baja | Pairing "solo código" permite reclamar sin secreto (carrera de claim) | A07 Auth |
 | **E** | 🟡 Baja | Sin anti-replay (nonce) en el device-proof (la firma del cuerpo ya está hecha) | A07 |
 
 ---
@@ -75,31 +74,6 @@ export function serverError(req: Request, error: string) {
 
 Mantener el `console.error(e?.stack)` que ya existe en algunos handlers (visible en `wrangler tail`)
 es correcto; lo que hay que quitar es el `details` en la respuesta HTTP.
-
----
-
-### 🟡 D — Pairing "solo código" permite reclamar sin secreto (carrera de claim)
-
-**OWASP:** A07 Identification & Authentication Failures.
-**Ubicación:** [apps/cloud-worker-licensing/src/server/endpoints/rest/pairing/pairClaim.ts:200-253](apps/cloud-worker-licensing/src/server/endpoints/rest/pairing/pairClaim.ts#L200-L253)
-
-**Descripción.** Cuando el body **no** trae `pairSecret`, se omite la verificación criptográfica y el
-claim se realiza igual (registra `claimed_by_device_id`/pubkey). El estado permanece `pending`, por lo
-que un **segundo** reclamante puede sobrescribir el claim del primero. La protección es: throttle por
-IP (30/60 s), TTL de 10 min del código, y **aprobación manual** en la Main. El espacio de códigos es
-10⁶ (6 dígitos).
-
-**Impacto.** Un atacante que adivine/observe un código pendiente puede reclamarlo (o pisar el claim
-legítimo) y, si el operador de la Main aprueba sin fijarse, emparejar un dispositivo no deseado. El
-throttle es por-IP (evadible con varias IPs), pero la aprobación manual y el TTL corto acotan mucho el
-riesgo.
-
-**Solución.**
-- Preferir siempre la ruta con secreto (QR/URI); tratar la ruta "solo código" como excepción.
-- En la UI de aprobación de la Main, mostrar nombre/fingerprint del dispositivo que reclamó para que
-  el operador detecte suplantaciones.
-- Considerar un cap **global** de intentos (además del por-IP) y/o un código más largo o TTL más corto.
-- Fijar el claim al **primer** reclamante (no permitir sobrescritura mientras siga `pending`).
 
 ---
 
