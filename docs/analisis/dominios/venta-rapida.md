@@ -35,16 +35,28 @@ Mismo problema estructural que MESA-11: el reparto FEFO está codificado dos vec
 tiene que comportarse igual. Hoy están igualados a mano. **Arreglo:** tests de contrato (SQL
 golden) → ARCH-01, ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
-### VR-06 🟡 Sin reconciliación de stock
+### VR-06 🟡 Sin reconciliación de stock entre Main y nube
 
-> **Parcialmente cubierto (INV-06 cerrado).** El job `reconciliacion` ya comprueba a diario el
-> invariante LOCAL de cada lote (`SUM(movimientos) − SUM(consumos)`) y avisa de lo que no cuadre.
-> Lo que sigue abierto es la comparación **Main ↔ nube**: si las dos copias divergen (una op en
-> cuarentena, por ejemplo), cada una cuadra consigo misma y nadie las contrasta entre sí.
-No hay ningún proceso que verifique `Stock_Disponible == Cantidad_Inicial − SUM(Lote_Consumos)`.
-Con el modelo actual (no se bloquea por falta de stock, el sobrante va al stock suelto), un
-descuadre solo se ve mirando los números a mano. Gemelo de **INV-06**; su cimiento (la tabla
-`Lote_Consumos` y `Movimientos_Stock`) ya existe. Falta decidir dónde corre y qué alerta.
+El chequeo **local** ya existe (INV-06, cerrado): el job `reconciliacion` cuadra a diario cada lote
+contra su propio historial (`SUM(Movimientos_Stock.Delta) − SUM(Lote_Consumos.Cantidad)`) y avisa.
+
+Lo que queda abierto es **contrastar las dos copias entre sí**. Hoy nada lo hace: el canal de sync
+(`/v1/sync/changes`, `sync.routes.ts`) reproduce el log de operaciones desde un número de secuencia,
+no compara estados. Cada lado puede cuadrar consigo mismo y tener números distintos del otro.
+
+**Cómo llegan a divergir.** El reparto FEFO de una venta de la Handy se calcula contra el stock de
+la **nube** y se replica a la Main como deltas relativos (`Stock_Disponible - ?`), así que una
+diferencia previa no se corrige sola: se arrastra. Y si la resta deja el lote por debajo de cero en
+la Main, choca con el `CHECK (Stock_Disponible >= 0)` y la operación acaba en cuarentena
+(`_Sync_Failed`) — a partir de ahí la divergencia ya no es de un número, es de una venta entera.
+
+**Ojo con la interacción:** la reconciliación local corrige `Total_Gastado` con un valor
+**absoluto** que se replica. Si la Main se perdió un pago (op en cuarentena), arrastra a la nube a
+su versión, que es la incompleta.
+
+**Arreglo:** un contraste periódico de sumas por lote (o un hash por tabla) entre Main y nube, que
+señale las filas divergentes. Barato si se hace por agregados; el detalle solo hace falta cuando el
+agregado no cuadra.
 
 ### VR-07 🔵 Round-trips por venta
 El consumo FEFO lee los lotes del producto y emite dos escrituras por lote dentro de la
