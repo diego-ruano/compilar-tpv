@@ -50,10 +50,6 @@ diferencia previa no se corrige sola: se arrastra. Y si la resta deja el lote po
 la Main, choca con el `CHECK (Stock_Disponible >= 0)` y la operación acaba en cuarentena
 (`_Sync_Failed`) — a partir de ahí la divergencia ya no es de un número, es de una venta entera.
 
-**Ojo con la interacción:** la reconciliación local corrige `Total_Gastado` con un valor
-**absoluto** que se replica. Si la Main se perdió un pago (op en cuarentena), arrastra a la nube a
-su versión, que es la incompleta.
-
 **Arreglo:** un contraste periódico de sumas por lote (o un hash por tabla) entre Main y nube, que
 señale las filas divergentes. Barato si se hace por agregados; el detalle solo hace falta cuando el
 agregado no cuadra.

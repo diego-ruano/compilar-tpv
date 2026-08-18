@@ -30,13 +30,21 @@ impl LoteDescuadrado {
     }
 }
 
-/// Cliente cuyo `Total_Gastado` se ha corregido al valor que suman sus pagos.
+/// Cliente cuyo `Total_Gastado` no coincide con lo que suman sus pagos.
 #[derive(Debug, Clone)]
-pub struct ClienteCorregido {
+pub struct ClienteDescuadrado {
     pub id_cliente: String,
     pub nombre: String,
-    pub antes: f64,
-    pub despues: f64,
+    /// Lo que dice la ficha del cliente.
+    pub guardado: f64,
+    /// Lo que suman sus pagos.
+    pub calculado: f64,
+}
+
+impl ClienteDescuadrado {
+    pub fn desviacion(&self) -> f64 {
+        self.guardado - self.calculado
+    }
 }
 
 #[async_trait]
@@ -48,11 +56,11 @@ pub trait ReconciliacionRepository: Send + Sync {
     /// números es el bueno. Machacar la columna podría borrar stock real de un almacén.
     async fn lotes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<LoteDescuadrado>>;
 
-    /// Recalcula `Clientes.Total_Gastado` desde los pagos y corrige los que se desvíen más de
-    /// `tolerancia`. Devuelve los corregidos.
+    /// Clientes cuyo `Total_Gastado` se desvía más de `tolerancia` de lo que suman sus pagos.
     ///
-    /// Este **sí** se corrige solo: es una cifra íntegramente derivable de `Pagos`, así que el
-    /// valor recalculado es por definición el correcto.
-    async fn corregir_gasto_de_clientes(&self, tolerancia: f64)
-        -> AppResult<Vec<ClienteCorregido>>;
+    /// **Solo lee.** Aunque el valor sea derivable de `Pagos` y se podría corregir solo, el gasto
+    /// acumulado de un cliente es un dato que el dueño del negocio mira y usa: que la aplicación se
+    /// lo cambie por su cuenta, de madrugada y sin decir nada, es peor que enseñarle el descuadre y
+    /// dejarle decidir.
+    async fn clientes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<ClienteDescuadrado>>;
 }

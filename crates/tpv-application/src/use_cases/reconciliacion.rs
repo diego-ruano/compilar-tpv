@@ -10,18 +10,16 @@
 //! se queda viejo **sin ningún síntoma visible**: no hay error, no falta un ticket, simplemente el
 //! número deja de ser verdad.
 //!
-//! Este caso de uso los vuelve a calcular y actúa distinto según si se puede saber cuál es el
-//! valor correcto:
-//!
-//!   · el gasto del cliente **se corrige** (es derivable al 100 % de `Pagos`),
-//!   · el stock **solo se avisa** (no se puede saber si sobra en la columna o falta un movimiento,
-//!     y machacarlo podría borrar stock que existe de verdad en el almacén).
+//! Este caso de uso los recalcula y **avisa**. No corrige nada, ni siquiera el gasto del cliente,
+//! que sí sería derivable sin ambigüedad: es un dato que el dueño del negocio mira y usa, y que la
+//! aplicación se lo cambie de madrugada y sin decir nada es peor que enseñarle el descuadre. Quien
+//! decide qué hacer con cada uno es él.
 
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::AppResult;
 use crate::ports::notificaciones::Notifier;
-use crate::ports::reconciliacion::{LoteDescuadrado, ReconciliacionRepository};
+use crate::ports::reconciliacion::{ClienteDescuadrado, LoteDescuadrado, ReconciliacionRepository};
 
 /// Medio céntimo: por debajo de eso es ruido de coma flotante, no un descuadre.
 pub const TOLERANCIA_DINERO: f64 = 0.005;
@@ -30,16 +28,17 @@ pub const TOLERANCIA_DINERO: f64 = 0.005;
 /// la del dinero pero sigue absorbiendo el error de representación de sumar muchos REAL.
 pub const TOLERANCIA_STOCK: f64 = 0.001;
 
-/// Cuántos lotes se enumeran en el cuerpo del aviso antes de resumir con "y N más".
-const MAX_LOTES_EN_AVISO: usize = 5;
+/// Cuántas filas se enumeran en el cuerpo de un aviso antes de resumir con "y N más".
+const MAX_EN_AVISO: usize = 5;
 
-/// Clave de deduplicación del aviso de stock: mientras siga activa no se emite otro, y se resuelve
-/// sola en cuanto una pasada encuentra todo cuadrado.
+/// Claves de deduplicación: mientras el aviso siga activo no se emite otro, y se resuelve solo en
+/// cuanto una pasada encuentra esa mitad cuadrada.
 const CLAVE_STOCK: &str = "reconciliacion:stock";
+const CLAVE_GASTO: &str = "reconciliacion:gasto";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Resultado {
-    pub clientes_corregidos: usize,
+    pub clientes_descuadrados: usize,
     pub lotes_descuadrados: usize,
 }
 
@@ -47,36 +46,60 @@ pub async fn ejecutar(
     repo: &dyn ReconciliacionRepository,
     notifier: &dyn Notifier,
 ) -> AppResult<Resultado> {
-    // ── Gasto de clientes: derivable, así que se corrige y no se molesta a nadie ──────────────
-    let corregidos = repo.corregir_gasto_de_clientes(TOLERANCIA_DINERO).await?;
+    let lotes = repo.lotes_descuadrados(TOLERANCIA_STOCK).await?;
+    let clientes = repo.clientes_descuadrados(TOLERANCIA_DINERO).await?;
 
-    // ── Stock por lote: solo se avisa ────────────────────────────────────────────────────────
-    let descuadrados = repo.lotes_descuadrados(TOLERANCIA_STOCK).await?;
+    avisar(
+        notifier,
+        CLAVE_STOCK,
+        lotes.is_empty(),
+        NuevaNotificacion {
+            tipo: "stock_descuadrado".to_string(),
+            severidad: Severidad::Aviso,
+            titulo: titulo_stock(lotes.len()),
+            cuerpo: Some(cuerpo_stock(&lotes)),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_inventario".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_STOCK.to_string()),
+            expira_en: None,
+        },
+    )
+    .await;
 
-    if descuadrados.is_empty() {
-        // La condición desapareció (alguien lo arregló, o era una op de sync que acabó
-        // aplicándose): se cierra el aviso para que no quede colgado.
-        let _ = notifier.resolver_por_clave(CLAVE_STOCK).await;
-    } else {
-        let _ = notifier
-            .emitir(NuevaNotificacion {
-                tipo: "stock_descuadrado".to_string(),
-                severidad: Severidad::Aviso,
-                titulo: titulo_stock(descuadrados.len()),
-                cuerpo: Some(cuerpo_stock(&descuadrados)),
-                destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
-                accion: Some("ver_inventario".to_string()),
-                payload: None,
-                clave_dedupe: Some(CLAVE_STOCK.to_string()),
-                expira_en: None,
-            })
-            .await;
-    }
+    avisar(
+        notifier,
+        CLAVE_GASTO,
+        clientes.is_empty(),
+        NuevaNotificacion {
+            tipo: "gasto_cliente_descuadrado".to_string(),
+            severidad: Severidad::Aviso,
+            titulo: titulo_gasto(clientes.len()),
+            cuerpo: Some(cuerpo_gasto(&clientes)),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_clientes".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_GASTO.to_string()),
+            expira_en: None,
+        },
+    )
+    .await;
 
     Ok(Resultado {
-        clientes_corregidos: corregidos.len(),
-        lotes_descuadrados: descuadrados.len(),
+        clientes_descuadrados: clientes.len(),
+        lotes_descuadrados: lotes.len(),
     })
+}
+
+/// Emite el aviso, o lo cierra si la condición ya no se da (alguien lo arregló, o era una
+/// operación de sync que acabó aplicándose). Best-effort: que falle el notificador no aborta la
+/// otra mitad de la pasada.
+async fn avisar(notifier: &dyn Notifier, clave: &str, cuadrado: bool, aviso: NuevaNotificacion) {
+    if cuadrado {
+        let _ = notifier.resolver_por_clave(clave).await;
+    } else {
+        let _ = notifier.emitir(aviso).await;
+    }
 }
 
 fn titulo_stock(n: usize) -> String {
@@ -87,41 +110,74 @@ fn titulo_stock(n: usize) -> String {
     }
 }
 
-/// Cuerpo del aviso: qué lote, cuánto se desvía y en qué dirección. Con el signo delante, porque
-/// "sobran 3" y "faltan 3" llevan a mirar sitios distintos.
-fn cuerpo_stock(lotes: &[LoteDescuadrado]) -> String {
-    let mut lineas: Vec<String> = lotes
-        .iter()
-        .take(MAX_LOTES_EN_AVISO)
-        .map(|l| {
-            let d = l.desviacion();
-            let signo = if d > 0.0 { "+" } else { "" };
-            format!(
-                "{} ({}): {}{:.3} — guardado {:.3}, calculado {:.3}",
-                l.producto, l.codigo_lote, signo, d, l.guardado, l.calculado
-            )
-        })
-        .collect();
-
-    if lotes.len() > MAX_LOTES_EN_AVISO {
-        lineas.push(format!("y {} más", lotes.len() - MAX_LOTES_EN_AVISO));
+fn titulo_gasto(n: usize) -> String {
+    if n == 1 {
+        "El gasto de un cliente no cuadra con sus cobros".to_string()
+    } else {
+        format!("El gasto de {n} clientes no cuadra con sus cobros")
     }
+}
 
-    lineas.join("\n")
+/// Cuerpo del aviso de stock: qué lote, cuánto se desvía y en qué dirección. Con el signo delante,
+/// porque "sobran 3" y "faltan 3" llevan a mirar sitios distintos.
+fn cuerpo_stock(lotes: &[LoteDescuadrado]) -> String {
+    resumir(lotes.len(), lotes.iter().take(MAX_EN_AVISO).map(|l| {
+        format!(
+            "{} ({}): {}{:.3} — guardado {:.3}, calculado {:.3}",
+            l.producto,
+            l.codigo_lote,
+            signo(l.desviacion()),
+            l.desviacion(),
+            l.guardado,
+            l.calculado
+        )
+    }))
+}
+
+/// Cuerpo del aviso de gasto: en euros, y diciendo cuál es cuál — la ficha y lo que suman sus
+/// cobros— para que se entienda sin abrir nada.
+fn cuerpo_gasto(clientes: &[ClienteDescuadrado]) -> String {
+    resumir(
+        clientes.len(),
+        clientes.iter().take(MAX_EN_AVISO).map(|c| {
+            format!(
+                "{}: la ficha dice {:.2} € y sus cobros suman {:.2} € ({}{:.2} €)",
+                c.nombre,
+                c.guardado,
+                c.calculado,
+                signo(c.desviacion()),
+                c.desviacion()
+            )
+        }),
+    )
+}
+
+fn signo(d: f64) -> &'static str {
+    if d > 0.0 {
+        "+"
+    } else {
+        ""
+    }
+}
+
+fn resumir(total: usize, lineas: impl Iterator<Item = String>) -> String {
+    let mut v: Vec<String> = lineas.collect();
+    if total > MAX_EN_AVISO {
+        v.push(format!("y {} más", total - MAX_EN_AVISO));
+    }
+    v.join("\n")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ports::notificaciones::Notifier;
-    use crate::ports::reconciliacion::ClienteCorregido;
     use async_trait::async_trait;
     use std::sync::Mutex;
 
     #[derive(Default)]
     struct RepoFalso {
         lotes: Vec<LoteDescuadrado>,
-        clientes: Vec<ClienteCorregido>,
+        clientes: Vec<ClienteDescuadrado>,
     }
 
     #[async_trait]
@@ -129,7 +185,7 @@ mod tests {
         async fn lotes_descuadrados(&self, _t: f64) -> AppResult<Vec<LoteDescuadrado>> {
             Ok(self.lotes.clone())
         }
-        async fn corregir_gasto_de_clientes(&self, _t: f64) -> AppResult<Vec<ClienteCorregido>> {
+        async fn clientes_descuadrados(&self, _t: f64) -> AppResult<Vec<ClienteDescuadrado>> {
             Ok(self.clientes.clone())
         }
     }
@@ -162,75 +218,91 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn sin_descuadres_cierra_el_aviso_en_vez_de_emitir() {
-        let repo = RepoFalso::default();
-        let notif = NotifierFalso::default();
-
-        let r = ejecutar(&repo, &notif).await.unwrap();
-
-        assert_eq!(r, Resultado::default());
-        assert!(notif.emitidas.lock().unwrap().is_empty());
-        assert_eq!(notif.resueltas.lock().unwrap().as_slice(), [CLAVE_STOCK]);
+    fn cliente(nombre: &str, guardado: f64, calculado: f64) -> ClienteDescuadrado {
+        ClienteDescuadrado {
+            id_cliente: nombre.to_string(),
+            nombre: nombre.to_string(),
+            guardado,
+            calculado,
+        }
     }
 
     #[tokio::test]
-    async fn con_descuadres_avisa_una_sola_vez_y_con_la_clave_de_dedupe() {
+    async fn sin_descuadres_cierra_los_dos_avisos_en_vez_de_emitir() {
+        let notif = NotifierFalso::default();
+
+        let r = ejecutar(&RepoFalso::default(), &notif).await.unwrap();
+
+        assert_eq!(r, Resultado::default());
+        assert!(notif.emitidas.lock().unwrap().is_empty());
+        assert_eq!(
+            notif.resueltas.lock().unwrap().as_slice(),
+            [CLAVE_STOCK, CLAVE_GASTO]
+        );
+    }
+
+    #[tokio::test]
+    async fn cada_mitad_avisa_por_su_cuenta() {
+        // Solo descuadra el gasto: el aviso de stock no debe salir, y además debe cerrarse.
         let repo = RepoFalso {
-            lotes: vec![lote("a", 10.0, 7.0)],
+            clientes: vec![cliente("Ana", 180.0, 220.0)],
             ..Default::default()
         };
         let notif = NotifierFalso::default();
 
         let r = ejecutar(&repo, &notif).await.unwrap();
 
-        assert_eq!(r.lotes_descuadrados, 1);
+        assert_eq!(r.clientes_descuadrados, 1);
+        assert_eq!(r.lotes_descuadrados, 0);
+
         let emitidas = notif.emitidas.lock().unwrap();
         assert_eq!(emitidas.len(), 1);
-        assert_eq!(emitidas[0].clave_dedupe.as_deref(), Some(CLAVE_STOCK));
-        assert!(notif.resueltas.lock().unwrap().is_empty());
+        assert_eq!(emitidas[0].clave_dedupe.as_deref(), Some(CLAVE_GASTO));
+        assert_eq!(notif.resueltas.lock().unwrap().as_slice(), [CLAVE_STOCK]);
+    }
+
+    #[tokio::test]
+    async fn el_gasto_no_se_toca_nunca() {
+        // El repo del caso de uso no expone ninguna forma de escribir: la garantía es de tipos.
+        // Este test fija la intención por si alguien añade un método de corrección al puerto.
+        let repo = RepoFalso {
+            clientes: vec![cliente("Ana", 180.0, 220.0)],
+            ..Default::default()
+        };
+        let notif = NotifierFalso::default();
+
+        let r = ejecutar(&repo, &notif).await.unwrap();
+
+        assert_eq!(
+            r.clientes_descuadrados, 1,
+            "se informa del descuadre, no se resuelve"
+        );
     }
 
     #[test]
-    fn el_cuerpo_lleva_el_signo_de_la_desviacion() {
-        let sobra = cuerpo_stock(&[lote("a", 10.0, 7.0)]);
-        assert!(sobra.contains("+3.000"), "sobra stock → signo +: {sobra}");
-
-        let falta = cuerpo_stock(&[lote("a", 7.0, 10.0)]);
-        assert!(falta.contains("-3.000"), "falta stock → signo -: {falta}");
+    fn el_cuerpo_del_stock_lleva_el_signo_de_la_desviacion() {
+        assert!(cuerpo_stock(&[lote("a", 10.0, 7.0)]).contains("+3.000"));
+        assert!(cuerpo_stock(&[lote("a", 7.0, 10.0)]).contains("-3.000"));
     }
 
     #[test]
-    fn el_cuerpo_resume_cuando_hay_muchos() {
-        let lotes: Vec<_> = (0..MAX_LOTES_EN_AVISO + 3)
+    fn el_cuerpo_del_gasto_dice_ficha_y_cobros() {
+        let cuerpo = cuerpo_gasto(&[cliente("Ana", 180.0, 220.0)]);
+
+        assert!(cuerpo.contains("180.00"), "{cuerpo}");
+        assert!(cuerpo.contains("220.00"), "{cuerpo}");
+        assert!(cuerpo.contains("-40.00"), "falta gasto por acreditar: {cuerpo}");
+    }
+
+    #[test]
+    fn los_cuerpos_resumen_cuando_hay_muchos() {
+        let lotes: Vec<_> = (0..MAX_EN_AVISO + 3)
             .map(|i| lote(&i.to_string(), 1.0, 0.0))
             .collect();
 
         let cuerpo = cuerpo_stock(&lotes);
 
-        assert_eq!(cuerpo.lines().count(), MAX_LOTES_EN_AVISO + 1);
+        assert_eq!(cuerpo.lines().count(), MAX_EN_AVISO + 1);
         assert!(cuerpo.ends_with("y 3 más"), "{cuerpo}");
-    }
-
-    #[tokio::test]
-    async fn el_gasto_corregido_se_cuenta_pero_no_genera_aviso() {
-        let repo = RepoFalso {
-            clientes: vec![ClienteCorregido {
-                id_cliente: "c1".to_string(),
-                nombre: "Ana".to_string(),
-                antes: 10.0,
-                despues: 12.5,
-            }],
-            ..Default::default()
-        };
-        let notif = NotifierFalso::default();
-
-        let r = ejecutar(&repo, &notif).await.unwrap();
-
-        assert_eq!(r.clientes_corregidos, 1);
-        assert!(
-            notif.emitidas.lock().unwrap().is_empty(),
-            "corregir un valor derivable no molesta a nadie"
-        );
     }
 }

@@ -90,8 +90,9 @@ TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness
 
 El resto se agrupa en:
 - **Reconciliación de datos derivados:** cerrada en su parte local (job `reconciliacion`: cuadra
-  cada lote contra su historial y recalcula `Total_Gastado` desde `Pagos`). Queda **VR-06**, que es
-  la comparación Main ↔ nube: cada copia cuadra consigo misma y nadie las contrasta entre sí.
+  cada lote contra su historial y cada `Total_Gastado` contra sus `Pagos`, y **avisa**; no corrige
+  nada por su cuenta). Queda **VR-06**, que es la comparación Main ↔ nube: cada copia cuadra
+  consigo misma y nadie las contrasta entre sí.
 - **Seguridad de datos:** LOGIN-04 (keyspace del PIN).
 - **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
   MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.

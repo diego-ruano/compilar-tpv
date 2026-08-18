@@ -162,10 +162,10 @@ async fn licencia(app: AppHandle) -> Result<(), String> {
 ///
 /// El stock de un lote y el gasto de un cliente se guardan ya sumados, así que un fallo parcial
 /// los deja mintiendo sin ningún síntoma: no hay error ni ticket que falte, el número simplemente
-/// se queda viejo. Esto los recalcula desde su origen; corrige el gasto (derivable al 100 %) y
-/// avisa del stock (donde no se puede saber si sobra en la columna o falta un movimiento).
+/// se queda viejo. Esto los recalcula desde su origen y **avisa**; no corrige nada por su cuenta,
+/// ni siquiera el gasto (que sí sería derivable): quien decide qué hacer es quien lleva el negocio.
 ///
-/// Idempotente: recalcular dos veces da lo mismo, y el aviso lleva `clave_dedupe`.
+/// Idempotente: recalcular dos veces da lo mismo, y los avisos llevan `clave_dedupe`.
 async fn reconciliacion(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let repo = state.reconciliacion_repo().await?;
@@ -173,12 +173,12 @@ async fn reconciliacion(app: AppHandle) -> Result<(), String> {
 
     let r = uc_reconciliacion::ejecutar(repo.as_ref(), notifier.as_ref()).await?;
 
-    // Que no sea silencioso en el log: si esto empieza a corregir clientes cada día, hay un bug
-    // aguas arriba y este job solo está tapando el síntoma.
-    if r.clientes_corregidos > 0 || r.lotes_descuadrados > 0 {
+    // Además del aviso in-app, al log: si esto salta cada día hay un bug aguas arriba, y esa
+    // señal la queremos en la telemetría, no solo en una notificación que alguien marca como leída.
+    if r.clientes_descuadrados > 0 || r.lotes_descuadrados > 0 {
         tracing::warn!(
             target: "tpv::jobs",
-            clientes_corregidos = r.clientes_corregidos,
+            clientes_descuadrados = r.clientes_descuadrados,
             lotes_descuadrados = r.lotes_descuadrados,
             "reconciliación: valores derivados fuera de cuadre"
         );

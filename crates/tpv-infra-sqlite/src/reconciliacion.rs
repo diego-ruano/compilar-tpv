@@ -1,7 +1,7 @@
 //! Adaptador SQLite de la **reconciliación** (`ReconciliacionRepository`, INV-06 / DB-14).
 //!
-//! Dos consultas que recalculan desde el origen lo que otras columnas guardan ya sumado, y la
-//! corrección del único de los dos que es derivable sin ambigüedad (el gasto del cliente).
+//! Dos consultas que recalculan desde el origen lo que otras columnas guardan ya sumado. Solo
+//! leen: la decisión de qué hacer con un descuadre es de quien lleva el negocio, no del job.
 
 use std::sync::Arc;
 
@@ -10,15 +10,15 @@ use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::reconciliacion::{
-    ClienteCorregido, LoteDescuadrado, ReconciliacionRepository,
+    ClienteDescuadrado, LoteDescuadrado, ReconciliacionRepository,
 };
 
-use crate::db::{Db, Reader, Writer};
+use crate::db::{Db, Reader};
 use crate::mapping::{v_f64, v_string};
 
 /// Tope de filas por pasada. Un descuadre masivo (BD corrupta, migración a medias) no debe
-/// convertirse en una notificación de miles de líneas ni en una tanda enorme de UPDATEs: con las
-/// peores ya hay señal suficiente para ir a mirar.
+/// convertirse en una notificación de miles de líneas: con las peores ya hay señal suficiente para
+/// ir a mirar.
 const MAX_FILAS: i64 = 200;
 
 pub struct SqliteReconciliacionRepository {
@@ -111,47 +111,26 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
         Ok(out)
     }
 
-    async fn corregir_gasto_de_clientes(
-        &self,
-        tolerancia: f64,
-    ) -> AppResult<Vec<ClienteCorregido>> {
-        // Lectura y escritura bajo el MISMO guard de escritura: entre detectar la desviación y
-        // corregirla no puede colarse un cobro que volviera obsoleto el valor recalculado.
-        let w = self.db.write().await;
-
-        let desviados = {
-            let mut rows = w
-                .query(
-                    SQL_CLIENTES,
-                    vec![Value::Real(tolerancia), Value::Integer(MAX_FILAS)],
-                )
-                .await
-                .map_err(db_err)?;
-
-            let mut v = Vec::new();
-            while let Some(row) = rows.next().await.map_err(db_err)? {
-                v.push(ClienteCorregido {
-                    id_cliente: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                    nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-                    antes: v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
-                    despues: v_f64(row.get_value(3).map_err(db_err)?).unwrap_or(0.0),
-                });
-            }
-            v
-        };
-
-        // La corrección va por `execute` (no por `raw`) A PROPÓSITO: es un dato de negocio y tiene
-        // que replicarse a la nube como cualquier otra escritura de la Main.
-        for c in &desviados {
-            w.execute(
-                "UPDATE Clientes SET Total_Gastado = ?2 WHERE ID_Cliente = ?1;",
-                vec![Value::Text(c.id_cliente.clone()), Value::Real(c.despues)],
+    async fn clientes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<ClienteDescuadrado>> {
+        let r = self.db.read().await;
+        let mut rows = r
+            .query(
+                SQL_CLIENTES,
+                vec![Value::Real(tolerancia), Value::Integer(MAX_FILAS)],
             )
             .await
             .map_err(db_err)?;
-        }
 
-        Ok(desviados)
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            out.push(ClienteDescuadrado {
+                id_cliente: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                guardado: v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
+                calculado: v_f64(row.get_value(3).map_err(db_err)?).unwrap_or(0.0),
+            });
+        }
+        Ok(out)
     }
 }
 
@@ -189,6 +168,13 @@ mod tests {
                 .await
                 .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
         }
+    }
+
+    async fn escalar(db: &Arc<Db>, sql: &str) -> f64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().expect("sin filas");
+        crate::mapping::v_f64(row.get_value(0).unwrap()).unwrap_or(0.0)
     }
 
     /// Producto con un lote de 10 y su movimiento de alta: el estado cuadrado del que parten los
@@ -264,7 +250,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn el_gasto_del_cliente_se_recalcula_desde_los_pagos() {
+    async fn el_gasto_del_cliente_se_contrasta_con_sus_pagos_sin_tocarlo() {
         let (db, _dir) = db_temporal().await;
         sembrar(&db, SEMILLA_LOTE).await;
         sembrar(
@@ -287,15 +273,18 @@ mod tests {
         .await;
 
         let repo = SqliteReconciliacionRepository::new(db.clone());
-        let corregidos = repo.corregir_gasto_de_clientes(0.005).await.unwrap();
+        let descuadrados = repo.clientes_descuadrados(0.005).await.unwrap();
 
-        assert_eq!(corregidos.len(), 1);
-        assert_eq!(corregidos[0].nombre, "Ana");
-        assert_eq!(corregidos[0].antes, 0.0);
-        assert_eq!(corregidos[0].despues, 25.50);
+        assert_eq!(descuadrados.len(), 1);
+        assert_eq!(descuadrados[0].nombre, "Ana");
+        assert_eq!(descuadrados[0].guardado, 0.0);
+        assert_eq!(descuadrados[0].calculado, 25.50);
 
-        // Y queda escrito: una segunda pasada ya no encuentra nada que corregir.
-        let otra = repo.corregir_gasto_de_clientes(0.005).await.unwrap();
-        assert!(otra.is_empty(), "la corrección es idempotente: {otra:?}");
+        // Y NO lo arregla: la ficha sigue como estaba hasta que el dueño decida.
+        assert_eq!(
+            escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
+            0.0,
+            "el job informa, no escribe"
+        );
     }
 }

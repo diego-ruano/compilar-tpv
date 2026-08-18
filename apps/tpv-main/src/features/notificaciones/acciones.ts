@@ -1,8 +1,8 @@
 // src/features/notificaciones/acciones.ts
 //
 // Traduce la `accion` de una notificación a la pantalla que resuelve el aviso. La acción la fija
-// el emisor en Rust (`use_cases/*`: "ver_tareas", "ver_reservas", "ver_pedidos", "ver_licencia");
-// aquí solo se mapea a una ruta del router.
+// el emisor en Rust (`use_cases/*`: "ver_tareas", "ver_reservas", "ver_pedidos", "ver_licencia",
+// "ver_inventario", "ver_clientes"); aquí solo se mapea a una ruta del router.
 //
 // Una acción desconocida devuelve `null`: la notificación se marca como leída y no navega. Así el
 // backend puede emitir acciones nuevas (o una versión vieja del front recibir una acción reciente)
@@ -23,6 +23,10 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   // Los pedidos a proveedor se gestionan dentro de la pantalla de Proveedores (PedidosSection).
   ver_pedidos: { to: "/Proveedores" },
   ver_licencia: { to: "/Configuracion", state: { seccion: "LICENCIA" } },
+  // Descuadres que detecta el job de reconciliación: llevan a la pantalla donde se corrigen
+  // (ajustar el lote / revisar la ficha del cliente).
+  ver_inventario: { to: "/Inventario" },
+  ver_clientes: { to: "/Clientes" },
 };
 
 export function destinoDeAccion(
