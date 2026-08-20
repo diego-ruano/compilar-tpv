@@ -1,0 +1,26 @@
+{
+  "descripcion": "Alta de reserva con cliente NUEVO (no existe por email): crea el cliente e inserta la reserva. El ID_Cliente lo generan ambos lados (distinto UUID) → se excluye de Clientes y de Reservas; ID_Reserva se provee (determinista).",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-1",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-01",
+    "hora": "20:30",
+    "turno": "cena",
+    "comensales": 4,
+    "nota": "junto a la ventana",
+    "estado": "confirmada",
+    "nombre_cliente": "Ana",
+    "email": "ana@x.com",
+    "telefono": "600100200",
+    "notas_cliente": "VIP"
+  },
+  "snapshot": {
+    "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",
+    "Reservas": "SELECT ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado FROM Reservas"
+  }
+}

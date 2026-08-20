@@ -32,12 +32,14 @@ use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::proveedores::ProveedoresRepository;
+use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 use tpv_domain::mesas::CobroDetalles;
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
+use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
@@ -47,6 +49,7 @@ use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
 use crate::mesas::SqliteMesasRepository;
 use crate::proveedores::SqliteProveedoresRepository;
+use crate::reservas::SqliteReservasRepository;
 use crate::tareas::SqliteTareasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
@@ -269,6 +272,9 @@ const CASOS: &[&str] = &[
     "proveedores__eliminar",
     "proveedores__set_vinculos",
     "proveedores__crear_producto",
+    "reservas__guardar_cliente_nuevo",
+    "reservas__guardar_cliente_existente",
+    "reservas__eliminar",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -506,6 +512,31 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("crear producto");
+        }
+        "reservas.guardar" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            repo.guardar(ReservaValidada {
+                id: opt_str(&e["id_reserva"]),
+                id_mesa: s(&e["id_mesa"]),
+                dia_ymd: s(&e["dia_ymd"]),
+                hora: s(&e["hora"]),
+                turno: s(&e["turno"]),
+                comensales: e["comensales"].as_i64().unwrap(),
+                nota: opt_str(&e["nota"]),
+                estado: s(&e["estado"]),
+                cliente: ClienteReserva {
+                    nombre: s(&e["nombre_cliente"]),
+                    email: opt_str(&e["email"]),
+                    telefono: opt_str(&e["telefono"]),
+                    notas: opt_str(&e["notas_cliente"]),
+                },
+            })
+            .await
+            .expect("guardar reserva");
+        }
+        "reservas.eliminar" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            repo.eliminar(&s(&e["id_reserva"])).await.expect("eliminar reserva");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

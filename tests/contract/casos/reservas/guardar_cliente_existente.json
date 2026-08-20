@@ -1,0 +1,27 @@
+{
+  "descripcion": "Alta de reserva con cliente EXISTENTE (encontrado por email): merge NO destructivo — conserva nombre/email ya presentes y rellena solo los vacíos (telefono y notas). Es el núcleo de RES-05: el mismo criterio de identidad y merge en ambos lados. ID_Cliente conocido → se incluye.",
+  "comando": "reservas.guardar",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Created_At) VALUES ('cliente-1', 'Bob', 'bob@x.com', '2026-01-01 00:00:00');"
+  ],
+  "entrada": {
+    "id_reserva": "reserva-1",
+    "id_mesa": "mesa-1",
+    "dia_ymd": "2026-02-02",
+    "hora": "21:00",
+    "turno": "cena",
+    "comensales": 2,
+    "nota": null,
+    "estado": "confirmada",
+    "nombre_cliente": "Bob Cambiado",
+    "email": "bob@x.com",
+    "telefono": "611222333",
+    "notas_cliente": "alergico"
+  },
+  "snapshot": {
+    "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes",
+    "Reservas": "SELECT ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado FROM Reservas"
+  }
+}

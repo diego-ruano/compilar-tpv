@@ -39,6 +39,8 @@ import {
 	guardarProveedor,
 	setVinculos,
 } from "../src/domains/proveedores/proveedores.commands";
+import { deleteReserva, saveReserva } from "../src/domains/reservas/reservas.commands";
+import { findClienteReserva } from "../src/domains/reservas/reservas.queries";
 import {
 	createTarea,
 	deleteTarea,
@@ -100,6 +102,12 @@ import casoProvVinculos from "../../../tests/contract/casos/proveedores/set_vinc
 import goldenProvVinculos from "../../../tests/contract/golden/proveedores/set_vinculos.json";
 import casoProvCrearProd from "../../../tests/contract/casos/proveedores/crear_producto.json";
 import goldenProvCrearProd from "../../../tests/contract/golden/proveedores/crear_producto.json";
+import casoResNuevo from "../../../tests/contract/casos/reservas/guardar_cliente_nuevo.json";
+import goldenResNuevo from "../../../tests/contract/golden/reservas/guardar_cliente_nuevo.json";
+import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cliente_existente.json";
+import goldenResExistente from "../../../tests/contract/golden/reservas/guardar_cliente_existente.json";
+import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
+import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -126,6 +134,9 @@ const CASOS = [
 	{ nombre: "proveedores_eliminar", caso: casoProvEliminar, golden: goldenProvEliminar },
 	{ nombre: "proveedores_set_vinculos", caso: casoProvVinculos, golden: goldenProvVinculos },
 	{ nombre: "proveedores_crear_producto", caso: casoProvCrearProd, golden: goldenProvCrearProd },
+	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
+	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
+	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -374,6 +385,20 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "proveedores.crear_producto": {
 			aplicar(hub, sql, crearProducto(caso.entrada as any));
+			return;
+		}
+		case "reservas.guardar": {
+			// La ruta busca el cliente existente por email/teléfono antes de construir el comando.
+			const cliente = await findClienteReserva(
+				db,
+				caso.entrada.email ?? null,
+				caso.entrada.telefono ?? null,
+			);
+			aplicar(hub, sql, saveReserva(caso.entrada as any, cliente));
+			return;
+		}
+		case "reservas.eliminar": {
+			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva));
 			return;
 		}
 		default:
