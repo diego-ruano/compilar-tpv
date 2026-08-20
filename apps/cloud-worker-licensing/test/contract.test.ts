@@ -1,4 +1,4 @@
-// test/contractVentaRapida.test.ts
+// test/contract.test.ts
 //
 // Tests de contrato Main(Rust) ↔ worker(TS) — ARCH-01. Ver `tests/contract/README.md`.
 //
@@ -16,20 +16,25 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
+import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import { cobrarFraccionado } from "../src/domains/venta_rapida/venta_rapida.commands";
 import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
 
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
 // bendecir su golden y sumar aquí su par caso/golden (workerd no lee del disco: los imports son
 // estáticos y esbuild los empaqueta). La misma lista, en Rust, vive en `contract_tests.rs::CASOS`.
-import casoUnLote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_un_lote.json";
-import goldenUnLote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_un_lote.json";
-import casoMultilote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_fefo_multilote.json";
-import goldenMultilote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_fefo_multilote.json";
+import casoVrUnLote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_un_lote.json";
+import goldenVrUnLote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_un_lote.json";
+import casoVrMultilote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_fefo_multilote.json";
+import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_fefo_multilote.json";
+import casoMesasCobro from "../../../tests/contract/casos/mesas__cobrar_detalles_un_lote.json";
+import goldenMesasCobro from "../../../tests/contract/golden/mesas__cobrar_detalles_un_lote.json";
 
 const CASOS = [
-	{ nombre: "un_lote", caso: casoUnLote, golden: goldenUnLote },
-	{ nombre: "fefo_multilote", caso: casoMultilote, golden: goldenMultilote },
+	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
+	{ nombre: "vr_fefo_multilote", caso: casoVrMultilote, golden: goldenVrMultilote },
+	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -81,6 +86,21 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			const plan = await cobrarPlan(db, entrada as any);
 			expect(plan.ok, "el plan de cobro debe resolverse").toBe(true);
 			const built = cobrarFraccionado(entrada as any, plan as any);
+			const batch = hub.buildApplyBatch(built.command);
+			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			return;
+		}
+		case "mesas.cobrar_detalles": {
+			const entrada = {
+				id_comanda: caso.entrada.id_comanda,
+				detalle_ids: caso.entrada.detalle_ids,
+				metodo: caso.entrada.metodo,
+				tipo: caso.entrada.tipo,
+				id_usuario: null,
+			};
+			const plan = await cobrarDetallesPlan(db, entrada as any);
+			expect(plan.ok, "el plan de cobro de mesa debe resolverse").toBe(true);
+			const built = cobrarDetalles(entrada as any, plan as any);
 			const batch = hub.buildApplyBatch(built.command);
 			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
 			return;

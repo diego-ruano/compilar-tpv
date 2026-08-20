@@ -47,7 +47,7 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
    > - **Canónico = Rust** (escritor único): bendice el golden; el worker se conforma o sale rojo.
    > - **Montado ya:** `tests/contract/` (fixtures + goldens), el lado Rust
    >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
-   >   (`apps/cloud-worker-licensing/test/contractVentaRapida.test.ts`, corre en workerd con el
+   >   (`apps/cloud-worker-licensing/test/contract.test.ts`, corre en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
    > - **Cubierto:** `venta_rapida.cobrar_fraccionado` (un lote y reparto FEFO multilote) — los dos
    >   lados coinciden hoy. **Falta (incremental):** mesas, inventario, stats, login y el resto de la

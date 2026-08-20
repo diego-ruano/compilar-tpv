@@ -54,7 +54,7 @@ Un **caso** (`casos/<nombre>.json`):
 | Lado | Fichero | Se ejecuta con |
 |---|---|---|
 | Rust (Main) | `crates/tpv-infra-sqlite/src/contract_tests.rs` | `cargo test -p tpv-infra-sqlite contrato_` |
-| Worker (Handy) | `apps/cloud-worker-licensing/test/contractVentaRapida.test.ts` | `pnpm --filter tpv-api test contract` |
+| Worker (Handy) | `apps/cloud-worker-licensing/test/contract.test.ts` | `pnpm --filter tpv-api test contract` |
 
 - Rust abre un libsql local, siembra, corre el comando (que captura su efecto en la BD) y lee las filas.
 - El worker corre **dentro de workerd** (`@cloudflare/vitest-pool-workers`): levanta el TenantHub real,
@@ -67,7 +67,7 @@ lo empaqueta); Rust lo lee del disco y es quien lo **bendice**.
 ## Añadir un CASO nuevo (mismo comando)
 
 1. Crea `casos/<nombre>.json` con su `seed`, `entrada` y `snapshot`.
-2. Añade `<nombre>` a `CASOS` en `contract_tests.rs` y su par `caso/golden` en `contractVentaRapida.test.ts`.
+2. Añade `<nombre>` a `CASOS` en `contract_tests.rs` y su par `caso/golden` en `contract.test.ts`.
 3. Bendice el golden desde Rust: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
 4. Corre el worker: `pnpm --filter tpv-api test contract`. Si sale rojo, **has encontrado una
    divergencia real** entre las dos implementaciones (o el snapshot incluye algo no determinista).
@@ -76,17 +76,24 @@ lo empaqueta); Rust lo lee del disco y es quien lo **bendice**.
 
 Además de lo anterior, añade el **brazo de despacho** del comando en los dos sitios:
 - Rust: `aplicar_comando` en `contract_tests.rs` (un `match` por `caso["comando"]`).
-- Worker: `aplicarComando` en `contractVentaRapida.test.ts` (un `switch` por `caso.comando`).
+- Worker: `aplicarComando` en `contract.test.ts` (un `switch` por `caso.comando`).
 
 Cada brazo invoca la implementación real de ese comando en su lado. El resto (siembra, snapshot,
 comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-- `venta_rapida.cobrar_fraccionado`: cobro de barra por FEFO.
+- `venta_rapida.cobrar_fraccionado` (VR-05): cobro de barra por FEFO.
   - `…_un_lote`: caso mínimo (un lote cubre la venta).
   - `…_fefo_multilote`: reparto FEFO entre dos lotes (agota el que caduca antes) — ejercita el orden
     FEFO, que es donde las dos implementaciones pueden divergir.
+- `mesas.cobrar_detalles` (MESA-11): cobro de una comanda de mesa por FEFO + cierre de comanda.
 
-Pendiente (incremental, un dominio cada vez): mesas, inventario, stats, login, y el resto de la familia
-`-parity` (ver [00-indice.md](../../docs/analisis/00-indice.md)).
+Pendiente (incremental, un dominio cada vez): el resto de comandos de mesas/venta rápida, inventario
+(lotes), clientes, proveedores, reservas, tareas, trabajadores/horarios, login y configuración — la
+familia `-parity` (ver [00-indice.md](../../docs/analisis/00-indice.md)).
+
+**No contrastables** (no hay segunda implementación que comparar): `pedidos_proveedor` (solo existe en
+Rust, ausente en el worker) y `stats` (solo lectura). Los comandos de `trabajadores`/`login` que
+escriben `Password_Hash` (PBKDF2 con salt aleatorio → distinto por diseño) o PII cifrada (el worker ni
+la escribe) se cubren **excluyendo esas columnas** del snapshot; el resto del efecto sí se compara.

@@ -27,10 +27,13 @@ use std::sync::Arc;
 use libsql::{Connection, Value};
 use serde_json::{Map, Value as Json};
 
-use tpv_domain::venta_rapida::CobroFraccionado;
+use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+use tpv_domain::mesas::CobroDetalles;
+use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::db::{Db, Reader};
+use crate::mesas::SqliteMesasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
 /// Tolerancia al comparar números (stock decimal, importes): absorbe el ruido de coma flotante.
@@ -210,10 +213,11 @@ fn strings(v: &Json) -> Vec<String> {
 
 /// Casos del harness. Añadir uno: crear su fixture en `tests/contract/casos/`, bendecir su golden
 /// (`BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`) y sumar su nombre aquí y en el test
-/// del worker (`test/contractVentaRapida.test.ts`).
+/// del worker (`test/contract.test.ts`).
 const CASOS: &[&str] = &[
     "venta_rapida__cobro_fraccionado_un_lote",
     "venta_rapida__cobro_fraccionado_fefo_multilote",
+    "mesas__cobrar_detalles_un_lote",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -234,6 +238,18 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("el cobro debe aplicarse");
+        }
+        "mesas.cobrar_detalles" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.cobrar_detalles(CobroDetalles {
+                id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
+                metodo: e["metodo"].as_str().unwrap().to_string(),
+                tipo: e["tipo"].as_str().unwrap().to_string(),
+                detalle_ids: strings(&e["detalle_ids"]),
+                id_usuario: None,
+            })
+            .await
+            .expect("el cobro de mesa debe aplicarse");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }
