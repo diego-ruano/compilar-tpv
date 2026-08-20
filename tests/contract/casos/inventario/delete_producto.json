@@ -1,0 +1,20 @@
+{
+  "descripcion": "Borrado de un producto: elimina explícitamente sus movimientos, lotes, alérgenos y el producto (todas las tablas quedan vacías).",
+  "comando": "inventario.delete_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Rioja');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 5, 5);",
+    "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha) VALUES ('mov-1', 'lote-1', 'ALTA', 5, 5, '2026-01-01 00:00:00');",
+    "INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('prod-1', '00000000-0000-7000-8000-000000000201');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto FROM Productos",
+    "Lotes_Producto": "SELECT ID_Lote FROM Lotes_Producto",
+    "Movimientos_Stock": "SELECT ID_Movimiento FROM Movimientos_Stock",
+    "Producto_Alergenos": "SELECT ID_Producto FROM Producto_Alergenos"
+  }
+}

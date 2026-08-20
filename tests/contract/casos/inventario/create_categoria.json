@@ -1,0 +1,16 @@
+{
+  "descripcion": "Alta de categoría (UPSERT por ID). Con id provisto → determinista. vendible/pasa_cocina se guardan como 1/0.",
+  "comando": "inventario.create_categoria",
+  "seed": [],
+  "entrada": {
+    "id_categoria": "cat-1",
+    "nombre": "Vinos",
+    "nombre_imagen": "v.png",
+    "ruta_imagen": "/v.png",
+    "vendible": true,
+    "pasa_cocina": false
+  },
+  "snapshot": {
+    "Categorias_Producto": "SELECT ID_Categoria, Nombre, Nombre_Imagen, Ruta_Imagen, Vendible, Pasa_Cocina FROM Categorias_Producto"
+  }
+}

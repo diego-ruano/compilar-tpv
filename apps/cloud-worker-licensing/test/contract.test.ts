@@ -17,7 +17,13 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
-import { createLote } from "../src/domains/inventario/inventario.commands";
+import {
+	createCategoria,
+	createLote,
+	deleteProducto,
+	setAlergenosProducto,
+	upsertProducto,
+} from "../src/domains/inventario/inventario.commands";
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import {
@@ -55,6 +61,14 @@ import casoTareaFinalizar from "../../../tests/contract/casos/tareas/marcar_fina
 import goldenTareaFinalizar from "../../../tests/contract/golden/tareas/marcar_finalizada.json";
 import casoInvCreateLote from "../../../tests/contract/casos/inventario/create_lote.json";
 import goldenInvCreateLote from "../../../tests/contract/golden/inventario/create_lote.json";
+import casoInvCategoria from "../../../tests/contract/casos/inventario/create_categoria.json";
+import goldenInvCategoria from "../../../tests/contract/golden/inventario/create_categoria.json";
+import casoInvUpsertProd from "../../../tests/contract/casos/inventario/upsert_producto.json";
+import goldenInvUpsertProd from "../../../tests/contract/golden/inventario/upsert_producto.json";
+import casoInvSetAlerg from "../../../tests/contract/casos/inventario/set_alergenos.json";
+import goldenInvSetAlerg from "../../../tests/contract/golden/inventario/set_alergenos.json";
+import casoInvDeleteProd from "../../../tests/contract/casos/inventario/delete_producto.json";
+import goldenInvDeleteProd from "../../../tests/contract/golden/inventario/delete_producto.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -68,6 +82,10 @@ const CASOS = [
 	{ nombre: "tareas_eliminar", caso: casoTareaEliminar, golden: goldenTareaEliminar },
 	{ nombre: "tareas_marcar_finalizada", caso: casoTareaFinalizar, golden: goldenTareaFinalizar },
 	{ nombre: "inventario_create_lote", caso: casoInvCreateLote, golden: goldenInvCreateLote },
+	{ nombre: "inventario_create_categoria", caso: casoInvCategoria, golden: goldenInvCategoria },
+	{ nombre: "inventario_upsert_producto", caso: casoInvUpsertProd, golden: goldenInvUpsertProd },
+	{ nombre: "inventario_set_alergenos", caso: casoInvSetAlerg, golden: goldenInvSetAlerg },
+	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -233,6 +251,28 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					notas: caso.entrada.notas,
 				} as any),
 			);
+			return;
+		}
+		case "inventario.create_categoria": {
+			aplicar(hub, sql, createCategoria(caso.entrada as any));
+			return;
+		}
+		case "inventario.upsert_producto": {
+			aplicar(hub, sql, upsertProducto(caso.entrada as any));
+			return;
+		}
+		case "inventario.set_alergenos": {
+			aplicar(
+				hub,
+				sql,
+				setAlergenosProducto(caso.entrada.id_producto, {
+					ids_alergenos: caso.entrada.ids_alergenos,
+				} as any),
+			);
+			return;
+		}
+		case "inventario.delete_producto": {
+			aplicar(hub, sql, deleteProducto(caso.entrada.id_producto));
 			return;
 		}
 		default:

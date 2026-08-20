@@ -1,0 +1,12 @@
+{
+  "Categorias_Producto": [
+    {
+      "ID_Categoria": "cat-1",
+      "Nombre": "Vinos",
+      "Nombre_Imagen": "v.png",
+      "Pasa_Cocina": 0,
+      "Ruta_Imagen": "/v.png",
+      "Vendible": 1
+    }
+  ]
+}

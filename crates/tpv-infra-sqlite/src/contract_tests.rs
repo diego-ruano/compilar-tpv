@@ -33,7 +33,7 @@ use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
-use tpv_domain::inventario::LoteNuevo;
+use tpv_domain::inventario::{CategoriaUpsert, LoteNuevo, ProductoUpsert};
 use tpv_domain::mesas::CobroDetalles;
 use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
@@ -251,6 +251,10 @@ const CASOS: &[&str] = &[
     "tareas__eliminar",
     "tareas__marcar_finalizada",
     "inventario__create_lote",
+    "inventario__create_categoria",
+    "inventario__upsert_producto",
+    "inventario__set_alergenos",
+    "inventario__delete_producto",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -366,6 +370,48 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("crear lote");
+        }
+        "inventario.create_categoria" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.create_categoria(CategoriaUpsert {
+                id: opt_str(&e["id_categoria"]),
+                nombre: s(&e["nombre"]),
+                nombre_imagen: s(&e["nombre_imagen"]),
+                ruta_imagen: s(&e["ruta_imagen"]),
+                vendible: e["vendible"].as_bool().unwrap(),
+                pasa_cocina: e["pasa_cocina"].as_bool().unwrap(),
+            })
+            .await
+            .expect("crear categoria");
+        }
+        "inventario.upsert_producto" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.upsert_producto(ProductoUpsert {
+                id: opt_str(&e["id_producto"]),
+                id_categoria: s(&e["id_categoria"]),
+                id_proveedor: opt_str(&e["id_proveedor"]),
+                nombre: s(&e["nombre"]),
+                precio_venta: e["precio_venta"].as_f64(),
+                stock_minimo: e["stock_minimo"].as_f64(),
+                unidad_medida: opt_str(&e["unidad_medida"]),
+                nombre_imagen: opt_str(&e["nombre_imagen"]),
+                ruta_imagen: opt_str(&e["ruta_imagen"]),
+                cantidad_pedido_esperada: e["cantidad_pedido_esperada"].as_f64(),
+                stock_suelto: e["stock_suelto"].as_f64(),
+                ids_alergenos: strings(&e["ids_alergenos"]),
+            })
+            .await
+            .expect("upsert producto");
+        }
+        "inventario.set_alergenos" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.set_alergenos_producto(&s(&e["id_producto"]), strings(&e["ids_alergenos"]))
+                .await
+                .expect("set alergenos");
+        }
+        "inventario.delete_producto" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.delete_producto(&s(&e["id_producto"])).await.expect("delete producto");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

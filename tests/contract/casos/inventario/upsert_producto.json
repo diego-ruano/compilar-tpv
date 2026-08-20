@@ -1,0 +1,25 @@
+{
+  "descripcion": "Upsert de producto con un alérgeno (Gluten, sembrado por la migración). Borra y recrea los alérgenos. ID provisto → determinista.",
+  "comando": "inventario.upsert_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "id_categoria": "cat-1",
+    "id_proveedor": null,
+    "nombre": "Rioja",
+    "precio_venta": 12.0,
+    "stock_minimo": 2,
+    "unidad_medida": "botella",
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "cantidad_pedido_esperada": null,
+    "stock_suelto": null,
+    "ids_alergenos": ["00000000-0000-7000-8000-000000000201"]
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Stock_Suelto FROM Productos",
+    "Producto_Alergenos": "SELECT ID_Producto, ID_Alergeno FROM Producto_Alergenos"
+  }
+}
