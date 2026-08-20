@@ -1,0 +1,17 @@
+{
+  "descripcion": "Reasigna el conjunto de productos de un proveedor: desvincula todos los suyos y vincula los del conjunto. Parte con prod-1 vinculado y pasa a [prod-2].",
+  "comando": "proveedores.set_vinculos",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuidora Sur');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre) VALUES ('prod-1', 'cat-1', 'prov-1', 'Cerveza');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-2', 'cat-1', 'Vino');"
+  ],
+  "entrada": {
+    "id_proveedor": "prov-1",
+    "producto_ids": ["prod-2"]
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, ID_Proveedor FROM Productos"
+  }
+}

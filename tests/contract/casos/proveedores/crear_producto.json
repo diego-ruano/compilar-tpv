@@ -1,0 +1,23 @@
+{
+  "descripcion": "Alta de producto desde Proveedores con stock inicial: crea el producto + un lote inicial (Codigo_Lote 'INI-'+id, determinista) + su movimiento 'ALTA'. ID_Lote e ID_Movimiento generados (distinto UUID por lado) y Fecha_Entrada/Fecha se excluyen.",
+  "comando": "proveedores.crear_producto",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuidora Sur');"
+  ],
+  "entrada": {
+    "id_producto": "prod-1",
+    "id_categoria": "cat-1",
+    "id_proveedor": "prov-1",
+    "nombre": "Ginebra",
+    "precio_venta": 15,
+    "stock_actual": 8,
+    "stock_minimo": 2,
+    "unidad_medida": "botella"
+  },
+  "snapshot": {
+    "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida FROM Productos",
+    "Lotes_Producto": "SELECT ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, ID_Proveedor FROM Lotes_Producto",
+    "Movimientos_Stock": "SELECT Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+  }
+}

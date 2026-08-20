@@ -1,0 +1,12 @@
+{
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "ID_Proveedor": null
+    },
+    {
+      "ID_Producto": "prod-2",
+      "ID_Proveedor": "prov-1"
+    }
+  ]
+}

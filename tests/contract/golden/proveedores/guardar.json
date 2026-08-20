@@ -1,0 +1,15 @@
+{
+  "Proveedores": [
+    {
+      "CIF": "B12345678",
+      "Contacto": "Juan",
+      "Email": "j@dist.com",
+      "ID_Proveedor": "prov-1",
+      "Informacion_adicional": "entregas L-V",
+      "Nombre_Empresa": "Distribuidora Sur",
+      "Nombre_Imagen": null,
+      "Ruta_Imagen": null,
+      "Telefono": "600100200"
+    }
+  ]
+}

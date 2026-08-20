@@ -31,11 +31,13 @@ use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::mesas::MesasRepository;
+use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 use tpv_domain::mesas::CobroDetalles;
+use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
@@ -44,6 +46,7 @@ use crate::configuracion::SqliteConfiguracionRepository;
 use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
 use crate::mesas::SqliteMesasRepository;
+use crate::proveedores::SqliteProveedoresRepository;
 use crate::tareas::SqliteTareasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
@@ -262,6 +265,10 @@ const CASOS: &[&str] = &[
     "configuracion__patch_business",
     "configuracion__patch_contact",
     "configuracion__patch_ticket",
+    "proveedores__guardar",
+    "proveedores__eliminar",
+    "proveedores__set_vinculos",
+    "proveedores__crear_producto",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -458,6 +465,47 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "config.patch_ticket" => {
             let repo = SqliteConfiguracionRepository::new(db.clone());
             repo.patch_ticket(&e["patch"]).await.expect("patch ticket");
+        }
+        "proveedores.guardar" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            repo.guardar(ProveedorValidado {
+                id: opt_str(&e["id_proveedor"]),
+                nombre_empresa: s(&e["nombre_empresa"]),
+                contacto: opt_str(&e["contacto"]),
+                telefono: opt_str(&e["telefono"]),
+                email: opt_str(&e["email"]),
+                cif: opt_str(&e["cif"]),
+                informacion_adicional: opt_str(&e["informacion_adicional"]),
+                nombre_imagen: opt_str(&e["nombre_imagen"]),
+                ruta_imagen: opt_str(&e["ruta_imagen"]),
+            })
+            .await
+            .expect("guardar proveedor");
+        }
+        "proveedores.eliminar" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            repo.eliminar(&s(&e["id_proveedor"])).await.expect("eliminar proveedor");
+        }
+        "proveedores.set_vinculos" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            repo.set_vinculos(&s(&e["id_proveedor"]), strings(&e["producto_ids"]))
+                .await
+                .expect("set vinculos");
+        }
+        "proveedores.crear_producto" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            repo.crear_producto(ProductoNuevo {
+                id: opt_str(&e["id_producto"]),
+                id_categoria: s(&e["id_categoria"]),
+                id_proveedor: s(&e["id_proveedor"]),
+                nombre: s(&e["nombre"]),
+                precio_venta: e["precio_venta"].as_f64(),
+                stock_actual: e["stock_actual"].as_f64(),
+                stock_minimo: e["stock_minimo"].as_f64(),
+                unidad_medida: opt_str(&e["unidad_medida"]),
+            })
+            .await
+            .expect("crear producto");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

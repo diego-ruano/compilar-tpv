@@ -1,0 +1,16 @@
+{
+  "descripcion": "Borrado de proveedor: desvincula sus productos/lotes (SET NULL replicado explícito, DB-03) y borra la fila.",
+  "comando": "proveedores.eliminar",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuidora Sur');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre) VALUES ('prod-1', 'cat-1', 'prov-1', 'Cerveza');"
+  ],
+  "entrada": {
+    "id_proveedor": "prov-1"
+  },
+  "snapshot": {
+    "Proveedores": "SELECT ID_Proveedor FROM Proveedores",
+    "Productos": "SELECT ID_Producto, ID_Proveedor FROM Productos"
+  }
+}

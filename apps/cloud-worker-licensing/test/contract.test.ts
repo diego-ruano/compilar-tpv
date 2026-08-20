@@ -34,6 +34,12 @@ import {
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import {
+	crearProducto,
+	eliminarProveedor,
+	guardarProveedor,
+	setVinculos,
+} from "../src/domains/proveedores/proveedores.commands";
+import {
 	createTarea,
 	deleteTarea,
 	marcarFinalizada,
@@ -86,6 +92,14 @@ import casoCfgContact from "../../../tests/contract/casos/configuracion/patch_co
 import goldenCfgContact from "../../../tests/contract/golden/configuracion/patch_contact.json";
 import casoCfgTicket from "../../../tests/contract/casos/configuracion/patch_ticket.json";
 import goldenCfgTicket from "../../../tests/contract/golden/configuracion/patch_ticket.json";
+import casoProvGuardar from "../../../tests/contract/casos/proveedores/guardar.json";
+import goldenProvGuardar from "../../../tests/contract/golden/proveedores/guardar.json";
+import casoProvEliminar from "../../../tests/contract/casos/proveedores/eliminar.json";
+import goldenProvEliminar from "../../../tests/contract/golden/proveedores/eliminar.json";
+import casoProvVinculos from "../../../tests/contract/casos/proveedores/set_vinculos.json";
+import goldenProvVinculos from "../../../tests/contract/golden/proveedores/set_vinculos.json";
+import casoProvCrearProd from "../../../tests/contract/casos/proveedores/crear_producto.json";
+import goldenProvCrearProd from "../../../tests/contract/golden/proveedores/crear_producto.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -108,6 +122,10 @@ const CASOS = [
 	{ nombre: "config_patch_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
 	{ nombre: "config_patch_contact", caso: casoCfgContact, golden: goldenCfgContact },
 	{ nombre: "config_patch_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
+	{ nombre: "proveedores_guardar", caso: casoProvGuardar, golden: goldenProvGuardar },
+	{ nombre: "proveedores_eliminar", caso: casoProvEliminar, golden: goldenProvEliminar },
+	{ nombre: "proveedores_set_vinculos", caso: casoProvVinculos, golden: goldenProvVinculos },
+	{ nombre: "proveedores_crear_producto", caso: casoProvCrearProd, golden: goldenProvCrearProd },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -334,6 +352,28 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "config.patch_ticket": {
 			aplicar(hub, sql, patchTicket(caso.entrada.patch));
+			return;
+		}
+		case "proveedores.guardar": {
+			aplicar(hub, sql, guardarProveedor(caso.entrada as any));
+			return;
+		}
+		case "proveedores.eliminar": {
+			aplicar(hub, sql, eliminarProveedor(caso.entrada.id_proveedor));
+			return;
+		}
+		case "proveedores.set_vinculos": {
+			aplicar(
+				hub,
+				sql,
+				setVinculos(caso.entrada.id_proveedor, {
+					producto_ids: caso.entrada.producto_ids,
+				} as any),
+			);
+			return;
+		}
+		case "proveedores.crear_producto": {
+			aplicar(hub, sql, crearProducto(caso.entrada as any));
 			return;
 		}
 		default:

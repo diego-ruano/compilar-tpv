@@ -1,0 +1,19 @@
+{
+  "descripcion": "Alta/edición de proveedor (UPSERT por ID). Con id provisto → determinista.",
+  "comando": "proveedores.guardar",
+  "seed": [],
+  "entrada": {
+    "id_proveedor": "prov-1",
+    "nombre_empresa": "Distribuidora Sur",
+    "contacto": "Juan",
+    "telefono": "600100200",
+    "email": "j@dist.com",
+    "cif": "B12345678",
+    "informacion_adicional": "entregas L-V",
+    "nombre_imagen": null,
+    "ruta_imagen": null
+  },
+  "snapshot": {
+    "Proveedores": "SELECT ID_Proveedor, Nombre_Empresa, Contacto, Telefono, Email, CIF, Informacion_adicional, Nombre_Imagen, Ruta_Imagen FROM Proveedores"
+  }
+}

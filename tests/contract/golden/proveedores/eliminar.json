@@ -1,0 +1,9 @@
+{
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "ID_Proveedor": null
+    }
+  ],
+  "Proveedores": []
+}
