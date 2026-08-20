@@ -1100,13 +1100,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
                     let take = if remaining < stock { remaining } else { stock };
 
+                    // VR-06: descuento relativo sin clamp (igual que cobrar_fraccionado y que el
+                    // worker), para que Main y nube converjan al aplicar el mismo delta. Aquí el
+                    // `take` va acotado por el stock del lote, así que este camino propio no baja de
+                    // cero; el clamp solo enmascaraba el delta replicado y rompía la convergencia.
                     db.execute(
                         r#"
                         UPDATE Lotes_Producto
-                        SET Stock_Disponible = CASE
-                          WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
-                          ELSE COALESCE(Stock_Disponible,0) - ?2
-                        END
+                        SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
                         WHERE ID_Lote = ?1;
                         "#,
                         vec![Value::Text(id_lote), Value::Real(take)],

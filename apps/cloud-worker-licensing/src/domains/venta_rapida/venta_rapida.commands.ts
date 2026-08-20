@@ -301,13 +301,13 @@ export function cobrarFraccionado(
 	for (const a of plan.allocations) {
 		steps.push({
 			kind: "execute",
-			// VR-02: los lotes nunca quedan negativos (clamp a 0 por seguridad ante TOCTOU).
+			// VR-06: descuento RELATIVO sin clamp. El clamp a 0 (VR-02) floreaba en una copia y no
+			// en la otra según su stock local, inventando divergencia Main↔nube; aplicando el mismo
+			// delta a secas, las dos convergen. Un lote puede quedar negativo (sobreventa): se
+			// admite a propósito y se avisa (el CHECK se quitó en la migración 0003).
 			sql: `
 				UPDATE Lotes_Producto
-				SET Stock_Disponible = CASE
-					WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
-					ELSE COALESCE(Stock_Disponible,0) - ?2
-				END
+				SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
 				WHERE ID_Lote = ?1;
 			`,
 			args: [a.id_lote, a.take],
@@ -396,12 +396,11 @@ export function restarStock(
 ): BuiltCommand {
 	const steps: any[] = plan.allocations.map((a) => ({
 		kind: "execute",
+		// VR-06: descuento RELATIVO sin clamp, para converger con la Main al aplicar el mismo delta.
+		// Un lote puede quedar negativo (sobreventa): se admite a propósito (CHECK quitado en 0003).
 		sql: `
 			UPDATE Lotes_Producto
-			SET Stock_Disponible = CASE
-				WHEN COALESCE(Stock_Disponible,0) - ?2 < 0 THEN 0
-				ELSE COALESCE(Stock_Disponible,0) - ?2
-			END
+			SET Stock_Disponible = COALESCE(Stock_Disponible,0) - ?2
 			WHERE ID_Lote = ?1;
 		`,
 		args: [a.id_lote, a.take],

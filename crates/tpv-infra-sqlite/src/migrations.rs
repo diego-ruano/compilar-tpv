@@ -149,10 +149,34 @@ async fn applied_map(conn: &Connection) -> Result<HashMap<String, String>, Libsq
 /// Aplica todas las migraciones pendientes (cada una en su propia transacción). Crea desde cero el
 /// esquema en BDs nuevas y pone al día las existentes. Falla si una migración ya aplicada fue
 /// modificada (hash distinto).
+///
+/// **Enforcement de FK apagado durante las migraciones.** Un cambio de esquema que quite una
+/// restricción de tabla (un `CHECK`, p. ej. 0003) obliga a reconstruir la tabla (SQLite no soporta
+/// `ALTER TABLE ... DROP CONSTRAINT`): crear la nueva, copiar, `DROP` la vieja, renombrar. Con las
+/// FK activas ese `DROP` de la tabla referenciada haría un DELETE implícito que **cascadearía** a
+/// `Movimientos_Stock` (`ON DELETE CASCADE`) o **violaría** la FK `NO ACTION` de `Lote_Consumos`.
+/// SQLite exige togglear el enforcement **fuera** de transacción (dentro es no-op), así que se apaga
+/// aquí, alrededor de toda la tanda, y se restaura al terminar. Como red de seguridad, cada
+/// migración pasa `foreign_key_check` antes de confirmar: con las FK apagadas nadie las verifica en
+/// caliente, así que comprobamos a mano que la migración no dejó huérfanos. Es el procedimiento que
+/// recomienda la propia doc de SQLite para alteraciones de tabla.
 pub async fn run(conn: &Connection) -> Result<(), BoxErr> {
     ensure_table(conn).await?;
     let applied = applied_map(conn).await?;
 
+    // Fuera de transacción (dentro sería no-op). Se restaura pase lo que pase más abajo.
+    conn.execute_batch("PRAGMA foreign_keys=OFF;").await?;
+    let res = apply_pending(conn, &applied).await;
+    let restore = conn.execute_batch("PRAGMA foreign_keys=ON;").await;
+    // El error de la migración manda sobre el de restaurar (que además casi nunca falla).
+    res?;
+    restore?;
+    Ok(())
+}
+
+/// Bucle de aplicación de las pendientes. Se ejecuta con el enforcement de FK ya apagado (ver
+/// [`run`]); confía en `foreign_key_check` para no confirmar una migración que rompa integridad.
+async fn apply_pending(conn: &Connection, applied: &HashMap<String, String>) -> Result<(), BoxErr> {
     for (name, content) in migration_files() {
         let normalized = normalize(&content);
         let hash = sha256_hex(&normalized);
@@ -170,10 +194,11 @@ pub async fn run(conn: &Connection) -> Result<(), BoxErr> {
 
         let body = strip_block_comments(&normalized);
 
-        // Transacción: migración + registro en `_migrations`, atómicos.
+        // Transacción: migración + verificación de integridad + registro en `_migrations`, atómicos.
         conn.execute_batch("BEGIN;").await?;
-        let applied_res: Result<(), LibsqlError> = async {
+        let applied_res: Result<(), BoxErr> = async {
             conn.execute_batch(&body).await?;
+            comprobar_integridad_fk(conn, &name).await?;
             conn.execute(
                 "INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, ?3);",
                 vec![
@@ -194,11 +219,33 @@ pub async fn run(conn: &Connection) -> Result<(), BoxErr> {
             }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;").await;
-                return Err(Box::new(e));
+                return Err(e);
             }
         }
     }
 
+    Ok(())
+}
+
+/// Verifica que la migración no dejó filas huérfanas. `PRAGMA foreign_key_check` devuelve una fila
+/// por cada violación (tabla, rowid, tabla referida, id de la FK); si hay alguna, abortamos para que
+/// la transacción de la migración haga rollback. Con el enforcement apagado durante la tanda, este
+/// es el control que sustituye a la verificación en caliente.
+async fn comprobar_integridad_fk(conn: &Connection, name: &str) -> Result<(), BoxErr> {
+    let mut rows = conn
+        .query("PRAGMA foreign_key_check;", Vec::<Value>::new())
+        .await?;
+    if let Some(row) = rows.next().await? {
+        let tabla = match row.get_value(0) {
+            Ok(Value::Text(t)) => t,
+            _ => "?".to_string(),
+        };
+        return Err(format!(
+            "La migración '{name}' dejó integridad referencial rota (foreign_key_check señala '{tabla}'). \
+             Se revierte."
+        )
+        .into());
+    }
     Ok(())
 }
 
@@ -352,6 +399,75 @@ mod tests {
         let msg = format!("{err}").to_lowercase();
         assert!(msg.contains("0001_inicial.sql"), "el error debe nombrar la migración: {msg}");
         assert!(msg.contains("modificada"), "el error debe indicar manipulación: {msg}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 4) Rebuild de tabla (0003): el runner corre con las FK apagadas, así que el DROP+recreate de
+    ///    `Lotes_Producto` NO borra por cascada sus hijas (`Movimientos_Stock`), y el
+    ///    `CHECK (Stock_Disponible >= 0)` desaparece (ya se admite stock negativo). Es la red de
+    ///    seguridad del cambio más delicado de todo el refactor.
+    #[tokio::test]
+    async fn migracion_0003_conserva_hijas_y_permite_stock_negativo() {
+        let (_db, conn, dir) = open_temp().await;
+
+        // Aplica a mano 0001 y 0002 (dejando 0003 pendiente) para sembrar datos ANTES del rebuild y
+        // comprobar que sobreviven.
+        ensure_table(&conn).await.unwrap();
+        for (name, content) in migration_files().into_iter().take(2) {
+            let normalized = normalize(&content);
+            let body = strip_block_comments(&normalized);
+            conn.execute_batch(&body).await.unwrap();
+            conn.execute(
+                "INSERT INTO _migrations (name, hash, applied_at) VALUES (?1, ?2, 1);",
+                vec![Value::Text(name), Value::Text(sha256_hex(&normalized))],
+            )
+            .await
+            .unwrap();
+        }
+
+        // Semilla mínima consistente: categoría → producto → lote (stock 3) → movimiento de ALTA.
+        // El movimiento es hija de Lotes_Producto con ON DELETE CASCADE: es justo la fila que un
+        // DROP de la tabla con las FK activas borraría.
+        conn.execute_batch(
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c1','Bebidas');
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+               VALUES ('p1','c1','Cerveza',2.5);
+             INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
+               VALUES ('l1','p1','L-1',10,3);
+             INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
+               VALUES ('m1','l1','ALTA',10,10,'2026-01-01 00:00:00');",
+        )
+        .await
+        .unwrap();
+
+        // Runner: ahora solo 0003 está pendiente.
+        run(&conn).await.expect("0003 debe aplicarse sin romper nada");
+
+        // La hija ON DELETE CASCADE sobrevive al rebuild, y el lote sigue con su stock.
+        assert_eq!(scalar_i64(&conn, "SELECT COUNT(*) FROM Movimientos_Stock;").await, 1);
+        assert_eq!(
+            scalar_i64(&conn, "SELECT COUNT(*) FROM Lotes_Producto WHERE ID_Lote='l1';").await,
+            1,
+        );
+
+        // El CHECK se fue: el disponible ya puede bajar de cero (antes esto lo rechazaba el CHECK).
+        conn.execute(
+            "UPDATE Lotes_Producto SET Stock_Disponible = -5 WHERE ID_Lote='l1';",
+            Vec::<Value>::new(),
+        )
+        .await
+        .expect("el stock ya puede ser negativo");
+
+        // Integridad referencial intacta tras el rebuild.
+        let mut rows = conn
+            .query("PRAGMA foreign_key_check;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        assert!(
+            rows.next().await.unwrap().is_none(),
+            "no debe haber huérfanos tras el rebuild",
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }
