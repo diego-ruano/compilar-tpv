@@ -1,0 +1,31 @@
+{
+  "Lote_Consumos": [
+    {
+      "Cantidad": 3.0,
+      "ID_Detalle": "detalle-1",
+      "ID_Lote": "lote-1"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "ID_Producto": "prod-1",
+      "Stock_Disponible": 7.0
+    }
+  ],
+  "Pago_Detalles": [
+    {
+      "ID_Detalle": "detalle-1"
+    }
+  ],
+  "Pagos": [
+    {
+      "ID_Comanda": "comanda-1",
+      "ID_Trabajador_Cobrador": null,
+      "ID_Usuario_Cobrador": null,
+      "Importe_Total": 6.0,
+      "Metodo_Pago": "EFECTIVO",
+      "Tipo": "FRACCIONADO"
+    }
+  ]
+}

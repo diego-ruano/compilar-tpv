@@ -7,6 +7,11 @@
 //! sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se reubica
 //! aquí, dentro de repositorios que reciben la `Connection` de libsql.
 
+// Tests de contrato Main(Rust)↔worker(TS): que el EFECTO de un comando (las filas que deja) sea el
+// mismo en las dos implementaciones. Ver `contract_tests.rs` y `tests/contract/README.md`.
+#[cfg(test)]
+mod contract_tests;
+
 // Helpers de mapeo libsql::Value <-> tipos Rust:
 pub mod mapping;
 

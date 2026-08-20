@@ -1,0 +1,41 @@
+{
+  "Lote_Consumos": [
+    {
+      "Cantidad": 5.0,
+      "ID_Detalle": "detalle-1",
+      "ID_Lote": "lote-a"
+    },
+    {
+      "Cantidad": 3.0,
+      "ID_Detalle": "detalle-1",
+      "ID_Lote": "lote-b"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-a",
+      "ID_Producto": "prod-1",
+      "Stock_Disponible": 0.0
+    },
+    {
+      "ID_Lote": "lote-b",
+      "ID_Producto": "prod-1",
+      "Stock_Disponible": 2.0
+    }
+  ],
+  "Pago_Detalles": [
+    {
+      "ID_Detalle": "detalle-1"
+    }
+  ],
+  "Pagos": [
+    {
+      "ID_Comanda": "comanda-1",
+      "ID_Trabajador_Cobrador": null,
+      "ID_Usuario_Cobrador": null,
+      "Importe_Total": 16.0,
+      "Metodo_Pago": "TARJETA",
+      "Tipo": "FRACCIONADO"
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+# Tests de contrato Main (Rust) ↔ worker (TS) — ARCH-01
+
+La lógica de convertir un comando de negocio (un cobro, un ajuste de stock…) en **sentencias SQL
+replicables** vive **dos veces**: en Rust (la Main, escritora única) y en TypeScript (el worker, que
+escribe por las Handy). Las dos tienen que comportarse **igual** para que la replicación converja, se
+igualan a mano y ya han divergido (MESA-04/MESA-07). Este harness pincha esa igualdad: convierte una
+divergencia futura en un **test rojo** en CI.
+
+No elimina la duplicación (para eso está el WASM del futuro, ver
+[BACKLOG §Unificación](../../docs/analisis/BACKLOG.md#unificación-de-la-doble-implementación-mainworker));
+la **fija**. Es el máximo retorno por esfuerzo, sin cambio de arquitectura.
+
+## Qué se compara: el EFECTO, no el texto SQL
+
+Los dos lados escribieron su SQL por separado, así que el **texto** difiere aunque el resultado sea
+idéntico (`INSERT … VALUES` vs `INSERT … SELECT`, distinto orden de columnas…). Comparar el texto
+daría falsos positivos. Lo que importa para la convergencia es que, **partiendo del mismo estado
+sembrado**, aplicar el comando deje **las mismas filas**. Así que:
+
+1. Los dos lados **siembran el mismo estado** (`seed` del caso).
+2. Cada uno corre **su** implementación del comando por su camino real.
+3. Se leen las filas resultantes (`snapshot`) y se comparan con el **golden**.
+
+Los `snapshot` **omiten a propósito** las columnas no deterministas (UUIDs generados, `Fecha_Hora`):
+lo que queda es el efecto determinista (importes, stock por lote, consumos, qué detalles se cobraron).
+La comparación es por **multiconjunto** de filas (sin orden) con igualdad estructural (números como
+números, con tolerancia `1e-9`).
+
+El **golden lo bendice Rust** (lado canónico: es el escritor único). El worker se conforma; si diverge,
+su test se pone rojo.
+
+## Estructura
+
+```
+tests/contract/
+├── casos/<nombre>.json      # seed + entrada + snapshot (SELECT por tabla)
+└── golden/<nombre>.json     # { tabla: [filas] } — el efecto esperado, bendecido por Rust
+```
+
+Un **caso** (`casos/<nombre>.json`):
+
+```jsonc
+{
+  "descripcion": "…",
+  "comando": "venta_rapida.cobrar_fraccionado",   // clave que despacha al comando en cada lado
+  "seed":     ["INSERT INTO …;", "…"],             // estado de partida (idéntico en ambos lados)
+  "entrada":  { "id_comanda": "…", "metodo": "…", "detalles": ["…"] },
+  "snapshot": { "Pagos": "SELECT … FROM Pagos", "Lotes_Producto": "SELECT … FROM Lotes_Producto" }
+}
+```
+
+## Dónde corre cada lado
+
+| Lado | Fichero | Se ejecuta con |
+|---|---|---|
+| Rust (Main) | `crates/tpv-infra-sqlite/src/contract_tests.rs` | `cargo test -p tpv-infra-sqlite contrato_` |
+| Worker (Handy) | `apps/cloud-worker-licensing/test/contractVentaRapida.test.ts` | `pnpm --filter tpv-api test contract` |
+
+- Rust abre un libsql local, siembra, corre el comando (que captura su efecto en la BD) y lee las filas.
+- El worker corre **dentro de workerd** (`@cloudflare/vitest-pool-workers`): levanta el TenantHub real,
+  construye el esquema de tenant con las **mismas migraciones** (`test/helpers/esquemaTenant.ts`),
+  siembra, corre `cobrarPlan → cobrarFraccionado → buildApplyBatch`, aplica las sentencias y lee.
+
+Ambos leen el mismo `golden`. Como workerd no accede al disco, el worker **importa** el JSON (esbuild
+lo empaqueta); Rust lo lee del disco y es quien lo **bendice**.
+
+## Añadir un CASO nuevo (mismo comando)
+
+1. Crea `casos/<nombre>.json` con su `seed`, `entrada` y `snapshot`.
+2. Añade `<nombre>` a `CASOS` en `contract_tests.rs` y su par `caso/golden` en `contractVentaRapida.test.ts`.
+3. Bendice el golden desde Rust: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
+4. Corre el worker: `pnpm --filter tpv-api test contract`. Si sale rojo, **has encontrado una
+   divergencia real** entre las dos implementaciones (o el snapshot incluye algo no determinista).
+
+## Añadir un DOMINIO/comando nuevo (p. ej. cobro de mesas)
+
+Además de lo anterior, añade el **brazo de despacho** del comando en los dos sitios:
+- Rust: `aplicar_comando` en `contract_tests.rs` (un `match` por `caso["comando"]`).
+- Worker: `aplicarComando` en `contractVentaRapida.test.ts` (un `switch` por `caso.comando`).
+
+Cada brazo invoca la implementación real de ese comando en su lado. El resto (siembra, snapshot,
+comparación, golden) es común y no se toca.
+
+## Cobertura actual
+
+- `venta_rapida.cobrar_fraccionado`: cobro de barra por FEFO.
+  - `…_un_lote`: caso mínimo (un lote cubre la venta).
+  - `…_fefo_multilote`: reparto FEFO entre dos lotes (agota el que caduca antes) — ejercita el orden
+    FEFO, que es donde las dos implementaciones pueden divergir.
+
+Pendiente (incremental, un dominio cada vez): mesas, inventario, stats, login, y el resto de la familia
+`-parity` (ver [00-indice.md](../../docs/analisis/00-indice.md)).
