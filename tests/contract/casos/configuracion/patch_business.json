@@ -1,0 +1,18 @@
+{
+  "descripcion": "Patch de los ajustes de negocio (singleton ID=1). UPSERT + UPDATE de solo las columnas del patch. Updated_At (now) se excluye del snapshot.",
+  "comando": "config.patch_business",
+  "seed": [],
+  "entrada": {
+    "patch": {
+      "business_name": "Mi Bar",
+      "direccion": "Calle Mayor 1",
+      "telefono": "600100200",
+      "cif": "B12345678",
+      "mensaje_footer": "Gracias por su visita",
+      "iva_percent": 21
+    }
+  },
+  "snapshot": {
+    "Business_Settings": "SELECT Business_Name, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent FROM Business_Settings"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "descripcion": "Patch de los ajustes de contacto (singleton). Updated_At excluido.",
+  "comando": "config.patch_contact",
+  "seed": [],
+  "entrada": {
+    "patch": {
+      "recovery_email": "recuperacion@bar.com",
+      "contact_email": "contacto@bar.com",
+      "contact_phone": "600100200"
+    }
+  },
+  "snapshot": {
+    "Contact_Settings": "SELECT Recovery_Email, Contact_Email, Contact_Phone FROM Contact_Settings"
+  }
+}

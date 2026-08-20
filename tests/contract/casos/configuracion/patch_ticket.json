@@ -1,0 +1,17 @@
+{
+  "descripcion": "Patch de los ajustes de ticket (singleton): booleanos (→ 1/0) y numéricos con clamp. Valores dentro de rango para el caso base. Updated_At excluido.",
+  "comando": "config.patch_ticket",
+  "seed": [],
+  "entrada": {
+    "patch": {
+      "show_logo": true,
+      "show_total": false,
+      "paper_width_mm": 80,
+      "chars_per_line": 42,
+      "font_scale": 1.0
+    }
+  },
+  "snapshot": {
+    "Ticket_Settings": "SELECT Show_Logo, Show_Total, Paper_Width_Mm, Chars_Per_Line, Font_Scale FROM Ticket_Settings"
+  }
+}

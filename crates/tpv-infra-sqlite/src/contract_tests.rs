@@ -28,6 +28,7 @@ use libsql::{Connection, Value};
 use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
+use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::tareas::TareasRepository;
@@ -39,6 +40,7 @@ use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
+use crate::configuracion::SqliteConfiguracionRepository;
 use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
 use crate::mesas::SqliteMesasRepository;
@@ -257,6 +259,9 @@ const CASOS: &[&str] = &[
     "inventario__delete_producto",
     "inventario__update_lote",
     "inventario__ajustar_lote",
+    "configuracion__patch_business",
+    "configuracion__patch_contact",
+    "configuracion__patch_ticket",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -441,6 +446,18 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("ajustar lote");
+        }
+        "config.patch_business" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            repo.patch_business(&e["patch"]).await.expect("patch business");
+        }
+        "config.patch_contact" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            repo.patch_contact(&e["patch"]).await.expect("patch contact");
+        }
+        "config.patch_ticket" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            repo.patch_ticket(&e["patch"]).await.expect("patch ticket");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

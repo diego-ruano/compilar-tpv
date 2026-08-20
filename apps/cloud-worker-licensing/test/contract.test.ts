@@ -18,6 +18,11 @@ import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import {
+	patchBusiness,
+	patchContact,
+	patchTicket,
+} from "../src/domains/configuracion/configuracion.commands";
+import {
 	ajustarLote,
 	createCategoria,
 	createLote,
@@ -75,6 +80,12 @@ import casoInvUpdateLote from "../../../tests/contract/casos/inventario/update_l
 import goldenInvUpdateLote from "../../../tests/contract/golden/inventario/update_lote.json";
 import casoInvAjustarLote from "../../../tests/contract/casos/inventario/ajustar_lote.json";
 import goldenInvAjustarLote from "../../../tests/contract/golden/inventario/ajustar_lote.json";
+import casoCfgBusiness from "../../../tests/contract/casos/configuracion/patch_business.json";
+import goldenCfgBusiness from "../../../tests/contract/golden/configuracion/patch_business.json";
+import casoCfgContact from "../../../tests/contract/casos/configuracion/patch_contact.json";
+import goldenCfgContact from "../../../tests/contract/golden/configuracion/patch_contact.json";
+import casoCfgTicket from "../../../tests/contract/casos/configuracion/patch_ticket.json";
+import goldenCfgTicket from "../../../tests/contract/golden/configuracion/patch_ticket.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -94,6 +105,9 @@ const CASOS = [
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
 	{ nombre: "inventario_update_lote", caso: casoInvUpdateLote, golden: goldenInvUpdateLote },
 	{ nombre: "inventario_ajustar_lote", caso: casoInvAjustarLote, golden: goldenInvAjustarLote },
+	{ nombre: "config_patch_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
+	{ nombre: "config_patch_contact", caso: casoCfgContact, golden: goldenCfgContact },
+	{ nombre: "config_patch_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -308,6 +322,18 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					stockActual,
 				),
 			);
+			return;
+		}
+		case "config.patch_business": {
+			aplicar(hub, sql, patchBusiness(caso.entrada.patch));
+			return;
+		}
+		case "config.patch_contact": {
+			aplicar(hub, sql, patchContact(caso.entrada.patch));
+			return;
+		}
+		case "config.patch_ticket": {
+			aplicar(hub, sql, patchTicket(caso.entrada.patch));
 			return;
 		}
 		default:
