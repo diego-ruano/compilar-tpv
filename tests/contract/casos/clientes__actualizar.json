@@ -1,0 +1,17 @@
+{
+  "descripcion": "Edición de un cliente existente (UPDATE de nombre/telefono/email/notas). No toca Created_At.",
+  "comando": "clientes.actualizar",
+  "seed": [
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono, Email, Notas, Created_At) VALUES ('cliente-1', 'Ana', '600100200', 'ana@bar.com', 'x', '2026-01-01 00:00:00');"
+  ],
+  "entrada": {
+    "id_cliente": "cliente-1",
+    "nombre": "Ana Lopez",
+    "email": "ana.lopez@bar.com",
+    "telefono": "600999888",
+    "notas": "Actualizado"
+  },
+  "snapshot": {
+    "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes"
+  }
+}

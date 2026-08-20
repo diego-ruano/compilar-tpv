@@ -1,0 +1,11 @@
+{
+  "Clientes": [
+    {
+      "Email": "ana@bar.com",
+      "ID_Cliente": "cliente-1",
+      "Nombre": "Ana Gomez",
+      "Notas": "VIP",
+      "Telefono": "600100200"
+    }
+  ]
+}

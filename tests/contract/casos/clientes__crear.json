@@ -1,0 +1,15 @@
+{
+  "descripcion": "Alta de un cliente (UPSERT por ID_Cliente). Con id ya provisto (no generado) para que la fila sea determinista. Created_At se omite del snapshot (datetime now).",
+  "comando": "clientes.crear",
+  "seed": [],
+  "entrada": {
+    "id_cliente": "cliente-1",
+    "nombre": "Ana Gomez",
+    "email": "ana@bar.com",
+    "telefono": "600100200",
+    "notas": "VIP"
+  },
+  "snapshot": {
+    "Clientes": "SELECT ID_Cliente, Nombre, Telefono, Email, Notas FROM Clientes"
+  }
+}

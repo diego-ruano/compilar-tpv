@@ -27,11 +27,14 @@ use std::sync::Arc;
 use libsql::{Connection, Value};
 use serde_json::{Map, Value as Json};
 
+use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::mesas::CobroDetalles;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
+use crate::clientes::SqliteClientesRepository;
 use crate::db::{Db, Reader};
 use crate::mesas::SqliteMesasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
@@ -211,6 +214,15 @@ fn strings(v: &Json) -> Vec<String> {
         .collect()
 }
 
+/// Campo opcional del `entrada`: `null`/ausente → `None`, string → `Some`.
+fn opt_str(v: &Json) -> Option<String> {
+    v.as_str().map(|s| s.to_string())
+}
+
+fn s(v: &Json) -> String {
+    v.as_str().unwrap().to_string()
+}
+
 /// Casos del harness. Añadir uno: crear su fixture en `tests/contract/casos/`, bendecir su golden
 /// (`BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`) y sumar su nombre aquí y en el test
 /// del worker (`test/contract.test.ts`).
@@ -218,6 +230,8 @@ const CASOS: &[&str] = &[
     "venta_rapida__cobro_fraccionado_un_lote",
     "venta_rapida__cobro_fraccionado_fefo_multilote",
     "mesas__cobrar_detalles_un_lote",
+    "clientes__crear",
+    "clientes__actualizar",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -250,6 +264,30 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("el cobro de mesa debe aplicarse");
+        }
+        "clientes.crear" => {
+            let repo = SqliteClientesRepository::new(db.clone());
+            repo.create(NuevoCliente {
+                id: opt_str(&e["id_cliente"]),
+                nombre: s(&e["nombre"]),
+                email: opt_str(&e["email"]),
+                telefono: opt_str(&e["telefono"]),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("alta de cliente");
+        }
+        "clientes.actualizar" => {
+            let repo = SqliteClientesRepository::new(db.clone());
+            repo.update(Cliente {
+                id: s(&e["id_cliente"]),
+                nombre: s(&e["nombre"]),
+                email: opt_str(&e["email"]),
+                telefono: opt_str(&e["telefono"]),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("edición de cliente");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

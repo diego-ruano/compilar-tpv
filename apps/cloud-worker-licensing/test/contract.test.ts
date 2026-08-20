@@ -16,6 +16,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import { cobrarFraccionado } from "../src/domains/venta_rapida/venta_rapida.commands";
@@ -30,11 +31,17 @@ import casoVrMultilote from "../../../tests/contract/casos/venta_rapida__cobro_f
 import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_fefo_multilote.json";
 import casoMesasCobro from "../../../tests/contract/casos/mesas__cobrar_detalles_un_lote.json";
 import goldenMesasCobro from "../../../tests/contract/golden/mesas__cobrar_detalles_un_lote.json";
+import casoCliCrear from "../../../tests/contract/casos/clientes__crear.json";
+import goldenCliCrear from "../../../tests/contract/golden/clientes__crear.json";
+import casoCliActualizar from "../../../tests/contract/casos/clientes__actualizar.json";
+import goldenCliActualizar from "../../../tests/contract/golden/clientes__actualizar.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
 	{ nombre: "vr_fefo_multilote", caso: casoVrMultilote, golden: goldenVrMultilote },
 	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
+	{ nombre: "clientes_crear", caso: casoCliCrear, golden: goldenCliCrear },
+	{ nombre: "clientes_actualizar", caso: casoCliActualizar, golden: goldenCliActualizar },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -101,6 +108,29 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			const plan = await cobrarDetallesPlan(db, entrada as any);
 			expect(plan.ok, "el plan de cobro de mesa debe resolverse").toBe(true);
 			const built = cobrarDetalles(entrada as any, plan as any);
+			const batch = hub.buildApplyBatch(built.command);
+			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			return;
+		}
+		case "clientes.crear": {
+			const built = createCliente({
+				id_cliente: caso.entrada.id_cliente,
+				nombre: caso.entrada.nombre,
+				email: caso.entrada.email,
+				telefono: caso.entrada.telefono,
+				notas: caso.entrada.notas,
+			} as any);
+			const batch = hub.buildApplyBatch(built.command);
+			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			return;
+		}
+		case "clientes.actualizar": {
+			const built = updateCliente(caso.entrada.id_cliente, {
+				nombre: caso.entrada.nombre,
+				email: caso.entrada.email,
+				telefono: caso.entrada.telefono,
+				notas: caso.entrada.notas,
+			} as any);
 			const batch = hub.buildApplyBatch(built.command);
 			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
 			return;
