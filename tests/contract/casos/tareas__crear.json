@@ -1,0 +1,19 @@
+{
+  "descripcion": "Alta de una tarea con un trabajador asignado. Ejercita el INSERT de Tareas y las asignaciones. El ID_Tarea lo generan ambos lados (distinto UUID) → se excluye del snapshot; Fecha_Creacion/Asignada_At son datetime now → excluidas.",
+  "comando": "tareas.crear",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');"
+  ],
+  "entrada": {
+    "titulo": "Limpiar barra",
+    "descripcion": "Antes de cerrar",
+    "fecha_limite": "2026-02-01",
+    "ids_trabajadores": ["trab-1"]
+  },
+  "snapshot": {
+    "Tareas": "SELECT Titulo, Descripcion, Fecha_Limite FROM Tareas",
+    "Tarea_Asignaciones": "SELECT ID_Trabajador, Estado FROM Tarea_Asignaciones"
+  }
+}

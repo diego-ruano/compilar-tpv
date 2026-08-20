@@ -19,6 +19,13 @@ import { enElHub } from "./helpers/hub";
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
+import {
+	createTarea,
+	deleteTarea,
+	marcarFinalizada,
+	setAsignacionesTarea,
+	updateTarea,
+} from "../src/domains/tareas/tareas.commands";
 import { cobrarFraccionado } from "../src/domains/venta_rapida/venta_rapida.commands";
 import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
 
@@ -35,6 +42,16 @@ import casoCliCrear from "../../../tests/contract/casos/clientes__crear.json";
 import goldenCliCrear from "../../../tests/contract/golden/clientes__crear.json";
 import casoCliActualizar from "../../../tests/contract/casos/clientes__actualizar.json";
 import goldenCliActualizar from "../../../tests/contract/golden/clientes__actualizar.json";
+import casoTareaCrear from "../../../tests/contract/casos/tareas__crear.json";
+import goldenTareaCrear from "../../../tests/contract/golden/tareas__crear.json";
+import casoTareaActualizar from "../../../tests/contract/casos/tareas__actualizar.json";
+import goldenTareaActualizar from "../../../tests/contract/golden/tareas__actualizar.json";
+import casoTareaSetAsig from "../../../tests/contract/casos/tareas__set_asignaciones.json";
+import goldenTareaSetAsig from "../../../tests/contract/golden/tareas__set_asignaciones.json";
+import casoTareaEliminar from "../../../tests/contract/casos/tareas__eliminar.json";
+import goldenTareaEliminar from "../../../tests/contract/golden/tareas__eliminar.json";
+import casoTareaFinalizar from "../../../tests/contract/casos/tareas__marcar_finalizada.json";
+import goldenTareaFinalizar from "../../../tests/contract/golden/tareas__marcar_finalizada.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -42,6 +59,11 @@ const CASOS = [
 	{ nombre: "mesas_cobro_un_lote", caso: casoMesasCobro, golden: goldenMesasCobro },
 	{ nombre: "clientes_crear", caso: casoCliCrear, golden: goldenCliCrear },
 	{ nombre: "clientes_actualizar", caso: casoCliActualizar, golden: goldenCliActualizar },
+	{ nombre: "tareas_crear", caso: casoTareaCrear, golden: goldenTareaCrear },
+	{ nombre: "tareas_actualizar", caso: casoTareaActualizar, golden: goldenTareaActualizar },
+	{ nombre: "tareas_set_asignaciones", caso: casoTareaSetAsig, golden: goldenTareaSetAsig },
+	{ nombre: "tareas_eliminar", caso: casoTareaEliminar, golden: goldenTareaEliminar },
+	{ nombre: "tareas_marcar_finalizada", caso: casoTareaFinalizar, golden: goldenTareaFinalizar },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -76,6 +98,12 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
 		restantes.splice(i, 1);
 	}
 	return null;
+}
+
+/** Resuelve un `BuiltCommand` con el DO real y ejecuta sus sentencias contra el SQLite del tenant. */
+function aplicar(hub: any, sql: any, built: any): void {
+	const batch = hub.buildApplyBatch(built.command);
+	for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
 }
 
 /** Corre el comando del caso por su camino real (plan → builder → apply). El `switch` es el punto de
@@ -133,6 +161,55 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			} as any);
 			const batch = hub.buildApplyBatch(built.command);
 			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			return;
+		}
+		case "tareas.crear": {
+			aplicar(
+				hub,
+				sql,
+				createTarea({
+					titulo: caso.entrada.titulo,
+					descripcion: caso.entrada.descripcion,
+					fecha_limite: caso.entrada.fecha_limite,
+					ids_trabajadores: caso.entrada.ids_trabajadores,
+				} as any),
+			);
+			return;
+		}
+		case "tareas.actualizar": {
+			aplicar(
+				hub,
+				sql,
+				updateTarea(caso.entrada.id_tarea, {
+					titulo: caso.entrada.titulo,
+					descripcion: caso.entrada.descripcion,
+					fecha_limite: caso.entrada.fecha_limite,
+				} as any),
+			);
+			return;
+		}
+		case "tareas.set_asignaciones": {
+			aplicar(
+				hub,
+				sql,
+				setAsignacionesTarea(caso.entrada.id_tarea, {
+					ids_trabajadores: caso.entrada.ids_trabajadores,
+				} as any),
+			);
+			return;
+		}
+		case "tareas.eliminar": {
+			aplicar(hub, sql, deleteTarea(caso.entrada.id_tarea));
+			return;
+		}
+		case "tareas.marcar_finalizada": {
+			aplicar(
+				hub,
+				sql,
+				marcarFinalizada(caso.entrada.id_tarea, {
+					id_trabajador: caso.entrada.id_trabajador,
+				} as any),
+			);
 			return;
 		}
 		default:

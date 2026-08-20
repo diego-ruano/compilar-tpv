@@ -29,14 +29,17 @@ use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::mesas::MesasRepository;
+use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::mesas::CobroDetalles;
+use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
 use crate::db::{Db, Reader};
 use crate::mesas::SqliteMesasRepository;
+use crate::tareas::SqliteTareasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
 /// Tolerancia al comparar números (stock decimal, importes): absorbe el ruido de coma flotante.
@@ -232,6 +235,11 @@ const CASOS: &[&str] = &[
     "mesas__cobrar_detalles_un_lote",
     "clientes__crear",
     "clientes__actualizar",
+    "tareas__crear",
+    "tareas__actualizar",
+    "tareas__set_asignaciones",
+    "tareas__eliminar",
+    "tareas__marcar_finalizada",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -288,6 +296,48 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             })
             .await
             .expect("edición de cliente");
+        }
+        "tareas.crear" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.create_tarea(
+                TareaData {
+                    titulo: s(&e["titulo"]),
+                    descripcion: opt_str(&e["descripcion"]),
+                    fecha_limite: opt_str(&e["fecha_limite"]),
+                },
+                strings(&e["ids_trabajadores"]),
+            )
+            .await
+            .expect("crear tarea");
+        }
+        "tareas.actualizar" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.update_tarea(
+                &s(&e["id_tarea"]),
+                TareaData {
+                    titulo: s(&e["titulo"]),
+                    descripcion: opt_str(&e["descripcion"]),
+                    fecha_limite: opt_str(&e["fecha_limite"]),
+                },
+            )
+            .await
+            .expect("actualizar tarea");
+        }
+        "tareas.set_asignaciones" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.set_asignaciones(&s(&e["id_tarea"]), strings(&e["ids_trabajadores"]))
+                .await
+                .expect("set asignaciones");
+        }
+        "tareas.eliminar" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.delete_tarea(&s(&e["id_tarea"])).await.expect("eliminar tarea");
+        }
+        "tareas.marcar_finalizada" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.marcar_finalizada(&s(&e["id_tarea"]), &s(&e["id_trabajador"]))
+                .await
+                .expect("marcar finalizada");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

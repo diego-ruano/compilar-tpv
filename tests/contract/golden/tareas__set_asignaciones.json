@@ -1,0 +1,9 @@
+{
+  "Tarea_Asignaciones": [
+    {
+      "Estado": "PENDIENTE",
+      "ID_Tarea": "tarea-1",
+      "ID_Trabajador": "trab-1"
+    }
+  ]
+}

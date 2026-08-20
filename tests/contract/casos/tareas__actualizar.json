@@ -1,0 +1,16 @@
+{
+  "descripcion": "Edición de una tarea existente (titulo/descripcion/fecha_limite). ID conocido → se incluye. No toca Fecha_Creacion.",
+  "comando": "tareas.actualizar",
+  "seed": [
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Descripcion, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-1', 'Viejo', 'vieja', '2026-01-01', '2026-01-01 00:00:00');"
+  ],
+  "entrada": {
+    "id_tarea": "tarea-1",
+    "titulo": "Nuevo titulo",
+    "descripcion": "nueva",
+    "fecha_limite": "2026-03-01"
+  },
+  "snapshot": {
+    "Tareas": "SELECT ID_Tarea, Titulo, Descripcion, Fecha_Limite FROM Tareas"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "descripcion": "Borrado de una tarea: elimina la tarea y sus asignaciones (ambas tablas quedan vacías).",
+  "comando": "tareas.eliminar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea-1', 'T', '2026-01-01 00:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-1', 'trab-1', '2026-01-01 00:00:00', 'PENDIENTE');"
+  ],
+  "entrada": {
+    "id_tarea": "tarea-1"
+  },
+  "snapshot": {
+    "Tareas": "SELECT ID_Tarea FROM Tareas",
+    "Tarea_Asignaciones": "SELECT ID_Tarea, ID_Trabajador FROM Tarea_Asignaciones"
+  }
+}

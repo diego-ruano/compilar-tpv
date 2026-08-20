@@ -1,0 +1,10 @@
+{
+  "Tareas": [
+    {
+      "Descripcion": "nueva",
+      "Fecha_Limite": "2026-03-01",
+      "ID_Tarea": "tarea-1",
+      "Titulo": "Nuevo titulo"
+    }
+  ]
+}

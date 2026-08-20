@@ -1,0 +1,15 @@
+{
+  "Tarea_Asignaciones": [
+    {
+      "Estado": "PENDIENTE",
+      "ID_Trabajador": "trab-1"
+    }
+  ],
+  "Tareas": [
+    {
+      "Descripcion": "Antes de cerrar",
+      "Fecha_Limite": "2026-02-01",
+      "Titulo": "Limpiar barra"
+    }
+  ]
+}
