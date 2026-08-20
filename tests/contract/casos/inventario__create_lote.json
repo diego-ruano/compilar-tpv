@@ -1,0 +1,24 @@
+{
+  "descripcion": "Alta de un lote con su auditoría (INV-01b): INSERT en Lotes_Producto + un movimiento 'ALTA' con delta = stock inicial. ID_Movimiento lo generan ambos lados (distinto UUID) → excluido; Fecha del movimiento (now) → excluida. Fecha_Entrada se fija explícita para que sea determinista.",
+  "comando": "inventario.create_lote",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 2.0);"
+  ],
+  "entrada": {
+    "id_lote": "lote-1",
+    "id_producto": "prod-1",
+    "codigo_lote": "L1",
+    "fecha_entrada": "2026-01-01 00:00:00",
+    "caducidad": "2026-06-01",
+    "cantidad_inicial": 10,
+    "stock_disponible": 10,
+    "coste_unitario": 1.5,
+    "id_proveedor": null,
+    "notas": "alta inicial"
+  },
+  "snapshot": {
+    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas FROM Lotes_Producto",
+    "Movimientos_Stock": "SELECT ID_Lote, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
+  }
+}

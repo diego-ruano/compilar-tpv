@@ -28,16 +28,19 @@ use libsql::{Connection, Value};
 use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
+use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
+use tpv_domain::inventario::LoteNuevo;
 use tpv_domain::mesas::CobroDetalles;
 use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
 use crate::db::{Db, Reader};
+use crate::inventario::SqliteInventarioRepository;
 use crate::mesas::SqliteMesasRepository;
 use crate::tareas::SqliteTareasRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
@@ -240,6 +243,7 @@ const CASOS: &[&str] = &[
     "tareas__set_asignaciones",
     "tareas__eliminar",
     "tareas__marcar_finalizada",
+    "inventario__create_lote",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -338,6 +342,23 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.marcar_finalizada(&s(&e["id_tarea"]), &s(&e["id_trabajador"]))
                 .await
                 .expect("marcar finalizada");
+        }
+        "inventario.create_lote" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.create_lote(LoteNuevo {
+                id: opt_str(&e["id_lote"]),
+                id_producto: s(&e["id_producto"]),
+                codigo_lote: s(&e["codigo_lote"]),
+                caducidad: opt_str(&e["caducidad"]),
+                cantidad_inicial: e["cantidad_inicial"].as_f64().unwrap(),
+                stock_disponible: e["stock_disponible"].as_f64().unwrap(),
+                fecha_entrada: opt_str(&e["fecha_entrada"]),
+                coste_unitario: e["coste_unitario"].as_f64(),
+                id_proveedor: opt_str(&e["id_proveedor"]),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("crear lote");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

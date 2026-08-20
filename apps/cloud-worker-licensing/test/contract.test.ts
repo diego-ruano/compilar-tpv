@@ -17,6 +17,7 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
+import { createLote } from "../src/domains/inventario/inventario.commands";
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import {
@@ -52,6 +53,8 @@ import casoTareaEliminar from "../../../tests/contract/casos/tareas__eliminar.js
 import goldenTareaEliminar from "../../../tests/contract/golden/tareas__eliminar.json";
 import casoTareaFinalizar from "../../../tests/contract/casos/tareas__marcar_finalizada.json";
 import goldenTareaFinalizar from "../../../tests/contract/golden/tareas__marcar_finalizada.json";
+import casoInvCreateLote from "../../../tests/contract/casos/inventario__create_lote.json";
+import goldenInvCreateLote from "../../../tests/contract/golden/inventario__create_lote.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -64,6 +67,7 @@ const CASOS = [
 	{ nombre: "tareas_set_asignaciones", caso: casoTareaSetAsig, golden: goldenTareaSetAsig },
 	{ nombre: "tareas_eliminar", caso: casoTareaEliminar, golden: goldenTareaEliminar },
 	{ nombre: "tareas_marcar_finalizada", caso: casoTareaFinalizar, golden: goldenTareaFinalizar },
+	{ nombre: "inventario_create_lote", caso: casoInvCreateLote, golden: goldenInvCreateLote },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -208,6 +212,25 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 				sql,
 				marcarFinalizada(caso.entrada.id_tarea, {
 					id_trabajador: caso.entrada.id_trabajador,
+				} as any),
+			);
+			return;
+		}
+		case "inventario.create_lote": {
+			aplicar(
+				hub,
+				sql,
+				createLote({
+					id_lote: caso.entrada.id_lote,
+					id_producto: caso.entrada.id_producto,
+					codigo_lote: caso.entrada.codigo_lote,
+					fecha_entrada: caso.entrada.fecha_entrada,
+					caducidad: caso.entrada.caducidad,
+					cantidad_inicial: caso.entrada.cantidad_inicial,
+					stock_disponible: caso.entrada.stock_disponible,
+					coste_unitario: caso.entrada.coste_unitario,
+					id_proveedor: caso.entrada.id_proveedor,
+					notas: caso.entrada.notas,
 				} as any),
 			);
 			return;
