@@ -33,28 +33,28 @@ import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
 // bendecir su golden y sumar aquí su par caso/golden (workerd no lee del disco: los imports son
 // estáticos y esbuild los empaqueta). La misma lista, en Rust, vive en `contract_tests.rs::CASOS`.
-import casoVrUnLote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_un_lote.json";
-import goldenVrUnLote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_un_lote.json";
-import casoVrMultilote from "../../../tests/contract/casos/venta_rapida__cobro_fraccionado_fefo_multilote.json";
-import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida__cobro_fraccionado_fefo_multilote.json";
-import casoMesasCobro from "../../../tests/contract/casos/mesas__cobrar_detalles_un_lote.json";
-import goldenMesasCobro from "../../../tests/contract/golden/mesas__cobrar_detalles_un_lote.json";
-import casoCliCrear from "../../../tests/contract/casos/clientes__crear.json";
-import goldenCliCrear from "../../../tests/contract/golden/clientes__crear.json";
-import casoCliActualizar from "../../../tests/contract/casos/clientes__actualizar.json";
-import goldenCliActualizar from "../../../tests/contract/golden/clientes__actualizar.json";
-import casoTareaCrear from "../../../tests/contract/casos/tareas__crear.json";
-import goldenTareaCrear from "../../../tests/contract/golden/tareas__crear.json";
-import casoTareaActualizar from "../../../tests/contract/casos/tareas__actualizar.json";
-import goldenTareaActualizar from "../../../tests/contract/golden/tareas__actualizar.json";
-import casoTareaSetAsig from "../../../tests/contract/casos/tareas__set_asignaciones.json";
-import goldenTareaSetAsig from "../../../tests/contract/golden/tareas__set_asignaciones.json";
-import casoTareaEliminar from "../../../tests/contract/casos/tareas__eliminar.json";
-import goldenTareaEliminar from "../../../tests/contract/golden/tareas__eliminar.json";
-import casoTareaFinalizar from "../../../tests/contract/casos/tareas__marcar_finalizada.json";
-import goldenTareaFinalizar from "../../../tests/contract/golden/tareas__marcar_finalizada.json";
-import casoInvCreateLote from "../../../tests/contract/casos/inventario__create_lote.json";
-import goldenInvCreateLote from "../../../tests/contract/golden/inventario__create_lote.json";
+import casoVrUnLote from "../../../tests/contract/casos/venta_rapida/cobro_fraccionado_un_lote.json";
+import goldenVrUnLote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_un_lote.json";
+import casoVrMultilote from "../../../tests/contract/casos/venta_rapida/cobro_fraccionado_fefo_multilote.json";
+import goldenVrMultilote from "../../../tests/contract/golden/venta_rapida/cobro_fraccionado_fefo_multilote.json";
+import casoMesasCobro from "../../../tests/contract/casos/mesas/cobrar_detalles_un_lote.json";
+import goldenMesasCobro from "../../../tests/contract/golden/mesas/cobrar_detalles_un_lote.json";
+import casoCliCrear from "../../../tests/contract/casos/clientes/crear.json";
+import goldenCliCrear from "../../../tests/contract/golden/clientes/crear.json";
+import casoCliActualizar from "../../../tests/contract/casos/clientes/actualizar.json";
+import goldenCliActualizar from "../../../tests/contract/golden/clientes/actualizar.json";
+import casoTareaCrear from "../../../tests/contract/casos/tareas/crear.json";
+import goldenTareaCrear from "../../../tests/contract/golden/tareas/crear.json";
+import casoTareaActualizar from "../../../tests/contract/casos/tareas/actualizar.json";
+import goldenTareaActualizar from "../../../tests/contract/golden/tareas/actualizar.json";
+import casoTareaSetAsig from "../../../tests/contract/casos/tareas/set_asignaciones.json";
+import goldenTareaSetAsig from "../../../tests/contract/golden/tareas/set_asignaciones.json";
+import casoTareaEliminar from "../../../tests/contract/casos/tareas/eliminar.json";
+import goldenTareaEliminar from "../../../tests/contract/golden/tareas/eliminar.json";
+import casoTareaFinalizar from "../../../tests/contract/casos/tareas/marcar_finalizada.json";
+import goldenTareaFinalizar from "../../../tests/contract/golden/tareas/marcar_finalizada.json";
+import casoInvCreateLote from "../../../tests/contract/casos/inventario/create_lote.json";
+import goldenInvCreateLote from "../../../tests/contract/golden/inventario/create_lote.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },

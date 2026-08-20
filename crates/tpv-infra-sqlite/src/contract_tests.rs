@@ -52,6 +52,13 @@ fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/contract")
 }
 
+/// Ruta del fichero (`casos` o `golden`) de un caso. Se organizan por módulo: el nombre lógico
+/// `<modulo>__<caso>` vive en `<base>/<modulo>/<caso>.json`.
+fn ruta_caso(base: &str, nombre: &str) -> PathBuf {
+    let (modulo, caso) = nombre.split_once("__").unwrap_or(("otros", nombre));
+    contract_dir().join(base).join(modulo).join(format!("{caso}.json"))
+}
+
 fn uniq() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -176,7 +183,7 @@ async fn estado_resultante(db: &Arc<Db>, snapshot: &Map<String, Json>) -> Json {
 
 /// Compara el estado obtenido contra el golden del caso, o lo bendice si `BLESS_CONTRACT` está.
 fn comparar_o_bendecir(nombre: &str, estado: &Json) {
-    let golden_path = contract_dir().join("golden").join(format!("{nombre}.json"));
+    let golden_path = ruta_caso("golden", nombre);
 
     if std::env::var("BLESS_CONTRACT").is_ok() || !golden_path.exists() {
         std::fs::create_dir_all(golden_path.parent().unwrap()).unwrap();
@@ -207,7 +214,7 @@ fn comparar_o_bendecir(nombre: &str, estado: &Json) {
 }
 
 fn leer_caso(nombre: &str) -> Json {
-    let path = contract_dir().join("casos").join(format!("{nombre}.json"));
+    let path = ruta_caso("casos", nombre);
     serde_json::from_str(&std::fs::read_to_string(&path).unwrap())
         .unwrap_or_else(|e| panic!("caso ilegible {}: {e}", path.display()))
 }

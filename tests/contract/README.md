@@ -31,13 +31,19 @@ su test se pone rojo.
 
 ## Estructura
 
+Los ficheros se organizan **por módulo** en subcarpetas. El nombre lógico del caso es
+`<modulo>__<caso>` (en las listas `CASOS`), y vive en `<modulo>/<caso>.json`:
+
 ```
 tests/contract/
-├── casos/<nombre>.json      # seed + entrada + snapshot (SELECT por tabla)
-└── golden/<nombre>.json     # { tabla: [filas] } — el efecto esperado, bendecido por Rust
+├── casos/<modulo>/<caso>.json      # seed + entrada + snapshot (SELECT por tabla)
+└── golden/<modulo>/<caso>.json     # { tabla: [filas] } — el efecto esperado, bendecido por Rust
 ```
 
-Un **caso** (`casos/<nombre>.json`):
+Ej.: el caso `venta_rapida__cobro_fraccionado_un_lote` está en
+`casos/venta_rapida/cobro_fraccionado_un_lote.json` y `golden/venta_rapida/cobro_fraccionado_un_lote.json`.
+
+Un **caso** (`casos/<modulo>/<caso>.json`):
 
 ```jsonc
 {
@@ -66,8 +72,9 @@ lo empaqueta); Rust lo lee del disco y es quien lo **bendice**.
 
 ## Añadir un CASO nuevo (mismo comando)
 
-1. Crea `casos/<nombre>.json` con su `seed`, `entrada` y `snapshot`.
-2. Añade `<nombre>` a `CASOS` en `contract_tests.rs` y su par `caso/golden` en `contract.test.ts`.
+1. Crea `casos/<modulo>/<caso>.json` con su `seed`, `entrada` y `snapshot`.
+2. Añade el nombre lógico `<modulo>__<caso>` a `CASOS` en `contract_tests.rs` (Rust deriva la subcarpeta
+   del nombre) y su par `caso/golden` en `contract.test.ts` (imports con la ruta `<modulo>/<caso>.json`).
 3. Bendice el golden desde Rust: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
 4. Corre el worker: `pnpm --filter tpv-api test contract`. Si sale rojo, **has encontrado una
    divergencia real** entre las dos implementaciones (o el snapshot incluye algo no determinista).
