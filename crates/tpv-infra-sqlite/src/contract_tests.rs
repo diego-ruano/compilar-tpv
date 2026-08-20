@@ -33,7 +33,7 @@ use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
-use tpv_domain::inventario::{CategoriaUpsert, LoteNuevo, ProductoUpsert};
+use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 use tpv_domain::mesas::CobroDetalles;
 use tpv_domain::tareas::TareaData;
 use tpv_domain::venta_rapida::CobroFraccionado;
@@ -255,6 +255,8 @@ const CASOS: &[&str] = &[
     "inventario__upsert_producto",
     "inventario__set_alergenos",
     "inventario__delete_producto",
+    "inventario__update_lote",
+    "inventario__ajustar_lote",
 ];
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -412,6 +414,33 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "inventario.delete_producto" => {
             let repo = SqliteInventarioRepository::new(db.clone());
             repo.delete_producto(&s(&e["id_producto"])).await.expect("delete producto");
+        }
+        "inventario.update_lote" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.update_lote(LoteUpdate {
+                id_lote: s(&e["id_lote"]),
+                id_producto: s(&e["id_producto"]),
+                codigo_lote: s(&e["codigo_lote"]),
+                caducidad: opt_str(&e["caducidad"]),
+                cantidad_inicial: e["cantidad_inicial"].as_f64().unwrap(),
+                stock_disponible: e["stock_disponible"].as_f64().unwrap(),
+                fecha_entrada: opt_str(&e["fecha_entrada"]),
+                coste_unitario: e["coste_unitario"].as_f64(),
+                id_proveedor: opt_str(&e["id_proveedor"]),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("update lote");
+        }
+        "inventario.ajustar_lote" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            repo.ajustar_lote(AjusteLote {
+                id_lote: s(&e["id_lote"]),
+                stock_disponible: e["stock_disponible"].as_f64().unwrap(),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("ajustar lote");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

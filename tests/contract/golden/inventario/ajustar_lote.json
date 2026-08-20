@@ -1,0 +1,18 @@
+{
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Notas": "recuento fisico",
+      "Stock_Disponible": 3.0
+    }
+  ],
+  "Movimientos_Stock": [
+    {
+      "Delta": -2.0,
+      "ID_Lote": "lote-1",
+      "Motivo": "recuento fisico",
+      "Stock_Resultante": 3.0,
+      "Tipo": "AJUSTE"
+    }
+  ]
+}

@@ -18,10 +18,12 @@ import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import {
+	ajustarLote,
 	createCategoria,
 	createLote,
 	deleteProducto,
 	setAlergenosProducto,
+	updateLote,
 	upsertProducto,
 } from "../src/domains/inventario/inventario.commands";
 import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
@@ -69,6 +71,10 @@ import casoInvSetAlerg from "../../../tests/contract/casos/inventario/set_alerge
 import goldenInvSetAlerg from "../../../tests/contract/golden/inventario/set_alergenos.json";
 import casoInvDeleteProd from "../../../tests/contract/casos/inventario/delete_producto.json";
 import goldenInvDeleteProd from "../../../tests/contract/golden/inventario/delete_producto.json";
+import casoInvUpdateLote from "../../../tests/contract/casos/inventario/update_lote.json";
+import goldenInvUpdateLote from "../../../tests/contract/golden/inventario/update_lote.json";
+import casoInvAjustarLote from "../../../tests/contract/casos/inventario/ajustar_lote.json";
+import goldenInvAjustarLote from "../../../tests/contract/golden/inventario/ajustar_lote.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -86,6 +92,8 @@ const CASOS = [
 	{ nombre: "inventario_upsert_producto", caso: casoInvUpsertProd, golden: goldenInvUpsertProd },
 	{ nombre: "inventario_set_alergenos", caso: casoInvSetAlerg, golden: goldenInvSetAlerg },
 	{ nombre: "inventario_delete_producto", caso: casoInvDeleteProd, golden: goldenInvDeleteProd },
+	{ nombre: "inventario_update_lote", caso: casoInvUpdateLote, golden: goldenInvUpdateLote },
+	{ nombre: "inventario_ajustar_lote", caso: casoInvAjustarLote, golden: goldenInvAjustarLote },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -273,6 +281,33 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "inventario.delete_producto": {
 			aplicar(hub, sql, deleteProducto(caso.entrada.id_producto));
+			return;
+		}
+		case "inventario.update_lote": {
+			// La ruta lee el stock previo (para el delta de auditoría) antes de construir el comando.
+			const rs = await db.execute({
+				sql: "SELECT Stock_Disponible AS s FROM Lotes_Producto WHERE ID_Lote=?1;",
+				args: [caso.entrada.id_lote],
+			});
+			const stockActual = Number(rs.rows[0]?.s ?? 0);
+			aplicar(hub, sql, updateLote(caso.entrada.id_lote, caso.entrada as any, stockActual));
+			return;
+		}
+		case "inventario.ajustar_lote": {
+			const rs = await db.execute({
+				sql: "SELECT Stock_Disponible AS s FROM Lotes_Producto WHERE ID_Lote=?1;",
+				args: [caso.entrada.id_lote],
+			});
+			const stockActual = Number(rs.rows[0]?.s ?? 0);
+			aplicar(
+				hub,
+				sql,
+				ajustarLote(
+					caso.entrada.id_lote,
+					{ stock_disponible: caso.entrada.stock_disponible, notas: caso.entrada.notas } as any,
+					stockActual,
+				),
+			);
 			return;
 		}
 		default:
