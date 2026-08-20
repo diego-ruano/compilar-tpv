@@ -21,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tpv_application::use_cases::avisos as uc_avisos;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::licensing as uc_licensing;
+use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
 
 use super::{tarea, Job, Requiere};
@@ -31,6 +32,11 @@ const LICENCIA_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
 /// Cada cuánto se buscan tareas vencidas y reservas próximas.
 const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
+
+/// Cada cuánto se buscan productos con stock total negativo (sobreventa) para avisar. Como los
+/// negativos entran por ventas de la Handy replicadas a la Main, 10 min da un aviso casi inmediato
+/// sin machacar la BD (es un par de lecturas agregadas).
+const STOCK_NEGATIVO_INTERVAL_SECS: u64 = 10 * 60;
 
 /// Cada cuánto se reintenta subir a R2 lo que quedó pendiente. No hace falta más a menudo: el
 /// camino normal es el evento (tras guardar la imagen y al reconectar el WS); esto es la red.
@@ -80,6 +86,13 @@ pub(crate) fn catalogo() -> Vec<Job> {
             retardo_inicial: Duration::from_secs(60),
             requiere: Requiere::MainConBd,
             ejecutar: tarea(avisos),
+        },
+        Job {
+            nombre: "stock_negativo",
+            cada: Duration::from_secs(STOCK_NEGATIVO_INTERVAL_SECS),
+            retardo_inicial: Duration::from_secs(90),
+            requiere: Requiere::MainConBd,
+            ejecutar: tarea(stock_negativo),
         },
         Job {
             nombre: "imagenes",
@@ -199,6 +212,19 @@ async fn avisos(app: AppHandle) -> Result<(), String> {
         uc_avisos::VENTANA_RESERVA_MIN,
     )
     .await?;
+    Ok(())
+}
+
+/// Escáner de stock negativo (VR-06): productos cuyo stock total ha caído por debajo de cero
+/// (sobreventa, típicamente por una venta de la Handy replicada a la Main) → aviso a los
+/// administradores. Emite una notificación por producto con `clave_dedupe`, así que seguir
+/// vendiéndolo en negativo no genera avisos nuevos; y cierra el de los que se recuperan.
+async fn stock_negativo(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.stock_alertas_repo().await?;
+    let notifier = state.notifier().await?;
+
+    uc_stock_alertas::escanear(repo.as_ref(), notifier.as_ref()).await?;
     Ok(())
 }
 

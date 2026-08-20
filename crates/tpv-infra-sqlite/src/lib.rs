@@ -42,6 +42,7 @@ pub mod proveedores;
 pub mod reconciliacion;
 pub mod reservas;
 pub mod stats;
+pub mod stock_alertas;
 pub mod sync;
 pub mod tareas;
 pub mod trabajadores;

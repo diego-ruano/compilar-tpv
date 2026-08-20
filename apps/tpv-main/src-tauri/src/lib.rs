@@ -32,7 +32,8 @@ use tpv_application::ports::{
     notificaciones::{NotificacionesRepository, Notifier},
     pedidos_proveedor::PedidoProveedorRepository,
     proveedores::ProveedoresRepository, reservas::ReservasRepository,
-    stats::StatsRepository, sync::SyncRepository, tareas::TareasRepository,
+    stats::StatsRepository, stock_alertas::StockAlertasRepository, sync::SyncRepository,
+    tareas::TareasRepository,
     trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
 };
 use tpv_infra_http::{
@@ -55,7 +56,8 @@ use tpv_infra_sqlite::{
     login::SqliteLoginRepository, mesas::SqliteMesasRepository,
     notificaciones::SqliteNotificacionesRepository,
     pedidos_proveedor::SqlitePedidoProveedorRepository, proveedores::SqliteProveedoresRepository,
-    reservas::SqliteReservasRepository, stats::SqliteStatsRepository, sync::SqliteSyncRepository,
+    reservas::SqliteReservasRepository, stats::SqliteStatsRepository,
+    stock_alertas::SqliteStockAlertasRepository, sync::SqliteSyncRepository,
     tareas::SqliteTareasRepository, trabajadores::SqliteTrabajadoresRepository,
     venta_rapida::SqliteVentaRapidaRepository,
 };
@@ -576,6 +578,19 @@ impl AppState {
             .cloned()
             .ok_or_else(|| "DB no inicializada (escáner de avisos requiere modo Main)".to_string())?;
         Ok(Arc::new(SqliteAvisosScanRepository::new(conn)) as Arc<dyn AvisosScanRepository>)
+    }
+
+    /// Escáner de stock negativo (sobreventa): solo Main (SQLite). En Handy no hay BD local → error
+    /// y el job lo salta por su `Requiere`.
+    pub(crate) async fn stock_alertas_repo(&self) -> Result<Arc<dyn StockAlertasRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "DB no inicializada (alertas de stock requieren modo Main)".to_string())?;
+        Ok(Arc::new(SqliteStockAlertasRepository::new(conn)) as Arc<dyn StockAlertasRepository>)
     }
 }
 
