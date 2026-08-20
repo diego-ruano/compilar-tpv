@@ -4,12 +4,13 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-18).** De los ~136 hallazgos del análisis original **quedan 22
+> **Estado (2026-08-20).** De los ~136 hallazgos del análisis original **quedan 21
 > abiertos** (la tabla de abajo es la buena; el recuento se corrigió el 2026-08-14, el 2026-08-17
-> bajó de 28 a 24 al cerrarse ARCH-02, ARCH-03, ARCH-05 y TRAB-03, y el 2026-08-18 a 22 al cerrarse
-> INV-06 y DB-14 con el job de reconciliación), y son lo único
-> que contienen estas fichas. De esos 22, **11 son el mismo trabajo** (la familia `-parity`, ver la
-> nota del recuento) y **6 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
+> bajó de 28 a 24 al cerrarse ARCH-02, ARCH-03, ARCH-05 y TRAB-03, el 2026-08-18 a 22 al cerrarse
+> INV-06 y DB-14 con el job de reconciliación, y el 2026-08-20 a 21 al cerrarse VR-06 —se permite
+> stock negativo y un job avisa de la sobreventa—), y son lo único
+> que contienen estas fichas. De esos 21, **11 son el mismo trabajo** (la familia `-parity`, ver la
+> nota del recuento) y **5 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
 > arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
 > aparece, está resuelto.
 
@@ -68,7 +69,7 @@
 |--------|----------|--------|
 | T5 Arquitectura | 1 | ARCH-01 🟠 |
 | D1 Mesas | 2 | MESA-11 🟡 · MESA-14 🔵 |
-| D2 Venta rápida | 3 | VR-05 🟡 · VR-06 🟡 *(en el [BACKLOG](BACKLOG.md), con plan)* · VR-07 🔵 |
+| D2 Venta rápida | 2 | VR-05 🟡 · VR-07 🔵 |
 | D4 Inventario | 1 | INV-07 🔵 |
 | D6 Reservas | 2 | RES-05 🔵 · RES-07 🔵 |
 | D8 Tareas | 2 | TAR-04 🔵 · TAR-05 🔵 |
@@ -89,10 +90,12 @@ TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness
 (SQL golden)— los cierra todos.** Es, con diferencia, el pendiente de mayor retorno.
 
 El resto se agrupa en:
-- **Reconciliación de datos derivados:** cerrada en su parte local (job `reconciliacion`: cuadra
-  cada lote contra su historial y cada `Total_Gastado` contra sus `Pagos`, y **avisa**; no corrige
-  nada por su cuenta). Queda **VR-06**, que es la comparación Main ↔ nube: cada copia cuadra
-  consigo misma y nadie las contrasta entre sí.
+- **Reconciliación de datos derivados:** cerrada. En su parte local el job `reconciliacion` cuadra
+  cada lote contra su historial y cada `Total_Gastado` contra sus `Pagos`, y **avisa** sin corregir
+  nada por su cuenta. La comparación Main ↔ nube (lo que era VR-06) dejó de hacer falta al quitar el
+  clamp de stock: el descuento se replica como delta relativo idéntico en ambas copias, así que
+  **convergen por construcción**; un lote puede quedar negativo (sobreventa) y el job `stock_negativo`
+  lo avisa una vez por producto.
 - **Seguridad de datos:** LOGIN-04 (keyspace del PIN).
 - **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
   MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.
