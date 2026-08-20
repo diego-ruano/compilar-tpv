@@ -31,35 +31,44 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
 > sea consistente, pero se desincroniza a mano. Afecta a **MESA-11, STAT-06, INV-07, LOGIN-05**.
 > Opciones, de menos a más ambiciosas:
 
-1. **Tests de contrato (SQL golden) — barato, primer paso.** Para cada comando, con los mismos
-   inputs, comparar que el conjunto de sentencias + args que produce Rust y el que produce el worker
-   son equivalentes (normalizando espacios; stubbeando UUIDs/timestamps). No elimina la duplicación,
-   pero convierte cada divergencia futura en un **test rojo**. Máximo retorno por esfuerzo; sin
-   cambio de arquitectura.
+1. **Tests de contrato (golden por EFECTO) — barato, primer paso. 🟡 EN MARCHA.** Para cada comando,
+   con el mismo estado sembrado, comprobar que aplicar la implementación de Rust y la del worker deja
+   **las mismas filas**. No elimina la duplicación, pero convierte cada divergencia futura en un
+   **test rojo**. Máximo retorno por esfuerzo; sin cambio de arquitectura.
 
-   > **Decisión (2026-08-14): aplazado**, hay trabajo más urgente por delante. Punto de partida
-   > cuando se retome, para no volver a levantarlo desde cero:
+   > **Estado (2026-08-20): andamiaje montado, en extensión incremental.** Ver
+   > [tests/contract/README.md](../../tests/contract/README.md).
    >
-   > - **El lado Rust casi está**: hay ~209 tests en 40 módulos, pero todos prueban **un solo lado**.
-   >   Lo que falta es serializar las sentencias del comando; el sobre del outbox **ya es** ese JSON.
-   > - **El lado worker está a cero**: no hay tests ni *runner* instalado (los `*.test.ts` que
-   >   aparecen en `apps/` son de `node_modules`). Montar **vitest** en `tpv-api` es el primer paso
-   >   real de esta tarea, y sirve además para cualquier otro test del worker.
-   > - Montaje: fixtures compartidos (`tests/contract/casos/*.json`) → cada lado emite su JSON de
-   >   sentencias+args → comparador que normaliza espacios del SQL y stubea UUIDs/timestamps → job de
-   >   CI que corre los dos.
-   > - Empezar por **un solo comando** (el cobro de mesas, que ya divergió en MESA-04 y MESA-07) para
-   >   validar el andamiaje; después cada dominio es solo añadir fixtures.
+   > - **Se compara el EFECTO, no el texto SQL.** Los dos lados escribieron su SQL por separado, así
+   >   que el texto difiere aunque el resultado sea idéntico → compararlo daría falsos positivos. El
+   >   golden es el **estado resultante** (las filas que deja el comando), y cada lado corre su
+   >   implementación real y compara contra él. Los snapshots omiten columnas no deterministas
+   >   (UUID generado, `Fecha_Hora`); la comparación es por multiconjunto con igualdad estructural.
+   > - **Canónico = Rust** (escritor único): bendice el golden; el worker se conforma o sale rojo.
+   > - **Montado ya:** `tests/contract/` (fixtures + goldens), el lado Rust
+   >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
+   >   (`apps/cloud-worker-licensing/test/contractVentaRapida.test.ts`, corre en workerd con el
+   >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
+   > - **Cubierto:** `venta_rapida.cobrar_fraccionado` (un lote y reparto FEFO multilote) — los dos
+   >   lados coinciden hoy. **Falta (incremental):** mesas, inventario, stats, login y el resto de la
+   >   familia `-parity`. Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
    (ficheros `.sql` con nombres, o un JSON de sentencias con placeholders) consumido por Rust
    (`include_str!`) y TS (`import`). La mayoría de divergencias reales son en el texto del SQL y las
    listas de columnas; esto las elimina. La orquestación (qué sentencias, orden, valores calculados)
    seguiría duplicada.
-3. **Un solo cerebro vía WASM — caro, arreglo definitivo.** Compilar la construcción de comandos
-   (parte de `tpv-application` / los command builders) a **WebAssembly** e importarla en el Worker
-   (Cloudflare soporta WASM). Main y Handy ejecutarían **el mismo código**; las lecturas (planes,
-   FEFO) se inyectan como *host functions*. Encaja con el diseño hexagonal (los puertos ya abstraen
-   el IO). Proyecto grande, pero elimina la duplicación en la raíz.
+3. **Un solo cerebro vía WASM — caro, arreglo definitivo. ⏳ FUTURO (post-lanzamiento).** Compilar la
+   construcción de comandos (parte de `tpv-application` / los command builders) a **WebAssembly** e
+   importarla en el Worker (Cloudflare soporta WASM). Main y Handy ejecutarían **el mismo código**;
+   las lecturas (planes, FEFO) se inyectan como *host functions*. Encaja con el diseño hexagonal (los
+   puertos ya abstraen el IO). Proyecto grande, pero elimina la duplicación en la raíz.
+
+   > **Se puede hacer más tarde, incluso con clientes en producción.** Es un refactor **solo del
+   > worker** (lado servidor): no toca el esquema, no migra datos, no obliga a actualizar las apps (la
+   > Main ya corre el Rust nativo). Es un deploy de worker con rollback como cualquier otro. Y el
+   > harness (opción 1) es **la red que lo hace seguro**: los tests de contrato demuestran, antes de
+   > desplegar, que el WASM deja el mismo efecto que los builders de TS. Por eso el orden correcto es
+   > **harness ahora → WASM después** si la duplicación sigue doliendo; el harness no es trabajo tirado.
 4. **La Handy siempre delega en una Main — decisión de producto.** La Handy no construye SQL: manda
    una **intención** y la Main (única escritora) genera las sentencias. Elimina la necesidad de que
    el worker construya SQL, pero **acopla la Handy a que haya una Main viva** (el mecanismo de
@@ -69,9 +78,10 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
    spec. Riesgo: el generador se vuelve su propia carga de mantenimiento y tiene límites de
    expresividad.
 
-**Recomendación (fase de desarrollo):** **(1)** ya como red de seguridad barata → **(2)** para matar
-la clase de divergencia más frecuente → **(3) WASM** como objetivo a largo plazo si la duplicación
-sigue doliendo. **(4)** es más decisión de producto (¿puede el negocio operar Handy sin Main?) que
+**Recomendación (fase de desarrollo):** **(1) en marcha** como red de seguridad barata (ver arriba) →
+**(2)** para matar la clase de divergencia más frecuente → **(3) WASM** como objetivo a largo plazo
+(post-lanzamiento) si la duplicación sigue doliendo; se puede hacer con clientes en producción y el
+harness lo blinda. **(4)** es más decisión de producto (¿puede el negocio operar Handy sin Main?) que
 refactor.
 
 ---

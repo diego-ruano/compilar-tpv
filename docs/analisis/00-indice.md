@@ -87,7 +87,10 @@
 **11 de los abiertos son la misma cosa**: la doble implementación Main(Rust)/Handy(worker). ARCH-01
 es el paraguas y MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04,
 TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness de tests de contrato
-(SQL golden)— los cierra todos.** Es, con diferencia, el pendiente de mayor retorno.
+por efecto— los cierra todos**, y ya está **en marcha**: el andamiaje funciona de punta a punta y
+cubre `venta_rapida.cobrar_fraccionado` (VR-05); falta extenderlo dominio a dominio. Ver
+[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker) y
+[tests/contract/README.md](../../tests/contract/README.md). Es, con diferencia, el de mayor retorno.
 
 El resto se agrupa en:
 - **Reconciliación de datos derivados:** cerrada. En su parte local el job `reconciliacion` cuadra
