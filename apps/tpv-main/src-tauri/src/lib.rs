@@ -115,8 +115,16 @@ struct DeviceConfig {
     /// Impresora de tickets seleccionada en este dispositivo físico. Es una preferencia LOCAL
     /// (la impresora está conectada a esta máquina), por eso vive en `device_config.json` y no
     /// en la BD (que se sincroniza entre dispositivos).
+    ///
+    /// Se conserva como el destino "caja" y sigue leyéndose para no perder la selección de quien
+    /// ya la tenía puesta; lo nuevo va en `printers`.
     #[serde(default)]
     printer_name: Option<String>,
+    /// Impresora por DESTINO (`caja`, `cocina`, …). Hoy solo se usa `caja`; `cocina` está
+    /// declarado para que añadir la comanda de cocina no obligue a rehacer el modelo ni a migrar
+    /// la configuración de nadie. Una entrada ausente = ese destino no tiene impresora.
+    #[serde(default)]
+    printers: std::collections::HashMap<String, String>,
 }
 
 /* =========================================================
@@ -126,6 +134,13 @@ struct DeviceConfig {
 #[derive(Debug, Clone, Deserialize)]
 struct SetDeviceModeArgs {
     mode: DeviceMode,
+}
+
+/// Destino de impresión (`caja` | `cocina`). Ausente = `caja`.
+#[derive(Debug, Clone, Deserialize)]
+struct DestinoArgs {
+    #[serde(default)]
+    destino: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -155,6 +170,9 @@ struct EnsureImageArgs {
 #[derive(Debug, Clone, Deserialize)]
 struct SetPrinterArgs {
     name: String,
+    /// Destino al que se asigna (`caja` | `cocina`). Ausente = `caja`.
+    #[serde(default)]
+    destino: Option<String>,
 }
 
 /* =========================================================
@@ -1125,36 +1143,81 @@ async fn printer_list() -> Result<Vec<printing::PrinterInfo>, AppErrorDto> {
         .map_err(AppErrorDto::from)
 }
 
-/// Devuelve la impresora seleccionada en este dispositivo (o `None`).
-#[tauri::command]
-fn printer_get_selected(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
-    let dir = app_data_dir_of(&app)?;
-    Ok(load_config(&dir).printer_name)
+/// Destino por defecto cuando nadie dice cuál: el ticket de cliente.
+const DESTINO_CAJA: &str = "caja";
+
+/// Normaliza el destino pedido (vacío => `caja`).
+fn destino_o_caja(v: Option<String>) -> String {
+    v.map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DESTINO_CAJA.to_string())
 }
 
-/// Persiste la impresora seleccionada en `device_config.json` (nombre vacío => deselecciona).
+/// Impresora de un destino, con el campo antiguo (`printer_name`) como respaldo de `caja`.
+fn impresora_de(cfg: &DeviceConfig, destino: &str) -> Option<String> {
+    cfg.printers
+        .get(destino)
+        .cloned()
+        .or_else(|| {
+            if destino == DESTINO_CAJA {
+                cfg.printer_name.clone()
+            } else {
+                None
+            }
+        })
+        .filter(|s| !s.trim().is_empty())
+}
+
+/// Devuelve la impresora seleccionada para un destino (o `None`).
+#[tauri::command]
+fn printer_get_selected(
+    app: AppHandle,
+    args: Option<DestinoArgs>,
+) -> Result<Option<String>, AppErrorDto> {
+    let dir = app_data_dir_of(&app)?;
+    let destino = destino_o_caja(args.and_then(|a| a.destino));
+    Ok(impresora_de(&load_config(&dir), &destino))
+}
+
+/// Persiste la impresora de un destino en `device_config.json` (nombre vacío => deselecciona).
 #[tauri::command]
 fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, AppErrorDto> {
     let dir = app_data_dir_of(&app)?;
     let mut cfg = load_config(&dir);
+    let destino = destino_o_caja(args.destino);
     let name = args.name.trim();
-    cfg.printer_name = if name.is_empty() {
-        None
+
+    if name.is_empty() {
+        cfg.printers.remove(&destino);
     } else {
-        Some(name.to_string())
-    };
+        cfg.printers.insert(destino.clone(), name.to_string());
+    }
+    // El campo antiguo se mantiene al día para `caja`: si alguien vuelve a una versión anterior,
+    // su impresora sigue estando donde esa versión la busca.
+    if destino == DESTINO_CAJA {
+        cfg.printer_name = if name.is_empty() { None } else { Some(name.to_string()) };
+    }
+
     save_config(&dir, &cfg)?;
     Ok("OK".into())
 }
 
-/// Resuelve la impresora a usar: la del payload/args si viene, si no la seleccionada en config.
-fn resolve_printer(app: &AppHandle, explicit: Option<String>) -> Result<String, String> {
-    let chosen = explicit
-        .filter(|s| !s.trim().is_empty())
-        .or_else(|| load_config(&app_data_dir_of(app).ok()?).printer_name);
-    chosen
-        .filter(|s| !s.trim().is_empty())
+/// Resuelve la impresora a usar: la explícita si viene, si no la del destino en config.
+fn resolve_printer_destino(
+    app: &AppHandle,
+    explicit: Option<String>,
+    destino: &str,
+) -> Result<String, String> {
+    if let Some(n) = explicit.filter(|s| !s.trim().is_empty()) {
+        return Ok(n);
+    }
+    let dir = app_data_dir_of(app).map_err(|e| e.to_string())?;
+    impresora_de(&load_config(&dir), destino)
         .ok_or_else(|| "No hay impresora seleccionada".to_string())
+}
+
+fn resolve_printer(app: &AppHandle, explicit: Option<String>) -> Result<String, String> {
+    resolve_printer_destino(app, explicit, DESTINO_CAJA)
 }
 
 /// Imprime un ticket real construido en ESC/POS respetando la personalización del front.

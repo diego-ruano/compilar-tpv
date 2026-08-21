@@ -80,12 +80,28 @@ export async function printerList(): Promise<PrinterInfo[]> {
     return await invokeClient<PrinterInfo[]>("printer_list");
 }
 
-export async function printerGetSelected(): Promise<string | null> {
-    return (await invokeClient<string | null>("printer_get_selected")) ?? null;
+/**
+ * Destino de impresión. Hoy solo se usa `caja`; `cocina` está declarado para que añadir la comanda
+ * de cocina no obligue a rehacer el modelo de selección de impresora ni a migrar la configuración
+ * de nadie. Ausente = `caja`.
+ */
+export type DestinoImpresion = "caja" | "cocina";
+
+export async function printerGetSelected(
+    destino: DestinoImpresion = "caja",
+): Promise<string | null> {
+    return (
+        (await invokeClient<string | null>("printer_get_selected", {
+            args: { destino },
+        })) ?? null
+    );
 }
 
-export async function printerSetSelected(name: string): Promise<void> {
-    await invokeClient<string>("printer_set_selected", { args: { name } });
+export async function printerSetSelected(
+    name: string,
+    destino: DestinoImpresion = "caja",
+): Promise<void> {
+    await invokeClient<string>("printer_set_selected", { args: { name, destino } });
 }
 
 export async function printerPrintTest(name?: string): Promise<void> {

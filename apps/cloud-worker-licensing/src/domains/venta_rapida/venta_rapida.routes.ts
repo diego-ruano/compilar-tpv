@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Env } from "../../env";
 import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
-import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 
 import * as cmd from "./venta_rapida.commands";
 import * as q from "./venta_rapida.queries";
@@ -188,6 +188,8 @@ ventaRapidaRoutes.put("/lineas/nota", async (c) => {
 });
 
 ventaRapidaRoutes.post("/cobrar-fraccionado", async (c) => {
+	const veto = await soloLaMainCobra(c);
+	if (veto) return veto;
 	const p = await parseBody(c, S.cobrarFraccionadoSchema);
 	if (!p.ok) return p.res;
 	const plan = await tenantQuery(c.env, c.get("tenantId"), (db) =>

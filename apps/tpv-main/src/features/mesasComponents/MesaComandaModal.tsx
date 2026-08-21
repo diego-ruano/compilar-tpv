@@ -10,6 +10,7 @@ import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
 import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
+import { useMode } from "../../shared/stores/useMode";
 
 import {
     mesasEnsureOpenComanda,
@@ -448,6 +449,10 @@ export default function MesaComandaModal({
     const [paso, setPaso] = useState<Paso>("categorias");
     const [cashCount, setCashCount] = useState<Record<string, number>>({});
     const [printOpen, setPrintOpen] = useState(false);
+    // Cobrar es cosa de la Main: es la que tiene impresora y cajón. Cerrar una mesa desde un Handy
+    // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza;
+    // esto evita que se llegue a intentar.
+    const puedeCobrar = useMode((s) => s.mode) === "tpv";
 
     const { idUsuario, idTrabajador, role } = useAuth();
     const isAdmin = (role || "").toLowerCase().includes("admin");
@@ -1292,11 +1297,11 @@ export default function MesaComandaModal({
                             <button
                                 className={cn(
                                     "flex-1 px-3 py-2 rounded-xl text-sm font-semibold transition",
-                                    ticket.some((t) => !t.pagado)
+                                    puedeCobrar && ticket.some((t) => !t.pagado)
                                         ? "bg-accent text-white hover:bg-accent-hover"
                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
-                                disabled={!ticket.some((t) => !t.pagado)}
+                                disabled={!puedeCobrar || !ticket.some((t) => !t.pagado)}
                                 onClick={() => {
                                     seleccionaTodoPendiente();
                                     setPaso("metodo");
@@ -1309,11 +1314,11 @@ export default function MesaComandaModal({
                             <button
                                 className={cn(
                                     "flex-1 px-3 py-2 rounded-xl text-sm font-semibold transition",
-                                    haySeleccion
+                                    puedeCobrar && haySeleccion
                                         ? "bg-surface border border-border hover:bg-surface-2"
                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                 )}
-                                disabled={!haySeleccion}
+                                disabled={!puedeCobrar || !haySeleccion}
                                 onClick={() => setPaso("metodo")}
                                 type="button"
                             >
@@ -1487,7 +1492,7 @@ export default function MesaComandaModal({
                                                 ? "bg-accent text-white hover:bg-accent-hover"
                                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
-                                        disabled={!haySeleccion}
+                                        disabled={!puedeCobrar || !haySeleccion}
                                         onClick={() => cobrar("tarjeta")}
                                         type="button"
                                     >
@@ -1501,7 +1506,7 @@ export default function MesaComandaModal({
                                                 ? "bg-surface border border-border hover:bg-surface-2"
                                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
-                                        disabled={!haySeleccion}
+                                        disabled={!puedeCobrar || !haySeleccion}
                                         onClick={() => {
                                             setPaso("efectivo");
                                             setCashCount({});

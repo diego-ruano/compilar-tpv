@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Env } from "../../env";
 import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
-import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 
 import * as cmd from "./mesas.commands";
 import * as q from "./mesas.queries";
@@ -186,6 +186,8 @@ mesasRoutes.put("/lineas/:id/nota", async (c) => {
 });
 
 mesasRoutes.post("/cobrar-detalles", async (c) => {
+	const veto = await soloLaMainCobra(c);
+	if (veto) return veto;
 	const p = await parseBody(c, S.cobrarDetallesSchema);
 	if (!p.ok) return p.res;
 	const plan = await tenantQuery(c.env, c.get("tenantId"), (db) =>

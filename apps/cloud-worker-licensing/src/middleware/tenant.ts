@@ -21,6 +21,41 @@ export type TenantVars = {
 	licHash: string;
 };
 
+/**
+ * Rol del dispositivo según la BD central (`tpv` | `handy`). El JWT no lo lleva: la cabecera
+ * `x-role` es del cliente y no puede otorgar privilegios, así que la única fuente es la fila.
+ */
+export async function rolDelDispositivo(
+	env: Env,
+	tenantId: string,
+	deviceId: string,
+): Promise<string> {
+	const r = await getDb(env).execute({
+		sql: `SELECT role FROM devices WHERE tenant_id=? AND device_id=? AND revoked_at_ms IS NULL LIMIT 1;`,
+		args: [tenantId, deviceId],
+	});
+	return String((r.rows?.[0] as any)?.role || "").toLowerCase();
+}
+
+/**
+ * Cobrar es cosa de la Main y solo de la Main.
+ *
+ * Una Handy no tiene impresora ni cajón, así que cerrar una mesa desde ella dejaría al cliente sin
+ * ticket y el dinero sin registrar en el cajón. Es una decisión de producto, y quien la hace
+ * cumplir es el servidor: dejarla solo en la interfaz significa que cualquiera con el token de un
+ * Handy podría cobrar igualmente.
+ *
+ * Devuelve la respuesta de rechazo, o `null` si puede seguir.
+ */
+export async function soloLaMainCobra(c: any): Promise<Response | null> {
+	const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (rol === "tpv") return null;
+	return c.json(
+		{ ok: false, code: "external", error: "cobro_solo_en_main" },
+		403,
+	);
+}
+
 export const tenantAuth: MiddlewareHandler<{
 	Bindings: Env;
 	Variables: TenantVars;

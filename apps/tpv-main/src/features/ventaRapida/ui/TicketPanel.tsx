@@ -11,6 +11,7 @@ import {
 import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
 import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
+import { useMode } from "../../../shared/stores/useMode";
 
 export default function TicketPanel({
   ticket,
@@ -55,8 +56,12 @@ export default function TicketPanel({
 }) {
   const hayPendientes = ticket.some((t) => !t.pagado);
 
-  const canCobrarTodo = hayPendientes;
-  const canCobrarFraccionado = haySeleccion;
+  // Cobrar es cosa de la Main: es la que tiene impresora y cajón. Cerrar una venta desde un Handy
+  // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza; esto
+  // es para que no se llegue a intentar.
+  const esMain = useMode((s) => s.mode) === "tpv";
+  const canCobrarTodo = esMain && hayPendientes;
+  const canCobrarFraccionado = esMain && haySeleccion;
   const canCobrarMetodo = haySeleccion;
 
   const [notaOpen, setNotaOpen] = useState(false);
