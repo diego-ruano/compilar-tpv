@@ -36,7 +36,7 @@ jobs:
 
   # Frontend: typecheck (usa bindings.ts ya commiteado, sin recompilar Rust).
   frontend:
-    name: Typecheck frontend
+    name: Typecheck + tests del frontend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -50,10 +50,15 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
-      # `exec`, no `run`: @tpv/main no tiene script "tsc", y sin exec pnpm sale con 0 sin
-      # comprobar nada — este job llevaba siendo un no-op.
+      # Incluye los tests: viven fuera del `include` de la app, así que sin su tsconfig propio
+      # sus errores de tipos no los vería nadie.
       - name: Typecheck frontend
-        run: pnpm --filter @tpv/main exec tsc --noEmit
+        run: pnpm --filter @tpv/main typecheck
+
+      # Lógica del frontend (entorno node, sin DOM): funciones puras y stores. Los componentes NO
+      # se prueban aquí — ver el comentario de `apps/tpv-main/vitest.config.ts`.
+      - name: Tests del frontend
+        run: pnpm --filter @tpv/main test
 
   # Worker: typecheck, suite de tests (corre dentro de workerd con el pool de Cloudflare) y que el
   # registro manual de migraciones (tenantMigrations.ts) no se desincronice de la carpeta

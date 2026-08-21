@@ -1,0 +1,5 @@
+{
+	"//": "Los tests quedan fuera del `include` de la app (que es solo `src`), así que sin esto sus errores de tipos no los vería nadie. Mismo patrón que el worker: un tsconfig propio que extiende el de la app y añade la carpeta de tests.",
+	"extends": "../tsconfig.json",
+	"include": ["./**/*.ts", "../src/**/*.ts"]
+}
