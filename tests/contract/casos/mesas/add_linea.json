@@ -1,11 +1,11 @@
 {
-  "descripcion": "Añade una línea a una comanda de mesa. ID_Detalle generado (excluido). Estado_Cocina lo resuelve el route (fuera del builder) → excluido del snapshot. Sin trabajador. Se comprueba la línea y el Total.",
+  "descripcion": "Añade una línea a una comanda de mesa. ID_Detalle generado (excluido). Estado_Cocina lo resuelve el route (fuera del builder) → excluido del snapshot. Sin trabajador. Se comprueba la línea, su tipo de IVA (copiado del producto al vender, no consultado al imprimir: una reimpresión tiene que enseñar el del día de la venta) y el Total.",
   "comando": "mesas.add_linea",
   "seed": [
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0, 21.0);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');"
   ],
   "entrada": {
@@ -15,7 +15,7 @@
     "precio": 3.0
   },
   "snapshot": {
-    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Cantidad, Precio_Unitario FROM Detalle_Comanda",
+    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda",
     "Comandas": "SELECT ID_Comanda, Total_Comanda FROM Comandas"
   }
 }

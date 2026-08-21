@@ -55,6 +55,7 @@ fn map_producto_base(row: &Row) -> AppResult<ProductoBaseDto> {
         ruta_imagen: v_string(g(8)?),
         cantidad_pedido_esperada: v_f64(g(9)?),
         stock_suelto: v_f64(g(10)?),
+        iva_percent: v_f64(g(11)?),
     })
 }
 
@@ -72,6 +73,7 @@ fn map_producto_list(row: &Row) -> AppResult<ProductoListDto> {
         ruta_imagen: v_string(g(9)?),
         cantidad_pedido_esperada: v_f64(g(12)?),
         stock_suelto: v_f64(g(13)?),
+        iva_percent: v_f64(g(14)?),
     };
     Ok(ProductoListDto {
         base,
@@ -109,7 +111,7 @@ fn map_lote(row: &Row) -> AppResult<LoteDto> {
     })
 }
 
-const SQL_PRODUCTO_BASE_COLS: &str = "ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto";
+const SQL_PRODUCTO_BASE_COLS: &str = "ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent";
 
 async fn fetch_producto<C: Reader>(
     conn: &C,
@@ -186,7 +188,8 @@ impl InventarioRepository for SqliteInventarioRepository {
             (SELECT l.Caducidad FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Caducidad_Proxima,
             (SELECT l.Codigo_Lote FROM Lotes_Producto l WHERE l.ID_Producto = p.ID_Producto AND l.Stock_Disponible > 0 AND l.Caducidad IS NOT NULL ORDER BY date(l.Caducidad) ASC, datetime(l.Fecha_Entrada) ASC, l.ID_Lote ASC LIMIT 1) AS Lote_Proximo,
             p.Cantidad_Pedido_Esperada,
-            p.Stock_Suelto
+            p.Stock_Suelto,
+            p.IVA_Percent
           FROM Productos p
           WHERE p.ID_Categoria = ?1
           ORDER BY p.Nombre ASC;
@@ -500,8 +503,8 @@ impl InventarioRepository for SqliteInventarioRepository {
         let res: AppResult<()> = async {
             conn.execute(
                 r#"
-                INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
                 ON CONFLICT(ID_Producto) DO UPDATE SET
                   ID_Categoria = excluded.ID_Categoria,
                   ID_Proveedor = excluded.ID_Proveedor,
@@ -512,7 +515,8 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
                   Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
                   Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
-                  Stock_Suelto = excluded.Stock_Suelto;
+                  Stock_Suelto = excluded.Stock_Suelto,
+                  IVA_Percent = excluded.IVA_Percent;
                 "#,
                 vec![
                     Value::Text(id_producto.to_string()),
@@ -529,6 +533,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     opt_text(p.ruta_imagen),
                     opt_real(p.cantidad_pedido_esperada),
                     opt_real(p.stock_suelto),
+                    opt_real(p.iva_percent),
                 ],
             )
             .await

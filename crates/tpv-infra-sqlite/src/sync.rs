@@ -494,9 +494,12 @@ impl SyncRepository for SqliteSyncRepository {
         let conn = w.raw();
         let corte = now_ms() - antiguedad_ms.max(0);
 
+        // `<=` y no `<`: con `antiguedad_ms = 0` la lectura natural es "libera todas", y con un
+        // plazo real (una hora) la diferencia en el borde es irrelevante. Con `<`, una encolada en
+        // el mismo milisegundo que la consulta se salvaba por un pelo.
         let n = conn
             .execute(
-                "DELETE FROM _Sync_Encoladas WHERE Encolada_En_Ms < ?1;",
+                "DELETE FROM _Sync_Encoladas WHERE Encolada_En_Ms <= ?1;",
                 vec![Value::Integer(corte)],
             )
             .await
@@ -667,6 +670,7 @@ mod tests_encoladas {
 
         // Todavía es reciente: no se toca.
         assert_eq!(repo.liberar_encoladas_caducadas(60_000).await.unwrap(), 0);
+
         assert!(ids_pendientes(&repo).await.is_empty());
 
         // Con el plazo vencido, vuelve a estar disponible.

@@ -89,7 +89,7 @@ export function createComandaBarra(
 	};
 }
 
-export function addLinea(input: AddLineaInput): BuiltCommand {
+export function addLinea(input: AddLineaInput, ivaPercent: number | null): BuiltCommand {
 	return {
 		commandName: "vr_add_linea_comanda",
 		command: {
@@ -127,14 +127,16 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 								Cantidad,
 								Precio_Unitario,
 								Notas,
-								Estado_Cocina
+								Estado_Cocina,
+								IVA_Percent
 							)
-							VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE')
+							VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE', ?6)
 							ON CONFLICT(ID_Detalle) DO UPDATE SET
 								ID_Comanda = excluded.ID_Comanda,
 								ID_Producto = excluded.ID_Producto,
 								Cantidad = excluded.Cantidad,
 								Precio_Unitario = excluded.Precio_Unitario,
+								IVA_Percent = excluded.IVA_Percent,
 								Estado_Cocina = COALESCE(Detalle_Comanda.Estado_Cocina, excluded.Estado_Cocina);
 						`,
 						args: [
@@ -143,6 +145,7 @@ export function addLinea(input: AddLineaInput): BuiltCommand {
 							input.id_producto,
 							input.cantidad,
 							input.precio_unitario,
+							ivaPercent,
 						],
 					},
 					{

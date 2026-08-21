@@ -396,19 +396,34 @@ export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Pr
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
-Stock_Suelto: number | null, };
+Stock_Suelto: number | null, 
+/**
+ * Tipo de IVA propio. `None` = hereda el del negocio (lo normal en hostelería: el consumo
+ * en local va todo al tipo reducido). Se fija solo en lo que tributa distinto.
+ */
+IVA_Percent: number | null, };
 
 export type ProductoDetalleDto = { alergs: Array<AlergenoMiniDto>, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
-Stock_Suelto: number | null, };
+Stock_Suelto: number | null, 
+/**
+ * Tipo de IVA propio. `None` = hereda el del negocio (lo normal en hostelería: el consumo
+ * en local va todo al tipo reducido). Se fija solo en lo que tributa distinto.
+ */
+IVA_Percent: number | null, };
 
 export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: string | null, Lote_Proximo: string | null, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
-Stock_Suelto: number | null, };
+Stock_Suelto: number | null, 
+/**
+ * Tipo de IVA propio. `None` = hereda el del negocio (lo normal en hostelería: el consumo
+ * en local va todo al tipo reducido). Se fija solo en lo que tributa distinto.
+ */
+IVA_Percent: number | null, };
 
 export type ProductoProveedorDto = { id_producto: string, id_categoria: string | null, id_proveedor: string | null, nombre: string, precio_venta: number | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
 
@@ -650,7 +665,11 @@ export type UpsertProductoInput = { id_producto?: string, id_categoria: string, 
 /**
  * VR-04: stock suelto fuera de lotes (opcional; None = el producto no lo usa).
  */
-stock_suelto?: number, ids_alergenos: Array<string>, };
+stock_suelto?: number, 
+/**
+ * Tipo de IVA propio (opcional; None = hereda el del negocio).
+ */
+iva_percent?: number, ids_alergenos: Array<string>, };
 
 export type UpsertProductoResult = { id_producto: string, };
 

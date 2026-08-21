@@ -18,11 +18,13 @@ import type { Client } from "@libsql/client";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 import m0002 from "../../../../packages/database/migrations/0002_suelto_consumos.sql";
 import m0003 from "../../../../packages/database/migrations/0003_stock_negativo.sql";
+import m0004 from "../../../../packages/database/migrations/0004_iva_por_producto.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
 	{ name: "0002_suelto_consumos.sql", sql: m0002 },
 	{ name: "0003_stock_negativo.sql", sql: m0003 },
+	{ name: "0004_iva_por_producto.sql", sql: m0004 },
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */

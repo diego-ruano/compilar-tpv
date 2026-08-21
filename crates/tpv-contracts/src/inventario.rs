@@ -63,6 +63,10 @@ pub struct ProductoBaseDto {
     /// VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
     #[serde(rename = "Stock_Suelto")]
     pub stock_suelto: Option<f64>,
+    /// Tipo de IVA propio. `None` = hereda el del negocio (lo normal en hostelería: el consumo
+    /// en local va todo al tipo reducido). Se fija solo en lo que tributa distinto.
+    #[serde(rename = "IVA_Percent")]
+    pub iva_percent: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -252,6 +256,10 @@ pub struct UpsertProductoInput {
     #[serde(default)]
     #[ts(optional)]
     pub stock_suelto: Option<f64>,
+    /// Tipo de IVA propio (opcional; None = hereda el del negocio).
+    #[serde(default)]
+    #[ts(optional)]
+    pub iva_percent: Option<f64>,
     #[serde(default)]
     pub ids_alergenos: Vec<String>,
 }

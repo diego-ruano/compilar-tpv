@@ -312,6 +312,37 @@ export async function searchProductos(
 	return rows(rs) as ProductoVendibleOut[];
 }
 
+/**
+ * Lo que hay que saber del producto ANTES de insertar su línea: si pasa por cocina y con qué tipo
+ * de IVA se vende. Los dos se resuelven aquí y viajan como literales en la sentencia, porque una
+ * subconsulta dentro del INSERT la reevaluaría la Main en otro estado y la fila dejaría de ser
+ * idéntica en las dos copias.
+ *
+ * Va en UNA sola lectura: son dos columnas de la misma fila y este camino está en el momento de
+ * añadir una línea, que es lo que más se repite en un servicio.
+ */
+export async function datosDeLinea(
+	db: Client,
+	idProducto: string,
+): Promise<{ pasaCocina: boolean; ivaPercent: number | null }> {
+	const rs = await db.execute({
+		sql: `
+			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva
+			FROM Productos p
+			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
+			WHERE p.ID_Producto = ?1
+			LIMIT 1;
+		`,
+		args: [idProducto],
+	});
+	const fila = rows(rs)[0];
+	const iva = fila?.iva;
+	return {
+		pasaCocina: Number(fila?.pasa ?? 0) === 1,
+		ivaPercent: iva === null || iva === undefined ? null : Number(iva),
+	};
+}
+
 export async function productoPasaCocina(
 	db: Client,
 	idProducto: string,

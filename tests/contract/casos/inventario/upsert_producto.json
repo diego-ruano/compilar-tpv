@@ -1,5 +1,5 @@
 {
-  "descripcion": "Upsert de producto con un alérgeno (Gluten, sembrado por la migración). Borra y recrea los alérgenos. ID provisto → determinista.",
+  "descripcion": "Upsert de producto con un alérgeno (Gluten, sembrado por la migración). Borra y recrea los alérgenos. Lleva tipo de IVA propio (un vino para llevar tributa distinto que el consumo en local). ID provisto → determinista.",
   "comando": "inventario.upsert_producto",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');"
@@ -16,10 +16,11 @@
     "ruta_imagen": null,
     "cantidad_pedido_esperada": null,
     "stock_suelto": null,
+    "iva_percent": 21.0,
     "ids_alergenos": ["00000000-0000-7000-8000-000000000201"]
   },
   "snapshot": {
-    "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Stock_Suelto FROM Productos",
+    "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Stock_Suelto, IVA_Percent FROM Productos",
     "Producto_Alergenos": "SELECT ID_Producto, ID_Alergeno FROM Producto_Alergenos"
   }
 }

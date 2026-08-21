@@ -402,7 +402,11 @@ export function cerrarComanda(idComanda: string, total: number): BuiltCommand {
 	};
 }
 
-export function addLinea(input: AddLineaInput, estadoCocina: string | null): BuiltCommand {
+export function addLinea(
+	input: AddLineaInput,
+	estadoCocina: string | null,
+	ivaPercent: number | null,
+): BuiltCommand {
 	const steps: any[] = [];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
 	// con su round trip — el statement capturado para la Main ya lleva el id resuelto.
@@ -433,6 +437,8 @@ export function addLinea(input: AddLineaInput, estadoCocina: string | null): Bui
 
 	// MESA-07: Estado_Cocina se resuelve como literal (?6) en el route handler; ya no
 	// va una subquery embebida en el INSERT (no determinista al replicarse a la Main).
+	// El tipo de IVA (?7) viaja igual y por el mismo motivo, y se guarda EN LA LÍNEA: una
+	// reimpresión tiene que enseñar el tipo del día de la venta, no el de hoy.
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -442,11 +448,20 @@ export function addLinea(input: AddLineaInput, estadoCocina: string | null): Bui
 				ID_Producto,
 				Cantidad,
 				Precio_Unitario,
-				Estado_Cocina
+				Estado_Cocina,
+				IVA_Percent
 			)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
 		`,
-		args: [idDetalle, input.id_comanda, input.id_producto, input.cantidad, input.precio, estadoCocina],
+		args: [
+			idDetalle,
+			input.id_comanda,
+			input.id_producto,
+			input.cantidad,
+			input.precio,
+			estadoCocina,
+			ivaPercent,
+		],
 	});
 
 	steps.push({ kind: "execute", sql: UPDATE_TOTAL, args: [input.id_comanda] });

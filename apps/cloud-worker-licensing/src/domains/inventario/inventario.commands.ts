@@ -51,8 +51,8 @@ function normalizeIds(ids: string[]): string[] {
 }
 
 const SQL_UPSERT_PRODUCTO = `
-	INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto)
-	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+	INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Nombre_Imagen, Ruta_Imagen, Cantidad_Pedido_Esperada, Stock_Suelto, IVA_Percent)
+	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
 	ON CONFLICT(ID_Producto) DO UPDATE SET
 		ID_Categoria = excluded.ID_Categoria,
 		ID_Proveedor = excluded.ID_Proveedor,
@@ -63,7 +63,8 @@ const SQL_UPSERT_PRODUCTO = `
 		Nombre_Imagen = COALESCE(excluded.Nombre_Imagen, Productos.Nombre_Imagen),
 		Ruta_Imagen = COALESCE(excluded.Ruta_Imagen, Productos.Ruta_Imagen),
 		Cantidad_Pedido_Esperada = excluded.Cantidad_Pedido_Esperada,
-		Stock_Suelto = excluded.Stock_Suelto;
+		Stock_Suelto = excluded.Stock_Suelto,
+		IVA_Percent = excluded.IVA_Percent;
 `;
 
 const SQL_UPSERT_CATEGORIA = `
@@ -144,6 +145,7 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 				cleanOrNull(input.ruta_imagen),
 				numOrNull(input.cantidad_pedido_esperada),
 				numOrNull(input.stock_suelto),
+				numOrNull(input.iva_percent),
 			],
 		},
 		{

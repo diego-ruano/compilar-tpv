@@ -10,6 +10,9 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 
 import * as cmd from "./venta_rapida.commands";
 import * as q from "./venta_rapida.queries";
+// El tipo de IVA de un producto es la misma lectura para barra y para mesa: vive en las queries de
+// mesas y se reutiliza en vez de duplicarla.
+import * as mesasQ from "../mesas/mesas.queries";
 import * as S from "./venta_rapida.schemas";
 import { badRequest } from "../../server/utils/response";
 
@@ -154,7 +157,12 @@ ventaRapidaRoutes.post("/comandas/barra", async (c) => {
 ventaRapidaRoutes.post("/lineas", async (c) => {
 	const p = await parseBody(c, S.addLineaSchema);
 	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.addLinea(p.data));
+	// El tipo de IVA se resuelve aquí y viaja como literal: dentro del INSERT sería una
+	// subconsulta que la Main reevaluaría en otro estado.
+	const datos = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		mesasQ.datosDeLinea(db, p.data.id_producto),
+	);
+	const id = await apply(c, cmd.addLinea(p.data, datos.ivaPercent));
 	return c.json({ ok: true, id_detalle: id });
 });
 

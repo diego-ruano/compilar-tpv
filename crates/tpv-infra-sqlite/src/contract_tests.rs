@@ -508,6 +508,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 ruta_imagen: opt_str(&e["ruta_imagen"]),
                 cantidad_pedido_esperada: e["cantidad_pedido_esperada"].as_f64(),
                 stock_suelto: e["stock_suelto"].as_f64(),
+                iva_percent: e["iva_percent"].as_f64(),
                 ids_alergenos: strings(&e["ids_alergenos"]),
             })
             .await

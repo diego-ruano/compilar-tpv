@@ -10,6 +10,7 @@
       "Cantidad": 2.0,
       "ID_Comanda": "comanda-1",
       "ID_Producto": "prod-1",
+      "IVA_Percent": 21.0,
       "Precio_Unitario": 3.0
     }
   ]

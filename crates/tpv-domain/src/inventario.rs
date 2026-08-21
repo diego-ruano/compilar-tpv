@@ -75,6 +75,10 @@ pub struct ProductoUpsert {
     pub ruta_imagen: Option<String>,
     pub cantidad_pedido_esperada: Option<f64>,
     pub stock_suelto: Option<f64>,
+    /// Tipo de IVA propio. `None` = hereda el del negocio, que es lo normal en hostelería
+    /// (el consumo en local va todo al tipo reducido). Se pone solo cuando este producto
+    /// tributa distinto: algo envasado para llevar, tabaco, merchandising.
+    pub iva_percent: Option<f64>,
     pub ids_alergenos: Vec<String>,
 }
 
@@ -92,6 +96,7 @@ impl ProductoUpsert {
         ruta_imagen: Option<String>,
         cantidad_pedido_esperada: Option<f64>,
         stock_suelto: Option<f64>,
+        iva_percent: Option<f64>,
         ids_alergenos: Vec<String>,
     ) -> Result<Self, String> {
         let nombre = nombre.trim().to_string();
@@ -114,6 +119,9 @@ impl ProductoUpsert {
             ruta_imagen: limpia(ruta_imagen),
             cantidad_pedido_esperada,
             stock_suelto: stock_suelto.filter(|v| v.is_finite()),
+            // Un tipo negativo o absurdo no se guarda: cae a "hereda el del negocio", que es la
+            // opción segura (un IVA inventado en la fila acabaría en un ticket).
+            iva_percent: iva_percent.filter(|v| v.is_finite() && *v >= 0.0 && *v <= 100.0),
             ids_alergenos: normalize_ids(ids_alergenos),
         })
     }
@@ -320,7 +328,30 @@ mod tests {
     }
 
     fn producto(nombre: &str, categoria: &str, stock_suelto: Option<f64>, alergenos: Vec<String>) -> Result<ProductoUpsert, String> {
-        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(2.5), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, alergenos)
+        producto_con_iva(nombre, categoria, stock_suelto, None, alergenos)
+    }
+
+    fn producto_con_iva(nombre: &str, categoria: &str, stock_suelto: Option<f64>, iva: Option<f64>, alergenos: Vec<String>) -> Result<ProductoUpsert, String> {
+        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(2.5), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, iva, alergenos)
+    }
+
+    #[test]
+    fn el_iva_del_producto_solo_se_guarda_si_es_un_porcentaje_creible() {
+        // Sin tipo propio = hereda el del negocio, que es el caso normal en hostelería.
+        assert_eq!(producto("Cafe", "c1", None, vec![]).unwrap().iva_percent, None);
+        assert_eq!(
+            producto_con_iva("Cafe", "c1", None, Some(21.0), vec![]).unwrap().iva_percent,
+            Some(21.0)
+        );
+        // Y lo que no es un porcentaje cae a "hereda", en vez de acabar en un ticket: un IVA
+        // inventado en la fila es peor que no tener ninguno.
+        for absurdo in [-1.0, 101.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                producto_con_iva("Cafe", "c1", None, Some(absurdo), vec![]).unwrap().iva_percent,
+                None,
+                "{absurdo} no deberia guardarse"
+            );
+        }
     }
 
     #[test]

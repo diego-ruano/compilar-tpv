@@ -113,6 +113,7 @@ pub async fn upsert_producto(
         input.ruta_imagen,
         input.cantidad_pedido_esperada,
         input.stock_suelto,
+        input.iva_percent,
         input.ids_alergenos,
     )
     .map_err(AppError::validation)?;

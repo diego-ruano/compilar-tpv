@@ -138,11 +138,15 @@ mesasRoutes.post("/lineas", async (c) => {
 	const p = await parseBody(c, S.addLineaSchema);
 	if (!p.ok) return p.res;
 	// MESA-07: resolvemos Estado_Cocina como literal para que el statement replicado a
-	// la Main sea determinista (no una subquery de catalogo dentro del INSERT).
-	const estadoCocina = await tenantQuery(c.env, c.get("tenantId"), async (db) =>
-		(await q.productoPasaCocina(db, p.data.id_producto)) ? "PENDIENTE" : null,
+	// la Main sea determinista (no una subquery de catalogo dentro del INSERT). El tipo de
+	// IVA del producto viaja igual, y en la misma lectura.
+	const datos = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.datosDeLinea(db, p.data.id_producto),
 	);
-	await apply(c, cmd.addLinea(p.data, estadoCocina));
+	await apply(
+		c,
+		cmd.addLinea(p.data, datos.pasaCocina ? "PENDIENTE" : null, datos.ivaPercent),
+	);
 	const lineas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.lineas(db, p.data.id_comanda),
 	);

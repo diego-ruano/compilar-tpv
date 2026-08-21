@@ -576,19 +576,42 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
         let id_detalle_final = new_id();
 
+        // El tipo de IVA se lee ANTES y se inserta como literal (igual que `Estado_Cocina`): una
+        // subconsulta dentro del INSERT la reevaluaría la nube en otro estado. Y se guarda en la
+        // línea porque una reimpresión tiene que enseñar el tipo del día de la venta, no el de hoy.
+        let iva = {
+            let r = self.db.read().await;
+            let mut rows = r
+                .conn()
+                .query(
+                    "SELECT IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+                    vec![Value::Text(id_producto.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => v_f64(row.get_value(0).map_err(db_err)?)
+                    .map(Value::Real)
+                    .unwrap_or(Value::Null),
+                None => Value::Null,
+            }
+        };
+
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<String> = async {
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda
-                  (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina)
+                  (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina,
+                   IVA_Percent)
                 VALUES
-                  (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE')
+                  (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE', ?6)
                 ON CONFLICT(ID_Detalle) DO UPDATE SET
                   ID_Comanda = excluded.ID_Comanda,
                   ID_Producto = excluded.ID_Producto,
                   Cantidad = excluded.Cantidad,
                   Precio_Unitario = excluded.Precio_Unitario,
+                  IVA_Percent = excluded.IVA_Percent,
                   Estado_Cocina = COALESCE(Detalle_Comanda.Estado_Cocina, excluded.Estado_Cocina);
                 "#,
                 vec![
@@ -597,6 +620,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(id_producto.to_string()),
                     Value::Real(cantidad),
                     Value::Real(precio_unitario),
+                    iva,
                 ],
             )
             .await

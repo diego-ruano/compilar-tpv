@@ -88,6 +88,24 @@ async fn select_one_string<C: Reader>(
     Ok(None)
 }
 
+/// Tipo de IVA vigente del producto, o `NULL` si no tiene uno propio (hereda el del negocio).
+///
+/// Se lee ANTES del INSERT y se inserta como literal, igual que `Estado_Cocina` y por el mismo
+/// motivo: una subconsulta dentro del INSERT la reevaluaría la nube en otro estado y la fila
+/// dejaría de ser idéntica en las dos copias.
+///
+/// Y se guarda EN LA LÍNEA, no se consulta al imprimir: si el tipo del producto cambia, un ticket
+/// reimpreso tiene que seguir enseñando el que se aplicó el día de la venta.
+async fn iva_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<Value> {
+    let v = select_one_f64(
+        conn,
+        "SELECT IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+        vec![Value::Text(id_producto.to_string())],
+    )
+    .await?;
+    Ok(v.map(Value::Real).unwrap_or(Value::Null))
+}
+
 async fn select_one_f64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
     let mut rows = conn.query(sql, args).await.map_err(db_err)?;
     if let Some(row) = rows.next().await.map_err(db_err)? {
@@ -1081,12 +1099,15 @@ impl MesasRepository for SqliteMesasRepository {
                 Value::Null
             };
 
+            let iva = iva_del_producto(db, id_producto).await?;
+
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda (
-                  ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina
+                  ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina,
+                  IVA_Percent
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
                 "#,
                 vec![
                     Value::Text(new_id()),
@@ -1095,6 +1116,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Real(cantidad),
                     Value::Real(precio),
                     estado_cocina,
+                    iva,
                 ],
             )
             .await
@@ -1181,15 +1203,18 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Null
                 };
 
+                let iva = iva_del_producto(db, producto_id).await?;
+
                 let id_detalle = new_id();
                 // MESA-12: no se escribe la clave de lote en Notas; la correlación con
                 // Pago_Detalles se hace por los ID_Detalle recién insertados (ver abajo).
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
-                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina
+                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina,
+                      IVA_Percent
                     )
-                    VALUES (?1, ?2, ?3, 1, ?4, ?5);
+                    VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6);
                     "#,
                     vec![
                         Value::Text(id_detalle.clone()),
@@ -1197,6 +1222,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(producto_id.clone()),
                         Value::Real(*precio),
                         estado_cocina,
+                        iva,
                     ],
                 )
                 .await
