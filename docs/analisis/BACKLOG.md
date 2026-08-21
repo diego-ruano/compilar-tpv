@@ -48,9 +48,11 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
    >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
    >   (`apps/cloud-worker-licensing/test/contract.test.ts`, corre en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
-   > - **Cubierto:** `venta_rapida.cobrar_fraccionado` (un lote y reparto FEFO multilote) — los dos
-   >   lados coinciden hoy. **Falta (incremental):** mesas, inventario, stats, login y el resto de la
-   >   familia `-parity`. Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
+   > - **Cubierto:** 47 casos sobre 45 comandos (venta rápida, mesas —incluido `save_layout`—,
+   >   inventario, clientes, tareas, proveedores, reservas, configuración y parte de login/horarios).
+   >   Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
+   > - **Lo que falta se ve solo:** `scripts/check-contract-coverage.mjs` avisa en CI (sin romperlo)
+   >   de cada comando del worker que no tenga caso ni exclusión documentada en `cobertura.json`.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
    (ficheros `.sql` con nombres, o un JSON de sentencias con placeholders) consumido por Rust
    (`include_str!`) y TS (`import`). La mayoría de divergencias reales son en el texto del SQL y las
