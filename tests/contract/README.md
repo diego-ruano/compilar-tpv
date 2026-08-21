@@ -125,7 +125,27 @@ comparación, golden) es común y no se toca.
   **Configuración** (CONF-06): `patch_business`, `patch_contact`, `patch_ticket`.
 - **Login/Horarios** (parcial): `login.set_turno_partido`, `horarios.create/update/delete_asignacion`.
 
+## Qué falta por cubrir (y quién lo vigila)
+
+La cobertura es una lista escrita a mano en dos ficheros, así que el punto débil del harness no es
+lo que tiene caso: es lo que **entra sin caso**. Un comando nuevo es justo cuando más fácil es que
+las dos implementaciones nazcan distintas, y hasta ahora nadie se enteraba.
+
+`node scripts/check-contract-coverage.mjs` compara los `export function` de los `*.commands.ts` del
+worker (si el worker construye SQL para algo, ese algo está implementado dos veces) con los builders
+que este harness importa de verdad, y lista lo que queda fuera. Lo que está fuera **a propósito** va
+en [`cobertura.json`](cobertura.json) con su motivo; lo demás sale como pendiente.
+
+Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y deja anotaciones en
+el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
+push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
+
 ## No cubiertos (por qué)
+
+> Los cuatro primeros están además en [`cobertura.json`](cobertura.json), que es lo que el script de
+> cobertura lee: este texto explica, ese fichero es el que hace que no vuelvan a salir como aviso.
+> Los **pendientes de verdad** (hoy: todo `cuentas`, `mesas.setReservaEstado` y `notificaciones`) no
+> están ahí a propósito — nadie ha decidido nada sobre ellos, así que deben seguir avisando.
 
 - **No hay segunda implementación**: `pedidos_proveedor` (solo Rust, ausente en el worker) y `stats`
   (solo lectura) — nada que contrastar.
