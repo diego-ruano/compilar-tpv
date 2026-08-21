@@ -195,8 +195,8 @@ export default function Configuracion() {
             ...baseNavItems,
             {
                 key: "CONECTIVIDAD",
-                title: "Modo de funcionamiento",
-                desc: "Local o sincronizado con la nube",
+                title: "Conectividad",
+                desc: "Estado de la conexión con la nube y tareas de fondo",
                 keywords: [
                     "modo",
                     "conexión",
@@ -206,6 +206,7 @@ export default function Configuracion() {
                     "internet",
                     "copia",
                     "backup",
+                    "sincronización",
                 ],
             },
             {

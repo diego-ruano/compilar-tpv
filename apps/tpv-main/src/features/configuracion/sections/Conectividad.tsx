@@ -5,29 +5,126 @@ import type { JobStatus, SyncHealth } from "@tpv/contracts";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import {
-	useConnectionMode,
-	type ConnectionMode,
-} from "../../../shared/stores/useConnectionMode";
+	useEstadoSync,
+	type EstadoSync,
+} from "../../../shared/stores/useEstadoSync";
 import { useMode } from "../../../shared/stores/useMode";
 
-type Option = {
-	value: ConnectionMode;
-	title: string;
-	desc: string;
+/**
+ * SYNC-17: cómo se cuenta cada estado. Ya no hay nada que elegir aquí —la Main se conecta sola—,
+ * así que este panel es informativo: dice qué está pasando y, cuando algo no va, qué significa.
+ *
+ * `tono` decide el color: `ok` verde, `neutro` gris (no pasa nada malo, simplemente no aplica),
+ * `aviso` ámbar (transitorio, se está resolviendo) y `malo` rojo (no se va a arreglar solo).
+ */
+const ESTADO_TEXTO: Record<
+	EstadoSync,
+	{ titulo: string; desc: string; tono: "ok" | "neutro" | "aviso" | "malo" }
+> = {
+	conectado: {
+		titulo: "Al día",
+		desc: "Los cambios se guardan en la nube y los dispositivos Handy pueden trabajar.",
+		tono: "ok",
+	},
+	conectando: {
+		titulo: "Conectando…",
+		desc: "Estableciendo la conexión con la nube.",
+		tono: "aviso",
+	},
+	reintentando: {
+		titulo: "Sin conexión",
+		desc: "Este TPV sigue funcionando con normalidad y guarda todo lo que hagas; se subirá solo en cuanto vuelva la conexión. Los Handy no pueden trabajar mientras tanto.",
+		tono: "aviso",
+	},
+	sin_identidad: {
+		titulo: "Sin licencia activada",
+		desc: "Todavía no hay una licencia activada en este dispositivo, así que no hay nada a lo que conectarse.",
+		tono: "neutro",
+	},
+	rechazado: {
+		titulo: "La nube ha rechazado la conexión",
+		desc: "El servidor no acepta este dispositivo: normalmente es la licencia (caducada o anulada) o que la licencia se ha trasladado a otro equipo. Revisa la licencia; esto no se arregla solo.",
+		tono: "malo",
+	},
+	pausada: {
+		titulo: "Sincronización desactivada",
+		desc: "Este dispositivo tiene la sincronización apagada a propósito. Todo se sigue guardando en local y se subirá si se vuelve a activar.",
+		tono: "neutro",
+	},
 };
 
-const OPTIONS: Option[] = [
-	{
-		value: "offline",
-		title: "Sin conexión (local)",
-		desc: "Solo este dispositivo. No se conecta a la nube ni permite dispositivos Handy. Máxima velocidad y funciona aunque no haya internet.",
-	},
-	{
-		value: "online",
-		title: "Con conexión (nube)",
-		desc: "Además de trabajar en local, mantiene la conexión con el servidor para guardar una copia de seguridad de los datos y permitir dispositivos Handy.",
-	},
-];
+function desdeHace(ms: number): string {
+	const d = Date.now() - ms;
+	if (d < 60_000) return "hace un momento";
+	const min = Math.floor(d / 60_000);
+	if (min < 60) return `desde hace ${min} min`;
+	const h = Math.floor(min / 60);
+	if (h < 24) return `desde hace ${h} h`;
+	return `desde hace ${Math.floor(h / 24)} d`;
+}
+
+// Estado real de la conexión. Sustituye al antiguo selector "offline/online": el usuario ya no
+// decide si quiere conexión (una pregunta que no puede responder bien y cuya respuesta se queda
+// vieja), solo ve la que hay.
+function EstadoConexion({ darkMode }: { darkMode: boolean }) {
+	const estado = useEstadoSync((s) => s.estado);
+	const detalle = useEstadoSync((s) => s.detalle);
+	const desde = useEstadoSync((s) => s.desde);
+
+	// Repintado periódico: lo único que cambia solo es el "desde hace X".
+	const [, setTick] = React.useState(0);
+	React.useEffect(() => {
+		const id = window.setInterval(() => setTick((t) => t + 1), 30_000);
+		return () => window.clearInterval(id);
+	}, []);
+
+	const info = ESTADO_TEXTO[estado];
+	const color =
+		info.tono === "ok"
+			? "bg-success"
+			: info.tono === "aviso"
+				? "bg-warning"
+				: info.tono === "malo"
+					? "bg-danger"
+					: "bg-fg-muted";
+
+	return (
+		<Panel
+			title="Conexión con la nube"
+			subtitle="Este TPV se conecta solo. Aquí ves el estado real, no un ajuste."
+		>
+			<div
+				className={cn(
+					"rounded-2xl border p-4",
+					info.tono === "malo"
+						? "border-danger/40 bg-danger/10"
+						: darkMode
+							? "border-border bg-surface-2"
+							: "border-border bg-surface",
+				)}
+			>
+				<div className="flex items-center gap-2">
+					<span className={cn("size-2.5 shrink-0 rounded-full", color)} />
+					<div
+						className={cn(
+							"text-sm font-semibold",
+							darkMode ? "text-white" : "text-fg",
+						)}
+					>
+						{info.titulo}
+					</div>
+					<div className="text-[11px] text-fg-muted">{desdeHace(desde)}</div>
+				</div>
+
+				<div className="mt-2 text-xs text-fg-muted">{info.desc}</div>
+
+				{detalle && estado !== "conectado" && (
+					<div className="mt-2 text-[11px] text-fg-muted">Detalle: {detalle}</div>
+				)}
+			</div>
+		</Panel>
+	);
+}
 
 // SYNC-14: tarjeta de un indicador de salud (una cifra + etiqueta; en ámbar si algo requiere ojo).
 function HealthStat({
@@ -259,107 +356,19 @@ function TareasFondo({ darkMode }: { darkMode: boolean }) {
 }
 
 export function Conectividad({ darkMode }: { darkMode: boolean }) {
-	const mode = useConnectionMode((s) => s.mode);
-	const setMode = useConnectionMode((s) => s.setMode);
 	const deviceMode = useMode((s) => s.mode);
-
-	const [busy, setBusy] = React.useState(false);
-	const [error, setError] = React.useState<string | null>(null);
-
-	const onSelect = async (value: ConnectionMode) => {
-		if (busy || value === mode) return;
-		setError(null);
-		setBusy(true);
-		try {
-			await setMode(value);
-		} catch (e) {
-			const msg = String((e as any)?.message ?? e ?? "");
-			setError(
-				msg.includes("licencia")
-					? "No se pudo activar el modo online: la licencia no es válida o no se pudo verificar. Revisa tu licencia e inténtalo de nuevo."
-					: `No se pudo cambiar de modo: ${msg}`,
-			);
-		} finally {
-			setBusy(false);
-		}
-	};
 
 	return (
 		<div className="flex flex-col gap-4">
-			<Panel
-				title="Modo de funcionamiento"
-				subtitle="Elige si este TPV trabaja solo en local o también sincroniza con la nube."
-			>
-				<div className="flex flex-col gap-3">
-					{OPTIONS.map((opt) => {
-						const selected = mode === opt.value;
-						return (
-							<button
-								key={opt.value}
-								type="button"
-								disabled={busy}
-								onClick={() => onSelect(opt.value)}
-								className={cn(
-									"text-left rounded-2xl border p-4 transition",
-									busy && "opacity-60 cursor-wait",
-									selected
-										? "border-accent bg-accent-soft"
-										: darkMode
-											? "border-border bg-surface-2 hover:bg-surface"
-											: "border-border bg-surface hover:bg-surface-2",
-								)}
-							>
-								<div className="flex items-start gap-3">
-									<span
-										className={cn(
-											"mt-0.5 grid size-5 shrink-0 place-items-center rounded-full border",
-											selected
-												? "border-accent"
-												: "border-border",
-										)}
-									>
-										{selected ? (
-											<span className="size-2.5 rounded-full bg-accent" />
-										) : null}
-									</span>
+			{/* SYNC-17: estado real de la conexión (antes aquí vivía el selector offline/online). */}
+			{deviceMode === "tpv" && <EstadoConexion darkMode={darkMode} />}
 
-									<div className="min-w-0">
-										<div
-											className={cn(
-												"text-sm font-semibold",
-												darkMode ? "text-white" : "text-fg",
-											)}
-										>
-											{opt.title}
-										</div>
-										<div className="text-xs text-fg-muted mt-1">
-											{opt.desc}
-										</div>
-									</div>
-								</div>
-							</button>
-						);
-					})}
-				</div>
+			{/* SYNC-14: salud de la sincronización. Se muestra siempre en la Main: la cola de subida
+			    importa sobre todo cuando NO hay conexión, que es justo cuando antes se ocultaba. */}
+			{deviceMode === "tpv" && <SaludSync darkMode={darkMode} />}
 
-				{error && (
-					<div className="mt-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
-						{error}
-					</div>
-				)}
-
-				<p className="mt-4 text-[11px] text-fg-muted">
-					El modo se aplica solo en este dispositivo. En "Con conexión" la app sigue
-					funcionando aunque internet se caiga puntualmente; solo se pausaría la
-					sincronización hasta recuperar la conexión.
-				</p>
-			</Panel>
-
-			{/* SYNC-14: salud de la sincronización (solo la Main con BD local y en modo online). */}
-			{deviceMode === "tpv" && mode === "online" && <SaludSync darkMode={darkMode} />}
-
-			{/* Runner de jobs: corre también offline (licencia con gracia, avisos), así que no
-			    depende del modo de conexión, solo de que esta sea la Main. */}
+			{/* Runner de jobs: corre haya conexión o no (licencia con gracia, avisos), así que solo
+			    depende de que esta sea la Main. */}
 			{deviceMode === "tpv" && <TareasFondo darkMode={darkMode} />}
 		</div>
 	);
