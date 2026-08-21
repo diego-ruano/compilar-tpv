@@ -1,0 +1,18 @@
+{
+  "Notificaciones": [
+    {
+      "Clave_Dedupe": "stock_bajo:prod-1",
+      "Estado": "activa",
+      "ID_Notificacion": "notif-viva",
+      "Tipo": "stock_bajo",
+      "Titulo": "Ya avisada"
+    },
+    {
+      "Clave_Dedupe": "stock_bajo:prod-9",
+      "Estado": "resuelta",
+      "ID_Notificacion": "notif-resuelta",
+      "Tipo": "stock_bajo",
+      "Titulo": "Vieja resuelta"
+    }
+  ]
+}

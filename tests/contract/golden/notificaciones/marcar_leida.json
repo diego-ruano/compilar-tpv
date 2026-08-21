@@ -1,0 +1,12 @@
+{
+  "Notificacion_Lecturas": [
+    {
+      "ID_Notificacion": "notif-1",
+      "ID_Usuario": "user-1"
+    },
+    {
+      "ID_Notificacion": "notif-1",
+      "ID_Usuario": "user-2"
+    }
+  ]
+}

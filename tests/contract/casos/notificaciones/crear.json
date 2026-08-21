@@ -1,0 +1,20 @@
+{
+  "descripcion": "Emite una notificación nueva. El ID lo genera cada lado por su cuenta y Creada_En es 'ahora': los dos quedan fuera del snapshot. Cubre además la normalización: severidad desconocida cae a 'info', los textos se recortan y los vacíos se guardan como NULL.",
+  "comando": "notificaciones.crear",
+  "seed": [],
+  "entrada": {
+    "tipo": "stock_bajo",
+    "severidad": "urgentisima",
+    "titulo": "  Quedan 2 cervezas  ",
+    "cuerpo": "   ",
+    "destino_tipo": "rol",
+    "destino_valor": "encargado",
+    "accion": "ver_inventario",
+    "payload": "{\"id_producto\":\"prod-1\"}",
+    "clave_dedupe": "stock_bajo:prod-1",
+    "expira_en": null
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Destino_Valor, Accion, Payload, Clave_Dedupe, Estado, Expira_En FROM Notificaciones"
+  }
+}

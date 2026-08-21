@@ -1,0 +1,12 @@
+{
+  "Cuentas_Gastos": [
+    {
+      "Concepto": "Cajas de servilletas",
+      "Fecha": "2026-03-14",
+      "ID_Gasto": "gasto-nuevo-1",
+      "ID_Proveedor": "prov-1",
+      "Importe": 42.75,
+      "Tipo_Gasto": "Suministros"
+    }
+  ]
+}

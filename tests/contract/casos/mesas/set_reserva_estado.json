@@ -1,0 +1,22 @@
+{
+  "descripcion": "Cierra una reserva (FINALIZADA). Además de marcar la reserva, la Main DESLIGA la comanda que la referenciaba: con la reserva ya cerrada, dejar el vínculo haría que la comanda siguiera contando como 'de esa reserva' (y el cliente seguiría colgando de ella al cobrar). La reserva de la mesa-2 comprueba que no se toca lo que no toca.",
+  "comando": "mesas.set_reserva_estado",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Ana');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-01-01', '13:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-2', 'cli-1', 'mesa-2', '2026-01-01', '14:00', 'COMIDA', 2, 'ACTIVA');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', 'res-1', '2026-01-01 13:05:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('comanda-2', 'MESA', 'mesa-2', 'res-2', '2026-01-01 14:05:00', 'Abierta');"
+  ],
+  "entrada": {
+    "id_reserva": "res-1",
+    "estado": "FINALIZADA"
+  },
+  "snapshot": {
+    "Reservas": "SELECT ID_Reserva, Estado FROM Reservas",
+    "Comandas": "SELECT ID_Comanda, ID_Reserva, Estado FROM Comandas"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "descripcion": "Un usuario marca una notificación como leída. La lectura es por (notificación, usuario), no un flag en la fila: la misma notificación puede estar leída por uno y no por otro. Leida_En es 'ahora' → fuera del snapshot. Repetir la marca no duplica (INSERT OR IGNORE): la del seed lo comprueba.",
+  "comando": "notificaciones.marcar_leida",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'admin');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'b@b.com', 'x', 'Bea');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-1', 'aviso', 'info', 'Una', 'todos', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-2', 'aviso', 'info', 'Otra', 'todos', 'activa', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-1', 'user-2', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-1",
+    "id_usuario": "user-1"
+  },
+  "snapshot": {
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "descripcion": "Edición de un cobro (CUENTA-02): cambian método y fecha, pero el Importe_Total NO se toma del formulario — se RECALCULA desde las líneas que cobró ese pago. El seed deja a propósito un Importe_Total mentiroso (999) para que el recálculo se note. El método se normaliza a 'Tarjeta'/'Efectivo' (CUENTA-03): aquí entra 'TARJETA' en mayúsculas.",
+  "comando": "cuentas.update_pago",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'comanda-1', 'prod-1', 2, 3.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'comanda-1', 'prod-1', 1, 4.5);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'comanda-1', '2026-01-01 13:00:00', 'Efectivo', 999.0, 'total');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-1');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');"
+  ],
+  "entrada": {
+    "id_pago": "pago-1",
+    "fecha_hora": "2026-01-05 09:30:00",
+    "metodo": "TARJETA"
+  },
+  "snapshot": {
+    "Pagos": "SELECT ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo FROM Pagos"
+  }
+}

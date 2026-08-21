@@ -19,6 +19,23 @@ import { enElHub } from "./helpers/hub";
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { setTurnoPartido } from "../src/domains/login/login.commands";
 import {
+	createGasto,
+	deleteGasto,
+	deletePago,
+	updateGasto,
+	updatePago,
+} from "../src/domains/cuentas/cuentas.commands";
+import {
+	crear as crearNotificacion,
+	marcarLeida,
+	marcarLeidasBatch,
+	resolverPorClave,
+} from "../src/domains/notificaciones/notificaciones.commands";
+import {
+	idActivaPorClave,
+	idsNoLeidas,
+} from "../src/domains/notificaciones/notificaciones.queries";
+import {
 	createAsignacion,
 	deleteAsignacion,
 	updateAsignacion,
@@ -46,6 +63,7 @@ import {
 	kitchenSetLineState,
 	removeOnePendingDetalle,
 	saveLayout,
+	setReservaEstado,
 	setTrabajadorIfNull,
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
@@ -166,6 +184,28 @@ import casoMesaUpdateNota from "../../../tests/contract/casos/mesas/update_detal
 import goldenMesaUpdateNota from "../../../tests/contract/golden/mesas/update_detalle_nota.json";
 import casoMesaKitchen from "../../../tests/contract/casos/mesas/kitchen_set_line_state.json";
 import goldenMesaKitchen from "../../../tests/contract/golden/mesas/kitchen_set_line_state.json";
+import casoCuentasCrearGasto from "../../../tests/contract/casos/cuentas/create_gasto.json";
+import goldenCuentasCrearGasto from "../../../tests/contract/golden/cuentas/create_gasto.json";
+import casoCuentasUpdateGasto from "../../../tests/contract/casos/cuentas/update_gasto.json";
+import goldenCuentasUpdateGasto from "../../../tests/contract/golden/cuentas/update_gasto.json";
+import casoCuentasDeleteGasto from "../../../tests/contract/casos/cuentas/delete_gasto.json";
+import goldenCuentasDeleteGasto from "../../../tests/contract/golden/cuentas/delete_gasto.json";
+import casoCuentasUpdatePago from "../../../tests/contract/casos/cuentas/update_pago.json";
+import goldenCuentasUpdatePago from "../../../tests/contract/golden/cuentas/update_pago.json";
+import casoCuentasDeletePago from "../../../tests/contract/casos/cuentas/delete_pago.json";
+import goldenCuentasDeletePago from "../../../tests/contract/golden/cuentas/delete_pago.json";
+import casoMesaSetReserva from "../../../tests/contract/casos/mesas/set_reserva_estado.json";
+import goldenMesaSetReserva from "../../../tests/contract/golden/mesas/set_reserva_estado.json";
+import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.json";
+import goldenNotifCrear from "../../../tests/contract/golden/notificaciones/crear.json";
+import casoNotifCrearDedupe from "../../../tests/contract/casos/notificaciones/crear_dedupe.json";
+import goldenNotifCrearDedupe from "../../../tests/contract/golden/notificaciones/crear_dedupe.json";
+import casoNotifLeida from "../../../tests/contract/casos/notificaciones/marcar_leida.json";
+import goldenNotifLeida from "../../../tests/contract/golden/notificaciones/marcar_leida.json";
+import casoNotifBatch from "../../../tests/contract/casos/notificaciones/marcar_leidas_batch.json";
+import goldenNotifBatch from "../../../tests/contract/golden/notificaciones/marcar_leidas_batch.json";
+import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
+import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
 import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partido.json";
 import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
 import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
@@ -219,6 +259,17 @@ const CASOS = [
 	{ nombre: "mesas_delete_detalle", caso: casoMesaDeleteDet, golden: goldenMesaDeleteDet },
 	{ nombre: "mesas_update_detalle_nota", caso: casoMesaUpdateNota, golden: goldenMesaUpdateNota },
 	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
+	{ nombre: "cuentas_create_gasto", caso: casoCuentasCrearGasto, golden: goldenCuentasCrearGasto },
+	{ nombre: "cuentas_update_gasto", caso: casoCuentasUpdateGasto, golden: goldenCuentasUpdateGasto },
+	{ nombre: "cuentas_delete_gasto", caso: casoCuentasDeleteGasto, golden: goldenCuentasDeleteGasto },
+	{ nombre: "cuentas_update_pago", caso: casoCuentasUpdatePago, golden: goldenCuentasUpdatePago },
+	{ nombre: "cuentas_delete_pago", caso: casoCuentasDeletePago, golden: goldenCuentasDeletePago },
+	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
+	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },
+	{ nombre: "notificaciones_crear_dedupe", caso: casoNotifCrearDedupe, golden: goldenNotifCrearDedupe },
+	{ nombre: "notificaciones_marcar_leida", caso: casoNotifLeida, golden: goldenNotifLeida },
+	{ nombre: "notificaciones_marcar_leidas_batch", caso: casoNotifBatch, golden: goldenNotifBatch },
+	{ nombre: "notificaciones_resolver_por_clave", caso: casoNotifResolver, golden: goldenNotifResolver },
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
 	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
 	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
@@ -259,10 +310,22 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
 	return null;
 }
 
-/** Resuelve un `BuiltCommand` con el DO real y ejecuta sus sentencias contra el SQLite del tenant. */
+/**
+ * Resuelve un `BuiltCommand` con el DO real y ejecuta sus sentencias contra el SQLite del tenant.
+ *
+ * Reproduce el **sobre** con el que el hub aplica de verdad un batch: una transacción con
+ * `PRAGMA defer_foreign_keys = ON` (ver `applyInternalCommand`: "batch atómico = [PRAGMA defer FK]
+ * + [gate idempotente] + [trabajo] + [log de sync]"). No es un detalle: un comando que borra en un
+ * orden que deja referencias colgantes hasta el COMMIT —la anulación de un cobro borra las líneas
+ * antes que sus `Pago_Detalles`— revienta por FK sin el pragma. Sin esto el harness diría que hay
+ * divergencia donde solo había un envoltorio distinto.
+ */
 function aplicar(hub: any, sql: any, built: any): void {
 	const batch = hub.buildApplyBatch(built.command);
-	for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+	hub.state.storage.transactionSync(() => {
+		sql.exec("PRAGMA defer_foreign_keys = ON;");
+		for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+	});
 }
 
 /** Corre el comando del caso por su camino real (plan → builder → apply). El `switch` es el punto de
@@ -279,9 +342,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			};
 			const plan = await cobrarPlan(db, entrada as any);
 			expect(plan.ok, "el plan de cobro debe resolverse").toBe(true);
-			const built = cobrarFraccionado(entrada as any, plan as any);
-			const batch = hub.buildApplyBatch(built.command);
-			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			aplicar(hub, sql, cobrarFraccionado(entrada as any, plan as any));
 			return;
 		}
 		case "mesas.cobrar_detalles": {
@@ -294,32 +355,26 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			};
 			const plan = await cobrarDetallesPlan(db, entrada as any);
 			expect(plan.ok, "el plan de cobro de mesa debe resolverse").toBe(true);
-			const built = cobrarDetalles(entrada as any, plan as any);
-			const batch = hub.buildApplyBatch(built.command);
-			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			aplicar(hub, sql, cobrarDetalles(entrada as any, plan as any));
 			return;
 		}
 		case "clientes.crear": {
-			const built = createCliente({
+			aplicar(hub, sql, createCliente({
 				id_cliente: caso.entrada.id_cliente,
 				nombre: caso.entrada.nombre,
 				email: caso.entrada.email,
 				telefono: caso.entrada.telefono,
 				notas: caso.entrada.notas,
-			} as any);
-			const batch = hub.buildApplyBatch(built.command);
-			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			} as any));
 			return;
 		}
 		case "clientes.actualizar": {
-			const built = updateCliente(caso.entrada.id_cliente, {
+			aplicar(hub, sql, updateCliente(caso.entrada.id_cliente, {
 				nombre: caso.entrada.nombre,
 				email: caso.entrada.email,
 				telefono: caso.entrada.telefono,
 				notas: caso.entrada.notas,
-			} as any);
-			const batch = hub.buildApplyBatch(built.command);
-			for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
+			} as any));
 			return;
 		}
 		case "tareas.crear": {
@@ -525,6 +580,70 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "mesas.save_layout": {
 			aplicar(hub, sql, saveLayout({ salons: caso.entrada.salons } as any));
+			return;
+		}
+		case "mesas.set_reserva_estado": {
+			aplicar(hub, sql, setReservaEstado(caso.entrada.id_reserva, caso.entrada.estado));
+			return;
+		}
+		case "cuentas.create_gasto": {
+			aplicar(hub, sql, createGasto(caso.entrada as any));
+			return;
+		}
+		case "cuentas.update_gasto": {
+			aplicar(hub, sql, updateGasto(caso.entrada.id_gasto, caso.entrada as any));
+			return;
+		}
+		case "cuentas.delete_gasto": {
+			aplicar(hub, sql, deleteGasto(caso.entrada.id_gasto));
+			return;
+		}
+		case "cuentas.update_pago": {
+			// El importe NO se pasa: el comando lo recalcula desde las líneas cobradas (CUENTA-02).
+			aplicar(
+				hub,
+				sql,
+				updatePago(caso.entrada.id_pago, {
+					fecha_hora: caso.entrada.fecha_hora,
+					metodo: caso.entrada.metodo,
+				} as any),
+			);
+			return;
+		}
+		case "cuentas.delete_pago": {
+			aplicar(hub, sql, deletePago(caso.entrada.id_pago));
+			return;
+		}
+		case "notificaciones.crear": {
+			// El dedupe vive en el route (una consulta previa), no en el builder: si ya hay una
+			// activa con esa clave se reutiliza y NO se emite nada. En la Main eso pasa dentro del
+			// repo, así que aquí hay que reproducir el camino del route para comparar lo mismo.
+			const clave = caso.entrada.clave_dedupe;
+			if (clave) {
+				const yaActiva = await idActivaPorClave(db, clave);
+				if (yaActiva) return;
+			}
+			aplicar(hub, sql, crearNotificacion(caso.entrada as any));
+			return;
+		}
+		case "notificaciones.marcar_leida": {
+			aplicar(
+				hub,
+				sql,
+				marcarLeida(caso.entrada.id_notificacion, caso.entrada.id_usuario),
+			);
+			return;
+		}
+		case "notificaciones.marcar_leidas_batch": {
+			// Igual que el route: los ids no leídos se resuelven ANTES y se emite un INSERT por
+			// cada uno (nunca un INSERT ... SELECT, que la nube reevaluaría en otro estado).
+			const ids = await idsNoLeidas(db, caso.entrada.id_usuario);
+			if (!ids.length) return;
+			aplicar(hub, sql, marcarLeidasBatch(ids, caso.entrada.id_usuario));
+			return;
+		}
+		case "notificaciones.resolver_por_clave": {
+			aplicar(hub, sql, resolverPorClave(caso.entrada.clave_dedupe));
 			return;
 		}
 		case "mesas.abrir_comanda": {

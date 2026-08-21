@@ -1,0 +1,46 @@
+{
+  "Clientes": [
+    {
+      "ID_Cliente": "cli-1",
+      "Total_Gastado": 41.0
+    }
+  ],
+  "Comandas": [
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 3.0
+    },
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-otra",
+      "Total_Comanda": 0.0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-pendiente",
+      "Precio_Unitario": 3.0
+    }
+  ],
+  "Lote_Consumos": [],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 20.0
+    }
+  ],
+  "Pago_Detalles": [],
+  "Pagos": [],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 8.0
+    }
+  ],
+  "Suelto_Consumos": []
+}

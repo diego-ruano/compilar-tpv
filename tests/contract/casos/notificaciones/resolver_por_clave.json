@@ -1,0 +1,15 @@
+{
+  "descripcion": "Resolver por clave de dedupe: es como se retira sola una notificación cuando desaparece su causa (se repone el stock, se aprueba el pedido). Toca sólo las ACTIVAS de esa clave; una ya resuelta y otra clave distinta se quedan como estaban.",
+  "comando": "notificaciones.resolver_por_clave",
+  "seed": [
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-1', 'stock_bajo', 'aviso', 'Activa misma clave', 'todos', 'stock_bajo:prod-1', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-2', 'stock_bajo', 'aviso', 'Ya descartada', 'todos', 'stock_bajo:prod-1', 'descartada', '2026-01-01 10:30:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Clave_Dedupe, Estado, Creada_En) VALUES ('notif-3', 'stock_bajo', 'aviso', 'Otra clave', 'todos', 'stock_bajo:prod-2', 'activa', '2026-01-01 11:00:00');"
+  ],
+  "entrada": {
+    "clave_dedupe": "stock_bajo:prod-1"
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Clave_Dedupe, Estado FROM Notificaciones"
+  }
+}

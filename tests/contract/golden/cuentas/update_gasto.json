@@ -1,0 +1,20 @@
+{
+  "Cuentas_Gastos": [
+    {
+      "Concepto": "Concepto nuevo",
+      "Fecha": "2026-02-20",
+      "ID_Gasto": "gasto-1",
+      "ID_Proveedor": null,
+      "Importe": 99.99,
+      "Tipo_Gasto": "Personal"
+    },
+    {
+      "Concepto": "No se toca",
+      "Fecha": "2026-01-02",
+      "ID_Gasto": "gasto-2",
+      "ID_Proveedor": null,
+      "Importe": 5.5,
+      "Tipo_Gasto": "Otros"
+    }
+  ]
+}

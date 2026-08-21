@@ -1,0 +1,18 @@
+{
+  "descripcion": "Alta de un gasto de caja. El ID se pasa explícito (los dos lados lo aceptan y lo respetan: sólo lo generan si falta), así que aquí sí entra en el snapshot. La fecha pasa por date(), que normaliza a YYYY-MM-DD.",
+  "comando": "cuentas.create_gasto",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuciones SA');"
+  ],
+  "entrada": {
+    "id_gasto": "gasto-nuevo-1",
+    "fecha": "2026-03-14",
+    "tipo_gasto": "Suministros",
+    "concepto": "Cajas de servilletas",
+    "importe": 42.75,
+    "proveedor_id": "prov-1"
+  },
+  "snapshot": {
+    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor FROM Cuentas_Gastos"
+  }
+}

@@ -249,16 +249,33 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	};
 }
 
+/** Estados con los que la reserva deja de estar viva y hay que soltar la comanda que la apuntaba. */
+const ESTADOS_QUE_CIERRAN_RESERVA = new Set(["FINALIZADA", "CANCELADA", "NO_SHOW"]);
+
 export function setReservaEstado(idReserva: string, estado: string): BuiltCommand {
+	const steps: any[] = [
+		{
+			kind: "execute",
+			sql: "UPDATE Reservas SET Estado = ?2 WHERE ID_Reserva = ?1;",
+			args: [idReserva, estado],
+		},
+	];
+
+	// Al cerrar la reserva se desliga la comanda que la referenciaba. Si no, la comanda sigue
+	// contando como "de esa reserva" y el cliente sigue colgando de ella al cobrar. Paridad con
+	// `SqliteMesasRepository::set_reserva_estado`; la condición se evalúa AQUÍ (no en el SQL) para
+	// que la nube y la Main emitan exactamente las mismas sentencias.
+	if (ESTADOS_QUE_CIERRAN_RESERVA.has(estado)) {
+		steps.push({
+			kind: "execute",
+			sql: "UPDATE Comandas SET ID_Reserva = NULL WHERE ID_Reserva = ?1;",
+			args: [idReserva],
+		});
+	}
+
 	return {
 		commandName: "set_reserva_estado",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: "UPDATE Reservas SET Estado = ?2 WHERE ID_Reserva = ?1;",
-				args: [idReserva, estado],
-			},
-		},
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_reserva: idReserva, estado },
 	};
 }

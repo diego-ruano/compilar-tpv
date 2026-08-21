@@ -1,0 +1,9 @@
+{
+  "Cuentas_Gastos": [
+    {
+      "Concepto": "Se queda",
+      "ID_Gasto": "gasto-2",
+      "Importe": 5.5
+    }
+  ]
+}

@@ -29,9 +29,11 @@ use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::configuracion::ConfiguracionRepository;
+use tpv_application::ports::cuentas::CuentasRepository;
 use tpv_application::ports::inventario::InventarioRepository;
 use tpv_application::ports::login::LoginRepository;
 use tpv_application::ports::mesas::MesasRepository;
+use tpv_application::ports::notificaciones::{NotificacionesRepository, Notifier};
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
@@ -40,8 +42,10 @@ use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::mesas::SalonInput;
 use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
+use tpv_domain::cuentas::{normalize_metodo, GastoData, PagoData};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
+use tpv_domain::notificaciones::NuevaNotificacion;
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
@@ -50,10 +54,12 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
 use crate::configuracion::SqliteConfiguracionRepository;
+use crate::cuentas::SqliteCuentasRepository;
 use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
 use crate::login::SqliteLoginRepository;
 use crate::mesas::SqliteMesasRepository;
+use crate::notificaciones::SqliteNotificacionesRepository;
 use crate::proveedores::SqliteProveedoresRepository;
 use crate::reservas::SqliteReservasRepository;
 use crate::tareas::SqliteTareasRepository;
@@ -266,6 +272,17 @@ fn opt_str(v: &Json) -> Option<String> {
     v.as_str().map(|s| s.to_string())
 }
 
+/// `entrada` → `GastoData`: lo comparten el alta y la edición de gastos.
+fn gasto_del_caso(e: &Json) -> GastoData {
+    GastoData {
+        fecha: s(&e["fecha"]),
+        tipo_gasto: s(&e["tipo_gasto"]),
+        concepto: s(&e["concepto"]),
+        importe: e["importe"].as_f64().unwrap_or(0.0),
+        proveedor_id: opt_str(&e["proveedor_id"]),
+    }
+}
+
 fn s(v: &Json) -> String {
     v.as_str().unwrap().to_string()
 }
@@ -325,6 +342,7 @@ casos_de_contrato! {
     venta_rapida__restar_stock,
     venta_rapida__delete_comanda_if_safe,
     mesas__save_layout,
+    mesas__set_reserva_estado,
     mesas__abrir_comanda,
     mesas__set_trabajador_if_null,
     mesas__cerrar_comanda,
@@ -333,6 +351,16 @@ casos_de_contrato! {
     mesas__delete_detalle,
     mesas__update_detalle_nota,
     mesas__kitchen_set_line_state,
+    cuentas__create_gasto,
+    cuentas__update_gasto,
+    cuentas__delete_gasto,
+    cuentas__update_pago,
+    cuentas__delete_pago,
+    notificaciones__crear,
+    notificaciones__crear_dedupe,
+    notificaciones__marcar_leida,
+    notificaciones__marcar_leidas_batch,
+    notificaciones__resolver_por_clave,
     login__set_turno_partido,
     horarios__create_asignacion,
     horarios__update_asignacion,
@@ -659,6 +687,89 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             let salons: Vec<SalonInput> =
                 serde_json::from_value(e["salons"].clone()).expect("salons del fixture");
             repo.save_layout(salons).await.expect("save layout");
+        }
+        "mesas.set_reserva_estado" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.set_reserva_estado(&s(&e["id_reserva"]), s(&e["estado"]))
+                .await
+                .expect("set reserva estado");
+        }
+        "cuentas.create_gasto" => {
+            let repo = SqliteCuentasRepository::new(db.clone());
+            repo.crear_gasto(opt_str(&e["id_gasto"]), gasto_del_caso(e))
+                .await
+                .expect("crear gasto");
+        }
+        "cuentas.update_gasto" => {
+            let repo = SqliteCuentasRepository::new(db.clone());
+            repo.actualizar_gasto(&s(&e["id_gasto"]), gasto_del_caso(e))
+                .await
+                .expect("actualizar gasto");
+        }
+        "cuentas.delete_gasto" => {
+            let repo = SqliteCuentasRepository::new(db.clone());
+            repo.eliminar_gasto(&s(&e["id_gasto"])).await.expect("eliminar gasto");
+        }
+        "cuentas.update_pago" => {
+            let repo = SqliteCuentasRepository::new(db.clone());
+            repo.actualizar_pago(
+                &s(&e["id_pago"]),
+                PagoData {
+                    fecha_hora: s(&e["fecha_hora"]),
+                    // La normalización del método (CUENTA-03) vive en el CASO DE USO, no en el
+                    // repositorio, y el otro lado la aplica en su builder: hay que entrar a la
+                    // misma altura o el test compararía dos caminos distintos y cantaría una
+                    // divergencia que no existe.
+                    metodo: normalize_metodo(&s(&e["metodo"])),
+                    // El importe del formulario se IGNORA a propósito (CUENTA-02): el comando lo
+                    // recalcula desde las líneas cobradas. Se manda un valor absurdo para que, si
+                    // algún día dejara de ignorarse, el golden lo cante.
+                    importe: -1.0,
+                },
+            )
+            .await
+            .expect("actualizar pago");
+        }
+        "cuentas.delete_pago" => {
+            let repo = SqliteCuentasRepository::new(db.clone());
+            repo.eliminar_pago(&s(&e["id_pago"])).await.expect("eliminar pago");
+        }
+        "notificaciones.crear" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            // `validar` es parte del camino real (normaliza severidad/textos): el fixture entrega
+            // los datos crudos, como los entrega la UI.
+            let nueva = NuevaNotificacion::validar(
+                s(&e["tipo"]),
+                &s(&e["severidad"]),
+                s(&e["titulo"]),
+                opt_str(&e["cuerpo"]),
+                &s(&e["destino_tipo"]),
+                opt_str(&e["destino_valor"]),
+                opt_str(&e["accion"]),
+                opt_str(&e["payload"]),
+                opt_str(&e["clave_dedupe"]),
+                opt_str(&e["expira_en"]),
+            )
+            .expect("notificacion valida");
+            repo.emitir(nueva).await.expect("emitir notificacion");
+        }
+        "notificaciones.marcar_leida" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.marcar_leida(&s(&e["id_notificacion"]), &s(&e["id_usuario"]))
+                .await
+                .expect("marcar leida");
+        }
+        "notificaciones.marcar_leidas_batch" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.marcar_todas_leidas(&s(&e["id_usuario"]))
+                .await
+                .expect("marcar todas leidas");
+        }
+        "notificaciones.resolver_por_clave" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.resolver_por_clave(&s(&e["clave_dedupe"]))
+                .await
+                .expect("resolver por clave");
         }
         "mesas.abrir_comanda" => {
             let repo = SqliteMesasRepository::new(db.clone());

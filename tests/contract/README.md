@@ -108,15 +108,23 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**47 casos, todos verdes.** Por dominio:
+**58 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
+tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
   `add_linea`, `remove_last_unpaid_linea`, `delete_linea_if_unpaid`, `update_nota_detalle`, `restar_stock`,
   `delete_comanda_if_safe`.
 - **Mesas** (MESA-11) — líneas/cocina/cobro: `cobrar_detalles`, `abrir_comanda`, `set_trabajador_if_null`,
   `cerrar_comanda`, `add_linea`, `remove_one_pending_detalle`, `delete_detalle`, `update_detalle_nota`,
-  `kitchen_set_line_state`, **`save_layout`** (el caso grande: intercambio de nombres entre zonas,
-  zona borrada con mesa libre, zona que sobrevive porque su mesa tiene comanda, y zona/mesa nuevas).
+  `kitchen_set_line_state`, `set_reserva_estado`, **`save_layout`** (el caso grande: intercambio de
+  nombres entre zonas, zona borrada con mesa libre, zona que sobrevive porque su mesa tiene comanda,
+  y zona/mesa nuevas).
+- **Cuentas / caja** (CUENTA-01/02/03) — completo: `create_gasto`, `update_gasto`, `delete_gasto`,
+  `update_pago` (con el recálculo del importe desde las líneas cobradas) y `delete_pago`, la
+  anulación completa de un cobro: devuelve stock por lote y suelto, resta el gasto del cliente,
+  borra las líneas cobradas y reabre la comanda si le quedaban pendientes.
+- **Notificaciones** — completo: `crear` (y el caso de dedupe, que NO crea una segunda),
+  `marcar_leida`, `marcar_leidas_batch` y `resolver_por_clave`.
 - **Inventario** (INV-07) — completo: `create_lote`, `create_categoria`, `upsert_producto`, `set_alergenos`,
   `delete_producto`, `update_lote`, `ajustar_lote`.
 - **Clientes** (CLI-05): `crear`, `actualizar`. **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
@@ -139,6 +147,11 @@ en [`cobertura.json`](cobertura.json) con su motivo; lo demás sale como pendien
 Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y deja anotaciones en
 el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
 push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
+
+Hoy dice **55/62 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
+que se ejecutó encontró 10 comandos sin caso que no estaban documentados en ninguna parte —todo
+`cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y dos de ellos escondían divergencias
+reales. Por eso existe.
 
 ## No cubiertos (por qué)
 

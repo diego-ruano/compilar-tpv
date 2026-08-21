@@ -1,0 +1,17 @@
+{
+  "Notificaciones": [
+    {
+      "Accion": "ver_inventario",
+      "Clave_Dedupe": "stock_bajo:prod-1",
+      "Cuerpo": null,
+      "Destino_Tipo": "rol",
+      "Destino_Valor": "encargado",
+      "Estado": "activa",
+      "Expira_En": null,
+      "Payload": "{\"id_producto\":\"prod-1\"}",
+      "Severidad": "info",
+      "Tipo": "stock_bajo",
+      "Titulo": "Quedan 2 cervezas"
+    }
+  ]
+}
