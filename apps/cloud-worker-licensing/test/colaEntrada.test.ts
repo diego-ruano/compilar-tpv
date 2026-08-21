@@ -182,6 +182,40 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 		});
 	});
 
+	it("volcar deja EXACTAMENTE el mismo estado que subir de una en una", async () => {
+		// La pregunta que de verdad importa: ¿cambia algo por haber ido por la cola? El mismo lote
+		// de operaciones se aplica por los dos caminos, en dos hubs distintos, y se comparan las
+		// filas resultantes. Si algún día el camino nuevo altera el resultado, esto se pone rojo.
+		const ops = [1, 2, 3, 4, 5].map(opLinea);
+
+		const fotografiar = (sql: any) => ({
+			lineas: lineas(sql),
+			cambios: sql
+				.exec("SELECT Op_Id FROM Sync_Changes ORDER BY Seq;")
+				.toArray()
+				.map((f: any) => f.Op_Id),
+			gates: sql
+				.exec("SELECT Op_Id FROM Applied_Operations ORDER BY Op_Id;")
+				.toArray()
+				.map((f: any) => f.Op_Id),
+		});
+
+		const unaAUna = await enElHub("equiv-una-a-una", async (hub: any) => {
+			const { sql, db } = prepararHub(hub);
+			for (const op of ops) await hub.applyBatchIdempotent(db, [op]);
+			return fotografiar(sql);
+		});
+
+		const volcadas = await enElHub("equiv-volcado", async (hub: any) => {
+			const { sql } = prepararHub(hub);
+			hub.encolar(TENANT, ops);
+			await hub.drenarCola();
+			return fotografiar(sql);
+		});
+
+		expect(volcadas).toEqual(unaAUna);
+	});
+
 	it("mientras hay atraso, una escritura de Handy se rechaza con main_volcando", async () => {
 		// Es el freeze: la nube está a medio construir, así que dejar escribir a una Handy sobre ese
 		// estado es pedir un choque. Se congela igual que sin Main, con otro motivo (y otro texto:
