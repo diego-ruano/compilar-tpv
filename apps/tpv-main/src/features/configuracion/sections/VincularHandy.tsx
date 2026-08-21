@@ -233,14 +233,12 @@ export function VincularHandy({
 						escanea.
 					</div>
 
-					{/* Sin conexión no hay código que dar: el QR y el código de 6 dígitos los emite la
-					    nube. Se dice así, y NO se enseña el error de red debajo (sería el mismo
-					    problema contado dos veces, una de ellas en jerga). */}
+					{/* Sin conexión no hay código que dar. Se dice así, y NO se enseña el error de red
+					    debajo (sería el mismo problema contado dos veces, una de ellas en jerga). */}
 					{!hayNube ? (
 						<div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
-							<span className="font-semibold">Necesitas conexión a internet.</span> El
-							código de vinculación lo genera el servidor, así que ahora mismo no se
-							puede crear uno. Este TPV sigue funcionando con normalidad; en cuanto
+							<span className="font-semibold">Necesitas conexión a internet</span> para
+							vincular un Handy. Este TPV sigue funcionando con normalidad; en cuanto
 							recupere la conexión, vuelve aquí y el código se generará solo.
 						</div>
 					) : error ? (
