@@ -87,10 +87,14 @@
 **11 de los abiertos son la misma cosa**: la doble implementación Main(Rust)/Handy(worker). ARCH-01
 es el paraguas y MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04,
 TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness de tests de contrato
-por efecto— los cierra todos**, y ya está **en marcha**: el andamiaje funciona de punta a punta y
-cubre `venta_rapida.cobrar_fraccionado` (VR-05); falta extenderlo dominio a dominio. Ver
-[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker) y
-[tests/contract/README.md](../../tests/contract/README.md). Es, con diferencia, el de mayor retorno.
+por efecto— los cierra todos**, y ya está **construido y en verde**: **46 comandos** contrastados en
+los dos lados, sin ninguna divergencia. Cubre completo venta rápida, mesas (líneas/cocina/cobro),
+inventario, clientes, tareas, proveedores, reservas (incl. el merge RES-05) y configuración, más una
+parte de login/horarios. Lo que queda sin contrastar tiene motivo documentado (PIN hasheado, PII
+cifrada, IDs generados de forma asimétrica, `save_layout`) — ver
+[tests/contract/README.md](../../tests/contract/README.md) §No cubiertos y
+[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker). Cada divergencia
+futura en un comando cubierto es ya un test rojo en CI.
 
 El resto se agrupa en:
 - **Reconciliación de datos derivados:** cerrada. En su parte local el job `reconciliacion` cuadra
