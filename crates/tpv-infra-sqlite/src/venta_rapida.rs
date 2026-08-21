@@ -364,7 +364,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   CASE WHEN EXISTS (
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado,
-                  COALESCE(p.Nombre, 'Producto') AS Nombre
+                  COALESCE(p.Nombre, 'Producto') AS Nombre,
+                  dc.IVA_Percent
                 FROM Detalle_Comanda dc
                 LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
                 WHERE dc.ID_Comanda = ?1
@@ -387,6 +388,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 Estado_Cocina: v_string(r.get_value(6).map_err(db_err)?),
                 Pagado: v_i64(r.get_value(7).map_err(db_err)?).unwrap_or(0),
                 Nombre: v_string(r.get_value(8).map_err(db_err)?).unwrap_or_else(|| "Producto".into()),
+                IVA_Percent: v_f64(r.get_value(9).map_err(db_err)?),
             });
         }
         Ok(out)
@@ -477,7 +479,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
                   CASE WHEN EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
                        THEN 1 ELSE 0 END AS Pagado,
-                  dc.Notas
+                  dc.Notas,
+                  dc.IVA_Percent
                 FROM Detalle_Comanda dc
                 LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
                 WHERE dc.ID_Comanda = ?1
@@ -500,6 +503,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     .unwrap_or_else(|| "PENDIENTE".into()),
                 Pagado: v_i64(r.get_value(6).map_err(db_err)?).unwrap_or(0),
                 Notas: v_string(r.get_value(7).map_err(db_err)?),
+                IVA_Percent: v_f64(r.get_value(8).map_err(db_err)?),
             });
         }
         Ok(out)

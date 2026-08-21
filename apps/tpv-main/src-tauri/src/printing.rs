@@ -26,6 +26,11 @@ pub struct PrintTicketLine {
     pub nombre: String,
     pub cantidad: u32,
     pub precio_unitario: f64,
+    /// Tipo de IVA con el que se vendió esta línea. `None` = el general del negocio.
+    /// Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
+    /// el tipo del día de la venta.
+    #[serde(default)]
+    pub iva_percent: Option<f64>,
 }
 
 /// Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
@@ -282,6 +287,39 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 }
 
 /// Construye los bytes ESC/POS del ticket replicando la personalización del front.
+/// Reparte el ticket por tipo de IVA: devuelve `(tipo, base, iva)` por cada tipo presente,
+/// ordenado por tipo.
+///
+/// Los precios son con IVA incluido (es lo que se le enseña al cliente en hostelería), así que la
+/// base se saca dividiendo: `base = total / (1 + tipo/100)`. Se calcula **por línea** y se suma
+/// por tipo, no sobre el total del ticket: con dos tipos distintos, aplicar uno solo al total da
+/// un desglose que no cuadra.
+///
+/// Una línea sin tipo propio usa el general del negocio, que es el caso de casi todo.
+fn desglose_iva(p: &PrintTicketPayload) -> Vec<(f64, f64, f64)> {
+    let mut por_tipo: Vec<(f64, f64)> = Vec::new(); // (tipo, total con IVA)
+
+    for it in &p.items {
+        let tipo = it.iva_percent.unwrap_or(p.iva_percent);
+        let total_linea = it.precio_unitario * it.cantidad as f64;
+        // Se agrupa comparando con tolerancia: un 10.0 y un 10.000000001 son el mismo tipo.
+        match por_tipo.iter_mut().find(|(t, _)| (*t - tipo).abs() < 1e-9) {
+            Some((_, acc)) => *acc += total_linea,
+            None => por_tipo.push((tipo, total_linea)),
+        }
+    }
+
+    por_tipo.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    por_tipo
+        .into_iter()
+        .map(|(tipo, total)| {
+            let divisor = 1.0 + tipo / 100.0;
+            let base = if divisor.abs() < f64::EPSILON { total } else { total / divisor };
+            (tipo, base, total - base)
+        })
+        .collect()
+}
+
 pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
     let cols = effective_cols(p);
     let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
@@ -356,14 +394,30 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
 
     // ── Base + IVA ──
     if p.show_base_and_iva {
-        let divisor = 1.0 + p.iva_percent / 100.0;
-        let base = if divisor == 0.0 { total } else { total / divisor };
-        let iva = total - base;
-        text_line(&mut out, &line_two("BASE", &fmt_eur(base), cols));
-        text_line(
-            &mut out,
-            &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(iva), cols),
-        );
+        let tramos = desglose_iva(p);
+        if tramos.len() <= 1 {
+            // Un solo tipo (el caso de un bar normal): se imprime como toda la vida, sin
+            // convertir el ticket en una tabla por algo que no aporta nada.
+            let t = tramos.first().copied().unwrap_or((p.iva_percent, 0.0, 0.0));
+            text_line(&mut out, &line_two("BASE", &fmt_eur(t.1), cols));
+            text_line(
+                &mut out,
+                &line_two(&format!("IVA ({}%)", fmt_pct(t.0)), &fmt_eur(t.2), cols),
+            );
+        } else {
+            // Varios tipos: hay que verlos por separado. Un ticket con comida al reducido y algo
+            // envasado para llevar al general no se puede resumir en una sola cifra.
+            for (tipo, base, iva) in &tramos {
+                text_line(
+                    &mut out,
+                    &line_two(&format!("BASE ({}%)", fmt_pct(*tipo)), &fmt_eur(*base), cols),
+                );
+                text_line(
+                    &mut out,
+                    &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*iva), cols),
+                );
+            }
+        }
     }
 
     // ── Total ──
@@ -679,5 +733,131 @@ mod tests_ancho {
     #[test]
     fn los_margenes_negativos_se_ignoran() {
         assert_eq!(geometria(80, 80, -5.0, 0.0), 48);
+    }
+}
+
+#[cfg(test)]
+mod tests_desglose_iva {
+    //! El reparto del ticket por tipo de IVA.
+    //!
+    //! Los precios se muestran con IVA incluido, así que la base se saca dividiendo. Lo que hay
+    //! que fijar aquí es que se calcule **por línea y luego se sume**, y no aplicando un tipo al
+    //! total: en cuanto un ticket mezcla dos tipos, la segunda forma da un desglose que no cuadra
+    //! con lo que se ha cobrado.
+
+    use super::*;
+
+    fn linea(precio: f64, cantidad: u32, iva: Option<f64>) -> PrintTicketLine {
+        PrintTicketLine {
+            nombre: "x".into(),
+            cantidad,
+            precio_unitario: precio,
+            iva_percent: iva,
+        }
+    }
+
+    fn payload(iva_negocio: f64, items: Vec<PrintTicketLine>) -> PrintTicketPayload {
+        PrintTicketPayload {
+            printer_name: None,
+            business_name: String::new(),
+            direccion: String::new(),
+            telefono: String::new(),
+            cif: String::new(),
+            mensaje_footer: String::new(),
+            iva_percent: iva_negocio,
+            show_logo: false,
+            show_business_name: false,
+            show_address: false,
+            show_phone: false,
+            show_cif: false,
+            show_date_time: false,
+            show_line_items: true,
+            show_base_and_iva: true,
+            show_total: true,
+            show_footer_message: false,
+            paper_width_mm: 80,
+            paper_dpi: 203,
+            chars_per_line: 42,
+            margin_top_mm: 0.0,
+            margin_bottom_mm: 0.0,
+            margin_left_mm: 0.0,
+            margin_right_mm: 0.0,
+            font_scale: 1.0,
+            items,
+        }
+    }
+
+    /// Compara con la tolerancia de un céntimo mal redondeado.
+    fn cerca(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-9
+    }
+
+    #[test]
+    fn sin_tipos_propios_todo_va_al_del_negocio() {
+        let p = payload(10.0, vec![linea(11.0, 1, None), linea(5.5, 2, None)]);
+        let d = desglose_iva(&p);
+
+        assert_eq!(d.len(), 1);
+        assert!(cerca(d[0].0, 10.0));
+        // 22 € con IVA al 10% → base 20, IVA 2.
+        assert!(cerca(d[0].1, 20.0), "base {}", d[0].1);
+        assert!(cerca(d[0].2, 2.0), "iva {}", d[0].2);
+    }
+
+    #[test]
+    fn el_tipo_de_la_linea_manda_sobre_el_del_negocio() {
+        let p = payload(10.0, vec![linea(12.1, 1, Some(21.0))]);
+        let d = desglose_iva(&p);
+
+        assert_eq!(d.len(), 1);
+        assert!(cerca(d[0].0, 21.0));
+        assert!(cerca(d[0].1, 10.0), "base {}", d[0].1);
+    }
+
+    #[test]
+    fn un_ticket_con_dos_tipos_los_separa_y_suma_lo_mismo_que_el_total() {
+        // Comida al 10 y algo envasado para llevar al 21, que es el caso que obligó a esto.
+        let p = payload(10.0, vec![linea(11.0, 1, None), linea(12.1, 1, Some(21.0))]);
+        let d = desglose_iva(&p);
+
+        assert_eq!(d.len(), 2);
+        // Ordenado por tipo: primero el 10, luego el 21.
+        assert!(cerca(d[0].0, 10.0) && cerca(d[1].0, 21.0));
+        assert!(cerca(d[0].1, 10.0) && cerca(d[0].2, 1.0));
+        assert!(cerca(d[1].1, 10.0) && cerca(d[1].2, 2.1));
+
+        // Y lo que de verdad importa: base + IVA de todos los tramos == lo cobrado.
+        let suma: f64 = d.iter().map(|(_, base, iva)| base + iva).sum();
+        assert!(cerca(suma, 23.1), "suma {suma}");
+    }
+
+    #[test]
+    fn las_lineas_del_mismo_tipo_se_agrupan_en_un_solo_tramo() {
+        let p = payload(
+            10.0,
+            vec![linea(11.0, 1, Some(21.0)), linea(11.0, 1, Some(21.0)), linea(11.0, 1, None)],
+        );
+        let d = desglose_iva(&p);
+
+        assert_eq!(d.len(), 2);
+        // Los dos del 21 suman 22 € con IVA.
+        let tramo21 = d.iter().find(|(t, _, _)| cerca(*t, 21.0)).unwrap();
+        assert!(cerca(tramo21.1 + tramo21.2, 22.0));
+    }
+
+    #[test]
+    fn un_ticket_vacio_no_revienta() {
+        let d = desglose_iva(&payload(10.0, vec![]));
+        assert!(d.is_empty());
+    }
+
+    #[test]
+    fn un_tipo_del_cero_por_ciento_no_divide_entre_cero() {
+        let p = payload(0.0, vec![linea(10.0, 1, Some(0.0))]);
+        let d = desglose_iva(&p);
+
+        assert_eq!(d.len(), 1);
+        assert!(cerca(d[0].1, 10.0), "base {}", d[0].1);
+        assert!(cerca(d[0].2, 0.0), "iva {}", d[0].2);
     }
 }

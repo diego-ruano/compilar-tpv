@@ -47,6 +47,8 @@ type TicketItem = {
     estadoCocina: "PENDIENTE" | "PREPARADO" | string;
     pasaCocina: boolean;
     notas: string | null;
+    /** Tipo de IVA con el que se vendió la línea; `null` = el general del negocio. */
+    ivaPercent: number | null;
 };
 
 type Paso = "categorias" | "productos" | "metodo" | "efectivo";
@@ -254,6 +256,8 @@ function mapTicketRows(rows: any[]): TicketItem[] {
         );
         const estadoCocina = pasa ? estadoDb || "PENDIENTE" : "NO_COCINA";
         const notas = (pick(r, ["notas", "Notas"]) ?? null) as string | null;
+        // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
+        const ivaRaw = pick(r, ["ivaPercent", "IVA_Percent", "iva_percent"]);
         return {
             id: idDetalle,
             productoId: idProducto,
@@ -264,6 +268,7 @@ function mapTicketRows(rows: any[]): TicketItem[] {
             estadoCocina,
             pasaCocina: pasa,
             notas: notas ? String(notas) : null,
+            ivaPercent: ivaRaw == null ? null : Number(ivaRaw),
         };
     });
     const hayPendientes = mapped.some((t) => !t.pagado);
@@ -666,6 +671,10 @@ export default function MesaComandaModal({
                     estadoCocina: "PENDIENTE",
                     pasaCocina: false,
                     notas: null,
+                    // La fila optimista todavía no tiene tipo congelado: lo fija el backend al
+                    // insertar y llega con la fila de verdad, que sustituye a esta en cuanto
+                    // responde. Hasta entonces vale el del negocio, que es lo que significa `null`.
+                    ivaPercent: null,
                 },
             ]);
 

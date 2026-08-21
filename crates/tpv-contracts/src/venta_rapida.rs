@@ -61,6 +61,9 @@ pub struct LineaComandaRow {
     pub ID_Producto: String,
     pub Cantidad: f64,
     pub Precio_Unitario: f64,
+    /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
+    #[ts(optional)]
+    pub IVA_Percent: Option<f64>,
     pub Notas: Option<String>,
     pub Estado_Cocina: Option<String>,
     #[ts(type = "number")]
@@ -77,6 +80,9 @@ pub struct VerTicketsDetalleRow {
     pub Nombre: String,
     pub Cantidad: f64,
     pub Precio_Unitario: f64,
+    /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
+    #[ts(optional)]
+    pub IVA_Percent: Option<f64>,
     pub Estado_Cocina: String,
     #[ts(type = "number")]
     pub Pagado: i64,

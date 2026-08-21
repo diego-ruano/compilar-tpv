@@ -27,6 +27,8 @@ export type PrintTicketLine = {
     nombre: string;
     cantidad: number;
     precio_unitario: number;
+    /** Tipo de IVA de la línea; `null` = el general del negocio. */
+    iva_percent: number | null;
 };
 
 /** Payload de impresión (snake_case para que serde lo deserialice directamente). */
@@ -68,6 +70,8 @@ export type PrintTicketPayload = {
 export type SimpleTicketItem = {
     nombre: string;
     precio: number;
+    /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
+    ivaPercent?: number | null;
 };
 
 /* ── API ── */
@@ -108,9 +112,12 @@ export function buildTicketPayload(
     const biz = useBusinessSettings.getState();
     const t = useTicketSettings.getState().settings;
 
+    // Se agrupa por nombre + precio + TIPO: dos unidades del mismo producto vendidas a tipos
+    // distintos (porque alguien lo cambió entre medias) son dos líneas, no una.
     const map = new Map<string, PrintTicketLine>();
     for (const it of items) {
-        const key = `${it.nombre}__${it.precio}`;
+        const iva = it.ivaPercent ?? null;
+        const key = `${it.nombre}__${it.precio}__${iva ?? "neg"}`;
         const cur = map.get(key);
         if (cur) {
             cur.cantidad += 1;
@@ -119,6 +126,7 @@ export function buildTicketPayload(
                 nombre: it.nombre,
                 precio_unitario: it.precio,
                 cantidad: 1,
+                iva_percent: iva,
             });
         }
     }

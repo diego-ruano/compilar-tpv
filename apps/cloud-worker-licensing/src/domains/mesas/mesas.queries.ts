@@ -190,6 +190,7 @@ export async function lineas(
 				D.Estado_Cocina AS Estado_Cocina,
 				P.Nombre AS Nombre,
 				COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
+				D.IVA_Percent AS IVA_Percent,
 				CASE WHEN EXISTS (
 					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado

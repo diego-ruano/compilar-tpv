@@ -1013,6 +1013,7 @@ impl MesasRepository for SqliteMesasRepository {
                   COALESCE(D.Precio_Unitario, 0) AS Precio_Unitario,
                   D.Notas, D.Estado_Cocina, P.Nombre,
                   COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
+                  D.IVA_Percent,
                   CASE WHEN EXISTS (
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado
@@ -1043,7 +1044,8 @@ impl MesasRepository for SqliteMesasRepository {
                 estado_cocina: v_string(r.get_value(6).map_err(db_err)?),
                 nombre: v_string(r.get_value(7).map_err(db_err)?).unwrap_or_default(),
                 pasa_cocina: v_i64(r.get_value(8).map_err(db_err)?).unwrap_or(0),
-                pagado: v_i64(r.get_value(9).map_err(db_err)?).unwrap_or(0),
+                iva_percent: v_f64(r.get_value(9).map_err(db_err)?),
+                pagado: v_i64(r.get_value(10).map_err(db_err)?).unwrap_or(0),
             });
         }
         Ok(out)

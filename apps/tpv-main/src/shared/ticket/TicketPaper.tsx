@@ -24,6 +24,8 @@ import { resolveImageUrl } from "../lib/imageUrl";
 export type TicketPaperItem = {
     nombre: string;
     precio: number;
+    /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
+    ivaPercent?: number | null;
 };
 
 function eur(n: number) {
@@ -79,11 +81,17 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
         texto.slice(0, Math.max(0, cols - importe.length - 1));
 
     const grouped = useMemo(() => {
-        const map = new Map<string, { nombre: string; precio: number; qty: number }>();
+        // Mismo criterio que `buildTicketPayload`: nombre + precio + tipo de IVA.
+        const map = new Map<
+            string,
+            { nombre: string; precio: number; qty: number; ivaPercent: number | null }
+        >();
         for (const it of items) {
-            const key = `${it.nombre}__${it.precio}`;
+            const iva = it.ivaPercent ?? null;
+            const key = `${it.nombre}__${it.precio}__${iva ?? "neg"}`;
             const cur = map.get(key);
-            if (!cur) map.set(key, { nombre: it.nombre, precio: it.precio, qty: 1 });
+            if (!cur)
+                map.set(key, { nombre: it.nombre, precio: it.precio, qty: 1, ivaPercent: iva });
             else cur.qty += 1;
         }
         return Array.from(map.values());
@@ -94,12 +102,27 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
         [grouped],
     );
 
-    const base = useMemo(() => {
-        const divisor = 1 + (ivaPercent ?? 0) / 100;
-        return divisor === 0 ? total : total / divisor;
-    }, [total, ivaPercent]);
-
-    const iva = useMemo(() => total - base, [total, base]);
+    /**
+     * Reparto por tipo de IVA, espejo de `desglose_iva` en Rust (printing.rs).
+     *
+     * Los precios llevan el IVA incluido, así que la base se saca dividiendo, y se calcula POR
+     * LÍNEA y luego se suma: aplicar un solo tipo al total de un ticket que mezcla dos da un
+     * desglose que no cuadra con lo cobrado.
+     */
+    const tramosIva = useMemo(() => {
+        const porTipo = new Map<number, number>();
+        for (const g of grouped) {
+            const tipo = g.ivaPercent ?? ivaPercent ?? 0;
+            porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + g.qty * g.precio);
+        }
+        return Array.from(porTipo.entries())
+            .sort((a, b) => a[0] - b[0])
+            .map(([tipo, totalTramo]) => {
+                const divisor = 1 + tipo / 100;
+                const base = divisor === 0 ? totalTramo : totalTramo / divisor;
+                return { tipo, base, iva: totalTramo - base };
+            });
+    }, [grouped, ivaPercent]);
 
     const fechaStr = useMemo(() => new Date().toLocaleString("es-ES"), []);
 
@@ -211,14 +234,33 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
 
                 {showBaseIva ? (
                     <>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>BASE</span>
-                            <span>{eur(base)}</span>
-                        </div>
-                        <div style={{ display: "flex", justifyContent: "space-between" }}>
-                            <span>IVA ({ivaPercent}%)</span>
-                            <span>{eur(iva)}</span>
-                        </div>
+                        {tramosIva.length <= 1 ? (
+                            // Un solo tipo (el caso normal): como toda la vida, sin convertir el
+                            // ticket en una tabla por algo que no aporta nada.
+                            <>
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                    <span>BASE</span>
+                                    <span>{eur(tramosIva[0]?.base ?? 0)}</span>
+                                </div>
+                                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                    <span>IVA ({tramosIva[0]?.tipo ?? ivaPercent}%)</span>
+                                    <span>{eur(tramosIva[0]?.iva ?? 0)}</span>
+                                </div>
+                            </>
+                        ) : (
+                            tramosIva.map((t) => (
+                                <React.Fragment key={t.tipo}>
+                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                        <span>BASE ({t.tipo}%)</span>
+                                        <span>{eur(t.base)}</span>
+                                    </div>
+                                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                                        <span>IVA ({t.tipo}%)</span>
+                                        <span>{eur(t.iva)}</span>
+                                    </div>
+                                </React.Fragment>
+                            ))
+                        )}
                     </>
                 ) : null}
 

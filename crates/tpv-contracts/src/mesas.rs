@@ -109,6 +109,11 @@ pub struct MesaLineaComandaRow {
     pub cantidad: f64,
     #[serde(rename = "Precio_Unitario")]
     pub precio_unitario: f64,
+    /// Tipo de IVA con el que se vendió la línea (congelado al añadirla). `None` = el general
+    /// del negocio. Va al ticket para desglosar por tipo.
+    #[serde(rename = "IVA_Percent")]
+    #[ts(optional)]
+    pub iva_percent: Option<f64>,
     #[serde(rename = "Notas")]
     pub notas: Option<String>,
     #[serde(rename = "Estado_Cocina")]

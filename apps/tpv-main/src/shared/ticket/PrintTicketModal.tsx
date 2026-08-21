@@ -24,6 +24,12 @@ export type PrintableLine = {
     nombre: string;
     precio: number;
     pagado: boolean;
+    /**
+     * Tipo de IVA con el que se vendió la línea. `null`/ausente = el general del negocio.
+     * Viene congelado de la línea, no del producto: si el tipo cambia, un ticket reimpreso tiene
+     * que seguir enseñando el del día de la venta.
+     */
+    ivaPercent?: number | null;
 };
 
 type Modo = "completo" | "cobrado" | "seleccion";

@@ -75,6 +75,9 @@ export function AddProductModal({
     const [cantidadPedidoEsperada, setCantidadPedidoEsperada] = useState("");
     // VR-04: stock suelto fuera de lote (vacío = el producto no lo usa; puede ser negativo).
     const [stockSuelto, setStockSuelto] = useState("");
+    // Tipo de IVA propio. Vacío = hereda el del negocio, que es lo normal: en hostelería el
+    // consumo en el local va todo al tipo reducido. Se rellena solo en lo que tributa distinto.
+    const [ivaPercent, setIvaPercent] = useState("");
 
     const [image, setImage] = useState<File | null>(null);
     const [existingImageName, setExistingImageName] = useState<string | null>(null);
@@ -204,6 +207,9 @@ export function AddProductModal({
             setStockSuelto(
                 detalle.Stock_Suelto != null ? String(detalle.Stock_Suelto) : "",
             );
+            setIvaPercent(
+                detalle.IVA_Percent != null ? String(detalle.IVA_Percent) : "",
+            );
 
             setExistingImageName(detalle.Nombre_Imagen ?? null);
             setExistingImagePath(detalle.Ruta_Imagen ?? null);
@@ -323,6 +329,10 @@ export function AddProductModal({
                         cantidadPedidoEsperada.trim() === ""
                             ? null
                             : Number(cantidadPedidoEsperada.replace(",", ".")),
+                    iva_percent:
+                        ivaPercent.trim() === ""
+                            ? null
+                            : Number(ivaPercent.replace(",", ".")),
                     stock_suelto:
                         stockSuelto.trim() === ""
                             ? null
@@ -534,6 +544,30 @@ export function AddProductModal({
                             Stock simple sin lotes: se descuenta al vender lo que no cubran los lotes y
                             puede quedar negativo (aviso de que has vendido de más). Déjalo vacío si el
                             producto no lleva control de stock.
+                        </p>
+                    </div>
+
+                    <div>
+                        <label htmlFor="producto-iva" className="block font-semibold">
+                            IVA (%)
+                        </label>
+                        <input
+                            id="producto-iva"
+                            type="number"
+                            step="0.1"
+                            min="0"
+                            max="100"
+                            value={ivaPercent}
+                            onChange={(e) => setIvaPercent(e.target.value)}
+                            placeholder="Vacío = el del negocio"
+                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            disabled={loading}
+                        />
+                        <p className="mt-1 text-xs text-fg-muted">
+                            Déjalo vacío salvo que este producto tribute distinto al resto: lo que se
+                            consume en el local va todo al mismo tipo. Se rellena para cosas como
+                            productos envasados para llevar. El tipo que haya al vender queda guardado
+                            en el ticket, así que cambiarlo no altera las ventas ya hechas.
                         </p>
                     </div>
 

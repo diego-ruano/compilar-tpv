@@ -459,6 +459,9 @@ export default function VentaRapida() {
           seleccionado: false,
           categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
           notas: l.Notas ?? null,
+          // Tipo de IVA congelado en la línea al venderla (null = el del negocio). Va al ticket.
+          ivaPercent:
+            (l as any).IVA_Percent == null ? null : Number((l as any).IVA_Percent),
         };
       });
 

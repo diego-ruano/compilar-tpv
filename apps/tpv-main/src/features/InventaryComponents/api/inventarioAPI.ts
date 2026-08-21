@@ -45,6 +45,10 @@ export type ProductoRow = {
 
     // VR-04: stock suelto fuera de lote (null = el producto no lo usa; puede ser negativo).
     Stock_Suelto: number | null;
+
+    // Tipo de IVA propio; null = hereda el del negocio (lo normal: el consumo en el local va
+    // todo al mismo tipo). Se rellena solo en lo que tributa distinto.
+    IVA_Percent: number | null;
 };
 
 export type ProductoListRow = ProductoRow & {
@@ -125,6 +129,8 @@ export type UpsertProductoArgs = {
 
     // VR-04: stock suelto fuera de lote (opcional; null = no usa; puede ser negativo).
     stock_suelto?: number | null;
+    /** Tipo de IVA propio; `null` = hereda el del negocio. */
+    iva_percent?: number | null;
 
     ids_alergenos: string[];
 };
@@ -309,6 +315,9 @@ function normalizeProductoBase(row: any): ProductoRow {
         Stock_Suelto: toNumOrNull(
             pick(row, ["Stock_Suelto", "stock_suelto", "stockSuelto"]),
         ),
+        IVA_Percent: toNumOrNull(
+            pick(row, ["IVA_Percent", "iva_percent", "ivaPercent"]),
+        ),
     };
 }
 
@@ -482,6 +491,8 @@ export const inventarioAPI = {
 
             stock_suelto:
                 args.stock_suelto == null ? null : toNumOrNull(args.stock_suelto),
+            iva_percent:
+                args.iva_percent == null ? null : toNumOrNull(args.iva_percent),
 
             ids_alergenos: normalizeIdList(args.ids_alergenos ?? []),
         };
