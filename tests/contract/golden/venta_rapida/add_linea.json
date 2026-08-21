@@ -1,0 +1,16 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 6.0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "Cantidad": 2.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Producto": "prod-1",
+      "Precio_Unitario": 3.0
+    }
+  ]
+}

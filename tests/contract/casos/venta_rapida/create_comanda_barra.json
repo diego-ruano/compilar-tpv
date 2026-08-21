@@ -1,0 +1,13 @@
+{
+  "descripcion": "Crea una comanda de barra (Canal='BARRA', Estado='Abierta'). El ID_Comanda es asimétrico (Rust lo genera; el worker usa el del cliente) → se excluye del snapshot, igual que Fecha_Hora_Apertura (now). Se compara el resto del efecto.",
+  "comando": "venta_rapida.create_comanda_barra",
+  "seed": [],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "id_trabajador": null,
+    "get_or_create": false
+  },
+  "snapshot": {
+    "Comandas": "SELECT Canal, Estado, Total_Comanda, ID_Mesa, ID_Trabajador FROM Comandas"
+  }
+}

@@ -48,8 +48,17 @@ import {
 	setAsignacionesTarea,
 	updateTarea,
 } from "../src/domains/tareas/tareas.commands";
-import { cobrarFraccionado } from "../src/domains/venta_rapida/venta_rapida.commands";
-import { cobrarPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
+import {
+	addLinea,
+	cobrarFraccionado,
+	createComandaBarra,
+	deleteComandaIfSafe,
+	deleteLineaIfUnpaid,
+	removeLastUnpaidLinea,
+	restarStock,
+	updateNotaDetalle,
+} from "../src/domains/venta_rapida/venta_rapida.commands";
+import { cobrarPlan, restarStockPlan } from "../src/domains/venta_rapida/venta_rapida.queries";
 
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
 // bendecir su golden y sumar aquí su par caso/golden (workerd no lee del disco: los imports son
@@ -108,6 +117,20 @@ import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cli
 import goldenResExistente from "../../../tests/contract/golden/reservas/guardar_cliente_existente.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
+import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
+import goldenVrCrearComanda from "../../../tests/contract/golden/venta_rapida/create_comanda_barra.json";
+import casoVrAddLinea from "../../../tests/contract/casos/venta_rapida/add_linea.json";
+import goldenVrAddLinea from "../../../tests/contract/golden/venta_rapida/add_linea.json";
+import casoVrRemoveLast from "../../../tests/contract/casos/venta_rapida/remove_last_unpaid_linea.json";
+import goldenVrRemoveLast from "../../../tests/contract/golden/venta_rapida/remove_last_unpaid_linea.json";
+import casoVrDeleteLinea from "../../../tests/contract/casos/venta_rapida/delete_linea_if_unpaid.json";
+import goldenVrDeleteLinea from "../../../tests/contract/golden/venta_rapida/delete_linea_if_unpaid.json";
+import casoVrUpdateNota from "../../../tests/contract/casos/venta_rapida/update_nota_detalle.json";
+import goldenVrUpdateNota from "../../../tests/contract/golden/venta_rapida/update_nota_detalle.json";
+import casoVrRestarStock from "../../../tests/contract/casos/venta_rapida/restar_stock.json";
+import goldenVrRestarStock from "../../../tests/contract/golden/venta_rapida/restar_stock.json";
+import casoVrDeleteComanda from "../../../tests/contract/casos/venta_rapida/delete_comanda_if_safe.json";
+import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/delete_comanda_if_safe.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -137,6 +160,13 @@ const CASOS = [
 	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
+	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
+	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },
+	{ nombre: "vr_remove_last_unpaid_linea", caso: casoVrRemoveLast, golden: goldenVrRemoveLast },
+	{ nombre: "vr_delete_linea_if_unpaid", caso: casoVrDeleteLinea, golden: goldenVrDeleteLinea },
+	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
+	{ nombre: "vr_restar_stock", caso: casoVrRestarStock, golden: goldenVrRestarStock },
+	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -399,6 +429,42 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "reservas.eliminar": {
 			aplicar(hub, sql, deleteReserva(caso.entrada.id_reserva));
+			return;
+		}
+		case "venta_rapida.create_comanda_barra": {
+			aplicar(
+				hub,
+				sql,
+				createComandaBarra(
+					{ id_comanda: caso.entrada.id_comanda, id_trabajador: null, get_or_create: false } as any,
+					null,
+				),
+			);
+			return;
+		}
+		case "venta_rapida.add_linea": {
+			aplicar(hub, sql, addLinea(caso.entrada as any));
+			return;
+		}
+		case "venta_rapida.remove_last_unpaid_linea": {
+			aplicar(hub, sql, removeLastUnpaidLinea(caso.entrada as any));
+			return;
+		}
+		case "venta_rapida.delete_linea_if_unpaid": {
+			aplicar(hub, sql, deleteLineaIfUnpaid(caso.entrada as any));
+			return;
+		}
+		case "venta_rapida.update_nota_detalle": {
+			aplicar(hub, sql, updateNotaDetalle(caso.entrada as any));
+			return;
+		}
+		case "venta_rapida.restar_stock": {
+			const plan = await restarStockPlan(db, caso.entrada as any);
+			aplicar(hub, sql, restarStock(caso.entrada as any, plan as any));
+			return;
+		}
+		case "venta_rapida.delete_comanda_if_safe": {
+			aplicar(hub, sql, deleteComandaIfSafe(caso.entrada.id_comanda));
 			return;
 		}
 		default:

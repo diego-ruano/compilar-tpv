@@ -59,7 +59,7 @@ Un **caso** (`casos/<modulo>/<caso>.json`):
 
 | Lado | Fichero | Se ejecuta con |
 |---|---|---|
-| Rust (Main) | `crates/tpv-infra-sqlite/src/contract_tests.rs` | `cargo test -p tpv-infra-sqlite contrato_` |
+| Rust (Main) | `crates/tpv-infra-sqlite/src/contract_tests.rs` | `cargo test -p tpv-infra-sqlite contract_tests` |
 | Worker (Handy) | `apps/cloud-worker-licensing/test/contract.test.ts` | `pnpm --filter tpv-api test contract` |
 
 - Rust abre un libsql local, siembra, corre el comando (que captura su efecto en la BD) y lee las filas.
@@ -73,9 +73,10 @@ lo empaqueta); Rust lo lee del disco y es quien lo **bendice**.
 ## Añadir un CASO nuevo (mismo comando)
 
 1. Crea `casos/<modulo>/<caso>.json` con su `seed`, `entrada` y `snapshot`.
-2. Añade el nombre lógico `<modulo>__<caso>` a `CASOS` en `contract_tests.rs` (Rust deriva la subcarpeta
-   del nombre) y su par `caso/golden` en `contract.test.ts` (imports con la ruta `<modulo>/<caso>.json`).
-3. Bendice el golden desde Rust: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
+2. Añade el nombre lógico `<modulo>__<caso>` a la macro `casos_de_contrato!` en `contract_tests.rs`
+   (genera un `#[tokio::test]` por caso; Rust deriva la subcarpeta del nombre) y su par `caso/golden` en
+   `contract.test.ts` (imports con la ruta `<modulo>/<caso>.json`).
+3. Bendice el golden desde Rust: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contract_tests`.
 4. Corre el worker: `pnpm --filter tpv-api test contract`. Si sale rojo, **has encontrado una
    divergencia real** entre las dos implementaciones (o el snapshot incluye algo no determinista).
 

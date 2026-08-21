@@ -35,6 +35,7 @@ use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
 use tpv_domain::mesas::CobroDetalles;
@@ -244,38 +245,61 @@ fn s(v: &Json) -> String {
     v.as_str().unwrap().to_string()
 }
 
-/// Casos del harness. Añadir uno: crear su fixture en `tests/contract/casos/`, bendecir su golden
-/// (`BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`) y sumar su nombre aquí y en el test
-/// del worker (`test/contract.test.ts`).
-const CASOS: &[&str] = &[
-    "venta_rapida__cobro_fraccionado_un_lote",
-    "venta_rapida__cobro_fraccionado_fefo_multilote",
-    "mesas__cobrar_detalles_un_lote",
-    "clientes__crear",
-    "clientes__actualizar",
-    "tareas__crear",
-    "tareas__actualizar",
-    "tareas__set_asignaciones",
-    "tareas__eliminar",
-    "tareas__marcar_finalizada",
-    "inventario__create_lote",
-    "inventario__create_categoria",
-    "inventario__upsert_producto",
-    "inventario__set_alergenos",
-    "inventario__delete_producto",
-    "inventario__update_lote",
-    "inventario__ajustar_lote",
-    "configuracion__patch_business",
-    "configuracion__patch_contact",
-    "configuracion__patch_ticket",
-    "proveedores__guardar",
-    "proveedores__eliminar",
-    "proveedores__set_vinculos",
-    "proveedores__crear_producto",
-    "reservas__guardar_cliente_nuevo",
-    "reservas__guardar_cliente_existente",
-    "reservas__eliminar",
-];
+/// Genera **un `#[tokio::test]` por caso** (en vez de un solo bucle). Abrir muchas BD libsql en un
+/// mismo test dispara un crash nativo intermitente en Windows (`STATUS_ACCESS_VIOLATION`); un test
+/// por caso —cada uno con su propia BD— es el patrón estable del resto de la suite. El identificador
+/// del test **es** el nombre del caso (`<modulo>__<caso>`), que también es la ruta de su fixture.
+///
+/// Añadir un caso: crear su fixture en `tests/contract/casos/<modulo>/`, sumar su nombre aquí y en el
+/// test del worker (`test/contract.test.ts`), y bendecir su golden.
+/// Correr/bendecir: `cargo test -p tpv-infra-sqlite contract_tests` (con `BLESS_CONTRACT=1` regenera).
+macro_rules! casos_de_contrato {
+    ($($caso:ident),* $(,)?) => {
+        $(
+            #[tokio::test]
+            async fn $caso() {
+                correr_caso(stringify!($caso)).await;
+            }
+        )*
+    };
+}
+
+casos_de_contrato! {
+    venta_rapida__cobro_fraccionado_un_lote,
+    venta_rapida__cobro_fraccionado_fefo_multilote,
+    mesas__cobrar_detalles_un_lote,
+    clientes__crear,
+    clientes__actualizar,
+    tareas__crear,
+    tareas__actualizar,
+    tareas__set_asignaciones,
+    tareas__eliminar,
+    tareas__marcar_finalizada,
+    inventario__create_lote,
+    inventario__create_categoria,
+    inventario__upsert_producto,
+    inventario__set_alergenos,
+    inventario__delete_producto,
+    inventario__update_lote,
+    inventario__ajustar_lote,
+    configuracion__patch_business,
+    configuracion__patch_contact,
+    configuracion__patch_ticket,
+    proveedores__guardar,
+    proveedores__eliminar,
+    proveedores__set_vinculos,
+    proveedores__crear_producto,
+    reservas__guardar_cliente_nuevo,
+    reservas__guardar_cliente_existente,
+    reservas__eliminar,
+    venta_rapida__create_comanda_barra,
+    venta_rapida__add_linea,
+    venta_rapida__remove_last_unpaid_linea,
+    venta_rapida__delete_linea_if_unpaid,
+    venta_rapida__update_nota_detalle,
+    venta_rapida__restar_stock,
+    venta_rapida__delete_comanda_if_safe,
+}
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
 /// el punto de extensión: un dominio nuevo añade su brazo aquí y en el lado worker.
@@ -538,18 +562,69 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             let repo = SqliteReservasRepository::new(db.clone());
             repo.eliminar(&s(&e["id_reserva"])).await.expect("eliminar reserva");
         }
+        "venta_rapida.create_comanda_barra" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.create_comanda_barra(None, false).await.expect("create comanda barra");
+        }
+        "venta_rapida.add_linea" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.add_linea_comanda(
+                &s(&e["id_comanda"]),
+                &s(&e["id_producto"]),
+                e["cantidad"].as_f64().unwrap(),
+                e["precio_unitario"].as_f64().unwrap(),
+            )
+            .await
+            .expect("add linea");
+        }
+        "venta_rapida.remove_last_unpaid_linea" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.remove_last_unpaid_linea(&s(&e["id_comanda"]), &s(&e["id_producto"]))
+                .await
+                .expect("remove last unpaid");
+        }
+        "venta_rapida.delete_linea_if_unpaid" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.delete_linea_if_unpaid(&s(&e["id_comanda"]), &s(&e["id_detalle"]))
+                .await
+                .expect("delete linea if unpaid");
+        }
+        "venta_rapida.update_nota_detalle" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.update_nota_detalle(&s(&e["id_detalle"]), opt_str(&e["nota"]))
+                .await
+                .expect("update nota detalle");
+        }
+        "venta_rapida.restar_stock" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let lineas = e["lineas"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| StockLinea {
+                    producto_id: s(&l["producto_id"]),
+                    cantidad: l["cantidad"].as_f64().unwrap(),
+                })
+                .collect();
+            repo.restar_stock(lineas).await.expect("restar stock");
+        }
+        "venta_rapida.delete_comanda_if_safe" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            repo.delete_comanda_if_safe(&s(&e["id_comanda"]))
+                .await
+                .expect("delete comanda if safe");
+        }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }
 }
 
-#[tokio::test]
-async fn contrato_efecto_coincide_con_el_golden() {
-    for nombre in CASOS {
-        let caso = leer_caso(nombre);
-        let (db, _dir) = db_temporal().await;
-        sembrar(&db, caso["seed"].as_array().unwrap()).await;
-        aplicar_comando(&db, &caso).await;
-        let estado = estado_resultante(&db, caso["snapshot"].as_object().unwrap()).await;
-        comparar_o_bendecir(nombre, &estado);
-    }
+/// Corre un caso: BD nueva, siembra, aplica el comando (que deja su efecto en la BD) y
+/// compara/bendice su golden. Cada `#[tokio::test]` generado por `casos_de_contrato!` llama aquí.
+async fn correr_caso(nombre: &str) {
+    let caso = leer_caso(nombre);
+    let (db, _dir) = db_temporal().await;
+    sembrar(&db, caso["seed"].as_array().unwrap()).await;
+    aplicar_comando(&db, &caso).await;
+    let estado = estado_resultante(&db, caso["snapshot"].as_object().unwrap()).await;
+    comparar_o_bendecir(nombre, &estado);
 }

@@ -1,0 +1,14 @@
+{
+  "Comandas": [
+    {
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 3.0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "ID_Detalle": "detalle-1",
+      "ID_Producto": "prod-1"
+    }
+  ]
+}
