@@ -1,0 +1,14 @@
+{
+  "descripcion": "Abre una comanda de mesa (si no hay ya una abierta para esa mesa). ID_Comanda generado (asimétrico) → excluido; Fecha_Hora_Apertura (now) → excluida. Sin trabajador ni reserva.",
+  "comando": "mesas.abrir_comanda",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);"
+  ],
+  "entrada": {
+    "id_mesa": "mesa-1"
+  },
+  "snapshot": {
+    "Comandas": "SELECT ID_Mesa, Estado, Total_Comanda, ID_Trabajador, ID_Reserva FROM Comandas"
+  }
+}

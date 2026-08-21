@@ -38,7 +38,7 @@ use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
-use tpv_domain::mesas::CobroDetalles;
+use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
@@ -299,6 +299,14 @@ casos_de_contrato! {
     venta_rapida__update_nota_detalle,
     venta_rapida__restar_stock,
     venta_rapida__delete_comanda_if_safe,
+    mesas__abrir_comanda,
+    mesas__set_trabajador_if_null,
+    mesas__cerrar_comanda,
+    mesas__add_linea,
+    mesas__remove_one_pending_detalle,
+    mesas__delete_detalle,
+    mesas__update_detalle_nota,
+    mesas__kitchen_set_line_state,
 }
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -613,6 +621,69 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.delete_comanda_if_safe(&s(&e["id_comanda"]))
                 .await
                 .expect("delete comanda if safe");
+        }
+        "mesas.abrir_comanda" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.abrir_comanda(AbrirComandaData {
+                id_mesa: s(&e["id_mesa"]),
+                id_trabajador_o_usuario: None,
+                id_reserva: None,
+            })
+            .await
+            .expect("abrir comanda");
+        }
+        "mesas.set_trabajador_if_null" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.comanda_set_trabajador_if_null(
+                &s(&e["id_comanda"]),
+                opt_str(&e["id_trabajador_o_usuario"]),
+            )
+            .await
+            .expect("set trabajador if null");
+        }
+        "mesas.cerrar_comanda" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.cerrar_comanda(&s(&e["id_comanda"]), e["total"].as_f64().unwrap())
+                .await
+                .expect("cerrar comanda");
+        }
+        "mesas.add_linea" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.add_linea_comanda(
+                &s(&e["id_comanda"]),
+                &s(&e["id_producto"]),
+                e["cantidad"].as_f64().unwrap(),
+                e["precio"].as_f64().unwrap(),
+                None,
+            )
+            .await
+            .expect("add linea mesa");
+        }
+        "mesas.remove_one_pending_detalle" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.remove_one_pending_detalle(&s(&e["id_comanda"]), &s(&e["id_producto"]))
+                .await
+                .expect("remove one pending");
+        }
+        "mesas.delete_detalle" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.delete_detalle(&s(&e["id_detalle"])).await.expect("delete detalle");
+        }
+        "mesas.update_detalle_nota" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.update_detalle_nota(&s(&e["id_detalle"]), opt_str(&e["nota"]))
+                .await
+                .expect("update detalle nota");
+        }
+        "mesas.kitchen_set_line_state" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            repo.kitchen_set_line_state(
+                &s(&e["id_detalle"]),
+                &s(&e["id_usuario_cocinero"]),
+                s(&e["estado"]),
+            )
+            .await
+            .expect("kitchen set line state");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

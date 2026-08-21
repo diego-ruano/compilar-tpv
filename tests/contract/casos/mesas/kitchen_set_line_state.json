@@ -1,0 +1,22 @@
+{
+  "descripcion": "Cocina marca el estado de una línea (PREPARADO). Fecha_Hora_Cocina (now) excluida.",
+  "comando": "mesas.kitchen_set_line_state",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('detalle-1', 'comanda-1', 'prod-1', 2, 3.0, 'PENDIENTE');"
+  ],
+  "entrada": {
+    "id_detalle": "detalle-1",
+    "id_usuario_cocinero": "user-1",
+    "estado": "PREPARADO"
+  },
+  "snapshot": {
+    "Detalle_Comanda": "SELECT ID_Detalle, Estado_Cocina FROM Detalle_Comanda"
+  }
+}

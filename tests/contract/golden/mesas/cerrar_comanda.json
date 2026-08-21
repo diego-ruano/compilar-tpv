@@ -1,0 +1,9 @@
+{
+  "Comandas": [
+    {
+      "Estado": "Pagada",
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 6.0
+    }
+  ]
+}

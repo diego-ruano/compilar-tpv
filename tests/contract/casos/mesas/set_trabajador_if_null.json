@@ -1,0 +1,19 @@
+{
+  "descripcion": "Asigna el trabajador a una comanda abierta si aún no tiene y no tiene líneas. El id ya resuelto lo pasa el route; aquí se pasa un ID_Trabajador directo.",
+  "comando": "mesas.set_trabajador_if_null",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'MESA', 'mesa-1', '2026-01-01 12:00:00', 'Abierta');"
+  ],
+  "entrada": {
+    "id_comanda": "comanda-1",
+    "id_trabajador_o_usuario": "trab-1"
+  },
+  "snapshot": {
+    "Comandas": "SELECT ID_Comanda, ID_Trabajador FROM Comandas"
+  }
+}

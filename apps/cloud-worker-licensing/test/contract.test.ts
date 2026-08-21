@@ -31,7 +31,17 @@ import {
 	updateLote,
 	upsertProducto,
 } from "../src/domains/inventario/inventario.commands";
-import { cobrarDetalles } from "../src/domains/mesas/mesas.commands";
+import {
+	abrirComanda,
+	addLinea as addLineaMesa,
+	cerrarComanda,
+	cobrarDetalles,
+	deleteDetalle,
+	kitchenSetLineState,
+	removeOnePendingDetalle,
+	setTrabajadorIfNull,
+	updateDetalleNota,
+} from "../src/domains/mesas/mesas.commands";
 import { cobrarDetallesPlan } from "../src/domains/mesas/mesas.queries";
 import {
 	crearProducto,
@@ -131,6 +141,22 @@ import casoVrRestarStock from "../../../tests/contract/casos/venta_rapida/restar
 import goldenVrRestarStock from "../../../tests/contract/golden/venta_rapida/restar_stock.json";
 import casoVrDeleteComanda from "../../../tests/contract/casos/venta_rapida/delete_comanda_if_safe.json";
 import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/delete_comanda_if_safe.json";
+import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.json";
+import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
+import casoMesaSetTrab from "../../../tests/contract/casos/mesas/set_trabajador_if_null.json";
+import goldenMesaSetTrab from "../../../tests/contract/golden/mesas/set_trabajador_if_null.json";
+import casoMesaCerrar from "../../../tests/contract/casos/mesas/cerrar_comanda.json";
+import goldenMesaCerrar from "../../../tests/contract/golden/mesas/cerrar_comanda.json";
+import casoMesaAddLinea from "../../../tests/contract/casos/mesas/add_linea.json";
+import goldenMesaAddLinea from "../../../tests/contract/golden/mesas/add_linea.json";
+import casoMesaRemoveOne from "../../../tests/contract/casos/mesas/remove_one_pending_detalle.json";
+import goldenMesaRemoveOne from "../../../tests/contract/golden/mesas/remove_one_pending_detalle.json";
+import casoMesaDeleteDet from "../../../tests/contract/casos/mesas/delete_detalle.json";
+import goldenMesaDeleteDet from "../../../tests/contract/golden/mesas/delete_detalle.json";
+import casoMesaUpdateNota from "../../../tests/contract/casos/mesas/update_detalle_nota.json";
+import goldenMesaUpdateNota from "../../../tests/contract/golden/mesas/update_detalle_nota.json";
+import casoMesaKitchen from "../../../tests/contract/casos/mesas/kitchen_set_line_state.json";
+import goldenMesaKitchen from "../../../tests/contract/golden/mesas/kitchen_set_line_state.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -167,6 +193,14 @@ const CASOS = [
 	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
 	{ nombre: "vr_restar_stock", caso: casoVrRestarStock, golden: goldenVrRestarStock },
 	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
+	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
+	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
+	{ nombre: "mesas_cerrar_comanda", caso: casoMesaCerrar, golden: goldenMesaCerrar },
+	{ nombre: "mesas_add_linea", caso: casoMesaAddLinea, golden: goldenMesaAddLinea },
+	{ nombre: "mesas_remove_one_pending", caso: casoMesaRemoveOne, golden: goldenMesaRemoveOne },
+	{ nombre: "mesas_delete_detalle", caso: casoMesaDeleteDet, golden: goldenMesaDeleteDet },
+	{ nombre: "mesas_update_detalle_nota", caso: casoMesaUpdateNota, golden: goldenMesaUpdateNota },
+	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -465,6 +499,73 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "venta_rapida.delete_comanda_if_safe": {
 			aplicar(hub, sql, deleteComandaIfSafe(caso.entrada.id_comanda));
+			return;
+		}
+		case "mesas.abrir_comanda": {
+			aplicar(hub, sql, abrirComanda({ id_mesa: caso.entrada.id_mesa } as any, null, null));
+			return;
+		}
+		case "mesas.set_trabajador_if_null": {
+			// El route pasa el ID_Trabajador ya resuelto; en el caso base es directo.
+			aplicar(
+				hub,
+				sql,
+				setTrabajadorIfNull(
+					{ id_comanda: caso.entrada.id_comanda } as any,
+					caso.entrada.id_trabajador_o_usuario,
+				),
+			);
+			return;
+		}
+		case "mesas.cerrar_comanda": {
+			aplicar(hub, sql, cerrarComanda(caso.entrada.id_comanda, caso.entrada.total));
+			return;
+		}
+		case "mesas.add_linea": {
+			// Estado_Cocina lo resuelve el route (fuera del builder); se excluye del snapshot, así
+			// que aquí se pasa un valor válido cualquiera ('PENDIENTE').
+			aplicar(
+				hub,
+				sql,
+				addLineaMesa(
+					{
+						id_comanda: caso.entrada.id_comanda,
+						id_producto: caso.entrada.id_producto,
+						cantidad: caso.entrada.cantidad,
+						precio: caso.entrada.precio,
+						id_trabajador_o_usuario: null,
+					} as any,
+					"PENDIENTE",
+				),
+			);
+			return;
+		}
+		case "mesas.remove_one_pending_detalle": {
+			aplicar(
+				hub,
+				sql,
+				removeOnePendingDetalle(caso.entrada.id_comanda, caso.entrada.id_producto),
+			);
+			return;
+		}
+		case "mesas.delete_detalle": {
+			aplicar(hub, sql, deleteDetalle(caso.entrada.id_detalle, caso.entrada.id_comanda));
+			return;
+		}
+		case "mesas.update_detalle_nota": {
+			aplicar(hub, sql, updateDetalleNota(caso.entrada.id_detalle, caso.entrada.nota));
+			return;
+		}
+		case "mesas.kitchen_set_line_state": {
+			aplicar(
+				hub,
+				sql,
+				kitchenSetLineState(
+					caso.entrada.id_detalle,
+					caso.entrada.id_usuario_cocinero,
+					caso.entrada.estado,
+				),
+			);
 			return;
 		}
 		default:
