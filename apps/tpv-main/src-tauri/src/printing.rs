@@ -103,6 +103,21 @@ pub struct PrintTicketPayload {
     #[serde(default = "default_font_scale")]
     pub font_scale: f64,
 
+    /// Número correlativo del ticket. `None` = **precuenta**: lo que se le enseña al cliente antes
+    /// de cobrar, que no es un ticket de venta y se marca como tal.
+    #[serde(default)]
+    pub numero_ticket: Option<String>,
+    /// Cómo se cobró (`Efectivo` | `Tarjeta`). `None` en una precuenta.
+    #[serde(default)]
+    pub metodo_pago: Option<String>,
+    /// De dónde sale la venta: `Mesa 5`, `Barra`… Ayuda a localizar el cobro después.
+    #[serde(default)]
+    pub origen: Option<String>,
+    /// Reimpresión de un ticket ya emitido: sale el MISMO número, marcado como copia para que dos
+    /// papeles iguales no parezcan dos ventas.
+    #[serde(default)]
+    pub es_copia: bool,
+
     #[serde(default)]
     pub items: Vec<PrintTicketLine>,
 }
@@ -360,12 +375,40 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
     esc_align(&mut out, 0);
     sep(&mut out, cols);
 
+    // Encabezado del cuerpo: fecha a la izquierda y, a la derecha, QUÉ es este papel — su número
+    // si es un ticket de venta, o PRECUENTA si aún no se ha cobrado.
+    let etiqueta = match p.numero_ticket.as_deref() {
+        Some(n) if !n.trim().is_empty() => n.trim().to_string(),
+        _ => "PRECUENTA".to_string(),
+    };
     if p.show_date_time {
         let fecha = chrono::Local::now().format("%d/%m/%Y %H:%M").to_string();
-        text_line(&mut out, &line_two(&fecha, "VENTA", cols));
+        text_line(&mut out, &line_two(&fecha, &etiqueta, cols));
     } else {
-        text_line(&mut out, &line_two("", "VENTA", cols));
+        text_line(&mut out, &line_two("", &etiqueta, cols));
     }
+
+    // Origen y método: es lo que permite encontrar el cobro después (una devolución, un arqueo).
+    if let Some(o) = p.origen.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        text_line(&mut out, &line_two(o, "", cols));
+    }
+    if let Some(m) = p.metodo_pago.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        text_line(&mut out, &line_two("Pago", m, cols));
+    }
+
+    // Los dos avisos que evitan confundir un papel con otro.
+    if p.numero_ticket.as_deref().map(str::trim).unwrap_or("").is_empty() {
+        esc_align(&mut out, 1);
+        text_line(&mut out, "NO ES UN TICKET DE VENTA");
+        esc_align(&mut out, 0);
+    } else if p.es_copia {
+        esc_align(&mut out, 1);
+        esc_bold(&mut out, true);
+        text_line(&mut out, "COPIA");
+        esc_bold(&mut out, false);
+        esc_align(&mut out, 0);
+    }
+
     sep(&mut out, cols);
 
     // Total siempre se calcula de los items, aunque las líneas estén ocultas.
@@ -783,6 +826,10 @@ mod tests_desglose_iva {
             margin_left_mm: 0.0,
             margin_right_mm: 0.0,
             font_scale: 1.0,
+            numero_ticket: None,
+            metodo_pago: None,
+            origen: None,
+            es_copia: false,
             items,
         }
     }
@@ -859,5 +906,135 @@ mod tests_desglose_iva {
         assert_eq!(d.len(), 1);
         assert!(cerca(d[0].1, 10.0), "base {}", d[0].1);
         assert!(cerca(d[0].2, 0.0), "iva {}", d[0].2);
+    }
+}
+
+#[cfg(test)]
+mod tests_identidad_del_ticket {
+    //! Qué papel es cada papel.
+    //!
+    //! Con numeración aparecen dos documentos que no se pueden confundir: la PRECUENTA (antes de
+    //! cobrar, sin número) y el TICKET (tras el cobro, numerado). Y una reimpresión sale con el
+    //! mismo número que el original, así que tiene que decir que es una COPIA — si no, dos papeles
+    //! idénticos parecen dos ventas.
+    //!
+    //! Se comprueba sobre los bytes ESC/POS: es lo que de verdad sale por la impresora.
+
+    use super::*;
+
+    fn base(items: Vec<PrintTicketLine>) -> PrintTicketPayload {
+        PrintTicketPayload {
+            printer_name: None,
+            business_name: "Bar".into(),
+            direccion: String::new(),
+            telefono: String::new(),
+            cif: String::new(),
+            mensaje_footer: String::new(),
+            iva_percent: 10.0,
+            show_logo: false,
+            show_business_name: true,
+            show_address: false,
+            show_phone: false,
+            show_cif: false,
+            show_date_time: false,
+            show_line_items: true,
+            show_base_and_iva: true,
+            show_total: true,
+            show_footer_message: false,
+            paper_width_mm: 80,
+            paper_dpi: 203,
+            chars_per_line: 42,
+            margin_top_mm: 0.0,
+            margin_bottom_mm: 0.0,
+            margin_left_mm: 0.0,
+            margin_right_mm: 0.0,
+            font_scale: 1.0,
+            numero_ticket: None,
+            metodo_pago: None,
+            origen: None,
+            es_copia: false,
+            items,
+        }
+    }
+
+    fn linea() -> PrintTicketLine {
+        PrintTicketLine {
+            nombre: "Cafe".into(),
+            cantidad: 1,
+            precio_unitario: 1.1,
+            iva_percent: None,
+        }
+    }
+
+    /// El ticket se codifica en CP858; para buscar texto ASCII basta con leerlo como bytes.
+    fn contiene(bytes: &[u8], texto: &str) -> bool {
+        bytes
+            .windows(texto.len())
+            .any(|w| w == texto.as_bytes())
+    }
+
+    #[test]
+    fn sin_numero_es_una_precuenta_y_lo_dice() {
+        let bytes = build_ticket(&base(vec![linea()]));
+
+        assert!(contiene(&bytes, "PRECUENTA"));
+        assert!(
+            contiene(&bytes, "NO ES UN TICKET DE VENTA"),
+            "una precuenta no puede parecer un ticket de venta"
+        );
+    }
+
+    #[test]
+    fn con_numero_sale_el_numero_y_no_el_aviso() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000042".into());
+        let bytes = build_ticket(&p);
+
+        assert!(contiene(&bytes, "T-000042"));
+        assert!(!contiene(&bytes, "PRECUENTA"));
+        assert!(!contiene(&bytes, "NO ES UN TICKET DE VENTA"));
+    }
+
+    #[test]
+    fn una_reimpresion_lleva_el_mismo_numero_y_dice_COPIA() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000042".into());
+        p.es_copia = true;
+        let bytes = build_ticket(&p);
+
+        assert!(contiene(&bytes, "T-000042"));
+        assert!(contiene(&bytes, "COPIA"));
+    }
+
+    #[test]
+    fn una_precuenta_nunca_se_marca_como_copia() {
+        // Sin número no hay original del que ser copia: el aviso que toca es el de precuenta.
+        let mut p = base(vec![linea()]);
+        p.es_copia = true;
+        let bytes = build_ticket(&p);
+
+        assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));
+        assert!(!contiene(&bytes, "COPIA"));
+    }
+
+    #[test]
+    fn el_origen_y_el_metodo_salen_impresos() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000007".into());
+        p.origen = Some("Mesa 5".into());
+        p.metodo_pago = Some("Tarjeta".into());
+        let bytes = build_ticket(&p);
+
+        assert!(contiene(&bytes, "Mesa 5"));
+        assert!(contiene(&bytes, "Tarjeta"));
+    }
+
+    #[test]
+    fn un_numero_en_blanco_cuenta_como_precuenta() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("   ".into());
+        let bytes = build_ticket(&p);
+
+        assert!(contiene(&bytes, "PRECUENTA"));
     }
 }

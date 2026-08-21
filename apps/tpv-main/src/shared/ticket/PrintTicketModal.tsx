@@ -16,6 +16,7 @@ import { useTicketSettings } from "../stores/useTicketSettings";
 import {
     buildTicketPayload,
     printerPrintTicket,
+    type DatosDelTicket,
 } from "../../features/configuracion/api/printerApis";
 import TicketPaper from "./TicketPaper";
 
@@ -50,11 +51,17 @@ export default function PrintTicketModal({
     onClose,
     items,
     titulo = "Imprimir ticket",
+    datos,
 }: {
     open: boolean;
     onClose: () => void;
     items: PrintableLine[];
     titulo?: string;
+    /**
+     * Qué papel es este. Sin `numeroTicket` sale como PRECUENTA: lo que se le enseña al cliente
+     * antes de cobrar, que no es un ticket de venta y no puede parecerlo.
+     */
+    datos?: DatosDelTicket;
 }) {
     const toast = useToast();
     const { settings } = useTicketSettings();
@@ -97,7 +104,7 @@ export default function PrintTicketModal({
         if (effectiveItems.length === 0) return;
         setPrinting(true);
         try {
-            await printerPrintTicket(buildTicketPayload(effectiveItems));
+            await printerPrintTicket(buildTicketPayload(effectiveItems, undefined, datos));
             toast.success("Ticket", "Enviado a la impresora.");
             onClose();
         } catch (e) {

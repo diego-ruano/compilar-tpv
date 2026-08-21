@@ -63,7 +63,24 @@ export type PrintTicketPayload = {
     margin_right_mm: number;
     font_scale: number;
 
+    /** Número correlativo. Ausente/null = precuenta (se marca "no es un ticket de venta"). */
+    numero_ticket?: string | null;
+    /** Cómo se cobró. Ausente en una precuenta. */
+    metodo_pago?: string | null;
+    /** De dónde sale la venta: `Mesa 5`, `Barra`… */
+    origen?: string | null;
+    /** Reimpresión: mismo número, marcado como COPIA. */
+    es_copia?: boolean;
+
     items: PrintTicketLine[];
+};
+
+/** Lo que distingue un ticket de venta de una precuenta o de una copia. */
+export type DatosDelTicket = {
+    numeroTicket?: string | null;
+    metodoPago?: string | null;
+    origen?: string | null;
+    esCopia?: boolean;
 };
 
 /** Item simple (cada unidad por separado); `buildTicketPayload` los agrupa. */
@@ -124,6 +141,7 @@ export async function printerPrintTicket(payload: PrintTicketPayload): Promise<v
 export function buildTicketPayload(
     items: SimpleTicketItem[],
     printerName?: string,
+    datos?: DatosDelTicket,
 ): PrintTicketPayload {
     const biz = useBusinessSettings.getState();
     const t = useTicketSettings.getState().settings;
@@ -177,6 +195,11 @@ export function buildTicketPayload(
         margin_left_mm: t.marginLeftMm,
         margin_right_mm: t.marginRightMm,
         font_scale: t.fontScale,
+
+        numero_ticket: datos?.numeroTicket ?? null,
+        metodo_pago: datos?.metodoPago ?? null,
+        origen: datos?.origen ?? null,
+        es_copia: datos?.esCopia ?? false,
 
         items: Array.from(map.values()),
     };
