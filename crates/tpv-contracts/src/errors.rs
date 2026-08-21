@@ -138,8 +138,13 @@ impl ErrorCode {
         match s.trim().to_ascii_lowercase().as_str() {
             "not_approved" => ErrorCode::NotApproved,
             "main_offline" => ErrorCode::MainOffline,
-            "device_revoked" | "revoked" => ErrorCode::DeviceRevoked,
-            "license_expired" | "expired" => ErrorCode::LicenseExpired,
+            // `device_replaced`: la licencia se activó en otro equipo (§6.4 del plan de
+            // licencias). Este Main ya no lo es, así que para él la consecuencia es la misma que
+            // estar revocado: parar. Ver el fixture compartido `error-codes.json`.
+            "device_revoked" | "revoked" | "device_replaced" => ErrorCode::DeviceRevoked,
+            // `license_revoked` cae aquí a propósito: `LicenseExpired` ya significa "caducada o
+            // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
+            "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
             "invalid_pin" => ErrorCode::InvalidPin,
             "validation_error" => ErrorCode::Validation,

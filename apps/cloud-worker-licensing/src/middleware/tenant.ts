@@ -17,6 +17,8 @@ export type TenantVars = {
 	tenantId: string;
 	deviceId: string;
 	token: string;
+	/** Hash de la clave de licencia (claim del JWT). Identifica la fila de `licenses`. */
+	licHash: string;
 };
 
 export const tenantAuth: MiddlewareHandler<{
@@ -35,6 +37,7 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("tenantId", claims.tenantId);
 		c.set("deviceId", claims.deviceId);
 		c.set("token", token);
+		c.set("licHash", claims.licHash);
 	} catch (e: any) {
 		return c.json({ error: String(e?.message || e) }, 401);
 	}
