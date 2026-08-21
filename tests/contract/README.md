@@ -91,17 +91,33 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-- `venta_rapida.cobrar_fraccionado` (VR-05): cobro de barra por FEFO.
-  - `…_un_lote`: caso mínimo (un lote cubre la venta).
-  - `…_fefo_multilote`: reparto FEFO entre dos lotes (agota el que caduca antes) — ejercita el orden
-    FEFO, que es donde las dos implementaciones pueden divergir.
-- `mesas.cobrar_detalles` (MESA-11): cobro de una comanda de mesa por FEFO + cierre de comanda.
+**46 casos, todos verdes** (las dos implementaciones coinciden — sin divergencias). Por dominio:
 
-Pendiente (incremental, un dominio cada vez): el resto de comandos de mesas/venta rápida, inventario
-(lotes), clientes, proveedores, reservas, tareas, trabajadores/horarios, login y configuración — la
-familia `-parity` (ver [00-indice.md](../../docs/analisis/00-indice.md)).
+- **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
+  `add_linea`, `remove_last_unpaid_linea`, `delete_linea_if_unpaid`, `update_nota_detalle`, `restar_stock`,
+  `delete_comanda_if_safe`.
+- **Mesas** (MESA-11) — líneas/cocina/cobro: `cobrar_detalles`, `abrir_comanda`, `set_trabajador_if_null`,
+  `cerrar_comanda`, `add_linea`, `remove_one_pending_detalle`, `delete_detalle`, `update_detalle_nota`,
+  `kitchen_set_line_state`.
+- **Inventario** (INV-07) — completo: `create_lote`, `create_categoria`, `upsert_producto`, `set_alergenos`,
+  `delete_producto`, `update_lote`, `ajustar_lote`.
+- **Clientes** (CLI-05): `crear`, `actualizar`. **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
+  `eliminar`, `marcar_finalizada`. **Proveedores** (PROV-07): `guardar`, `eliminar`, `set_vinculos`,
+  `crear_producto`. **Reservas** (RES-07/RES-05): `guardar` (cliente nuevo + merge de existente), `eliminar`.
+  **Configuración** (CONF-06): `patch_business`, `patch_contact`, `patch_ticket`.
+- **Login/Horarios** (parcial): `login.set_turno_partido`, `horarios.create/update/delete_asignacion`.
 
-**No contrastables** (no hay segunda implementación que comparar): `pedidos_proveedor` (solo existe en
-Rust, ausente en el worker) y `stats` (solo lectura). Los comandos de `trabajadores`/`login` que
-escriben `Password_Hash` (PBKDF2 con salt aleatorio → distinto por diseño) o PII cifrada (el worker ni
-la escribe) se cubren **excluyendo esas columnas** del snapshot; el resto del efecto sí se compara.
+## No cubiertos (por qué)
+
+- **No hay segunda implementación**: `pedidos_proveedor` (solo Rust, ausente en el worker) y `stats`
+  (solo lectura) — nada que contrastar.
+- **`mesas.save_layout`**: reemplazo multi-sentencia de zonas/mesas con UUIDs generados y reordenado;
+  pendiente (encaja en el harness, pero es un caso grande aparte).
+- **`login.complete_initial_setup`, `login.punch`**: el lado Rust **verifica el PIN** contra el hash
+  guardado (PBKDF2), así que el fixture tendría que sembrar un hash válido precomputado. Fuera del
+  alcance fácil del harness de efecto.
+- **`trabajadores.crear/actualizar`**: escriben **PII cifrada** (DNI/IBAN/nº SS — el worker ni la
+  escribe) y `Password_Hash` (salt aleatorio → distinto por diseño); solo las columnas no sensibles
+  serían comparables, y hace falta cablear el *field cipher*. Cubrible parcialmente, bajo valor.
+- **`horarios.copiar_semana`, `set_predeterminado`**: generan los IDs nuevos de forma **distinta** en
+  cada lado (Rust `new_id` vs `randomblob`/`randomUUID`), así que solo el resto de columnas es comparable.

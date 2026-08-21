@@ -30,10 +30,12 @@ use serde_json::{Map, Value as Json};
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::inventario::InventarioRepository;
+use tpv_application::ports::login::LoginRepository;
 use tpv_application::ports::mesas::MesasRepository;
 use tpv_application::ports::proveedores::ProveedoresRepository;
 use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
+use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
 use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
@@ -42,16 +44,19 @@ use tpv_domain::mesas::{AbrirComandaData, CobroDetalles};
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 use tpv_domain::reservas::{ClienteReserva, ReservaValidada};
 use tpv_domain::tareas::TareaData;
+use tpv_domain::trabajadores::{AsignacionCambios, AsignacionNueva};
 use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
 use crate::configuracion::SqliteConfiguracionRepository;
 use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
+use crate::login::SqliteLoginRepository;
 use crate::mesas::SqliteMesasRepository;
 use crate::proveedores::SqliteProveedoresRepository;
 use crate::reservas::SqliteReservasRepository;
 use crate::tareas::SqliteTareasRepository;
+use crate::trabajadores::SqliteTrabajadoresRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
 /// Tolerancia al comparar números (stock decimal, importes): absorbe el ruido de coma flotante.
@@ -307,6 +312,10 @@ casos_de_contrato! {
     mesas__delete_detalle,
     mesas__update_detalle_nota,
     mesas__kitchen_set_line_state,
+    login__set_turno_partido,
+    horarios__create_asignacion,
+    horarios__update_asignacion,
+    horarios__delete_asignacion,
 }
 
 /// Corre el comando del caso por su camino real (el que captura el efecto en la BD). El `match` es
@@ -684,6 +693,51 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("kitchen set line state");
+        }
+        "login.set_turno_partido" => {
+            let repo = SqliteLoginRepository::new(db.clone());
+            repo.set_turno_partido(
+                &s(&e["id_usuario"]),
+                opt_str(&e["fecha"]),
+                e["turno_partido"].as_bool().unwrap(),
+            )
+            .await
+            .expect("set turno partido");
+        }
+        "horarios.create_asignacion" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.create_asignacion(AsignacionNueva {
+                id_trabajador: s(&e["id_trabajador"]),
+                fecha: s(&e["fecha"]),
+                id_turno: s(&e["id_turno"]),
+                area: s(&e["area"]),
+                hora_inicio: opt_str(&e["hora_inicio"]),
+                hora_fin: opt_str(&e["hora_fin"]),
+                notas: opt_str(&e["notas"]),
+            })
+            .await
+            .expect("create asignacion");
+        }
+        "horarios.update_asignacion" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.update_asignacion(
+                &s(&e["id_asignacion"]),
+                AsignacionCambios {
+                    id_turno: s(&e["id_turno"]),
+                    area: s(&e["area"]),
+                    hora_inicio: opt_str(&e["hora_inicio"]),
+                    hora_fin: opt_str(&e["hora_fin"]),
+                    notas: opt_str(&e["notas"]),
+                },
+            )
+            .await
+            .expect("update asignacion");
+        }
+        "horarios.delete_asignacion" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.delete_asignacion(&s(&e["id_asignacion"]))
+                .await
+                .expect("delete asignacion");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }

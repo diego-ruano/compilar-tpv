@@ -1,0 +1,16 @@
+{
+  "descripcion": "Fija el turno partido del día (UPSERT en Fichaje_Dia, sin PIN). Fecha fija (determinista).",
+  "comando": "login.set_turno_partido",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');"
+  ],
+  "entrada": {
+    "id_usuario": "user-1",
+    "fecha": "2026-02-01",
+    "turno_partido": true
+  },
+  "snapshot": {
+    "Fichaje_Dia": "SELECT ID_Usuario, Fecha, Turno_Partido FROM Fichaje_Dia"
+  }
+}

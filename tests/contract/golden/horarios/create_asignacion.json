@@ -1,0 +1,13 @@
+{
+  "Asignacion_Turnos": [
+    {
+      "Area": "barra",
+      "Fecha": "2026-02-01",
+      "Hora_Fin": "17:00",
+      "Hora_Inicio": "09:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "turno-1",
+      "Notas": "turno normal"
+    }
+  ]
+}

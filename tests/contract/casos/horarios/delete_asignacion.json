@@ -1,0 +1,17 @@
+{
+  "descripcion": "Borra una asignación de turno.",
+  "comando": "horarios.delete_asignacion",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-1', 'Mañana');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-1', 'trab-1', '2026-02-01', 'turno-1', 'barra');"
+  ],
+  "entrada": {
+    "id_asignacion": "asig-1"
+  },
+  "snapshot": {
+    "Asignacion_Turnos": "SELECT ID_Asignacion FROM Asignacion_Turnos"
+  }
+}

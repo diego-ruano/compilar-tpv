@@ -17,6 +17,12 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
+import { setTurnoPartido } from "../src/domains/login/login.commands";
+import {
+	createAsignacion,
+	deleteAsignacion,
+	updateAsignacion,
+} from "../src/domains/trabajadores/trabajadores.commands";
 import {
 	patchBusiness,
 	patchContact,
@@ -157,6 +163,14 @@ import casoMesaUpdateNota from "../../../tests/contract/casos/mesas/update_detal
 import goldenMesaUpdateNota from "../../../tests/contract/golden/mesas/update_detalle_nota.json";
 import casoMesaKitchen from "../../../tests/contract/casos/mesas/kitchen_set_line_state.json";
 import goldenMesaKitchen from "../../../tests/contract/golden/mesas/kitchen_set_line_state.json";
+import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partido.json";
+import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
+import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
+import goldenHorCreate from "../../../tests/contract/golden/horarios/create_asignacion.json";
+import casoHorUpdate from "../../../tests/contract/casos/horarios/update_asignacion.json";
+import goldenHorUpdate from "../../../tests/contract/golden/horarios/update_asignacion.json";
+import casoHorDelete from "../../../tests/contract/casos/horarios/delete_asignacion.json";
+import goldenHorDelete from "../../../tests/contract/golden/horarios/delete_asignacion.json";
 
 const CASOS = [
 	{ nombre: "vr_un_lote", caso: casoVrUnLote, golden: goldenVrUnLote },
@@ -201,6 +215,10 @@ const CASOS = [
 	{ nombre: "mesas_delete_detalle", caso: casoMesaDeleteDet, golden: goldenMesaDeleteDet },
 	{ nombre: "mesas_update_detalle_nota", caso: casoMesaUpdateNota, golden: goldenMesaUpdateNota },
 	{ nombre: "mesas_kitchen_set_line_state", caso: casoMesaKitchen, golden: goldenMesaKitchen },
+	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
+	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
+	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
+	{ nombre: "horarios_delete_asignacion", caso: casoHorDelete, golden: goldenHorDelete },
 ];
 
 // ── Comparación estructural (misma spec que el lado Rust) ────────────────────────
@@ -566,6 +584,22 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					caso.entrada.estado,
 				),
 			);
+			return;
+		}
+		case "login.set_turno_partido": {
+			aplicar(hub, sql, setTurnoPartido(caso.entrada as any));
+			return;
+		}
+		case "horarios.create_asignacion": {
+			aplicar(hub, sql, createAsignacion(caso.entrada as any));
+			return;
+		}
+		case "horarios.update_asignacion": {
+			aplicar(hub, sql, updateAsignacion(caso.entrada.id_asignacion, caso.entrada as any));
+			return;
+		}
+		case "horarios.delete_asignacion": {
+			aplicar(hub, sql, deleteAsignacion(caso.entrada.id_asignacion));
 			return;
 		}
 		default:
