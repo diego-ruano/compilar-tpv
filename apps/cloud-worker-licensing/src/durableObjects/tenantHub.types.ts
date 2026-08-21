@@ -65,7 +65,21 @@ export type ApplyMsg = {
 	requestPayload?: any;
 };
 
-export type AnyMsg = PingMsg | HelloSignedMsg | EventMsg | ApplyMsg;
+/**
+ * SYNC-18: volcado del atraso. La Main que vuelve de estar sin conexión manda sus operaciones
+ * pendientes por trozos en vez de una a una; el DO las guarda en su cola y las aplica por su
+ * cuenta, así que la Main puede desconectarse en cuanto reciba el `bulk_ack`.
+ *
+ * Cada elemento de `ops` lleva lo mismo que un `apply` suelto: el comando y su identidad.
+ */
+export type BulkApplyMsg = {
+	type: "bulk_apply";
+	ops?: ApplyMsg[];
+	client_now?: string;
+	clientNow?: string;
+};
+
+export type AnyMsg = PingMsg | HelloSignedMsg | EventMsg | ApplyMsg | BulkApplyMsg;
 
 /* =========================================================
    3. Comando interno (SQL replicable)

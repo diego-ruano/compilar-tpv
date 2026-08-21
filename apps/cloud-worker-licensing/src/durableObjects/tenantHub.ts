@@ -9,6 +9,7 @@ import { ingestToAxiom } from "../observability/axiom";
 import type {
 	AnyMsg,
 	ApplyMsg,
+	BulkApplyMsg,
 	EventMsg,
 	HelloSignedMsg,
 	InternalApplyCommand,
@@ -68,6 +69,17 @@ const CHECKPOINT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // una Main cuenta para el
 const PURGE_SEQ_MARGIN = 1000; // holgura de Seq por debajo del suelo (cubre solape catch-up/live)
 const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de menos de 7 días
 const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintento nunca llega tan tarde
+
+// ---- SYNC-18: cola de entrada del DO ----------------------------------------
+// Una Main que vuelve de estar días sin conexión trae miles de operaciones. Antes tenía que
+// quedarse conectada hasta que la última se aplicara; ahora las deja en esta cola —que vive en el
+// SQLite del propio DO, no en memoria— y se puede ir. El DO las aplica por su cuenta.
+const COLA_LOTE = 50; // operaciones por batch contra Turso
+const COLA_MAX_INTENTOS = 5; // fallos de una operación antes de apartarla
+const COLA_REINTENTO_MS = 5_000; // espera antes de reintentar tras un fallo del ciclo
+// Presupuesto de un `alarm`. El runtime corta a los 15 min; se sale mucho antes y se reprograma,
+// para no acercarse al límite y para que un despliegue no pille un drenado enorme a medias.
+const COLA_PRESUPUESTO_MS = 60_000;
 
 function safeJsonParse(s: string): any | null {
 	try {
@@ -705,6 +717,238 @@ export class TenantHub {
 		}
 
 		return { aplicadas, yaEstaban: [...yaAplicadas] };
+	}
+
+	// ---- SYNC-18: cola de entrada -----------------------------------------------------------
+
+	/**
+	 * Crea las tablas de la cola en el SQLite del propio DO (no en Turso: esto es control, no
+	 * negocio). Es barato e idempotente, así que se llama al principio de cada operación con la
+	 * cola en vez de llevar un flag que se evapore al hibernar.
+	 */
+	private asegurarCola(): void {
+		const sql = this.state.storage.sql;
+		sql.exec(`
+			CREATE TABLE IF NOT EXISTS _Cola_Entrada (
+				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+				Op_Id TEXT NOT NULL UNIQUE,
+				Tenant_Id TEXT NOT NULL,
+				Command_Name TEXT NOT NULL,
+				Cmd_Json TEXT NOT NULL,
+				Device_Id TEXT,
+				Request_Payload_Json TEXT NOT NULL,
+				Cloud_Payload_Json TEXT NOT NULL,
+				Client_Now TEXT,
+				Recibida_En_Ms INTEGER NOT NULL,
+				Intentos INTEGER NOT NULL DEFAULT 0,
+				Ultimo_Error TEXT
+			);
+		`);
+		// Lo que no se pudo aplicar por más que se reintentara. Se aparta para que el resto del
+		// atraso siga entrando; queda aquí con su error para poder mirarlo.
+		sql.exec(`
+			CREATE TABLE IF NOT EXISTS _Cola_Muerta (
+				Op_Id TEXT PRIMARY KEY,
+				Command_Name TEXT NOT NULL,
+				Device_Id TEXT,
+				Error TEXT NOT NULL,
+				Intentos INTEGER NOT NULL,
+				Apartada_En_Ms INTEGER NOT NULL
+			);
+		`);
+	}
+
+	/** Cuántas operaciones esperan en la cola. Es el estado del que cuelga todo lo demás. */
+	private cuantasEnCola(): number {
+		this.asegurarCola();
+		const r = this.state.storage.sql
+			.exec("SELECT COUNT(*) AS n FROM _Cola_Entrada;")
+			.toArray();
+		return Number((r[0] as any)?.n ?? 0);
+	}
+
+	/**
+	 * Mete operaciones en la cola, en orden y sin duplicar (`INSERT OR IGNORE` por `Op_Id`: si la
+	 * Main reenvía un trozo del que no llegó a ver el ack, no entra dos veces).
+	 *
+	 * Devuelve los `Op_Id` aceptados, que es lo que la Main necesita para dejar de tenerlos
+	 * pendientes de subir. Todo va en una transacción: o entra el trozo entero o no entra nada.
+	 */
+	private encolar(tenantId: string, ops: OpParaAplicar[]): string[] {
+		if (!ops.length) return [];
+		this.asegurarCola();
+
+		const sql = this.state.storage.sql;
+		const ahora = nowMs();
+		this.state.storage.transactionSync(() => {
+			for (const o of ops) {
+				sql.exec(
+					`INSERT OR IGNORE INTO _Cola_Entrada
+						(Op_Id, Tenant_Id, Command_Name, Cmd_Json, Device_Id, Request_Payload_Json, Cloud_Payload_Json, Client_Now, Recibida_En_Ms)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+					o.opId,
+					tenantId,
+					o.commandName,
+					JSON.stringify(o.cmd),
+					o.deviceId ?? null,
+					o.requestPayloadJson,
+					o.cloudPayloadJson,
+					o.clientNow ?? null,
+					ahora,
+				);
+			}
+		});
+
+		// Que empiece a drenar ya. `setAlarm` es idempotente: si ya había una programada, esto la
+		// adelanta como mucho, nunca encola dos.
+		this.state.storage.setAlarm(nowMs());
+		return ops.map((o) => o.opId);
+	}
+
+	/** Fila de la cola → la forma que consume el apply agrupado. */
+	private filaAOp(f: any): OpParaAplicar {
+		return {
+			opId: String(f.Op_Id),
+			commandName: String(f.Command_Name),
+			cmd: JSON.parse(String(f.Cmd_Json)) as InternalApplyCommand,
+			deviceId: f.Device_Id ?? null,
+			requestPayloadJson: String(f.Request_Payload_Json),
+			cloudPayloadJson: String(f.Cloud_Payload_Json),
+			clientNow: f.Client_Now ?? null,
+		};
+	}
+
+	private sacarDeLaCola(opIds: string[]): void {
+		if (!opIds.length) return;
+		const sql = this.state.storage.sql;
+		this.state.storage.transactionSync(() => {
+			for (const id of opIds) sql.exec("DELETE FROM _Cola_Entrada WHERE Op_Id = ?;", id);
+		});
+	}
+
+	/**
+	 * Anota el fallo de una operación y, si ya ha agotado los intentos, la aparta.
+	 *
+	 * Apartarla es una decisión consciente: el resto del atraso —que puede ser un día entero de
+	 * ventas— no se queda sin subir por una operación que no hay forma de aplicar.
+	 */
+	private anotarFallo(op: OpParaAplicar, error: string): void {
+		const sql = this.state.storage.sql;
+		const fila = sql
+			.exec("SELECT Intentos FROM _Cola_Entrada WHERE Op_Id = ?;", op.opId)
+			.toArray()[0] as any;
+		const intentos = Number(fila?.Intentos ?? 0) + 1;
+
+		if (intentos >= COLA_MAX_INTENTOS) {
+			this.state.storage.transactionSync(() => {
+				sql.exec(
+					`INSERT OR REPLACE INTO _Cola_Muerta (Op_Id, Command_Name, Device_Id, Error, Intentos, Apartada_En_Ms)
+					 VALUES (?, ?, ?, ?, ?, ?);`,
+					op.opId,
+					op.commandName,
+					op.deviceId ?? null,
+					error.slice(0, 500),
+					intentos,
+					nowMs(),
+				);
+				sql.exec("DELETE FROM _Cola_Entrada WHERE Op_Id = ?;", op.opId);
+			});
+			this.emitSyncEvent("cola_apartada", {
+				op_id: op.opId,
+				command_name: op.commandName,
+				device_id: op.deviceId ?? null,
+				error: error.slice(0, 500),
+				intentos,
+			});
+			return;
+		}
+
+		sql.exec(
+			"UPDATE _Cola_Entrada SET Intentos = ?, Ultimo_Error = ? WHERE Op_Id = ?;",
+			intentos,
+			error.slice(0, 500),
+			op.opId,
+		);
+	}
+
+	/**
+	 * Drena la cola en lotes hasta vaciarla o agotar el presupuesto de esta invocación.
+	 *
+	 * Aplica en Turso **primero** y borra de la cola después. Si el DO muere entre las dos cosas,
+	 * la operación se reaplica y el filtro de `Op_Id` la reconoce como ya aplicada: se pierde una
+	 * lectura, nunca un dato. Al revés (borrar y luego aplicar) se perdería la operación.
+	 *
+	 * Cuando un lote falla no sabemos cuál lo rompió, así que se reintenta de una en una: eso
+	 * separa a la culpable de sus compañeras, que sí pueden entrar.
+	 */
+	private async drenarCola(): Promise<void> {
+		const limite = nowMs() + COLA_PRESUPUESTO_MS;
+
+		while (nowMs() < limite) {
+			this.asegurarCola();
+			const filas = this.state.storage.sql
+				.exec(
+					"SELECT * FROM _Cola_Entrada ORDER BY Seq LIMIT ?;",
+					COLA_LOTE,
+				)
+				.toArray();
+			if (!filas.length) return; // cola vacía: no se reprograma nada y el DO puede hibernar
+			const antes = filas.length === COLA_LOTE ? this.cuantasEnCola() : filas.length;
+
+			const tenantId = String((filas[0] as any).Tenant_Id);
+			// Un lote no mezcla tenants (el DO es de uno solo, pero la cola guarda el tenant por si
+			// acaso: si apareciera otro, se drena en la vuelta siguiente).
+			const delTenant = filas.filter((f: any) => String(f.Tenant_Id) === tenantId);
+			const ops = delTenant.map((f) => this.filaAOp(f));
+
+			await this.withTenantDbRetry(tenantId, async (db) => {
+				try {
+					const r = await this.applyBatchIdempotent(db, ops);
+					this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
+				} catch {
+					for (const op of ops) {
+						try {
+							const r = await this.applyBatchIdempotent(db, [op]);
+							this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
+						} catch (e: any) {
+							this.anotarFallo(op, String(e?.message || e));
+						}
+					}
+				}
+			});
+
+			// Aprovechamos el ciclo para purgar el log de sync ya consumido (throttleado dentro).
+			this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
+
+			// Guardia de progreso: una vuelta que no reduce la cola volvería a leer las mismas filas
+			// y a intentar lo mismo, girando en caliente hasta agotar el presupuesto (y facturando
+			// ese tiempo). Si no se avanza, se para y se reintenta más tarde con calma.
+			if (this.cuantasEnCola() >= antes) {
+				this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
+				return;
+			}
+		}
+
+		// Se acabó el presupuesto pero queda cola: seguimos en la siguiente alarma.
+		if (this.cuantasEnCola() > 0) this.state.storage.setAlarm(nowMs());
+	}
+
+	/**
+	 * Único punto de entrada del drenado.
+	 *
+	 * ⚠️ El reintento automático de un `alarm` que lanza se rinde a los 6 intentos y **la cola se
+	 * quedaría muerta en silencio**. Por eso aquí se captura todo y se reprograma a mano: el
+	 * drenado tiene que ser insistente, no valiente.
+	 */
+	async alarm(): Promise<void> {
+		try {
+			await this.drenarCola();
+		} catch (e: any) {
+			this.emitSyncEvent("cola_ciclo_error", {
+				error: String(e?.message || e).slice(0, 500),
+			});
+			this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
+		}
 	}
 
 	// Aplana un InternalApplyCommand a las piezas del batch atómico:
@@ -1365,6 +1609,67 @@ export class TenantHub {
 		// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
 		// al resto). La Main no se bloquea esperando; recibe un `apply_ack`
 		// asíncrono solo para reconciliar/revertir si algo falla.
+		// SYNC-18: volcado del atraso. La Main manda por trozos lo que lleva acumulado, el DO lo
+		// guarda en su cola y confirma sin tocar Turso — de ahí que sea inmediato y que la Main
+		// pueda desconectarse justo después. El trabajo lo hace luego el `alarm`.
+		if (msg.type === "bulk_apply") {
+			const m = msg as BulkApplyMsg;
+
+			if (a.role !== "tpv") {
+				this.send(ws, { type: "bulk_ack", ok: false, error: "forbidden_not_tpv" });
+				return;
+			}
+
+			const entrada = Array.isArray(m.ops) ? m.ops : [];
+			const clientNowLote = String(getFirstOwnValue(m, ["client_now", "clientNow"]) || "");
+			const ops: OpParaAplicar[] = [];
+
+			for (const item of entrada) {
+				const inner = item?.command;
+				const cmdType = String(inner?.type || "").trim();
+				const opId = String(item?.opId ?? item?.op_id ?? "").trim();
+				const commandName = String(
+					item?.commandName ?? item?.command_name ?? "",
+				).trim();
+				if (!cmdType || !opId || !commandName) {
+					this.send(ws, { type: "bulk_ack", ok: false, error: "missing_apply_fields" });
+					return;
+				}
+
+				const cmd = { type: inner!.type, payload: inner!.payload } as InternalApplyCommand;
+				const fallback = buildInternalPayloadForHash(cmd);
+				ops.push({
+					opId,
+					commandName,
+					cmd,
+					deviceId,
+					requestPayloadJson: readRequestPayloadJson(item, fallback),
+					cloudPayloadJson: readCloudPayloadJson({
+						body: item,
+						opId,
+						commandName,
+						fallbackPayloadForHash: fallback,
+					}),
+					// El reloj puede venir por operación o una vez para todo el trozo.
+					clientNow:
+						String(getFirstOwnValue(item, ["client_now", "clientNow"]) || "") ||
+						clientNowLote,
+				});
+			}
+
+			try {
+				const aceptadas = this.encolar(tenantId, ops);
+				this.send(ws, { type: "bulk_ack", ok: true, opIds: aceptadas });
+			} catch (e: any) {
+				this.send(ws, {
+					type: "bulk_ack",
+					ok: false,
+					error: String(e?.message || e).slice(0, 300),
+				});
+			}
+			return;
+		}
+
 		if (msg.type === "apply") {
 			const m = msg as ApplyMsg;
 
@@ -1415,6 +1720,35 @@ export class TenantHub {
 			const clientNow = String(
 				getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
 			);
+
+			// SYNC-18: si hay cola, esta operación va DETRÁS de ella. El outbox de la Main está
+			// ordenado y sus operaciones se apoyan unas en otras (una línea necesita su comanda),
+			// así que colarse por delante del atraso sería aplicar el futuro antes que el pasado.
+			// Se responde igual de rápido, pero diciendo que quedó encolada.
+			if (this.cuantasEnCola() > 0) {
+				try {
+					this.encolar(tenantId, [
+						{
+							opId,
+							commandName,
+							cmd,
+							deviceId,
+							requestPayloadJson,
+							cloudPayloadJson,
+							clientNow,
+						},
+					]);
+					this.send(ws, { type: "apply_ack", opId, ok: true, encolada: true });
+				} catch (e: any) {
+					this.send(ws, {
+						type: "apply_ack",
+						opId,
+						ok: false,
+						error: String(e?.message || e).slice(0, 300),
+					});
+				}
+				return;
+			}
 
 			this.state.waitUntil(
 				(async () => {
