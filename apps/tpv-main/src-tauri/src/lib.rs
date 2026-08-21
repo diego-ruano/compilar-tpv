@@ -1171,6 +1171,22 @@ async fn printer_print_ticket(
     Ok("OK".into())
 }
 
+/// Columnas de caracteres que de verdad caben con la configuración actual de papel y márgenes.
+///
+/// Lo pregunta la previsualización para enseñar el ancho real (y recortar los nombres donde los
+/// recorta el papel) en vez de una versión más amable. Vive aquí y no duplicado en TypeScript
+/// porque es la MISMA cuenta que usa el builder ESC/POS: dos copias acabarían discrepando, que es
+/// justo lo que hace que una previsualización deje de servir para nada.
+#[tauri::command]
+fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorDto> {
+    Ok(printing::cols_efectivas(
+        args.paper_width_mm,
+        args.chars_per_line,
+        args.margin_left_mm,
+        args.margin_right_mm,
+    ) as u32)
+}
+
 /// Imprime un ticket de prueba en la impresora indicada (o la seleccionada) para verificarla.
 #[tauri::command]
 async fn printer_print_test(
@@ -1560,6 +1576,7 @@ pub fn run() {
             printer_get_selected,
             printer_set_selected,
             printer_print_ticket,
+            printer_ticket_cols,
             printer_print_test,
             // auth / login
             commands::login::list_login_users,

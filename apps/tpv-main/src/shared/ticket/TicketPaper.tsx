@@ -7,8 +7,15 @@
 //
 // Agrupa por `nombre + precio` (mismo criterio que `buildTicketPayload`), de modo que lo que se
 // ve aquí coincide con lo que el backend imprime en ESC/POS.
+//
+// El ANCHO no es decorativo: se mide en columnas de caracteres reales, las mismas que va a tener
+// el papel, y se las pregunta a Rust (`printer_ticket_cols`) en vez de recalcularlas aquí. Dos
+// copias de esa cuenta acabarían discrepando, y una previsualización que no coincide con el papel
+// no sirve para nada. Gracias a eso, elegir 58 mm se VE distinto de 80 y los nombres largos se
+// cortan donde de verdad se van a cortar.
 
 import React, { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
@@ -26,13 +33,10 @@ function eur(n: number) {
     }).format(n);
 }
 
-export default function TicketPaper({
-    items,
-    width = 384,
-}: {
-    items: TicketPaperItem[];
-    width?: number;
-}) {
+/** Columnas mientras Rust contesta: el valor por defecto de un papel de 80 mm. */
+const COLS_POR_DEFECTO = 42;
+
+export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
     const {
         businessName,
         logoDataUrl,
@@ -44,6 +48,35 @@ export default function TicketPaper({
     } = useBusinessSettings();
 
     const { settings } = useTicketSettings();
+
+    // Columnas reales del papel con la configuración actual (ancho + márgenes). Se re-pregunta
+    // cuando cambia algo de la geometría, no en cada repintado.
+    const [cols, setCols] = useState<number>(COLS_POR_DEFECTO);
+    useEffect(() => {
+        let vivo = true;
+        invoke<number>("printer_ticket_cols", {
+            args: {
+                paper_width_mm: settings.paperWidthMm,
+                chars_per_line: settings.charsPerLine,
+                margin_left_mm: settings.marginLeftMm,
+                margin_right_mm: settings.marginRightMm,
+            },
+        })
+            .then((n) => vivo && setCols(Number(n) || COLS_POR_DEFECTO))
+            .catch(() => vivo && setCols(COLS_POR_DEFECTO));
+        return () => {
+            vivo = false;
+        };
+    }, [
+        settings.paperWidthMm,
+        settings.charsPerLine,
+        settings.marginLeftMm,
+        settings.marginRightMm,
+    ]);
+
+    /** Recorta como el papel: el nombre cede el espacio que ocupa su importe. */
+    const recortar = (texto: string, importe: string) =>
+        texto.slice(0, Math.max(0, cols - importe.length - 1));
 
     const grouped = useMemo(() => {
         const map = new Map<string, { nombre: string; precio: number; qty: number }>();
@@ -97,11 +130,10 @@ export default function TicketPaper({
     const showFooter = settings.showFooterMessage;
 
     return (
-        <div
-            className="bg-white text-black rounded-xl border border-black/10 shadow-sm overflow-hidden"
-            style={{ width }}
-        >
-            <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14 }}>
+        <div className="bg-white text-black rounded-xl border border-black/10 shadow-sm overflow-hidden inline-block">
+            {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
+                las columnas que tendrá el de verdad. */}
+            <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
                 <div style={{ textAlign: "center" }}>
                     {showHeaderLogo ? (
                         <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
@@ -158,8 +190,8 @@ export default function TicketPaper({
                             return (
                                 <div key={idx} style={{ marginBottom: 8 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                                        <span style={{ maxWidth: "70%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {g.nombre}
+                                        <span style={{ whiteSpace: "nowrap" }}>
+                                            {recortar(g.nombre, eur(lineTotal))}
                                         </span>
                                         <span style={{ fontWeight: 700 }}>{eur(lineTotal)}</span>
                                     </div>

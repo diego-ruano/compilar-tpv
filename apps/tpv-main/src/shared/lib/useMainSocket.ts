@@ -30,7 +30,14 @@ import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
 import { queryClient } from "./queryClient";
-import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
+import {
+	affectedComandas,
+	affectedFeatureKeys,
+	tocaAjustes,
+	type RawStatement,
+} from "./syncStatements";
+import { useBusinessSettings } from "../stores/useBusinessSettings";
+import { useTicketSettings } from "../stores/useTicketSettings";
 import { captureException } from "../observability/sentry";
 
 // SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
@@ -225,6 +232,13 @@ export function useMainSocket() {
 								queryClient.invalidateQueries({ queryKey: [k] });
 						}
 						useSyncSignal.getState().bump(affectedComandas(statements));
+						// Los ajustes del negocio/ticket no están en React Query: viven en stores que se
+						// leen al arrancar. Si los cambia otro dispositivo hay que recargarlos, o esta
+						// Main seguiría IMPRIMIENDO con el ancho y el pie de página viejos.
+						if (tocaAjustes(statements)) {
+							void useBusinessSettings.getState().init();
+							void useTicketSettings.getState().init();
+						}
 					}
 				} catch (e) {
 					console.warn("sync_apply_changes falló:", e);

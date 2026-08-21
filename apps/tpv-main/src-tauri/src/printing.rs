@@ -119,8 +119,12 @@ fn default_font_scale() -> f64 {
 // Construcción del ticket en ESC/POS (independiente de plataforma)
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// Columnas de caracteres (fuente A) según el ancho de papel. Sirve de tope físico razonable
-/// cuando no hay un DPI/margen fiable con el que calcular el ancho útil real.
+/// Columnas de caracteres (fuente A) que caben en cada formato de papel.
+///
+/// ⚠️ Son las columnas **imprimibles**, que no salen del ancho del rollo: una impresora de 58 mm
+/// imprime sobre unos 48 mm (384 dots ÷ 12 por carácter = 32 columnas), y una de 80 mm sobre unos
+/// 72 mm (576 ÷ 12 = 48). Derivar las columnas de los milímetros de papel da un 20 % de más y el
+/// texto se sale.
 fn cols_for(paper_width_mm: u32) -> usize {
     match paper_width_mm {
         58 => 32,
@@ -129,8 +133,15 @@ fn cols_for(paper_width_mm: u32) -> usize {
     }
 }
 
-/// Ancho aproximado de un carácter de la fuente A en dots (12 dots ≈ estándar térmico).
-const CHAR_DOTS: u32 = 12;
+/// Milímetros **imprimibles** de cada formato (el rollo menos el margen muerto del cabezal).
+/// Solo se usa para traducir los márgenes del usuario a columnas.
+fn printable_mm(paper_width_mm: u32) -> f64 {
+    match paper_width_mm {
+        58 => 48.0,
+        112 => 104.0,
+        _ => 72.0, // 80mm
+    }
+}
 
 /// Convierte milímetros a dots según el DPI de la impresora.
 fn mm_to_dots(mm: f64, dpi: u32) -> u32 {
@@ -141,22 +152,53 @@ fn mm_to_dots(mm: f64, dpi: u32) -> u32 {
     }
 }
 
-/// Columnas efectivas del cuerpo: parte de `chars_per_line` deseado pero lo acota al ancho
-/// físico disponible (ancho de papel − márgenes izq/dcha), para no desbordar el papel.
-fn effective_cols(p: &PrintTicketPayload) -> usize {
-    let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
-    let paper_dots = mm_to_dots(p.paper_width_mm as f64, dpi);
-    let left_dots = mm_to_dots(p.margin_left_mm, dpi);
-    let right_dots = mm_to_dots(p.margin_right_mm, dpi);
-    let avail = paper_dots.saturating_sub(left_dots + right_dots);
-    let desired = p.chars_per_line.clamp(20, 80) as usize;
-    let physical_max = if avail == 0 {
-        cols_for(p.paper_width_mm)
-    } else {
-        (avail / CHAR_DOTS) as usize
-    };
+/// Columnas efectivas del cuerpo: las que pide el usuario (`chars_per_line`), acotadas por las que
+/// de verdad caben — las imprimibles del formato menos lo que se comen sus márgenes.
+///
+/// El tope sale de [`cols_for`], no de recalcularlo desde los milímetros de papel: el rollo es más
+/// ancho que la zona imprimible, así que hacerlo por milímetros daba 38 columnas donde caben 32 y
+/// el texto se salía en cuanto alguien subía `chars_per_line`.
+pub fn cols_efectivas(
+    paper_width_mm: u32,
+    chars_per_line: u32,
+    margin_left_mm: f64,
+    margin_right_mm: f64,
+) -> usize {
+    let cols_papel = cols_for(paper_width_mm);
+
+    // Los márgenes se traducen a columnas por proporción sobre el ancho imprimible: así no depende
+    // del DPI ni de cuántos dots ocupe un carácter en cada modelo.
+    let margen_mm = margin_left_mm.max(0.0) + margin_right_mm.max(0.0);
+    let cols_margen = ((margen_mm / printable_mm(paper_width_mm)) * cols_papel as f64).round();
+    let physical_max = cols_papel.saturating_sub(cols_margen.max(0.0) as usize);
+
+    let desired = chars_per_line.clamp(20, 80) as usize;
     desired.min(physical_max).max(10)
 }
+
+fn effective_cols(p: &PrintTicketPayload) -> usize {
+    cols_efectivas(
+        p.paper_width_mm,
+        p.chars_per_line,
+        p.margin_left_mm,
+        p.margin_right_mm,
+    )
+}
+
+/// Geometría del papel para preguntar por las columnas desde el frontend (previsualización).
+/// Es un subconjunto de [`PrintTicketPayload`]: la vista previa no necesita ni negocio ni líneas.
+#[derive(Debug, Clone, Deserialize)]
+pub struct GeometriaTicket {
+    #[serde(default = "default_paper_width")]
+    pub paper_width_mm: u32,
+    #[serde(default = "default_chars_per_line")]
+    pub chars_per_line: u32,
+    #[serde(default)]
+    pub margin_left_mm: f64,
+    #[serde(default)]
+    pub margin_right_mm: f64,
+}
+
 
 /// Importe en formato español: `1,70 €`.
 fn fmt_eur(n: f64) -> String {
@@ -589,3 +631,53 @@ mod imp {
 }
 
 pub use imp::{list_printers, print_raw};
+
+#[cfg(test)]
+mod tests_ancho {
+    //! Cuántas columnas caben de verdad en el papel.
+    //!
+    //! Esto se calculaba a partir de los milímetros del ROLLO, y el rollo es más ancho que la zona
+    //! que la impresora puede marcar: daba 38 columnas donde caben 32. No se notaba porque el
+    //! valor por defecto (42) queda por debajo de todo, pero el panel deja subirlo — y ahí el
+    //! ticket se salía del papel.
+
+    use super::*;
+
+    fn geometria(paper_width_mm: u32, chars_per_line: u32, izq: f64, dcha: f64) -> usize {
+        cols_efectivas(paper_width_mm, chars_per_line, izq, dcha)
+    }
+
+    #[test]
+    fn nunca_pasa_de_las_columnas_imprimibles_del_formato() {
+        // Aunque se pidan 80, el papel manda: 32 / 48 / 64 son los anchos reales de fuente A.
+        assert_eq!(geometria(58, 80, 0.0, 0.0), 32);
+        assert_eq!(geometria(80, 80, 0.0, 0.0), 48);
+        assert_eq!(geometria(112, 80, 0.0, 0.0), 64);
+    }
+
+    #[test]
+    fn respeta_lo_que_pide_el_usuario_si_cabe() {
+        assert_eq!(geometria(80, 42, 0.0, 0.0), 42);
+        assert_eq!(geometria(58, 30, 0.0, 0.0), 30);
+    }
+
+    #[test]
+    fn los_margenes_quitan_columnas() {
+        // 12 mm de margen sobre los 72 mm imprimibles de un 80 mm = un sexto de las 48 columnas.
+        assert_eq!(geometria(80, 80, 6.0, 6.0), 40);
+        // Y con márgenes puestos, lo pedido sigue mandando si es menor.
+        assert_eq!(geometria(80, 30, 6.0, 6.0), 30);
+    }
+
+    #[test]
+    fn unos_margenes_absurdos_no_dejan_el_ticket_en_cero() {
+        // Suelo de 10 columnas: preferimos un ticket estrecho a uno vacío o a un pánico por
+        // dividir entre nada.
+        assert_eq!(geometria(58, 80, 100.0, 100.0), 10);
+    }
+
+    #[test]
+    fn los_margenes_negativos_se_ignoran() {
+        assert_eq!(geometria(80, 80, -5.0, 0.0), 48);
+    }
+}

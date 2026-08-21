@@ -10,20 +10,18 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { PrinterPanel } from "./PrinterPanel";
 import { buildTicketPayload, printerPrintTicket } from "../api/printerApis";
 
-// ✅ PreviewModal solo acepta 384 | 576
-type PreviewWidth = 384 | 576;
-
 type TicketWidthOpt = {
-    value: 58 | 80 | 112; // mm (lo que guardas en DB)
+    value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
     label: string;
-    previewWidthPx: PreviewWidth; // ✅ tipado correcto para PreviewModal
 };
 
-// ⚠️ Puedes cambiar el mapeo si quieres, pero que previewWidthPx sea 384 o 576
+// El ancho de la previsualización ya no se declara aquí: `TicketPaper` se mide en columnas reales
+// (se las pregunta a Rust), así que 58 y 80 se ven distintos sin que nadie tenga que mapearlos a
+// píxeles a mano — que es lo que hacía que ambos se vieran igual.
 const TICKET_WIDTHS: TicketWidthOpt[] = [
-    { value: 58, label: "58mm (térmica pequeña)", previewWidthPx: 384 },
-    { value: 80, label: "80mm (térmica estándar)", previewWidthPx: 384 },
-    { value: 112, label: "112mm (ancho)", previewWidthPx: 576 },
+    { value: 58, label: "58mm (térmica pequeña)" },
+    { value: 80, label: "80mm (térmica estándar)" },
+    { value: 112, label: "112mm (ancho)" },
 ];
 
 function SelectInput({
@@ -107,10 +105,6 @@ export function Ticket({
     const ticketWidthMm: 58 | 80 | 112 = normalizeTicketWidthMm(
         ticket?.paperWidthMm ?? ticket?.paper_width_mm ?? 80,
     );
-
-    const widthOpt =
-        TICKET_WIDTHS.find((x) => x.value === ticketWidthMm) ??
-        TICKET_WIDTHS.find((x) => x.value === 80)!;
 
     const previewItems = useMemo(
         () => [
@@ -350,7 +344,6 @@ export function Ticket({
                 open={previewOpen}
                 onClose={() => setPreviewOpen(false)}
                 items={previewItems}
-                width={widthOpt.previewWidthPx} // ✅ 384 | 576
                 onPrint={imprimirPreview}
             />
         </div>

@@ -28,7 +28,14 @@ import { useSyncSignal } from "../stores/useSyncSignal";
 import { useMainPresence } from "../stores/useMainPresence";
 import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
 import { queryClient } from "./queryClient";
-import { affectedComandas, affectedFeatureKeys, type RawStatement } from "./syncStatements";
+import {
+	affectedComandas,
+	affectedFeatureKeys,
+	tocaAjustes,
+	type RawStatement,
+} from "./syncStatements";
+import { useBusinessSettings } from "../stores/useBusinessSettings";
+import { useTicketSettings } from "../stores/useTicketSettings";
 
 // SYNC-09: backoff exponencial con tope + jitter (se resetea al autenticarse).
 const RECONNECT_BASE_MS = 3000;
@@ -279,6 +286,12 @@ export function useHandySocket() {
 									queryClient.invalidateQueries({ queryKey: [k] });
 							}
 							useSyncSignal.getState().bump(affectedComandas(statements));
+							// Los ajustes del negocio/ticket viven en stores que se leen al arrancar,
+							// no en React Query: si los cambia la Main, hay que recargarlos aquí.
+							if (tocaAjustes(statements)) {
+								void useBusinessSettings.getState().init();
+								void useTicketSettings.getState().init();
+							}
 						}
 						return;
 					}

@@ -18,6 +18,7 @@ import {
 	affectedComandas,
 	affectedFeatureKeys,
 	shouldReloadTicket,
+	tocaAjustes,
 	type RawStatement,
 } from "../src/shared/lib/syncStatements";
 
@@ -142,6 +143,34 @@ describe("affectedFeatureKeys · qué se invalida en React Query", () => {
 				st("UPDATE Tabla_Nueva SET a=1;"),
 			]),
 		).toBeNull();
+	});
+});
+
+describe("tocaAjustes · cuándo hay que recargar los ajustes", () => {
+	// Los ajustes del negocio y del ticket no están en React Query: viven en stores que se leen al
+	// arrancar. Sin esto, cambiar el ancho de papel desde otro dispositivo no llegaba a esta Main
+	// hasta reiniciarla, y mientras tanto seguía imprimiendo con el ancho viejo.
+	it("detecta los ajustes de negocio, ticket y contacto", () => {
+		expect(tocaAjustes([st("UPDATE business_settings SET Business_Name='Bar' WHERE ID=1;")])).toBe(
+			true,
+		);
+		expect(tocaAjustes([st("UPDATE ticket_settings SET Paper_Width_Mm=58 WHERE ID=1;")])).toBe(
+			true,
+		);
+		expect(tocaAjustes([st("UPDATE contact_settings SET Email='a@a.com' WHERE ID=1;")])).toBe(true);
+	});
+
+	it("no se dispara con lo que no son ajustes", () => {
+		expect(tocaAjustes([st("INSERT INTO Pagos (ID_Pago) VALUES (?1);", ["p-1"])])).toBe(false);
+	});
+
+	it("basta con que UNA sentencia del lote los toque", () => {
+		expect(
+			tocaAjustes([
+				st("INSERT INTO Pagos (ID_Pago) VALUES (?1);", ["p-1"]),
+				st("UPDATE ticket_settings SET Paper_Width_Mm=58 WHERE ID=1;"),
+			]),
+		).toBe(true);
 	});
 });
 

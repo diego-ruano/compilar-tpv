@@ -64,14 +64,12 @@ export default function TicketPreviewModal({
 	items,
 	titulo = "Previsualización del ticket",
 	onPrint,
-	width = 384,
 }: {
 	open: boolean;
 	onClose: () => void;
 	items: TicketItemLike[];
 	titulo?: string;
 	onPrint?: () => void;
-	width?: 384 | 576;
 }) {
 	const { ivaPercent } = useBusinessSettings();
 	const { settings } = useTicketSettings();
@@ -83,7 +81,7 @@ export default function TicketPreviewModal({
 		<Modal open={open} onClose={onClose} title={titulo} maxWidthClass="max-w-[980px]">
 			<div className="grid grid-cols-1 lg:grid-cols-[1fr,320px] gap-4">
 				<div className="flex justify-center">
-					<TicketPaper items={items} width={width} />
+					<TicketPaper items={items} />
 				</div>
 
 				<div className="rounded-2xl border border-black/10 bg-white p-4 flex flex-col gap-3">
@@ -108,7 +106,7 @@ export default function TicketPreviewModal({
 					</button>
 
 					<div className="text-xs text-black/50">
-						Ancho: {width === 384 ? "58mm" : "80mm"} · IVA: {ivaPercent}%
+						Ancho: {settings.paperWidthMm}mm · IVA: {ivaPercent}%
 					</div>
 				</div>
 			</div>

@@ -140,7 +140,8 @@ const TABLE_TO_FEATURES: Record<string, readonly string[]> = {
 	roles: ["trabajadores"],
 	notificaciones: ["notificaciones"],
 	notificacion_lecturas: ["notificaciones"],
-	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave.
+	// Ajustes: viven en stores Zustand (no en React Query), así que no invalidan ninguna clave de
+	// caché. Lo que sí hace falta es que sus stores se recarguen — ver `tocaAjustes` más abajo.
 	business_settings: [],
 	ticket_settings: [],
 	contact_settings: [],
@@ -175,6 +176,30 @@ export function affectedFeatureKeys(statements: RawStatement[]): string[] | null
 		for (const f of feats) keys.add(f);
 	}
 	return Array.from(keys);
+}
+
+/** Tablas de ajustes: no están en React Query, sus stores se leen una vez al arrancar. */
+const TABLAS_DE_AJUSTES = new Set([
+	"business_settings",
+	"ticket_settings",
+	"contact_settings",
+]);
+
+/**
+ * ¿El lote toca los ajustes del negocio/ticket/contacto?
+ *
+ * Estos ajustes NO viven en React Query, sino en stores de Zustand que se cargan una vez al
+ * arrancar. Sin esto, cambiar el ancho de papel o el pie del ticket desde otro dispositivo no se
+ * notaba en esta Main hasta reiniciarla — y peor: seguía IMPRIMIENDO con los ajustes viejos.
+ */
+export function tocaAjustes(statements: RawStatement[]): boolean {
+	for (const st of statements ?? []) {
+		const sql = String(st?.sql ?? "");
+		if (!sql.trim()) continue;
+		const table = targetTable(sql);
+		if (table && TABLAS_DE_AJUSTES.has(table)) return true;
+	}
+	return false;
 }
 
 /**
