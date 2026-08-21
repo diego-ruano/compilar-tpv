@@ -203,10 +203,13 @@ function LicenseExpiryBanner({
 
 function HandyWaitingMain({
     connecting,
+    volcando,
     onRetry,
     onUnlink,
 }: {
     connecting: boolean;
+    /** SYNC-18: hay Main, pero está subiendo su atraso. Es una espera con final, no una avería. */
+    volcando: boolean;
     onRetry: () => void;
     onUnlink: () => void;
 }) {
@@ -215,12 +218,18 @@ function HandyWaitingMain({
             <div className="w-full max-w-md rounded-2xl bg-white shadow-sm border border-slate-200 p-6 text-center">
                 <div className="mx-auto mb-4 size-12 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin" />
                 <h1 className="text-xl font-semibold text-slate-900">
-                    {connecting ? "Conectando con la Main…" : "La Main no está activa"}
+                    {volcando
+                        ? "Haciendo copia de seguridad"
+                        : connecting
+                          ? "Conectando con la Main…"
+                          : "La Main no está activa"}
                 </h1>
                 <p className="text-sm text-slate-600 mt-2">
-                    {connecting
-                        ? "Estableciendo conexión con el punto de venta principal."
-                        : "Este Handy no puede usarse mientras el punto de venta principal esté apagado o en modo offline. Volverá a estar disponible en cuanto la Main se active."}
+                    {volcando
+                        ? "En breve podrás conectarte. El punto de venta principal está guardando lo que hizo sin conexión; en cuanto termine, este Handy se desbloquea solo."
+                        : connecting
+                          ? "Estableciendo conexión con el punto de venta principal."
+                          : "Este Handy no puede usarse mientras el punto de venta principal esté apagado o en modo offline. Volverá a estar disponible en cuanto la Main se active."}
                 </p>
 
                 <div className="mt-6 flex flex-col items-center gap-2">
@@ -754,6 +763,8 @@ export default function AppBoot({ router }: { router: any }) {
     // Presencia de la Main vista por el Handy: sin Main activa, el Handy se bloquea entero
     // (login incluido). null = aún conectando/sin confirmar (fail-closed).
     const mainOnline = useMainPresence((s) => s.mainOnline);
+    // SYNC-18: la Main está subiendo su atraso. Cuenta como "no disponible todavía" para el Handy.
+    const mainVolcando = useMainPresence((s) => s.volcando);
 
     const gateNow = gate === "loading" ? null : gate;
     const isMainAppReady = mode === "tpv" && gateNow !== null && gateNow.allowed;
@@ -777,7 +788,7 @@ export default function AppBoot({ router }: { router: any }) {
             : null;
 
     const handyIsReady = mode === "handy" && handyPair.step === "paired";
-    const handyMainActive = mainOnline === true;
+    const handyMainActive = mainOnline === true && !mainVolcando;
     // El Handy solo muestra su app (RouterProvider, con su propia Titlebar) si está emparejado Y
     // hay una Main activa. Si no, enseñamos la pantalla de espera (que sí necesita la TopBar).
     const handyShowsApp = handyIsReady && handyMainActive;
@@ -991,6 +1002,7 @@ export default function AppBoot({ router }: { router: any }) {
                             // Emparejado pero sin Main activa: bloqueo total (login incluido).
                             <HandyWaitingMain
                                 connecting={mainOnline === null}
+                                volcando={mainVolcando}
                                 onRetry={() => useMainPresence.getState().requestReconnect()}
                                 onUnlink={() => {
                                     setHandyPairErr(null);

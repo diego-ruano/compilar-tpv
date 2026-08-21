@@ -458,6 +458,16 @@ export class TenantHub {
 			throw new Error("main_offline");
 		}
 
+		// SYNC-18: y si la Main tiene atraso sin aplicar, la nube está a medio construir. Dejar
+		// escribir a una Handy sobre ese estado es pedir un choque (dos comandas abiertas para la
+		// misma mesa, por ejemplo). Se congela igual que sin Main, con otro motivo.
+		//
+		// Solo afecta a las escrituras que NO son el propio atraso: las de la cola no pasan por
+		// aquí, van por `applyBatchIdempotent`.
+		if (this.cuantasEnCola() > 0) {
+			throw new Error("main_volcando");
+		}
+
 		const requestHash = await sha256Hex(requestPayloadJson);
 		const createdAtMs = nowMs();
 
@@ -780,6 +790,7 @@ export class TenantHub {
 
 		const sql = this.state.storage.sql;
 		const ahora = nowMs();
+		const estabaVacia = this.cuantasEnCola() === 0;
 		this.state.storage.transactionSync(() => {
 			for (const o of ops) {
 				sql.exec(
@@ -802,6 +813,14 @@ export class TenantHub {
 		// Que empiece a drenar ya. `setAlarm` es idempotente: si ya había una programada, esto la
 		// adelanta como mucho, nunca encola dos.
 		this.state.storage.setAlarm(nowMs());
+
+		// Las Handy se congelan mientras dure. Solo en la transición: si ya estaba volcando, ya lo
+		// saben.
+		if (estabaVacia && this.cuantasEnCola() > 0) {
+			this.broadcastAuthed({ type: "main_volcando", volcando: true });
+			this.emitSyncEvent("cola_volcado_inicio", { pendientes: this.cuantasEnCola() });
+		}
+
 		return ops.map((o) => o.opId);
 	}
 
@@ -883,6 +902,7 @@ export class TenantHub {
 	 */
 	private async drenarCola(): Promise<void> {
 		const limite = nowMs() + COLA_PRESUPUESTO_MS;
+		let huboTrabajo = false;
 
 		while (nowMs() < limite) {
 			this.asegurarCola();
@@ -892,9 +912,18 @@ export class TenantHub {
 					COLA_LOTE,
 				)
 				.toArray();
-			if (!filas.length) return; // cola vacía: no se reprograma nada y el DO puede hibernar
+			if (!filas.length) {
+				// Cola vacía: no se reprograma nada y el DO puede volver a hibernar. Si veníamos de
+				// drenar, es el momento de soltar a las Handy.
+				if (huboTrabajo) {
+					this.broadcastAuthed({ type: "main_volcando", volcando: false });
+					this.emitSyncEvent("cola_volcado_fin", {});
+				}
+				return;
+			}
 			const antes = filas.length === COLA_LOTE ? this.cuantasEnCola() : filas.length;
 
+			huboTrabajo = true;
 			const tenantId = String((filas[0] as any).Tenant_Id);
 			// Un lote no mezcla tenants (el DO es de uno solo, pero la cola guarda el tenant por si
 			// acaso: si apareciera otro, se drena en la vuelta siguiente).
@@ -1574,6 +1603,9 @@ export class TenantHub {
 						this.send(ws, {
 							type: "main_status",
 							online: this.isMainConnected(),
+							// SYNC-18: una Handy que entra a mitad de un volcado tiene que bloquear
+							// igual que si no hubiera Main; con `online` a secas no se enteraría.
+							volcando: this.cuantasEnCola() > 0,
 						});
 
 						if (roleFinal === "tpv") {

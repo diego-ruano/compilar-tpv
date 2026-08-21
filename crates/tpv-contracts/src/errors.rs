@@ -137,7 +137,10 @@ impl ErrorCode {
     pub fn from_wire(s: &str) -> Self {
         match s.trim().to_ascii_lowercase().as_str() {
             "not_approved" => ErrorCode::NotApproved,
-            "main_offline" => ErrorCode::MainOffline,
+            // `main_volcando`: la Main está subiendo su atraso y la nube está a medio construir.
+            // Para quien lo recibe es el mismo caso que no haber Main —congelar—, solo cambia el
+            // texto; el detalle de en cuál de los dos estamos viaja por la presencia del WS.
+            "main_offline" | "main_volcando" => ErrorCode::MainOffline,
             // `device_replaced`: la licencia se activó en otro equipo (§6.4 del plan de
             // licencias). Este Main ya no lo es, así que para él la consecuencia es la misma que
             // estar revocado: parar. Ver el fixture compartido `error-codes.json`.

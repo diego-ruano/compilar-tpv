@@ -26,6 +26,7 @@ import type { ErrorCode } from "@tpv/contracts";
 const NEGOCIO: Record<string, ErrorCode> = {
 	not_approved: "not_approved",
 	main_offline: "main_offline",
+	main_volcando: "main_offline",
 	device_revoked: "device_revoked",
 	revoked: "device_revoked",
 	license_expired: "license_expired",

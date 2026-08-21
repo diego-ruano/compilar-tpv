@@ -4,6 +4,7 @@
   "negocio": [
     { "wire": "not_approved", "code": "not_approved", "porque": "pairing Handy pendiente de aprobación; AppBoot lo trata como 'sigue esperando', no como error" },
     { "wire": "main_offline", "code": "main_offline", "porque": "no hay Main conectada al TenantHub; las Handy congelan su UI" },
+    { "wire": "main_volcando", "code": "main_offline", "porque": "la Main está subiendo su atraso y la nube aún está a medio construir: para la Handy es el mismo caso (congelar), solo cambia el texto que ve el camarero" },
     { "wire": "device_revoked", "code": "device_revoked", "porque": "el dispositivo fue revocado desde la Main" },
     { "wire": "revoked", "code": "device_revoked", "porque": "alias corto que emite el cierre de socket del DO (código 4001)" },
     { "wire": "license_expired", "code": "license_expired", "porque": "licencia caducada" },

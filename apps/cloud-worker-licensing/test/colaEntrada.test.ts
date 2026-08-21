@@ -182,6 +182,31 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 		});
 	});
 
+	it("mientras hay atraso, una escritura de Handy se rechaza con main_volcando", async () => {
+		// Es el freeze: la nube está a medio construir, así que dejar escribir a una Handy sobre ese
+		// estado es pedir un choque. Se congela igual que sin Main, con otro motivo (y otro texto:
+		// el camarero ve "haciendo copia de seguridad", no "la Main no está activa").
+		await enElHub("cola-freeze", async (hub: any) => {
+			prepararHub(hub);
+			hub.isMainConnected = () => true; // hay Main; lo que falta es que termine de volcar
+
+			hub.encolar(TENANT, [opLinea(1)]);
+
+			await expect(
+				hub.applyInternalCommandIdempotent({
+					tenantId: TENANT,
+					cmd: opLinea(9).cmd,
+					opId: "op-handy",
+					commandName: "add_linea",
+					deviceId: "device-handy",
+					requestPayloadJson: "{}",
+					cloudPayloadJson: "{}",
+					clientNow: "2026-01-01 12:30:00",
+				}),
+			).rejects.toThrow("main_volcando");
+		});
+	});
+
 	it("con cola pendiente, el drenado respeta el orden de llegada", async () => {
 		// El outbox de la Main está ordenado y sus operaciones se apoyan unas en otras: lo que llega
 		// nuevo tiene que ir DETRÁS del atraso, nunca colarse.

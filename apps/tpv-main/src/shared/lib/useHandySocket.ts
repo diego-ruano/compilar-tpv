@@ -11,6 +11,8 @@
 //
 // Presencia de la Main (freeze): el worker nos dice si hay una Main activa (`main_status` al
 // autenticarse, `main_online`/`main_offline` en vivo). Sin Main, el Handy se bloquea (AppBoot).
+// También avisa (`main_volcando`) mientras la Main sube el atraso que acumuló sin conexión: la
+// nube está a medio construir y el Handy espera, con otro mensaje (SYNC-18).
 // Para que ese bloqueo NO parpadee en cada micro-caída del WS (muy comunes en móvil: pasar a
 // segundo plano, bloqueo de pantalla, cambio de red, Doze) el cierre no bloquea de inmediato:
 // hay una GRACIA (BLOCK_GRACE_MS) durante la que se conserva el último estado. Y como en móvil
@@ -238,6 +240,15 @@ export function useHandySocket() {
 						reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: autenticados → resetea el backoff
 						clearBlockTimer();
 						useMainPresence.getState().setMainOnline(Boolean(msg.online));
+						// SYNC-18: entrar a mitad de un volcado tiene que bloquear igual; con
+						// `online` a secas no nos enteraríamos.
+						useMainPresence.getState().setVolcando(Boolean(msg.volcando));
+						return;
+					}
+					// SYNC-18: la Main está subiendo su atraso (o acaba de terminar).
+					if (msg.type === "main_volcando") {
+						clearBlockTimer();
+						useMainPresence.getState().setVolcando(Boolean(msg.volcando));
 						return;
 					}
 					if (msg.type === "main_online") {

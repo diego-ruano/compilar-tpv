@@ -6,9 +6,10 @@
 // por el worker (freeze `main_offline`) y operar a ciegas no tiene sentido.
 //
 // El worker ya informa de la presencia por WebSocket:
-//   - `main_status` { online }  → al autenticarse el Handy (estado inicial).
-//   - `main_online`             → cuando una Main se autentica.
-//   - `main_offline`            → cuando la última Main se desconecta.
+//   - `main_status` { online, volcando } → al autenticarse el Handy (estado inicial).
+//   - `main_online`                      → cuando una Main se autentica.
+//   - `main_offline`                     → cuando la última Main se desconecta.
+//   - `main_volcando` { volcando }       → la Main está subiendo su atraso (SYNC-18).
 // `useHandySocket` traduce esos mensajes a este store, y `AppBoot` decide si deja pasar.
 //
 // Semántica de `mainOnline`:
@@ -21,6 +22,14 @@ import { create } from "zustand";
 type MainPresenceStore = {
 	mainOnline: boolean | null;
 	setMainOnline: (v: boolean | null) => void;
+	/**
+	 * SYNC-18: la Main está conectada pero subiendo el atraso que acumuló sin conexión, así que la
+	 * nube todavía no refleja su estado. El Handy se bloquea igual que sin Main —escribir sobre un
+	 * estado a medio construir es pedir un choque— pero lo que se le cuenta al camarero es otra
+	 * cosa: esto se pasa solo en cuanto termine.
+	 */
+	volcando: boolean;
+	setVolcando: (v: boolean) => void;
 	// Nonce para forzar una reconexión manual del WS del Handy (botón "Reintentar" en la pantalla de
 	// espera). `useHandySocket` lo incluye en las deps de su efecto: al incrementarlo, el efecto se
 	// re-ejecuta = conexión WS fresca (el equivalente a recargar la página en escritorio).
@@ -31,6 +40,8 @@ type MainPresenceStore = {
 export const useMainPresence = create<MainPresenceStore>((set) => ({
 	mainOnline: null,
 	setMainOnline: (v) => set({ mainOnline: v }),
+	volcando: false,
+	setVolcando: (v) => set({ volcando: v }),
 	retryTick: 0,
 	requestReconnect: () => set((s) => ({ retryTick: s.retryTick + 1 })),
 }));
