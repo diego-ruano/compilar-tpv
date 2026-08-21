@@ -162,6 +162,10 @@ reales. Por eso existe.
 
 - **No hay segunda implementación**: `pedidos_proveedor` (solo Rust, ausente en el worker) y `stats`
   (solo lectura) — nada que contrastar.
+- **El número de ticket (`Pagos.Numero_Ticket`) no entra en los snapshots de cobro**: lo asigna la
+  Main y solo la Main, porque solo ella cobra. Los constructores de cobro del worker siguen ahí
+  como referencia y sus casos contrastan el efecto que sí es compartido (dinero, stock, líneas
+  cobradas); la numeración no forma parte de ese contrato.
 - **`login.complete_initial_setup`, `login.punch`**: el lado Rust **verifica el PIN** contra el hash
   guardado (PBKDF2), así que el fixture tendría que sembrar un hash válido precomputado. Fuera del
   alcance fácil del harness de efecto.

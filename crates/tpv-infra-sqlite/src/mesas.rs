@@ -88,6 +88,30 @@ async fn select_one_string<C: Reader>(
     Ok(None)
 }
 
+/// Reserva el siguiente número de ticket y lo devuelve ya formateado (`T-000123`).
+///
+/// El incremento es RELATIVO (`Ultimo + 1`), no un valor calculado y escrito: así la sentencia que
+/// se captura para replicar converge sola. El número resultante sí viaja como literal en el pago,
+/// que es lo que permite que una reimpresión saque el mismo papel.
+///
+/// Solo cobra la Main, así que un único contador basta: no hay que repartir series ni coordinar
+/// equipos sin conexión. El número es TEXT para que el formato pueda crecer (una serie por
+/// dispositivo, el año delante…) sin migrar los ya emitidos.
+pub(crate) async fn siguiente_numero_ticket(db: &crate::db::WriteGuard<'_>) -> AppResult<String> {
+    db.execute(
+        "UPDATE Ticket_Contador SET Ultimo = Ultimo + 1 WHERE ID = 1;",
+        Vec::<Value>::new(),
+    )
+    .await
+    .map_err(db_err)?;
+
+    let n = select_one_i64(db, "SELECT Ultimo FROM Ticket_Contador WHERE ID = 1;", vec![])
+        .await?
+        .unwrap_or(0);
+
+    Ok(format!("T-{n:06}"))
+}
+
 /// Tipo de IVA vigente del producto, o `NULL` si no tiene uno propio (hereda el del negocio).
 ///
 /// Se lee ANTES del INSERT y se inserta como literal, igual que `Estado_Cocina` y por el mismo
@@ -1239,15 +1263,18 @@ impl MesasRepository for SqliteMesasRepository {
             // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién vendidas.
             consumir_stock_fefo(db, &charged).await?;
 
+            // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
+            // para que una reimpresion saque el mismo papel.
+            let numero_ticket = siguiente_numero_ticket(db).await?;
             let id_pago = new_id();
             let ok = try_exec(
                 db,
                 r#"
                 INSERT INTO Pagos (
                   ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador
+                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
                 )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6);
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7);
                 "#,
                 vec![
                     Value::Text(id_pago.clone()),
@@ -1256,6 +1283,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Real(importe_total),
                     data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(numero_ticket.clone()),
                 ],
             )
             .await?;
@@ -1273,9 +1301,10 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
-                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
+                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                      ID_Usuario_Cobrador, Numero_Ticket
                     )
-                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5);
+                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6);
                     "#,
                     vec![
                         Value::Text(id_pago.clone()),
@@ -1283,6 +1312,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(data.metodo.clone()),
                         Value::Real(importe_total),
                         data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
+                        Value::Text(numero_ticket.clone()),
                     ],
                 )
                 .await
@@ -1910,15 +1940,18 @@ impl MesasRepository for SqliteMesasRepository {
                 .unwrap_or(0.0);
             let total = (total * 100.0).round() / 100.0;
 
+            // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
+            // para que una reimpresion saque el mismo papel.
+            let numero_ticket = siguiente_numero_ticket(db).await?;
             let id_pago = new_id();
             let ok = try_exec(
                 db,
                 r#"
                 INSERT INTO Pagos (
                   ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador
+                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
                 )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7);
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7, ?8);
                 "#,
                 vec![
                     Value::Text(id_pago.clone()),
@@ -1928,6 +1961,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Text(data.tipo.clone()),
                     data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(numero_ticket.clone()),
                 ],
             )
             .await?;
@@ -1945,9 +1979,10 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Pagos (
-                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador
+                      ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                      ID_Usuario_Cobrador, Numero_Ticket
                     )
-                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6);
+                    VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7);
                     "#,
                     vec![
                         Value::Text(id_pago.clone()),
@@ -1956,6 +1991,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Real(total),
                         Value::Text(data.tipo.clone()),
                         data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
+                        Value::Text(numero_ticket.clone()),
                     ],
                 )
                 .await
@@ -2215,4 +2251,56 @@ async fn productos_query<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_numero_ticket {
+    //! El número correlativo que va impreso en el ticket.
+    //!
+    //! Es lo que permite atar un papel a su cobro: para una devolución, para cuadrar un arqueo o
+    //! para el cliente que vuelve a reclamar. Y una reimpresión tiene que sacar el MISMO número,
+    //! así que lo importante aquí es que no se repita y que no dependa de cuándo se imprime.
+
+    use super::*;
+    use crate::db::Db;
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_numero_ticket_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    #[tokio::test]
+    async fn empieza_en_uno_y_no_repite() {
+        let (db, _dir) = db_temporal().await;
+        let g = db.write().await;
+
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000001");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000002");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+    }
+
+    #[tokio::test]
+    async fn el_formato_deja_sitio_para_crecer() {
+        // Seis dígitos con ceros a la izquierda: los tickets salen ordenables como texto, que es
+        // como se leen en un listado. Al pasar del millón simplemente crece, no se rompe.
+        let (db, _dir) = db_temporal().await;
+        let g = db.write().await;
+
+        g.execute(
+            "UPDATE Ticket_Contador SET Ultimo = 999999 WHERE ID = 1;",
+            Vec::<Value>::new(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-1000000");
+    }
 }

@@ -765,6 +765,9 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
 
         let id_pago_final = new_id();
+        // Numero correlativo del ticket: se reserva antes del cobro y viaja como literal en el
+        // pago, para que una reimpresion saque el mismo papel.
+        let numero_ticket = crate::mesas::siguiente_numero_ticket(db).await?;
 
         let id_usuario = data
             .id_usuario_cobrador
@@ -880,16 +883,18 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 r#"
                 INSERT INTO Pagos (
                   ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
-                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador
+                  ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
                 )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6)
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7)
                 ON CONFLICT(ID_Pago) DO UPDATE SET
                   ID_Comanda = excluded.ID_Comanda,
                   Metodo_Pago = excluded.Metodo_Pago,
                   Importe_Total = excluded.Importe_Total,
                   Tipo = excluded.Tipo,
                   ID_Usuario_Cobrador = excluded.ID_Usuario_Cobrador,
-                  ID_Trabajador_Cobrador = excluded.ID_Trabajador_Cobrador;
+                  ID_Trabajador_Cobrador = excluded.ID_Trabajador_Cobrador,
+                  -- El numero NO se pisa en un reintento: el ticket ya pudo salir impreso.
+                  Numero_Ticket = COALESCE(Pagos.Numero_Ticket, excluded.Numero_Ticket);
                 "#,
                 vec![
                     Value::Text(id_pago_final.clone()),
@@ -898,6 +903,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Real(importe_total_db),
                     id_usuario.map(Value::Text).unwrap_or(Value::Null),
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
+                    Value::Text(numero_ticket.clone()),
                 ],
             )
             .await
