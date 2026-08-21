@@ -127,3 +127,22 @@ export type InternalApplyCommand =
 	| { type: "tenantDb.row"; payload: QueryPayload }
 	| { type: "tenantDb.rows"; payload: QueryPayload }
 	| { type: "tenantDb.transaction"; payload: TransactionPayload };
+
+/**
+ * SYNC-18: una operación lista para aplicarse, tal y como la guarda la cola de entrada del DO y
+ * la consume el apply agrupado. Es exactamente lo que hoy recibe `applyInternalCommandIdempotent`
+ * por parámetros sueltos, pero como dato: así puede persistirse y aplicarse más tarde, sin el
+ * dispositivo que la originó delante.
+ */
+export type OpParaAplicar = {
+	opId: string;
+	commandName: string;
+	cmd: InternalApplyCommand;
+	deviceId?: string | null;
+	/** Cuerpo canónico que se firma/hashea (`Request_Hash` del gate de idempotencia). */
+	requestPayloadJson: string;
+	/** Payload de negocio que viaja en el broadcast a los demás dispositivos. */
+	cloudPayloadJson: string;
+	/** Hora del dispositivo emisor: resuelve los `datetime('now')` a literal (replicación determinista). */
+	clientNow?: string | null;
+};

@@ -12,6 +12,7 @@ import type {
 	EventMsg,
 	HelloSignedMsg,
 	InternalApplyCommand,
+	OpParaAplicar,
 	ResolvedStmt,
 	Role,
 	SqlScalar,
@@ -32,6 +33,7 @@ import {
 } from "./tenantHub.envelope";
 import {
 	allRowsFromResult,
+	DDL_TABLAS_DE_NUBE,
 	evalValueStep,
 	firstRowFromResult,
 	isUniqueOpIdViolation,
@@ -219,28 +221,12 @@ export class TenantHub {
 			sql: "SELECT 1 AS ok;",
 			args: [],
 		});
-		// Garantizamos la tabla de log de sync UNA vez al resolver la conexión (autocommit,
-		// caché de 6 h) en lugar de un CREATE TABLE IF NOT EXISTS por cada escritura. La tabla
-		// persiste en Turso, así que las escrituras dentro del TTL ya la encuentran creada.
-		await db.execute(`
-			CREATE TABLE IF NOT EXISTS Sync_Changes (
-				Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-				Op_Id TEXT NOT NULL,
-				Command_Name TEXT,
-				Statements_Json TEXT NOT NULL,
-				Device_Id TEXT,
-				Created_At_Ms INTEGER NOT NULL
-			);
-		`);
-		// SYNC-12: checkpoint reportado por cada Main (su `Last_Seq` al hacer catch-up). Es el SUELO
-		// de la purga: nunca se borra un `Sync_Changes.Seq` por encima del mínimo de las Main activas.
-		await db.execute(`
-			CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
-				Device_Id TEXT PRIMARY KEY,
-				Last_Seq INTEGER NOT NULL,
-				Updated_At_Ms INTEGER NOT NULL
-			);
-		`);
+		// Garantizamos las tablas que solo existen en la nube UNA vez al resolver la conexión
+		// (autocommit, caché de 6 h) en lugar de un CREATE TABLE IF NOT EXISTS por cada escritura.
+		// Persisten en Turso, así que las escrituras dentro del TTL ya las encuentran creadas.
+		for (const ddl of DDL_TABLAS_DE_NUBE) {
+			await db.execute(ddl);
+		}
 	}
 
 	private clearTenantDbCache() {
@@ -581,6 +567,144 @@ export class TenantHub {
 			});
 			throw e;
 		}
+	}
+
+	/**
+	 * SYNC-18: aplica **N operaciones en un único batch** contra Turso.
+	 *
+	 * El camino de una en una ([`applyInternalCommandIdempotent`]) paga una ida y vuelta a Turso por
+	 * operación. Con el atraso de una Main que estuvo días sin conexión eso son miles de idas y
+	 * vueltas, y como el DO factura a reloj de pared, ese tiempo se paga además de esperarse. Aquí
+	 * el trabajo de todas viaja junto: una sola transacción con el PRAGMA, los gates, el trabajo y
+	 * el log de sync de cada una.
+	 *
+	 * Tres diferencias deliberadas con el camino de una en una:
+	 *
+	 * 1. **Se filtran antes las ya aplicadas.** El gate de idempotencia funciona porque un `Op_Id`
+	 *    repetido viola el UNIQUE y tira la transacción; agrupadas, esa repetida se llevaría por
+	 *    delante a todas sus compañeras y el reintento volvería a chocar — atascada para siempre.
+	 *    Así que una lectura previa las descarta. Es el precio de agrupar, y es una lectura.
+	 * 2. **No exige que haya una Main conectada.** El freeze existe para que una Handy no escriba
+	 *    sin Main; estas operaciones YA son de la Main, que las dejó encoladas antes de irse.
+	 *    Aplicarlas sin ella delante es justo el objetivo.
+	 * 3. **No refina el `Result_Json`.** Ese refinamiento existe para que el reintento de una Handy
+	 *    devuelva el mismo `data`; de una operación de la Main sólo se usa el `seq`. Nos ahorra una
+	 *    escritura extra por operación.
+	 *
+	 * Si el batch falla no sabemos cuál lo rompió: **lanza**, y quien llama reintenta de una en una
+	 * (que es este mismo método con una sola operación) para aislar a la culpable.
+	 *
+	 * Recibe el `db` ya resuelto en vez de resolverlo dentro: quien drena la cola quiere el
+	 * reintento de credenciales (`withTenantDbRetry`) alrededor de todo su ciclo, no de cada lote.
+	 * De paso, esto es lo que permite probarlo contra SQL de verdad sin un Turso delante.
+	 */
+	private async applyBatchIdempotent(
+		db: Client,
+		ops: OpParaAplicar[],
+	): Promise<{ aplicadas: string[]; yaEstaban: string[] }> {
+		if (!ops.length) return { aplicadas: [], yaEstaban: [] };
+
+		// 1) Normalizar: mismo trato que el camino de una en una (validación + `now` a literal).
+		const preparadas = ops.map((o) => {
+			const op = o.opId.trim();
+			const command = o.commandName.trim();
+			if (!op) throw new Error("missing_op_id");
+			if (!command) throw new Error("missing_command_name");
+
+			const parsedNow = parseClientNow(o.clientNow);
+			if (parsedNow === null && commandHasNowLiteral(o.cmd)) {
+				throw new Error("missing_client_now");
+			}
+			const cmd = rewriteCmdNowLiterals(o.cmd, parsedNow ?? serverNowFixed());
+			return { ...o, opId: op, commandName: command, cmd };
+		});
+
+		// 2) Fuera las ya aplicadas (ver punto 1 del comentario de arriba).
+		const ids = preparadas.map((p) => p.opId);
+		const yaAplicadas = new Set<string>();
+		const r = await db.execute({
+			sql: `SELECT Op_Id FROM Applied_Operations WHERE Op_Id IN (${ids
+				.map((_, i) => `?${i + 1}`)
+				.join(",")});`,
+			args: ids,
+		});
+		for (const fila of r.rows ?? []) {
+			const v = String((fila as any).Op_Id ?? "");
+			if (v) yaAplicadas.add(v);
+		}
+
+		const pendientes = preparadas.filter((p) => !yaAplicadas.has(p.opId));
+		if (!pendientes.length) {
+			return { aplicadas: [], yaEstaban: [...yaAplicadas] };
+		}
+
+		// 3) Un solo array de sentencias: [PRAGMA] + por operación [gate, ...trabajo, syncLog].
+		const createdAtMs = nowMs();
+		const stmts: ResolvedStmt[] = [{ sql: "PRAGMA defer_foreign_keys = ON;", args: [] }];
+		const tramos: {
+			op: (typeof pendientes)[number];
+			built: ReturnType<TenantHub["buildApplyBatch"]>;
+			offsetMiddle: number;
+			idxSyncLog: number;
+		}[] = [];
+
+		for (const p of pendientes) {
+			const built = this.buildApplyBatch(p.cmd);
+			const requestHash = await sha256Hex(p.requestPayloadJson);
+
+			stmts.push({
+				sql: `INSERT INTO Applied_Operations (Op_Id, Command_Name, Request_Hash, Device_Id, Status, Result_Json, Error_Text, Created_At_Ms, Applied_At_Ms, Updated_At_Ms) VALUES (?1, ?2, ?3, ?4, 'APPLIED', ?5, NULL, ?6, ?6, ?6);`,
+				args: [
+					p.opId,
+					p.commandName,
+					requestHash,
+					p.deviceId || null,
+					stringifyJsonValue(built.storageResult),
+					createdAtMs,
+				],
+			});
+			const offsetMiddle = stmts.length;
+			stmts.push(...built.middle);
+			const idxSyncLog = stmts.length;
+			stmts.push({
+				sql: `INSERT INTO Sync_Changes (Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms) VALUES (?1, ?2, ?3, ?4, ?5);`,
+				args: [
+					p.opId,
+					p.commandName,
+					stableStringify(built.replicated),
+					p.deviceId || null,
+					createdAtMs,
+				],
+			});
+
+			tramos.push({ op: p, built, offsetMiddle, idxSyncLog });
+		}
+
+		const batchResults = await db.batch(stmts as any, "write");
+
+		// 4) Ya en Turso: cada operación recupera su `seq` y se difunde por separado, para que el
+		//    anti-eco por `Op_Id` de la Main y el refetch de las Handy sigan funcionando igual.
+		const aplicadas: string[] = [];
+		for (const t of tramos) {
+			const seq = Number(batchResults[t.idxSyncLog]?.lastInsertRowid ?? 0);
+			const result = t.built.resolveResult(batchResults, t.offsetMiddle);
+			aplicadas.push(t.op.opId);
+
+			this.broadcastChange(
+				{
+					command: t.op.commandName,
+					opId: t.op.opId,
+					deviceId: t.op.deviceId || null,
+					payloadJson: t.op.cloudPayloadJson,
+					result,
+					seq,
+					statements: t.built.replicated,
+				},
+				t.op.deviceId || undefined,
+			);
+		}
+
+		return { aplicadas, yaEstaban: [...yaAplicadas] };
 	}
 
 	// Aplana un InternalApplyCommand a las piezas del batch atómico:
