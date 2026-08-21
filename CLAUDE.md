@@ -400,7 +400,8 @@ no sólo en dev.
 |---|---|---|
 | Captura del outbox | `crates/tpv-infra-sqlite/src/db.rs` | Cada escritura local (Main) se serializa a JSON en `_Sync_Outbox` |
 | Determinismo temporal | `db.rs:114-122` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
-| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox, aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
+| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
+| Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
 | Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
 | Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast. **Usa la WebSocket Hibernation API** (ver regla abajo) |
@@ -436,6 +437,29 @@ no sólo en dev.
     tras dos latidos sin respuesta; además se reconecta al instante ante `online`/`focus`/
     `visibilitychange`. Sin ambos, un TCP medio-abierto se quedaba mudo para siempre.
 - **Sin conexión:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al recuperarla.
+- **Volcado del atraso (SYNC-18):** cuando la Main conecta con **más de 100 operaciones**
+  acumuladas, no las sube de una en una: las manda por trozos (`bulk_apply`) a una **cola durable
+  en el SQLite del propio DO** y termina en cuanto sube la última, sin esperar a que se apliquen.
+  A partir de ahí el TPV puede quedarse otra vez sin internet sin perder nada. Reglas al tocarlo:
+  - **El umbral se mira solo al conectar.** Una ráfaga a mitad de servicio (importar un catálogo)
+    sigue por el camino en vivo, que es el que hace que el Handy vea el cambio al instante.
+  - **Encolada ≠ aplicada.** Entre medias hay un estado (`_Sync_Encoladas` en la Main): la fila
+    sigue en el outbox y lo que la da por buena es **verla volver por el catch-up**, que es la
+    única prueba de que se aplicó. Una encolada sin confirmar en 1 h vuelve a ofrecerse (reenviar
+    es inocuo: la nube es idempotente por `Op_Id`).
+  - **Se aplica en Turso primero y se borra de la cola después.** Si el DO muere entre las dos, la
+    operación se reaplica y el filtro por `Op_Id` la reconoce: se pierde una lectura, nunca un dato.
+  - **Con cola pendiente, todo va a la cola** — también un `apply` en vivo. El outbox está ordenado
+    y sus operaciones se apoyan unas en otras: colarse por delante sería aplicar el futuro antes
+    que el pasado.
+  - **Agrupar exige filtrar antes las ya aplicadas** (`applyBatchIdempotent`): el gate por `Op_Id`
+    está hecho para que un duplicado tire la transacción, y agrupado se llevaría por delante a las
+    buenas, atascándose para siempre.
+  - **Las Handy esperan** mientras haya cola (`main_volcando`): la nube está a medio construir. El
+    estado *es* que la cola no esté vacía — no hay flag, que se evaporaría al hibernar.
+  - **El `alarm` captura sus excepciones y se reprograma a mano**: el reintento automático se rinde
+    a los 6 intentos y la cola se quedaría muerta en silencio. Y para si una vuelta no la reduce,
+    para no girar en caliente (que además se factura).
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el
