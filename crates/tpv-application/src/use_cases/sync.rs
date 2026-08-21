@@ -35,6 +35,19 @@ pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str, seq: i64) 
 
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo lo ya subido a la nube). Se invoca cuando el
 /// outbox queda vacío tras drenar.
+/// SYNC-18: la nube aceptó estas operaciones en su cola (ver el puerto).
+pub async fn outbox_mark_encolada(repo: &dyn SyncRepository, op_ids: &[String]) -> AppResult<()> {
+    repo.outbox_mark_encolada(op_ids).await
+}
+
+/// SYNC-18: devuelve al outbox lo que lleva demasiado tiempo encolado sin confirmar.
+pub async fn liberar_encoladas_caducadas(
+    repo: &dyn SyncRepository,
+    antiguedad_ms: i64,
+) -> AppResult<i64> {
+    repo.liberar_encoladas_caducadas(antiguedad_ms).await
+}
+
 pub async fn purge_applied_ops(repo: &dyn SyncRepository) -> AppResult<()> {
     repo.purge_applied_ops().await
 }
@@ -70,6 +83,12 @@ mod tests {
         }
         async fn outbox_mark_sent(&self, _: &str, _: i64) -> AppResult<()> {
             Ok(())
+        }
+        async fn outbox_mark_encolada(&self, _: &[String]) -> AppResult<()> {
+            Ok(())
+        }
+        async fn liberar_encoladas_caducadas(&self, _: i64) -> AppResult<i64> {
+            Ok(0)
         }
         async fn purge_applied_ops(&self) -> AppResult<()> {
             Ok(())

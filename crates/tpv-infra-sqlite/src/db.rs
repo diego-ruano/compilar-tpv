@@ -601,6 +601,14 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
             Seq INTEGER NOT NULL,
             Applied_At_Ms INTEGER NOT NULL
         );
+        -- SYNC-18: operaciones que la nube ya ha ACEPTADO en su cola pero aún no ha confirmado
+        -- aplicadas. Su fila sigue en `_Sync_Outbox` a propósito: mientras no vuelva por el
+        -- catch-up (que es la prueba de que se aplicó de verdad), esta Main conserva su copia y
+        -- puede reenviarla. Lo que hace esta tabla es que no se reenvíe MIENTRAS TANTO.
+        CREATE TABLE IF NOT EXISTS _Sync_Encoladas (
+            Op_Id TEXT PRIMARY KEY,
+            Encolada_En_Ms INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS _Sync_State (
             Id INTEGER PRIMARY KEY CHECK (Id = 1),
             Last_Seq INTEGER NOT NULL

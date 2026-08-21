@@ -35,6 +35,17 @@ pub trait SyncRepository: Send + Sync {
     /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para
     /// llamarse cuando el outbox queda vacío tras drenar (todo subido). Es segura por diseño: nunca
     /// borra un anti-eco cuya operación siga sin enviarse (evitaría su re-aplicación tras catch-up).
+    /// SYNC-18: marca operaciones como **aceptadas por la cola de la nube**. Su fila sigue en el
+    /// outbox (la prueba de que se aplicaron es verlas volver por el catch-up), pero dejan de
+    /// ofrecerse para reenviar mientras tanto.
+    async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()>;
+
+    /// Suelta las encoladas que llevan demasiado tiempo sin confirmarse: vuelven a estar
+    /// disponibles para reenviar. Devuelve cuántas se soltaron. Reenviar es inocuo (la nube es
+    /// idempotente por `Op_Id`), y es la red que impide que una operación se quede en el limbo si
+    /// la nube la descartó o el ack se perdió.
+    async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64>;
+
     async fn purge_applied_ops(&self) -> AppResult<()>;
 
     /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en

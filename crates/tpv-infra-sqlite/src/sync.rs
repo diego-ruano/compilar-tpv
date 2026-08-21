@@ -105,6 +105,24 @@ async fn op_already_applied(conn: &Connection, op_id: &str) -> AppResult<bool> {
 /// Avanza el checkpoint hasta `seq` (solo hacia delante). Se usa al SALTAR una op ya aplicada
 /// (p. ej. un eco de las propias escrituras de la Main que vuelve por el catch-up): aunque no se
 /// reaplique, hay que mover el cursor para no volver a pedirla indefinidamente.
+/// SYNC-18: la nube confirma (devolviéndonosla) que una operación NUESTRA está aplicada allí.
+/// Se retira del outbox y de las encoladas. Si no era nuestra, no hay nada que borrar.
+async fn confirmar_subida(conn: &Connection, op_id: &str) -> AppResult<()> {
+    conn.execute(
+        "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
+        vec![Value::Text(op_id.to_string())],
+    )
+    .await
+    .map_err(db_err)?;
+    conn.execute(
+        "DELETE FROM _Sync_Encoladas WHERE Op_Id = ?1;",
+        vec![Value::Text(op_id.to_string())],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
+}
+
 async fn advance_checkpoint(conn: &Connection, seq: i64) -> AppResult<()> {
     conn.execute(
         "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1 AND Last_Seq < ?1;",
@@ -289,6 +307,12 @@ impl SyncRepository for SqliteSyncRepository {
         let conn: &Connection = w.raw();
 
         for ch in &changes {
+            // SYNC-18: que un cambio VUELVA de la nube es la prueba de que allí se aplicó. Si era
+            // una de las nuestras (encolada o simplemente sin ack), esta es su confirmación: se
+            // retira del outbox y deja de estar pendiente. Cubre de una vez el camino de la cola y
+            // cualquier `apply_ack` que se perdiera por el camino.
+            confirmar_subida(conn, &ch.op_id).await?;
+
             // Idempotencia: una op ya aplicada (re-broadcast, solape con el catch-up, eco de las
             // propias escrituras de la Main o una op en cuarentena) se ignora, pero igualmente
             // avanza el checkpoint.
@@ -351,10 +375,15 @@ impl SyncRepository for SqliteSyncRepository {
         let r = self.db.read().await;
         let conn = r.conn();
 
+        // SYNC-18: se excluyen las que la nube ya aceptó en su cola. Siguen en el outbox (su prueba
+        // de aplicación es volver por el catch-up), pero reenviarlas mientras tanto sería repetir
+        // trabajo en cada ciclo de drenado.
         let mut rows = conn
             .query(
                 "SELECT Seq, Op_Id, Command_Name, Statements_Json \
-                 FROM _Sync_Outbox ORDER BY Seq ASC LIMIT ?1;",
+                 FROM _Sync_Outbox \
+                 WHERE Op_Id NOT IN (SELECT Op_Id FROM _Sync_Encoladas) \
+                 ORDER BY Seq ASC LIMIT ?1;",
                 vec![Value::Integer(limit)],
             )
             .await
@@ -428,6 +457,54 @@ impl SyncRepository for SqliteSyncRepository {
         }
     }
 
+    async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()> {
+        if op_ids.is_empty() {
+            return Ok(());
+        }
+        // Tabla de control: conexión CRUDA (no debe capturarse como cambio de negocio).
+        let w = self.db.write().await;
+        let conn = w.raw();
+        let ahora = now_ms();
+
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            for op_id in op_ids {
+                conn.execute(
+                    "INSERT OR REPLACE INTO _Sync_Encoladas (Op_Id, Encolada_En_Ms) VALUES (?1, ?2);",
+                    vec![Value::Text(op_id.clone()), Value::Integer(ahora)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+            Ok(())
+        }
+        .await;
+
+        match res {
+            Ok(()) => conn.execute_batch("COMMIT;").await.map_err(db_err),
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64> {
+        let w = self.db.write().await;
+        let conn = w.raw();
+        let corte = now_ms() - antiguedad_ms.max(0);
+
+        let n = conn
+            .execute(
+                "DELETE FROM _Sync_Encoladas WHERE Encolada_En_Ms < ?1;",
+                vec![Value::Integer(corte)],
+            )
+            .await
+            .map_err(db_err)?;
+
+        Ok(n as i64)
+    }
+
     async fn purge_applied_ops(&self) -> AppResult<()> {
         // Red de seguridad para los anti-ecos que no se ascendieron por cursor (p. ej. `apply_ack`
         // sin `seq` por cache-hit de idempotencia): retira los registros ANTIGUOS (TTL) cuyo
@@ -473,5 +550,127 @@ impl SyncRepository for SqliteSyncRepository {
             quarantined,
             failing,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests_encoladas {
+    //! SYNC-18 · lado Main: el estado intermedio "la nube la tiene en su cola, pero aún no me
+    //! consta aplicada".
+    //!
+    //! Es el estado que permite a este TPV soltar su atraso y desconectarse. Lo delicado es que no
+    //! se dé una operación por buena antes de tiempo: mientras no vuelva por el catch-up, su copia
+    //! local se conserva.
+
+    use super::*;
+    use crate::db::Db;
+    use libsql::Connection;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_sync_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    /// Mete una operación en el outbox como si la hubiera capturado una escritura local.
+    async fn encolar_en_outbox(db: &Arc<Db>, op_id: &str) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        conn.execute(
+            "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+             VALUES (?1, 'test', '[]', ?2);",
+            vec![Value::Text(op_id.to_string()), Value::Integer(now_ms())],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn ids_pendientes(repo: &SqliteSyncRepository) -> Vec<String> {
+        repo.outbox_pending(100)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.op_id)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn una_encolada_deja_de_ofrecerse_pero_no_se_borra() {
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        encolar_en_outbox(&db, "op-2").await;
+
+        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+
+        // Ya no se ofrece para reenviar...
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-2".to_string()]);
+        // ...pero su copia sigue aquí: que la nube la tenga en la cola no prueba que la aplicara.
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT COUNT(*) FROM _Sync_Outbox WHERE Op_Id = 'op-1';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_i64(fila.get_value(0).unwrap()).unwrap_or(0), 1);
+    }
+
+    #[tokio::test]
+    async fn verla_volver_de_la_nube_es_lo_que_la_da_por_subida() {
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+
+        // El catch-up la devuelve: prueba de que allí está aplicada.
+        repo.apply_changes(vec![SyncChange {
+            op_id: "op-1".to_string(),
+            seq: 7,
+            statements: Vec::<SqlStatement>::new(),
+        }])
+        .await
+        .unwrap();
+
+        assert!(ids_pendientes(&repo).await.is_empty());
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT (SELECT COUNT(*) FROM _Sync_Outbox) + (SELECT COUNT(*) FROM _Sync_Encoladas);",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_i64(fila.get_value(0).unwrap()).unwrap_or(-1), 0);
+    }
+
+    #[tokio::test]
+    async fn una_encolada_que_nunca_se_confirma_vuelve_a_ofrecerse() {
+        // La red que impide el limbo: si la nube nunca la devuelve (se perdió el ack, o acabó
+        // apartada allí), se reenvía. Reenviar es inocuo: la nube es idempotente por `Op_Id`.
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+        assert!(ids_pendientes(&repo).await.is_empty());
+
+        // Todavía es reciente: no se toca.
+        assert_eq!(repo.liberar_encoladas_caducadas(60_000).await.unwrap(), 0);
+        assert!(ids_pendientes(&repo).await.is_empty());
+
+        // Con el plazo vencido, vuelve a estar disponible.
+        assert_eq!(repo.liberar_encoladas_caducadas(0).await.unwrap(), 1);
+        assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string()]);
     }
 }

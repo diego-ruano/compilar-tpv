@@ -53,6 +53,21 @@ const RETRY_SIN_IDENTIDAD_MS = 60_000;
 const RETRY_RECHAZADO_MS = 5 * 60_000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
+// SYNC-18: a partir de aquí no se sube de una en una, se VUELCA. El corte separa dos situaciones
+// distintas: con la nube casi al día, subir en vivo va sobrado y el Handy ve el cambio al instante;
+// con un atraso de verdad, esperar un ack por operación son minutos con el cliente atado a la
+// conexión. Solo se mira al conectar: una ráfaga a mitad de servicio (importar un catálogo) sigue
+// por el camino en vivo y no congela a nadie.
+const UMBRAL_VOLCADO = 100;
+// Tamaño de trozo. El límite de un mensaje WS son 32 MiB, así que esto no es por el límite: es para
+// que un corte a mitad del volcado no obligue a repetirlo entero.
+const VOLCADO_OPS_POR_TROZO = 200;
+const VOLCADO_BYTES_POR_TROZO = 256 * 1024;
+const VOLCADO_ACK_TIMEOUT_MS = 30000;
+// Cuánto se espera la confirmación de una encolada antes de volver a ofrecerla. Reenviar es inocuo
+// (la nube es idempotente por `Op_Id`); esto es lo que impide que una operación se quede en el
+// limbo si su ack se perdió o la nube acabó descartándola.
+const TTL_ENCOLADA_MS = 60 * 60 * 1000;
 // SYNC-13: tope de páginas por ciclo de catch-up (× 500 ops/página = 1M ops). Si se alcanza, el
 // catch-up quedó a medias: continúa en el siguiente ciclo, pero lo señalamos por telemetría.
 const CATCHUP_MAX_PAGES = 2000;
@@ -177,7 +192,13 @@ export function useMainSocket() {
 		let authed = false;
 		let draining = false;
 		let drainTimer: number | null = null;
-		const acks = new Map<string, (ok: boolean, error?: string, seq?: number) => void>();
+		const acks = new Map<
+			string,
+			(ok: boolean, error?: string, seq?: number, encolada?: boolean) => void
+		>();
+		// SYNC-18: sólo hay un volcado en curso a la vez (el bucle es secuencial), así que basta un
+		// hueco en vez de un mapa.
+		let ackVolcado: ((ok: boolean, error?: string) => void) | null = null;
 
 		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
 		function enqueue(changes: ChangeArg[]) {
@@ -212,8 +233,16 @@ export function useMainSocket() {
 		}
 
 		// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
-		function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<{ ok: boolean; error?: string; seq?: number }> {
-			return new Promise<{ ok: boolean; error?: string; seq?: number }>((resolve) => {
+		function sendApply(
+			socket: WebSocket,
+			entry: OutboxEntry,
+		): Promise<{ ok: boolean; error?: string; seq?: number; encolada?: boolean }> {
+			return new Promise<{
+				ok: boolean;
+				error?: string;
+				seq?: number;
+				encolada?: boolean;
+			}>((resolve) => {
 				if (socket.readyState !== WebSocket.OPEN) {
 					resolve({ ok: false, error: "socket_not_open" });
 					return;
@@ -223,10 +252,10 @@ export function useMainSocket() {
 					resolve({ ok: false, error: "ack_timeout" });
 				}, ACK_TIMEOUT_MS);
 
-				acks.set(entry.op_id, (ok, error, seq) => {
+				acks.set(entry.op_id, (ok, error, seq, encolada) => {
 					window.clearTimeout(timer);
 					acks.delete(entry.op_id);
-					resolve({ ok, error, seq });
+					resolve({ ok, error, seq, encolada });
 				});
 
 				socket.send(
@@ -249,6 +278,91 @@ export function useMainSocket() {
 			});
 		}
 
+		/**
+		 * SYNC-18: manda un trozo del atraso y espera a que la nube confirme que lo ha guardado en
+		 * su cola. Confirmar no es aplicar: el DO lo aplicará por su cuenta, y por eso este camino
+		 * termina en cuanto se sube lo último, sin esperar a que se escriba en Turso.
+		 */
+		function enviarTrozo(
+			socket: WebSocket,
+			trozo: OutboxEntry[],
+		): Promise<{ ok: boolean; error?: string }> {
+			return new Promise((resolve) => {
+				if (socket.readyState !== WebSocket.OPEN) {
+					resolve({ ok: false, error: "socket_not_open" });
+					return;
+				}
+				const timer = window.setTimeout(() => {
+					ackVolcado = null;
+					resolve({ ok: false, error: "bulk_ack_timeout" });
+				}, VOLCADO_ACK_TIMEOUT_MS);
+
+				ackVolcado = (ok, error) => {
+					window.clearTimeout(timer);
+					ackVolcado = null;
+					resolve({ ok, error });
+				};
+
+				socket.send(
+					JSON.stringify({
+						type: "bulk_apply",
+						ops: trozo.map((entry) => ({
+							opId: entry.op_id,
+							commandName: entry.command_name,
+							command: {
+								type: "tenantDb.transaction",
+								payload: {
+									steps: entry.statements.map((s) => ({
+										kind: "execute",
+										sql: s.sql,
+										args: s.args,
+									})),
+								},
+							},
+						})),
+					}),
+				);
+			});
+		}
+
+		/**
+		 * Vuelca TODO el atraso a la cola de la nube, por trozos, y marca lo aceptado como encolado.
+		 *
+		 * Es el camino de "vengo de estar sin conexión": en cuanto termina, este TPV puede quedarse
+		 * sin internet otra vez sin perder nada — sus operaciones ya están guardadas en el servidor,
+		 * que las aplicará solo. Lo que NO hace es esperar a que se apliquen.
+		 */
+		async function volcarOutbox(socket: WebSocket): Promise<void> {
+			for (let vuelta = 0; vuelta < 10000 && !cancelled && authed; vuelta++) {
+				if (socket.readyState !== WebSocket.OPEN) return;
+
+				const pendientes = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
+					limit: VOLCADO_OPS_POR_TROZO,
+				})) as OutboxEntry[];
+				if (!pendientes.length) return;
+
+				// Recorte por tamaño: el trozo se cierra en cuanto se pasa del presupuesto de bytes.
+				const trozo: OutboxEntry[] = [];
+				let bytes = 0;
+				for (const entry of pendientes) {
+					trozo.push(entry);
+					bytes += JSON.stringify(entry.statements).length;
+					if (bytes >= VOLCADO_BYTES_POR_TROZO) break;
+				}
+
+				const { ok, error } = await enviarTrozo(socket, trozo);
+				if (!ok) {
+					console.warn("[volcado] la nube no aceptó el trozo:", error ?? "(sin error)");
+					return; // se reintenta al reconectar; nada se ha perdido
+				}
+
+				await invoke("sync_outbox_mark_encolada", {
+					opIds: trozo.map((e) => e.op_id),
+				});
+				console.log(`[volcado] ${trozo.length} op(s) en la cola de la nube`);
+			}
+		}
+
 		// Drena el outbox local en orden: por cada op pendiente, la envía y, si la nube confirma
 		// (apply_ack ok), la marca como enviada. Si una falla/expira, para y reintenta más tarde.
 		async function drainOutbox(socket: WebSocket) {
@@ -265,10 +379,17 @@ export function useMainSocket() {
 					let progressed = false;
 					for (const entry of pending) {
 						if (cancelled || socket.readyState !== WebSocket.OPEN) break;
-						const { ok, error, seq } = await sendApply(socket, entry);
+						const { ok, error, seq, encolada } = await sendApply(socket, entry);
 						if (!ok) {
 							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
 							break;
+						}
+						// SYNC-18: encolada ≠ aplicada. Su fila se queda en el outbox hasta que el
+						// catch-up la devuelva; marcarla como enviada aquí sería darla por buena antes
+						// de tiempo. Ya se anotó como encolada al recibir el ack.
+						if (encolada) {
+							progressed = true;
+							continue;
 						}
 						try {
 							// Tauri v2 camelCasea los nombres de argumento en la frontera JS↔Rust:
@@ -296,6 +417,46 @@ export function useMainSocket() {
 			} finally {
 				draining = false;
 			}
+		}
+
+		/**
+		 * SYNC-18: decide por dónde sube lo pendiente, y lo decide UNA VEZ, al conectar.
+		 *
+		 * Con poco atraso, de una en una: la nube está casi al día, cada operación se aplica al
+		 * instante y el Handy la ve enseguida. Con atraso de verdad, volcado: se sube todo a la cola
+		 * del servidor y este TPV queda libre, aunque le quiten el internet a continuación.
+		 *
+		 * Antes de nada se sueltan las encoladas que la nube nunca confirmó: reenviarlas es inocuo y
+		 * es lo que impide que una operación se quede en el limbo.
+		 */
+		async function subirLoPendiente(socket: WebSocket) {
+			try {
+				const liberadas = await invoke<number>("sync_liberar_encoladas", {
+					antiguedadMs: TTL_ENCOLADA_MS,
+				});
+				if (liberadas > 0) {
+					console.log(`[outbox] ${liberadas} op(s) encoladas sin confirmar: se reenvían`);
+				}
+			} catch (e) {
+				console.warn("sync_liberar_encoladas falló:", e);
+			}
+
+			let atraso = 0;
+			try {
+				const muestra = (await invoke<OutboxEntry[]>("sync_outbox_pending", {
+					limit: UMBRAL_VOLCADO + 1,
+				})) as OutboxEntry[];
+				atraso = muestra.length;
+			} catch (e) {
+				console.warn("sync_outbox_pending falló:", e);
+			}
+
+			if (atraso > UMBRAL_VOLCADO) {
+				console.log("[outbox] atraso grande: se vuelca a la cola de la nube");
+				await volcarOutbox(socket);
+				return;
+			}
+			await drainOutbox(socket);
 		}
 
 		async function catchUpThenLive() {
@@ -521,7 +682,7 @@ export function useMainSocket() {
 					marcar("conectado");
 					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
 					void catchUpThenLive();
-					void drainOutbox(socket);
+					void subirLoPendiente(socket);
 					void invoke<string>("images_drain_pending")
 						.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/hello_ok]", r); })
 						.catch((e) => console.error("[images_drain/hello_ok] error:", e));
@@ -536,8 +697,29 @@ export function useMainSocket() {
 					return;
 				}
 
+				if (msg.type === "bulk_ack") {
+					if (ackVolcado) {
+						ackVolcado(
+							Boolean(msg.ok),
+							msg.ok ? undefined : String(msg.error ?? "unknown"),
+						);
+					}
+					return;
+				}
+
 				if (msg.type === "apply_ack") {
 					const opId = String(msg.opId ?? msg.op_id ?? "");
+					// SYNC-18: la nube puede contestar "la he encolado" en vez de "la he aplicado":
+					// pasa cuando ya había atraso por delante y esta operación se pone a la cola para
+					// no adelantarlo. No es un envío confirmado todavía.
+					if (msg.ok && msg.encolada) {
+						void invoke("sync_outbox_mark_encolada", { opIds: [opId] }).catch((e) =>
+							console.warn("sync_outbox_mark_encolada falló:", e),
+						);
+						const cbEnc = acks.get(opId);
+						if (cbEnc) cbEnc(true, undefined, 0, true);
+						return;
+					}
 					const cb = acks.get(opId);
 					if (cb)
 						cb(

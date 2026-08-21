@@ -51,6 +51,31 @@ pub async fn sync_outbox_mark_sent(
     Ok(())
 }
 
+/// SYNC-18: la nube aceptó estas operaciones en su cola (`bulk_ack`, o un `apply_ack` que llegó
+/// marcado como encolado). Dejan de ofrecerse para reenviar, pero su copia local se conserva hasta
+/// que el catch-up las devuelva: ver el puerto `outbox_mark_encolada`.
+#[tauri::command]
+pub async fn sync_outbox_mark_encolada(
+    state: State<'_, AppState>,
+    op_ids: Vec<String>,
+) -> Result<(), AppErrorDto> {
+    let repo = state.sync_repo().await?;
+    uc::outbox_mark_encolada(repo.as_ref(), &op_ids).await?;
+    Ok(())
+}
+
+/// SYNC-18: devuelve al outbox lo que lleva demasiado tiempo encolado sin que la nube lo confirme.
+/// Se llama al conectar: reenviar es inocuo (la nube es idempotente por `Op_Id`) y es lo que
+/// impide que una operación se quede en el limbo si su ack se perdió o la nube la descartó.
+#[tauri::command]
+pub async fn sync_liberar_encoladas(
+    state: State<'_, AppState>,
+    antiguedad_ms: i64,
+) -> Result<i64, AppErrorDto> {
+    let repo = state.sync_repo().await?;
+    Ok(uc::liberar_encoladas_caducadas(repo.as_ref(), antiguedad_ms).await?)
+}
+
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo registros antiguos ya subidos a la nube).
 /// El frontend la invoca cuando el outbox queda vacío tras drenar.
 #[tauri::command]
