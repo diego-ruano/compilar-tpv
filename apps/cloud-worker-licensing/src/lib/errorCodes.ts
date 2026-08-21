@@ -30,6 +30,8 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	revoked: "device_revoked",
 	license_expired: "license_expired",
 	expired: "license_expired",
+	license_revoked: "license_expired",
+	device_replaced: "device_revoked",
 	no_active_license_for_tenant: "license_not_found",
 	license_not_found: "license_not_found",
 	invalid_pin: "invalid_pin",

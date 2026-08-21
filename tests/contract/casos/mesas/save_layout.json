@@ -1,0 +1,89 @@
+{
+  "descripcion": "Guarda el plano del salón: el caso grande de mesas (~140 líneas duplicadas). Cubre a la vez las cuatro cosas que hacen difícil este comando: (1) INTERCAMBIO de nombres entre dos zonas conservadas —lo que obliga a aparcar los nombres en '__tmp_zona_' para no chocar con UNIQUE(Nombre_Zona)—, (2) zona eliminada del editor con su mesa libre → se borran las dos, (3) zona eliminada cuya mesa tiene una comanda → sobreviven mesa Y zona (no se pierde histórico), y (4) zona nueva con mesa nueva + mesa conservada que se mueve + mesa suprimida. Los ID de zona/mesa nuevos los genera cada lado por su cuenta (asimétricos), así que el snapshot de Mesas se ancla al NOMBRE de su zona por JOIN en vez de al ID. Room_Points se compara aparte (ver snapshot Zonas): son los puntos tal cual los guarda cada lado.",
+  "comando": "mesas.save_layout",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-terraza', 'Terraza', '[0.5,0.5]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-salon', 'Salon', '[1.5,1.5]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-vip', 'VIP', '[2.5,2.5]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-fumadores', 'Fumadores', '[3.5,3.5]');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-t1', 'zona-terraza', 'T1', 4, 10, 10, 'rect', 120, 70, NULL);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-s1', 'zona-salon', 'S1', 2, 20, 20, 'rounded', 100, 60, 8);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-s2', 'zona-salon', 'S2', 6, 30, 30, 'rect', 140, 80, NULL);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-vip1', 'zona-vip', 'V1', 8, 40, 40, 'circle', 90, 90, 45);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-f1', 'zona-fumadores', 'F1', 4, 50, 50, 'rect', 110, 70, NULL);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('comanda-f1', 'MESA', 'mesa-f1', '2026-01-01 12:00:00', 'Abierta');"
+  ],
+  "entrada": {
+    "salons": [
+      {
+        "id": "db-zona-zona-terraza",
+        "name": "Salon",
+        "room": { "type": "poly", "points": [10, 20, 30] },
+        "tables": [
+          {
+            "id": "db-mesa-mesa-t1",
+            "name": "T1",
+            "x": 111,
+            "y": 222,
+            "width": 130,
+            "height": 75,
+            "radius": 12,
+            "seats": 5,
+            "shape": "circle"
+          },
+          {
+            "id": "nueva-t2",
+            "name": "T2",
+            "x": 300,
+            "y": 300,
+            "width": 0,
+            "height": 0,
+            "radius": null,
+            "seats": 0,
+            "shape": "   "
+          }
+        ]
+      },
+      {
+        "id": "db-zona-zona-salon",
+        "name": "Terraza",
+        "room": { "type": "poly", "points": [40, 50] },
+        "tables": [
+          {
+            "id": "db-mesa-mesa-s1",
+            "name": "S1",
+            "x": 21,
+            "y": 22,
+            "width": 100,
+            "height": 60,
+            "radius": 8,
+            "seats": 2,
+            "shape": "rounded"
+          }
+        ]
+      },
+      {
+        "id": "nueva-barra",
+        "name": "Barra",
+        "room": { "type": "poly", "points": [60] },
+        "tables": [
+          {
+            "id": "nueva-b1",
+            "name": "B1",
+            "x": 5,
+            "y": 6,
+            "width": 200,
+            "height": 40,
+            "radius": null,
+            "seats": 3,
+            "shape": "rect"
+          }
+        ]
+      }
+    ]
+  },
+  "snapshot": {
+    "Zonas": "SELECT Nombre_Zona, Room_Points FROM Zonas",
+    "Mesas": "SELECT Z.Nombre_Zona AS Zona, M.Numero_Mesa AS Mesa, M.Capacidad AS Capacidad, M.Ubicacion_X AS X, M.Ubicacion_Y AS Y, M.Shape AS Shape, M.Width AS Width, M.Height AS Height, M.Radius AS Radius FROM Mesas M LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona"
+  }
+}

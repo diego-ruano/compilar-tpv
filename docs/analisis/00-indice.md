@@ -79,7 +79,7 @@
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
 | D3 Cuentas | 1 | CUENTA-06 🔵 |
 | D5 Clientes · D7 Proveedores · D10 Configuración · D12 Estadísticas | 1 c/u | CLI-05 · PROV-07 · CONF-06 · STAT-06 (todos 🔵 parity) |
-| T2 Sync | 0 | *(SYNC-17 vive en el [BACKLOG](BACKLOG.md))* |
+| T2 Sync | 0 | — |
 | T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento
@@ -87,12 +87,14 @@
 **11 de los abiertos son la misma cosa**: la doble implementación Main(Rust)/Handy(worker). ARCH-01
 es el paraguas y MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04,
 TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness de tests de contrato
-por efecto— los cierra todos**, y ya está **construido y en verde**: **46 comandos** contrastados en
-los dos lados, sin ninguna divergencia. Cubre completo venta rápida, mesas (líneas/cocina/cobro),
-inventario, clientes, tareas, proveedores, reservas (incl. el merge RES-05) y configuración, más una
-parte de login/horarios. Lo que queda sin contrastar tiene motivo documentado (PIN hasheado, PII
-cifrada, IDs generados de forma asimétrica, `save_layout`) — ver
-[tests/contract/README.md](../../tests/contract/README.md) §No cubiertos y
+por efecto— los cierra todos**, y ya está **construido y en verde**: **47 casos** sobre 45 comandos
+contrastados en los dos lados. Cubre completo venta rápida, mesas (líneas/cocina/cobro y el
+`save_layout` grande), inventario, clientes, tareas, proveedores, reservas (incl. el merge RES-05) y
+configuración, más una parte de login/horarios. Lo excluido tiene motivo documentado en
+[`cobertura.json`](../../tests/contract/cobertura.json) (PIN hasheado, PII cifrada, IDs asimétricos),
+y `scripts/check-contract-coverage.mjs` **avisa en CI —sin romperlo—** de todo comando que entre sin
+caso: hoy señala `cuentas` entero, `mesas.setReservaEstado` y `notificaciones`. Ver
+[tests/contract/README.md](../../tests/contract/README.md) y
 [BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker). Cada divergencia
 futura en un comando cubierto es ya un test rojo en CI.
 
@@ -111,6 +113,6 @@ El resto se agrupa en:
 
 ## Dónde está el resto
 
-- **Aplazados con motivo** (incluido SYNC-17 y la deuda transversal): [BACKLOG.md](BACKLOG.md).
+- **Aplazados con motivo** (incluida la deuda transversal): [BACKLOG.md](BACKLOG.md).
 - **Seguridad de red / superficie de ataque:** [auditoria-fable.md](../../auditoria-fable.md).
 - **Sistema de licencias propio:** [PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md).

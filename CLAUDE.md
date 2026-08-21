@@ -3,7 +3,8 @@
 > **Estado:** la refactorización profunda está **completada**. El TPV (Terminal Punto de Venta) es
 > ahora un **monorepo híbrido JS/Rust** con **arquitectura hexagonal** en Rust, **generación
 > automática de tipos** a TypeScript con `ts-rs`, y un frontend **Local-First** (modo TPV) con
-> **sincronización WebSocket** (modo online / Handy) reestructurado en `app/ · features/ · shared/`.
+> **sincronización WebSocket** (automática cuando hay conexión, y siempre para la Handy)
+> reestructurado en `app/ · features/ · shared/`.
 >
 > Todos los dominios están migrados (monolito desmontado). La capa antigua `dualCall` fue eliminada y
 > reemplazada por el sistema outbox + WS + TenantHub (§9). La verificación final (`cargo build` +
@@ -125,14 +126,15 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   ⚠️ **IDs**: los ID `i64` se mapean a `bigint`. Como los ID de SQLite del TPV no superan 2^53, en los DTOs se
   anota `#[ts(type = "number")]` en los campos ID/contadores para mantener compatibilidad con el frontend (que usa `number`).
 
-### 4.4 Frontend Local-First (TPV) y capa de sync (Handy/online)
+### 4.4 Frontend Local-First (TPV) y capa de sync (nube/Handy)
 - **Eliminado** el patrón `dualCall.ts` y sus auxiliares antiguos (`net/cloudSync`, `net/outboxSync`,
   `net/realtimeSocket`, `net/healthCheck`, stores `useNet`/`useSync`).
 - **`packages/client/src/invokeClient.ts`**: cliente unificado que envuelve `invoke()` de
   `@tauri-apps/api/core`. En modo TPV, el frontend lee/muta directamente contra Tauri (SQLite local).
 - Hooks y componentes de `apps/tpv-main/src/features/` consumen `@tpv/client`.
-- **Modo online / Handy**: existe una capa de sincronización activa (outbox + WebSocket + DO TenantHub).
-  El detalle completo está en **§9**. Los hooks clave son `useMainSocket` (Main) y `useHandySocket` (Handy).
+- **Capa de sync**: outbox + WebSocket + DO TenantHub, **activa siempre que haya conexión** (no hay
+  ajuste que encender: SYNC-17). El detalle completo está en **§9**. Los hooks clave son
+  `useMainSocket` (Main, y única fuente del estado de conexión) y `useHandySocket` (Handy).
 
 ### 4.5 Worker único `tpv-api`
 - Los dos Cloudflare Workers se **fusionaron en uno solo**: `apps/cloud-worker-licensing/` (nombre
@@ -370,8 +372,9 @@ no sólo en dev.
 ## 9. Arquitectura de sincronización (Main ↔ Nube ↔ Handy)
 
 > **Contexto:** la refactorización eliminó el `dualCall` antiguo e implementó a continuación el
-> sistema descrito aquí. Los dos modos coexisten: **TPV/offline** opera 100 % Local-First;
-> **TPV/online** y **Handy** añaden la capa de replicación.
+> sistema descrito aquí. La Main es **siempre** Local-First (vende contra su SQLite haya red o no);
+> la capa de replicación se añade **cuando hay conexión**, que ya no es una elección del usuario
+> (SYNC-17, ver *Conectividad* abajo). La **Handy** no tiene BD local: sin nube no opera.
 
 ```
 ┌─────────────────────────┐      WebSocket (/ws)       ┌──────────────────────────────────┐
@@ -397,7 +400,7 @@ no sólo en dev.
 |---|---|---|
 | Captura del outbox | `crates/tpv-infra-sqlite/src/db.rs` | Cada escritura local (Main) se serializa a JSON en `_Sync_Outbox` |
 | Determinismo temporal | `db.rs:114-122` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
-| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox, aplica cambios remotos, hace catch-up al reconectar |
+| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox, aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
 | Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
 | Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast. **Usa la WebSocket Hibernation API** (ver regla abajo) |
@@ -415,8 +418,24 @@ no sólo en dev.
   garantiza una comanda abierta por mesa real; los tickets de barra no compiten entre sí porque en
   SQLite los `NULL` son distintos en un índice UNIQUE. Un `CHECK` impide mezclar canal y mesa. Si
   añades un canal nuevo ('LLEVAR', 'DELIVERY'…), basta ampliar el `CHECK`: no se tocan índices ni seeds.
-- **Freeze:** si no hay una Main conectada al DO, las Handy reciben `main_offline` y bloquean su UI. El modo por defecto de la Main es `offline` (se activa en Configuración → Conectividad).
-- **Modo offline puro:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al volver a online.
+- **Freeze:** si no hay una Main conectada al DO, las Handy reciben `main_offline` y bloquean su UI.
+- **Conectividad automática (SYNC-17):** **no existe un ajuste online/offline.** La Main abre el WS
+  siempre que sea el dispositivo `tpv`; el estado real (`conectado` · `reintentando` ·
+  `sin_identidad` · `rechazado` · `pausada`) lo publica `useMainSocket` en el store
+  **`useEstadoSync`** y lo pinta Configuración → Conectividad. Reglas al tocar esto:
+  - **La autoridad es el worker.** `/v1/ws/ticket` exige JWT + device-proof y además comprueba la
+    licencia (`computeLicenseState`/`stateAllowsUse`, los mismos que firman `/v1/license/status`) y
+    que un rol `tpv` siga siendo el `main_device_id`. El cliente no decide si "puede" conectarse:
+    lo intenta y obedece. Un 403 se traduce a `rechazado` y espacia los reintentos.
+  - **La gracia por caducidad sincroniza.** `expiry_grace` pasa el filtro a propósito: durante esos
+    días el TPV sigue vendiendo, y vender sin replicar es la peor combinación.
+  - **Palanca de emergencia sin UI:** `connectivity: "auto" | "off"` en `device_config.json`
+    (comandos `get/set_connection_mode`). Sirve para una red patológica o un cliente que no quiera
+    nube. La captura del outbox NO depende de ella: al volver a `auto` se drena lo acumulado.
+  - **Socket medio-muerto:** el latido verifica el `pong` (el DO lo contesta en el edge) y cierra
+    tras dos latidos sin respuesta; además se reconecta al instante ante `online`/`focus`/
+    `visibilitychange`. Sin ambos, un TCP medio-abierto se quedaba mudo para siempre.
+- **Sin conexión:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al recuperarla.
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el

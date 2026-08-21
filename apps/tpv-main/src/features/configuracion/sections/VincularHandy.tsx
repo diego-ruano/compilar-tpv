@@ -7,7 +7,7 @@ import { QRCodeCanvas } from "qrcode.react";
 import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { cloudPost } from "../../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../../shared/lib/deviceFingerprint";
-import { useConnectionMode } from "../../../shared/stores/useConnectionMode";
+import { useEstadoSync } from "../../../shared/stores/useEstadoSync";
 
 type PairPendingItem = {
 	pairCode: string;
@@ -57,9 +57,11 @@ export function VincularHandy({
 	onRegenerate: () => void;
 	onShowCode: () => void;
 }) {
-	// La vinculación de Handy solo tiene sentido si la Main está en modo "Con conexión (nube)": en
-	// solo-local los Handy no podrían conectarse. Si no está online, cubrimos la UI (ver return).
-	const online = useConnectionMode((s) => s.mode) === "online";
+	// SYNC-17: la sección ya no se tapa (antes exigía el modo "online", que ya no existe). Vincular
+	// es una petición REST al worker: lo que hace falta es que HAYA conexión ahora mismo. Sin ella
+	// se dice claramente —el código se pide a la nube y sin ella no hay código válido que teclear—,
+	// en vez de soltar el error crudo de red.
+	const hayNube = useEstadoSync((s) => s.estado) === "conectado";
 
 	const qrValue = useMemo(() => {
 		if (!pairCode || !pairSecret) return "";
@@ -85,11 +87,12 @@ export function VincularHandy({
 		return () => window.clearInterval(id);
 	}, [expiresAtMs]);
 
-	// Auto-regenerar cuando caduca (y no hay carga en curso)
+	// Auto-regenerar cuando caduca (y no hay carga en curso). Sin conexión NO se intenta: el
+	// código lo emite el worker, así que reintentar sería un bucle de fallos contra la nube.
 	useEffect(() => {
-		if (secsLeft > 0 || !expiresAtMs || loading) return;
+		if (secsLeft > 0 || !expiresAtMs || loading || !hayNube) return;
 		onRegenerateRef.current();
-	}, [secsLeft, expiresAtMs, loading]);
+	}, [secsLeft, expiresAtMs, loading, hayNube]);
 
 	const countdownText = useMemo(() => {
 		if (!expiresAtMs || secsLeft <= 0) return "";
@@ -230,7 +233,17 @@ export function VincularHandy({
 						escanea.
 					</div>
 
-					{error ? (
+					{/* Sin conexión no hay código que dar: el QR y el código de 6 dígitos los emite la
+					    nube. Se dice así, y NO se enseña el error de red debajo (sería el mismo
+					    problema contado dos veces, una de ellas en jerga). */}
+					{!hayNube ? (
+						<div className="mt-3 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
+							<span className="font-semibold">Necesitas conexión a internet.</span> El
+							código de vinculación lo genera el servidor, así que ahora mismo no se
+							puede crear uno. Este TPV sigue funcionando con normalidad; en cuanto
+							recupere la conexión, vuelve aquí y el código se generará solo.
+						</div>
+					) : error ? (
 						<div
 							className={cn(
 								"mt-3 text-sm rounded-xl border px-3 py-2",
@@ -575,23 +588,6 @@ export function VincularHandy({
 				)}
 			</Panel>
 
-			{/* Solo-local: la vinculación no sirve (los Handy no podrían conectarse). Cubrimos toda
-			    la UI con una capa gris que bloquea la interacción y explica cómo habilitarla. */}
-			{!online ? (
-				<div className="absolute inset-0 z-10 grid place-items-center rounded-2xl bg-slate-900/50 p-6 backdrop-blur-[1px]">
-					<div className="max-w-md rounded-2xl border border-border bg-surface p-5 text-center shadow-xl">
-						<div className="text-base font-semibold text-fg">
-							Activa “Con conexión” para vincular
-						</div>
-						<p className="mt-2 text-sm text-fg-muted">
-							La vinculación de dispositivos Handy solo tiene sentido con este TPV en modo{" "}
-							<span className="font-semibold">Con conexión (nube)</span>: en modo solo local
-							los Handy no podrían conectarse. Cámbialo en{" "}
-							<span className="font-semibold">Configuración → Conectividad</span>.
-						</p>
-					</div>
-				</div>
-			) : null}
 		</div>
 	);
 }

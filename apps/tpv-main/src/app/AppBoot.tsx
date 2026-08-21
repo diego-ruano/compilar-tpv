@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 
 import { useMode, type DeviceMode, type ModeStateValue } from "../shared/stores/useMode";
-import { useConnectionMode } from "../shared/stores/useConnectionMode";
+import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useContactSettings } from "../shared/stores/useContactSettings";
@@ -334,13 +334,15 @@ export default function AppBoot({ router }: { router: any }) {
     const [handyPairBusy, setHandyPairBusy] = useState(false);
     const [handyPairErr, setHandyPairErr] = useState<string | null>(null);
     const pairingAliveRef = useRef(true);
-    // Modo de funcionamiento (offline/online) persistido en AppData: hidratar al arrancar.
-    const hydrateConnMode = useConnectionMode((s) => s.hydrate);
+    // SYNC-17: palanca de conectividad (auto/off) persistida en AppData. No es un ajuste de
+    // usuario: se lee al arrancar y solo existe como salida de emergencia.
+    const hidratarSync = useEstadoSync((s) => s.hidratar);
     useEffect(() => {
-        void hydrateConnMode();
-    }, [hydrateConnMode]);
+        void hidratarSync();
+    }, [hidratarSync]);
 
-    // WebSocket de la Main: se abre/cierra según el modo (online → abre, offline → cierra).
+    // WebSocket de la Main: lo intenta siempre mientras este dispositivo sea la Main. Su estado
+    // real (conectado / reintentando / rechazado…) se publica en `useEstadoSync`.
     useMainSocket();
 
     // WebSocket del Handy: se abre cuando el dispositivo es Handy. Solo recibe `change` de la
@@ -755,6 +757,15 @@ export default function AppBoot({ router }: { router: any }) {
 
     const gateNow = gate === "loading" ? null : gate;
     const isMainAppReady = mode === "tpv" && gateNow !== null && gateNow.allowed;
+
+    // SYNC-17: en cuanto la licencia deja pasar (activación recién hecha, licencia renovada, o el
+    // pulso periódico del job `licencia`), le decimos al WebSocket que lo intente YA. Sin esto, un
+    // TPV recién activado se quedaría esperando a que venciera la espera larga de `sin_identidad`.
+    // Es un booleano: el efecto solo corre en la transición, no en cada repintado.
+    const reintentarSync = useEstadoSync((s) => s.reintentar);
+    useEffect(() => {
+        if (isMainAppReady) reintentarSync();
+    }, [isMainAppReady, reintentarSync]);
 
     // Aviso de caducidad: solo cuando el gate deja pasar pero avisa (warn/expiry_grace). Cuelga
     // por encima de la app, sin bloquearla.

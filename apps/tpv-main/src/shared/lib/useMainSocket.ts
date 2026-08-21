@@ -1,9 +1,14 @@
 // src/shared/lib/useMainSocket.ts
 //
-// Mantiene el WebSocket de la Main con el worker cuando el modo es "online" (y el dispositivo
-// es la Main / tpv), y APLICA en la BD local los cambios que llegan de la nube (Opción 3:
-// sentencias ya resueltas). Conectar + responder al challenge firmado registra el dispositivo
-// como `tpv` en el TenantHub (habilita las escrituras de la Handy). En "offline" cierra.
+// Mantiene el WebSocket de la Main con el worker y APLICA en la BD local los cambios que llegan
+// de la nube (Opción 3: sentencias ya resueltas). Conectar + responder al challenge firmado
+// registra el dispositivo como `tpv` en el TenantHub (habilita las escrituras de la Handy).
+//
+// SYNC-17: se intenta SIEMPRE mientras este dispositivo sea la Main. No hay ajuste que activar:
+// la conectividad es un estado derivado que se publica en `useEstadoSync` (lo pinta Configuración
+// → Conectividad). Lo único que puede impedir el intento es la palanca de emergencia
+// (`preferencia === "off"`, sin UI) o que aún no haya licencia/identidad a la que conectarse.
+// La Main es Local-First pase lo que pase: sin conexión sigue vendiendo y el outbox acumula.
 //
 // Flujo de aplicación:
 //   - Al autenticarse (hello_ok) se hace un CATCH-UP: se pide a /v1/sync/changes todo lo que
@@ -18,8 +23,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import type { LicenseLocalState } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
 
-import { useConnectionMode } from "../stores/useConnectionMode";
+import { useEstadoSync } from "../stores/useEstadoSync";
 import { useMode } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
@@ -32,6 +38,19 @@ import { captureException } from "../observability/sentry";
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
 const PING_MS = 30000;
+// SYNC-17: margen sin `pong` antes de dar el socket por muerto. Un TCP medio-abierto (la ruta se
+// cae sin FIN: cambio de red, NAT que expira, suspensión del equipo) NO dispara `onclose`, así que
+// sin este vigía la Main se queda con un socket que ni recibe cambios ni sube el outbox y nadie se
+// entera. Dos latidos de margen: un `pong` perdido suelto no cierra nada.
+const PONG_TIMEOUT_MS = PING_MS * 2 + 5000;
+// SYNC-17: esperas largas para los dos casos en los que reintentar rápido no arregla nada.
+// `sin_identidad` no llega ni a tocar la red (son dos `invoke` locales), pero repetirlo cada 3 s
+// en un TPV recién instalado solo llena la consola; el camino rápido de verdad es el `pulso` que
+// dispara AppBoot en cuanto la licencia deja pasar.
+const RETRY_SIN_IDENTIDAD_MS = 60_000;
+// `rechazado` lo dice el worker (licencia caducada/anulada, dispositivo desplazado). Insistir es
+// pedirle lo mismo una y otra vez: se espacia y se espera al `pulso` de una licencia renovada.
+const RETRY_RECHAZADO_MS = 5 * 60_000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
 // SYNC-13: tope de páginas por ciclo de catch-up (× 500 ops/página = 1M ops). Si se alcanza, el
@@ -80,16 +99,32 @@ async function loadDeviceId(): Promise<string> {
 	}
 }
 
+/** Resultado de pedir el ticket: hay que distinguir "no hay red" de "el worker dice que no". */
+type ResultadoTicket =
+	| { ok: true; ticket: string }
+	| { ok: false; rechazado: boolean; detalle: string };
+
+// SYNC-17: códigos con los que el worker nos está diciendo que este dispositivo no puede
+// sincronizar. Reintentar en 3 s no cambia nada; lo que lo cambia es renovar la licencia (y eso
+// llega por el `pulso`). Ver el re-chequeo de licencia en `/v1/ws/ticket` (ws.routes.ts).
+const CODIGOS_RECHAZO = new Set(["license_expired", "license_not_found", "device_revoked"]);
+
 // SYNC-15: canjea el token por un ticket efímero de un solo uso para NO exponer el JWT en la URL
-// del WebSocket. Devuelve `null` si el endpoint falla; en ese caso NO abrimos el WS (ya no existe
-// respaldo `?token=`: el token nunca viaja por la URL) y reintentamos más tarde con backoff.
-async function loadWsTicket(mode: "tpv" | "handy"): Promise<string | null> {
+// del WebSocket. Si falla NO abrimos el WS (ya no existe respaldo `?token=`: el token nunca viaja
+// por la URL) y reintentamos más tarde, con la espera que corresponda al motivo.
+async function loadWsTicket(mode: "tpv" | "handy"): Promise<ResultadoTicket> {
 	try {
 		const r = (await cloudPost<any>(mode, "/v1/ws/ticket", {})) as any;
 		const t = String(r?.ticket ?? "");
-		return t || null;
-	} catch {
-		return null;
+		if (!t) return { ok: false, rechazado: false, detalle: "respuesta sin ticket" };
+		return { ok: true, ticket: t };
+	} catch (e) {
+		const err = toAppError(e);
+		return {
+			ok: false,
+			rechazado: CODIGOS_RECHAZO.has(err.code),
+			detalle: err.message || err.code,
+		};
 	}
 }
 
@@ -105,17 +140,33 @@ async function signWsHello(
 }
 
 export function useMainSocket() {
-	const connMode = useConnectionMode((s) => s.mode);
+	const preferencia = useEstadoSync((s) => s.preferencia);
+	const hidratada = useEstadoSync((s) => s.hidratada);
 	const deviceMode = useMode((s) => s.mode);
 
 	useEffect(() => {
-		if (deviceMode !== "tpv" || connMode !== "online") return;
+		if (deviceMode !== "tpv") return;
+		// Esperamos a leer la palanca de AppData: si está en `off`, arrancar y cerrar acto seguido
+		// dejaría un parpadeo de "conectando" y una conexión inútil.
+		if (!hidratada) return;
+
+		const marcar = useEstadoSync.getState().marcar;
+
+		if (preferencia === "off") {
+			marcar("pausada", "Sincronización desactivada en este dispositivo");
+			return;
+		}
 
 		let cancelled = false;
 		let ws: WebSocket | null = null;
 		let retryTimer: number | null = null;
 		let pingTimer: number | null = null;
 		let unlistenOutbox: (() => void) | null = null;
+		// Evita dos `open()` concurrentes: ahora la reconexión también la disparan eventos
+		// (`online`/`focus`/`visibilitychange`), que pueden llegar a la vez.
+		let opening = false;
+		// SYNC-17: último `pong` recibido (el DO lo contesta en el edge, sin despertarse).
+		let lastPongAt = 0;
 
 		// Estado de aplicación (compartido entre reconexiones dentro de este efecto).
 		let caughtUp = false;
@@ -290,43 +341,134 @@ export function useMainSocket() {
 
 		// SYNC-09: retardo de reconexión con backoff exponencial (se resetea a base en `hello_ok`).
 		let reconnectDelay = RECONNECT_BASE_MS;
-		const scheduleReconnect = () => {
+		/**
+		 * Programa el siguiente intento. `esperaFija` salta el backoff para los motivos que no se
+		 * arreglan reintentando deprisa (sin identidad, rechazo del worker).
+		 */
+		const scheduleReconnect = (esperaFija?: number) => {
 			if (cancelled || retryTimer) return;
-			const delay = Math.min(reconnectDelay, RECONNECT_MAX_MS) + Math.random() * 1000;
-			reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+			let delay: number;
+			if (esperaFija != null) {
+				delay = esperaFija + Math.random() * 1000;
+			} else {
+				delay = Math.min(reconnectDelay, RECONNECT_MAX_MS) + Math.random() * 1000;
+				reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
+			}
 			retryTimer = window.setTimeout(() => {
 				retryTimer = null;
 				void open();
 			}, delay);
 		};
 
+		// SYNC-17: reconexión inmediata cuando vuelve la red / la app recupera el foco, SOLO si no
+		// estamos ya sanos. Sin esto, un equipo que despierta de suspensión se queda esperando a que
+		// venza un backoff que puede ir por 30 s, con el socket ya muerto. La Handy ya lo hacía.
+		const reconnectNowIfNeeded = (forzar = false) => {
+			if (cancelled || opening) return;
+			if (ws && ws.readyState === WebSocket.CONNECTING) return;
+			// Sano = socket abierto Y autenticado (un WS abierto sin `hello_ok` no sirve de nada).
+			if (ws?.readyState === WebSocket.OPEN && authed) return;
+			// Un rechazo del worker no lo arregla volver a la ventana: sin esto, cada alt-tab
+			// dispararía otra petición de ticket con la misma licencia bloqueada. Solo el `pulso`
+			// (licencia renovada) tiene derecho a saltarse la espera larga.
+			if (!forzar && useEstadoSync.getState().estado === "rechazado") return;
+
+			reconnectDelay = RECONNECT_BASE_MS;
+			if (retryTimer) {
+				window.clearTimeout(retryTimer);
+				retryTimer = null;
+			}
+			// Un WS "abierto" pero sin autenticar puede estar medio-muerto: cerrar para reabrir limpio.
+			if (ws && ws.readyState === WebSocket.OPEN) {
+				try {
+					ws.close();
+				} catch {
+					/* noop */
+				}
+			}
+			ws = null;
+			void open();
+		};
+
+		// Envoltorios con nombre: los listeners del DOM reciben el Event como primer argumento, y
+		// pasárselo tal cual a `reconnectNowIfNeeded` lo leería como `forzar = true`.
+		const alVolverLaRed = () => reconnectNowIfNeeded(false);
+		const onVisibility = () => {
+			if (document.visibilityState === "visible") reconnectNowIfNeeded(false);
+		};
+
 		async function open() {
+			if (cancelled || opening) return;
+			opening = true;
+			try {
+				await openInner();
+			} finally {
+				opening = false;
+			}
+		}
+
+		async function openInner() {
 			if (cancelled) return;
+
+			// "Conectando…" es para el primer intento, no para cada reintento: si ya estamos en un
+			// estado de fallo conocido, se conserva. Si no, "sin conexión desde hace 40 min" se
+			// reiniciaría cada pocos segundos y el usuario nunca sabría cuánto lleva caído.
+			const estadoActual = useEstadoSync.getState().estado;
+			if (
+				estadoActual !== "reintentando" &&
+				estadoActual !== "rechazado" &&
+				estadoActual !== "sin_identidad"
+			) {
+				marcar("conectando");
+			}
 
 			const lic = await loadLicense();
 			const deviceId = await loadDeviceId();
-			if (cancelled || !lic || !deviceId) {
-				scheduleReconnect();
+			if (cancelled) return;
+			if (!lic || !deviceId) {
+				// TPV recién instalado (o licencia aún sin activar): no hay tenant al que conectarse.
+				// No es un error; en cuanto el gate deje pasar, AppBoot dispara el `pulso`.
+				marcar("sin_identidad");
+				scheduleReconnect(RETRY_SIN_IDENTIDAD_MS);
 				return;
 			}
 
 			// SYNC-15: el WS se abre SOLO con un ticket efímero de un solo uso (nunca el token en la
-			// URL). Si no lo obtenemos (endpoint caído/sin red), reintentamos más tarde.
-			const ticket = await loadWsTicket("tpv");
+			// URL). Si no lo obtenemos, el motivo decide cuánto esperamos.
+			const res = await loadWsTicket("tpv");
 			if (cancelled) return;
-			if (!ticket) {
-				scheduleReconnect();
+			if (!res.ok) {
+				if (res.rechazado) {
+					marcar("rechazado", res.detalle);
+					scheduleReconnect(RETRY_RECHAZADO_MS);
+				} else {
+					marcar("reintentando", res.detalle);
+					scheduleReconnect();
+				}
 				return;
 			}
-			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}`);
+			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(res.ticket)}`);
 			ws = socket;
 
 			socket.onopen = () => {
+				// El vigía cuenta desde la apertura: si el primer `pong` no llega, también cierra.
+				lastPongAt = Date.now();
 				if (pingTimer) clearInterval(pingTimer);
 				pingTimer = window.setInterval(() => {
-					if (socket.readyState === WebSocket.OPEN) {
-						socket.send(JSON.stringify({ type: "ping" }));
+					if (socket.readyState !== WebSocket.OPEN) return;
+					// SYNC-17: antes de latir, comprobamos que el latido anterior tuvo respuesta. Sin
+					// esto se enviaban `ping` a un socket muerto para siempre (nadie lee el `pong`).
+					// Cerrar dispara `onclose` → backoff → reconexión limpia.
+					if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+						console.warn("[ws] sin pong en", PONG_TIMEOUT_MS, "ms: socket muerto, cerrando");
+						try {
+							socket.close();
+						} catch {
+							/* noop */
+						}
+						return;
 					}
+					socket.send(JSON.stringify({ type: "ping" }));
 				}, PING_MS);
 			};
 
@@ -338,6 +480,14 @@ export function useMainSocket() {
 					return;
 				}
 				if (!msg || typeof msg.type !== "string") return;
+
+				// SYNC-17: respuesta al latido. La contesta el auto-response del edge sin despertar al
+				// DO (tenantHub.ts), así que llega aunque el hub esté hibernando: es justo lo que la
+				// convierte en una señal fiable de "la ruta hasta la nube sigue viva".
+				if (msg.type === "pong") {
+					lastPongAt = Date.now();
+					return;
+				}
 
 				if (msg.type === "challenge") {
 					try {
@@ -368,6 +518,7 @@ export function useMainSocket() {
 					// Autenticados: ponerse al día (nube→Main), drenar el outbox (Main→nube) y
 					// subir a R2 las imágenes pendientes (canal aparte del outbox SQL).
 					authed = true;
+					marcar("conectado");
 					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
 					void catchUpThenLive();
 					void drainOutbox(socket);
@@ -422,6 +573,7 @@ export function useMainSocket() {
 				authed = false;
 				// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
 				caughtUp = false;
+				marcar("reintentando", "Se perdió la conexión con la nube");
 				scheduleReconnect();
 			};
 
@@ -446,9 +598,31 @@ export function useMainSocket() {
 			else unlistenOutbox = un;
 		});
 
+		// SYNC-17: re-disparo de la reconexión cuando vuelve la red o la ventana recupera el foco.
+		// En escritorio importa igual que en móvil: al despertar de suspensión el socket está muerto
+		// y el backoff puede ir por 30 s.
+		document.addEventListener("visibilitychange", onVisibility);
+		window.addEventListener("online", alVolverLaRed);
+		window.addEventListener("focus", alVolverLaRed);
+
+		// SYNC-17: `pulso` es "inténtalo ya". Lo sube AppBoot en cuanto el gate de licencia deja
+		// pasar (activación recién hecha, licencia renovada), que es justo cuando `sin_identidad` o
+		// `rechazado` dejan de ser ciertos y su espera larga sobra. Se observa por suscripción y no
+		// como dependencia del efecto para no derribar un socket que ya esté sano.
+		let ultimoPulso = useEstadoSync.getState().pulso;
+		const unsubPulso = useEstadoSync.subscribe((s) => {
+			if (s.pulso === ultimoPulso) return;
+			ultimoPulso = s.pulso;
+			reconnectNowIfNeeded(true);
+		});
+
 		return () => {
 			cancelled = true;
 			authed = false;
+			unsubPulso();
+			document.removeEventListener("visibilitychange", onVisibility);
+			window.removeEventListener("online", alVolverLaRed);
+			window.removeEventListener("focus", alVolverLaRed);
 			if (unlistenOutbox) unlistenOutbox();
 			if (retryTimer) clearTimeout(retryTimer);
 			if (pingTimer) clearInterval(pingTimer);
@@ -464,5 +638,5 @@ export function useMainSocket() {
 				ws = null;
 			}
 		};
-	}, [deviceMode, connMode]);
+	}, [deviceMode, preferencia, hidratada]);
 }

@@ -36,6 +36,23 @@ function parseDbId(raw: string, prefix: string): string | null {
 	return id || null;
 }
 
+/**
+ * Serializa los puntos del polígono de una zona **igual que la Main**.
+ *
+ * En Rust los puntos son `Vec<f64>` y `serde_json` escribe todo float con parte decimal:
+ * `[10.0,20.0]`. `JSON.stringify` escribe `[10,20]`. Las dos cadenas valen lo mismo al parsearlas,
+ * pero son bytes distintos en `Zonas.Room_Points`, así que la misma zona guardada desde la Main y
+ * desde una Handy quedaba con un texto distinto. Lo detectó el test de contrato
+ * `mesas__save_layout`; aquí se conforma el worker, que es la regla del harness (canónico = Rust,
+ * el escritor único). Si algún día Rust deja de usar `serde_json` para esto, esto sobra.
+ */
+function puntosComoRust(points: number[] | undefined | null): string {
+	const partes = (points ?? []).map((n) =>
+		Number.isFinite(n) && Number.isInteger(n) ? n.toFixed(1) : String(n),
+	);
+	return `[${partes.join(",")}]`;
+}
+
 export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 	const steps: any[] = [];
 
@@ -89,7 +106,7 @@ export function saveLayout(input: SaveLayoutInput): BuiltCommand {
 
 	for (const z of input.salons) {
 		const idZona = parseDbId(z.id, "db-zona-");
-		const points = JSON.stringify(z.room.points ?? []);
+		const points = puntosComoRust(z.room.points);
 		if (idZona) {
 			steps.push({
 				kind: "execute",

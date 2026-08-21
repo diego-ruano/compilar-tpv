@@ -45,8 +45,8 @@ use tpv_infra_http::{
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
 };
-use tpv_contracts::errors::{AppErrorDto, ErrorCode};
-use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
+use tpv_contracts::errors::AppErrorDto;
+use tpv_infra_licensing::PairingAdapter;
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
     reconciliacion::SqliteReconciliacionRepository,
@@ -73,19 +73,44 @@ enum DeviceMode {
     Handy,
 }
 
-/// Modo de funcionamiento de la Main respecto a la nube (ajuste explícito persistido).
-/// `Offline`: solo SQLite local. `Online`: además abre WebSocket con el worker.
+/// SYNC-17: qué hace la Main respecto a la nube. **Ya no es una elección del usuario**: la
+/// conectividad es un estado derivado del WebSocket (se intenta siempre y el badge refleja lo que
+/// hay). Esto es solo la palanca de emergencia, sin UI, para el caso patológico —una red que tira
+/// el socket en bucle, o alguien que no quiere sus datos en la nube—: se toca a mano en
+/// `device_config.json` o desde `set_connection_mode`.
+///
+/// `Auto` (por defecto, y lo que se asume si el campo falta): intentar conectar siempre.
+/// `Off`: no abrir el WebSocket. La Main sigue siendo Local-First y el outbox sigue capturando,
+/// así que al volver a `Auto` se drena lo acumulado.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum ConnectivityMode {
-    Offline,
-    Online,
+    Auto,
+    Off,
+}
+
+/// Lectura tolerante del campo: los `device_config.json` anteriores a SYNC-17 guardan
+/// `"offline"`/`"online"` (el ajuste que se ha eliminado). Un valor desconocido tiene que caer a
+/// `None` —o sea, `Auto`— y NO reventar el parseo: `load_config` hace `unwrap_or_default()`, así
+/// que un error aquí se llevaría por delante también `mode` y `printer_name` (el dispositivo
+/// olvidaría que es la Main). Que `"offline"` pase a `Auto` es justo lo que queremos: el ajuste
+/// desaparece y todo el mundo conecta solo.
+fn connectivity_tolerante<'de, D>(d: D) -> Result<Option<ConnectivityMode>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let crudo = Option::<String>::deserialize(d).unwrap_or(None);
+    Ok(match crudo.as_deref() {
+        Some("off") => Some(ConnectivityMode::Off),
+        Some("auto") => Some(ConnectivityMode::Auto),
+        _ => None,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DeviceConfig {
     mode: Option<DeviceMode>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "connectivity_tolerante")]
     connectivity: Option<ConnectivityMode>,
     /// Impresora de tickets seleccionada en este dispositivo físico. Es una preferencia LOCAL
     /// (la impresora está conectada a esta máquina), por eso vive en `device_config.json` y no
@@ -610,8 +635,8 @@ fn get_device_mode(app: AppHandle) -> Result<Option<DeviceMode>, AppErrorDto> {
     Ok(cfg.mode)
 }
 
-/// Lee el modo de funcionamiento (offline/online) persistido en `device_config.json`.
-/// Si nunca se eligió, devuelve `None` (la UI asume `offline`).
+/// Lee la palanca de conectividad de `device_config.json`. `None` = nunca se tocó = `Auto`
+/// (el frontend asume `auto`): SYNC-17, conectar es el comportamiento por defecto.
 #[tauri::command]
 fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppErrorDto> {
     let app_data_dir = app
@@ -621,11 +646,19 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
     Ok(load_config(&app_data_dir).connectivity)
 }
 
-/// Persiste el modo de funcionamiento (offline/online) en `device_config.json`. La captura de
-/// escrituras para el outbox está SIEMPRE activa (el outbox es el log de cambios local); este
-/// modo solo decide si, ADEMÁS, el frontend abre el WebSocket para drenar/recibir de la nube.
+/// Persiste la palanca de conectividad en `device_config.json`. **Sin UI**: es la salida de
+/// emergencia de SYNC-17 (ver [`ConnectivityMode`]), no un ajuste que se ofrezca al usuario.
+///
+/// La captura de escrituras para el outbox está SIEMPRE activa (el outbox es el log de cambios
+/// local), así que apagar y volver a encender no pierde nada: al volver a `Auto` se drena.
+///
+/// Aquí ya NO se valida la licencia. Antes se hacía porque activar "online" era una acción
+/// explícita del usuario; ahora la autoridad es el worker (`/v1/ws/ticket` exige JWT + device
+/// proof y rechaza una licencia no activa) y, antes que eso, el gate de AppBoot ya bloquea la app
+/// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
+/// red a un camino que no la necesita.
 #[tauri::command]
-async fn set_connection_mode(
+fn set_connection_mode(
     app: AppHandle,
     args: SetConnectionModeArgs,
 ) -> Result<String, AppErrorDto> {
@@ -633,21 +666,6 @@ async fn set_connection_mode(
         .path()
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
-
-    // Activar la nube exige una licencia válida AHORA: forzamos una validación contra el worker
-    // (no nos fiamos del estado cacheado). Si no es válida, no activamos online.
-    if args.mode == ConnectivityMode::Online {
-        let svc = LicensingAdapter::new(app_data_dir.clone());
-        let gate = tpv_application::use_cases::licensing::check_now(&svc).await?;
-        if !gate.allowed {
-            // Código genérico a propósito: nadie ramifica por esto en la UI, sólo lo
-            // muestra. El motivo concreto del gate viaja en el mensaje.
-            return Err(AppErrorDto::new(
-                ErrorCode::Conflict,
-                format!("licencia_no_valida: {}", gate.reason),
-            ));
-        }
-    }
 
     let mut cfg = load_config(&app_data_dir);
     cfg.connectivity = Some(args.mode);

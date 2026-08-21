@@ -83,3 +83,11 @@ jobs:
 
       - name: Anti-drift del registro de migraciones del worker
         run: node scripts/check-migration-registry.mjs
+
+      # ARCH-01: qué comandos con doble implementación se han quedado sin test de contrato.
+      # AVISA, NO ROMPE: el script sale siempre con 0 y deja anotaciones `::warning::` + una tabla
+      # en el resumen del job. `continue-on-error` es el cinturón sobre los tirantes, para que ni
+      # un fallo del propio script (un JSON mal formado, por ejemplo) tumbe el push.
+      - name: Cobertura del harness de contrato (informativo)
+        continue-on-error: true
+        run: node scripts/check-contract-coverage.mjs

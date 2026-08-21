@@ -45,6 +45,7 @@ import {
 	deleteDetalle,
 	kitchenSetLineState,
 	removeOnePendingDetalle,
+	saveLayout,
 	setTrabajadorIfNull,
 	updateDetalleNota,
 } from "../src/domains/mesas/mesas.commands";
@@ -147,6 +148,8 @@ import casoVrRestarStock from "../../../tests/contract/casos/venta_rapida/restar
 import goldenVrRestarStock from "../../../tests/contract/golden/venta_rapida/restar_stock.json";
 import casoVrDeleteComanda from "../../../tests/contract/casos/venta_rapida/delete_comanda_if_safe.json";
 import goldenVrDeleteComanda from "../../../tests/contract/golden/venta_rapida/delete_comanda_if_safe.json";
+import casoMesaSaveLayout from "../../../tests/contract/casos/mesas/save_layout.json";
+import goldenMesaSaveLayout from "../../../tests/contract/golden/mesas/save_layout.json";
 import casoMesaAbrir from "../../../tests/contract/casos/mesas/abrir_comanda.json";
 import goldenMesaAbrir from "../../../tests/contract/golden/mesas/abrir_comanda.json";
 import casoMesaSetTrab from "../../../tests/contract/casos/mesas/set_trabajador_if_null.json";
@@ -207,6 +210,7 @@ const CASOS = [
 	{ nombre: "vr_update_nota_detalle", caso: casoVrUpdateNota, golden: goldenVrUpdateNota },
 	{ nombre: "vr_restar_stock", caso: casoVrRestarStock, golden: goldenVrRestarStock },
 	{ nombre: "vr_delete_comanda_if_safe", caso: casoVrDeleteComanda, golden: goldenVrDeleteComanda },
+	{ nombre: "mesas_save_layout", caso: casoMesaSaveLayout, golden: goldenMesaSaveLayout },
 	{ nombre: "mesas_abrir_comanda", caso: casoMesaAbrir, golden: goldenMesaAbrir },
 	{ nombre: "mesas_set_trabajador_if_null", caso: casoMesaSetTrab, golden: goldenMesaSetTrab },
 	{ nombre: "mesas_cerrar_comanda", caso: casoMesaCerrar, golden: goldenMesaCerrar },
@@ -517,6 +521,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "venta_rapida.delete_comanda_if_safe": {
 			aplicar(hub, sql, deleteComandaIfSafe(caso.entrada.id_comanda));
+			return;
+		}
+		case "mesas.save_layout": {
+			aplicar(hub, sql, saveLayout({ salons: caso.entrada.salons } as any));
 			return;
 		}
 		case "mesas.abrir_comanda": {
