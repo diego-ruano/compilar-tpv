@@ -37,6 +37,7 @@ use tpv_application::ports::reservas::ReservasRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+use tpv_contracts::mesas::SalonInput;
 use tpv_contracts::venta_rapida::StockLinea;
 use tpv_domain::clientes::{Cliente, NuevoCliente};
 use tpv_domain::inventario::{AjusteLote, CategoriaUpsert, LoteNuevo, LoteUpdate, ProductoUpsert};
@@ -110,13 +111,32 @@ fn cell_to_json(v: Value) -> Json {
 
 /// Nombres de columna del SELECT (entre `SELECT` y `FROM`). Los SELECT del harness son planos a
 /// propósito (sin `*`, sin subconsultas), así que este parseo simple basta.
+///
+/// Tiene que dar **el mismo nombre que devolvería SQLite**, porque el lado worker no parsea nada:
+/// lee las claves de la fila que le da libsql y las compara contra este golden. Por eso:
+/// `X AS Y` → `Y` (manda el alias) y `M.Numero_Mesa` → `Numero_Mesa` (SQLite quita el prefijo de
+/// tabla). Sin esto, un snapshot con JOIN —necesario cuando el ID de la fila lo genera cada lado
+/// por su cuenta y hay que anclarse a otra columna— compararía claves distintas y saldría rojo por
+/// un motivo que no es la divergencia que se busca.
 fn columnas(select: &str) -> Vec<String> {
     let up = select.to_uppercase();
     let ini = up.find("SELECT ").expect("SELECT") + "SELECT ".len();
     let fin = up.find(" FROM ").expect("FROM");
     select[ini..fin]
         .split(',')
-        .map(|c| c.trim().to_string())
+        .map(|c| {
+            let c = c.trim();
+            let up_c = c.to_uppercase();
+            let base = match up_c.rfind(" AS ") {
+                Some(i) => &c[i + " AS ".len()..],
+                None => c,
+            };
+            let base = base.trim();
+            match base.rsplit_once('.') {
+                Some((_, col)) => col.to_string(),
+                None => base.to_string(),
+            }
+        })
         .collect()
 }
 
@@ -304,6 +324,7 @@ casos_de_contrato! {
     venta_rapida__update_nota_detalle,
     venta_rapida__restar_stock,
     venta_rapida__delete_comanda_if_safe,
+    mesas__save_layout,
     mesas__abrir_comanda,
     mesas__set_trabajador_if_null,
     mesas__cerrar_comanda,
@@ -630,6 +651,14 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.delete_comanda_if_safe(&s(&e["id_comanda"]))
                 .await
                 .expect("delete comanda if safe");
+        }
+        "mesas.save_layout" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            // El `entrada` se deserializa al DTO real (`SalonInput`), no a mano: así el fixture no
+            // puede quedarse desalineado con la forma que de verdad recibe el comando.
+            let salons: Vec<SalonInput> =
+                serde_json::from_value(e["salons"].clone()).expect("salons del fixture");
+            repo.save_layout(salons).await.expect("save layout");
         }
         "mesas.abrir_comanda" => {
             let repo = SqliteMesasRepository::new(db.clone());

@@ -43,6 +43,23 @@ tests/contract/
 Ej.: el caso `venta_rapida__cobro_fraccionado_un_lote` está en
 `casos/venta_rapida/cobro_fraccionado_un_lote.json` y `golden/venta_rapida/cobro_fraccionado_un_lote.json`.
 
+### Cuando el ID lo genera cada lado (snapshot con JOIN)
+
+Si el comando **crea filas** con un ID nuevo, ese ID es distinto en cada lado (Rust usa `new_id()`,
+el worker `crypto.randomUUID()`) y no puede entrar en el snapshot. Cuando además hace falta saber
+**a qué otra fila pertenece** cada una (una mesa y su zona, por ejemplo), el ancla es un JOIN por una
+columna estable —el nombre— en lugar del ID:
+
+```sql
+SELECT Z.Nombre_Zona AS Zona, M.Numero_Mesa AS Mesa, …
+FROM Mesas M LEFT JOIN Zonas Z ON Z.ID_Zona = M.ID_Zona
+```
+
+**Pon siempre un alias `AS`** en las columnas cualificadas: el lado worker lee los nombres que
+devuelve SQLite y el lado Rust los parsea del texto del SELECT, y el alias es lo que garantiza que
+ambos usen la misma clave. `LEFT JOIN` (no `INNER`) a propósito: si una fila se quedase huérfana,
+tiene que salir en el snapshot y romper el test, no desaparecer sin ruido.
+
 Un **caso** (`casos/<modulo>/<caso>.json`):
 
 ```jsonc
@@ -91,14 +108,15 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**46 casos, todos verdes** (las dos implementaciones coinciden — sin divergencias). Por dominio:
+**47 casos, todos verdes.** Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
   `add_linea`, `remove_last_unpaid_linea`, `delete_linea_if_unpaid`, `update_nota_detalle`, `restar_stock`,
   `delete_comanda_if_safe`.
 - **Mesas** (MESA-11) — líneas/cocina/cobro: `cobrar_detalles`, `abrir_comanda`, `set_trabajador_if_null`,
   `cerrar_comanda`, `add_linea`, `remove_one_pending_detalle`, `delete_detalle`, `update_detalle_nota`,
-  `kitchen_set_line_state`.
+  `kitchen_set_line_state`, **`save_layout`** (el caso grande: intercambio de nombres entre zonas,
+  zona borrada con mesa libre, zona que sobrevive porque su mesa tiene comanda, y zona/mesa nuevas).
 - **Inventario** (INV-07) — completo: `create_lote`, `create_categoria`, `upsert_producto`, `set_alergenos`,
   `delete_producto`, `update_lote`, `ajustar_lote`.
 - **Clientes** (CLI-05): `crear`, `actualizar`. **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
@@ -111,8 +129,6 @@ comparación, golden) es común y no se toca.
 
 - **No hay segunda implementación**: `pedidos_proveedor` (solo Rust, ausente en el worker) y `stats`
   (solo lectura) — nada que contrastar.
-- **`mesas.save_layout`**: reemplazo multi-sentencia de zonas/mesas con UUIDs generados y reordenado;
-  pendiente (encaja en el harness, pero es un caso grande aparte).
 - **`login.complete_initial_setup`, `login.punch`**: el lado Rust **verifica el PIN** contra el hash
   guardado (PBKDF2), así que el fixture tendría que sembrar un hash válido precomputado. Fuera del
   alcance fácil del harness de efecto.

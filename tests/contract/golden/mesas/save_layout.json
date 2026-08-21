@@ -1,0 +1,77 @@
+{
+  "Mesas": [
+    {
+      "Capacidad": 5,
+      "Height": 75,
+      "Mesa": "T1",
+      "Radius": 12,
+      "Shape": "circle",
+      "Width": 130,
+      "X": 111,
+      "Y": 222,
+      "Zona": "Salon"
+    },
+    {
+      "Capacidad": 2,
+      "Height": 60,
+      "Mesa": "S1",
+      "Radius": 8,
+      "Shape": "rounded",
+      "Width": 100,
+      "X": 21,
+      "Y": 22,
+      "Zona": "Terraza"
+    },
+    {
+      "Capacidad": 4,
+      "Height": 70,
+      "Mesa": "F1",
+      "Radius": null,
+      "Shape": "rect",
+      "Width": 110,
+      "X": 50,
+      "Y": 50,
+      "Zona": "Fumadores"
+    },
+    {
+      "Capacidad": 4,
+      "Height": 70,
+      "Mesa": "T2",
+      "Radius": null,
+      "Shape": "rounded",
+      "Width": 120,
+      "X": 300,
+      "Y": 300,
+      "Zona": "Salon"
+    },
+    {
+      "Capacidad": 3,
+      "Height": 40,
+      "Mesa": "B1",
+      "Radius": null,
+      "Shape": "rect",
+      "Width": 200,
+      "X": 5,
+      "Y": 6,
+      "Zona": "Barra"
+    }
+  ],
+  "Zonas": [
+    {
+      "Nombre_Zona": "Salon",
+      "Room_Points": "[10.0,20.0,30.0]"
+    },
+    {
+      "Nombre_Zona": "Terraza",
+      "Room_Points": "[40.0,50.0]"
+    },
+    {
+      "Nombre_Zona": "Fumadores",
+      "Room_Points": "[3.5,3.5]"
+    },
+    {
+      "Nombre_Zona": "Barra",
+      "Room_Points": "[60.0]"
+    }
+  ]
+}
