@@ -32,6 +32,11 @@ import { captureException } from "../observability/sentry";
 const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
 const PING_MS = 30000;
+// SYNC-17: margen sin `pong` antes de dar el socket por muerto. Un TCP medio-abierto (la ruta se
+// cae sin FIN: cambio de red, NAT que expira, suspensión del equipo) NO dispara `onclose`, así que
+// sin este vigía la Main se queda con un socket que ni recibe cambios ni sube el outbox y nadie se
+// entera. Dos latidos de margen: un `pong` perdido suelto no cierra nada.
+const PONG_TIMEOUT_MS = PING_MS * 2 + 5000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
 // SYNC-13: tope de páginas por ciclo de catch-up (× 500 ops/página = 1M ops). Si se alcanza, el
@@ -116,6 +121,11 @@ export function useMainSocket() {
 		let retryTimer: number | null = null;
 		let pingTimer: number | null = null;
 		let unlistenOutbox: (() => void) | null = null;
+		// Evita dos `open()` concurrentes: ahora la reconexión también la disparan eventos
+		// (`online`/`focus`/`visibilitychange`), que pueden llegar a la vez.
+		let opening = false;
+		// SYNC-17: último `pong` recibido (el DO lo contesta en el edge, sin despertarse).
+		let lastPongAt = 0;
 
 		// Estado de aplicación (compartido entre reconexiones dentro de este efecto).
 		let caughtUp = false;
@@ -300,7 +310,47 @@ export function useMainSocket() {
 			}, delay);
 		};
 
+		// SYNC-17: reconexión inmediata cuando vuelve la red / la app recupera el foco, SOLO si no
+		// estamos ya sanos. Sin esto, un equipo que despierta de suspensión se queda esperando a que
+		// venza un backoff que puede ir por 30 s, con el socket ya muerto. La Handy ya lo hacía.
+		const reconnectNowIfNeeded = () => {
+			if (cancelled || opening) return;
+			if (ws && ws.readyState === WebSocket.CONNECTING) return;
+			// Sano = socket abierto Y autenticado (un WS abierto sin `hello_ok` no sirve de nada).
+			if (ws?.readyState === WebSocket.OPEN && authed) return;
+
+			reconnectDelay = RECONNECT_BASE_MS;
+			if (retryTimer) {
+				window.clearTimeout(retryTimer);
+				retryTimer = null;
+			}
+			// Un WS "abierto" pero sin autenticar puede estar medio-muerto: cerrar para reabrir limpio.
+			if (ws && ws.readyState === WebSocket.OPEN) {
+				try {
+					ws.close();
+				} catch {
+					/* noop */
+				}
+			}
+			ws = null;
+			void open();
+		};
+
+		const onVisibility = () => {
+			if (document.visibilityState === "visible") reconnectNowIfNeeded();
+		};
+
 		async function open() {
+			if (cancelled || opening) return;
+			opening = true;
+			try {
+				await openInner();
+			} finally {
+				opening = false;
+			}
+		}
+
+		async function openInner() {
 			if (cancelled) return;
 
 			const lic = await loadLicense();
@@ -322,11 +372,24 @@ export function useMainSocket() {
 			ws = socket;
 
 			socket.onopen = () => {
+				// El vigía cuenta desde la apertura: si el primer `pong` no llega, también cierra.
+				lastPongAt = Date.now();
 				if (pingTimer) clearInterval(pingTimer);
 				pingTimer = window.setInterval(() => {
-					if (socket.readyState === WebSocket.OPEN) {
-						socket.send(JSON.stringify({ type: "ping" }));
+					if (socket.readyState !== WebSocket.OPEN) return;
+					// SYNC-17: antes de latir, comprobamos que el latido anterior tuvo respuesta. Sin
+					// esto se enviaban `ping` a un socket muerto para siempre (nadie lee el `pong`).
+					// Cerrar dispara `onclose` → backoff → reconexión limpia.
+					if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
+						console.warn("[ws] sin pong en", PONG_TIMEOUT_MS, "ms: socket muerto, cerrando");
+						try {
+							socket.close();
+						} catch {
+							/* noop */
+						}
+						return;
 					}
+					socket.send(JSON.stringify({ type: "ping" }));
 				}, PING_MS);
 			};
 
@@ -338,6 +401,14 @@ export function useMainSocket() {
 					return;
 				}
 				if (!msg || typeof msg.type !== "string") return;
+
+				// SYNC-17: respuesta al latido. La contesta el auto-response del edge sin despertar al
+				// DO (tenantHub.ts), así que llega aunque el hub esté hibernando: es justo lo que la
+				// convierte en una señal fiable de "la ruta hasta la nube sigue viva".
+				if (msg.type === "pong") {
+					lastPongAt = Date.now();
+					return;
+				}
 
 				if (msg.type === "challenge") {
 					try {
@@ -446,9 +517,19 @@ export function useMainSocket() {
 			else unlistenOutbox = un;
 		});
 
+		// SYNC-17: re-disparo de la reconexión cuando vuelve la red o la ventana recupera el foco.
+		// En escritorio importa igual que en móvil: al despertar de suspensión el socket está muerto
+		// y el backoff puede ir por 30 s.
+		document.addEventListener("visibilitychange", onVisibility);
+		window.addEventListener("online", reconnectNowIfNeeded);
+		window.addEventListener("focus", reconnectNowIfNeeded);
+
 		return () => {
 			cancelled = true;
 			authed = false;
+			document.removeEventListener("visibilitychange", onVisibility);
+			window.removeEventListener("online", reconnectNowIfNeeded);
+			window.removeEventListener("focus", reconnectNowIfNeeded);
 			if (unlistenOutbox) unlistenOutbox();
 			if (retryTimer) clearTimeout(retryTimer);
 			if (pingTimer) clearInterval(pingTimer);
