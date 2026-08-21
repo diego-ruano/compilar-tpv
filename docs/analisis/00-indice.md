@@ -79,7 +79,7 @@
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
 | D3 Cuentas | 1 | CUENTA-06 🔵 |
 | D5 Clientes · D7 Proveedores · D10 Configuración · D12 Estadísticas | 1 c/u | CLI-05 · PROV-07 · CONF-06 · STAT-06 (todos 🔵 parity) |
-| T2 Sync | 0 | *(SYNC-17 vive en el [BACKLOG](BACKLOG.md))* |
+| T2 Sync | 0 | — |
 | T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento
@@ -111,6 +111,6 @@ El resto se agrupa en:
 
 ## Dónde está el resto
 
-- **Aplazados con motivo** (incluido SYNC-17 y la deuda transversal): [BACKLOG.md](BACKLOG.md).
+- **Aplazados con motivo** (incluida la deuda transversal): [BACKLOG.md](BACKLOG.md).
 - **Seguridad de red / superficie de ataque:** [auditoria-fable.md](../../auditoria-fable.md).
 - **Sistema de licencias propio:** [PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md).
