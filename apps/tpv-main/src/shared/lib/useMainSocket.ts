@@ -363,11 +363,15 @@ export function useMainSocket() {
 		// SYNC-17: reconexión inmediata cuando vuelve la red / la app recupera el foco, SOLO si no
 		// estamos ya sanos. Sin esto, un equipo que despierta de suspensión se queda esperando a que
 		// venza un backoff que puede ir por 30 s, con el socket ya muerto. La Handy ya lo hacía.
-		const reconnectNowIfNeeded = () => {
+		const reconnectNowIfNeeded = (forzar = false) => {
 			if (cancelled || opening) return;
 			if (ws && ws.readyState === WebSocket.CONNECTING) return;
 			// Sano = socket abierto Y autenticado (un WS abierto sin `hello_ok` no sirve de nada).
 			if (ws?.readyState === WebSocket.OPEN && authed) return;
+			// Un rechazo del worker no lo arregla volver a la ventana: sin esto, cada alt-tab
+			// dispararía otra petición de ticket con la misma licencia bloqueada. Solo el `pulso`
+			// (licencia renovada) tiene derecho a saltarse la espera larga.
+			if (!forzar && useEstadoSync.getState().estado === "rechazado") return;
 
 			reconnectDelay = RECONNECT_BASE_MS;
 			if (retryTimer) {
@@ -386,8 +390,11 @@ export function useMainSocket() {
 			void open();
 		};
 
+		// Envoltorios con nombre: los listeners del DOM reciben el Event como primer argumento, y
+		// pasárselo tal cual a `reconnectNowIfNeeded` lo leería como `forzar = true`.
+		const alVolverLaRed = () => reconnectNowIfNeeded(false);
 		const onVisibility = () => {
-			if (document.visibilityState === "visible") reconnectNowIfNeeded();
+			if (document.visibilityState === "visible") reconnectNowIfNeeded(false);
 		};
 
 		async function open() {
@@ -403,7 +410,17 @@ export function useMainSocket() {
 		async function openInner() {
 			if (cancelled) return;
 
-			marcar("conectando");
+			// "Conectando…" es para el primer intento, no para cada reintento: si ya estamos en un
+			// estado de fallo conocido, se conserva. Si no, "sin conexión desde hace 40 min" se
+			// reiniciaría cada pocos segundos y el usuario nunca sabría cuánto lleva caído.
+			const estadoActual = useEstadoSync.getState().estado;
+			if (
+				estadoActual !== "reintentando" &&
+				estadoActual !== "rechazado" &&
+				estadoActual !== "sin_identidad"
+			) {
+				marcar("conectando");
+			}
 
 			const lic = await loadLicense();
 			const deviceId = await loadDeviceId();
@@ -585,8 +602,8 @@ export function useMainSocket() {
 		// En escritorio importa igual que en móvil: al despertar de suspensión el socket está muerto
 		// y el backoff puede ir por 30 s.
 		document.addEventListener("visibilitychange", onVisibility);
-		window.addEventListener("online", reconnectNowIfNeeded);
-		window.addEventListener("focus", reconnectNowIfNeeded);
+		window.addEventListener("online", alVolverLaRed);
+		window.addEventListener("focus", alVolverLaRed);
 
 		// SYNC-17: `pulso` es "inténtalo ya". Lo sube AppBoot en cuanto el gate de licencia deja
 		// pasar (activación recién hecha, licencia renovada), que es justo cuando `sin_identidad` o
@@ -596,7 +613,7 @@ export function useMainSocket() {
 		const unsubPulso = useEstadoSync.subscribe((s) => {
 			if (s.pulso === ultimoPulso) return;
 			ultimoPulso = s.pulso;
-			reconnectNowIfNeeded();
+			reconnectNowIfNeeded(true);
 		});
 
 		return () => {
@@ -604,8 +621,8 @@ export function useMainSocket() {
 			authed = false;
 			unsubPulso();
 			document.removeEventListener("visibilitychange", onVisibility);
-			window.removeEventListener("online", reconnectNowIfNeeded);
-			window.removeEventListener("focus", reconnectNowIfNeeded);
+			window.removeEventListener("online", alVolverLaRed);
+			window.removeEventListener("focus", alVolverLaRed);
 			if (unlistenOutbox) unlistenOutbox();
 			if (retryTimer) clearTimeout(retryTimer);
 			if (pingTimer) clearInterval(pingTimer);
