@@ -78,9 +78,12 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │
 └── packages/                  # CÓDIGO JS COMPARTIDO
     ├── database/              # migrations/*.sql (esquema ÚNICO; runner Rust include_dir! + worker tenantMigrations.ts)
-    │                          #   Hoy solo 0001_inicial.sql: antes del lanzamiento se consolidaron
-    │                          #   ahí las incrementales 0002..0008. A partir del lanzamiento, todo
-    │                          #   cambio va en una migración NUEVA (editar una publicada rompe el hash).
+    │                          #   0001_inicial.sql consolidó las incrementales previas al lanzamiento;
+    │                          #   a partir de ahí todo cambio va en una migración NUEVA (0002…): el
+    │                          #   runner rechaza una migración ya aplicada cuyo hash cambie. Al añadir
+    │                          #   una, regístrala TAMBIÉN en el worker (tenantMigrations.ts) y en
+    │                          #   test/helpers/esquemaTenant.ts, y toca migrations.rs para que
+    │                          #   include_dir! no sirva la copia vieja.
     ├── contracts/             # @tpv/contracts — tipos autogenerados (src/generated/bindings.ts)
     └── client/                # @tpv/client — invokeClient.ts (envoltura de invoke de Tauri)
 ```
@@ -516,3 +519,41 @@ tras un fallo parcial).
 
 ⚠️ Las escrituras a `_Jobs_State` van por `WriteGuard::raw()`: por `execute()` se capturarían en
 `_Sync_Outbox` y cada tick de cada job se replicaría a la nube.
+
+---
+
+## 11. Tickets e impresión (ESC/POS)
+
+El ticket se genera **en Rust** (`apps/tpv-main/src-tauri/src/printing.rs`) y se envía en crudo a la
+impresora. La vista previa del frontend (`shared/ticket/TicketPaper.tsx`) es un **espejo** de ese
+generador: no imprime, sólo enseña lo que va a salir. Cuando cambies el layout hay que cambiar los
+dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calcularlo por su cuenta.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Generador ESC/POS | `src-tauri/src/printing.rs` | Ancho, columnas, desglose de IVA, logo, corte, cajón |
+| Comandos Tauri | `src-tauri/src/lib.rs` | `printer_print_ticket`, `printer_ticket_cols`, `printer_open_drawer` |
+| Vista previa | `src/shared/ticket/TicketPaper.tsx` | Espejo del generador (mismo truncado, mismo desglose) |
+| Payload | `src/features/configuracion/api/printerApis.ts` | `buildTicketPayload` agrupa líneas por `nombre__precio__iva` |
+| Reimpresión | `src/app/pages/Cuentas.tsx` | Copia marcada (`es_copia`), no genera número nuevo |
+
+### Reglas
+
+- **El ancho manda.** `cols_efectivas()` sale del papel (58/80/112 mm), los márgenes y el
+  `chars_per_line` configurado. Nada se maqueta con anchos fijos: un nombre largo se trunca contra
+  ese ancho, no contra un 42 hardcodeado.
+- **El IVA es por producto** (`Productos.IVA_Percent`, migración 0004). Un mismo ticket puede llevar
+  varios tipos, así que el pie lleva **una línea de base+cuota por tipo**. El `iva_percent` global
+  del payload es sólo el defecto para lo que no lo traiga.
+- **El número de ticket es correlativo y lo asigna la BD** (migración 0005, `siguiente_numero_ticket`
+  con un `UPDATE … Ultimo + 1` relativo, no un `SELECT MAX`). Una reimpresión reusa el número: si
+  saliera uno nuevo, la copia parecería una venta más.
+- **El cajón se abre con la impresora.** El pulso va dentro del propio flujo del ticket (`ESC p`) o
+  suelto (`DLE DC4`, que la impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se
+  registra en `Aperturas_Cajon` (migración 0006) — un cajón que se abre sin venta es el descuadre que
+  hay que poder investigar.
+- **El logo es de un bit.** `rasterizar_logo` reduce al ancho del papel (múltiplo de 8 dots),
+  difumina con Floyd–Steinberg y emite `GS v 0`. Si la imagen no se puede leer devuelve `None` y el
+  ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
+- **Cobrar es cosa de la Main.** El worker rechaza el cobro desde una Handy (`cobro_solo_en_main`),
+  porque el número correlativo y el cajón viven en la Main.
