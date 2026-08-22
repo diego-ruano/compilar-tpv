@@ -168,8 +168,10 @@ export function upsertProducto(input: UpsertProductoInput): BuiltCommand {
 
 export function deleteProducto(idProducto: string): BuiltCommand {
 	const steps = [
-		// Movimientos primero (FK → Lotes): explícito para no depender de ON DELETE CASCADE del
-		// motor (incierto en Turso, DB-03).
+		// DB-03: todo lo que la FK haría sola se hace A MANO. Soltar el enlace de las ventas va
+		// primero (la línea conserva su snapshot y no pierde nada, INV-05); los movimientos, antes
+		// que los lotes por su FK.
+		"UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
 		"DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
 		"DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
 		"DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",

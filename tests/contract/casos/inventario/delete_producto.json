@@ -1,12 +1,14 @@
 {
-  "descripcion": "Borrado de un producto: elimina explícitamente sus movimientos, lotes, alérgenos y el producto (todas las tablas quedan vacías).",
+  "descripcion": "Borrado de un producto YA VENDIDO (INV-05): elimina explícitamente sus movimientos, lotes, alérgenos y el producto, y suelta a mano el enlace de las ventas (DB-03: no se depende del ON DELETE SET NULL del motor, que en Turso no se garantiza). La línea de la venta sobrevive con su snapshot —nombre, precio y tipo de IVA— y solo pierde el ID_Producto.",
   "comando": "inventario.delete_producto",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Vinos');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Rioja');",
     "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 5, 5);",
     "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha) VALUES ('mov-1', 'lote-1', 'ALTA', 5, 5, '2026-01-01 00:00:00');",
-    "INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('prod-1', '00000000-0000-7000-8000-000000000201');"
+    "INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('prod-1', '00000000-0000-7000-8000-000000000201');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent) VALUES ('det-1', 'comanda-1', 'prod-1', 'Rioja', 2, 12.0, 21.0);"
   ],
   "entrada": {
     "id_producto": "prod-1"
@@ -15,6 +17,7 @@
     "Productos": "SELECT ID_Producto FROM Productos",
     "Lotes_Producto": "SELECT ID_Lote FROM Lotes_Producto",
     "Movimientos_Stock": "SELECT ID_Movimiento FROM Movimientos_Stock",
-    "Producto_Alergenos": "SELECT ID_Producto FROM Producto_Alergenos"
+    "Producto_Alergenos": "SELECT ID_Producto FROM Producto_Alergenos",
+    "Detalle_Comanda": "SELECT ID_Detalle, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda"
   }
 }

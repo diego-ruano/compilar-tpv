@@ -490,8 +490,16 @@ impl InventarioRepository for SqliteInventarioRepository {
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
             for sql in [
-                // Movimientos primero (FK → Lotes): explícito para que replique a la nube sin
-                // depender de ON DELETE CASCADE del motor (incierto en Turso, DB-03).
+                // DB-03: todo lo que la FK haría sola se hace A MANO, porque lo que viaja a la nube
+                // son estas sentencias y allí no se garantiza que las acciones referenciales se
+                // apliquen igual. Si la Main confiara en el motor, la nube se quedaría con el
+                // enlace colgando y las dos copias dejarían de decir lo mismo.
+                //
+                // Soltar el enlace de las ventas va PRIMERO: es lo que permite que el DELETE de
+                // abajo no choque. La línea conserva su snapshot (nombre, precio, IVA), así que no
+                // pierde nada al quedarse sin producto (INV-05).
+                "UPDATE Detalle_Comanda SET ID_Producto = NULL WHERE ID_Producto=?1;",
+                // Movimientos antes que lotes (FK → Lotes), por el mismo motivo.
                 "DELETE FROM Movimientos_Stock WHERE ID_Lote IN (SELECT ID_Lote FROM Lotes_Producto WHERE ID_Producto=?1);",
                 "DELETE FROM Lotes_Producto WHERE ID_Producto=?1;",
                 "DELETE FROM Producto_Alergenos WHERE ID_Producto=?1;",
