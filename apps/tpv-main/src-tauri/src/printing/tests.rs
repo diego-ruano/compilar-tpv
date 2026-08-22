@@ -405,7 +405,7 @@ mod tests_logo {
     #[test]
     fn el_ancho_nunca_supera_el_papel() {
         // 32 columnas (58 mm) = 384 dots = 48 bytes por fila.
-        let b = rasterizar_logo(&png_1x1(), ancho_dots(32)).unwrap();
+        let b = rasterizar_logo(&png_1x1(), ancho_logo_dots(58, 0.0, 0.0)).unwrap();
         let bytes_fila = b[4] as usize | ((b[5] as usize) << 8);
 
         assert!(bytes_fila * 8 <= 384, "se saldría del papel");
@@ -1450,5 +1450,104 @@ mod tests_logo_imagen {
 
         assert!(super::fixtures::contiene(&bytes, "Cafe"), "el texto sigue detrás del logo");
         super::parser::trocear(&bytes).expect("el trabajo sigue siendo ESC/POS válido");
+    }
+}
+
+#[cfg(test)]
+mod tests_ancho_del_logo {
+    //! Cuánto papel puede ocupar el logo.
+    //!
+    //! Salía de las columnas de texto efectivas, así que bajar `chars_per_line` —una opción sobre
+    //! la densidad de las LETRAS— encogía el logo. Quien pide 20 caracteres por línea quiere el
+    //! texto más grande, no un logo del tercio del papel.
+
+    use super::fixtures::*;
+    use super::*;
+
+    #[test]
+    fn cada_formato_usa_su_cabezal_entero() {
+        assert_eq!(ancho_logo_dots(58, 0.0, 0.0), 384);
+        assert_eq!(ancho_logo_dots(80, 0.0, 0.0), 576);
+        assert_eq!(ancho_logo_dots(112, 0.0, 0.0), 768);
+    }
+
+    #[test]
+    fn no_depende_de_los_caracteres_por_linea() {
+        // La comprobación que motiva el cambio: el mismo papel, con el texto apretado o suelto,
+        // da el mismo logo.
+        for cpl in [20u32, 32, 42, 60, 80] {
+            let mut p = base(vec![linea()]);
+            p.show_logo = true;
+            p.chars_per_line = cpl;
+
+            assert_eq!(
+                ancho_logo_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm),
+                576,
+                "con {cpl} caracteres por línea"
+            );
+        }
+    }
+
+    #[test]
+    fn los_margenes_si_lo_encogen() {
+        // Un margen es papel que no se puede marcar: ahí el logo tampoco cabe.
+        let sin = ancho_logo_dots(80, 0.0, 0.0);
+        let con = ancho_logo_dots(80, 5.0, 5.0);
+
+        assert!(con < sin, "{con} debería ser menor que {sin}");
+        // 10 mm de 72 útiles son ~14 %: 576 → ~496.
+        assert!((488..=504).contains(&con), "{con}");
+    }
+
+    #[test]
+    fn los_margenes_negativos_se_ignoran() {
+        assert_eq!(ancho_logo_dots(80, -5.0, -5.0), 576);
+    }
+
+    #[test]
+    fn unos_margenes_absurdos_no_dejan_el_logo_en_cero() {
+        // Un ancho de 0 daría una trama vacía y una cabecera que declara 0 filas: la impresora se
+        // queda esperando bytes que no llegan.
+        let a = ancho_logo_dots(80, 200.0, 200.0);
+
+        assert!(a >= 8, "{a}");
+        assert_eq!(a % 8, 0);
+    }
+
+    #[test]
+    fn siempre_es_multiplo_de_ocho() {
+        for mm in [58u32, 80, 112] {
+            for margen in [0.0f64, 1.0, 2.5, 7.3, 13.7] {
+                let a = ancho_logo_dots(mm, margen, margen / 2.0);
+                assert_eq!(a % 8, 0, "{mm} mm con {margen} mm de margen dio {a}");
+            }
+        }
+    }
+
+    #[test]
+    fn el_logo_impreso_ocupa_ese_ancho_y_no_el_de_las_columnas() {
+        // De punta a punta: el bloque que acaba en el ticket declara el ancho del cabezal aunque
+        // el texto vaya a 20 columnas.
+        use image::{ImageBuffer, Rgba};
+
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_fn(800, 200, |_, _| Rgba([0, 0, 0, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let png = png.into_inner();
+
+        let mut p = base(vec![linea()]);
+        p.show_logo = true;
+        p.chars_per_line = 20;
+        let bytes = build_ticket(&p, Some(&png));
+
+        // Se busca la cabecera de imagen y se lee el ancho que declara.
+        let i = bytes
+            .windows(4)
+            .position(|w| w == [0x1D, 0x76, 0x30, 0x00])
+            .expect("el logo tiene que estar");
+        let bytes_fila = bytes[i + 4] as usize | ((bytes[i + 5] as usize) << 8);
+
+        assert_eq!(bytes_fila * 8, 576, "el logo se ha encogido con el texto");
     }
 }

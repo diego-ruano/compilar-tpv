@@ -124,11 +124,14 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
             <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
                 <div style={{ textAlign: "center" }}>
                     {showHeaderLogo ? (
+                        // El logo impreso ocupa el ancho del cabezal menos los márgenes (ver
+                        // `ancho_logo_dots` en printing.rs), no una fracción del bloque de texto:
+                        // enseñarlo al 70 % hacía creer que sale más pequeño de lo que sale.
                         <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
                             <img
                                 src={logoSrc}
                                 alt="logo"
-                                style={{ maxHeight: 48, maxWidth: "70%", objectFit: "contain" }}
+                                style={{ maxHeight: 48, maxWidth: "100%", objectFit: "contain" }}
                             />
                         </div>
                     ) : null}

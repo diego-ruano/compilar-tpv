@@ -794,3 +794,146 @@ async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests_borrado_de_producto {
+    //! INV-05: qué pasa al borrar un producto del catálogo.
+    //!
+    //! El borrado es físico, y `Detalle_Comanda` tiene una FK a `Productos`. Sin la comprobación
+    //! previa, borrar un producto con ventas revienta con el error crudo del motor ("FOREIGN KEY
+    //! constraint failed") a mitad de una transacción: el usuario ve un error de base de datos
+    //! donde debería leer por qué no puede hacerlo.
+    //!
+    //! La comprobación es fácil de perder de vista —está lejos del `DELETE` que protege—, así que
+    //! aquí queda fijada.
+
+    use super::*;
+    use crate::db::Db;
+    use libsql::Connection;
+    use tpv_application::ports::inventario::InventarioRepository;
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_borrado_producto_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    const CATALOGO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('vendido', 'cat', 'Cafe', 1.3);",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('nuevo', 'cat', 'Te', 1.5);",
+    ];
+
+    const UNA_VENTA: &[&str] = &[
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'vendido', 1, 1.3);",
+    ];
+
+    async fn existe(db: &Arc<Db>, id: &str) -> bool {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT 1 FROM Productos WHERE ID_Producto = ?1;",
+                vec![Value::Text(id.to_string())],
+            )
+            .await
+            .unwrap();
+        rows.next().await.unwrap().is_some()
+    }
+
+    #[tokio::test]
+    async fn un_producto_sin_ventas_se_borra() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("nuevo").await.unwrap();
+
+        assert!(!existe(&db, "nuevo").await);
+    }
+
+    #[tokio::test]
+    async fn un_producto_con_ventas_se_rechaza_con_un_motivo_legible() {
+        // Lo que no puede salir es "FOREIGN KEY constraint failed": el usuario está en la ficha de
+        // un producto y lo que necesita saber es que tiene ventas detrás.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_VENTA).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        let err = repo.delete_producto("vendido").await.unwrap_err();
+        let motivo = err.to_string();
+
+        assert!(
+            matches!(err, AppError::Validation(_)),
+            "no es un fallo de base de datos, es una regla: {err:?}"
+        );
+        assert!(
+            motivo.to_lowercase().contains("ventas"),
+            "el motivo tiene que hablar de ventas, y dice: {motivo}"
+        );
+        assert!(
+            !motivo.to_uppercase().contains("FOREIGN KEY"),
+            "se ha escapado el error del motor: {motivo}"
+        );
+    }
+
+    #[tokio::test]
+    async fn el_producto_rechazado_sigue_entero() {
+        // El borrado va en varios pasos (movimientos, lotes, alérgenos, producto). Si la
+        // comprobación llegara tarde, el producto se quedaría a medio borrar: sin sus lotes, pero
+        // todavía en el catálogo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_VENTA).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
+                 VALUES ('lote', 'vendido', 'L-1', 10, 10);"],
+        )
+        .await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        let _ = repo.delete_producto("vendido").await;
+
+        assert!(existe(&db, "vendido").await, "el producto ha desaparecido");
+        let r = db.read().await;
+        let mut rows = r
+            .query("SELECT 1 FROM Lotes_Producto WHERE ID_Producto='vendido';", Vec::<Value>::new())
+            .await
+            .unwrap();
+        assert!(rows.next().await.unwrap().is_some(), "se ha llevado los lotes por delante");
+    }
+
+    #[tokio::test]
+    async fn borrar_uno_no_toca_al_de_al_lado() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("nuevo").await.unwrap();
+
+        assert!(existe(&db, "vendido").await);
+    }
+}

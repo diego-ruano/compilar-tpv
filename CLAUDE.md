@@ -553,8 +553,12 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   registra en `Aperturas_Cajon` (migración 0006) — un cajón que se abre sin venta es el descuadre que
   hay que poder investigar.
 - **El logo es de un bit.** `rasterizar_logo` reduce al ancho del papel (múltiplo de 8 dots),
-  difumina con Floyd–Steinberg y emite `GS v 0`. Si la imagen no se puede leer devuelve `None` y el
-  ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
+  difumina con Floyd–Steinberg y emite `GS v 0`. La transparencia se compone sobre blanco antes de
+  nada (un PNG de fondo transparente salía como un rectángulo negro). Si la imagen no se puede leer
+  devuelve `None` y el ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
+- **El ancho del logo sale del papel, no del texto.** `ancho_logo_dots` parte del cabezal del
+  formato y descuenta los márgenes; `chars_per_line` no entra. Esa opción es la densidad de las
+  LETRAS: quien la baja a 20 quiere el texto más grande, no un logo del tercio del papel.
 - **Cobrar es cosa de la Main.** El worker rechaza el cobro desde una Handy (`cobro_solo_en_main`),
   porque el número correlativo y el cajón viven en la Main.
 - **Base + IVA tienen que dar el total.** Se redondea la base y la cuota es **lo que falta**: si se

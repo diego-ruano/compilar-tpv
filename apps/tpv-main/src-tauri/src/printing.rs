@@ -451,9 +451,24 @@ fn desglose_iva(p: &PrintTicketPayload) -> Vec<(f64, f64, f64)> {
         .collect()
 }
 
-/// Ancho imprimible en dots, derivado de las columnas (12 dots por carácter en fuente A).
-fn ancho_dots(cols: usize) -> u32 {
-    (cols as u32) * 12
+/// Puntos de ancho que puede ocupar el logo: los del cabezal del formato, menos lo que se coman
+/// los márgenes.
+///
+/// **No depende de `chars_per_line`.** Esa opción es la densidad del TEXTO: alguien que la baja a
+/// 20 quiere las letras más grandes, no un logo del tercio del papel. Se calculaba desde las
+/// columnas efectivas y el logo encogía con ellas.
+///
+/// Los márgenes se descuentan por proporción sobre el ancho útil, igual que en [`cols_efectivas`]:
+/// así el resultado no depende del DPI ni de cuántos puntos ocupe un carácter en cada modelo.
+fn ancho_logo_dots(paper_width_mm: u32, margin_left_mm: f64, margin_right_mm: f64) -> u32 {
+    let cabezal = (cols_for(paper_width_mm) as u32) * 12;
+
+    let margen_mm = margin_left_mm.max(0.0) + margin_right_mm.max(0.0);
+    let fraccion = (margen_mm / printable_mm(paper_width_mm)).clamp(0.0, 0.9);
+    let ancho = (cabezal as f64 * (1.0 - fraccion)).round() as u32;
+
+    // Múltiplo de 8: cada byte de la trama son 8 puntos horizontales.
+    ancho.max(8) & !7
 }
 
 /// Convierte una imagen a un bloque ESC/POS `GS v 0` listo para imprimir.
@@ -566,7 +581,8 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     // ── Cabecera (centrada) ──
     esc_align(&mut out, 1);
     if p.show_logo {
-        if let Some(bloque) = logo.and_then(|b| rasterizar_logo(b, ancho_dots(cols))) {
+        let ancho_logo = ancho_logo_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm);
+        if let Some(bloque) = logo.and_then(|b| rasterizar_logo(b, ancho_logo)) {
             out.extend_from_slice(&bloque);
             esc_feed(&mut out, 1);
         }
