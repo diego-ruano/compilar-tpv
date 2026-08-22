@@ -108,8 +108,13 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
      * Los precios llevan el IVA incluido, así que la base se saca dividiendo, y se calcula POR
      * LÍNEA y luego se suma: aplicar un solo tipo al total de un ticket que mezcla dos da un
      * desglose que no cuadra con lo cobrado.
+     *
+     * La cuota no se redondea: se despeja como `total - base`. Redondear las dos por separado
+     * hace que a veces suban las dos y el papel diga `0,38 + 0,02 = 0,39` (0,39 € al 4 % es el
+     * primer caso). Rust hace exactamente lo mismo; si esto cambia, cambia allí.
      */
     const tramosIva = useMemo(() => {
+        const aCentimos = (n: number) => Math.round(n * 100) / 100;
         const porTipo = new Map<number, number>();
         for (const g of grouped) {
             const tipo = g.ivaPercent ?? ivaPercent ?? 0;
@@ -117,10 +122,11 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
         }
         return Array.from(porTipo.entries())
             .sort((a, b) => a[0] - b[0])
-            .map(([tipo, totalTramo]) => {
+            .map(([tipo, bruto]) => {
+                const totalTramo = aCentimos(bruto);
                 const divisor = 1 + tipo / 100;
-                const base = divisor === 0 ? totalTramo : totalTramo / divisor;
-                return { tipo, base, iva: totalTramo - base };
+                const base = divisor === 0 ? totalTramo : aCentimos(totalTramo / divisor);
+                return { tipo, base, iva: aCentimos(totalTramo - base) };
             });
     }, [grouped, ivaPercent]);
 
