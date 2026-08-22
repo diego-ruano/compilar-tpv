@@ -10,6 +10,7 @@ import type { MesaMeta } from "./types";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
 import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
+import type { DatosDelTicket } from "../configuracion/api/printerApis";
 import { useMode } from "../../shared/stores/useMode";
 
 import {
@@ -449,6 +450,9 @@ export default function MesaComandaModal({
     const [paso, setPaso] = useState<Paso>("categorias");
     const [cashCount, setCashCount] = useState<Record<string, number>>({});
     const [printOpen, setPrintOpen] = useState(false);
+    // Qué papel se imprime. Vacío = PRECUENTA (aún no se ha cobrado); tras el cobro se rellena con
+    // el número que devuelve, y entonces sale un ticket de venta.
+    const [datosTicket, setDatosTicket] = useState<DatosDelTicket | undefined>(undefined);
     // Cobrar es cosa de la Main: es la que tiene impresora y cajón. Cerrar una mesa desde un Handy
     // dejaría al cliente sin ticket y el dinero sin registrar. El servidor también lo rechaza;
     // esto evita que se llegue a intentar.
@@ -802,7 +806,7 @@ export default function MesaComandaModal({
                 operador,
             });
 
-            await mesasCobrarDetalles({
+            const numeroTicket = await mesasCobrarDetalles({
                 idComanda,
                 metodo: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
                 tipo:
@@ -811,6 +815,14 @@ export default function MesaComandaModal({
                         : "FRACCIONADO",
                 detalleIds: ids,
                 idUsuario: operador,
+            });
+
+            // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta
+            // numerado en vez de una precuenta.
+            setDatosTicket({
+                numeroTicket: numeroTicket || null,
+                metodoPago: metodo === "tarjeta" ? "Tarjeta" : "Efectivo",
+                origen: mesaNombre ? `Mesa ${mesaNombre}` : null,
             });
 
             const t = await loadTicketForComanda(idComanda);
@@ -932,6 +944,7 @@ export default function MesaComandaModal({
                 open={printOpen}
                 onClose={() => setPrintOpen(false)}
                 items={ticket}
+                datos={datosTicket}
             />
             <NotaLineaModal
                 open={openNota}

@@ -678,9 +678,9 @@ impl MesasRepository for SqliteMesasRepository {
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
@@ -861,9 +861,9 @@ impl MesasRepository for SqliteMesasRepository {
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
@@ -1179,16 +1179,17 @@ impl MesasRepository for SqliteMesasRepository {
         .await
     }
 
-    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()> {
+    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
 
         if data.items.is_empty() {
-            return Ok(());
+            // Sin líneas no hay venta: tampoco ticket ni número.
+            return Ok(String::new());
         }
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<String> = async {
             let id_trabajador_cobrador = match data.id_trabajador_cobrador.clone() {
                 Some(s) if !s.trim().is_empty() => Some(s),
                 _ => trabajador_id_from_usuario(db, data.id_usuario_cobrador.clone()).await?,
@@ -1334,14 +1335,14 @@ impl MesasRepository for SqliteMesasRepository {
                 .map_err(db_err)?;
             }
 
-            Ok(())
+            Ok(numero_ticket)
         }
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
@@ -1809,9 +1810,9 @@ impl MesasRepository for SqliteMesasRepository {
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
@@ -1856,9 +1857,9 @@ impl MesasRepository for SqliteMesasRepository {
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;
@@ -1889,13 +1890,13 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(())
     }
 
-    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<()> {
+    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
         let ids = data.detalle_ids.clone();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<()> = async {
+        let res: AppResult<String> = async {
             let id_trabajador_cobrador = resolve_trabajador_id_input(db, data.id_usuario.clone()).await?;
 
             let in_sql = build_in_placeholders(2, ids.len());
@@ -2099,14 +2100,14 @@ impl MesasRepository for SqliteMesasRepository {
                     .await
                     .map_err(db_err)?;
             }
-            Ok(())
+            Ok(numero_ticket)
         }
         .await;
 
         match res {
-            Ok(()) => {
+            Ok(numero) => {
                 db.execute_batch("COMMIT;").await.map_err(db_err)?;
-                Ok(())
+                Ok(numero)
             }
             Err(e) => {
                 let _ = db.execute_batch("ROLLBACK;").await;

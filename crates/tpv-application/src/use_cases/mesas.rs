@@ -155,7 +155,7 @@ pub async fn get_or_create_comanda_barra(
 pub async fn cobrar_venta_rapida(
     repo: &dyn MesasRepository,
     input: MesasCobrarVentaRapidaInput,
-) -> AppResult<()> {
+) -> AppResult<String> {
     let items: Vec<(String, f64)> = input
         .items
         .into_iter()
@@ -264,7 +264,7 @@ pub async fn update_detalle_nota(
 pub async fn cobrar_detalles(
     repo: &dyn MesasRepository,
     input: MesasCobrarDetallesInput,
-) -> AppResult<()> {
+) -> AppResult<String> {
     let mut ids: Vec<String> = input
         .detalle_ids
         .into_iter()
@@ -275,7 +275,8 @@ pub async fn cobrar_detalles(
     ids.dedup();
 
     if input.id_comanda.trim().is_empty() || ids.is_empty() {
-        return Ok(());
+        // No hay nada que cobrar: tampoco hay ticket, así que no hay número que devolver.
+        return Ok(String::new());
     }
 
     let metodo = requerido(&input.metodo, "metodo").map_err(AppError::validation)?;

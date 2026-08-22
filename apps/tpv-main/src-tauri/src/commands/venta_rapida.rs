@@ -128,8 +128,9 @@ pub async fn vr_update_nota_detalle(
 pub async fn vr_cobrar_fraccionado(
     state: State<'_, AppState>,
     args: VrCobrarFraccionadoInput,
-) -> Result<bool, AppErrorDto> {
+) -> Result<String, AppErrorDto> {
     let repo = state.venta_rapida_repo().await?;
+    // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
     Ok(uc::cobrar_fraccionado(repo.as_ref(), args).await?)
 }
 

@@ -44,7 +44,10 @@ pub trait MesasRepository: Send + Sync {
     /* Barra */
     async fn get_or_create_comanda_barra(&self, id_trabajador: Option<String>)
         -> AppResult<String>;
-    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<()>;
+    /// Devuelve el **número de ticket** que ha reservado el cobro. Lo necesita quien imprime: sin
+    /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
+    /// es lo que permite que una reimpresión saque el mismo.
+    async fn cobrar_venta_rapida(&self, data: CobroVentaRapida) -> AppResult<String>;
     async fn create_comanda_barra(&self, id_trabajador: Option<String>) -> AppResult<String>;
     async fn list_comandas_barra(
         &self,
@@ -70,7 +73,10 @@ pub trait MesasRepository: Send + Sync {
     ) -> AppResult<()>;
     async fn delete_detalle(&self, id_detalle: &str) -> AppResult<()>;
     async fn update_detalle_nota(&self, id_detalle: &str, nota: Option<String>) -> AppResult<()>;
-    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<()>;
+    /// Devuelve el **número de ticket** que ha reservado el cobro. Lo necesita quien imprime: sin
+    /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
+    /// es lo que permite que una reimpresión saque el mismo.
+    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String>;
 
     /* Cocina */
     async fn kitchen_list_today_pending(&self) -> AppResult<Vec<KitchenRow>>;

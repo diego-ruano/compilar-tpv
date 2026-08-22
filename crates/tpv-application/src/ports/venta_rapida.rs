@@ -54,7 +54,10 @@ pub trait VentaRapidaRepository: Send + Sync {
     /// Actualiza la nota de un detalle. Error si no existe.
     async fn update_nota_detalle(&self, id_detalle: &str, nota: Option<String>) -> AppResult<bool>;
     /// Cobro fraccionado: descuenta stock FEFO + traza consumos en la misma transacción.
-    async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool>;
+    /// Devuelve el **número de ticket** que ha reservado el cobro. Lo necesita quien imprime: sin
+    /// él, el papel saldría sin número o habría que volver a consultarlo. Y guardarlo con el pago
+    /// es lo que permite que una reimpresión saque el mismo.
+    async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String>;
     /// Resta stock (FEFO) de las líneas dadas (sin trazabilidad por detalle).
     async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool>;
     /// Borra una comanda si no tiene líneas pagadas. Error si tiene pagos o no existe.

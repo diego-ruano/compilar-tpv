@@ -760,7 +760,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         Ok(true)
     }
 
-    async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool> {
+    async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
 
@@ -783,7 +783,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let detalles = data.detalles.clone();
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
+        let res: AppResult<String> = async {
             if let Some(idt) = id_trabajador_cobrador.clone() {
                 db.execute(
                     r#"
@@ -1076,7 +1076,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 .map_err(db_err)?;
             }
 
-            Ok(true)
+            Ok(numero_ticket.clone())
         }
         .await;
 

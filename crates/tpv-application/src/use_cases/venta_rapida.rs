@@ -166,7 +166,7 @@ pub async fn update_nota_detalle(
 pub async fn cobrar_fraccionado(
     repo: &dyn VentaRapidaRepository,
     input: VrCobrarFraccionadoInput,
-) -> AppResult<bool> {
+) -> AppResult<String> {
     if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda invalid"));
     }
@@ -270,7 +270,7 @@ mod tests {
         async fn remove_last_unpaid_linea(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn delete_linea_if_unpaid(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn update_nota_detalle(&self, _: &str, _: Option<String>) -> AppResult<bool> { panic!("no usado") }
-        async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<bool> { self.cobros.lock().unwrap().push(data); Ok(true) }
+        async fn cobrar_fraccionado(&self, data: CobroFraccionado) -> AppResult<String> { self.cobros.lock().unwrap().push(data); Ok("T-000001".into()) }
         async fn restar_stock(&self, lineas: Vec<StockLinea>) -> AppResult<bool> { self.stock.lock().unwrap().push(lineas); Ok(true) }
         async fn delete_comanda_if_safe(&self, _: &str) -> AppResult<bool> { panic!("no usado") }
     }
@@ -338,7 +338,8 @@ mod tests {
             id_usuario_cobrador: Some(" usuario-1 ".into()), id_trabajador_cobrador: Some(" ".into()),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
         };
-        assert!(cobrar_fraccionado(&repo, input).await.unwrap());
+        // Devuelve el número de ticket del cobro, que es lo que el POS imprime a continuación.
+        assert_eq!(cobrar_fraccionado(&repo, input).await.unwrap(), "T-000001");
         let calls = repo.cobros.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].metodo, "Tarjeta");

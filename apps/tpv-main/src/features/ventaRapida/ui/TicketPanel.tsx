@@ -12,6 +12,7 @@ import { Paso, TicketItem } from "../types";
 import { cn } from "../utils";
 import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
+import type { DatosDelTicket } from "../../configuracion/api/printerApis";
 
 export default function TicketPanel({
   ticket,
@@ -27,6 +28,7 @@ export default function TicketPanel({
   onEliminarLinea,
 
   onCobrarTarjeta,
+  datosTicket,
   onStartEfectivo,
   onCancelarCobro,
 
@@ -47,6 +49,11 @@ export default function TicketPanel({
   onEliminarLinea: (id: string) => void;
 
   onCobrarTarjeta: () => void | Promise<void>;
+  /**
+   * Qué papel se imprime. Ausente = PRECUENTA (aún no se ha cobrado); tras el cobro llega con el
+   * número que devolvió, y entonces sale un ticket de venta.
+   */
+  datosTicket?: DatosDelTicket;
   onStartEfectivo: () => void;
   onCancelarCobro: () => void;
 
@@ -545,7 +552,12 @@ export default function TicketPanel({
         </div>
       ) : null}
 
-      <PrintTicketModal open={printOpen} onClose={() => setPrintOpen(false)} items={ticket} />
+      <PrintTicketModal
+        open={printOpen}
+        onClose={() => setPrintOpen(false)}
+        items={ticket}
+        datos={datosTicket}
+      />
     </div>
   );
 }

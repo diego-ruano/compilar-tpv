@@ -443,7 +443,8 @@ export async function mesasCobrarDetalles(params: {
     tipo: "TOTAL" | "FRACCIONADO";
     detalleIds: string[];
     idUsuario: string | null;
-}): Promise<void> {
+    /** Devuelve el número de ticket del cobro (cadena vacía si no había nada que cobrar). */
+}): Promise<string> {
     const idComanda = toId(params.idComanda);
     const detalleIds = (params.detalleIds ?? [])
         .map((x) => toId(x))
@@ -452,9 +453,9 @@ export async function mesasCobrarDetalles(params: {
     const idUsuario =
         params.idUsuario != null ? toId(params.idUsuario) || null : null;
 
-    if (!idComanda || !detalleIds.length) return;
+    if (!idComanda || !detalleIds.length) return "";
 
-    await invokeClient<string>("cobrar_detalles", {
+    return await invokeClient<string>("cobrar_detalles", {
         args: {
             id_comanda: idComanda,
             metodo: params.metodo,

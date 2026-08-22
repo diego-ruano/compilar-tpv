@@ -131,8 +131,8 @@ pub async fn cobrar_venta_rapida(
     args: MesasCobrarVentaRapidaInput,
 ) -> Result<String, AppErrorDto> {
     let repo = state.mesas_repo().await?;
-    uc::cobrar_venta_rapida(repo.as_ref(), args).await?;
-    Ok("OK".to_string())
+    // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
+    Ok(uc::cobrar_venta_rapida(repo.as_ref(), args).await?)
 }
 
 #[tauri::command]
@@ -236,8 +236,8 @@ pub async fn cobrar_detalles(
     args: MesasCobrarDetallesInput,
 ) -> Result<String, AppErrorDto> {
     let repo = state.mesas_repo().await?;
-    uc::cobrar_detalles(repo.as_ref(), args).await?;
-    Ok("OK".to_string())
+    // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
+    Ok(uc::cobrar_detalles(repo.as_ref(), args).await?)
 }
 
 /* ===== COCINA ===== */

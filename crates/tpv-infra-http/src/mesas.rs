@@ -137,7 +137,7 @@ impl MesasRepository for HttpMesasRepository {
         Err(barra_no_disponible("get_or_create_comanda_barra"))
     }
 
-    async fn cobrar_venta_rapida(&self, _data: CobroVentaRapida) -> AppResult<()> {
+    async fn cobrar_venta_rapida(&self, _data: CobroVentaRapida) -> AppResult<String> {
         Err(barra_no_disponible("cobrar_venta_rapida"))
     }
 
@@ -214,7 +214,10 @@ impl MesasRepository for HttpMesasRepository {
         Ok(())
     }
 
-    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<()> {
+    /// El worker rechaza el cobro desde un Handy (solo cobra la Main, que es la que tiene
+    /// impresora y cajón), así que esta llamada devuelve 403 y nunca llega a un número. Se
+    /// mantiene el camino por si algún día se retoma.
+    async fn cobrar_detalles(&self, data: CobroDetalles) -> AppResult<String> {
         let body = json!({
             "id_comanda": data.id_comanda,
             "metodo": data.metodo,
@@ -223,7 +226,7 @@ impl MesasRepository for HttpMesasRepository {
             "id_usuario": data.id_usuario,
         });
         let _: JsonValue = self.client.post_json("/v1/mesas/cobrar-detalles", &body).await?;
-        Ok(())
+        Ok(String::new())
     }
 
     /* Cocina */

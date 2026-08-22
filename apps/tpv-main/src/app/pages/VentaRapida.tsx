@@ -13,6 +13,7 @@ import AddProductModal from "../../features/ventaRapida/ui/AddProductModal";
 import CatalogGrid from "../../features/ventaRapida/ui/CatalogGrid";
 import CashPanel from "../../features/ventaRapida/ui/CashPanel";
 import TicketPanel from "../../features/ventaRapida/ui/TicketPanel";
+import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
 import VerTicketsModal from "../../features/ventaRapida/ui/VerTicketsModal";
 
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
@@ -260,6 +261,9 @@ export default function VentaRapida() {
   const ticketRef = useRef<TicketItem[]>([]);
 
   const [paso, setPaso] = useState<Paso>("categorias");
+  // Qué papel se imprime. Vacío = PRECUENTA (aún no se ha cobrado); tras el cobro se rellena con
+  // el número que devuelve, y entonces sale un ticket de venta.
+  const [datosTicket, setDatosTicket] = useState<DatosDelTicket | undefined>(undefined);
   const [cashCount, setCashCount] = useState<Record<string, number>>({});
   const [openAddProduct, setOpenAddProduct] = useState(false);
 
@@ -984,6 +988,16 @@ export default function VentaRapida() {
             detalles: detallesUsados,
             opId: intent.opIdCobro,
           });
+
+          if (pago?.numeroTicket) {
+            // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta
+            // numerado en vez de una precuenta.
+            setDatosTicket({
+              numeroTicket: pago.numeroTicket,
+              metodoPago: metodoDb === "Tarjeta" ? "Tarjeta" : "Efectivo",
+              origen: "Barra",
+            });
+          }
 
           if (pago?.error === "insufficient_stock") {
             // No se creó el pago: revertimos el marcado optimista de cobrado.
@@ -1944,6 +1958,7 @@ export default function VentaRapida() {
 
         <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-border bg-surface">
           <TicketPanel
+            datosTicket={datosTicket}
             ticket={ticketForPanel}
             paso={paso}
             totalPendiente={totalPendiente}

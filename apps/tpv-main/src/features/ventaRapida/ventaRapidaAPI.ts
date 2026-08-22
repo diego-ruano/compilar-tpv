@@ -91,6 +91,8 @@ export type VrAddLineaComandaResult = {
 export type VrCobrarFraccionadoResult = {
     ok: boolean;
     idPago: string | null;
+    /** Número de ticket que reservó el cobro; es lo que se imprime a continuación. */
+    numeroTicket?: string | null;
 
     /**
      * Presente cuando el cobro falla por stock insuficiente.
@@ -355,7 +357,7 @@ export async function vrCobrarFraccionado(argsInput: {
     opId?: string;
 }): Promise<VrCobrarFraccionadoResult> {
     try {
-        const ok = await invokeClient<boolean>("vr_cobrar_fraccionado", {
+        const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", {
             args: {
                 id_comanda: argsInput.idComanda,
                 metodo: argsInput.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
@@ -373,8 +375,9 @@ export async function vrCobrarFraccionado(argsInput: {
         });
 
         return {
-            ok: !!ok,
+            ok: true,
             idPago: null,
+            numeroTicket: numeroTicket || null,
         };
     } catch (e) {
         /*
