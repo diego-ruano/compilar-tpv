@@ -557,3 +557,17 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
 - **Cobrar es cosa de la Main.** El worker rechaza el cobro desde una Handy (`cobro_solo_en_main`),
   porque el número correlativo y el cajón viven en la Main.
+- **Base + IVA tienen que dar el total.** Se redondea la base y la cuota es **lo que falta**: si se
+  redondean por separado, a veces suben las dos y el papel dice `0,38 + 0,02 = 0,39` (0,39 € al 4 %
+  es el primer caso). Un ticket cuya base más su IVA no dan el total es un documento mal emitido.
+- **Un carácter, un byte.** El maquetado cuenta columnas, así que `encode_cp858` mapea uno a uno y
+  lo que no está en la tabla cae a `?`. Los bytes de control se convierten en espacio: el nombre de
+  un producto lo escribe el usuario, y un `ESC` ahí lo leería la impresora como un comando.
+- **La vista previa es un espejo, y se prueba como tal.** Las cuentas comunes viven en
+  `shared/ticket/ticketMath.ts` (fuera del componente, para poder probarlas sin React) y hay un
+  golden con los mismos importes duplicado a propósito en los dos lados: `printing/tests.rs` y
+  `test/ticketMath.test.ts`. Si tocas el redondeo de uno, el otro falla.
+
+Los tests del generador están en `src-tauri/src/printing/tests.rs`, e incluyen un mini-intérprete
+ESC/POS: separa texto de comandos y **falla si encuentra un byte que no es ninguna de las dos
+cosas**, que es la única forma de comprobar el trabajo de impresión sin una impresora delante.
