@@ -7,7 +7,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
-use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto};
+use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::CloudClient;
@@ -123,6 +123,15 @@ impl CuentasRepository for HttpCuentasRepository {
             .put_json(&format!("/v1/cuentas/pagos/{id_pago}"), &body)
             .await?;
         Ok(true)
+    }
+
+    /// Reimprimir es cosa de la Main: es la que tiene la impresora, y solo ella cobra. No hay
+    /// endpoint en el worker para esto.
+    async fn ticket_para_reimprimir(
+        &self,
+        _id_pago: &str,
+    ) -> AppResult<Option<TicketReimpresionDto>> {
+        Ok(None)
     }
 
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {

@@ -1727,6 +1727,7 @@ pub fn run() {
             commands::cuentas::cuentas_delete_gasto,
             commands::cuentas::cuentas_update_pago,
             commands::cuentas::cuentas_delete_pago,
+            commands::cuentas::cuentas_ticket_para_reimprimir,
             // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
             commands::clientes::clientes_get_overview,
             commands::clientes::clientes_get_cliente_form,

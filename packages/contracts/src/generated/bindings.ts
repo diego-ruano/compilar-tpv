@@ -247,13 +247,30 @@ expires_at_ms: number | null,
  */
 plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
-export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
+export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, 
+/**
+ * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
+ */
+IVA_Percent?: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 
 export type LineaEmailInput = { nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
 
 export type LineaPedidoDto = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario: number | null, unidad: string | null, };
 
 export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
+
+/**
+ * Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
+ */
+export type LineaTicketDto = { nombre: string, 
+/**
+ * Importe de la línea completo (cantidad × precio): la reimpresión no reagrupa nada.
+ */
+importe: number, 
+/**
+ * Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
+ */
+iva_percent?: number, };
 
 export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre: string, apellido: string | null, rol: string, email: string, requiere_setup: number, };
 
@@ -278,7 +295,12 @@ export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
 /**
  * Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
  */
-export type MesaLineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, Notas: string | null, Estado_Cocina: string | null, Nombre: string, Pasa_Cocina: number, Pagado: number, };
+export type MesaLineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, 
+/**
+ * Tipo de IVA con el que se vendió la línea (congelado al añadirla). `None` = el general
+ * del negocio. Va al ticket para desglosar por tipo.
+ */
+IVA_Percent?: number, Notas: string | null, Estado_Cocina: string | null, Nombre: string, Pasa_Cocina: number, Pagado: number, };
 
 export type MesaMetaOut = { ocupada: boolean, id_comanda: string, idComanda: string, totalPendiente: number, pendientesPago: number, pendientesCocina: number, estado: string, reserva?: ReservaMesaOut, };
 
@@ -582,6 +604,23 @@ export type TareaIdArgs = { id_tarea: string, };
 
 export type TareaRow = { ID_Tarea: string, Titulo: string, Descripcion: string | null, Fecha_Creacion: string, Fecha_Limite: string | null, };
 
+/**
+ * Todo lo que hace falta para volver a sacar un ticket ya cobrado.
+ *
+ * Se lee del cobro guardado, no se recalcula: el número es el del original y los tipos de IVA son
+ * los del día de la venta. Es lo que hace que la copia sea una copia y no un ticket nuevo con los
+ * datos de hoy.
+ */
+export type TicketReimpresionDto = { 
+/**
+ * Número del ticket original. Vacío en cobros anteriores a la numeración.
+ */
+numero_ticket: string, metodo_pago: string, 
+/**
+ * `Mesa 5` / `Barra`.
+ */
+origen: string, lineas: Array<LineaTicketDto>, };
+
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, 
 /**
  * DPI de la impresora térmica (203 | 300). Usado para convertir márgenes mm→dots/líneas.
@@ -675,7 +714,11 @@ export type UpsertProductoResult = { id_producto: string, };
 
 export type UserListItem = { id_usuario: string, nombre: string, apellido: string | null, nombre_rol: string, };
 
-export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, Nombre: string, Cantidad: number, Precio_Unitario: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
+export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, Nombre: string, Cantidad: number, Precio_Unitario: number, 
+/**
+ * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
+ */
+IVA_Percent?: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 

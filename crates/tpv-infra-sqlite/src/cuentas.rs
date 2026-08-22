@@ -7,7 +7,9 @@ use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
-use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto};
+use tpv_contracts::cuentas::{
+    EntradaDto, LineaTicketDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto,
+};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::db::{Db, Reader, Writer};
@@ -386,6 +388,79 @@ impl CuentasRepository for SqliteCuentasRepository {
     /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
     /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
     /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
+    async fn ticket_para_reimprimir(&self, id_pago: &str) -> AppResult<Option<TicketReimpresionDto>> {
+        let r = self.db.read().await;
+        let conn = r.conn();
+
+        // Cabecera: número, método y de dónde salió. El origen se arma aquí y no en la UI para que
+        // la copia diga exactamente lo mismo que dijo el original.
+        let mut rows = conn
+            .query(
+                r#"
+                SELECT
+                  COALESCE(p.Numero_Ticket, '') AS Numero,
+                  COALESCE(p.Metodo_Pago, '')   AS Metodo,
+                  CASE
+                    WHEN m.Numero_Mesa IS NOT NULL THEN 'Mesa ' || m.Numero_Mesa
+                    ELSE 'Barra'
+                  END AS Origen
+                FROM Pagos p
+                JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
+                LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
+                WHERE p.ID_Pago = ?1
+                LIMIT 1;
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+        let (numero_ticket, metodo_pago, origen) = match rows.next().await.map_err(db_err)? {
+            Some(row) => (
+                v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+            ),
+            None => return Ok(None),
+        };
+
+        // Y las líneas que cobró ESE pago (no las de la comanda entera: un cobro fraccionado
+        // imprimió solo las suyas y su copia tiene que llevar las mismas).
+        let mut rows = conn
+            .query(
+                r#"
+                SELECT
+                  COALESCE(pr.Nombre, 'Producto') AS Nombre,
+                  COALESCE(dc.Cantidad, 1) * COALESCE(dc.Precio_Unitario, 0) AS Importe,
+                  dc.IVA_Percent
+                FROM Pago_Detalles pd
+                JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
+                LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+                WHERE pd.ID_Pago = ?1
+                ORDER BY dc.ID_Detalle ASC;
+                "#,
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+        let mut lineas = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            lineas.push(LineaTicketDto {
+                nombre: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                importe: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                iva_percent: v_f64(row.get_value(2).map_err(db_err)?),
+            });
+        }
+
+        Ok(Some(TicketReimpresionDto {
+            numero_ticket,
+            metodo_pago,
+            origen,
+            lineas,
+        }))
+    }
+
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;

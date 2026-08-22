@@ -5,7 +5,7 @@ use tauri::State;
 use tpv_application::use_cases::cuentas as uc;
 use tpv_contracts::cuentas::{
     CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
-    ResumenCajaDto, SalidaDto, UpdateGastoInput, UpdatePagoInput,
+    ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -80,4 +80,16 @@ pub async fn cuentas_delete_pago(
 ) -> Result<bool, AppErrorDto> {
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_pago(repo.as_ref(), args).await?)
+}
+
+/// Devuelve un ticket ya cobrado para volver a imprimirlo: mismo número, mismos tipos de IVA y las
+/// mismas líneas que cobró ese pago (no las de la comanda entera, que en un cobro fraccionado
+/// serían otras). Quien imprime lo marca como COPIA.
+#[tauri::command]
+pub async fn cuentas_ticket_para_reimprimir(
+    state: State<'_, AppState>,
+    id_pago: String,
+) -> Result<Option<TicketReimpresionDto>, AppErrorDto> {
+    let repo = state.cuentas_repo().await?;
+    Ok(uc::ticket_para_reimprimir(repo.as_ref(), &id_pago).await?)
 }

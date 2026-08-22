@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto};
+use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::error::AppResult;
@@ -41,4 +41,8 @@ pub trait CuentasRepository: Send + Sync {
     async fn actualizar_pago(&self, id_pago: &str, pago: PagoData) -> AppResult<bool>;
     /// Elimina un pago (y sus detalles). `true` si borró fila.
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool>;
+
+    /// Reconstruye un ticket ya cobrado para volver a imprimirlo (mismo número, marcado COPIA).
+    /// `None` si el pago no existe.
+    async fn ticket_para_reimprimir(&self, id_pago: &str) -> AppResult<Option<TicketReimpresionDto>>;
 }

@@ -15,6 +15,34 @@ pub struct EntradaDto {
     pub importe: f64,
 }
 
+/// Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct LineaTicketDto {
+    pub nombre: String,
+    /// Importe de la línea completo (cantidad × precio): la reimpresión no reagrupa nada.
+    pub importe: f64,
+    /// Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
+    #[ts(optional)]
+    pub iva_percent: Option<f64>,
+}
+
+/// Todo lo que hace falta para volver a sacar un ticket ya cobrado.
+///
+/// Se lee del cobro guardado, no se recalcula: el número es el del original y los tipos de IVA son
+/// los del día de la venta. Es lo que hace que la copia sea una copia y no un ticket nuevo con los
+/// datos de hoy.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TicketReimpresionDto {
+    /// Número del ticket original. Vacío en cobros anteriores a la numeración.
+    pub numero_ticket: String,
+    pub metodo_pago: String,
+    /// `Mesa 5` / `Barra`.
+    pub origen: String,
+    pub lineas: Vec<LineaTicketDto>,
+}
+
 /// Fila de salidas (gastos).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

@@ -5,7 +5,7 @@
 
 use tpv_contracts::cuentas::{
     CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
-    ResumenCajaDto, SalidaDto, UpdateGastoInput, UpdatePagoInput,
+    ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cuentas::{normalize_metodo, requerido, GastoData, PagoData};
 
@@ -129,6 +129,18 @@ pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -
         importe: input.importe,
     };
     repo.actualizar_pago(&input.id_pago, pago).await
+}
+
+/// Reconstruye un ticket ya cobrado para volver a imprimirlo. El número es el del original: la
+/// copia no es un ticket nuevo.
+pub async fn ticket_para_reimprimir(
+    repo: &dyn CuentasRepository,
+    id_pago: &str,
+) -> AppResult<Option<TicketReimpresionDto>> {
+    if id_pago.trim().is_empty() {
+        return Ok(None);
+    }
+    repo.ticket_para_reimprimir(id_pago.trim()).await
 }
 
 pub async fn delete_pago(repo: &dyn CuentasRepository, input: DeletePagoInput) -> AppResult<bool> {
