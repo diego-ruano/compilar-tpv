@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 import {
 	agruparLineas,
 	desgloseIva,
+	eur,
+	recortar,
 	totalDe,
 	type LineaEntrada,
 } from "../src/shared/ticket/ticketMath";
@@ -144,5 +146,96 @@ describe("desglose de IVA", () => {
 				{ tipo, base, iva },
 			]);
 		}
+	});
+});
+
+describe("espejo del papel", () => {
+	// Estas dos tablas están duplicadas a propósito en `printing/tests.rs`
+	// (`tests_espejo_del_frontend`). La vista previa es contra lo que el usuario configura el
+	// ticket y contra lo que compara cuando algo le parece raro: si enseña un importe o un
+	// recorte distinto del que sale por la impresora, uno de los dos miente y no hay forma de
+	// saber cuál sin gastar papel.
+
+	/** `[importe, como se imprime]`. Gemelo de `GOLDEN_EUR` en Rust. */
+	const GOLDEN_EUR: Array<[number, string]> = [
+		[0, "0,00 €"],
+		[1.7, "1,70 €"],
+		[12, "12,00 €"],
+		[0.005, "0,01 €"],
+		// Sin separador de miles: en 32 columnas se confundiría con el decimal. `Intl` lo metía.
+		[1234.5, "1234,50 €"],
+		[12345.67, "12345,67 €"],
+		// Empates: hacia arriba, como los haría cualquiera a mano.
+		[1.125, "1,13 €"],
+		[2.675, "2,68 €"],
+		// Y los que NO son empates aunque lo parezcan (0,145 en binario es 0,14499…).
+		[0.145, "0,14 €"],
+		// Negativos: una devolución tiene que leerse como tal.
+		[-1.5, "-1,50 €"],
+		// Un negativo por debajo del céntimo no es "menos cero".
+		[-0.001, "0,00 €"],
+	];
+
+	it("el importe se ve igual que se imprime", () => {
+		for (const [n, esperado] of GOLDEN_EUR) {
+			expect(eur(n), `importe ${n}`).toBe(esperado);
+		}
+	});
+
+	it("el importe no lleva separador de miles ni espacio duro", () => {
+		// Los dos vicios de `Intl.NumberFormat` en es-ES, que es de donde venía la divergencia.
+		const s = eur(12345.67);
+
+		expect(s).not.toContain(".");
+		expect(s.codePointAt(s.length - 2)).toBe(0x20); // espacio normal, no U+00A0
+	});
+
+	/** `[nombre, importe, columnas, lo que queda del nombre]`. Gemelo de `GOLDEN_RECORTE`. */
+	const GOLDEN_RECORTE: Array<[string, string, number, string]> = [
+		["Cafe", "1,70 €", 32, "Cafe"],
+		// Justo lo que cabe: 32 - 6 - 1 = 25 caracteres.
+		["Solomillo al foie con reduccion", "1,70 €", 32, "Solomillo al foie con red"],
+		// Con tildes se cuenta en caracteres, no en bytes.
+		["Ñoquis a la crème con jamón", "9,99 €", 20, "Ñoquis a la c"],
+		// Un emoji es UN carácter y aquí cabe justo: 13 - 6 - 1 = 6. Es el corte exacto que
+		// `slice` partía por la mitad, pintando un rombo.
+		["Cafe 🍺 grande", "1,70 €", 13, "Cafe 🍺"],
+		// Importe más ancho que la línea: no queda nombre, pero no revienta.
+		["Cafe", "123456789,00 €", 10, ""],
+	];
+
+	it("el nombre se recorta igual que en el papel", () => {
+		for (const [nombre, importe, cols, esperado] of GOLDEN_RECORTE) {
+			expect(recortar(nombre, importe, cols), `${nombre} en ${cols} columnas`).toBe(esperado);
+		}
+	});
+
+	it("recortar nunca parte un carácter por la mitad", () => {
+		// El síntoma de cortar por unidades UTF-16: aparece el carácter de reemplazo.
+		for (let cols = 8; cols <= 20; cols++) {
+			const cortado = recortar("Cafe 🍺 grande 🍷 doble", "1,70 €", cols);
+			expect(cortado, `con ${cols} columnas`).not.toContain("�");
+			expect([...cortado].every((c) => c.codePointAt(0)! < 0xd800 || c.codePointAt(0)! > 0xdfff)).toBe(true);
+		}
+	});
+
+	it("lo recortado más el importe cabe en la línea", () => {
+		// La invariante del maquetado, contada en caracteres como la cuenta Rust.
+		for (const [nombre, importe, cols] of GOLDEN_RECORTE) {
+			const usado = [...recortar(nombre, importe, cols)].length + [...importe].length;
+			// Cuando el importe solo ya no cabe, se conserva el importe y el nombre desaparece.
+			if ([...importe].length < cols) {
+				expect(usado, `${nombre} en ${cols}`).toBeLessThan(cols);
+			}
+		}
+	});
+
+	it("el recorte se mide contra el importe DE VERDAD, no contra uno cualquiera", () => {
+		// Un importe más largo deja menos sitio al nombre: si no fuera así, la línea de un plato
+		// caro se saldría del papel.
+		const corto = recortar("Solomillo al foie con reduccion", "1,70 €", 32);
+		const largo = recortar("Solomillo al foie con reduccion", "1234,50 €", 32);
+
+		expect([...largo].length).toBe([...corto].length - 3);
 	});
 });

@@ -20,7 +20,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { resolveImageUrl } from "../lib/imageUrl";
-import { agruparLineas, desgloseIva, totalDe } from "./ticketMath";
+import { agruparLineas, desgloseIva, eur, recortar as recortarA, totalDe } from "./ticketMath";
 
 export type TicketPaperItem = {
     nombre: string;
@@ -30,13 +30,6 @@ export type TicketPaperItem = {
     /** Unidades de la línea. Ausente = 1. */
     cantidad?: number;
 };
-
-function eur(n: number) {
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-    }).format(n);
-}
 
 /** Columnas mientras Rust contesta: el valor por defecto de un papel de 80 mm. */
 const COLS_POR_DEFECTO = 42;
@@ -80,8 +73,7 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
     ]);
 
     /** Recorta como el papel: el nombre cede el espacio que ocupa su importe. */
-    const recortar = (texto: string, importe: string) =>
-        texto.slice(0, Math.max(0, cols - importe.length - 1));
+    const recortar = (texto: string, importe: string) => recortarA(texto, importe, cols);
 
     // Las cuentas viven en `ticketMath` (sin React) para poder probarlas contra los mismos
     // números que saca Rust: la vista previa no vale de nada si no coincide con el papel.

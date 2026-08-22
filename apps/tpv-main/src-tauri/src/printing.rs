@@ -223,8 +223,21 @@ pub struct GeometriaTicket {
 
 
 /// Importe en formato español: `1,70 €`.
+///
+/// Se redondea a céntimos ANTES de formatear, y no se deja la tarea al `{:.2}`. Dos motivos, los
+/// dos comprobados:
+///
+/// - `{:.2}` rompe los empates al PAR (1,125 → "1,12"), mientras que la vista previa —y cualquiera
+///   que haga la cuenta a mano— redondea hacia arriba. Redondeando antes con la misma operación que
+///   usa el frontend, los dos lados no tienen forma de discrepar.
+/// - Un importe negativo minúsculo daba `-0,00 €`, que en un ticket no significa nada.
+///
+/// Sin separador de miles a propósito: en una columna de 32 caracteres, un punto de millar se
+/// confunde con el decimal.
 fn fmt_eur(n: f64) -> String {
-    format!("{:.2} €", n).replace('.', ",")
+    let c = a_centimos(n);
+    let c = if c == 0.0 { 0.0 } else { c }; // se lleva por delante el -0.0
+    format!("{:.2} €", c).replace('.', ",")
 }
 
 /// Línea de dos columnas: `left` a la izquierda, `right` pegado a la derecha dentro de `cols`.
@@ -842,11 +855,11 @@ mod imp {
         fn GetDefaultPrinterW(pszbuffer: *mut u16, pcchbuffer: *mut u32) -> BOOL;
     }
 
-    fn to_wide(s: &str) -> Vec<u16> {
+    pub(super) fn to_wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    unsafe fn wide_to_string(ptr: *const u16) -> String {
+    pub(super) unsafe fn wide_to_string(ptr: *const u16) -> String {
         if ptr.is_null() {
             return String::new();
         }

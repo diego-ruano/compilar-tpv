@@ -38,6 +38,36 @@ export function aCentimos(n: number): number {
 }
 
 /**
+ * Importe en formato español: `1,70 €`. Gemelo de `fmt_eur` en `printing.rs`.
+ *
+ * A mano y no con `Intl.NumberFormat`, aunque duela: `Intl` mete el punto de los miles a partir de
+ * cinco cifras (`12.345,67 €`) y usa un espacio duro antes del €, y el papel no hace ni lo uno ni
+ * lo otro — en una columna de 32 caracteres, un punto de millar se confunde con el decimal. La
+ * previa enseñaba un importe que la impresora no iba a escribir.
+ *
+ * El redondeo a céntimos va ANTES de formatear y con la misma operación que usa Rust, para que los
+ * empates (1,125) caigan del mismo lado en los dos sitios.
+ */
+export function eur(n: number): string {
+	const c = aCentimos(n);
+	return `${(c === 0 ? 0 : c).toFixed(2).replace(".", ",")} €`;
+}
+
+/**
+ * Recorta el nombre para que el importe quepa pegado al borde derecho. Gemelo de la parte
+ * izquierda de `line_two` en `printing.rs`: mismo ancho disponible (`cols - importe - 1`) y mismo
+ * criterio de conteo.
+ *
+ * Se corta por CARACTERES (`[...texto]`), no con `slice`: `slice` cuenta unidades UTF-16, así que
+ * un emoji cuenta doble y, si el corte cae en medio, parte el par sustituto y pinta un rombo. Rust
+ * cuenta caracteres, y el papel imprime un `?` por cada uno que no esté en su tabla.
+ */
+export function recortar(texto: string, importe: string, cols: number): string {
+	const disponible = Math.max(0, cols - [...importe].length - 1);
+	return [...texto].slice(0, disponible).join("");
+}
+
+/**
  * Agrupa las unidades idénticas en líneas con cantidad.
  *
  * El criterio es **nombre + precio + tipo de IVA**: dos unidades del mismo producto vendidas a

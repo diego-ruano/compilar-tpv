@@ -1551,3 +1551,156 @@ mod tests_ancho_del_logo {
         assert_eq!(bytes_fila * 8, 576, "el logo se ha encogido con el texto");
     }
 }
+
+#[cfg(test)]
+mod tests_espejo_del_frontend {
+    //! Los importes y el truncado, contra los MISMOS casos que prueba la vista previa.
+    //!
+    //! `TicketPaper` tiene que enseñar exactamente lo que se va a imprimir; es contra la previa
+    //! contra lo que el usuario configura el ticket y contra lo que compara cuando algo le parece
+    //! raro. Esta tabla está duplicada a propósito en `test/ticketMath.test.ts`: si uno de los dos
+    //! lados cambia de criterio, el otro falla.
+    //!
+    //! Lo que sacó esta tabla al escribirla: la previa usaba `Intl.NumberFormat`, que a partir de
+    //! cinco cifras mete el punto de los miles ("12.345,67 €") donde el papel imprime
+    //! "12345,67 €"; y `{:.2}` de Rust rompía los empates al par ("1,125" → "1,12") donde
+    //! JavaScript redondea hacia arriba.
+
+    use super::*;
+
+    /// `(importe, como se imprime)`. Gemelo de `GOLDEN_EUR` en el test del frontend.
+    const GOLDEN_EUR: &[(f64, &str)] = &[
+        (0.0, "0,00 €"),
+        (1.7, "1,70 €"),
+        (12.0, "12,00 €"),
+        (0.005, "0,01 €"),
+        // Sin separador de miles: en 32 columnas se confundiría con el decimal.
+        (1234.5, "1234,50 €"),
+        (12345.67, "12345,67 €"),
+        // Empates: hacia arriba, como los haría cualquiera a mano.
+        (1.125, "1,13 €"),
+        (2.675, "2,68 €"),
+        // Y los que NO son empates aunque lo parezcan (0,145 en binario es 0,14499…).
+        (0.145, "0,14 €"),
+        // Negativos: una devolución tiene que leerse como tal.
+        (-1.5, "-1,50 €"),
+        // Un negativo por debajo del céntimo no es "menos cero".
+        (-0.001, "0,00 €"),
+    ];
+
+    #[test]
+    fn el_importe_se_imprime_igual_que_en_la_vista_previa() {
+        for (n, esperado) in GOLDEN_EUR {
+            assert_eq!(&fmt_eur(*n), esperado, "importe {n}");
+        }
+    }
+
+    #[test]
+    fn formatear_a_secas_no_habria_bastado() {
+        // Este test no prueba nuestro código: fija el comportamiento de la biblioteca estándar del
+        // que viene la corrección, para que quien "simplifique" `fmt_eur` de vuelta vea por qué no
+        // puede. `{:.2}` rompe los empates al PAR, y la vista previa (y cualquiera con un lápiz)
+        // los rompe hacia arriba.
+        assert_eq!(format!("{:.2}", 1.125), "1.12");
+        assert_eq!(fmt_eur(1.125), "1,13 €");
+
+        // Y el negativo minúsculo, que salía como "menos cero".
+        assert_eq!(format!("{:.2}", -0.001), "-0.00");
+        assert_eq!(fmt_eur(-0.001), "0,00 €");
+    }
+
+    /// `(nombre, importe, columnas, lo que queda del nombre)`. Gemelo de `GOLDEN_RECORTE`.
+    const GOLDEN_RECORTE: &[(&str, &str, usize, &str)] = &[
+        ("Cafe", "1,70 €", 32, "Cafe"),
+        // Justo lo que cabe: 32 - 6 - 1 = 25 caracteres.
+        ("Solomillo al foie con reduccion", "1,70 €", 32, "Solomillo al foie con red"),
+        // Con tildes se cuenta en caracteres, no en bytes.
+        ("Ñoquis a la crème con jamón", "9,99 €", 20, "Ñoquis a la c"),
+        // Un emoji es UN carácter y aquí cabe justo: 13 - 6 - 1 = 6. Es el corte exacto que en
+        // JavaScript partía el par sustituto por la mitad y pintaba un rombo.
+        ("Cafe 🍺 grande", "1,70 €", 13, "Cafe 🍺"),
+        // Importe más ancho que la línea: no queda nombre, pero no revienta.
+        ("Cafe", "123456789,00 €", 10, ""),
+    ];
+
+    #[test]
+    fn el_nombre_se_recorta_igual_que_en_la_vista_previa() {
+        for (nombre, importe, cols, esperado) in GOLDEN_RECORTE {
+            // Es lo que hace `line_two` con la parte izquierda; se compara sobre la línea entera
+            // para probar la función de verdad y no una copia suya.
+            let linea = line_two(nombre, importe, *cols);
+            let recortado = linea.trim_end_matches(importe).trim_end();
+
+            assert_eq!(recortado, *esperado, "{nombre:?} en {cols} columnas");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_spooler {
+    //! Las dos conversiones de texto que separan la app de la API de Windows.
+    //!
+    //! El resto del módulo son llamadas FFI (`OpenPrinter`, `WritePrinter`…) que no se pueden
+    //! probar sin una impresora, y mockearlas sería probar el mock. Estas dos sí son puras, y son
+    //! justo donde duele: la API espera UTF-16 **terminado en cero**, y si falta ese cero lee
+    //! memoria hasta que encuentra uno — el nombre de la impresora sale con basura detrás y no
+    //! coincide con ninguna.
+
+    use super::imp::{to_wide, wide_to_string};
+
+    #[test]
+    fn el_texto_va_terminado_en_cero() {
+        let w = to_wide("EPSON");
+
+        assert_eq!(*w.last().unwrap(), 0, "sin el terminador, la API lee de más");
+        assert_eq!(w.len(), "EPSON".len() + 1);
+    }
+
+    #[test]
+    fn una_cadena_vacia_sigue_siendo_una_cadena() {
+        // Es lo que se manda cuando no hay impresora seleccionada: tiene que ser "" y no un
+        // puntero a nada.
+        assert_eq!(to_wide(""), vec![0]);
+    }
+
+    #[test]
+    fn los_acentos_de_un_nombre_de_impresora_no_se_pierden() {
+        // "Impresora Cocina Ñ" es un nombre perfectamente normal en un bar español.
+        let w = to_wide("Ñ");
+
+        assert_eq!(w, vec![0x00D1, 0]);
+    }
+
+    #[test]
+    fn un_caracter_fuera_del_plano_basico_ocupa_dos_unidades() {
+        // UTF-16 no es "un carácter, una unidad": un emoji son dos. Si alguien contara caracteres
+        // en vez de unidades para dimensionar el buffer, se quedaría corto.
+        let w = to_wide("🍺");
+
+        assert_eq!(w.len(), 3, "dos unidades + terminador: {w:04X?}");
+        assert_eq!(*w.last().unwrap(), 0);
+    }
+
+    #[test]
+    fn la_vuelta_para_en_el_terminador() {
+        let buf: Vec<u16> = vec![b'E' as u16, b'P' as u16, 0, b'X' as u16, b'X' as u16];
+
+        // Lo que hay detrás del cero es basura del buffer que devuelve Windows: no puede colarse
+        // en el nombre.
+        assert_eq!(unsafe { wide_to_string(buf.as_ptr()) }, "EP");
+    }
+
+    #[test]
+    fn un_puntero_nulo_no_revienta() {
+        // `GetDefaultPrinterW` puede fallar y dejar el buffer sin tocar.
+        assert_eq!(unsafe { wide_to_string(std::ptr::null()) }, "");
+    }
+
+    #[test]
+    fn ida_y_vuelta_de_un_nombre_real() {
+        for nombre in ["EPSON TM-T20III", "Impresora Cocina Ñ", "Star TSP100 (copia 2)"] {
+            let w = to_wide(nombre);
+            assert_eq!(unsafe { wide_to_string(w.as_ptr()) }, nombre);
+        }
+    }
+}
