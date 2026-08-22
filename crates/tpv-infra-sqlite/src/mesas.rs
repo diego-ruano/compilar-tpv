@@ -2304,4 +2304,159 @@ mod tests_numero_ticket {
 
         assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-1000000");
     }
+    #[tokio::test]
+    async fn anular_un_cobro_no_devuelve_el_numero_a_la_cola() {
+        // El contador es propio, no un `SELECT MAX(Numero_Ticket)`. Si saliera de los cobros
+        // existentes, anular el último haría que el siguiente ticket repitiera número: dos ventas
+        // distintas con el mismo número es lo que convierte un arqueo en una discusión.
+        let (db, _dir) = db_temporal().await;
+        let g = db.write().await;
+
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000001");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000002");
+
+        // Se anula el segundo cobro: la fila desaparece, el contador no.
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+    }
+
+    #[tokio::test]
+    async fn el_contador_sobrevive_a_cerrar_la_aplicacion() {
+        // Vive en la BD, no en memoria: apagar el TPV por la noche no puede reiniciar la
+        // numeración del día siguiente.
+        let dir = std::env::temp_dir().join(format!("tpv_contador_persistente_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let ruta = dir.join("data.db").to_str().unwrap().to_string();
+
+        {
+            let db = Db::open(&ruta).await.unwrap();
+            let g = db.write().await;
+            siguiente_numero_ticket(&g).await.unwrap();
+            siguiente_numero_ticket(&g).await.unwrap();
+        }
+
+        let db = Db::open(&ruta).await.unwrap();
+        let g = db.write().await;
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+    }
+
+    #[tokio::test]
+    async fn el_contador_se_replica_a_la_nube_con_el_numero_ya_puesto() {
+        // La sentencia que sale al outbox es `Ultimo = Ultimo + 1`, RELATIVA: si fuera
+        // `Ultimo = 7` y la nube la aplicara con otro estado, los contadores se separarían. Lo que
+        // no puede pasar es que el número del papel se decida dos veces.
+        let (db, _dir) = db_temporal().await;
+        {
+            let g = db.write().await;
+            siguiente_numero_ticket(&g).await.unwrap();
+        }
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Statements_Json FROM _Sync_Outbox WHERE Statements_Json LIKE '%Ticket_Contador%';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().expect("la subida del contador");
+        let sql = crate::mapping::v_string(fila.get_value(0).unwrap()).unwrap_or_default();
+
+        assert!(sql.contains("Ultimo + 1"), "la sentencia replicada no es relativa: {sql}");
+    }
 }
+
+#[cfg(test)]
+mod tests_iva_de_la_linea {
+    //! De dónde sale el tipo de IVA de cada línea.
+    //!
+    //! Se lee del producto en el momento de la venta y se **congela** en `Detalle_Comanda`. Es lo
+    //! que hace que una reimpresión de hace tres meses siga enseñando el tipo que se aplicó
+    //! entonces, y no el de hoy.
+
+    use super::*;
+    use crate::db::Db;
+    use libsql::Connection;
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_iva_linea_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    const CATALOGO: &[&str] = &[
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
+        // Con tipo propio: una botella para llevar.
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent)
+           VALUES ('con', 'cat', 'Vino para llevar', 12.0, 21);",
+        // Sin tipo propio: hereda el del negocio.
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('sin', 'cat', 'Cafe', 1.3);",
+    ];
+
+    #[tokio::test]
+    async fn un_producto_con_tipo_propio_lo_aporta() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let r = db.read().await;
+
+        assert_eq!(iva_del_producto(&r, "con").await.unwrap(), Value::Real(21.0));
+    }
+
+    #[tokio::test]
+    async fn un_producto_sin_tipo_deja_la_linea_en_nulo() {
+        // NULL significa "el del negocio". Poner aquí un 10 por defecto congelaría en la línea un
+        // tipo que el usuario no ha elegido, y cambiar el del negocio ya no afectaría a nada.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let r = db.read().await;
+
+        assert_eq!(iva_del_producto(&r, "sin").await.unwrap(), Value::Null);
+    }
+
+    #[tokio::test]
+    async fn un_producto_que_no_existe_no_inventa_un_tipo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        let r = db.read().await;
+
+        assert_eq!(iva_del_producto(&r, "fantasma").await.unwrap(), Value::Null);
+    }
+
+    #[tokio::test]
+    async fn cambiar_el_tipo_del_producto_no_toca_lo_ya_vendido() {
+        // La razón de que el tipo se copie a la línea en vez de consultarse al imprimir.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+
+        let antes = {
+            let r = db.read().await;
+            iva_del_producto(&r, "con").await.unwrap()
+        };
+        sembrar(&db, &["UPDATE Productos SET IVA_Percent = 10 WHERE ID_Producto = 'con';"]).await;
+        let despues = {
+            let r = db.read().await;
+            iva_del_producto(&r, "con").await.unwrap()
+        };
+
+        assert_eq!(antes, Value::Real(21.0));
+        assert_eq!(despues, Value::Real(10.0), "las ventas nuevas sí usan el tipo nuevo");
+    }
+}
+
