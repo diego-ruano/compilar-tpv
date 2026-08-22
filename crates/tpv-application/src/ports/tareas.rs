@@ -30,8 +30,14 @@ pub trait TareasRepository: Send + Sync {
         id_tarea: &str,
         ids_trabajadores: Vec<String>,
     ) -> AppResult<bool>;
-    /// Elimina una tarea (y sus asignaciones). Error si no existe.
+    /// Manda una tarea a la papelera (TAR-05: borrado reversible). Error si no existe.
     async fn delete_tarea(&self, id_tarea: &str) -> AppResult<bool>;
+    /// Tareas que están en la papelera.
+    async fn get_papelera(&self) -> AppResult<Vec<TareaAdminRow>>;
+    /// Devuelve una tarea de la papelera a la lista. Error si no está en la papelera.
+    async fn restaurar_tarea(&self, id_tarea: &str) -> AppResult<bool>;
+    /// Vacía la papelera: borrado definitivo. Devuelve cuántas tareas se han borrado.
+    async fn vaciar_papelera(&self) -> AppResult<i64>;
     /// Marca finalizada la asignación de un trabajador en una tarea. Error si no existe.
     async fn marcar_finalizada(&self, id_tarea: &str, id_trabajador: &str) -> AppResult<bool>;
 }

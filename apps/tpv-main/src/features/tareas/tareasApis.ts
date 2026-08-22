@@ -243,10 +243,28 @@ export const tareasApi = {
         });
     },
 
+    /** TAR-05: borrar manda a la papelera (reversible), no pierde la tarea. */
     async deleteTarea(idTarea: string): Promise<boolean> {
         return await invokeClient<boolean>("tareas_delete_tarea", {
             args: { id_tarea: idTarea },
         });
+    },
+
+    async getPapelera(): Promise<TareaAdminRow[]> {
+        const rows = await invokeClient<any[]>("tareas_get_papelera");
+        return (rows ?? []).map(mapTareaAdmin);
+    },
+
+    async restaurarTarea(idTarea: string): Promise<boolean> {
+        return await invokeClient<boolean>("tareas_restaurar_tarea", {
+            args: { id_tarea: idTarea },
+        });
+    },
+
+    /** Vaciar la papelera es el único camino que borra de verdad. Devuelve cuántas se borraron. */
+    async vaciarPapelera(): Promise<number> {
+        const n = await invokeClient<number>("tareas_vaciar_papelera");
+        return toNum(n, 0);
     },
 
     async getMisTareas(idTrabajador: string): Promise<MisTareasRow[]> {

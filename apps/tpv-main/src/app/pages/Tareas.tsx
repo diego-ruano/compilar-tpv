@@ -6,13 +6,16 @@ import {
   useDeleteTarea,
   useMarcarTareaFinalizada,
   useMisTareas,
+  usePapelera,
+  useRestaurarTarea,
   useSetAsignacionesTarea,
   useTareasAdmin,
   useTrabajadores,
   useUpdateTarea,
+  useVaciarPapelera,
 } from "../../features/tareas/tareasQueries";
 import { useAuth } from "../../shared/stores/useAuth";
-import { ListChecks, Plus, X, Trash2 } from "lucide-react";
+import { ListChecks, Plus, X, Trash2, RotateCcw } from "lucide-react";
 
 type TareaUI = {
   ID_Tarea: string;
@@ -172,6 +175,15 @@ export default function Tareas() {
   const setAsignacionesM = useSetAsignacionesTarea();
   const deleteTareaM = useDeleteTarea();
   const marcarFinalizadaM = useMarcarTareaFinalizada();
+
+  // Papelera (TAR-05). La lista solo se pide con la modal abierta: es una vista puntual, no algo
+  // que deba viajar en cada carga de la pagina.
+  const [modalPapelera, setModalPapelera] = useState(false);
+  const papeleraQuery = usePapelera(isAdmin && modalPapelera);
+  const restaurarTareaM = useRestaurarTarea();
+  const vaciarPapeleraM = useVaciarPapelera();
+  const [confirmVaciar, setConfirmVaciar] = useState(false);
+  const papelera = (papeleraQuery.data ?? []) as TareaUI[];
 
   const trabajadores = useMemo<TrabajadorUI[]>(
     () => (trabajadoresQuery.data ?? []) as TrabajadorUI[],
@@ -435,14 +447,27 @@ export default function Tareas() {
         </div>
 
         {isAdmin ? (
-          <button
-            type="button"
-            onClick={() => setModalNueva(true)}
-            className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
-          >
-            <Plus className="size-4" aria-hidden />
-            <span className="hidden xs:inline">Crear tarea</span>
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setModalPapelera(true)}
+              title="Papelera"
+              aria-label="Papelera"
+              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg active:scale-[0.98]"
+            >
+              <Trash2 className="size-4" aria-hidden />
+              <span className="hidden sm:inline">Papelera</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setModalNueva(true)}
+              className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98]"
+            >
+              <Plus className="size-4" aria-hidden />
+              <span className="hidden xs:inline">Crear tarea</span>
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -834,7 +859,8 @@ export default function Tareas() {
             ?
           </p>
           <p className="mt-2 text-sm text-fg-muted">
-            Esto la elimina de la BD y desaparece para todos.
+            Se moverá a la papelera: desaparece de la lista de todos, pero podrás
+            restaurarla desde ahí mientras no la vacíes.
           </p>
         </div>
 
@@ -852,6 +878,117 @@ export default function Tareas() {
             disabled={confirmando}
           >
             {confirmando ? "Borrando…" : "Confirmar"}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={modalPapelera}
+        onClose={() => {
+          if (vaciarPapeleraM.isPending) return;
+          setModalPapelera(false);
+        }}
+        title="Papelera"
+      >
+        {papeleraQuery.isLoading ? (
+          <p className="text-sm text-fg-muted sm:text-base">Cargando…</p>
+        ) : papelera.length === 0 ? (
+          <p className="text-sm text-fg-subtle sm:text-base">
+            La papelera está vacía.
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {papelera.map((t) => (
+              <div
+                key={t.ID_Tarea}
+                className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 p-3 sm:rounded-2xl"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-fg sm:text-base">
+                    {t.Titulo}
+                  </p>
+                  {t.Descripcion ? (
+                    <p className="line-clamp-2 text-xs text-fg-muted sm:text-sm">
+                      {t.Descripcion}
+                    </p>
+                  ) : null}
+                  <p className="mt-0.5 text-xs text-fg-subtle">
+                    {t.Total_Finalizadas ?? 0}/{t.Total_Asignados ?? 0} finalizadas
+                    {t.Fecha_Limite ? " \u00b7 límite " + t.Fecha_Limite : ""}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => restaurarTareaM.mutate(t.ID_Tarea)}
+                  disabled={restaurarTareaM.isPending || vaciarPapeleraM.isPending}
+                  className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-3 disabled:opacity-60"
+                >
+                  <RotateCcw className="size-4" aria-hidden />
+                  Restaurar
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button
+            onClick={() => setModalPapelera(false)}
+            disabled={vaciarPapeleraM.isPending}
+            className="w-full rounded-xl bg-surface-2 px-4 py-2.5 hover:bg-surface-3 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
+          >
+            Cerrar
+          </button>
+          <button
+            onClick={() => setConfirmVaciar(true)}
+            disabled={papelera.length === 0 || vaciarPapeleraM.isPending}
+            className="w-full rounded-xl bg-danger px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
+          >
+            Vaciar papelera
+          </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={confirmVaciar}
+        onClose={() => {
+          if (vaciarPapeleraM.isPending) return;
+          setConfirmVaciar(false);
+        }}
+        title="Vaciar papelera"
+      >
+        <div className="text-sm text-fg-muted sm:text-base">
+          <p>
+            ¿Seguro que quieres vaciar la papelera
+            {papelera.length
+              ? " (" + papelera.length + " tarea" + (papelera.length === 1 ? "" : "s") + ")"
+              : ""}
+            ?
+          </p>
+          <p className="mt-2 text-sm text-fg-muted">
+            Esto sí borra de verdad: las tareas y sus asignaciones se pierden para
+            todos y no se pueden recuperar.
+          </p>
+        </div>
+
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <button
+            onClick={() => setConfirmVaciar(false)}
+            disabled={vaciarPapeleraM.isPending}
+            className="w-full rounded-xl bg-surface-2 px-4 py-2.5 hover:bg-surface-3 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={async () => {
+              await vaciarPapeleraM.mutateAsync();
+              setConfirmVaciar(false);
+            }}
+            disabled={vaciarPapeleraM.isPending}
+            className="w-full rounded-xl bg-danger px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
+          >
+            {vaciarPapeleraM.isPending ? "Vaciando…" : "Vaciar"}
           </button>
         </div>
       </Modal>

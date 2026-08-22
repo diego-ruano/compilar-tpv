@@ -67,6 +67,11 @@ tareasRoutes.get("/admin", async (c) =>
 	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getTareasAdmin(db))),
 );
 
+// TAR-05. Ojo al orden: esta ruta va antes que `/:id`, que si no la captura como un id de tarea.
+tareasRoutes.get("/papelera", async (c) =>
+	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getPapelera(db))),
+);
+
 tareasRoutes.get("/mias", async (c) => {
 	const idTrabajador = parseId(c.req.query("trabajador"));
 	if (idTrabajador == null) return badRequest(c, "id_trabajador invalido");
@@ -128,6 +133,18 @@ tareasRoutes.put("/:id/asignaciones", async (c) => {
 	if (!okTrab) return badRequest(c, "trabajador_inexistente");
 	await apply(c, cmd.setAsignacionesTarea(id, p.data));
 	return c.json({ ok: true });
+});
+
+tareasRoutes.post("/:id/restaurar", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_tarea invalido");
+	await apply(c, cmd.restaurarTarea(id));
+	return c.json({ ok: true });
+});
+
+tareasRoutes.delete("/papelera", async (c) => {
+	const borradas = await apply(c, cmd.vaciarPapelera());
+	return c.json({ ok: true, borradas: Number(borradas ?? 0) });
 });
 
 tareasRoutes.delete("/:id", async (c) => {

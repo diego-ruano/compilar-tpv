@@ -82,6 +82,8 @@ import {
 	marcarFinalizada,
 	setAsignacionesTarea,
 	updateTarea,
+	restaurarTarea,
+	vaciarPapelera,
 } from "../src/domains/tareas/tareas.commands";
 import {
 	addLinea,
@@ -116,6 +118,10 @@ import casoTareaSetAsig from "../../../tests/contract/casos/tareas/set_asignacio
 import goldenTareaSetAsig from "../../../tests/contract/golden/tareas/set_asignaciones.json";
 import casoTareaEliminar from "../../../tests/contract/casos/tareas/eliminar.json";
 import goldenTareaEliminar from "../../../tests/contract/golden/tareas/eliminar.json";
+import casoTareaRestaurar from "../../../tests/contract/casos/tareas/restaurar.json";
+import goldenTareaRestaurar from "../../../tests/contract/golden/tareas/restaurar.json";
+import casoTareaVaciar from "../../../tests/contract/casos/tareas/vaciar_papelera.json";
+import goldenTareaVaciar from "../../../tests/contract/golden/tareas/vaciar_papelera.json";
 import casoTareaFinalizar from "../../../tests/contract/casos/tareas/marcar_finalizada.json";
 import goldenTareaFinalizar from "../../../tests/contract/golden/tareas/marcar_finalizada.json";
 import casoInvCreateLote from "../../../tests/contract/casos/inventario/create_lote.json";
@@ -225,6 +231,8 @@ const CASOS = [
 	{ nombre: "tareas_actualizar", caso: casoTareaActualizar, golden: goldenTareaActualizar },
 	{ nombre: "tareas_set_asignaciones", caso: casoTareaSetAsig, golden: goldenTareaSetAsig },
 	{ nombre: "tareas_eliminar", caso: casoTareaEliminar, golden: goldenTareaEliminar },
+	{ nombre: "tareas_restaurar", caso: casoTareaRestaurar, golden: goldenTareaRestaurar },
+	{ nombre: "tareas_vaciar_papelera", caso: casoTareaVaciar, golden: goldenTareaVaciar },
 	{ nombre: "tareas_marcar_finalizada", caso: casoTareaFinalizar, golden: goldenTareaFinalizar },
 	{ nombre: "inventario_create_lote", caso: casoInvCreateLote, golden: goldenInvCreateLote },
 	{ nombre: "inventario_create_categoria", caso: casoInvCategoria, golden: goldenInvCategoria },
@@ -414,6 +422,14 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "tareas.eliminar": {
 			aplicar(hub, sql, deleteTarea(caso.entrada.id_tarea));
+			return;
+		}
+		case "tareas.restaurar": {
+			aplicar(hub, sql, restaurarTarea(caso.entrada.id_tarea));
+			return;
+		}
+		case "tareas.vaciar_papelera": {
+			aplicar(hub, sql, vaciarPapelera());
 			return;
 		}
 		case "tareas.marcar_finalizada": {

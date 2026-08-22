@@ -1,5 +1,5 @@
 {
-  "descripcion": "Borrado de una tarea: elimina la tarea y sus asignaciones (ambas tablas quedan vacías).",
+  "descripcion": "Borrado de una tarea (TAR-05): pasa a la papelera (Estado='ELIMINADA') y CONSERVA sus asignaciones, que es lo que permite restaurarla.",
   "comando": "tareas.eliminar",
   "seed": [
     "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
@@ -12,7 +12,7 @@
     "id_tarea": "tarea-1"
   },
   "snapshot": {
-    "Tareas": "SELECT ID_Tarea FROM Tareas",
-    "Tarea_Asignaciones": "SELECT ID_Tarea, ID_Trabajador FROM Tarea_Asignaciones"
+    "Tareas": "SELECT ID_Tarea, Estado FROM Tareas",
+    "Tarea_Asignaciones": "SELECT ID_Tarea, ID_Trabajador, Estado FROM Tarea_Asignaciones"
   }
 }

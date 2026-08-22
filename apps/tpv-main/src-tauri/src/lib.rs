@@ -1814,6 +1814,9 @@ pub fn run() {
             commands::tareas::tareas_get_tarea_asignados,
             commands::tareas::tareas_set_asignaciones_tarea,
             commands::tareas::tareas_delete_tarea,
+            commands::tareas::tareas_get_papelera,
+            commands::tareas::tareas_restaurar_tarea,
+            commands::tareas::tareas_vaciar_papelera,
             commands::tareas::tareas_get_mis_tareas,
             commands::tareas::tareas_marcar_tarea_finalizada,
             // trabajadores

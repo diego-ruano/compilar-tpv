@@ -316,6 +316,8 @@ casos_de_contrato! {
     tareas__actualizar,
     tareas__set_asignaciones,
     tareas__eliminar,
+    tareas__restaurar,
+    tareas__vaciar_papelera,
     tareas__marcar_finalizada,
     inventario__create_lote,
     inventario__create_categoria,
@@ -457,6 +459,14 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "tareas.eliminar" => {
             let repo = SqliteTareasRepository::new(db.clone());
             repo.delete_tarea(&s(&e["id_tarea"])).await.expect("eliminar tarea");
+        }
+        "tareas.restaurar" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.restaurar_tarea(&s(&e["id_tarea"])).await.expect("restaurar tarea");
+        }
+        "tareas.vaciar_papelera" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            repo.vaciar_papelera().await.expect("vaciar papelera");
         }
         "tareas.marcar_finalizada" => {
             let repo = SqliteTareasRepository::new(db.clone());

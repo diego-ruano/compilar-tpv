@@ -21,6 +21,7 @@ export const tareasKeys = {
   admin: () => ["tareas", "admin"] as const,
   mias: (idTrabajador: string | null | undefined) =>
     ["tareas", "mias", idTrabajador ?? null] as const,
+  papelera: () => ["tareas", "papelera"] as const,
 };
 
 /** Lista de trabajadores (para asignación de tareas). */
@@ -90,6 +91,37 @@ export function useDeleteTarea() {
     mutationFn: tareasApi.deleteTarea,
     onSuccess: (ok) => {
       if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+    },
+  });
+}
+
+/** Tareas en la papelera (TAR-05). Se habilita al abrir la modal, no en cada carga de la página. */
+export function usePapelera(enabled = true) {
+  return useQuery({
+    queryKey: tareasKeys.papelera(),
+    queryFn: () => tareasApi.getPapelera(),
+    enabled,
+  });
+}
+
+/** Saca una tarea de la papelera; invalida toda la feature (vuelve a la lista y sale de la papelera). */
+export function useRestaurarTarea() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: tareasApi.restaurarTarea,
+    onSuccess: (ok) => {
+      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+    },
+  });
+}
+
+/** Vacía la papelera (borrado definitivo); invalida la feature. */
+export function useVaciarPapelera() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: tareasApi.vaciarPapelera,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }

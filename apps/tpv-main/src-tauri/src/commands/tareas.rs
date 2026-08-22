@@ -97,6 +97,31 @@ pub async fn tareas_delete_tarea(
     Ok(uc::delete_tarea(repo.as_ref(), args).await?)
 }
 
+/// Papelera (TAR-05). El borrado manda a la papelera; estos tres comandos son el resto del ciclo:
+/// verla, sacar una tarea de ella y vaciarla (lo único que borra de verdad).
+#[tauri::command]
+pub async fn tareas_get_papelera(
+    state: State<'_, AppState>,
+) -> Result<Vec<TareaAdminRow>, AppErrorDto> {
+    let repo = state.tareas_repo().await?;
+    Ok(uc::get_papelera(repo.as_ref()).await?)
+}
+
+#[tauri::command]
+pub async fn tareas_restaurar_tarea(
+    state: State<'_, AppState>,
+    args: TareaIdArgs,
+) -> Result<bool, AppErrorDto> {
+    let repo = state.tareas_repo().await?;
+    Ok(uc::restaurar_tarea(repo.as_ref(), args).await?)
+}
+
+#[tauri::command]
+pub async fn tareas_vaciar_papelera(state: State<'_, AppState>) -> Result<i64, AppErrorDto> {
+    let repo = state.tareas_repo().await?;
+    Ok(uc::vaciar_papelera(repo.as_ref()).await?)
+}
+
 #[tauri::command]
 pub async fn tareas_marcar_tarea_finalizada(
     state: State<'_, AppState>,

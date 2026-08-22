@@ -91,6 +91,28 @@ impl TareasRepository for HttpTareasRepository {
         Ok(true)
     }
 
+    async fn get_papelera(&self) -> AppResult<Vec<TareaAdminRow>> {
+        self.client.get_json("/v1/tareas/papelera").await
+    }
+
+    async fn restaurar_tarea(&self, id_tarea: &str) -> AppResult<bool> {
+        let _: JsonValue = self
+            .client
+            .post_json(&format!("/v1/tareas/{id_tarea}/restaurar"), &json!({}))
+            .await?;
+        Ok(true)
+    }
+
+    async fn vaciar_papelera(&self) -> AppResult<i64> {
+        #[derive(serde::Deserialize)]
+        struct Vaciada {
+            #[serde(default)]
+            borradas: i64,
+        }
+        let res: Vaciada = self.client.delete_json("/v1/tareas/papelera").await?;
+        Ok(res.borradas)
+    }
+
     async fn marcar_finalizada(&self, id_tarea: &str, id_trabajador: &str) -> AppResult<bool> {
         let body = json!({ "id_trabajador": id_trabajador });
         let _: JsonValue = self

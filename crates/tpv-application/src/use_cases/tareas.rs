@@ -246,6 +246,22 @@ pub async fn delete_tarea(repo: &dyn TareasRepository, args: TareaIdArgs) -> App
     repo.delete_tarea(&args.id_tarea).await
 }
 
+/// Papelera (TAR-05): la lista de lo borrado usa el mismo read model que la vista de admin.
+pub async fn get_papelera(repo: &dyn TareasRepository) -> AppResult<Vec<TareaAdminRow>> {
+    repo.get_papelera().await
+}
+
+pub async fn restaurar_tarea(repo: &dyn TareasRepository, args: TareaIdArgs) -> AppResult<bool> {
+    if args.id_tarea.trim().is_empty() {
+        return Err(AppError::validation("id_tarea required"));
+    }
+    repo.restaurar_tarea(&args.id_tarea).await
+}
+
+pub async fn vaciar_papelera(repo: &dyn TareasRepository) -> AppResult<i64> {
+    repo.vaciar_papelera().await
+}
+
 pub async fn marcar_finalizada(
     repo: &dyn TareasRepository,
     input: FinalizarTareaInput,
@@ -279,6 +295,8 @@ mod tests {
         update: Mutex<Vec<(String, TareaData)>>,
         asignaciones: Mutex<Vec<(String, Vec<String>)>>,
         delete: Mutex<Vec<String>>,
+        restaurar: Mutex<Vec<String>>,
+        vaciada: Mutex<bool>,
         finalizar: Mutex<Vec<(String, String)>>,
     }
 
@@ -335,6 +353,17 @@ mod tests {
         async fn delete_tarea(&self, id: &str) -> AppResult<bool> {
             self.delete.lock().unwrap().push(id.to_string());
             Ok(true)
+        }
+        async fn get_papelera(&self) -> AppResult<Vec<TareaAdminRow>> {
+            Ok(vec![])
+        }
+        async fn restaurar_tarea(&self, id: &str) -> AppResult<bool> {
+            self.restaurar.lock().unwrap().push(id.to_string());
+            Ok(true)
+        }
+        async fn vaciar_papelera(&self) -> AppResult<i64> {
+            *self.vaciada.lock().unwrap() = true;
+            Ok(0)
         }
         async fn marcar_finalizada(&self, id: &str, trab: &str) -> AppResult<bool> {
             self.finalizar

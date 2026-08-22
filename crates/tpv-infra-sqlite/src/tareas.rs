@@ -474,32 +474,133 @@ impl TareasRepository for SqliteTareasRepository {
         }
     }
 
+    /// TAR-05: el borrado es **reversible**. En vez de perder la fila (y sus asignaciones por
+    /// CASCADE), la tarea pasa a `Estado='ELIMINADA'`: desaparece de las listas y del escáner de
+    /// avisos —que ya filtraban por `COALESCE(Estado,'ABIERTA')='ABIERTA'`— pero conserva a quién
+    /// estaba asignada, que es lo que permite restaurarla tal y como estaba.
     async fn delete_tarea(&self, id_tarea: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
 
-        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
-        let res: AppResult<bool> = async {
-            conn.execute(
-                "DELETE FROM Tarea_Asignaciones WHERE ID_Tarea = ?1;",
+        let affected = conn
+            .execute(
+                r#"
+                UPDATE Tareas
+                SET Estado = 'ELIMINADA'
+                WHERE ID_Tarea = ?1
+                  AND COALESCE(Estado, 'ABIERTA') <> 'ELIMINADA';
+                "#,
                 vec![Value::Text(id_tarea.to_string())],
             )
             .await
             .map_err(db_err)?;
 
-            let affected = conn
+        if affected == 0 {
+            return Err(AppError::not_found("Tarea no encontrada"));
+        }
+
+        Ok(true)
+    }
+
+    async fn get_papelera(&self) -> AppResult<Vec<TareaAdminRow>> {
+        let g = self.db.read().await;
+        let conn = &g;
+
+        let sql = r#"
+            SELECT
+              t.ID_Tarea,
+              t.Titulo,
+              t.Descripcion,
+              t.Fecha_Creacion,
+              t.Fecha_Limite,
+              (
+                SELECT COUNT(*)
+                FROM Tarea_Asignaciones a
+                WHERE a.ID_Tarea = t.ID_Tarea
+              ) AS Total_Asignados,
+              (
+                SELECT COUNT(*)
+                FROM Tarea_Asignaciones a
+                WHERE a.ID_Tarea = t.ID_Tarea
+                  AND a.Estado = 'FINALIZADA'
+              ) AS Total_Finalizadas
+            FROM Tareas t
+            WHERE COALESCE(t.Estado, 'ABIERTA') = 'ELIMINADA'
+            ORDER BY t.ID_Tarea DESC;
+        "#;
+
+        let mut rows = conn.query(sql, ()).await.map_err(db_err)?;
+        let mut out: Vec<TareaAdminRow> = vec![];
+
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            out.push(TareaAdminRow {
+                id_tarea: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                titulo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                descripcion: v_string(row.get_value(2).map_err(db_err)?),
+                fecha_creacion: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
+                fecha_limite: v_string(row.get_value(4).map_err(db_err)?),
+                total_asignados: v_i64(row.get_value(5).map_err(db_err)?).unwrap_or(0),
+                total_finalizadas: v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0),
+            });
+        }
+
+        Ok(out)
+    }
+
+    async fn restaurar_tarea(&self, id_tarea: &str) -> AppResult<bool> {
+        let g = self.db.write().await;
+        let conn = &g;
+
+        let affected = conn
+            .execute(
+                r#"
+                UPDATE Tareas
+                SET Estado = 'ABIERTA'
+                WHERE ID_Tarea = ?1
+                  AND COALESCE(Estado, 'ABIERTA') = 'ELIMINADA';
+                "#,
+                vec![Value::Text(id_tarea.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+        if affected == 0 {
+            return Err(AppError::not_found("La tarea no está en la papelera"));
+        }
+
+        Ok(true)
+    }
+
+    /// Vaciar la papelera **sí** borra de verdad (es el único camino que pierde datos, y hay que
+    /// pedirlo a propósito). Las asignaciones se borran a mano antes que las tareas: el CASCADE de
+    /// la FK existe en la Main, pero en la nube puede no estar activo (DB-03) y dejaría huérfanas.
+    async fn vaciar_papelera(&self) -> AppResult<i64> {
+        let g = self.db.write().await;
+        let conn = &g;
+
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<i64> = async {
+            conn.execute(
+                r#"
+                DELETE FROM Tarea_Asignaciones
+                WHERE ID_Tarea IN (
+                  SELECT ID_Tarea FROM Tareas WHERE COALESCE(Estado, 'ABIERTA') = 'ELIMINADA'
+                );
+                "#,
+                vec![],
+            )
+            .await
+            .map_err(db_err)?;
+
+            let borradas = conn
                 .execute(
-                    "DELETE FROM Tareas WHERE ID_Tarea = ?1;",
-                    vec![Value::Text(id_tarea.to_string())],
+                    "DELETE FROM Tareas WHERE COALESCE(Estado, 'ABIERTA') = 'ELIMINADA';",
+                    vec![],
                 )
                 .await
                 .map_err(db_err)?;
 
-            if affected == 0 {
-                return Err(AppError::not_found("Tarea no encontrada"));
-            }
-
-            Ok(true)
+            Ok(borradas as i64)
         }
         .await;
 

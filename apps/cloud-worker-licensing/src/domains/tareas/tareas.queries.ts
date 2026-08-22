@@ -85,6 +85,33 @@ export async function getTareasAdmin(db: Client): Promise<TareaAdminRow[]> {
 	return rows(rs) as TareaAdminRow[];
 }
 
+// TAR-05: la papelera es la misma lista de admin filtrada por el otro estado.
+export async function getPapelera(db: Client): Promise<TareaAdminRow[]> {
+	const rs = await db.execute(`
+		SELECT
+			t.ID_Tarea,
+			t.Titulo,
+			t.Descripcion,
+			t.Fecha_Creacion,
+			t.Fecha_Limite,
+			(
+				SELECT COUNT(*)
+				FROM Tarea_Asignaciones a
+				WHERE a.ID_Tarea = t.ID_Tarea
+			) AS Total_Asignados,
+			(
+				SELECT COUNT(*)
+				FROM Tarea_Asignaciones a
+				WHERE a.ID_Tarea = t.ID_Tarea
+					AND a.Estado = 'FINALIZADA'
+			) AS Total_Finalizadas
+		FROM Tareas t
+		WHERE COALESCE(t.Estado, 'ABIERTA') = 'ELIMINADA'
+		ORDER BY t.ID_Tarea DESC;
+	`);
+	return rows(rs) as TareaAdminRow[];
+}
+
 export async function getTareaById(
 	db: Client,
 	idTarea: string,

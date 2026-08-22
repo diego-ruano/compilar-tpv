@@ -108,7 +108,7 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**58 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
+**60 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
 tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
@@ -127,8 +127,9 @@ tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). P
   `marcar_leida`, `marcar_leidas_batch` y `resolver_por_clave`.
 - **Inventario** (INV-07) — completo: `create_lote`, `create_categoria`, `upsert_producto`, `set_alergenos`,
   `delete_producto`, `update_lote`, `ajustar_lote`.
-- **Clientes** (CLI-05): `crear`, `actualizar`. **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
-  `eliminar`, `marcar_finalizada`. **Proveedores** (PROV-07): `guardar`, `eliminar`, `set_vinculos`,
+- **Clientes**: `crear`, `actualizar` (ojo: CLI-05 es la paridad del **overview**, una lectura, y sigue abierta). **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
+  `eliminar`, `restaurar`, `vaciar_papelera` (la papelera de TAR-05: borrar es `Estado='ELIMINADA'`
+  conservando las asignaciones, y vaciar es el único borrado real), `marcar_finalizada`. **Proveedores** (PROV-07): `guardar`, `eliminar`, `set_vinculos`,
   `crear_producto`. **Reservas** (RES-07/RES-05): `guardar` (cliente nuevo + merge de existente), `eliminar`.
   **Configuración** (CONF-06): `patch_business`, `patch_contact`, `patch_ticket`.
 - **Login/Horarios** (parcial): `login.set_turno_partido`, `horarios.create/update/delete_asignacion`.
@@ -148,7 +149,7 @@ Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y 
 el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
 push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **55/62 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
+Hoy dice **57/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
 que se ejecutó encontró 10 comandos sin caso que no estaban documentados en ninguna parte —todo
 `cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y dos de ellos escondían divergencias
 reales. Por eso existe.

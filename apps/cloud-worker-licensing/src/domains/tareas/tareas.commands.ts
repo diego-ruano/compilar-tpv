@@ -175,25 +175,73 @@ export function setAsignacionesTarea(
 	};
 }
 
+// TAR-05: borrar es mandar a la papelera. Las listas ya filtraban por
+// `COALESCE(Estado,'ABIERTA')='ABIERTA'`, asi que la tarea desaparece de la UI igual que antes,
+// pero conserva sus asignaciones para poder restaurarla tal cual estaba.
 export function deleteTarea(idTarea: string): BuiltCommand {
+	return {
+		commandName: "tareas_delete_tarea",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Tareas
+					SET Estado = 'ELIMINADA'
+					WHERE ID_Tarea = ?1
+						AND COALESCE(Estado, 'ABIERTA') <> 'ELIMINADA';
+				`,
+				args: [idTarea],
+			},
+		},
+		cloudPayload: { id_tarea: idTarea },
+	};
+}
+
+export function restaurarTarea(idTarea: string): BuiltCommand {
+	return {
+		commandName: "tareas_restaurar_tarea",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `
+					UPDATE Tareas
+					SET Estado = 'ABIERTA'
+					WHERE ID_Tarea = ?1
+						AND COALESCE(Estado, 'ABIERTA') = 'ELIMINADA';
+				`,
+				args: [idTarea],
+			},
+		},
+		cloudPayload: { id_tarea: idTarea },
+	};
+}
+
+// Vaciar la papelera es lo unico que borra de verdad. Las asignaciones se borran a mano antes que
+// las tareas: el CASCADE de la FK esta en el esquema, pero en la nube puede no aplicarse (DB-03).
+export function vaciarPapelera(): BuiltCommand {
 	const steps: any[] = [
 		{
 			kind: "execute",
-			sql: "DELETE FROM Tarea_Asignaciones WHERE ID_Tarea = ?1;",
-			args: [idTarea],
+			sql: `
+				DELETE FROM Tarea_Asignaciones
+				WHERE ID_Tarea IN (
+					SELECT ID_Tarea FROM Tareas WHERE COALESCE(Estado, 'ABIERTA') = 'ELIMINADA'
+				);
+			`,
+			args: [],
 		},
 		{
 			kind: "execute",
-			saveAs: "deleted",
-			sql: "DELETE FROM Tareas WHERE ID_Tarea = ?1;",
-			args: [idTarea],
+			saveAs: "borradas",
+			sql: "DELETE FROM Tareas WHERE COALESCE(Estado, 'ABIERTA') = 'ELIMINADA';",
+			args: [],
 		},
 	];
 
 	return {
-		commandName: "tareas_delete_tarea",
-		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "deleted" } },
-		cloudPayload: { id_tarea: idTarea },
+		commandName: "tareas_vaciar_papelera",
+		command: { type: "tenantDb.transaction", payload: { steps, resultKey: "borradas" } },
+		cloudPayload: {},
 	};
 }
 
