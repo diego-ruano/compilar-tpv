@@ -68,8 +68,14 @@ un kiosco y su mitigación real (el lockout) ya está. Se deja como está.
 
 ### LOGIN-05 🔵 Doble implementación crítica
 Login/verify existe en Rust y en el worker; una divergencia en la verificación sería grave.
-**Arreglo:** tests de contrato de todos los caminos (setup, login, punch) → ver
-[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
+
+**Es de los pocos `-parity` que el harness NO cierra:** `login.completeInitialSetup`,
+`login.punchEntrada` y `login.punchSalida` están **excluidos con motivo** en
+[`cobertura.json`](../../../tests/contract/cobertura.json) —el camino real de Rust verifica el PIN
+(PBKDF2) y escribe `Password_Hash` con salt aleatorio—, así que de este dominio solo está cubierto
+`login.set_turno_partido`. El precio de esa exclusión ya se ha cobrado una vez: ver **TRAB-07** en
+[trabajadores.md](trabajadores.md). **Arreglo:** cubrir al menos la parte del fichaje (sembrando un
+hash precomputado o separando la verificación del efecto).
 
 ---
 

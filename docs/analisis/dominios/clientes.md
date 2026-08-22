@@ -15,5 +15,15 @@
 
 ### CLI-05 🔵 Doble implementación del overview
 El cálculo del overview/ranking existe en Rust (Main) y en TS (worker, para Handy) y debe dar los
-mismos números. Hoy están igualados a mano. Es una instancia más de **ARCH-01**; lo cubre el mismo
-harness de tests de contrato → ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
+mismos números.
+
+**Estado (2026-08-22): verificado idéntico a mano, pero sin test que lo sujete.** Las dos consultas
+son equivalentes sentencia a sentencia —mismos CTE (`ult_reserva` con `ROW_NUMBER`, `agg_reservas`),
+mismo `ORDER BY` por ranking y mismo `LIMIT 10`—; la única diferencia es cómo cada lado nombra las
+columnas de salida (Rust lee por posición y mapea al DTO, el worker las aliasea a snake_case), y el
+DTO resultante es el mismo.
+
+**Por qué sigue abierto:** el harness de contrato compara el **efecto de una escritura**, así que
+**no cubre lecturas**. Cerrarlo pide un harness hermano que, con el mismo estado sembrado, compare
+las **filas que devuelve la consulta** en los dos lados. Es la misma pieza que pide STAT-06, y con
+ella se cerrarían los dos.

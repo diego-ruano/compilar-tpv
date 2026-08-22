@@ -9,14 +9,6 @@
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| PROV-07 | 🔵 | Doble implementación Rust/worker (parity) | `proveedores.rs` ↔ `proveedores.commands.ts` |
+Ninguno.
 
-### PROV-07 🔵 Doble implementación
-Instancia de **ARCH-01**; lo cubre el harness de tests de contrato → ver
-[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
-> **Nota (no es un hallazgo):** el correo de pedido lo envía el worker con **Cloudflare Email
-> Service** (binding `EMAIL`); Resend quedó retirado. Sin claves de API en el cliente ni
-> credenciales SMTP en ningún sitio.

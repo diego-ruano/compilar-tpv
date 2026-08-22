@@ -11,7 +11,6 @@
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
 | RES-05 | 🔵 | **Segundo punto** de alta de clientes, con criterio de identidad propio | `reservas.rs` (`upsert_cliente`) |
-| RES-07 | 🔵 | Doble implementación Rust/worker (parity) | `reservas.rs` ↔ `reservas.commands.ts` |
 
 ### RES-05 🔵 Segundo punto de alta de clientes
 Hay **dos** sitios que crean e identifican clientes: el dominio de clientes (D5) y el
@@ -28,6 +27,3 @@ email (a propósito: una reserva se coge a menudo por teléfono y con datos a me
 **Arreglo:** un único punto de resolución de cliente que consuman ambos flujos. Prioridad baja
 mientras los criterios no vuelvan a separarse.
 
-### RES-07 🔵 Doble implementación
-Instancia de **ARCH-01**; lo cubre el harness de tests de contrato → ver
-[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).

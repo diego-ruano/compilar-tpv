@@ -32,11 +32,14 @@ Local-First y React Query con hooks co-locados por feature.
 - **Fallo:** ambas implementaciones deben producir **exactamente** las mismas sentencias y resultados
   para que el sync converja. Mantenerlas idénticas a mano es frágil y la deriva **ya ocurrió**
   (MESA-04, MESA-07, CUENTA-03 — todas corregidas a mano).
-- **Estado:** la lógica está hoy igualada y verificada, pero **sin red de seguridad**. Es el paraguas
-  de todos los `-parity`: MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07,
-  TAR-04, TRAB-06, CLI-05.
-- **Arreglo:** empezar por **tests de contrato (SQL golden)**, que convierten cada divergencia futura
-  en un test rojo sin cambiar la arquitectura. Opciones más ambiciosas (SQL en fuente compartida,
+- **Estado (2026-08-22):** las **escrituras** ya tienen red: el harness de contrato por efecto corre
+  en CI en los dos lados (60 casos, 0 comandos sin cubrir ni excluir con motivo) y cerró MESA-11,
+  VR-05, INV-07, RES-07, TAR-04, PROV-07 y CONF-06. Sigue **sin red** lo que el harness no mira:
+  la paridad de **lectura** (STAT-06, CLI-05 — compara escrituras, no consultas) y lo **excluido con
+  motivo** (LOGIN-05, TRAB-06: PIN verificado en Rust, PII cifrada, salt aleatorio). Que esa segunda
+  laguna no es teórica lo demuestra **TRAB-07**, un bug real que entró justo por ahí.
+- **Arreglo:** hecho el primer paso (**tests de contrato por efecto**). Siguientes: un harness
+  hermano de **paridad de lectura** y cubrir el efecto del fichaje. Opciones más ambiciosas (SQL en fuente compartida,
   WASM, codegen) en [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 - **Decisión del responsable:** refactor **gradual post-lanzamiento**; el producto funciona y converge.
 

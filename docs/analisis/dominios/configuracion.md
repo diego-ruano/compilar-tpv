@@ -10,10 +10,6 @@
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| CONF-06 | 🔵 | Doble implementación Rust/worker (parity) | `configuracion.rs` ↔ `configuracion.commands.ts` |
+Ninguno.
 
-### CONF-06 🔵 Doble implementación
-Instancia de **ARCH-01**; la paridad se mantiene a mano y falta el harness de tests de contrato →
-ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
+

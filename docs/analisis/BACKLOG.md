@@ -6,19 +6,17 @@
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
-| STAT-06 | 🔵 | Paridad Main↔Handy: la lógica ya se igualó a mano; falta el **harness de tests de contrato** (infra de tests). | [estadisticas.md](dominios/estadisticas.md) |
-| INV-07 | 🔵 | Doble implementación Rust/worker: lógica igualada a mano; falta el **harness de tests de contrato** (misma infra que STAT-06). | [inventario.md](dominios/inventario.md) |
+| STAT-06 · CLI-05 | 🔵 | Paridad de **lectura** (KPIs y overview de clientes): verificada idéntica a mano el 2026-08-22, pero el harness de contrato compara escrituras y **no cubre consultas**. Falta el harness hermano de lectura (mismo seed → mismas filas). | [estadisticas.md](dominios/estadisticas.md) · [clientes.md](dominios/clientes.md) |
+| LOGIN-05 · TRAB-06 | 🔵 | Fichaje y login: **excluidos con motivo** del harness (Rust verifica el PIN; PII cifrada y salt aleatorio). Cubrir al menos el efecto del fichaje. Ya costó un bug real: **TRAB-07**. | [login.md](dominios/login.md) · [trabajadores.md](dominios/trabajadores.md) |
 | LOGIN-04 | 🔵 | **PBKDF2 a 600k (OWASP): BLOQUEADO por el runtime, no por el plan.** ⚠️ Corregido 2026-08-09: el tope de 100k **no** viene del plan Free sino de `crypto.subtle` de Cloudflare Workers, que **rechaza** PBKDF2 con más de 100.000 iteraciones (ver la nota en `crates/tpv-domain/src/login.rs:11-15`). Como el worker **verifica** el hash en cada login/fichaje de Handy, 100k es el techo común de ambos runtimes; tener el plan de pago **no lo desbloquea**. Además, con un PIN de 4 dígitos (10⁴) pasar de 100k a 600k solo multiplica por 6 el coste del crackeo offline: irrelevante frente al tamaño del espacio de claves. **Lo que sí movería la aguja** (por orden): un **pepper** fuera de la BD (hace inútil el hash replicado), ampliar el espacio de PIN, o dejar de replicar `Password_Hash` (descartado: la Handy necesita que el worker verifique). El anti-brute-force online ya está resuelto por el lockout escalado de LOGIN-01. **Decisión (2026-08-09): aplazado a cambios futuros.** Riesgo bajo: para explotarlo hay que tener antes acceso de lectura a la BD del tenant en Turso, que es un escenario raro. Se retoma si algún día hay volumen de clientes que lo justifique. | [login.md](dominios/login.md) |
-| LOGIN-05 | 🔵 | Doble implementación login/verify Rust↔worker: falta **harness de tests de contrato** de todos los caminos (setup, login, punch). Misma infra que STAT-06/INV-07. | [login.md](dominios/login.md) |
-| MESA-11 | 🟡 | Doble implementación Main (Rust) ↔ worker (TS) del dominio mesas: la lógica se iguala a mano y **diverge** (ya pasó con MESA-04/MESA-07). Falta el **harness de tests de contrato** y un plan de unificación (ver §[Unificación de la doble implementación](#unificación-de-la-doble-implementación-mainworker)). | [mesas.md](dominios/mesas.md) |
-| MESA-14 | 🔵 | Componentes de UI monolíticos (`MesaComandaModal.tsx` ~70 KB, `KitchenBoard.tsx` ~18 KB): troceo en subcomponentes (ticket / panel de cobro / selector de productos) + hooks. **Pospuesto por prioridad**, no hay bug de negocio detrás. | [mesas.md](dominios/mesas.md) |
 | INFRA-01 | 🟡 | **No hay entorno de staging: se prueba contra producción.** Hoy existe un único worker (`tpv-api`) con una sola BD de control y los binarios apuntan a él por constante. No hay dónde validar un cambio de worker, de esquema o de licencias antes de que lo vea un cliente real. Ver §[Entorno de staging](#entorno-de-staging-infra-01--pendiente-completo). **Aplazado a cuando el SaaS esté más asentado** (decisión 2026-08-09): es un montaje completo, no un ajuste. | §Entorno de staging |
 | FABLE-E | 🔵 | **Nonce anti-repetición en el device-proof.** La firma ya cubre el cuerpo (hecho el 2026-08-15), pero no lleva número de serie: dentro de la ventana de 2 min una petición firmada podría **reproducirse tal cual**. **Decisión: aplazado.** Para reproducirla hay que haber capturado el tráfico (va por TLS) y las escrituras son idempotentes por `Op_Id`, así que repetir una no duplica nada. **Lo que hace falta cuando se retome:** un almacén de nonces vistos, compartido — los isolates del worker no comparten memoria, así que un `Set` en RAM no vale. Opciones: **KV** (barato, pero eventualmente consistente: un replay en otro colo podría no ver el nonce todavía → mal encaje), **Durable Object** (consistente de verdad, ya existe `TenantHub`, pero mete un salto por petición) o una **tabla en Turso** con TTL (un INSERT por petición). Yo iría al DO si algún día pesa. | [auditoria-fable.md](../../auditoria-fable.md) |
 | FABLE-B | 🟠 | **Fuga de stack traces al cliente.** `serverError(req, code, details)` serializa `details` en el cuerpo JSON, y varios handlers de pairing le pasan `{ message, name, stack }` del `Error` ([response.ts:48-63](../../apps/cloud-worker-licensing/src/server/utils/response.ts#L48-L63)). Cualquiera que llame a la API recibe la traza y el texto crudo del motor de Turso. **Decisión (2026-08-14): aplazado**, no hay clientes en producción todavía. **Cuando se haga, el cambio es en tres partes y hay que hacer las tres:** (1) `serverError` deja de serializar `details` y devuelve `{ ok, error, trace_id }`; (2) en cada `catch`, `console.error(trace_id, e?.stack)` + `Sentry.captureException` — hoy solo 9 ficheros loguean, así que sin esto **sí** se perdería información al quitar el `details`; (3) opcional pero recomendable, seguir devolviendo `details` cuando `env.ENVIRONMENT !== "prod"` (requiere añadir `ENVIRONMENT` a los `vars` de `wrangler.json`, hoy ausente). El stack se sigue viendo en `wrangler tail`, Sentry y Axiom. La forma de la respuesta ya la fijó el catálogo de códigos (`{ ok, code, error }`): lo que queda aquí es **dejar de serializar `details`**. | [auditoria-fable.md](../../auditoria-fable.md) |
 
-**Nota:** el harness de tests de contrato Rust↔worker cubriría de una vez STAT-06, INV-07, MESA-11,
-LOGIN-05 y el resto de `-parity` (CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05, VR-05). Es una
-tarea transversal de infraestructura de testing, no de un dominio. Ver
+**Nota (actualizada 2026-08-22):** el harness de contrato **ya está** y cerró los `-parity` de
+**escritura** (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06). Lo que queda de esa
+familia son dos cosas distintas: la **paridad de lectura** (STAT-06, CLI-05), que pide un harness
+hermano que compare filas devueltas, y lo **excluido con motivo** (LOGIN-05, TRAB-06). Ver
 [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
 ---
@@ -27,15 +25,16 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
 
 > **Problema (transversal):** la lógica de construir las **sentencias replicables** vive dos veces —
 > Rust (Main) y TS (worker)— y tiene que ser **idéntica en comportamiento** para que la replicación
-> sea consistente, pero se desincroniza a mano. Afecta a **MESA-11, STAT-06, INV-07, LOGIN-05**.
+> sea consistente, pero se desincroniza a mano. Las **escrituras** ya las sujeta el harness (punto 1);
+> lo que sigue expuesto es la paridad de **lectura** (STAT-06, CLI-05) y lo excluido (LOGIN-05, TRAB-06).
 > Opciones, de menos a más ambiciosas:
 
-1. **Tests de contrato (golden por EFECTO) — barato, primer paso. 🟡 EN MARCHA.** Para cada comando,
+1. **Tests de contrato (golden por EFECTO) — barato, primer paso. ✅ HECHO (escrituras).** Para cada comando,
    con el mismo estado sembrado, comprobar que aplicar la implementación de Rust y la del worker deja
    **las mismas filas**. No elimina la duplicación, pero convierte cada divergencia futura en un
    **test rojo**. Máximo retorno por esfuerzo; sin cambio de arquitectura.
 
-   > **Estado (2026-08-20): andamiaje montado, en extensión incremental.** Ver
+   > **Estado (2026-08-22): completo para escrituras; las lecturas siguen sin cubrir.** Ver
    > [tests/contract/README.md](../../tests/contract/README.md).
    >
    > - **Se compara el EFECTO, no el texto SQL.** Los dos lados escribieron su SQL por separado, así
@@ -48,7 +47,7 @@ tarea transversal de infraestructura de testing, no de un dominio. Ver
    >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
    >   (`apps/cloud-worker-licensing/test/contract.test.ts`, corre en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
-   > - **Cubierto:** 58 casos sobre 55 comandos, sin ninguno pendiente (venta rápida, mesas
+   > - **Cubierto:** 60 casos sobre 57 comandos, sin ninguno pendiente (venta rápida, mesas
    >   —incluido `save_layout`—, cuentas, inventario, clientes, tareas, proveedores, reservas,
    >   configuración, notificaciones y parte de login/horarios). Añadir un dominio = un brazo de
    >   despacho en cada lado + sus fixtures.
@@ -152,7 +151,7 @@ probar la **app** completa contra staging.
 
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
-| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker) de la lógica de escritura. Mitigada a mano; falta el **harness de tests de contrato** (SQL golden) y, a medio plazo, una única fuente de generación de sentencias. Es el paraguas de todos los `-parity` (MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04, TRAB-06, CLI-05). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Las **escrituras** ya las sujeta el harness de contrato (60 casos verdes en CI, 2026-08-22). Queda: la paridad de **lectura** (STAT-06, CLI-05), lo **excluido con motivo** (LOGIN-05, TRAB-06) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
 
 ---
 

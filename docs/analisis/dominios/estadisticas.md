@@ -18,7 +18,12 @@ contra límites `datetime('now','localtime',…)` **sin re-convertir**. Este mó
 | STAT-06 | 🔵 | Doble implementación Rust/worker (los KPIs deben coincidir Main↔Handy) | `stats.rs` ↔ `stats.*.ts` |
 
 ### STAT-06 🔵 Doble implementación
-La lógica ya se igualó a mano; lo que falta es el **harness de tests de contrato** que impida que
-vuelva a separarse (los KPIs son especialmente sensibles: una divergencia se ve como "la Handy me
-da otro número"). Instancia de **ARCH-01** → ver
-[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
+Los 7 KPI (`mesas`, `list_categorias`, `productos`, `reservas`, `trabajadores`, `clientes`,
+`proveedores`) están implementados dos veces, en `stats.rs` y en `stats.queries.ts`, y deben dar el
+mismo número; una divergencia se ve como "la Handy me da otro total".
+
+**Ojo con lo que dice el harness:** el de contrato compara el efecto de las **escrituras**, y stats
+es **solo lectura** — por eso `tests/contract/README.md` lo lista entre los "no cubiertos: no hay
+nada que contrastar". Es decir, **STAT-06 no lo cierra el harness actual**: hace falta el harness
+de **paridad de lectura** (mismo seed → mismas filas devueltas por cada lado), que cerraría también
+CLI-05. Mientras tanto la paridad se mantiene a mano y nada la vigila.

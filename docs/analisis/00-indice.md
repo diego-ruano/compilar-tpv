@@ -4,15 +4,15 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-20).** De los ~136 hallazgos del análisis original **quedan 21
-> abiertos** (la tabla de abajo es la buena; el recuento se corrigió el 2026-08-14, el 2026-08-17
-> bajó de 28 a 24 al cerrarse ARCH-02, ARCH-03, ARCH-05 y TRAB-03, el 2026-08-18 a 22 al cerrarse
-> INV-06 y DB-14 con el job de reconciliación, y el 2026-08-20 a 21 al cerrarse VR-06 —se permite
-> stock negativo y un job avisa de la sobreventa—), y son lo único
-> que contienen estas fichas. De esos 21, **11 son el mismo trabajo** (la familia `-parity`, ver la
-> nota del recuento) y **5 están aplazados con motivo** en [BACKLOG.md](BACKLOG.md). **Un hallazgo corregido se borra de aquí**: la traza del
-> arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no
-> aparece, está resuelto.
+> **Estado (2026-08-22).** De los ~136 hallazgos del análisis original **quedan 13 abiertos**
+> (la tabla de abajo es la buena). El 2026-08-22 se revisó hallazgo por hallazgo contra el código:
+> se cerraron los 7 `-parity` de **escritura** que el harness de contrato ya sujeta (MESA-11, VR-05,
+> INV-07, RES-07, TAR-04, PROV-07, CONF-06 — 60 casos verdes en los dos lados), se cerró **TAR-05**
+> (papelera de tareas implementada) y se retiró **MESA-14** por decisión del responsable. En esa
+> misma revisión salió un bug real: **TRAB-07** (el fichaje de la Handy inserta con la PK a NULL),
+> que entra como hallazgo nuevo. **Un hallazgo corregido se borra de aquí**: la traza del arreglo
+> vive en el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no aparece,
+> está resuelto.
 
 ---
 
@@ -67,50 +67,46 @@
 
 | Módulo | Abiertos | Cuáles |
 |--------|----------|--------|
-| T5 Arquitectura | 1 | ARCH-01 🟠 |
-| D1 Mesas | 2 | MESA-11 🟡 · MESA-14 🔵 |
-| D2 Venta rápida | 2 | VR-05 🟡 · VR-07 🔵 |
-| D4 Inventario | 1 | INV-07 🔵 |
-| D6 Reservas | 2 | RES-05 🔵 · RES-07 🔵 |
-| D8 Tareas | 2 | TAR-04 🔵 · TAR-05 🔵 |
-| D9 Trabajadores | 1 | TRAB-06 🔵 |
+| T5 Arquitectura | 1 | ARCH-01 🟠 (lo que queda: las **lecturas** y lo excluido del harness) |
+| D2 Venta rápida | 1 | VR-07 🔵 |
+| D5 Clientes | 1 | CLI-05 🔵 (paridad de **lectura**) |
+| D6 Reservas | 1 | RES-05 🔵 |
+| D9 Trabajadores | 2 | **TRAB-07 🔴** · TRAB-06 🔵 |
 | D11 Login | 3 | LOGIN-03 🔵 · LOGIN-04 🔵 · LOGIN-05 🔵 |
-| T1 Esquema DB | 0 | — |
+| D12 Estadísticas | 1 | STAT-06 🔵 (paridad de **lectura**) |
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
 | D3 Cuentas | 1 | CUENTA-06 🔵 |
-| D5 Clientes · D7 Proveedores · D10 Configuración · D12 Estadísticas | 1 c/u | CLI-05 · PROV-07 · CONF-06 · STAT-06 (todos 🔵 parity) |
-| T2 Sync | 0 | — |
-| T4 Observabilidad | 0 | — |
+| D1 Mesas · D4 Inventario · D7 Proveedores · D8 Tareas · D10 Configuración · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento
 
-**11 de los abiertos son la misma cosa**: la doble implementación Main(Rust)/Handy(worker). ARCH-01
-es el paraguas y MESA-11, VR-05, INV-07, STAT-06, LOGIN-05, CONF-06, PROV-07, RES-07, TAR-04,
-TRAB-06 y CLI-05 son sus instancias por dominio. **Un solo trabajo —el harness de tests de contrato
-por efecto— los cierra todos**, y ya está **construido y en verde**: **58 casos** sobre 55 comandos
-contrastados en los dos lados, **sin ninguno pendiente**. Cubre completo venta rápida, mesas
-(líneas/cocina/cobro, `set_reserva_estado` y el `save_layout` grande), cuentas (gastos y la anulación
-completa de un cobro), inventario, clientes, tareas, proveedores, reservas (incl. el merge RES-05),
-configuración y notificaciones, más una parte de login/horarios. Los 7 restantes están excluidos con
-motivo en [`cobertura.json`](../../tests/contract/cobertura.json) (PIN hasheado, PII cifrada, IDs
-asimétricos), y `scripts/check-contract-coverage.mjs` **avisa en CI —sin romperlo—** de todo comando
-que entre sin caso. Ver
+**Qué cerró el harness de contrato y qué no.** El harness compara el **efecto de una escritura**
+(mismo seed → mismas filas) y está en verde en los dos lados: **60 casos** sobre 57 comandos, con 7
+excluidos con motivo en [`cobertura.json`](../../tests/contract/cobertura.json) y 0 pendientes;
+`scripts/check-contract-coverage.mjs` avisa en CI —sin romperlo— de todo comando que entre sin caso.
+Eso **cierra** los `-parity` de escritura: MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07 y
+CONF-06. Lo que **no** cierra, y por eso siguen abiertos:
+
+- **Paridad de lectura** — CLI-05 (overview de clientes) y STAT-06 (los 7 KPI). El harness no mira
+  consultas. Ambos están verificados idénticos a mano hoy, pero nada los vigila; los cierra un
+  harness hermano que compare **las filas devueltas** por cada lado con el mismo seed.
+- **Lo excluido con motivo** — LOGIN-05 y TRAB-06: `login.completeInitialSetup` y `login.punch*`
+  quedan fuera porque el camino de Rust verifica el PIN, y `trabajadores.crear/actualizar` porque
+  escriben PII cifrada y hash con salt. **TRAB-07 es el precio de esa exclusión**: el `INSERT` del
+  fichaje del worker se dejó la PK y nadie lo vio.
+
+**ARCH-01** sigue siendo el paraguas, pero ya solo de esos dos frentes (lecturas + exclusiones) y
+del refactor de fondo (WASM, post-lanzamiento). Ver
 [tests/contract/README.md](../../tests/contract/README.md) y
-[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker). Cada divergencia
-futura en un comando cubierto es ya un test rojo en CI.
+[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
 El resto se agrupa en:
-- **Reconciliación de datos derivados:** cerrada. En su parte local el job `reconciliacion` cuadra
-  cada lote contra su historial y cada `Total_Gastado` contra sus `Pagos`, y **avisa** sin corregir
-  nada por su cuenta. La comparación Main ↔ nube (lo que era VR-06) dejó de hacer falta al quitar el
-  clamp de stock: el descuento se replica como delta relativo idéntico en ambas copias, así que
-  **convergen por construcción**; un lote puede quedar negativo (sobreventa) y el job `stock_negativo`
-  lo avisa una vez por producto.
+- **Bug abierto:** TRAB-07 (fichaje de la Handy con `ID_Fichaje` NULL) — ver
+  [trabajadores.md](dominios/trabajadores.md).
+- **Reconciliación de datos derivados:** cerrada (job `reconciliacion` + `stock_negativo`).
 - **Seguridad de datos:** LOGIN-04 (keyspace del PIN).
-- **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), TAR-05 (papelera),
-  MESA-14 (troceo de UI), RES-05 (unificar gestión de clientes), LOGIN-03, LIC-02, LIC-04.
-
----
+- **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), RES-05 (unificar gestión de
+  clientes), LOGIN-03, LIC-02, LIC-04, VR-07.
 
 ## Dónde está el resto
 

@@ -14,32 +14,17 @@ Existen **dos implementaciones** completas del dominio: la de la **Main** (Rust,
 del **worker** (TS, `mesas.commands.ts`) que sirve las escrituras de la **Handy**. Ambas construyen
 el mismo tipo de sentencias pero **por separado y a mano**. Hoy están igualadas (las divergencias
 históricas MESA-04 y MESA-07 se corrigieron), pero nada impide que vuelvan a separarse: es el
-riesgo estructural que queda en pie (MESA-11).
+riesgo estructural de fondo, pero ya **no queda suelto**: el harness de tests de contrato por
+efecto cubre el dominio completo —incluido el `save_layout` grande— y corre en CI en los dos lados,
+así que una divergencia futura sale como test rojo. Ver
+[tests/contract/README.md](../../../tests/contract/README.md).
 
 ---
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| MESA-11 | 🟡 | **Doble implementación** del dominio mantenida a mano → riesgo de divergencia (saveLayout duplica ~140 líneas) | `mesas.rs` ↔ `mesas.commands.ts` |
-| MESA-14 | 🔵 | `MesaComandaModal.tsx` (~70 KB) / `KitchenBoard.tsx` (~18 KB) monolíticos → mantenibilidad | `features/mesasComponents/` |
+Ninguno.
 
-### MESA-11 🟡 Doble implementación mantenida a mano
-- **Ubicación:** todo el dominio duplicado en `mesas.rs` (Rust) y `mesas.commands.ts` (worker);
-  `saveLayout` replica ~140 líneas de lógica de borrado/renombrado de zonas y mesas.
-- **Fallo:** cada cambio hay que hacerlo dos veces y mantenerlo idéntico. Las divergencias **ya
-  ocurrieron** (MESA-04 y MESA-07, ambas corregidas a mano); nada garantiza que no se repita.
-- **Arreglo:** tests de contrato (SQL golden) que comparen las sentencias que producen ambas
-  implementaciones para los mismos inputs. Es la tarea transversal ARCH-01 → ver
-  [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
-
-### MESA-14 🔵 Componentes de UI monolíticos
-- **Ubicación:** `MesaComandaModal.tsx` (~70 KB), `KitchenBoard.tsx` (~18 KB).
-- **Fallo:** difícil de leer, testear y evolucionar; concentra estado del ticket, cobro, cocina y
-  reservas en un único archivo.
-- **Arreglo:** extraer subcomponentes (ticket, panel de cobro, selector de productos) y hooks.
-- **Estado:** pospuesto por prioridad (no hay bug de negocio detrás).
 
 ---
 

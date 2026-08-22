@@ -30,13 +30,7 @@
 
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
-| VR-05 | 🟡 | **Doble implementación** Rust/worker de FEFO (misma clase de riesgo que MESA-11) | `venta_rapida.rs` ↔ `venta_rapida.commands.ts` |
 | VR-07 | 🔵 | Muchos round-trips por venta (N lecturas de lotes + 2N updates) dentro de la tx | `venta_rapida.rs` (consumo FEFO) |
-
-### VR-05 🟡 Doble implementación del FEFO
-Mismo problema estructural que MESA-11: el reparto FEFO está codificado dos veces (Rust y TS) y
-tiene que comportarse igual. Hoy están igualados a mano. **Arreglo:** tests de contrato (SQL
-golden) → ARCH-01, ver [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
 ### VR-07 🔵 Round-trips por venta
 El consumo FEFO lee los lotes del producto y emite dos escrituras por lote dentro de la

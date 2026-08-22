@@ -15,13 +15,8 @@ ajustes, coherencia de datos, borrados).
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| INV-07 | 🔵 | **Doble implementación** Rust/worker (parity risk) | `inventario.rs` ↔ `inventario.commands.ts` |
+Ninguno.
 
-### INV-07 🔵 Doble implementación
-Instancia de **ARCH-01**; misma infraestructura de tests que STAT-06 → ver
-[BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
 
 ### Ampliaciones futuras conocidas (no son hallazgos)
 - `ID_Usuario` en `Movimientos_Stock` queda **NULLABLE sin poblar**: la capa de comando aún no
