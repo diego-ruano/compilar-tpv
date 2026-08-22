@@ -57,10 +57,12 @@ pub struct PrintTicketPayload {
     pub iva_percent: f64,
 
     // ── Flags de personalización ──
-    /// Reservado: el logo (imagen) aún no se rasteriza a ESC/POS, por eso este flag no se lee.
     #[serde(default)]
-    #[allow(dead_code)]
     pub show_logo: bool,
+    /// Ruta relativa del logo en AppData (`images/…`) o un data URL heredado. La lee el comando,
+    /// no el builder: aquí dentro no se toca el disco.
+    #[serde(default)]
+    pub logo_path: Option<String>,
     #[serde(default)]
     pub show_business_name: bool,
     #[serde(default)]
@@ -347,7 +349,94 @@ fn desglose_iva(p: &PrintTicketPayload) -> Vec<(f64, f64, f64)> {
         .collect()
 }
 
-pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
+/// Ancho imprimible en dots, derivado de las columnas (12 dots por carácter en fuente A).
+fn ancho_dots(cols: usize) -> u32 {
+    (cols as u32) * 12
+}
+
+/// Convierte una imagen a un bloque ESC/POS `GS v 0` listo para imprimir.
+///
+/// Una térmica es de **un bit**: cada punto se marca o no. Un logo plano de líneas sale nítido;
+/// una fotografía saldría como una mancha si se recortara por un umbral, así que se difumina con
+/// Floyd–Steinberg — el error de redondeo de cada píxel se reparte entre sus vecinos, que es lo que
+/// crea la ilusión de grises con solo negro y blanco.
+///
+/// Devuelve `None` si la imagen no se puede decodificar: el ticket sale sin logo, que es mejor que
+/// no salir.
+pub fn rasterizar_logo(bytes: &[u8], ancho_max_dots: u32) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(bytes).ok()?;
+
+    // El ancho se ajusta al papel; el alto va en proporción. Se usa un múltiplo de 8 porque cada
+    // byte de la trama son 8 puntos horizontales.
+    let ancho = ancho_max_dots.min(img.width().max(1)).max(8) & !7;
+    let alto = ((img.height() as f64) * (ancho as f64) / (img.width().max(1) as f64)).round() as u32;
+    let alto = alto.clamp(1, 1024); // tope de seguridad: un logo no puede comerse el rollo
+
+    let gris = image::imageops::resize(
+        &img.to_luma8(),
+        ancho,
+        alto,
+        image::imageops::FilterType::Lanczos3,
+    );
+
+    // Difuminado Floyd–Steinberg sobre una copia en coma flotante.
+    let mut buf: Vec<f32> = gris.pixels().map(|p| p.0[0] as f32).collect();
+    let w = ancho as usize;
+    let h = alto as usize;
+    for y in 0..h {
+        for x in 0..w {
+            let i = y * w + x;
+            let viejo = buf[i];
+            let nuevo = if viejo < 128.0 { 0.0 } else { 255.0 };
+            buf[i] = nuevo;
+            let err = viejo - nuevo;
+            let mut reparte = |dx: usize, dy: usize, factor: f32| {
+                if dx < w && dy < h {
+                    buf[dy * w + dx] += err * factor;
+                }
+            };
+            if x + 1 < w {
+                reparte(x + 1, y, 7.0 / 16.0);
+            }
+            if y + 1 < h {
+                if x > 0 {
+                    reparte(x - 1, y + 1, 3.0 / 16.0);
+                }
+                reparte(x, y + 1, 5.0 / 16.0);
+                if x + 1 < w {
+                    reparte(x + 1, y + 1, 1.0 / 16.0);
+                }
+            }
+        }
+    }
+
+    // Empaquetado: un bit por punto, el más significativo a la izquierda, 1 = negro.
+    let bytes_por_fila = w / 8;
+    let mut trama = Vec::with_capacity(bytes_por_fila * h);
+    for y in 0..h {
+        for bx in 0..bytes_por_fila {
+            let mut b: u8 = 0;
+            for bit in 0..8 {
+                let x = bx * 8 + bit;
+                if buf[y * w + x] < 128.0 {
+                    b |= 0x80 >> bit;
+                }
+            }
+            trama.push(b);
+        }
+    }
+
+    // GS v 0 m xL xH yL yH  +  datos
+    let mut out = vec![0x1D, 0x76, 0x30, 0x00];
+    out.push((bytes_por_fila & 0xFF) as u8);
+    out.push(((bytes_por_fila >> 8) & 0xFF) as u8);
+    out.push((h & 0xFF) as u8);
+    out.push(((h >> 8) & 0xFF) as u8);
+    out.extend_from_slice(&trama);
+    Some(out)
+}
+
+pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     let cols = effective_cols(p);
     let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
     // Escala de fuente: sólo el eje de altura (mantiene columnas). GS ! 0x01 = doble alto.
@@ -365,7 +454,12 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
 
     // ── Cabecera (centrada) ──
     esc_align(&mut out, 1);
-    // Nota: el logo (imagen) no se imprime en esta versión (requiere rasterizado ESC/POS).
+    if p.show_logo {
+        if let Some(bloque) = logo.and_then(|b| rasterizar_logo(b, ancho_dots(cols))) {
+            out.extend_from_slice(&bloque);
+            esc_feed(&mut out, 1);
+        }
+    }
     if p.show_business_name {
         esc_bold(&mut out, true);
         esc_size(&mut out, 0x11); // doble alto+ancho para el nombre
@@ -842,6 +936,7 @@ mod tests_desglose_iva {
             mensaje_footer: String::new(),
             iva_percent: iva_negocio,
             show_logo: false,
+            logo_path: None,
             show_business_name: false,
             show_address: false,
             show_phone: false,
@@ -965,6 +1060,7 @@ mod tests_identidad_del_ticket {
             mensaje_footer: String::new(),
             iva_percent: 10.0,
             show_logo: false,
+            logo_path: None,
             show_business_name: true,
             show_address: false,
             show_phone: false,
@@ -1008,7 +1104,7 @@ mod tests_identidad_del_ticket {
 
     #[test]
     fn sin_numero_es_una_precuenta_y_lo_dice() {
-        let bytes = build_ticket(&base(vec![linea()]));
+        let bytes = build_ticket(&base(vec![linea()]), None);
 
         assert!(contiene(&bytes, "PRECUENTA"));
         assert!(
@@ -1021,7 +1117,7 @@ mod tests_identidad_del_ticket {
     fn con_numero_sale_el_numero_y_no_el_aviso() {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000042".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "T-000042"));
         assert!(!contiene(&bytes, "PRECUENTA"));
@@ -1033,7 +1129,7 @@ mod tests_identidad_del_ticket {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000042".into());
         p.es_copia = true;
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "T-000042"));
         assert!(contiene(&bytes, "COPIA"));
@@ -1044,7 +1140,7 @@ mod tests_identidad_del_ticket {
         // Sin número no hay original del que ser copia: el aviso que toca es el de precuenta.
         let mut p = base(vec![linea()]);
         p.es_copia = true;
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "NO ES UN TICKET DE VENTA"));
         assert!(!contiene(&bytes, "COPIA"));
@@ -1056,7 +1152,7 @@ mod tests_identidad_del_ticket {
         p.numero_ticket = Some("T-000007".into());
         p.origen = Some("Mesa 5".into());
         p.metodo_pago = Some("Tarjeta".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "Mesa 5"));
         assert!(contiene(&bytes, "Tarjeta"));
@@ -1070,7 +1166,7 @@ mod tests_identidad_del_ticket {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000001".into());
         p.metodo_pago = Some("Efectivo".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(
             bytes.windows(5).any(|w| w == PULSO_CAJON),
@@ -1084,7 +1180,7 @@ mod tests_identidad_del_ticket {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000001".into());
         p.metodo_pago = Some("Tarjeta".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(!bytes.windows(5).any(|w| w == PULSO_CAJON));
     }
@@ -1092,7 +1188,7 @@ mod tests_identidad_del_ticket {
     #[test]
     fn una_precuenta_no_abre_el_cajon() {
         // No hay cobro: no hay dinero que meter.
-        let bytes = build_ticket(&base(vec![linea()]));
+        let bytes = build_ticket(&base(vec![linea()]), None);
         assert!(!bytes.windows(5).any(|w| w == PULSO_CAJON));
     }
 
@@ -1101,7 +1197,7 @@ mod tests_identidad_del_ticket {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000001".into());
         p.metodo_pago = Some("  EFECTIVO  ".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(bytes.windows(5).any(|w| w == PULSO_CAJON));
     }
@@ -1120,8 +1216,138 @@ mod tests_identidad_del_ticket {
     fn un_numero_en_blanco_cuenta_como_precuenta() {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("   ".into());
-        let bytes = build_ticket(&p);
+        let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "PRECUENTA"));
+    }
+}
+
+#[cfg(test)]
+mod tests_logo {
+    //! Rasterizado del logo a ESC/POS.
+    //!
+    //! Una térmica es de UN BIT: cada punto se marca o no. Lo que se comprueba aquí es la
+    //! cabecera del bloque —de la que depende que la impresora interprete bien la trama— y que un
+    //! logo que no se pueda decodificar no reviente el ticket: sale sin logo, que es mejor que no
+    //! salir.
+
+    use super::*;
+
+    /// PNG mínimo válido (1×1, negro), suficiente para ejercitar el decodificador.
+    fn png_1x1() -> Vec<u8> {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
+            .unwrap()
+    }
+
+    #[test]
+    fn el_bloque_empieza_por_la_cabecera_de_imagen_de_escpos() {
+        let b = rasterizar_logo(&png_1x1(), 576).expect("un PNG válido se rasteriza");
+
+        // GS v 0 m — sin esto la impresora escupiría la trama como si fuera texto.
+        assert_eq!(&b[0..4], &[0x1D, 0x76, 0x30, 0x00]);
+        assert!(b.len() > 8, "tiene que llevar datos, no solo cabecera");
+    }
+
+    #[test]
+    fn el_ancho_declarado_cuadra_con_los_datos() {
+        // La cabecera dice cuántos BYTES tiene cada fila y cuántas filas hay; si no cuadra con lo
+        // que sigue, la impresora imprime basura o se cuelga esperando bytes.
+        let b = rasterizar_logo(&png_1x1(), 576).unwrap();
+
+        let bytes_fila = b[4] as usize | ((b[5] as usize) << 8);
+        let filas = b[6] as usize | ((b[7] as usize) << 8);
+
+        assert_eq!(b.len() - 8, bytes_fila * filas);
+    }
+
+    #[test]
+    fn el_ancho_nunca_supera_el_papel() {
+        // 32 columnas (58 mm) = 384 dots = 48 bytes por fila.
+        let b = rasterizar_logo(&png_1x1(), ancho_dots(32)).unwrap();
+        let bytes_fila = b[4] as usize | ((b[5] as usize) << 8);
+
+        assert!(bytes_fila * 8 <= 384, "se saldría del papel");
+    }
+
+    #[test]
+    fn una_imagen_ilegible_no_rompe_el_ticket() {
+        assert!(rasterizar_logo(b"esto no es una imagen", 576).is_none());
+        assert!(rasterizar_logo(&[], 576).is_none());
+    }
+
+    #[test]
+    fn sin_logo_el_ticket_sale_igual() {
+        let mut p = base(vec![linea()]);
+        p.show_logo = true;
+        // Se pide logo pero no hay bytes: el ticket se imprime sin él.
+        let bytes = build_ticket(&p, None);
+
+        assert!(!bytes.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
+        assert!(bytes.len() > 0);
+    }
+
+    #[test]
+    fn con_logo_el_bloque_entra_en_el_ticket() {
+        let mut p = base(vec![linea()]);
+        p.show_logo = true;
+        let bytes = build_ticket(&p, Some(&png_1x1()));
+
+        assert!(bytes.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
+    }
+
+    #[test]
+    fn con_el_logo_desactivado_no_se_imprime_aunque_haya_imagen() {
+        let mut p = base(vec![linea()]);
+        p.show_logo = false;
+        let bytes = build_ticket(&p, Some(&png_1x1()));
+
+        assert!(!bytes.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
+    }
+
+    fn base(items: Vec<PrintTicketLine>) -> PrintTicketPayload {
+        PrintTicketPayload {
+            printer_name: None,
+            business_name: "Bar".into(),
+            direccion: String::new(),
+            telefono: String::new(),
+            cif: String::new(),
+            mensaje_footer: String::new(),
+            iva_percent: 10.0,
+            show_logo: false,
+            logo_path: None,
+            show_business_name: true,
+            show_address: false,
+            show_phone: false,
+            show_cif: false,
+            show_date_time: false,
+            show_line_items: true,
+            show_base_and_iva: true,
+            show_total: true,
+            show_footer_message: false,
+            paper_width_mm: 80,
+            paper_dpi: 203,
+            chars_per_line: 42,
+            margin_top_mm: 0.0,
+            margin_bottom_mm: 0.0,
+            margin_left_mm: 0.0,
+            margin_right_mm: 0.0,
+            font_scale: 1.0,
+            numero_ticket: None,
+            metodo_pago: None,
+            origen: None,
+            es_copia: false,
+            items,
+        }
+    }
+
+    fn linea() -> PrintTicketLine {
+        PrintTicketLine {
+            nombre: "Cafe".into(),
+            cantidad: 1,
+            precio_unitario: 1.1,
+            iva_percent: None,
+        }
     }
 }

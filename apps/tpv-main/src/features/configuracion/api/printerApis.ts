@@ -43,6 +43,8 @@ export type PrintTicketPayload = {
     iva_percent: number;
 
     show_logo: boolean;
+    /** Ruta del logo en AppData (o data URL heredado). Lo lee Rust al imprimir. */
+    logo_path: string | null;
     show_business_name: boolean;
     show_address: boolean;
     show_phone: boolean;
@@ -189,6 +191,7 @@ export function buildTicketPayload(
         iva_percent: biz.ivaPercent,
 
         show_logo: t.showLogo,
+        logo_path: biz.logoDataUrl ?? null,
         show_business_name: t.showBusinessName,
         show_address: t.showAddress,
         show_phone: t.showPhone,

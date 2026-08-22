@@ -1234,7 +1234,20 @@ async fn printer_print_ticket(
     payload: printing::PrintTicketPayload,
 ) -> Result<String, AppErrorDto> {
     let printer = resolve_printer(&app, payload.printer_name.clone())?;
-    let bytes = printing::build_ticket(&payload);
+
+    // El logo se lee AQUÍ y no dentro del builder: `build_ticket` no toca el disco, que es lo que
+    // lo mantiene comprobable con un test. Si el fichero no está o no se puede decodificar, el
+    // ticket sale sin logo — mejor que no salir.
+    let logo = if payload.show_logo {
+        payload
+            .logo_path
+            .as_deref()
+            .and_then(|ruta| leer_imagen_local(&app, ruta))
+    } else {
+        None
+    };
+
+    let bytes = printing::build_ticket(&payload, logo.as_deref());
     tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Ticket TPV", &bytes))
         .await
         .map_err(|e| e.to_string())??;
@@ -1255,6 +1268,29 @@ fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorD
         args.margin_left_mm,
         args.margin_right_mm,
     ) as u32)
+}
+
+/// Lee del disco una imagen guardada en AppData (`images/{sub}/{archivo}`) o descodifica un data
+/// URL heredado. `None` si no se puede: quien llama decide qué hacer sin ella.
+fn leer_imagen_local(app: &AppHandle, ruta: &str) -> Option<Vec<u8>> {
+    let r = ruta.trim();
+    if r.is_empty() {
+        return None;
+    }
+
+    // Data URL heredado (`data:image/png;base64,…`): los logos antiguos se guardaron así.
+    if let Some(b64) = r.split_once(";base64,").map(|(_, b)| b) {
+        use base64::Engine;
+        return base64::engine::general_purpose::STANDARD.decode(b64).ok();
+    }
+
+    let dir = app_data_dir_of(app).ok()?;
+    let completa = dir.join(r.replace("\\", "/"));
+    // El fichero tiene que quedar DENTRO de AppData: una ruta con `..` no puede sacarnos de ahí.
+    if !completa.starts_with(&dir) {
+        return None;
+    }
+    std::fs::read(completa).ok()
 }
 
 /// Abre el cajón portamonedas sin imprimir nada.
