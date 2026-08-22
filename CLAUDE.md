@@ -78,12 +78,15 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │
 └── packages/                  # CÓDIGO JS COMPARTIDO
     ├── database/              # migrations/*.sql (esquema ÚNICO; runner Rust include_dir! + worker tenantMigrations.ts)
-    │                          #   0001_inicial.sql consolidó las incrementales previas al lanzamiento;
-    │                          #   a partir de ahí todo cambio va en una migración NUEVA (0002…): el
-    │                          #   runner rechaza una migración ya aplicada cuyo hash cambie. Al añadir
-    │                          #   una, regístrala TAMBIÉN en el worker (tenantMigrations.ts) y en
-    │                          #   test/helpers/esquemaTenant.ts, y toca migrations.rs para que
-    │                          #   include_dir! no sirva la copia vieja.
+    │                          #   Hoy SOLO 0001_inicial.sql: mientras no haya clientes en producción,
+    │                          #   un cambio de esquema se edita ahí y se borra la BD de desarrollo —
+    │                          #   un esquema se lee de arriba abajo y una cadena de ALTERs hay que
+    │                          #   ejecutarla mentalmente. Desde el lanzamiento, todo cambio va en una
+    │                          #   migración NUEVA (0002…): el runner rechaza una ya aplicada cuyo hash
+    │                          #   cambie. Al tocar o añadir una, regístrala TAMBIÉN en el worker
+    │                          #   (tenantMigrations.ts) y en test/helpers/esquemaTenant.ts, toca
+    │                          #   migrations.rs para que include_dir! no sirva la copia vieja, y
+    │                          #   rebendice el snapshot (BLESS_SCHEMA_SNAPSHOT=1).
     ├── contracts/             # @tpv/contracts — tipos autogenerados (src/generated/bindings.ts)
     └── client/                # @tpv/client — invokeClient.ts (envoltura de invoke de Tauri)
 ```

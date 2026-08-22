@@ -2,9 +2,14 @@
 //!
 //! ## Modelo (fuente única de verdad)
 //! Ya **no existe `schema.sql`**. El esquema completo se construye ejecutando en orden los ficheros
-//! `.sql` de `packages/database/migrations/` (`0001_inicial.sql`, `0002_…`, …), que se **embeben**
-//! en el binario con [`include_dir!`]. Tanto una instalación nueva como una existente convergen
-//! aplicando las migraciones que aún no tengan registradas.
+//! `.sql` de `packages/database/migrations/`, que se **embeben** en el binario con [`include_dir!`].
+//! Tanto una instalación nueva como una existente convergen aplicando las migraciones que aún no
+//! tengan registradas.
+//!
+//! Hoy solo hay `0001_inicial.sql`: antes del lanzamiento las incrementales se consolidaron ahí,
+//! porque un esquema se lee de arriba abajo y una cadena de `ALTER` hay que ejecutarla mentalmente
+//! para saber cómo acaba una tabla. Desde el lanzamiento eso deja de poder hacerse: editar una
+//! migración ya aplicada cambia su hash y ambos runners fallan en duro (`migration_altered`).
 //!
 //! ## Control por tabla `_migrations`
 //! Cada BD lleva una tabla `_migrations (name, hash, applied_at)` con las migraciones ya aplicadas.

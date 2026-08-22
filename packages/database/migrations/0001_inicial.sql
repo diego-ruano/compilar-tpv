@@ -2,11 +2,15 @@
    TPV SCHEMA — MIGRACION INICIAL (0001) · UNICA Y COMPARTIDA (app local + nube Turso)
    - La FUENTE UNICA DE VERDAD del esquema son los ficheros .sql de
      packages/database/migrations/, aplicados EN ORDEN. Hoy este es el UNICO:
-     antes del lanzamiento se CONSOLIDARON aqui las migraciones incrementales
-     0002..0008 (contact settings, email unico de cliente, movimientos de stock,
-     intentos de login, comanda unica por mesa, stock suelto y notificaciones).
-     No habia instalaciones en produccion, asi que arrancar de un esquema plano
-     es mas simple de leer y de mantener que una cadena de parches historicos.
+     antes del lanzamiento se CONSOLIDARON aqui todas las incrementales
+     (contact settings, email unico de cliente, movimientos de stock, intentos
+     de login, comanda unica por mesa, stock suelto, notificaciones, traza del
+     consumo suelto, stock negativo en lotes, IVA por producto, numero de ticket
+     y registro de aperturas del cajon).
+     No hay instalaciones en produccion, asi que arrancar de un esquema plano es
+     mas simple de leer y de mantener que una cadena de parches historicos: un
+     esquema se lee de arriba abajo, una cadena de ALTERs hay que ejecutarla
+     mentalmente para saber como acaba una tabla.
      Los consumen los dos runners espejo:
        * App de escritorio (Rust): crates/tpv-infra-sqlite/src/migrations.rs los
          embebe con include_dir! y aplica lo pendiente en cada arranque.
@@ -189,6 +193,14 @@ CREATE TABLE IF NOT EXISTS Productos (
   -- de 0), este contador SI puede quedar negativo: es la senal honesta de sobreventa. El stock total
   -- mostrado de un producto es SUM(lotes) + COALESCE(Stock_Suelto, 0).
   Stock_Suelto REAL,
+  -- Tipo de IVA propio del producto. NULL = "hereda el del negocio"
+  -- (Business_Settings.IVA_Percent), que es el caso de casi todo: en hosteleria el consumo en el
+  -- establecimiento va al tipo reducido, bebida incluida. Deja de valer en cuanto se vende algo
+  -- para llevar envasado, tabaco o merchandising, que tributan a otro tipo.
+  -- Es nullable a proposito y no DEFAULT 10: "no decidido" y "decidido que sea 10" son cosas
+  -- distintas. Un producto que nadie ha tocado tiene que SEGUIR al tipo general si este cambia;
+  -- un 10 escrito en la fila se quedaria congelado sin que nadie lo pidiera.
+  IVA_Percent REAL,
   FOREIGN KEY (ID_Categoria) REFERENCES Categorias_Producto(ID_Categoria),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor)
 );
@@ -214,8 +226,7 @@ CREATE TABLE IF NOT EXISTS Lotes_Producto (
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
   UNIQUE (ID_Producto, Codigo_Lote),
-  CHECK (Cantidad_Inicial >= 0),
-  CHECK (Stock_Disponible >= 0)
+  CHECK (Cantidad_Inicial >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_cad
@@ -445,12 +456,16 @@ ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 -- CAPA DE APLICACION (use_cases de Rust + esquemas zod del worker), NO con CHECK: SQLite no permite
 -- anadir un CHECK a una tabla ya existente via ALTER, y el runner envuelve cada migracion en una
 -- transaccion (recrear la tabla seria arriesgado en tablas tan referenciadas). Ver DB-06.
+-- IVA_Percent es un SNAPSHOT, igual que Precio_Unitario: al vender una linea se copia el tipo
+-- vigente del producto. Sin eso, reimprimir un ticket del ano pasado lo sacaria con el tipo de hoy,
+-- que es justo lo que una reimpresion no puede hacer.
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Detalle TEXT PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
   ID_Producto TEXT NOT NULL,
   Cantidad REAL NOT NULL,
   Precio_Unitario REAL NOT NULL,
+  IVA_Percent REAL,
   Notas TEXT,
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
   Fecha_Hora_Cocina DATETIME,
@@ -487,6 +502,27 @@ CREATE TABLE IF NOT EXISTS Lote_Consumos (
 
 CREATE INDEX IF NOT EXISTS idx_lote_consumos_lote
 ON Lote_Consumos(ID_Lote);
+
+-- Espejo de Lote_Consumos para el stock que no esta en lotes (VR-04). Una venta consume primero de
+-- los lotes (FEFO) y lo que estos no cubren se descuenta de Productos.Stock_Suelto; sin esta traza,
+-- anular un pago devolvia lo de los lotes y perdia PARA SIEMPRE la parte suelta, porque no habia de
+-- donde reconstruirla. Y como ese contador puede quedar negativo a proposito (senal de sobreventa),
+-- la perdida ni siquiera se distinguia de una sobreventa legitima.
+--
+-- Es tambien la otra mitad del invariante de reconciliacion (INV-06): el stock de un producto es
+-- SUM(lotes) + Stock_Suelto.
+CREATE TABLE IF NOT EXISTS Suelto_Consumos (
+  ID_Detalle  TEXT NOT NULL,
+  ID_Producto TEXT NOT NULL,
+  Cantidad    REAL NOT NULL,
+  PRIMARY KEY (ID_Detalle, ID_Producto),
+  FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto),
+  CHECK (Cantidad > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_suelto_consumos_producto
+ON Suelto_Consumos(ID_Producto);
 
 -- (La tabla Facturas se retiro: nunca se escribia; el cobro vive integramente en Pagos +
 --  Pago_Detalles, que es la fuente de verdad. Ver DB-13. Si algun dia hace falta facturacion
@@ -583,6 +619,7 @@ CREATE TABLE IF NOT EXISTS Pagos (
   Tipo TEXT NOT NULL,
   ID_Usuario_Cobrador TEXT,
   ID_Trabajador_Cobrador TEXT,
+  Numero_Ticket TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario_Cobrador) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL
@@ -609,6 +646,35 @@ CREATE TABLE IF NOT EXISTS Pago_Detalles (
 -- cobro esta linea), necesarias al anular/revertir un pago.
 CREATE INDEX IF NOT EXISTS idx_pago_detalles_detalle
 ON Pago_Detalles(ID_Detalle);
+
+-- Correlativo del ticket impreso (Pagos.Numero_Ticket). Sin el, un papel no se puede atar a su
+-- cobro: ni para una devolucion, ni para cuadrar un arqueo, ni para el cliente que vuelve a
+-- reclamar. Y una reimpresion tiene que salir con el MISMO numero que el original, asi que el
+-- numero no se calcula al imprimir: se guarda con el pago.
+--
+-- Contador unico y no una serie por dispositivo porque solo cobra la Main: con un unico escritor no
+-- hay que repartir numeros ni coordinar equipos sin conexion. El numero es TEXT para que el formato
+-- pueda crecer (una serie por dispositivo, el ano delante) sin migrar los ya emitidos.
+CREATE TABLE IF NOT EXISTS Ticket_Contador (
+  ID INTEGER PRIMARY KEY CHECK (ID = 1),
+  Ultimo INTEGER NOT NULL DEFAULT 0
+);
+
+INSERT OR IGNORE INTO Ticket_Contador (ID, Ultimo) VALUES (1, 0);
+
+-- Aperturas MANUALES del cajon portamonedas. Las de un cobro se saben por su Pago y duplicarlas
+-- aqui seria ruido; lo que no dejaba rastro es abrirlo SIN una venta detras (dar cambio, cuadrar),
+-- que es justo por donde se va el dinero. No se registra para impedirlo -el camarero necesita
+-- abrirlo- sino para que exista la pregunta "quien lo abrio a las 17:40".
+CREATE TABLE IF NOT EXISTS Aperturas_Cajon (
+  ID_Apertura TEXT PRIMARY KEY,
+  ID_Usuario TEXT,
+  Fecha DATETIME NOT NULL,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_aperturas_cajon_fecha
+ON Aperturas_Cajon(Fecha);
 
 /* =========================================================
    10. Idempotencia / Atomicidad (tabla de la NUBE)
@@ -794,12 +860,15 @@ ON Notificacion_Lecturas(ID_Usuario);
 --   * agg:      SUM(stock) por producto + MIN(caducidad) de los lotes con stock (= caducidad proxima).
 --   * lote_fefo: ROW_NUMBER() en UNA pasada para elegir el lote FEFO siguiente (rn = 1).
 -- Columnas de salida IDENTICAS a la version anterior (Stock_Actual, Caducidad_Proxima, Lote_Proximo).
+-- Caducidad_Proxima = MIN de las caducidades de los lotes CON stock (MIN ignora los NULL).
+--
+-- (Este comentario va fuera del CREATE VIEW por la misma razon que en las tablas: el snapshot
+--  anti-drift colapsa cada sentencia a una linea, y un `--` dentro se comeria el resto.)
 CREATE VIEW IF NOT EXISTS v_inventario_producto_stock AS
 WITH agg AS (
   SELECT
     ID_Producto,
     COALESCE(SUM(Stock_Disponible), 0) AS Stock_Actual,
-    -- Caducidad mas proxima = MIN de las caducidades de lotes con stock (MIN ignora NULLs).
     MIN(CASE WHEN COALESCE(Stock_Disponible, 0) > 0 THEN Caducidad END) AS Caducidad_Proxima
   FROM Lotes_Producto
   GROUP BY ID_Producto
