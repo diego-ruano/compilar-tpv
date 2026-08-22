@@ -9,9 +9,11 @@ import { useToast } from "../../../shared/toast";
 import { cn } from "../utils";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
+import { useAuth } from "../../../shared/stores/useAuth";
 import {
     printerGetSelected,
     printerList,
+    printerOpenDrawer,
     printerPrintTest,
     printerSetSelected,
     type PrinterInfo,
@@ -63,6 +65,26 @@ export function PrinterPanel() {
         },
         [selected, toast, cargar],
     );
+
+    // Quién lo abre: la apertura manual se anota a su nombre.
+    const idUsuario = useAuth((s) => s.idUsuario);
+
+    /**
+     * Abre el cajón sin imprimir. Sirve para comprobar que el cable RJ11 está bien puesto — que es
+     * el fallo típico al montarlo — y en el día a día para dar cambio.
+     */
+    const abrirCajon = useCallback(async () => {
+        try {
+            await printerOpenDrawer(idUsuario ?? null);
+            toast.success("Cajón", "Orden de apertura enviada.");
+        } catch (e) {
+            console.error("printerOpenDrawer error:", e);
+            toast.error(
+                "Cajón",
+                typeof e === "string" ? e : "No se pudo abrir el cajón.",
+            );
+        }
+    }, [toast, idUsuario]);
 
     const imprimirPrueba = useCallback(async () => {
         if (!selected) return;
@@ -157,12 +179,17 @@ export function PrinterPanel() {
                         ? `Imprimirá en: ${selected}`
                         : "Sin impresora seleccionada."}
                 </div>
-                <PrimaryButton
-                    onClick={imprimirPrueba}
-                    disabled={!selected || testing}
-                >
-                    {testing ? "Imprimiendo…" : "Imprimir prueba"}
-                </PrimaryButton>
+                <div className="flex gap-2">
+                    <GhostButton onClick={abrirCajon} disabled={!selected}>
+                        Abrir cajón
+                    </GhostButton>
+                    <PrimaryButton
+                        onClick={imprimirPrueba}
+                        disabled={!selected || testing}
+                    >
+                        {testing ? "Imprimiendo…" : "Imprimir prueba"}
+                    </PrimaryButton>
+                </div>
             </div>
         </Panel>
     );

@@ -290,6 +290,18 @@ fn esc_feed_dots(out: &mut Vec<u8>, mut dots: u32) {
 fn esc_left_margin(out: &mut Vec<u8>, dots: u32) {
     out.extend_from_slice(&[0x1D, 0x4C, (dots & 0xFF) as u8, ((dots >> 8) & 0xFF) as u8]);
 }
+/// Pulso al cajón portamonedas (`ESC p m t1 t2`).
+///
+/// El cajón no está conectado al ordenador: cuelga de la impresora por un RJ11 y se abre con un
+/// pulso de corriente a su solenoide. `m=0` es el pin 2, que es el que usan casi todos; los
+/// tiempos van en unidades de 2 ms (50 ms de pulso y 500 ms de descanso, lo habitual).
+///
+/// Son cinco bytes dentro del mismo trabajo de impresión: puestos al final, el cajón se abre
+/// cuando el ticket ya ha salido.
+fn esc_abrir_cajon(out: &mut Vec<u8>) {
+    out.extend_from_slice(&[0x1B, 0x70, 0x00, 0x19, 0xFA]);
+}
+
 fn esc_cut(out: &mut Vec<u8>) {
     out.extend_from_slice(&[0x1D, 0x56, 0x00]); // GS V 0  (corte total)
 }
@@ -492,7 +504,28 @@ pub fn build_ticket(p: &PrintTicketPayload) -> Vec<u8> {
     esc_feed(&mut out, 4);
     esc_cut(&mut out);
 
+    // El cajón se abre SOLO si se cobró en efectivo: en tarjeta no hace falta y abrirlo delante
+    // del cliente sin motivo es exponer el dinero. Va después del corte, con el ticket ya fuera.
+    if p
+        .metodo_pago
+        .as_deref()
+        .map(|m| m.trim().eq_ignore_ascii_case("efectivo"))
+        .unwrap_or(false)
+    {
+        esc_abrir_cajon(&mut out);
+    }
+
     out
+}
+
+/// Trabajo de impresión que **solo** abre el cajón, sin sacar papel.
+///
+/// Usa la variante en tiempo real (`DLE DC4`), que la impresora atiende aunque tenga trabajos por
+/// delante: el botón de "abrir cajón" existe para dar cambio, y esperar a que termine una cola de
+/// tickets lo haría inútil.
+pub fn build_abrir_cajon() -> Vec<u8> {
+    // DLE DC4 n m t → n=1 (pulso), m=0 (pin 2), t=2 (200 ms).
+    vec![0x10, 0x14, 0x01, 0x00, 0x02]
 }
 
 /// Formatea un porcentaje sin decimales innecesarios (`10` en vez de `10,00`).
@@ -1027,6 +1060,60 @@ mod tests_identidad_del_ticket {
 
         assert!(contiene(&bytes, "Mesa 5"));
         assert!(contiene(&bytes, "Tarjeta"));
+    }
+
+    /// `ESC p 0 25 250` — el pulso al solenoide del cajón.
+    const PULSO_CAJON: [u8; 5] = [0x1B, 0x70, 0x00, 0x19, 0xFA];
+
+    #[test]
+    fn cobrando_en_efectivo_el_ticket_abre_el_cajon() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000001".into());
+        p.metodo_pago = Some("Efectivo".into());
+        let bytes = build_ticket(&p);
+
+        assert!(
+            bytes.windows(5).any(|w| w == PULSO_CAJON),
+            "un cobro en efectivo tiene que abrir el cajón"
+        );
+    }
+
+    #[test]
+    fn cobrando_con_tarjeta_el_cajon_no_se_abre() {
+        // Abrirlo sin motivo delante del cliente es exponer el dinero.
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000001".into());
+        p.metodo_pago = Some("Tarjeta".into());
+        let bytes = build_ticket(&p);
+
+        assert!(!bytes.windows(5).any(|w| w == PULSO_CAJON));
+    }
+
+    #[test]
+    fn una_precuenta_no_abre_el_cajon() {
+        // No hay cobro: no hay dinero que meter.
+        let bytes = build_ticket(&base(vec![linea()]));
+        assert!(!bytes.windows(5).any(|w| w == PULSO_CAJON));
+    }
+
+    #[test]
+    fn el_metodo_se_reconoce_sin_importar_mayusculas_ni_espacios() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000001".into());
+        p.metodo_pago = Some("  EFECTIVO  ".into());
+        let bytes = build_ticket(&p);
+
+        assert!(bytes.windows(5).any(|w| w == PULSO_CAJON));
+    }
+
+    #[test]
+    fn el_boton_manual_abre_sin_sacar_papel() {
+        // Variante en tiempo real: la impresora la atiende aunque tenga trabajos por delante, que
+        // es lo que hace util un boton para dar cambio.
+        let bytes = build_abrir_cajon();
+
+        assert_eq!(bytes, vec![0x10, 0x14, 0x01, 0x00, 0x02]);
+        assert!(!bytes.contains(&0x0A), "no debe imprimir ninguna linea");
     }
 
     #[test]

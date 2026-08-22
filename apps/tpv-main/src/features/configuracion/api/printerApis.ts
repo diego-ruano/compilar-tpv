@@ -121,6 +121,19 @@ export async function printerSetSelected(
     await invokeClient<string>("printer_set_selected", { args: { name, destino } });
 }
 
+/**
+ * Abre el cajón portamonedas sin imprimir nada (para dar cambio o cuadrar caja).
+ *
+ * Queda registrado con quién y cuándo: una apertura sin venta detrás es la única por la que
+ * alguien pregunta cuando falta dinero. No pide permiso de administrador — el camarero lo
+ * necesita, y poner fricción ahí acaba en que todos conocen el PIN del encargado.
+ */
+export async function printerOpenDrawer(idUsuario?: string | null): Promise<void> {
+    await invokeClient<string>("printer_open_drawer", {
+        args: { id_usuario: idUsuario ?? null },
+    });
+}
+
 export async function printerPrintTest(name?: string): Promise<void> {
     await invokeClient<string>("printer_print_test", {
         args: name ? { name } : null,

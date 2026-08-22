@@ -131,6 +131,14 @@ pub async fn update_pago(repo: &dyn CuentasRepository, input: UpdatePagoInput) -
     repo.actualizar_pago(&input.id_pago, pago).await
 }
 
+/// Deja constancia de una apertura manual del cajón (ver el puerto).
+pub async fn registrar_apertura_cajon(
+    repo: &dyn CuentasRepository,
+    id_usuario: Option<String>,
+) -> AppResult<()> {
+    repo.registrar_apertura_cajon(id_usuario).await
+}
+
 /// Reconstruye un ticket ya cobrado para volver a imprimirlo. El número es el del original: la
 /// copia no es un ticket nuevo.
 pub async fn ticket_para_reimprimir(

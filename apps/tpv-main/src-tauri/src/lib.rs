@@ -136,6 +136,13 @@ struct SetDeviceModeArgs {
     mode: DeviceMode,
 }
 
+/// Quién abre el cajón a mano (para el registro). Ausente = no identificado.
+#[derive(Debug, Clone, Deserialize)]
+struct AbrirCajonArgs {
+    #[serde(default)]
+    id_usuario: Option<String>,
+}
+
 /// Destino de impresión (`caja` | `cocina`). Ausente = `caja`.
 #[derive(Debug, Clone, Deserialize)]
 struct DestinoArgs {
@@ -1250,6 +1257,40 @@ fn printer_ticket_cols(args: printing::GeometriaTicket) -> Result<u32, AppErrorD
     ) as u32)
 }
 
+/// Abre el cajón portamonedas sin imprimir nada.
+///
+/// Existe para dar cambio o cuadrar caja, que es algo que el camarero necesita hacer, así que no
+/// se pide permiso de administrador. Lo que sí se hace es **dejarlo anotado** con quién y cuándo:
+/// una apertura sin venta detrás es la única por la que alguien pregunta cuando falta dinero.
+///
+/// El registro es best-effort a propósito: si la BD fallara, el cajón se abre igual. Bloquear el
+/// cambio de un cliente porque no se pudo escribir una fila de auditoría sería peor que la falta
+/// de esa fila.
+#[tauri::command]
+async fn printer_open_drawer(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    args: Option<AbrirCajonArgs>,
+) -> Result<String, AppErrorDto> {
+    let id_usuario = args.and_then(|a| a.id_usuario);
+
+    if let Ok(repo) = state.cuentas_repo().await {
+        if let Err(e) =
+            tpv_application::use_cases::cuentas::registrar_apertura_cajon(repo.as_ref(), id_usuario)
+                .await
+        {
+            tracing::warn!(target: "tpv::caja", error = %e, "no se pudo anotar la apertura del cajón");
+        }
+    }
+
+    let printer = resolve_printer(&app, None)?;
+    let bytes = printing::build_abrir_cajon();
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Abrir cajón", &bytes))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok("OK".into())
+}
+
 /// Imprime un ticket de prueba en la impresora indicada (o la seleccionada) para verificarla.
 #[tauri::command]
 async fn printer_print_test(
@@ -1640,6 +1681,7 @@ pub fn run() {
             printer_set_selected,
             printer_print_ticket,
             printer_ticket_cols,
+            printer_open_drawer,
             printer_print_test,
             // auth / login
             commands::login::list_login_users,

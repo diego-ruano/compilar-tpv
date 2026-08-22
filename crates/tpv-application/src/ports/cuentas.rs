@@ -42,6 +42,11 @@ pub trait CuentasRepository: Send + Sync {
     /// Elimina un pago (y sus detalles). `true` si borró fila.
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool>;
 
+    /// Anota que alguien abrió el cajón SIN una venta detrás (para dar cambio, para cuadrar).
+    /// No lo impide —el camarero lo necesita—: lo deja registrado, que es la única pista real
+    /// cuando falta dinero. Las aperturas de un cobro no se anotan aquí: ya las cuenta su pago.
+    async fn registrar_apertura_cajon(&self, id_usuario: Option<String>) -> AppResult<()>;
+
     /// Reconstruye un ticket ya cobrado para volver a imprimirlo (mismo número, marcado COPIA).
     /// `None` si el pago no existe.
     async fn ticket_para_reimprimir(&self, id_pago: &str) -> AppResult<Option<TicketReimpresionDto>>;

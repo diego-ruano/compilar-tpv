@@ -125,6 +125,11 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
+    /// El cajón cuelga de la impresora de la Main: una Handy no tiene ninguno que abrir.
+    async fn registrar_apertura_cajon(&self, _id_usuario: Option<String>) -> AppResult<()> {
+        Ok(())
+    }
+
     /// Reimprimir es cosa de la Main: es la que tiene la impresora, y solo ella cobra. No hay
     /// endpoint en el worker para esto.
     async fn ticket_para_reimprimir(

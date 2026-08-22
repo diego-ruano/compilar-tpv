@@ -1,3 +1,4 @@
+CREATE INDEX idx_aperturas_cajon_fecha ON Aperturas_Cajon(Fecha);
 CREATE INDEX idx_applied_ops_command ON Applied_Operations(Command_Name);
 CREATE INDEX idx_applied_ops_created_at ON Applied_Operations(Created_At_Ms);
 CREATE INDEX idx_applied_ops_status ON Applied_Operations(Status);
@@ -43,6 +44,7 @@ CREATE INDEX idx_tarea_asig_tarea ON Tarea_Asignaciones(ID_Tarea);
 CREATE INDEX idx_tarea_asig_trab ON Tarea_Asignaciones(ID_Trabajador, Estado);
 CREATE UNIQUE INDEX ux_clientes_email ON Clientes(lower(Email)) WHERE Email IS NOT NULL AND Email <> '';
 CREATE TABLE Alergenos ( ID_Alergeno TEXT PRIMARY KEY, Nombre TEXT NOT NULL UNIQUE, Nombre_Imagen TEXT, Ruta_Imagen TEXT );
+CREATE TABLE Aperturas_Cajon ( ID_Apertura TEXT PRIMARY KEY, ID_Usuario TEXT, Fecha DATETIME NOT NULL, FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL );
 CREATE TABLE Applied_Operations ( ID_Applied_Operation INTEGER PRIMARY KEY AUTOINCREMENT, Op_Id TEXT NOT NULL, Command_Name TEXT NOT NULL, Request_Hash TEXT NOT NULL, Device_Id TEXT, Status TEXT NOT NULL DEFAULT 'PROCESSING', Result_Json TEXT, Error_Text TEXT, Created_At_Ms INTEGER NOT NULL, Applied_At_Ms INTEGER, Updated_At_Ms INTEGER NOT NULL, UNIQUE (Op_Id), CHECK (Status IN ('PROCESSING', 'APPLIED', 'FAILED')) );
 CREATE TABLE Asignacion_Turnos ( ID_Asignacion TEXT PRIMARY KEY, ID_Trabajador TEXT NOT NULL, Fecha DATE NOT NULL, ID_Turno TEXT NOT NULL, Area TEXT NOT NULL, Hora_Inicio TIME, Hora_Fin TIME, Notas TEXT, FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador), FOREIGN KEY (ID_Turno) REFERENCES Turnos(ID_Turno) );
 CREATE TABLE Business_Settings ( ID INTEGER PRIMARY KEY CHECK (ID = 1), Business_Name TEXT NOT NULL DEFAULT 'TPV', Logo_DataUrl TEXT, Direccion TEXT DEFAULT '', Telefono TEXT DEFAULT '', CIF TEXT DEFAULT '', Mensaje_Footer TEXT DEFAULT '¡Gracias por su visita!', IVA_Percent REAL NOT NULL DEFAULT 10, Updated_At TEXT DEFAULT (datetime('now','localtime')) );

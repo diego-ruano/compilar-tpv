@@ -388,6 +388,24 @@ impl CuentasRepository for SqliteCuentasRepository {
     /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
     /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
     /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
+    async fn registrar_apertura_cajon(&self, id_usuario: Option<String>) -> AppResult<()> {
+        let w = self.db.write().await;
+        w.execute(
+            "INSERT INTO Aperturas_Cajon (ID_Apertura, ID_Usuario, Fecha)              VALUES (?1, ?2, datetime('now','localtime'));",
+            vec![
+                Value::Text(new_id()),
+                id_usuario
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .map(Value::Text)
+                    .unwrap_or(Value::Null),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
+        Ok(())
+    }
+
     async fn ticket_para_reimprimir(&self, id_pago: &str) -> AppResult<Option<TicketReimpresionDto>> {
         let r = self.db.read().await;
         let conn = r.conn();

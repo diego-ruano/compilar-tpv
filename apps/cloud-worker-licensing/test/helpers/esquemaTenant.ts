@@ -13,15 +13,16 @@ import m0002 from "../../../../packages/database/migrations/0002_suelto_consumos
 import m0003 from "../../../../packages/database/migrations/0003_stock_negativo.sql";
 import m0004 from "../../../../packages/database/migrations/0004_iva_por_producto.sql";
 import m0005 from "../../../../packages/database/migrations/0005_numero_ticket.sql";
+import m0006 from "../../../../packages/database/migrations/0006_aperturas_cajon.sql";
 
 /** Quita comentarios de bloque y de línea (el parser de sqld/SqlStorage no siempre los tolera). */
 function sinComentarios(sql: string): string {
 	return sql.replace(/\/\*[\s\S]*?\*\//g, "").replace(/--[^\n]*/g, "");
 }
 
-/** Aplica 0001..0005 sobre `sql` (el `ctx.storage.sql` del DO), sentencia a sentencia. */
+/** Aplica 0001..0006 sobre `sql` (el `ctx.storage.sql` del DO), sentencia a sentencia. */
 export function crearEsquemaTenant(sql: any): void {
-	for (const mig of [m0001, m0002, m0003, m0004, m0005]) {
+	for (const mig of [m0001, m0002, m0003, m0004, m0005, m0006]) {
 		for (const stmt of sinComentarios(mig).split(";")) {
 			const s = stmt.trim();
 			if (s) sql.exec(s);
