@@ -61,19 +61,34 @@ export function punchEntrada(input: {
 	fecha: string;
 	parte: number;
 }): BuiltCommand {
+	// TRAB-07: el UUID se genera aqui, en un paso `value`, y entra en el INSERT. `ID_Fichaje` es
+	// TEXT PRIMARY KEY sin DEFAULT y en SQLite una PK de texto ADMITE NULL: omitirla no daba error,
+	// creaba el fichaje sin clave y luego la salida (WHERE ID_Fichaje = ?) no casaba ninguna fila,
+	// asi que la jornada no cerraba nunca. Es el patron de CLAUDE.md §9 para toda TEXT PRIMARY KEY.
+	const steps: any[] = [
+		{
+			kind: "value",
+			saveAs: "id_fichaje",
+			sql: "SELECT ?1;",
+			args: [crypto.randomUUID()],
+		},
+		{
+			kind: "execute",
+			sql: `
+				INSERT INTO Fichajes (
+					ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
+				)
+				VALUES (?1, ?2, ?3, ?4, datetime('now','localtime'), NULL, 'ABIERTO', 0);
+			`,
+			args: [{ $ref: "id_fichaje" }, input.id_usuario, input.fecha, input.parte],
+		},
+	];
+
 	return {
 		commandName: "punch",
 		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: `
-					INSERT INTO Fichajes (
-						ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico
-					)
-					VALUES (?1, ?2, ?3, datetime('now','localtime'), NULL, 'ABIERTO', 0);
-				`,
-				args: [input.id_usuario, input.fecha, input.parte],
-			},
+			type: "tenantDb.transaction",
+			payload: { steps, resultKey: "id_fichaje" },
 		},
 		cloudPayload: { ...input, tipo: "entrada" },
 	};

@@ -340,7 +340,10 @@ async fn exec_apply_initial_setup<C: Writer>(
     Ok(())
 }
 
-async fn exec_punch<C: Writer>(
+/// `pub(crate)` para que el harness de contrato pueda comprobar el EFECTO del fichaje sin pasar por
+/// la verificación del PIN (que es lo que mantenía a `punch` fuera del harness — y por ese hueco
+/// entró TRAB-07, el INSERT del worker sin `ID_Fichaje`).
+pub(crate) async fn exec_punch<C: Writer>(
     conn: &C,
     id_usuario: &str,
     tipo: &str,

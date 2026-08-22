@@ -17,7 +17,7 @@ import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
-import { setTurnoPartido } from "../src/domains/login/login.commands";
+import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
 import {
 	createGasto,
 	deleteGasto,
@@ -212,6 +212,10 @@ import casoNotifBatch from "../../../tests/contract/casos/notificaciones/marcar_
 import goldenNotifBatch from "../../../tests/contract/golden/notificaciones/marcar_leidas_batch.json";
 import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
+import casoLoginPunchEntrada from "../../../tests/contract/casos/login/punch_entrada.json";
+import goldenLoginPunchEntrada from "../../../tests/contract/golden/login/punch_entrada.json";
+import casoLoginPunchSalida from "../../../tests/contract/casos/login/punch_salida.json";
+import goldenLoginPunchSalida from "../../../tests/contract/golden/login/punch_salida.json";
 import casoLoginTurno from "../../../tests/contract/casos/login/set_turno_partido.json";
 import goldenLoginTurno from "../../../tests/contract/golden/login/set_turno_partido.json";
 import casoHorCreate from "../../../tests/contract/casos/horarios/create_asignacion.json";
@@ -278,6 +282,8 @@ const CASOS = [
 	{ nombre: "notificaciones_marcar_leida", caso: casoNotifLeida, golden: goldenNotifLeida },
 	{ nombre: "notificaciones_marcar_leidas_batch", caso: casoNotifBatch, golden: goldenNotifBatch },
 	{ nombre: "notificaciones_resolver_por_clave", caso: casoNotifResolver, golden: goldenNotifResolver },
+	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
+	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
 	{ nombre: "horarios_create_asignacion", caso: casoHorCreate, golden: goldenHorCreate },
 	{ nombre: "horarios_update_asignacion", caso: casoHorUpdate, golden: goldenHorUpdate },
@@ -735,6 +741,31 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					caso.entrada.estado,
 				),
 			);
+			return;
+		}
+		case "login.punch": {
+			// El lado worker parte la operacion en dos comandos (la ruta decide cual segun el tipo);
+			// el efecto que se contrasta es el mismo que el de `exec_punch` en Rust.
+			if (caso.entrada.tipo === "entrada") {
+				aplicar(
+					hub,
+					sql,
+					punchEntrada({
+						id_usuario: caso.entrada.id_usuario,
+						fecha: caso.entrada.fecha,
+						parte: caso.entrada.parte,
+					}),
+				);
+			} else {
+				aplicar(
+					hub,
+					sql,
+					punchSalida({
+						id_usuario: caso.entrada.id_usuario,
+						id_fichaje: caso.entrada.id_fichaje,
+					}),
+				);
+			}
 			return;
 		}
 		case "login.set_turno_partido": {

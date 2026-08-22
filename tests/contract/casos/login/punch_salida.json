@@ -1,0 +1,17 @@
+{
+  "descripcion": "Fichaje de salida: cierra el fichaje abierto del día (Estado CERRADO, hora de salida puesta, sin marcar cierre automático). La fecha del seed se calcula en SQL para que sea el mismo día que mira el backend.",
+  "comando": "login.punch",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado, Cerrado_Automatico) VALUES ('fich-1', 'user-1', date('now','localtime'), 1, datetime('now','localtime'), NULL, 'ABIERTO', 0);"
+  ],
+  "entrada": {
+    "id_usuario": "user-1",
+    "tipo": "salida",
+    "id_fichaje": "fich-1"
+  },
+  "snapshot": {
+    "Fichajes": "SELECT ID_Fichaje, ID_Usuario, Parte, Estado, Cerrado_Automatico, Cierre_Motivo, Incidencia, CASE WHEN Hora_Salida IS NOT NULL THEN 1 ELSE 0 END AS Tiene_Salida FROM Fichajes"
+  }
+}

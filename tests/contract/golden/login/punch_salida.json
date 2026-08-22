@@ -1,0 +1,14 @@
+{
+  "Fichajes": [
+    {
+      "Cerrado_Automatico": 0,
+      "Cierre_Motivo": null,
+      "Estado": "CERRADO",
+      "ID_Fichaje": "fich-1",
+      "ID_Usuario": "user-1",
+      "Incidencia": null,
+      "Parte": 1,
+      "Tiene_Salida": 1
+    }
+  ]
+}

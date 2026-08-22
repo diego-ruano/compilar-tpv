@@ -1,0 +1,13 @@
+{
+  "Fichajes": [
+    {
+      "Cerrado_Automatico": 0,
+      "Estado": "ABIERTO",
+      "ID_Usuario": "user-1",
+      "Parte": 1,
+      "Sin_Salida": 1,
+      "Tiene_Entrada": 1,
+      "Tiene_Id": 1
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "descripcion": "Fichaje de entrada (TRAB-07): crea el fichaje ABIERTO de la Parte 1 CON su ID_Fichaje. La clave es TEXT PRIMARY KEY sin DEFAULT y en SQLite admite NULL, así que el snapshot comprueba explícitamente que no viene vacía: sin eso, un INSERT que se deje la columna pasa por bueno.",
+  "comando": "login.punch",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');"
+  ],
+  "entrada": {
+    "id_usuario": "user-1",
+    "tipo": "entrada",
+    "fecha": "2026-01-01",
+    "parte": 1
+  },
+  "snapshot": {
+    "Fichajes": "SELECT ID_Usuario, Parte, Estado, Cerrado_Automatico, CASE WHEN ID_Fichaje IS NOT NULL AND ID_Fichaje <> '' THEN 1 ELSE 0 END AS Tiene_Id, CASE WHEN Hora_Entrada IS NOT NULL THEN 1 ELSE 0 END AS Tiene_Entrada, CASE WHEN Hora_Salida IS NULL THEN 1 ELSE 0 END AS Sin_Salida FROM Fichajes"
+  }
+}
