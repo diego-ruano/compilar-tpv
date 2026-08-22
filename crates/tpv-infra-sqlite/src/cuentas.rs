@@ -383,15 +383,17 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
-    /// Borra un pago **revirtiendo por completo y de forma atómica** los efectos del cobro
-    /// (CUENTA-01): devuelve el stock consumido (`Lote_Consumos`), resta el gasto del cliente
-    /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
-    /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
-    /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
+    /// Deja anotada una apertura del cajón hecha a mano (dar cambio, cuadrar caja).
+    ///
+    /// Una apertura sin una venta detrás es exactamente el movimiento por el que alguien pregunta
+    /// cuando al cerrar falta dinero; si no queda anotada, no hay nada que investigar. Va por
+    /// `execute` y no por `raw` a propósito: es de las cosas que hay que poder mirar desde fuera
+    /// del local.
     async fn registrar_apertura_cajon(&self, id_usuario: Option<String>) -> AppResult<()> {
         let w = self.db.write().await;
         w.execute(
-            "INSERT INTO Aperturas_Cajon (ID_Apertura, ID_Usuario, Fecha)              VALUES (?1, ?2, datetime('now','localtime'));",
+            "INSERT INTO Aperturas_Cajon (ID_Apertura, ID_Usuario, Fecha)
+             VALUES (?1, ?2, datetime('now','localtime'));",
             vec![
                 Value::Text(new_id()),
                 id_usuario
@@ -481,6 +483,11 @@ impl CuentasRepository for SqliteCuentasRepository {
         }))
     }
 
+    /// Borra un pago **revirtiendo por completo y de forma atómica** los efectos del cobro
+    /// (CUENTA-01): devuelve el stock consumido (`Lote_Consumos`), resta el gasto del cliente
+    /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
+    /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
+    /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
     async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
         let g = self.db.write().await;
         let conn = &g;
