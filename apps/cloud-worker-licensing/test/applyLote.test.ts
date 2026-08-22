@@ -18,7 +18,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
-import { DDL_TABLAS_DE_NUBE } from "../src/durableObjects/tenantHub.sql";
+import { DDL_TABLAS_DE_NUBE } from "../src/durableObjects/tenantHub.sentencias";
 
 /** Estado mínimo para poder insertar comandas y líneas. */
 const SEMILLA = [

@@ -1,4 +1,12 @@
-// src/durableObjects/tenantHub.sql.ts
+// src/durableObjects/tenantHub.sentencias.ts
+//
+// OJO CON EL NOMBRE: este fichero se llamaba `tenantHub.sql.ts` y el deploy fallaba. `wrangler.json`
+// declara una regla `{ type: "Text", globs: ["**/*.sql"] }` --necesaria para que
+// `tenantMigrations.ts` importe los .sql de migraciones-- y el import sin extension
+// (`from "./tenantHub.sql"`) casaba ese glob: el bundler lo empaquetaba como modulo de TEXTO, que
+// solo expone `default`, y el worker reventaba al arrancar con "does not provide an export named
+// DDL_TABLAS_DE_NUBE". No se veia en `tsc` ni en vitest, que resuelven el .ts. No le pongas `.sql`
+// al nombre de un modulo TypeScript.
 //
 // Manejo de las sentencias replicables dentro del DO: resolver los `$ref` de una transacción,
 // normalizar valores que vienen de libsql y leer resultados.

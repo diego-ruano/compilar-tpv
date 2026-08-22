@@ -22,7 +22,7 @@ import {
 	resolveSqlArg,
 	resolveSqlArgs,
 	toPlainValue,
-} from "../src/durableObjects/tenantHub.sql";
+} from "../src/durableObjects/tenantHub.sentencias";
 
 describe("resolución de $ref", () => {
 	const bag = { id: "uuid-1", n: 42, flag: true, nulo: null };

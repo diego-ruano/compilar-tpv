@@ -41,7 +41,7 @@ import {
 	normalizeSql,
 	resolveSqlArgs,
 	toPlainValue,
-} from "./tenantHub.sql";
+} from "./tenantHub.sentencias";
 import {
 	commandHasNowLiteral,
 	parseClientNow,

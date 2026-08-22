@@ -14,7 +14,7 @@
 // la misma operación produciría hashes distintos y la idempotencia dejaría de funcionar.
 
 import { bytesToB64 } from "../server/utils/base64";
-import { toPlainValue } from "./tenantHub.sql";
+import { toPlainValue } from "./tenantHub.sentencias";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
 export function parseJsonStrict(s: string, fieldName: string): any {

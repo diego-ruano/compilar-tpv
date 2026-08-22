@@ -15,7 +15,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
-import { DDL_TABLAS_DE_NUBE } from "../src/durableObjects/tenantHub.sql";
+import { DDL_TABLAS_DE_NUBE } from "../src/durableObjects/tenantHub.sentencias";
 
 const TENANT = "tenant-1";
 
