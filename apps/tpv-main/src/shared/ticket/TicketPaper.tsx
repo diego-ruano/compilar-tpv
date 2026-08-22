@@ -20,12 +20,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { resolveImageUrl } from "../lib/imageUrl";
+import { agruparLineas, desgloseIva, totalDe } from "./ticketMath";
 
 export type TicketPaperItem = {
     nombre: string;
     precio: number;
     /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
     ivaPercent?: number | null;
+    /** Unidades de la línea. Ausente = 1. */
+    cantidad?: number;
 };
 
 function eur(n: number) {
@@ -80,55 +83,11 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
     const recortar = (texto: string, importe: string) =>
         texto.slice(0, Math.max(0, cols - importe.length - 1));
 
-    const grouped = useMemo(() => {
-        // Mismo criterio que `buildTicketPayload`: nombre + precio + tipo de IVA.
-        const map = new Map<
-            string,
-            { nombre: string; precio: number; qty: number; ivaPercent: number | null }
-        >();
-        for (const it of items) {
-            const iva = it.ivaPercent ?? null;
-            const key = `${it.nombre}__${it.precio}__${iva ?? "neg"}`;
-            const cur = map.get(key);
-            if (!cur)
-                map.set(key, { nombre: it.nombre, precio: it.precio, qty: 1, ivaPercent: iva });
-            else cur.qty += 1;
-        }
-        return Array.from(map.values());
-    }, [items]);
-
-    const total = useMemo(
-        () => grouped.reduce((acc, g) => acc + g.qty * g.precio, 0),
-        [grouped],
-    );
-
-    /**
-     * Reparto por tipo de IVA, espejo de `desglose_iva` en Rust (printing.rs).
-     *
-     * Los precios llevan el IVA incluido, así que la base se saca dividiendo, y se calcula POR
-     * LÍNEA y luego se suma: aplicar un solo tipo al total de un ticket que mezcla dos da un
-     * desglose que no cuadra con lo cobrado.
-     *
-     * La cuota no se redondea: se despeja como `total - base`. Redondear las dos por separado
-     * hace que a veces suban las dos y el papel diga `0,38 + 0,02 = 0,39` (0,39 € al 4 % es el
-     * primer caso). Rust hace exactamente lo mismo; si esto cambia, cambia allí.
-     */
-    const tramosIva = useMemo(() => {
-        const aCentimos = (n: number) => Math.round(n * 100) / 100;
-        const porTipo = new Map<number, number>();
-        for (const g of grouped) {
-            const tipo = g.ivaPercent ?? ivaPercent ?? 0;
-            porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + g.qty * g.precio);
-        }
-        return Array.from(porTipo.entries())
-            .sort((a, b) => a[0] - b[0])
-            .map(([tipo, bruto]) => {
-                const totalTramo = aCentimos(bruto);
-                const divisor = 1 + tipo / 100;
-                const base = divisor === 0 ? totalTramo : aCentimos(totalTramo / divisor);
-                return { tipo, base, iva: aCentimos(totalTramo - base) };
-            });
-    }, [grouped, ivaPercent]);
+    // Las cuentas viven en `ticketMath` (sin React) para poder probarlas contra los mismos
+    // números que saca Rust: la vista previa no vale de nada si no coincide con el papel.
+    const grouped = useMemo(() => agruparLineas(items), [items]);
+    const total = useMemo(() => totalDe(grouped), [grouped]);
+    const tramosIva = useMemo(() => desgloseIva(grouped, ivaPercent), [grouped, ivaPercent]);
 
     const fechaStr = useMemo(() => new Date().toLocaleString("es-ES"), []);
 

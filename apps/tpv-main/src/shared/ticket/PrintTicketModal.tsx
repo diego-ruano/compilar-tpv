@@ -31,6 +31,11 @@ export type PrintableLine = {
      * que seguir enseñando el del día de la venta.
      */
     ivaPercent?: number | null;
+    /**
+     * Unidades de la línea. Ausente = 1, que es como el POS manda la comanda (una entrada por
+     * pulsación). La reimpresión sí la trae: lee del cobro una línea que ya venía con su cantidad.
+     */
+    cantidad?: number;
 };
 
 type Modo = "completo" | "cobrado" | "seleccion";

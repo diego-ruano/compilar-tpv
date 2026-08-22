@@ -85,15 +85,6 @@ mod fixtures {
         let aguja = encode_cp858(texto);
         bytes.windows(aguja.len()).any(|w| w == aguja.as_slice())
     }
-
-    /// Las líneas de texto del ticket, ya decodificadas a `String` byte a byte.
-    /// Sirve para comprobar invariantes de maquetado sin interpretar ESC/POS.
-    pub fn lineas_de_texto(bytes: &[u8]) -> Vec<String> {
-        bytes
-            .split(|b| *b == b'\n')
-            .map(|l| l.iter().map(|b| *b as char).collect::<String>())
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -951,6 +942,29 @@ mod tests_cuadre {
                 }
             }
             assert!(fallos.is_empty(), "descuadres al {tipo}%: {fallos:#?}");
+        }
+    }
+
+    #[test]
+    fn los_importes_del_espejo_dan_lo_mismo_aqui_que_en_la_vista_previa() {
+        // Estas seis filas están duplicadas a propósito en `test/ticketMath.test.ts`. Son los
+        // importes que sacó el barrido cuando la cuota se redondeaba por su cuenta, así que son
+        // los que más fácil vuelven a divergir. Que los dos lados los claven es lo que garantiza
+        // que la vista previa enseña el ticket que se va a imprimir.
+        let golden: [(f64, f64, i64, i64); 6] = [
+            // (total, tipo, base en céntimos, IVA en céntimos)
+            (0.39, 4.0, 38, 1),
+            (0.91, 4.0, 88, 3),
+            (1.17, 4.0, 113, 4),
+            (1.69, 4.0, 163, 6),
+            (2.21, 4.0, 213, 8),
+            (2.47, 4.0, 238, 9),
+        ];
+
+        for (total, tipo, base_esperada, iva_esperado) in golden {
+            let bytes = build_ticket(&payload(tipo, vec![linea_de(total, 1, None)]), None);
+            assert_eq!(valor(&bytes, "BASE"), base_esperada, "base de {total:.2} al {tipo}%");
+            assert_eq!(valor(&bytes, "IVA"), iva_esperado, "IVA de {total:.2} al {tipo}%");
         }
     }
 

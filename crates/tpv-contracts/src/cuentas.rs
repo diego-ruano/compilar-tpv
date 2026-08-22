@@ -20,8 +20,10 @@ pub struct EntradaDto {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct LineaTicketDto {
     pub nombre: String,
-    /// Importe de la línea completo (cantidad × precio): la reimpresión no reagrupa nada.
-    pub importe: f64,
+    /// Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
+    /// no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
+    pub cantidad: f64,
+    pub precio_unitario: f64,
     /// Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
     #[ts(optional)]
     pub iva_percent: Option<f64>,

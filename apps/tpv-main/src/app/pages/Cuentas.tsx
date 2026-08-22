@@ -617,7 +617,8 @@ export default function Cuentas() {
                 items: t.lineas.map((l: LineaTicketDto, i: number) => ({
                     id: `${e.id}-${i}`,
                     nombre: l.nombre,
-                    precio: l.importe,
+                    precio: l.precio_unitario,
+                    cantidad: l.cantidad,
                     pagado: true,
                     ivaPercent: l.iva_percent ?? null,
                 })),

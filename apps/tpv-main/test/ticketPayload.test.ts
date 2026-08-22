@@ -1,0 +1,290 @@
+// apps/tpv-main/test/ticketPayload.test.ts
+//
+// `buildTicketPayload` es la costura entre lo que el camarero ha pulsado y lo que se imprime: toma
+// las líneas sueltas (una por unidad) más la personalización guardada, y arma el payload que Rust
+// convierte en ESC/POS.
+//
+// Lo que se prueba aquí es la agrupación —de dónde sale el "3 x 1,10" del papel— y que la
+// personalización llegue entera. Un fallo en cualquiera de las dos cosas no se ve en pantalla: se
+// ve en el ticket que ya se le ha dado al cliente.
+
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// El módulo llama a `invokeClient` en las funciones de impresora; los tests de payload no lo tocan,
+// pero importar el módulo arrastra el cliente de Tauri, que en node no existe.
+const invocaciones: Array<{ cmd: string; args: unknown }> = [];
+vi.mock("@tpv/client", () => ({
+	invokeClient: async (cmd: string, args: unknown) => {
+		invocaciones.push({ cmd, args });
+		return null;
+	},
+	toAppError: (e: unknown) => e,
+	esError: () => false,
+}));
+
+const {
+	buildTicketPayload,
+	printerOpenDrawer,
+	printerSetSelected,
+	printerGetSelected,
+} = await import("../src/features/configuracion/api/printerApis");
+const { useBusinessSettings } = await import("../src/shared/stores/useBusinessSettings");
+const { useTicketSettings } = await import("../src/shared/stores/useTicketSettings");
+
+/** Una unidad suelta, como la manda el POS. */
+function unidad(nombre: string, precio: number, ivaPercent?: number | null) {
+	return { nombre, precio, ivaPercent };
+}
+
+/** Total del payload, que es lo que acaba imprimiéndose como TOTAL. */
+function total(items: Array<{ cantidad: number; precio_unitario: number }>) {
+	return items.reduce((acc, l) => acc + l.cantidad * l.precio_unitario, 0);
+}
+
+beforeEach(() => {
+	invocaciones.length = 0;
+	useBusinessSettings.setState({
+		businessName: "Bar Pepe",
+		logoDataUrl: null,
+		direccion: "Calle Mayor 1",
+		telefono: "600123456",
+		cif: "B12345678",
+		mensajeFooter: "Gracias",
+		ivaPercent: 10,
+	});
+});
+
+describe("agrupación de líneas", () => {
+	it("junta las unidades idénticas en una línea con su cantidad", () => {
+		const p = buildTicketPayload([
+			unidad("Cafe", 1.1),
+			unidad("Cafe", 1.1),
+			unidad("Cafe", 1.1),
+		]);
+
+		expect(p.items).toHaveLength(1);
+		expect(p.items[0]).toMatchObject({ nombre: "Cafe", cantidad: 3, precio_unitario: 1.1 });
+	});
+
+	it("no junta el mismo producto vendido a precios distintos", () => {
+		// Pasa de verdad: alguien cambia el precio a mitad de comanda, o se aplica un precio de
+		// oferta a una unidad. Juntarlas inventaría un precio unitario que no es ninguno de los dos.
+		const p = buildTicketPayload([unidad("Cafe", 1.1), unidad("Cafe", 1.2)]);
+
+		expect(p.items).toHaveLength(2);
+		expect(total(p.items)).toBeCloseTo(2.3, 10);
+	});
+
+	it("no junta el mismo producto vendido a tipos de IVA distintos", () => {
+		// Dos botellas iguales, una consumida en la mesa (10 %) y otra para llevar (21 %): son dos
+		// líneas porque el desglose del pie tiene que poder separarlas.
+		const p = buildTicketPayload([unidad("Vino", 12, 10), unidad("Vino", 12, 21)]);
+
+		expect(p.items).toHaveLength(2);
+		expect(p.items.map((l) => l.iva_percent).sort()).toEqual([10, 21]);
+	});
+
+	it("trata igual el tipo ausente y el tipo nulo", () => {
+		// `undefined` y `null` significan lo mismo (el tipo del negocio): si generaran claves
+		// distintas, el ticket sacaría dos líneas del mismo café.
+		const p = buildTicketPayload([unidad("Cafe", 1.1), unidad("Cafe", 1.1, null)]);
+
+		expect(p.items).toHaveLength(1);
+		expect(p.items[0].cantidad).toBe(2);
+	});
+
+	it("respeta una cantidad que ya viene contada", () => {
+		// La reimpresión lee del cobro una línea que ya trae "2 unidades a 1,30".
+		const p = buildTicketPayload([{ nombre: "Cafe", precio: 1.3, cantidad: 2 }]);
+
+		expect(p.items[0]).toMatchObject({ cantidad: 2, precio_unitario: 1.3 });
+	});
+
+	it("suma las cantidades ya contadas de líneas iguales", () => {
+		const p = buildTicketPayload([
+			{ nombre: "Cafe", precio: 1.3, cantidad: 2 },
+			{ nombre: "Cafe", precio: 1.3, cantidad: 3 },
+		]);
+
+		expect(p.items).toHaveLength(1);
+		expect(p.items[0].cantidad).toBe(5);
+	});
+
+	it("una cantidad fraccionada no descuadra el total", () => {
+		// El ticket cuenta unidades enteras: 0,35 kg de jamón a 60 €/kg no se puede escribir como
+		// "0,35 x 60". Se pliega a una unidad de 21 €, que es lo que se cobra.
+		const p = buildTicketPayload([{ nombre: "Jamon", precio: 60, cantidad: 0.35 }]);
+
+		expect(p.items[0].cantidad).toBe(1);
+		expect(total(p.items)).toBeCloseTo(21, 10);
+	});
+
+	it("agrupar nunca cambia el dinero", () => {
+		// La invariante: se agrupe como se agrupe, el total del payload es el de las unidades que
+		// entraron. Es lo único que el cliente comprueba.
+		const casos = [
+			[unidad("A", 1.15), unidad("A", 1.15), unidad("B", 0.95), unidad("A", 1.15)],
+			[unidad("A", 2.5, 21), unidad("A", 2.5, 10), unidad("A", 2.5, 21)],
+			[unidad("C", 13.9), unidad("C", 13.9)],
+			[],
+		];
+
+		for (const items of casos) {
+			const esperado = items.reduce((acc, it) => acc + it.precio, 0);
+			expect(total(buildTicketPayload(items).items)).toBeCloseTo(esperado, 10);
+		}
+	});
+
+	it("un ticket sin líneas sigue siendo un payload válido", () => {
+		const p = buildTicketPayload([]);
+		expect(p.items).toEqual([]);
+		expect(p.business_name).toBe("Bar Pepe");
+	});
+});
+
+describe("personalización y datos del cobro", () => {
+	it("arrastra los datos del negocio tal y como están guardados", () => {
+		const p = buildTicketPayload([unidad("Cafe", 1.1)]);
+
+		expect(p).toMatchObject({
+			business_name: "Bar Pepe",
+			direccion: "Calle Mayor 1",
+			telefono: "600123456",
+			cif: "B12345678",
+			mensaje_footer: "Gracias",
+			iva_percent: 10,
+		});
+	});
+
+	it("el logo viaja como ruta, no como imagen", () => {
+		// Rust lo lee del disco: mandar el data URL entero por el IPC en cada ticket es tirar
+		// megas por una imagen que ya está guardada.
+		useBusinessSettings.setState({ logoDataUrl: "images/logo.png" });
+		expect(buildTicketPayload([]).logo_path).toBe("images/logo.png");
+
+		useBusinessSettings.setState({ logoDataUrl: null });
+		expect(buildTicketPayload([]).logo_path).toBeNull();
+	});
+
+	it("las once casillas del panel llegan al payload", () => {
+		// Si una se quedara por el camino, la configuración del usuario se ignoraría en silencio.
+		const apagado = {
+			showLogo: false,
+			showBusinessName: false,
+			showAddress: false,
+			showPhone: false,
+			showCif: false,
+			showDateTime: false,
+			showLineItems: false,
+			showBaseAndIva: false,
+			showTotal: false,
+			showFooterMessage: false,
+		};
+		useTicketSettings.setState({
+			settings: { ...useTicketSettings.getState().settings, ...apagado },
+		});
+
+		const p = buildTicketPayload([unidad("Cafe", 1.1)]);
+
+		for (const clave of [
+			"show_logo",
+			"show_business_name",
+			"show_address",
+			"show_phone",
+			"show_cif",
+			"show_date_time",
+			"show_line_items",
+			"show_base_and_iva",
+			"show_total",
+			"show_footer_message",
+		] as const) {
+			expect(p[clave], clave).toBe(false);
+		}
+	});
+
+	it("la geometría del papel llega al payload", () => {
+		useTicketSettings.setState({
+			settings: {
+				...useTicketSettings.getState().settings,
+				paperWidthMm: 58,
+				charsPerLine: 32,
+				marginLeftMm: 2,
+				marginRightMm: 3,
+				paperDpi: 300,
+			},
+		});
+
+		expect(buildTicketPayload([])).toMatchObject({
+			paper_width_mm: 58,
+			chars_per_line: 32,
+			margin_left_mm: 2,
+			margin_right_mm: 3,
+			paper_dpi: 300,
+		});
+	});
+
+	it("sin datos del cobro el papel es una precuenta", () => {
+		// Sin número, Rust imprime "NO ES UN TICKET DE VENTA". Mandar aquí una cadena vacía en vez
+		// de null daría lo mismo, pero `es_copia` en true por descuido marcaría COPIA una venta.
+		const p = buildTicketPayload([unidad("Cafe", 1.1)]);
+
+		expect(p.numero_ticket).toBeNull();
+		expect(p.metodo_pago).toBeNull();
+		expect(p.origen).toBeNull();
+		expect(p.es_copia).toBe(false);
+	});
+
+	it("los datos del cobro pasan enteros al papel", () => {
+		const p = buildTicketPayload([unidad("Cafe", 1.1)], "EPSON", {
+			numeroTicket: "T-000007",
+			metodoPago: "EFECTIVO",
+			origen: "Mesa 4",
+			esCopia: true,
+		});
+
+		expect(p).toMatchObject({
+			printer_name: "EPSON",
+			numero_ticket: "T-000007",
+			metodo_pago: "EFECTIVO",
+			origen: "Mesa 4",
+			es_copia: true,
+		});
+	});
+});
+
+describe("comandos de impresora", () => {
+	it("el destino viaja en cada selección de impresora", async () => {
+		// La impresora se guarda POR destino (caja / cocina). Sin el destino, elegir la de cocina
+		// pisaría la de caja y los tickets saldrían por la cocina.
+		await printerSetSelected("EPSON", "cocina");
+		await printerGetSelected("cocina");
+
+		expect(invocaciones[0]).toEqual({
+			cmd: "printer_set_selected",
+			args: { args: { name: "EPSON", destino: "cocina" } },
+		});
+		expect(invocaciones[1]).toEqual({
+			cmd: "printer_get_selected",
+			args: { args: { destino: "cocina" } },
+		});
+	});
+
+	it("sin destino se entiende la caja", async () => {
+		await printerGetSelected();
+		expect(invocaciones[0].args).toEqual({ args: { destino: "caja" } });
+	});
+
+	it("abrir el cajón a mano dice quién lo abre", async () => {
+		// Es el dato por el que se pregunta cuando falta dinero en el arqueo.
+		await printerOpenDrawer("u1");
+		expect(invocaciones[0]).toEqual({
+			cmd: "printer_open_drawer",
+			args: { args: { id_usuario: "u1" } },
+		});
+	});
+
+	it("sin usuario identificado se abre igual y se anota sin nombre", async () => {
+		await printerOpenDrawer();
+		expect(invocaciones[0].args).toEqual({ args: { id_usuario: null } });
+	});
+});

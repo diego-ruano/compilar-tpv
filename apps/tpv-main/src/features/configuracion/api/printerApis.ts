@@ -85,12 +85,18 @@ export type DatosDelTicket = {
     esCopia?: boolean;
 };
 
-/** Item simple (cada unidad por separado); `buildTicketPayload` los agrupa. */
+/** Item simple (por defecto una unidad); `buildTicketPayload` agrupa los iguales. */
 export type SimpleTicketItem = {
     nombre: string;
     precio: number;
     /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
     ivaPercent?: number | null;
+    /**
+     * Unidades de esta línea. Ausente = 1, que es como el POS manda la comanda (una entrada por
+     * pulsación). Lo usa la reimpresión, que lee del cobro una línea ya con su cantidad y no
+     * puede desdoblarla sin inventarse el precio unitario.
+     */
+    cantidad?: number;
 };
 
 /* ── API ── */
@@ -166,15 +172,20 @@ export function buildTicketPayload(
     const map = new Map<string, PrintTicketLine>();
     for (const it of items) {
         const iva = it.ivaPercent ?? null;
-        const key = `${it.nombre}__${it.precio}__${iva ?? "neg"}`;
+        // El ticket cuenta unidades enteras. Una cantidad fraccionada (un producto al peso) no se
+        // puede representar, así que se pliega a una unidad por el importe de la línea: el total
+        // sigue siendo el cobrado, que es lo que no se puede perder.
+        const unidades = Number.isInteger(it.cantidad) ? (it.cantidad as number) : 1;
+        const precio = Number.isInteger(it.cantidad) ? it.precio : it.precio * (it.cantidad ?? 1);
+        const key = `${it.nombre}__${precio}__${iva ?? "neg"}`;
         const cur = map.get(key);
         if (cur) {
-            cur.cantidad += 1;
+            cur.cantidad += unidades;
         } else {
             map.set(key, {
                 nombre: it.nombre,
-                precio_unitario: it.precio,
-                cantidad: 1,
+                precio_unitario: precio,
+                cantidad: unidades,
                 iva_percent: iva,
             });
         }

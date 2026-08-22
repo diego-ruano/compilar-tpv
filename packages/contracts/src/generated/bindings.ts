@@ -264,9 +264,10 @@ export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cant
  */
 export type LineaTicketDto = { nombre: string, 
 /**
- * Importe de la línea completo (cantidad × precio): la reimpresión no reagrupa nada.
+ * Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
+ * no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
  */
-importe: number, 
+cantidad: number, precio_unitario: number, 
 /**
  * Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
  */

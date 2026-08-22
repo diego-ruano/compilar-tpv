@@ -1285,13 +1285,47 @@ fn leer_imagen_local(app: &AppHandle, ruta: &str) -> Option<Vec<u8>> {
     }
 
     let dir = app_data_dir_of(app).ok()?;
-    let completa = dir.join(r.replace("\\", "/"));
-    // El fichero tiene que quedar DENTRO de AppData: una ruta con `..` no puede sacarnos de ahí.
-    if !completa.starts_with(&dir) {
+    std::fs::read(ruta_dentro_de(&dir, r)?).ok()
+}
+
+/// Resuelve una ruta relativa **dentro** de `dir`, o `None` si se sale.
+///
+/// ⚠️ No basta con `dir.join(ruta).starts_with(dir)`: `Path::starts_with` compara componentes, y
+/// `AppData/tpv/../../otro` empieza por `AppData/tpv` tal cual está escrito. El `..` no lo resuelve
+/// nadie hasta que el sistema operativo abre el fichero, o sea que la comprobación pasaba y la
+/// lectura salía igualmente del directorio.
+///
+/// Por eso se rechaza cualquier `..` y cualquier ruta absoluta **antes** de juntar nada, que es lo
+/// único que no depende de que el fichero exista ya.
+fn ruta_dentro_de(dir: &std::path::Path, ruta: &str) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+
+    let limpia = ruta.trim().replace('\\', "/");
+    if limpia.is_empty() {
         return None;
     }
-    std::fs::read(completa).ok()
+
+    let relativa = std::path::Path::new(&limpia);
+    for c in relativa.components() {
+        match c {
+            Component::Normal(_) | Component::CurDir => {}
+            // `..`, `/` inicial, `C:` … cualquiera de estos saca del directorio.
+            _ => return None,
+        }
+    }
+
+    let completa = dir.join(relativa);
+
+    // Si además existe, se contrasta la ruta ya resuelta: cubre los enlaces simbólicos, que no
+    // llevan `..` y aun así apuntan fuera.
+    if let (Ok(real), Ok(raiz)) = (completa.canonicalize(), dir.canonicalize()) {
+        if !real.starts_with(&raiz) {
+            return None;
+        }
+    }
+    Some(completa)
 }
+
 
 /// Abre el cajón portamonedas sin imprimir nada.
 ///
@@ -1903,4 +1937,161 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests_impresora_por_destino {
+    //! A qué impresora sale cada cosa.
+    //!
+    //! La configuración guarda una impresora **por destino** (caja, cocina). El campo antiguo
+    //! `printer_name` sigue existiendo porque las instalaciones que ya estaban lo tienen relleno:
+    //! si dejara de leerse, a esos usuarios les desaparecería la impresora sin tocar nada.
+
+    use super::*;
+
+    fn config(printers: &[(&str, &str)], antiguo: Option<&str>) -> DeviceConfig {
+        let mut cfg = DeviceConfig::default();
+        cfg.printer_name = antiguo.map(|s| s.to_string());
+        cfg.printers = printers
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        cfg
+    }
+
+    #[test]
+    fn sin_destino_se_entiende_la_caja() {
+        assert_eq!(destino_o_caja(None), "caja");
+        assert_eq!(destino_o_caja(Some(String::new())), "caja");
+        assert_eq!(destino_o_caja(Some("   ".into())), "caja");
+    }
+
+    #[test]
+    fn el_destino_no_distingue_mayusculas_ni_espacios() {
+        // Llega de la UI y del IPC; dos formas de escribir "Cocina" no pueden ser dos impresoras.
+        assert_eq!(destino_o_caja(Some("  Cocina ".into())), "cocina");
+        assert_eq!(destino_o_caja(Some("COCINA".into())), "cocina");
+    }
+
+    #[test]
+    fn cada_destino_saca_la_suya() {
+        let cfg = config(&[("caja", "EPSON"), ("cocina", "STAR")], None);
+
+        assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("EPSON"));
+        assert_eq!(impresora_de(&cfg, "cocina").as_deref(), Some("STAR"));
+    }
+
+    #[test]
+    fn una_instalacion_antigua_sigue_imprimiendo_por_caja() {
+        // Solo tiene el campo viejo: sin el respaldo, el TPV diría "no hay impresora
+        // seleccionada" en mitad de un servicio, después de una actualización.
+        let cfg = config(&[], Some("EPSON DE SIEMPRE"));
+
+        assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("EPSON DE SIEMPRE"));
+    }
+
+    #[test]
+    fn el_campo_antiguo_no_se_cuela_en_los_demas_destinos() {
+        // Si la cocina heredara la de caja, la comanda saldría en la barra y nadie la vería.
+        let cfg = config(&[], Some("EPSON"));
+
+        assert_eq!(impresora_de(&cfg, "cocina"), None);
+    }
+
+    #[test]
+    fn lo_nuevo_manda_sobre_lo_viejo() {
+        let cfg = config(&[("caja", "NUEVA")], Some("VIEJA"));
+
+        assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("NUEVA"));
+    }
+
+    #[test]
+    fn una_impresora_en_blanco_es_no_tener_impresora() {
+        // Guardar "" y tratarlo como un nombre haría que el trabajo se mandara a la nada, sin
+        // error visible: el camarero se queda esperando un ticket que no va a salir.
+        let cfg = config(&[("caja", "   ")], None);
+
+        assert_eq!(impresora_de(&cfg, "caja"), None);
+    }
+}
+
+#[cfg(test)]
+mod tests_ruta_del_logo {
+    //! Que el logo se lea de dentro de AppData y de ningún otro sitio.
+    //!
+    //! La ruta viene de la configuración del negocio, que se sincroniza: no es un dato que escriba
+    //! solo quien está delante del TPV.
+
+    use super::*;
+
+    fn temporal() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("tpv_ruta_test_{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("images")).unwrap();
+        std::fs::write(dir.join("images/logo.png"), b"png").unwrap();
+        dir
+    }
+
+    #[test]
+    fn una_ruta_normal_se_resuelve_dentro() {
+        let dir = temporal();
+        let r = ruta_dentro_de(&dir, "images/logo.png").expect("debería resolver");
+
+        assert!(r.ends_with("images/logo.png") || r.ends_with("images\\logo.png"), "{r:?}");
+    }
+
+    #[test]
+    fn las_barras_de_windows_valen_igual() {
+        let dir = temporal();
+        assert!(ruta_dentro_de(&dir, "images\\logo.png").is_some());
+    }
+
+    #[test]
+    fn una_ruta_con_dos_puntos_no_saca_del_directorio() {
+        // `Path::starts_with` compara componentes, así que "AppData/tpv/../../x" empieza por
+        // "AppData/tpv" tal cual está escrito y la comprobación pasaba: el `..` no lo resolvía
+        // nadie hasta que el sistema abría el fichero, ya fuera de AppData.
+        let dir = temporal();
+
+        assert_eq!(ruta_dentro_de(&dir, "../../secreto.png"), None);
+        assert_eq!(ruta_dentro_de(&dir, "images/../../secreto.png"), None);
+        assert_eq!(ruta_dentro_de(&dir, "images/..\\..\\secreto.png"), None);
+    }
+
+    #[test]
+    fn la_comprobacion_ingenua_no_habria_bastado() {
+        // Este test no prueba nuestro código: fija el comportamiento de la biblioteca estándar del
+        // que venía el agujero, para que el día que alguien "simplifique" la función vea por qué
+        // no puede. `starts_with` compara COMPONENTES, y nadie resuelve el `..` por el camino.
+        let dir = std::path::Path::new("/appdata/tpv");
+        let ingenua = dir.join("../../secreto.png");
+
+        assert!(
+            ingenua.starts_with(dir),
+            "si esto dejara de ser cierto, la comprobación de antes valdría"
+        );
+        assert_eq!(ruta_dentro_de(dir, "../../secreto.png"), None, "la de ahora sí lo para");
+    }
+
+    #[test]
+    fn una_ruta_absoluta_tampoco() {
+        let dir = temporal();
+
+        assert_eq!(ruta_dentro_de(&dir, "/etc/passwd"), None);
+        assert_eq!(ruta_dentro_de(&dir, "C:/Windows/win.ini"), None);
+    }
+
+    #[test]
+    fn una_ruta_vacia_no_es_una_ruta() {
+        let dir = temporal();
+
+        assert_eq!(ruta_dentro_de(&dir, ""), None);
+        assert_eq!(ruta_dentro_de(&dir, "   "), None);
+    }
+
+    #[test]
+    fn un_punto_solo_no_estorba() {
+        // "./images/logo.png" es la misma ruta escrita de otra forma.
+        let dir = temporal();
+        assert!(ruta_dentro_de(&dir, "./images/logo.png").is_some());
+    }
 }
