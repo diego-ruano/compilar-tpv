@@ -450,7 +450,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             .query(
                 r#"
                 SELECT
-                  COALESCE(pr.Nombre, 'Producto') AS Nombre,
+                  COALESCE(dc.Nombre_Producto, pr.Nombre, 'Producto') AS Nombre,
                   COALESCE(dc.Cantidad, 1) AS Cantidad,
                   COALESCE(dc.Precio_Unitario, 0) AS Precio,
                   dc.IVA_Percent
@@ -855,10 +855,10 @@ mod tests_reimpresion {
            VALUES ('p2', 'cat', 'Tostada', 2.5, 10);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
-        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('d1', 'com', 'p1', 2, 1.3, 10);",
-        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('d2', 'com', 'p2', 1, 2.5, 21);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('d1', 'com', 'p1', 'Cafe con leche', 2, 1.3, 10);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('d2', 'com', 'p2', 'Tostada', 1, 2.5, 21);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
            VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 5.1, 'TOTAL', 'T-000007');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd1');",
@@ -976,35 +976,43 @@ mod tests_reimpresion {
     }
 
     #[tokio::test]
-    async fn un_producto_vendido_no_se_puede_borrar_del_catalogo() {
-        // Es lo que impide que un cobro se quede sin saber qué se vendió. Si esta FK cayera, la
-        // reimpresión de una venta antigua saldría con líneas sin nombre.
+    async fn borrar_un_producto_vendido_no_se_lleva_por_delante_su_ticket() {
+        // INV-05: el catálogo puede quitar lo que ya no se vende. La copia del ticket sale igual,
+        // con el nombre que tenía el producto el día de la venta.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_BARRA).await;
 
-        let w = db.write().await;
-        let err = w
-            .raw()
-            .execute("DELETE FROM Productos WHERE ID_Producto = 'p1';", Vec::<Value>::new())
-            .await;
-
-        assert!(err.is_err(), "el catálogo no puede llevarse por delante un cobro");
-    }
-
-    #[tokio::test]
-    async fn si_el_producto_no_esta_la_linea_no_se_queda_sin_nombre() {
-        // Con las FK apagadas se simula una BD que llega ya rota (una restauración a medias, una
-        // migración de otra época). La copia tiene que salir igual: es un documento contable, y
-        // "Producto" se lee mejor que un hueco.
-        let (db, _dir) = db_temporal().await;
-        sembrar(&db, VENTA_BARRA).await;
         {
             let w = db.write().await;
             w.raw()
-                .execute_batch("PRAGMA foreign_keys=OFF; DELETE FROM Productos WHERE ID_Producto = 'p1'; PRAGMA foreign_keys=ON;")
+                .execute("DELETE FROM Productos WHERE ID_Producto = 'p1';", Vec::<Value>::new())
                 .await
-                .unwrap();
+                .expect("borrar un producto ya vendido tiene que poder hacerse");
         }
+
+        let t = repo(&db).ticket_para_reimprimir("pago").await.unwrap().unwrap();
+
+        assert_eq!(t.lineas.len(), 2, "no puede perderse ninguna línea del cobro");
+        assert_eq!(t.lineas[0].nombre, "Cafe con leche");
+        assert_eq!(t.lineas[0].cantidad, 2.0);
+        assert!((t.lineas[0].precio_unitario - 1.3).abs() < 1e-9);
+        assert_eq!(t.lineas[0].iva_percent, Some(10.0));
+    }
+
+    #[tokio::test]
+    async fn una_linea_sin_nombre_ni_producto_no_sale_muda() {
+        // El cinturón de seguridad: una línea a la que le falten las dos cosas (el snapshot y el
+        // producto) sigue siendo un documento contable, y "Producto" se lee mejor que un hueco.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        sembrar(
+            &db,
+            &[
+                "UPDATE Detalle_Comanda SET Nombre_Producto = NULL WHERE ID_Detalle = 'd1';",
+                "DELETE FROM Productos WHERE ID_Producto = 'p1';",
+            ],
+        )
+        .await;
 
         let t = repo(&db).ticket_para_reimprimir("pago").await.unwrap().unwrap();
         assert_eq!(t.lineas[0].nombre, "Producto");

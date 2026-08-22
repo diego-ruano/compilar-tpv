@@ -188,15 +188,15 @@ export async function lineas(
 				COALESCE(D.Precio_Unitario, 0) AS Precio_Unitario,
 				D.Notas AS Notas,
 				D.Estado_Cocina AS Estado_Cocina,
-				P.Nombre AS Nombre,
+				COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
 				COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
 				D.IVA_Percent AS IVA_Percent,
 				CASE WHEN EXISTS (
 					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado
 			FROM Detalle_Comanda D
-			JOIN Productos P ON P.ID_Producto = D.ID_Producto
-			JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
+			LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
+			LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
 			WHERE D.ID_Comanda = ?1
 			ORDER BY D.ID_Detalle ASC;
 		`,
@@ -325,10 +325,10 @@ export async function searchProductos(
 export async function datosDeLinea(
 	db: Client,
 	idProducto: string,
-): Promise<{ pasaCocina: boolean; ivaPercent: number | null }> {
+): Promise<{ pasaCocina: boolean; ivaPercent: number | null; nombre: string | null }> {
 	const rs = await db.execute({
 		sql: `
-			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva
+			SELECT COALESCE(cat.Pasa_Cocina, 0) AS pasa, p.IVA_Percent AS iva, p.Nombre AS nombre
 			FROM Productos p
 			JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
 			WHERE p.ID_Producto = ?1
@@ -338,9 +338,11 @@ export async function datosDeLinea(
 	});
 	const fila = rows(rs)[0];
 	const iva = fila?.iva;
+	const nombre = fila?.nombre;
 	return {
 		pasaCocina: Number(fila?.pasa ?? 0) === 1,
 		ivaPercent: iva === null || iva === undefined ? null : Number(iva),
+		nombre: nombre === null || nombre === undefined ? null : String(nombre),
 	};
 }
 

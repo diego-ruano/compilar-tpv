@@ -112,22 +112,40 @@ pub(crate) async fn siguiente_numero_ticket(db: &crate::db::WriteGuard<'_>) -> A
     Ok(format!("T-{n:06}"))
 }
 
-/// Tipo de IVA vigente del producto, o `NULL` si no tiene uno propio (hereda el del negocio).
+/// Lo que se congela del producto al vender: `(nombre, tipo de IVA)`.
 ///
-/// Se lee ANTES del INSERT y se inserta como literal, igual que `Estado_Cocina` y por el mismo
+/// Se lee ANTES del INSERT y se insertan como literales, igual que `Estado_Cocina` y por el mismo
 /// motivo: una subconsulta dentro del INSERT la reevaluaría la nube en otro estado y la fila
 /// dejaría de ser idéntica en las dos copias.
 ///
-/// Y se guarda EN LA LÍNEA, no se consulta al imprimir: si el tipo del producto cambia, un ticket
-/// reimpreso tiene que seguir enseñando el que se aplicó el día de la venta.
-async fn iva_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<Value> {
-    let v = select_one_f64(
-        conn,
-        "SELECT IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
-        vec![Value::Text(id_producto.to_string())],
-    )
-    .await?;
-    Ok(v.map(Value::Real).unwrap_or(Value::Null))
+/// Van EN LA LÍNEA y no se consultan al imprimir. Dos razones, y las dos importan:
+///
+/// - Si el producto cambia de nombre, de precio o de tipo, un ticket reimpreso tiene que seguir
+///   enseñando lo que se cobró el día de la venta.
+/// - Y el producto puede **dejar de existir**: el catálogo permite borrar lo que ya no se vende
+///   (INV-05) y la FK deja `ID_Producto` a NULL. Sin este nombre, esa línea se quedaría muda.
+///
+/// El IVA es `NULL` si el producto no tiene tipo propio (hereda el del negocio).
+pub(crate) async fn snapshot_del_producto<C: Reader>(conn: &C, id_producto: &str) -> AppResult<(Value, Value)> {
+    let mut rows = conn
+        .query(
+            "SELECT Nombre, IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
+            vec![Value::Text(id_producto.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+
+    match rows.next().await.map_err(db_err)? {
+        Some(row) => Ok((
+            v_string(row.get_value(0).map_err(db_err)?)
+                .map(Value::Text)
+                .unwrap_or(Value::Null),
+            v_f64(row.get_value(1).map_err(db_err)?)
+                .map(Value::Real)
+                .unwrap_or(Value::Null),
+        )),
+        None => Ok((Value::Null, Value::Null)),
+    }
 }
 
 async fn select_one_f64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> AppResult<Option<f64>> {
@@ -1035,15 +1053,16 @@ impl MesasRepository for SqliteMesasRepository {
                   D.ID_Detalle, D.ID_Comanda, D.ID_Producto,
                   COALESCE(D.Cantidad, 1) AS Cantidad,
                   COALESCE(D.Precio_Unitario, 0) AS Precio_Unitario,
-                  D.Notas, D.Estado_Cocina, P.Nombre,
+                  D.Notas, D.Estado_Cocina,
+                  COALESCE(D.Nombre_Producto, P.Nombre, 'Producto') AS Nombre,
                   COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
                   D.IVA_Percent,
                   CASE WHEN EXISTS (
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado
                 FROM Detalle_Comanda D
-                JOIN Productos P ON P.ID_Producto = D.ID_Producto
-                JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
+                LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
+                LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = P.ID_Categoria
                 WHERE D.ID_Comanda = ?1
                 ORDER BY D.ID_Detalle ASC;
                 "#,
@@ -1125,20 +1144,21 @@ impl MesasRepository for SqliteMesasRepository {
                 Value::Null
             };
 
-            let iva = iva_del_producto(db, id_producto).await?;
+            let (nombre_producto, iva) = snapshot_del_producto(db, id_producto).await?;
 
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda (
-                  ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina,
-                  IVA_Percent
+                  ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario,
+                  Estado_Cocina, IVA_Percent
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
                 "#,
                 vec![
                     Value::Text(new_id()),
                     Value::Text(id_comanda.to_string()),
                     Value::Text(id_producto.to_string()),
+                    nombre_producto,
                     Value::Real(cantidad),
                     Value::Real(precio),
                     estado_cocina,
@@ -1230,7 +1250,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Null
                 };
 
-                let iva = iva_del_producto(db, producto_id).await?;
+                let (nombre_producto, iva) = snapshot_del_producto(db, producto_id).await?;
 
                 let id_detalle = new_id();
                 // MESA-12: no se escribe la clave de lote en Notas; la correlación con
@@ -1238,15 +1258,16 @@ impl MesasRepository for SqliteMesasRepository {
                 db.execute(
                     r#"
                     INSERT INTO Detalle_Comanda (
-                      ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina,
-                      IVA_Percent
+                      ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad,
+                      Precio_Unitario, Estado_Cocina, IVA_Percent
                     )
-                    VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6);
+                    VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, ?7);
                     "#,
                     vec![
                         Value::Text(id_detalle.clone()),
                         Value::Text(id_comanda.to_string()),
                         Value::Text(producto_id.clone()),
+                        nombre_producto,
                         Value::Real(*precio),
                         estado_cocina,
                         iva,
@@ -2366,12 +2387,12 @@ mod tests_numero_ticket {
 }
 
 #[cfg(test)]
-mod tests_iva_de_la_linea {
-    //! De dónde sale el tipo de IVA de cada línea.
+mod tests_snapshot_de_la_linea {
+    //! De dónde salen el nombre y el tipo de IVA de cada línea.
     //!
-    //! Se lee del producto en el momento de la venta y se **congela** en `Detalle_Comanda`. Es lo
-    //! que hace que una reimpresión de hace tres meses siga enseñando el tipo que se aplicó
-    //! entonces, y no el de hoy.
+    //! Se leen del producto en el momento de la venta y se **congelan** en `Detalle_Comanda`. Es lo
+    //! que hace que una reimpresión de hace tres meses siga enseñando lo que se vendió entonces —y
+    //! no lo de hoy— y lo que permite que el catálogo borre un producto sin dejar muda su venta.
 
     use super::*;
     use crate::db::Db;
@@ -2416,7 +2437,7 @@ mod tests_iva_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(iva_del_producto(&r, "con").await.unwrap(), Value::Real(21.0));
+        assert_eq!(snapshot_del_producto(&r, "con").await.unwrap().1, Value::Real(21.0));
     }
 
     #[tokio::test]
@@ -2427,7 +2448,7 @@ mod tests_iva_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(iva_del_producto(&r, "sin").await.unwrap(), Value::Null);
+        assert_eq!(snapshot_del_producto(&r, "sin").await.unwrap().1, Value::Null);
     }
 
     #[tokio::test]
@@ -2436,7 +2457,7 @@ mod tests_iva_de_la_linea {
         sembrar(&db, CATALOGO).await;
         let r = db.read().await;
 
-        assert_eq!(iva_del_producto(&r, "fantasma").await.unwrap(), Value::Null);
+        assert_eq!(snapshot_del_producto(&r, "fantasma").await.unwrap().1, Value::Null);
     }
 
     #[tokio::test]
@@ -2447,12 +2468,12 @@ mod tests_iva_de_la_linea {
 
         let antes = {
             let r = db.read().await;
-            iva_del_producto(&r, "con").await.unwrap()
+            snapshot_del_producto(&r, "con").await.unwrap().1
         };
         sembrar(&db, &["UPDATE Productos SET IVA_Percent = 10 WHERE ID_Producto = 'con';"]).await;
         let despues = {
             let r = db.read().await;
-            iva_del_producto(&r, "con").await.unwrap()
+            snapshot_del_producto(&r, "con").await.unwrap().1
         };
 
         assert_eq!(antes, Value::Real(21.0));

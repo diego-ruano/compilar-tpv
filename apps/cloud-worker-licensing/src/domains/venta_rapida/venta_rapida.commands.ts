@@ -89,7 +89,11 @@ export function createComandaBarra(
 	};
 }
 
-export function addLinea(input: AddLineaInput, ivaPercent: number | null): BuiltCommand {
+export function addLinea(
+	input: AddLineaInput,
+	ivaPercent: number | null,
+	nombreProducto: string | null,
+): BuiltCommand {
 	return {
 		commandName: "vr_add_linea_comanda",
 		command: {
@@ -124,16 +128,18 @@ export function addLinea(input: AddLineaInput, ivaPercent: number | null): Built
 								ID_Detalle,
 								ID_Comanda,
 								ID_Producto,
+								Nombre_Producto,
 								Cantidad,
 								Precio_Unitario,
 								Notas,
 								Estado_Cocina,
 								IVA_Percent
 							)
-							VALUES (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE', ?6)
+							VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7)
 							ON CONFLICT(ID_Detalle) DO UPDATE SET
 								ID_Comanda = excluded.ID_Comanda,
 								ID_Producto = excluded.ID_Producto,
+								Nombre_Producto = excluded.Nombre_Producto,
 								Cantidad = excluded.Cantidad,
 								Precio_Unitario = excluded.Precio_Unitario,
 								IVA_Percent = excluded.IVA_Percent,
@@ -143,6 +149,7 @@ export function addLinea(input: AddLineaInput, ivaPercent: number | null): Built
 							REF_ID_DETALLE,
 							input.id_comanda,
 							input.id_producto,
+							nombreProducto,
 							input.cantidad,
 							input.precio_unitario,
 							ivaPercent,

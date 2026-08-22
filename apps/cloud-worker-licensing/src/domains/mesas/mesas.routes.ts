@@ -145,7 +145,7 @@ mesasRoutes.post("/lineas", async (c) => {
 	);
 	await apply(
 		c,
-		cmd.addLinea(p.data, datos.pasaCocina ? "PENDIENTE" : null, datos.ivaPercent),
+		cmd.addLinea(p.data, datos.pasaCocina ? "PENDIENTE" : null, datos.ivaPercent, datos.nombre),
 	);
 	const lineas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		q.lineas(db, p.data.id_comanda),

@@ -554,9 +554,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "venta_rapida.add_linea": {
-			// El tipo de IVA lo resuelve el route, no el builder: se entra a la misma altura.
+			// El tipo de IVA y el nombre los resuelve el route, no el builder: se entra a la misma
+			// altura.
 			const datosVr = await datosDeLinea(db, caso.entrada.id_producto);
-			aplicar(hub, sql, addLinea(caso.entrada as any, datosVr.ivaPercent));
+			aplicar(hub, sql, addLinea(caso.entrada as any, datosVr.ivaPercent, datosVr.nombre));
 			return;
 		}
 		case "venta_rapida.remove_last_unpaid_linea": {
@@ -669,9 +670,10 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			return;
 		}
 		case "mesas.add_linea": {
-			// Estado_Cocina y el tipo de IVA los resuelve el ROUTE, no el builder, así que hay que
-			// entrar a la misma altura: se leen de la BD igual que en producción. (Estado_Cocina se
-			// excluye del snapshot; el IVA no, que es lo que se quiere comprobar.)
+			// Estado_Cocina, el tipo de IVA y el nombre los resuelve el ROUTE, no el builder, así
+			// que hay que entrar a la misma altura: se leen de la BD igual que en producción.
+			// (Estado_Cocina se excluye del snapshot; el IVA y el nombre no, que es lo que se
+			// quiere comprobar.)
 			const datos = await datosDeLinea(db, caso.entrada.id_producto);
 			aplicar(
 				hub,
@@ -686,6 +688,7 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					} as any,
 					datos.pasaCocina ? "PENDIENTE" : null,
 					datos.ivaPercent,
+					datos.nombre,
 				),
 			);
 			return;

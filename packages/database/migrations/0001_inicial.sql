@@ -456,13 +456,20 @@ ON Comandas(ID_Trabajador, Fecha_Hora_Apertura);
 -- CAPA DE APLICACION (use_cases de Rust + esquemas zod del worker), NO con CHECK: SQLite no permite
 -- anadir un CHECK a una tabla ya existente via ALTER, y el runner envuelve cada migracion en una
 -- transaccion (recrear la tabla seria arriesgado en tablas tan referenciadas). Ver DB-06.
--- IVA_Percent es un SNAPSHOT, igual que Precio_Unitario: al vender una linea se copia el tipo
--- vigente del producto. Sin eso, reimprimir un ticket del ano pasado lo sacaria con el tipo de hoy,
--- que es justo lo que una reimpresion no puede hacer.
+-- La linea de comanda es un SNAPSHOT de la venta, no un puntero al catalogo de hoy: Nombre_Producto,
+-- Precio_Unitario e IVA_Percent se copian del producto al vender. Sin eso, reimprimir un ticket del
+-- ano pasado lo sacaria con el nombre, el precio y el tipo de hoy, que es justo lo que una
+-- reimpresion no puede hacer.
+--
+-- Y es lo que permite que el catalogo BORRE (INV-05): ID_Producto es nullable y su FK es ON DELETE
+-- SET NULL, asi que quitar un producto que ya no se vende deja la venta intacta -con su nombre, su
+-- precio y su tipo- y solo pierde el enlace a una ficha que ya no existe. Sin el snapshot, esa misma
+-- FK dejaria las lineas historicas sin nombre.
 CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Detalle TEXT PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
-  ID_Producto TEXT NOT NULL,
+  ID_Producto TEXT,
+  Nombre_Producto TEXT,
   Cantidad REAL NOT NULL,
   Precio_Unitario REAL NOT NULL,
   IVA_Percent REAL,
@@ -471,7 +478,7 @@ CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   Fecha_Hora_Cocina DATETIME,
   ID_Usuario_Cocinero TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
-  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto)
+  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_dc_cocinero_fecha
@@ -511,13 +518,16 @@ ON Lote_Consumos(ID_Lote);
 --
 -- Es tambien la otra mitad del invariante de reconciliacion (INV-06): el stock de un producto es
 -- SUM(lotes) + Stock_Suelto.
+-- ID_Producto va SIN FK a proposito: forma parte de la clave primaria, asi que no puede quedarse a
+-- NULL cuando se borra el producto (INV-05), y borrar la fila tampoco vale, porque es el rastro de
+-- un consumo que ocurrio. Se queda como valor suelto, igual que Lineas_Pedido_Proveedor guarda el
+-- nombre del producto y no su id.
 CREATE TABLE IF NOT EXISTS Suelto_Consumos (
   ID_Detalle  TEXT NOT NULL,
   ID_Producto TEXT NOT NULL,
   Cantidad    REAL NOT NULL,
   PRIMARY KEY (ID_Detalle, ID_Producto),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
-  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto),
   CHECK (Cantidad > 0)
 );
 

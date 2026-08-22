@@ -406,6 +406,7 @@ export function addLinea(
 	input: AddLineaInput,
 	estadoCocina: string | null,
 	ivaPercent: number | null,
+	nombreProducto: string | null,
 ): BuiltCommand {
 	const steps: any[] = [];
 	// UUID generado en JS e insertado como literal: no necesita un paso `value` (SELECT ?1)
@@ -437,8 +438,9 @@ export function addLinea(
 
 	// MESA-07: Estado_Cocina se resuelve como literal (?6) en el route handler; ya no
 	// va una subquery embebida en el INSERT (no determinista al replicarse a la Main).
-	// El tipo de IVA (?7) viaja igual y por el mismo motivo, y se guarda EN LA LÍNEA: una
-	// reimpresión tiene que enseñar el tipo del día de la venta, no el de hoy.
+	// El tipo de IVA (?7) y el nombre (?8) viajan igual y por el mismo motivo, y se guardan EN LA
+	// LÍNEA: una reimpresión tiene que enseñar lo del día de la venta, y el producto puede haberse
+	// borrado del catálogo desde entonces (INV-05).
 	steps.push({
 		kind: "execute",
 		sql: `
@@ -449,9 +451,10 @@ export function addLinea(
 				Cantidad,
 				Precio_Unitario,
 				Estado_Cocina,
-				IVA_Percent
+				IVA_Percent,
+				Nombre_Producto
 			)
-			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);
+			VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);
 		`,
 		args: [
 			idDetalle,
@@ -461,6 +464,7 @@ export function addLinea(
 			input.precio,
 			estadoCocina,
 			ivaPercent,
+			nombreProducto,
 		],
 	});
 

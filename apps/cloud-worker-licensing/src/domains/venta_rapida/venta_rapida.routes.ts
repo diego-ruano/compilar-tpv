@@ -162,7 +162,7 @@ ventaRapidaRoutes.post("/lineas", async (c) => {
 	const datos = await tenantQuery(c.env, c.get("tenantId"), (db) =>
 		mesasQ.datosDeLinea(db, p.data.id_producto),
 	);
-	const id = await apply(c, cmd.addLinea(p.data, datos.ivaPercent));
+	const id = await apply(c, cmd.addLinea(p.data, datos.ivaPercent, datos.nombre));
 	return c.json({ ok: true, id_detalle: id });
 });
 

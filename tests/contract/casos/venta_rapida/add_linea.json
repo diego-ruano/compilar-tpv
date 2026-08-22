@@ -13,7 +13,7 @@
     "precio_unitario": 3.0
   },
   "snapshot": {
-    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda",
+    "Detalle_Comanda": "SELECT ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent FROM Detalle_Comanda",
     "Comandas": "SELECT ID_Comanda, Total_Comanda FROM Comandas"
   }
 }

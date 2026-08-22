@@ -91,8 +91,9 @@ pub async fn delete_producto(repo: &R, id_producto: String) -> AppResult<String>
     if id_producto.trim().is_empty() {
         return Err(AppError::validation("id_producto inválido"));
     }
-    // INV-05: el repo rechaza con mensaje claro si el producto tiene histórico en Detalle_Comanda
-    // (en vez de un error crudo de FK).
+    // INV-05: el repo rechaza si el producto está en una comanda ABIERTA. Las ventas ya cobradas
+    // no lo impiden: la línea guarda su propio snapshot (nombre, precio, IVA) y sobrevive al
+    // borrado.
     repo.delete_producto(&id_producto).await?;
     Ok("OK".to_string())
 }

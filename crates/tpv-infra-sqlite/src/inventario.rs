@@ -456,20 +456,32 @@ impl InventarioRepository for SqliteInventarioRepository {
     }
 
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()> {
-        // INV-05: si el producto aparece en comandas históricas, el borrado físico fallaría con un
-        // error crudo de FK. Se avisa con un mensaje claro en su lugar.
+        // INV-05: lo único que impide borrar es que el producto esté EN USO ahora mismo, o sea en
+        // una comanda todavía abierta. Quitarlo del catálogo con una mesa a medias dejaría a la
+        // línea sin precio ni cocina y al camarero sin saber por qué.
+        //
+        // Las ventas ya cobradas NO lo impiden: la línea es un snapshot (nombre, precio y tipo de
+        // IVA copiados al vender), así que el histórico se sostiene solo y la FK deja `ID_Producto`
+        // a NULL. Un bar que deja de servir algo tiene que poder quitarlo de la carta sin arrastrar
+        // para siempre una ficha que ya no usa.
         {
             let rg = self.db.read().await;
             let mut rows = rg
                 .query(
-                    "SELECT 1 FROM Detalle_Comanda WHERE ID_Producto=?1 LIMIT 1;",
+                    r#"
+                    SELECT 1
+                    FROM Detalle_Comanda dc
+                    JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda
+                    WHERE dc.ID_Producto = ?1 AND c.Estado = 'Abierta'
+                    LIMIT 1;
+                    "#,
                     vec![Value::Text(id_producto.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
             if rows.next().await.map_err(db_err)?.is_some() {
                 return Err(AppError::validation(
-                    "No se puede borrar: el producto tiene ventas registradas en comandas.",
+                    "No se puede borrar: el producto está en una comanda abierta. Cóbrala o quita la línea y vuelve a intentarlo.",
                 ));
             }
         }
@@ -797,15 +809,15 @@ async fn finish_tx<C: Writer>(conn: &C, res: AppResult<()>) -> AppResult<()> {
 
 #[cfg(test)]
 mod tests_borrado_de_producto {
-    //! INV-05: qué pasa al borrar un producto del catálogo.
+    //! INV-05: qué se puede borrar del catálogo y qué se lleva por delante.
     //!
-    //! El borrado es físico, y `Detalle_Comanda` tiene una FK a `Productos`. Sin la comprobación
-    //! previa, borrar un producto con ventas revienta con el error crudo del motor ("FOREIGN KEY
-    //! constraint failed") a mitad de una transacción: el usuario ve un error de base de datos
-    //! donde debería leer por qué no puede hacerlo.
+    //! Un bar deja de servir cosas: el catálogo tiene que poder quitarlas. Lo único que lo impide
+    //! es que el producto esté EN USO ahora mismo —en una comanda abierta—, porque quitarlo con
+    //! una mesa a medias deja la línea sin precio ni cocina.
     //!
-    //! La comprobación es fácil de perder de vista —está lejos del `DELETE` que protege—, así que
-    //! aquí queda fijada.
+    //! Las ventas ya cobradas no lo impiden y tampoco se pierden: la línea guarda su propio
+    //! snapshot (nombre, precio, tipo de IVA) y la FK solo suelta el enlace. Lo que sí se va con el
+    //! producto son sus lotes, en cascada: es stock de esa ficha y no significa nada sin ella.
 
     use super::*;
     use crate::db::Db;
@@ -843,11 +855,20 @@ mod tests_borrado_de_producto {
            VALUES ('nuevo', 'cat', 'Te', 1.5);",
     ];
 
-    const UNA_VENTA: &[&str] = &[
+    /// Una venta ya cobrada: la comanda está cerrada y la línea guarda su snapshot.
+    const UNA_VENTA_COBRADA: &[&str] = &[
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
-        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det', 'com', 'vendido', 1, 1.3);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'vendido', 'Cafe', 1, 1.3);",
+    ];
+
+    /// Una mesa a medias: la comanda sigue abierta.
+    const UNA_COMANDA_ABIERTA: &[&str] = &[
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('viva', 'BARRA', '2026-01-02 12:00:00', 'Abierta');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det-vivo', 'viva', 'vendido', 'Cafe', 1, 1.3);",
     ];
 
     async fn existe(db: &Arc<Db>, id: &str) -> bool {
@@ -874,39 +895,93 @@ mod tests_borrado_de_producto {
     }
 
     #[tokio::test]
-    async fn un_producto_con_ventas_se_rechaza_con_un_motivo_legible() {
-        // Lo que no puede salir es "FOREIGN KEY constraint failed": el usuario está en la ficha de
-        // un producto y lo que necesita saber es que tiene ventas detrás.
+    async fn un_producto_ya_vendido_tambien_se_borra() {
+        // Un bar que deja de servir algo tiene que poder quitarlo de la carta. Lo que impedia
+        // hacerlo era la FK de Detalle_Comanda; ahora la linea guarda su propio snapshot y la FK
+        // deja el enlace a NULL.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, CATALOGO).await;
-        sembrar(&db, UNA_VENTA).await;
+        sembrar(&db, UNA_VENTA_COBRADA).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("vendido").await.unwrap();
+
+        assert!(!existe(&db, "vendido").await);
+    }
+
+    #[tokio::test]
+    async fn la_venta_sobrevive_al_borrado_con_su_nombre_y_su_precio() {
+        // Lo que no puede pasar es que borrar del catalogo borre historia: la linea sigue ahi, con
+        // lo que se cobro, y solo pierde el enlace a una ficha que ya no existe.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_VENTA_COBRADA).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("vendido").await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT ID_Producto, Nombre_Producto, Precio_Unitario FROM Detalle_Comanda WHERE ID_Detalle='det';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().expect("la linea de la venta sigue existiendo");
+
+        assert_eq!(crate::mapping::v_string(fila.get_value(0).unwrap()), None, "el enlace se suelta");
+        assert_eq!(
+            crate::mapping::v_string(fila.get_value(1).unwrap()).as_deref(),
+            Some("Cafe"),
+            "y el nombre se queda"
+        );
+        assert_eq!(crate::mapping::v_f64(fila.get_value(2).unwrap()), Some(1.3));
+    }
+
+    #[tokio::test]
+    async fn un_producto_en_una_comanda_abierta_no_se_borra() {
+        // Esta es la unica razon que queda para decir que no: quitarlo con una mesa a medias
+        // dejaria la linea sin precio ni cocina y al camarero sin saber por que.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
         let repo = SqliteInventarioRepository::new(db.clone());
 
         let err = repo.delete_producto("vendido").await.unwrap_err();
         let motivo = err.to_string();
 
+        assert!(matches!(err, AppError::Validation(_)), "es una regla, no un fallo del motor: {err:?}");
         assert!(
-            matches!(err, AppError::Validation(_)),
-            "no es un fallo de base de datos, es una regla: {err:?}"
+            motivo.to_lowercase().contains("comanda abierta"),
+            "el motivo tiene que decir donde esta el producto, y dice: {motivo}"
         );
-        assert!(
-            motivo.to_lowercase().contains("ventas"),
-            "el motivo tiene que hablar de ventas, y dice: {motivo}"
-        );
-        assert!(
-            !motivo.to_uppercase().contains("FOREIGN KEY"),
-            "se ha escapado el error del motor: {motivo}"
-        );
+        assert!(existe(&db, "vendido").await, "y el producto sigue en el catalogo");
+    }
+
+    #[tokio::test]
+    async fn cerrar_la_comanda_desbloquea_el_borrado() {
+        // El mensaje dice "cobrala o quita la linea": esto comprueba que hacerlo sirve de algo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        assert!(repo.delete_producto("vendido").await.is_err());
+
+        sembrar(&db, &["UPDATE Comandas SET Estado = 'Pagada' WHERE ID_Comanda = 'viva';"]).await;
+
+        repo.delete_producto("vendido").await.unwrap();
     }
 
     #[tokio::test]
     async fn el_producto_rechazado_sigue_entero() {
-        // El borrado va en varios pasos (movimientos, lotes, alérgenos, producto). Si la
-        // comprobación llegara tarde, el producto se quedaría a medio borrar: sin sus lotes, pero
-        // todavía en el catálogo.
+        // El borrado va en varios pasos (movimientos, lotes, alergenos, producto). Si la
+        // comprobacion llegara tarde, el producto se quedaria a medio borrar: sin sus lotes, pero
+        // todavia en el catalogo.
         let (db, _dir) = db_temporal().await;
         sembrar(&db, CATALOGO).await;
-        sembrar(&db, UNA_VENTA).await;
+        sembrar(&db, UNA_COMANDA_ABIERTA).await;
         sembrar(
             &db,
             &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
@@ -924,6 +999,60 @@ mod tests_borrado_de_producto {
             .await
             .unwrap();
         assert!(rows.next().await.unwrap().is_some(), "se ha llevado los lotes por delante");
+    }
+
+    #[tokio::test]
+    async fn borrar_un_producto_se_lleva_sus_lotes() {
+        // Decision explicita: si el bar ya no quiere el producto, su inventario se va con el. Los
+        // lotes son stock de ESE producto y no significan nada sin su ficha.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
+                 VALUES ('lote', 'nuevo', 'L-1', 10, 10);"],
+        )
+        .await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("nuevo").await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query("SELECT 1 FROM Lotes_Producto WHERE ID_Producto='nuevo';", Vec::<Value>::new())
+            .await
+            .unwrap();
+        assert!(rows.next().await.unwrap().is_none(), "los lotes se van con el producto");
+    }
+
+    #[tokio::test]
+    async fn el_rastro_del_consumo_suelto_sobrevive() {
+        // Suelto_Consumos guarda el ID_Producto sin FK: es el rastro de un consumo que ocurrio y
+        // con el se cuadra el stock (INV-06). Si se fuera con el producto, la reconciliacion de un
+        // arqueo antiguo dejaria de cuadrar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, CATALOGO).await;
+        sembrar(&db, UNA_VENTA_COBRADA).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
+                 VALUES ('det', 'vendido', 2);"],
+        )
+        .await;
+        let repo = SqliteInventarioRepository::new(db.clone());
+
+        repo.delete_producto("vendido").await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Cantidad FROM Suelto_Consumos WHERE ID_Producto='vendido';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().expect("el rastro del consumo sigue ahi");
+        assert_eq!(crate::mapping::v_f64(fila.get_value(0).unwrap()), Some(2.0));
     }
 
     #[tokio::test]

@@ -364,7 +364,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   CASE WHEN EXISTS (
                     SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado,
-                  COALESCE(p.Nombre, 'Producto') AS Nombre,
+                  COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
                   dc.IVA_Percent
                 FROM Detalle_Comanda dc
                 LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
@@ -411,11 +411,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
               (
                 SELECT GROUP_CONCAT(nn.Nombre, ' · ')
                 FROM (
-                  SELECT DISTINCT COALESCE(p2.Nombre,'') AS Nombre
+                  SELECT DISTINCT COALESCE(dc2.Nombre_Producto, p2.Nombre, '') AS Nombre
                   FROM Detalle_Comanda dc2
                   LEFT JOIN Productos p2 ON p2.ID_Producto = dc2.ID_Producto
                   WHERE dc2.ID_Comanda = x.ID_Comanda
-                  ORDER BY COALESCE(p2.Nombre,'')
+                  ORDER BY COALESCE(dc2.Nombre_Producto, p2.Nombre, '')
                 ) nn
                 WHERE nn.Nombre <> ''
               ) AS Productos,
@@ -580,25 +580,13 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
         let id_detalle_final = new_id();
 
-        // El tipo de IVA se lee ANTES y se inserta como literal (igual que `Estado_Cocina`): una
-        // subconsulta dentro del INSERT la reevaluaría la nube en otro estado. Y se guarda en la
-        // línea porque una reimpresión tiene que enseñar el tipo del día de la venta, no el de hoy.
-        let iva = {
+        // El nombre y el tipo de IVA se leen ANTES y se insertan como literales (igual que
+        // `Estado_Cocina`): una subconsulta dentro del INSERT la reevaluaría la nube en otro estado.
+        // Y se guardan en la línea porque una reimpresión tiene que enseñar lo del día de la venta,
+        // y porque el producto puede haberse borrado del catálogo desde entonces (INV-05).
+        let (nombre_producto, iva) = {
             let r = self.db.read().await;
-            let mut rows = r
-                .conn()
-                .query(
-                    "SELECT IVA_Percent FROM Productos WHERE ID_Producto = ?1 LIMIT 1;",
-                    vec![Value::Text(id_producto.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            match rows.next().await.map_err(db_err)? {
-                Some(row) => v_f64(row.get_value(0).map_err(db_err)?)
-                    .map(Value::Real)
-                    .unwrap_or(Value::Null),
-                None => Value::Null,
-            }
+            crate::mesas::snapshot_del_producto(&r, id_producto).await?
         };
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
@@ -606,13 +594,14 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             db.execute(
                 r#"
                 INSERT INTO Detalle_Comanda
-                  (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina,
-                   IVA_Percent)
+                  (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario,
+                   Notas, Estado_Cocina, IVA_Percent)
                 VALUES
-                  (?1, ?2, ?3, ?4, ?5, NULL, 'PENDIENTE', ?6)
+                  (?1, ?2, ?3, ?4, ?5, ?6, NULL, 'PENDIENTE', ?7)
                 ON CONFLICT(ID_Detalle) DO UPDATE SET
                   ID_Comanda = excluded.ID_Comanda,
                   ID_Producto = excluded.ID_Producto,
+                  Nombre_Producto = excluded.Nombre_Producto,
                   Cantidad = excluded.Cantidad,
                   Precio_Unitario = excluded.Precio_Unitario,
                   IVA_Percent = excluded.IVA_Percent,
@@ -622,6 +611,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(id_detalle_final.clone()),
                     Value::Text(id_comanda.to_string()),
                     Value::Text(id_producto.to_string()),
+                    nombre_producto,
                     Value::Real(cantidad),
                     Value::Real(precio_unitario),
                     iva,

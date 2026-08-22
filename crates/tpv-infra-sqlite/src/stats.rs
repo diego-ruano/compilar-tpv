@@ -371,18 +371,23 @@ impl SqliteStatsRepository {
         let sql_best = format!(
             r#"
             {ctes}
+            -- LEFT JOIN y no JOIN: el catálogo puede borrar un producto que ya no se vende
+            -- (INV-05), y su venta del año pasado sigue siendo una venta. Con un INNER, esas
+            -- líneas desaparecerían del histórico SIN error, que es la peor forma de perderlas.
+            -- El nombre sale del catálogo si el producto sigue ahí (así un renombrado se ve en el
+            -- informe) y del snapshot de la línea si ya no está.
             SELECT
-              pr.Nombre,
+              COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
               CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
             FROM Detalle_Comanda dc
             JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
             JOIN rng ON 1=1
-            JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
-            JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+            LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+            LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
             WHERE pd.paid_at >= rng.start_dt
               AND pd.paid_at <  rng.end_dt
               AND COALESCE(cat.Vendible,1)=1
-            GROUP BY pr.ID_Producto
+            GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
             HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
             ORDER BY unidades DESC, pr.Nombre ASC
             LIMIT 1;
@@ -445,18 +450,18 @@ impl SqliteStatsRepository {
             r#"
             {ctes}
             SELECT
-              pr.Nombre,
+              COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto') AS Nombre,
               CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS unidades
             FROM Detalle_Comanda dc
             JOIN paid_det pd ON pd.ID_Detalle = dc.ID_Detalle
             JOIN rng ON 1=1
-            JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
-            JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+            LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+            LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
             WHERE pd.paid_at >= rng.start_dt
               AND pd.paid_at <  rng.end_dt
               AND COALESCE(cat.Vendible,1)=1
               {filter}
-            GROUP BY pr.ID_Producto
+            GROUP BY COALESCE(dc.ID_Producto, dc.Nombre_Producto)
             HAVING SUM(COALESCE(dc.Cantidad,1)) > 0
             ORDER BY unidades DESC, pr.Nombre ASC
             LIMIT 10;

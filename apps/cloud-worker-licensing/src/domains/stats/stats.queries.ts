@@ -174,39 +174,45 @@ export async function productos(
 		FROM Detalle_Comanda dc
 		JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
 		JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
-		JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
-		JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
+		LEFT JOIN Productos pr ON pr.ID_Producto = dc.ID_Producto
+		LEFT JOIN Categorias_Producto cat ON cat.ID_Categoria = pr.ID_Categoria
 		WHERE p.Fecha_Hora >= ${start}
 			AND p.Fecha_Hora < ${end}
 			AND COALESCE(cat.Vendible,1)=1
 	`;
+	// LEFT JOIN y COALESCE en vez de JOIN: el catálogo puede borrar un producto que ya no se vende
+	// (INV-05) y su venta del año pasado sigue siendo una venta. Con un INNER esas líneas
+	// desaparecerían del histórico SIN error. El nombre sale del catálogo si el producto sigue ahí
+	// (así un renombrado se ve en el informe) y del snapshot de la línea si ya no está.
+	const NOMBRE = "COALESCE(pr.Nombre, dc.Nombre_Producto, 'Producto')";
+	const AGRUPA = "COALESCE(dc.ID_Producto, dc.Nombre_Producto)";
 	const best = await one(
 		db,
-		`SELECT pr.Nombre AS nombre, SUM(COALESCE(dc.Cantidad,1)) AS unidades
+		`SELECT ${NOMBRE} AS nombre, SUM(COALESCE(dc.Cantidad,1)) AS unidades
 		 ${base}
-		 GROUP BY pr.ID_Producto
-		 ORDER BY unidades DESC, pr.Nombre ASC LIMIT 1;`,
+		 GROUP BY ${AGRUPA}
+		 ORDER BY unidades DESC, nombre ASC LIMIT 1;`,
 	);
 	const worst = await one(
 		db,
-		`SELECT pr.Nombre AS nombre, SUM(COALESCE(dc.Cantidad,1)) AS unidades
+		`SELECT ${NOMBRE} AS nombre, SUM(COALESCE(dc.Cantidad,1)) AS unidades
 		 ${base}
-		 GROUP BY pr.ID_Producto
-		 ORDER BY unidades ASC, pr.Nombre ASC LIMIT 1;`,
+		 GROUP BY ${AGRUPA}
+		 ORDER BY unidades ASC, nombre ASC LIMIT 1;`,
 	);
 	const topFilter = categoriaTopId && categoriaTopId.trim() ? "AND pr.ID_Categoria = ?1" : "";
 	const worstFilter =
 		categoriaWorstId && categoriaWorstId.trim() ? "AND pr.ID_Categoria = ?1" : "";
 	const topRs = await db.execute({
-		sql: `SELECT pr.Nombre AS label, CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS value
+		sql: `SELECT ${NOMBRE} AS label, CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS value
 		      ${base} ${topFilter}
-		      GROUP BY pr.ID_Producto ORDER BY value DESC, pr.Nombre ASC LIMIT 10;`,
+		      GROUP BY ${AGRUPA} ORDER BY value DESC, label ASC LIMIT 10;`,
 		args: topFilter ? [categoriaTopId] : [],
 	});
 	const worstRs = await db.execute({
-		sql: `SELECT pr.Nombre AS label, CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS value
+		sql: `SELECT ${NOMBRE} AS label, CAST(ROUND(SUM(COALESCE(dc.Cantidad,1)),0) AS INTEGER) AS value
 		      ${base} ${worstFilter}
-		      GROUP BY pr.ID_Producto ORDER BY value ASC, pr.Nombre ASC LIMIT 10;`,
+		      GROUP BY ${AGRUPA} ORDER BY value ASC, label ASC LIMIT 10;`,
 		args: worstFilter ? [categoriaWorstId] : [],
 	});
 	const top = rows(topRs);

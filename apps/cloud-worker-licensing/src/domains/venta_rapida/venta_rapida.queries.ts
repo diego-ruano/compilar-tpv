@@ -205,7 +205,7 @@ export async function lineas(
 				CASE WHEN EXISTS (
 					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
-				COALESCE(p.Nombre, 'Producto') AS Nombre,
+				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				dc.IVA_Percent AS IVA_Percent
 			FROM Detalle_Comanda dc
 			LEFT JOIN Productos p ON p.ID_Producto = dc.ID_Producto
@@ -227,11 +227,11 @@ export async function indexRows(db: Client, ids: string[]): Promise<IndexRow[]> 
 				(
 					SELECT GROUP_CONCAT(nn.Nombre, ' - ')
 					FROM (
-						SELECT DISTINCT COALESCE(p2.Nombre,'') AS Nombre
+						SELECT DISTINCT COALESCE(dc2.Nombre_Producto, p2.Nombre, '') AS Nombre
 						FROM Detalle_Comanda dc2
 						LEFT JOIN Productos p2 ON p2.ID_Producto = dc2.ID_Producto
 						WHERE dc2.ID_Comanda = x.ID_Comanda
-						ORDER BY COALESCE(p2.Nombre,'')
+						ORDER BY COALESCE(dc2.Nombre_Producto, p2.Nombre, '')
 					) nn
 					WHERE nn.Nombre <> ''
 				) AS Productos,
@@ -261,7 +261,7 @@ export async function detallesVerTicket(
 			SELECT
 				dc.ID_Detalle AS ID_Detalle,
 				dc.ID_Producto AS ID_Producto,
-				COALESCE(p.Nombre,'Producto') AS Nombre,
+				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				COALESCE(dc.Cantidad,1) AS Cantidad,
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
 				COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,

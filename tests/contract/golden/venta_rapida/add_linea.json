@@ -11,6 +11,7 @@
       "ID_Comanda": "comanda-1",
       "ID_Producto": "prod-1",
       "IVA_Percent": 21.0,
+      "Nombre_Producto": "Cerveza",
       "Precio_Unitario": 3.0
     }
   ]
