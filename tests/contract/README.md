@@ -108,7 +108,7 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**60 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
+**62 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
 tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
@@ -132,7 +132,8 @@ tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). P
   conservando las asignaciones, y vaciar es el único borrado real), `marcar_finalizada`. **Proveedores** (PROV-07): `guardar`, `eliminar`, `set_vinculos`,
   `crear_producto`. **Reservas** (RES-07/RES-05): `guardar` (cliente nuevo + merge de existente), `eliminar`.
   **Configuración** (CONF-06): `patch_business`, `patch_contact`, `patch_ticket`.
-- **Login/Horarios** (parcial): `login.set_turno_partido`, `horarios.create/update/delete_asignacion`.
+- **Login/Horarios** (parcial): `login.punch` (**entrada y salida**, TRAB-07), `login.set_turno_partido`,
+  `horarios.create/update/delete_asignacion`.
 
 ## Qué falta por cubrir (y quién lo vigila)
 
@@ -149,7 +150,7 @@ Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y 
 el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
 push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **57/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
+Hoy dice **59/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
 que se ejecutó encontró 10 comandos sin caso que no estaban documentados en ninguna parte —todo
 `cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y dos de ellos escondían divergencias
 reales. Por eso existe.
@@ -167,9 +168,15 @@ reales. Por eso existe.
   Main y solo la Main, porque solo ella cobra. Los constructores de cobro del worker siguen ahí
   como referencia y sus casos contrastan el efecto que sí es compartido (dinero, stock, líneas
   cobradas); la numeración no forma parte de ese contrato.
-- **`login.complete_initial_setup`, `login.punch`**: el lado Rust **verifica el PIN** contra el hash
-  guardado (PBKDF2), así que el fixture tendría que sembrar un hash válido precomputado. Fuera del
-  alcance fácil del harness de efecto.
+- **`login.complete_initial_setup`**: escribe `Password_Hash` con salt aleatorio (distinto por
+  diseño en cada lado), así que el efecto no es comparable columna a columna.
+- **`login.punch` sí está cubierto desde el 2026-08-22.** El lado Rust verifica el PIN dentro de
+  `repo.punch`, que es lo que lo mantenía fuera; el caso llama a `exec_punch` —el efecto— y se salta
+  esa verificación a propósito: **autenticar no es parte del contrato de replicación**, y lo que
+  tiene que converger es la fila del fichaje. El snapshot comprueba explícitamente que `ID_Fichaje`
+  no viene vacío, porque el bug que motivó el caso (TRAB-07) era justo ese: `TEXT PRIMARY KEY`
+  admite NULL en SQLite, así que un INSERT que se deje la columna **no da error**, solo deja una
+  fila que luego nadie puede actualizar.
 - **`trabajadores.crear/actualizar`**: escriben **PII cifrada** (DNI/IBAN/nº SS — el worker ni la
   escribe) y `Password_Hash` (salt aleatorio → distinto por diseño); solo las columnas no sensibles
   serían comparables, y hace falta cablear el *field cipher*. Cubrible parcialmente, bajo valor.

@@ -2,28 +2,20 @@
 
 > **Ámbito.** Reservas de mesa (calendario mensual, alta/edición, estado, borrado) y su vínculo con
 > clientes y mesas. Incluye el `upsert_cliente` que crea/actualiza el cliente al reservar.
+>
+> **Identidad del cliente al reservar (decidido, no es un hallazgo).** Reservas deduplica por email y
+> **también por teléfono**, y no valida el formato del email; la pantalla de Clientes solo deduplica
+> por email (índice único `ux_clientes_email`) y sí lo valida. Es a propósito: una reserva se coge
+> por teléfono y con datos a medias. Consecuencia asumida por el responsable (2026-08-22): si dos
+> personas comparten teléfono, la reserva se engancha a la ficha existente y aparece con **su**
+> nombre. Se acepta; no se toca. El merge no es destructivo (RES-01): reusar una ficha solo rellena
+> huecos, nunca pisa datos.
 > **Capas:** `crates/tpv-infra-sqlite/src/reservas.rs`, `use_cases/reservas.rs`,
 > `crates/tpv-domain/src/reservas.rs`, `apps/cloud-worker-licensing/src/domains/reservas/*`,
 > FE `apps/tpv-main/src/features/reservas/*` (React Query).
 >
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| RES-05 | 🔵 | **Segundo punto** de alta de clientes, con criterio de identidad propio | `reservas.rs` (`upsert_cliente`) |
+Ninguno.
 
-### RES-05 🔵 Segundo punto de alta de clientes
-Hay **dos** sitios que crean e identifican clientes: el dominio de clientes (D5) y el
-`upsert_cliente` de reservas, que resuelve por email y, si no hay, por teléfono. (Mesas y cuentas
-también escriben en `Clientes`, pero solo suman o restan `Total_Gastado` de una ficha existente: no
-crean ni deduplican, así que no cuentan como un tercer punto — el enunciado original de este
-hallazgo decía tres y era inexacto.)
-
-Las dos rutas ya coinciden en lo que importa: normalizan el email a minúsculas y buscan
-case-insensitive contra `lower(Email)`, que es el criterio del índice único `ux_clientes_email`.
-Lo que sigue difiriendo: reservas deduplica **además** por teléfono, y **no** valida el formato del
-email (a propósito: una reserva se coge a menudo por teléfono y con datos a medias).
-
-**Arreglo:** un único punto de resolución de cliente que consuman ambos flujos. Prioridad baja
-mientras los criterios no vuelvan a separarse.
 

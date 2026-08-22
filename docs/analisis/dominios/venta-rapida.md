@@ -24,15 +24,17 @@
   stock total de un producto cae por debajo de cero. El sobrante que los lotes no cubren va al *stock
   suelto* por producto, que también puede quedar negativo.
 
+**Coste del consumo FEFO (medido, no es un hallazgo).** El cobro hace 1 `SELECT` de lotes por línea
+y 2 escrituras por lote consumido, dentro de la transacción. Medido sobre SQLite local: un ticket
+**extremo** de 100 líneas con 2 lotes cada una (100 lecturas + 400 escrituras contando la captura
+del outbox) se resuelve en ~15 ms. Un ticket real anda por dos órdenes de magnitud menos. Sería otra
+historia si este bucle corriera contra una BD remota —ahí cada sentencia es un salto de red—, pero
+en la Main es local y en una sola transacción. Decisión (2026-08-22): se deja como está.
+
 ---
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| VR-07 | 🔵 | Muchos round-trips por venta (N lecturas de lotes + 2N updates) dentro de la tx | `venta_rapida.rs` (consumo FEFO) |
+Ninguno.
 
-### VR-07 🔵 Round-trips por venta
-El consumo FEFO lee los lotes del producto y emite dos escrituras por lote dentro de la
-transacción. Con pocas líneas es irrelevante; conviene tenerlo presente si algún día una venta pasa
-a tener decenas de líneas. Sin impacto medido hoy.
+

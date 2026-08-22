@@ -23,7 +23,6 @@ antes acceso de lectura a la BD de la nube.
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
 | LOGIN-04 | 🔵 | El hash del PIN es **crackeable offline** si alguien lee la BD del tenant; subir iteraciones no lo arregla | `domain/login.rs:11-16`, `login.crypto.ts` |
-| LOGIN-03 | 🔵 | `list_login_users` **enumera usuarios** | `login.rs` (`list_login_users`) |
 | LOGIN-05 | 🔵 | Doble implementación Rust/worker de login/verify (parity, crítico) | `login.rs` ↔ `login.commands.ts` |
 
 ### LOGIN-04 🔵 El hash es crackeable offline (y las iteraciones no son la palanca)
@@ -61,21 +60,16 @@ antes acceso de lectura a la BD de la nube.
 - **Ya hecho y aprovechable:** el **rehash-en-login** está cableado (`crates/tpv-infra-sqlite/src/login.rs`),
   así que cualquier cambio de esquema de hash migra solo en el primer login de cada usuario.
 
-### LOGIN-03 🔵 Enumeración de usuarios
-`list_login_users` devuelve la lista de usuarios para que el operador elija su nombre: publica los
-identificadores válidos, así que la seguridad efectiva queda solo en el PIN. Es el patrón normal de
-un kiosco y su mitigación real (el lockout) ya está. Se deja como está.
-
 ### LOGIN-05 🔵 Doble implementación crítica
 Login/verify existe en Rust y en el worker; una divergencia en la verificación sería grave.
 
-**Es de los pocos `-parity` que el harness NO cierra:** `login.completeInitialSetup`,
-`login.punchEntrada` y `login.punchSalida` están **excluidos con motivo** en
-[`cobertura.json`](../../../tests/contract/cobertura.json) —el camino real de Rust verifica el PIN
-(PBKDF2) y escribe `Password_Hash` con salt aleatorio—, así que de este dominio solo está cubierto
-`login.set_turno_partido`. El precio de esa exclusión ya se ha cobrado una vez: ver **TRAB-07** en
-[trabajadores.md](trabajadores.md). **Arreglo:** cubrir al menos la parte del fichaje (sembrando un
-hash precomputado o separando la verificación del efecto).
+**El fichaje ya está cubierto** (2026-08-22, `login__punch_entrada` / `login__punch_salida`): se
+contrasta el **efecto** llamando a `exec_punch`, saltándose la verificación del PIN, que es
+autenticación y no forma parte del contrato de replicación. Lo que queda sin contrastar es
+`login.completeInitialSetup`, excluido con motivo en
+[`cobertura.json`](../../../tests/contract/cobertura.json): escribe `Password_Hash` con salt
+aleatorio, distinto por diseño en cada lado, así que el efecto no es comparable columna a columna.
+La verificación del PIN en sí (PBKDF2, 100k, misma sal) sigue igualada a mano en los dos runtimes.
 
 ---
 
