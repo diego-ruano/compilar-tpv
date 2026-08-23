@@ -1,8 +1,11 @@
 // src/features/configuracion/sections/Licencia.tsx
 //
 // Estado real de la licencia (antes era un placeholder). Lee `license_get_state`, que es lo que
-// el gate ya cachea localmente: no hace red propia. Muestra estado, plan, días restantes y el
-// dispositivo. La fuente de verdad es el servidor; esto es la última foto verificada.
+// el gate ya cachea localmente: no hace red propia. La fuente de verdad es el servidor; esto es
+// la última foto verificada.
+//
+// Se enseña lo que el dueño del bar puede USAR para decidir algo: si está activa, cuándo caduca
+// y cuánto queda. Ni el plan (sólo hay uno) ni el UUID del dispositivo pintaban nada aquí.
 
 import React, { useEffect, useState } from "react";
 import { invokeClient } from "@tpv/client";
@@ -124,14 +127,10 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 				}
 			>
 				<div className="flex flex-col">
-					<Fila label="Plan">{state.plan ?? "standard"}</Fila>
 					<Fila label="Caducidad">
 						{expiresMs != null ? formatFecha(expiresMs) : "—"}
 					</Fila>
 					{diasTexto ? <Fila label="Tiempo restante">{diasTexto}</Fila> : null}
-					<Fila label="Dispositivo">
-						<span className="font-mono text-xs">{state.device_id}</span>
-					</Fila>
 				</div>
 
 				{avisaRenovar ? (

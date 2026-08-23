@@ -31,7 +31,6 @@ import { Apariencia } from "../../features/configuracion/sections/Apariencia";
 import { Conectividad } from "../../features/configuracion/sections/Conectividad";
 import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
-import { EmailConfig } from "../../features/configuracion/sections/EmailConfig";
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
 
 
@@ -150,12 +149,6 @@ export default function Configuracion() {
             title: "Apariencia",
             desc: "Tema / modo oscuro",
             keywords: ["tema", "oscuro", "apariencia"],
-        },
-        {
-            key: "EMAIL_CONFIG",
-            title: "Correos automatizados",
-            desc: "Envío de pedidos a proveedores",
-            keywords: ["email", "correo", "smtp", "pedidos", "proveedor", "cloudflare"],
         },
         {
             key: "ACTUALIZACIONES",
@@ -371,24 +364,14 @@ export default function Configuracion() {
                                 </div>
                             </div>
 
-                            <div className="flex flex-wrap items-center gap-2">
-                                {dirty ? (
-                                    <Badge tone="warn">
-                                        Cambios sin guardar
-                                    </Badge>
-                                ) : (
-                                    <Badge tone="good">Sincronizado</Badge>
-                                )}
-
-                                {mode !== "loading" ? (
-                                    <Badge>
-                                        Modo:{" "}
-                                        <span className="font-bold ml-1">
-                                            {mode === "tpv" ? "TPV" : "Handy"}
-                                        </span>
-                                    </Badge>
-                                ) : null}
-                            </div>
+                            {/* Sólo el aviso de cambios pendientes. Los distintivos permanentes
+                                ("Sincronizado", "Modo: TPV") no decían nada que el usuario no
+                                supiera ya y ocupaban la esquina que mira cuando busca un aviso. */}
+                            {dirty ? (
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <Badge tone="warn">Cambios sin guardar</Badge>
+                                </div>
+                            ) : null}
                         </div>
                     </div>
 
@@ -730,10 +713,6 @@ export default function Configuracion() {
                                         {section === "VINCULAR_HANDY" &&
                                             isMain ? (
                                             <VincularHandy darkMode={darkMode} />
-                                        ) : null}
-
-                                        {section === "EMAIL_CONFIG" ? (
-                                            <EmailConfig darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "ACTUALIZACIONES" ? (

@@ -16,7 +16,6 @@ export type SectionKey =
 	| "CONECTIVIDAD"
 	| "VINCULAR_HANDY"
 	| "DISPOSITIVO"
-	| "EMAIL_CONFIG"
 	| "ACTUALIZACIONES";
 
 export type NavItem = {

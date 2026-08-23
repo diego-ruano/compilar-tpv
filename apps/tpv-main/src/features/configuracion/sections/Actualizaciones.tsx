@@ -34,9 +34,6 @@ type UpdateStatus = {
 	error: string | null;
 };
 
-/** Cada cuánto comprueba el backend por su cuenta (job `updater`, en jobs/registro.rs). */
-const INTERVALO_AUTOMATICO = "cada 6 horas";
-
 function horaCorta(d: Date): string {
 	return d.toLocaleTimeString(undefined, {
 		hour: "2-digit",
@@ -212,30 +209,6 @@ export function Actualizaciones({ darkMode }: { darkMode: boolean }) {
 					</div>
 				</Panel>
 			) : null}
-
-			<Panel
-				title="Cómo funcionan las actualizaciones"
-				subtitle="Automáticas al detectar, manuales al instalar."
-			>
-				<ul className="flex list-disc flex-col gap-2 pl-5 text-sm text-fg-muted">
-					<li>
-						La aplicación comprueba si hay versión nueva al arrancar y{" "}
-						{INTERVALO_AUTOMATICO} mientras está abierta.
-					</li>
-					<li>
-						Cuando aparece una, se avisa con una notificación a los administradores y con
-						un aviso en pantalla. Nunca se instala sola.
-					</li>
-					<li>
-						Instálala cuando no estés en mitad de un servicio: la aplicación se cierra y
-						se vuelve a abrir sola al terminar.
-					</li>
-					<li>
-						Cada actualización se descarga firmada y se verifica antes de instalarse; si
-						la firma no cuadra, se descarta.
-					</li>
-				</ul>
-			</Panel>
 		</div>
 	);
 }
