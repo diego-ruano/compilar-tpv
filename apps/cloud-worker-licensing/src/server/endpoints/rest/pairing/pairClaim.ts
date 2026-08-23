@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client/web";
 
+import { signInternalWorkerRequest } from "../../../../lib/internalAuth";
 import { json, serverError } from "../../../utils/response";
 import { sha256HexStr } from "../../../utils/crypto";
 import { b64ToBytes, bytesToB64 } from "../../../utils/base64";
@@ -90,6 +91,39 @@ async function claimRateLimitOk(
 		args: [ip],
 	});
 	return true;
+}
+
+/**
+ * Empuja a la Main el aviso de que hay una solicitud esperando aprobación.
+ *
+ * Best-effort **a propósito**: el claim ya está guardado cuando llegamos aquí, así que un DO
+ * que no responde —o un local sin ninguna Main conectada— no puede tumbar un emparejamiento
+ * válido. El panel tiene su propia recarga de respaldo para ese caso.
+ */
+async function avisarSolicitudALaMain(env: any, tenantId: string): Promise<void> {
+	if (!tenantId) return;
+
+	try {
+		const stub = env.TenantHub.get(env.TenantHub.idFromName(tenantId));
+		const rawBody = JSON.stringify({ tenantId });
+
+		// FABLE-F: misma firma HMAC que `/internal/apply` y `/internal/revoke`. `pathname` y
+		// `rawBody` tienen que coincidir exactamente con lo que verá el DO.
+		const sigHeaders = await signInternalWorkerRequest(
+			String(env.LICENSE_JWT_SECRET || ""),
+			"POST",
+			"/internal/pair-request",
+			rawBody,
+		);
+
+		await stub.fetch("https://do/internal/pair-request", {
+			method: "POST",
+			headers: { "content-type": "application/json", ...sigHeaders },
+			body: rawBody,
+		});
+	} catch {
+		// Silencio deliberado: ver el comentario de arriba.
+	}
 }
 
 export async function handlePairClaim(
@@ -275,6 +309,8 @@ export async function handlePairClaim(
 				req,
 			);
 		}
+
+		await avisarSolicitudALaMain(env, String(pr.tenant_id || ""));
 
 		const nonceBytes = new Uint8Array(32);
 		crypto.getRandomValues(nonceBytes);

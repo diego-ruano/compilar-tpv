@@ -4,7 +4,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation } from "react-router-dom";
 import { message as messageDialog } from "@tauri-apps/plugin-dialog";
 import { invokeClient } from "@tpv/client";
-import type { PairCreateResult } from "@tpv/contracts";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import { useMode } from "../../shared/stores/useMode";
@@ -326,44 +325,9 @@ export default function Configuracion() {
         }
     };
 
-    // ✅ Vincular handy (REAL con invoke->Rust)
-    const [pairCode, setPairCode] = useState("");
-    const [pairSecret, setPairSecret] = useState("");
-    const [pairExpiresAtMs, setPairExpiresAtMs] = useState<number | null>(null);
-    const [pairLoading, setPairLoading] = useState(false);
-    const [pairError, setPairError] = useState<string | null>(null);
-
-    const generatePair = async () => {
-        try {
-            setPairError(null);
-            setPairLoading(true);
-
-            // Comando hexagonal dedicado: pide al worker un código nuevo (firma device-proof
-            // en modo TPV) y devuelve el DTO tipado generado desde Rust.
-            const j = await invokeClient<PairCreateResult>("pair_create");
-
-            setPairCode(String(j.pairCode || ""));
-            setPairSecret(String(j.pairSecret || ""));
-            setPairExpiresAtMs(
-                typeof j.expiresAtMs === "number" ? j.expiresAtMs : null,
-            );
-        } catch (e: any) {
-            setPairError(String(e?.message || e));
-        } finally {
-            setPairLoading(false);
-        }
-    };
-
-    // Autogenerar al entrar en sección (solo MAIN)
-    useEffect(() => {
-        if (!isMain) return;
-        if (section !== "VINCULAR_HANDY") return;
-        if (pairLoading) return;
-        if (pairCode) return;
-
-        generatePair().catch(() => { });
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [section, isMain]);
+    // El código de emparejamiento (y su ciclo de vida) vive en `usePairCode`: esta página se
+    // desmonta al navegar, y con el estado aquí cada visita a "Vincular Handy" pedía un código
+    // nuevo — el QR cambiaba delante de quien lo estaba escaneando.
 
     // Si cambia a handy, fuera de las secciones solo-Main
     useEffect(() => {
@@ -765,20 +729,7 @@ export default function Configuracion() {
 
                                         {section === "VINCULAR_HANDY" &&
                                             isMain ? (
-                                            <VincularHandy
-                                                darkMode={darkMode}
-                                                pairCode={pairCode}
-                                                pairSecret={pairSecret}
-                                                expiresAtMs={pairExpiresAtMs}
-                                                loading={pairLoading}
-                                                error={pairError}
-                                                onRegenerate={generatePair}
-                                                onShowCode={() => {
-                                                    void messageDialog(
-                                                        `Código: ${pairCode}`,
-                                                    );
-                                                }}
-                                            />
+                                            <VincularHandy darkMode={darkMode} />
                                         ) : null}
 
                                         {section === "EMAIL_CONFIG" ? (

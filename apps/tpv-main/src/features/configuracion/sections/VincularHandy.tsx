@@ -1,67 +1,36 @@
 // src/features/configuracion/sections/VincularHandy.tsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { QRCodeCanvas } from "qrcode.react";
-import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
-import { cloudPost } from "../../../shared/lib/cloudApi";
-import { deviceFingerprint } from "../../../shared/lib/deviceFingerprint";
+import { confirm as confirmDialog, message as messageDialog } from "@tauri-apps/plugin-dialog";
+import { toAppError } from "@tpv/client";
 import { useEstadoSync } from "../../../shared/stores/useEstadoSync";
+import { usePairCode } from "../../../shared/stores/usePairCode";
+import {
+	useAprobarHandy,
+	useDispositivosVinculados,
+	usePairPendientes,
+	useRevocarHandy,
+} from "../pairingQueries";
 
-type PairPendingItem = {
-	pairCode: string;
-	status: string;
-	createdAtMs: number;
-	expiresAtMs: number;
-
-	claimedAtMs: number | null;
-	claimedDeviceId: string | null;
-	claimedDeviceName: string | null;
-	claimedDevicePubKeyB64: string | null;
-
-	attempts: number;
-	lastAttemptAtMs: number | null;
-
-	// Calculada en el cliente a partir de claimedDevicePubKeyB64 (no viene del worker).
-	fingerprint?: string;
-};
-
-type LinkedDevice = {
-	deviceId: string;
-	devicePubKeyB64: string | null;
-	firstSeenAtMs: number;
-	lastSeenAtMs: number;
-	fingerprint?: string;
-};
-
-export function VincularHandy({
-	darkMode,
-	pairCode,
-	pairSecret,
-	expiresAtMs,
-	loading,
-	error,
-	onRegenerate,
-	onShowCode,
-}: {
-	darkMode: boolean;
-
-	pairCode: string;
-	pairSecret: string;
-	expiresAtMs: number | null;
-
-	loading: boolean;
-	error: string | null;
-
-	onRegenerate: () => void;
-	onShowCode: () => void;
-}) {
+export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	// SYNC-17: la sección ya no se tapa (antes exigía el modo "online", que ya no existe). Vincular
 	// es una petición REST al worker: lo que hace falta es que HAYA conexión ahora mismo. Sin ella
 	// se dice claramente —el código se pide a la nube y sin ella no hay código válido que teclear—,
 	// en vez de soltar el error crudo de red.
 	const hayNube = useEstadoSync((s) => s.estado) === "conectado";
+
+	// El código vive en un store, no aquí: salir de Configuración y volver no debe cambiar el QR
+	// que alguien está intentando escanear (ver `shared/stores/usePairCode`).
+	const pairCode = usePairCode((s) => s.code);
+	const pairSecret = usePairCode((s) => s.secret);
+	const expiresAtMs = usePairCode((s) => s.expiresAtMs);
+	const loading = usePairCode((s) => s.loading);
+	const error = usePairCode((s) => s.error);
+	const asegurarCodigo = usePairCode((s) => s.asegurar);
+	const regenerarCodigo = usePairCode((s) => s.regenerar);
 
 	const qrValue = useMemo(() => {
 		if (!pairCode || !pairSecret) return "";
@@ -74,25 +43,29 @@ export function VincularHandy({
 		return d.toLocaleString("es-ES");
 	}, [expiresAtMs]);
 
-	// Cuenta regresiva en segundos hasta que caduca el QR
-	const [secsLeft, setSecsLeft] = useState<number>(0);
-	const onRegenerateRef = useRef(onRegenerate);
-	useEffect(() => { onRegenerateRef.current = onRegenerate; }, [onRegenerate]);
+	// Cuenta atrás. Se guarda el instante actual y los segundos se DERIVAN en el render: con un
+	// `secsLeft` en estado, el primer pintado tras recibir un código nuevo usaba todavía el 0 del
+	// estado anterior y la línea salía un frame en rojo de "caduca ya" antes de corregirse.
+	const [ahora, setAhora] = useState<number>(() => Date.now());
 
 	useEffect(() => {
-		if (!expiresAtMs) { setSecsLeft(0); return; }
-		const recalc = () => Math.max(0, Math.round((expiresAtMs - Date.now()) / 1000));
-		setSecsLeft(recalc());
-		const id = window.setInterval(() => setSecsLeft(recalc()), 1000);
+		const id = window.setInterval(() => setAhora(Date.now()), 1000);
 		return () => window.clearInterval(id);
-	}, [expiresAtMs]);
+	}, []);
 
-	// Auto-regenerar cuando caduca (y no hay carga en curso). Sin conexión NO se intenta: el
-	// código lo emite el worker, así que reintentar sería un bucle de fallos contra la nube.
+	const secsLeft = expiresAtMs
+		? Math.max(0, Math.round((expiresAtMs - ahora) / 1000))
+		: 0;
+
+	const codigoCaducado = secsLeft <= 0;
+
+	// Un código al entrar, y otro cuando el anterior caduca. El store decide si hace falta
+	// pedirlo de verdad; aquí sólo se le pregunta. Sin conexión NO se intenta: lo emite el
+	// worker, así que insistir sería un bucle de fallos contra la nube.
 	useEffect(() => {
-		if (secsLeft > 0 || !expiresAtMs || loading || !hayNube) return;
-		onRegenerateRef.current();
-	}, [secsLeft, expiresAtMs, loading, hayNube]);
+		if (!hayNube) return;
+		void asegurarCodigo();
+	}, [hayNube, codigoCaducado, asegurarCodigo]);
 
 	const countdownText = useMemo(() => {
 		if (!expiresAtMs || secsLeft <= 0) return "";
@@ -101,31 +74,40 @@ export function VincularHandy({
 		return `${m}:${String(s).padStart(2, "0")}`;
 	}, [secsLeft, expiresAtMs]);
 
-	const [pending, setPending] = useState<PairPendingItem[]>([]);
-	const [pendingErr, setPendingErr] = useState<string | null>(null);
-	const [pendingBusy, setPendingBusy] = useState(false);
+	const onRegenerate = () => void regenerarCodigo();
+	const onShowCode = () => void messageDialog(`Código: ${pairCode}`);
 
-	const [linked, setLinked] = useState<LinkedDevice[]>([]);
-	const [linkedErr, setLinkedErr] = useState<string | null>(null);
-	const [revokingId, setRevokingId] = useState<string | null>(null);
+	const pendientes = usePairPendientes();
+	const vinculados = useDispositivosVinculados();
+	const aprobar = useAprobarHandy();
+	const revocar = useRevocarHandy();
 
-	async function refreshLinked() {
-		try {
-			setLinkedErr(null);
-			const r = (await cloudPost("tpv", "/v1/device/list", {})) as any;
-			const items = (r.items || []) as LinkedDevice[];
-			const withFp = await Promise.all(
-				items.map(async (it) => ({
-					...it,
-					fingerprint: it.devicePubKeyB64
-						? await deviceFingerprint(it.devicePubKeyB64)
-						: "",
-				})),
-			);
-			setLinked(withFp);
-		} catch (e: any) {
-			setLinkedErr(String(e?.message || e));
-		}
+	const pending = pendientes.data ?? [];
+	const linked = vinculados.data ?? [];
+
+	// El cartel rojo sale cuando la consulta está EN error (React Query ya ha reintentado): un
+	// tropiezo suelto no debe pintar un error que se va solo, porque enseña a ignorarlos. Lo que
+	// sí se enseña siempre es el fallo de una acción del usuario —aprobar o desvincular—, que
+	// pulsó él y necesita saber si salió.
+	const pendingErr = pendientes.isError
+		? toAppError(pendientes.error).message
+		: aprobar.isError
+			? toAppError(aprobar.error).message
+			: null;
+
+	const linkedErr = vinculados.isError
+		? toAppError(vinculados.error).message
+		: revocar.isError
+			? toAppError(revocar.error).message
+			: null;
+
+	const pendingBusy = aprobar.isPending;
+	const revokingId = revocar.isPending ? revocar.variables : null;
+
+	function approve(code: string) {
+		// `mutate` (no `mutateAsync`) porque aquí nadie espera el resultado: el fallo queda en
+		// `aprobar.error` y de ahí sale el cartel.
+		aprobar.mutate(code);
 	}
 
 	async function revoke(deviceId: string) {
@@ -136,63 +118,8 @@ export function VincularHandy({
 			))
 		)
 			return;
-		setRevokingId(deviceId);
-		try {
-			await cloudPost("tpv", "/v1/device/revoke", { deviceId });
-			await refreshLinked();
-		} catch (e: any) {
-			setLinkedErr(String(e?.message || e));
-		} finally {
-			setRevokingId(null);
-		}
-	}
 
-	async function refreshPending() {
-		try {
-			setPendingErr(null);
-			const r = (await cloudPost("tpv", "/v1/pair/pending", {})) as any;
-			const items = (r.items || []) as PairPendingItem[];
-
-			// Resolvemos la huella de cada dispositivo para que el operador pueda
-			// compararla con la que muestra el Handy antes de aprobar.
-			const withFp = await Promise.all(
-				items.map(async (it) => ({
-					...it,
-					fingerprint: it.claimedDevicePubKeyB64
-						? await deviceFingerprint(it.claimedDevicePubKeyB64)
-						: "",
-				})),
-			);
-
-			setPending(withFp);
-		} catch (e: any) {
-			setPendingErr(String(e?.message || e));
-		}
-	}
-
-	useEffect(() => {
-		refreshPending();
-		refreshLinked();
-		const id = window.setInterval(() => {
-			refreshPending();
-			refreshLinked();
-		}, 5000);
-		return () => window.clearInterval(id);
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
-
-	async function approve(code: string) {
-		setPendingBusy(true);
-
-		try {
-			await cloudPost("tpv", "/v1/pair/approve", { pairCode: code });
-			await refreshPending();
-			await refreshLinked();
-		} catch (e: any) {
-			setPendingErr(String(e?.message || e));
-		} finally {
-			setPendingBusy(false);
-		}
+		revocar.mutate(deviceId);
 	}
 
 	return (
@@ -510,7 +437,7 @@ export function VincularHandy({
 										darkMode ? "text-fg-muted" : "text-fg-muted",
 									)}
 								>
-									Se actualiza automáticamente cada 5 segundos.
+									Las solicitudes aparecen solas en cuanto el Handy las envía.
 								</div>
 							</div>
 						</div>

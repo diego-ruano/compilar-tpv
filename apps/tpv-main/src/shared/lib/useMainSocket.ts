@@ -664,6 +664,15 @@ export function useMainSocket() {
 					return;
 				}
 
+				// Un Handy acaba de pedir el emparejamiento. El aviso viene vacío a propósito
+				// (ver `/internal/pair-request` en el DO): sólo dice "vuelve a mirar", y quien
+				// trae la solicitud —con la huella que hay que verificar— es el REST firmado que
+				// hay detrás de esta query. Sustituye al sondeo cada 5 s del panel.
+				if (msg.type === "pair_request") {
+					queryClient.invalidateQueries({ queryKey: ["pairing"] });
+					return;
+				}
+
 				if (msg.type === "challenge") {
 					try {
 						const ts = Date.now();

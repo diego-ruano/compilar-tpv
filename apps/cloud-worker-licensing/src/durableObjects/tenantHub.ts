@@ -1179,6 +1179,27 @@ export class TenantHub {
 		}
 	}
 
+	/**
+	 * Manda un mensaje solo a los sockets autenticados con un rol concreto.
+	 *
+	 * El rol sale del attachment (que lo fijó la BD central al autenticar, no una cabecera del
+	 * cliente), así que esto NO es cosmética: un aviso dirigido a la Main no puede acabar en las
+	 * Handy del local.
+	 */
+	private broadcastRol(rol: Role, obj: any) {
+		const msg = JSON.stringify(obj);
+
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (!a || !a.authed) continue;
+			if (a.role !== rol) continue;
+
+			try {
+				ws.send(msg);
+			} catch { }
+		}
+	}
+
 	private broadcastAuthed(obj: any, exceptDeviceId?: string) {
 		const msg = JSON.stringify(obj);
 
@@ -1343,6 +1364,32 @@ export class TenantHub {
 					if (a) this.sessionGone(ws, a);
 				}
 			}
+
+			return new Response("OK", { status: 200 });
+		}
+
+		// Un Handy acaba de reclamar un código de emparejamiento y espera que alguien le abra
+		// la puerta desde la Main. En vez de que el panel de la Main pregunte cada pocos
+		// segundos "¿hay alguien esperando?", se lo empujamos por su WebSocket.
+		//
+		// El aviso va VACÍO a propósito: es un "vuelve a mirar", no el dato. La solicitud —con
+		// su huella y su clave pública, que es justo lo que el operario compara antes de
+		// aprobar— la sigue leyendo la Main por REST firmado. Así este mensaje no puede
+		// convertirse en una vía para colar información en la pantalla de aprobación.
+		if (url.pathname === "/internal/pair-request" && request.method === "POST") {
+			const raw = await request.text();
+
+			try {
+				await verifyInternalWorkerRequest(
+					request,
+					String(this.env.LICENSE_JWT_SECRET || ""),
+					raw,
+				);
+			} catch (e: any) {
+				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
+			}
+
+			this.broadcastRol("tpv", { type: "pair_request" });
 
 			return new Response("OK", { status: 200 });
 		}
