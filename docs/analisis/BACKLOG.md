@@ -6,7 +6,7 @@
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
-| STAT-06 · CLI-05 | 🔵 | Paridad de **lectura** (KPIs y overview de clientes): verificada idéntica a mano el 2026-08-22, pero el harness de contrato compara escrituras y **no cubre consultas**. Falta el harness hermano de lectura (mismo seed → mismas filas). | [estadisticas.md](dominios/estadisticas.md) · [clientes.md](dominios/clientes.md) |
+| CLI-05 | 🔵 | Paridad de **lectura** del overview de clientes: verificada idéntica a mano el 2026-08-22, pero el harness de contrato compara escrituras y **no cubre consultas**. Falta el harness hermano de lectura (mismo seed → mismas filas). La equivalente de estadísticas (STAT-06) se retiró como hallazgo: los datos convergen y los agregados van detrás. | [clientes.md](dominios/clientes.md) |
 | LOGIN-04 | 🔵 | **PBKDF2 a 600k (OWASP): BLOQUEADO por el runtime, no por el plan.** ⚠️ Corregido 2026-08-09: el tope de 100k **no** viene del plan Free sino de `crypto.subtle` de Cloudflare Workers, que **rechaza** PBKDF2 con más de 100.000 iteraciones (ver la nota en `crates/tpv-domain/src/login.rs:11-15`). Como el worker **verifica** el hash en cada login/fichaje de Handy, 100k es el techo común de ambos runtimes; tener el plan de pago **no lo desbloquea**. Además, con un PIN de 4 dígitos (10⁴) pasar de 100k a 600k solo multiplica por 6 el coste del crackeo offline: irrelevante frente al tamaño del espacio de claves. **Lo que sí movería la aguja** (por orden): un **pepper** fuera de la BD (hace inútil el hash replicado), ampliar el espacio de PIN, o dejar de replicar `Password_Hash` (descartado: la Handy necesita que el worker verifique). El anti-brute-force online ya está resuelto por el lockout escalado de LOGIN-01. **Decisión (2026-08-09): aplazado a cambios futuros.** Riesgo bajo: para explotarlo hay que tener antes acceso de lectura a la BD del tenant en Turso, que es un escenario raro. Se retoma si algún día hay volumen de clientes que lo justifique. | [login.md](dominios/login.md) |
 | INFRA-01 | 🟡 | **No hay entorno de staging: se prueba contra producción.** Hoy existe un único worker (`tpv-api`) con una sola BD de control y los binarios apuntan a él por constante. No hay dónde validar un cambio de worker, de esquema o de licencias antes de que lo vea un cliente real. Ver §[Entorno de staging](#entorno-de-staging-infra-01--pendiente-completo). **Aplazado a cuando el SaaS esté más asentado** (decisión 2026-08-09): es un montaje completo, no un ajuste. | §Entorno de staging |
 | FABLE-E | 🔵 | **Nonce anti-repetición en el device-proof.** La firma ya cubre el cuerpo (hecho el 2026-08-15), pero no lleva número de serie: dentro de la ventana de 2 min una petición firmada podría **reproducirse tal cual**. **Decisión: aplazado.** Para reproducirla hay que haber capturado el tráfico (va por TLS) y las escrituras son idempotentes por `Op_Id`, así que repetir una no duplica nada. **Lo que hace falta cuando se retome:** un almacén de nonces vistos, compartido — los isolates del worker no comparten memoria, así que un `Set` en RAM no vale. Opciones: **KV** (barato, pero eventualmente consistente: un replay en otro colo podría no ver el nonce todavía → mal encaje), **Durable Object** (consistente de verdad, ya existe `TenantHub`, pero mete un salto por petición) o una **tabla en Turso** con TTL (un INSERT por petición). Yo iría al DO si algún día pesa. | [auditoria-fable.md](../../auditoria-fable.md) |
@@ -14,9 +14,9 @@
 
 **Nota (actualizada 2026-08-22):** el harness de contrato **ya está** y cerró los `-parity` de
 **escritura** (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06). Lo que queda de esa
-familia queda la **paridad de lectura** (STAT-06, CLI-05), que pide un harness hermano que compare
-filas devueltas. Lo excluido con motivo se revisó a mano el 22-23/08 y solo escondía un fallo:
-**TRAB-08**, en la ficha del dominio. Ver
+familia queda la **paridad de lectura** (CLI-05), que pide un harness hermano que compare filas
+devueltas. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo, **TRAB-08**, ya
+corregido. Ver
 [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
 ---
@@ -26,8 +26,8 @@ filas devueltas. Lo excluido con motivo se revisó a mano el 22-23/08 y solo esc
 > **Problema (transversal):** la lógica de construir las **sentencias replicables** vive dos veces —
 > Rust (Main) y TS (worker)— y tiene que ser **idéntica en comportamiento** para que la replicación
 > sea consistente, pero se desincroniza a mano. Las **escrituras** ya las sujeta el harness (punto 1);
-> lo que sigue expuesto es la paridad de **lectura** (STAT-06, CLI-05); lo excluido se revisó a mano
-> el 22-23/08 y solo escondia un fallo, TRAB-08.
+> lo que sigue expuesto es la paridad de **lectura** (CLI-05); lo excluido se revisó a mano el
+> 22-23/08 y escondía un fallo, TRAB-08, ya corregido.
 > Opciones, de menos a más ambiciosas:
 
 1. **Tests de contrato (golden por EFECTO) — barato, primer paso. ✅ HECHO (escrituras).** Para cada comando,
@@ -48,7 +48,7 @@ filas devueltas. Lo excluido con motivo se revisó a mano el 22-23/08 y solo esc
    >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
    >   (`apps/cloud-worker-licensing/test/contract.test.ts`, corre en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
-   > - **Cubierto:** 62 casos sobre 59 comandos, sin ninguno pendiente (venta rápida, mesas
+   > - **Cubierto:** 63 casos sobre 60 comandos, sin ninguno pendiente (venta rápida, mesas
    >   —incluido `save_layout`—, cuentas, inventario, clientes, tareas, proveedores, reservas,
    >   configuración, notificaciones y parte de login/horarios). Añadir un dominio = un brazo de
    >   despacho en cada lado + sus fixtures.
@@ -152,7 +152,7 @@ probar la **app** completa contra staging.
 
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
-| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Las **escrituras** ya las sujeta el harness de contrato (62 casos verdes en CI). Queda: la paridad de **lectura** (STAT-06, CLI-05), lo que sigue **excluido con motivo** (`complete_initial_setup`, ficha con PII, `copiar_semana` — donde vive TRAB-08) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Las **escrituras** ya las sujeta el harness de contrato (63 casos verdes en CI) más el guard de SQL replicable determinista. Queda: la paridad de **lectura** (CLI-05), lo que sigue **excluido con motivo** (`complete_initial_setup`, ficha con PII) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
 
 ---
 

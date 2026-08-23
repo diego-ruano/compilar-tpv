@@ -17,36 +17,18 @@ La lógica de jornada laboral está **repartida** entre `login.rs`, `stats.rs` y
 > y esas columnas se rellenan desde la Main: es una asimetría diseñada, no un fallo de replicación.
 > `set_predeterminado_desde_semana` **también está bien**: genera el UUID en JS y lo pasa como
 > argumento, así que la fila que se replica lleva el ID ya resuelto. El **fichaje** quedó cubierto
-> por el harness. De todo aquel bloque solo salió mal `copiar_semana` → **TRAB-08**.
+> por el harness. De todo aquel bloque solo salió mal `copiar_semana`, y ya está corregido: el
+> comando construye un INSERT por fila con el UUID resuelto **antes** de escribir, como hacía Rust.
+> Con eso `horarios.copiar_semana` sale de las exclusiones y tiene su caso de contrato.
+>
+> **La lección, que vive en el harness:** el snapshot compara el efecto, y un `randomblob()` dentro
+> de la sentencia deja un efecto **válido en cada lado por separado** — IDs distintos, pero no
+> vacíos ni repetidos. O sea que el caso de contrato, por sí solo, no lo habría cazado. Lo que lo
+> caza es el guard que mira la **sentencia replicada** y falla si lleva SQL no determinista
+> (`SQL_NO_DETERMINISTA` en `contract.test.ts`), porque lo que viaja a la Main es el texto.
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| TRAB-08 | 🟠 | **`copiar semana` desde una Handy** genera los `ID_Asignacion` con `randomblob` **dentro** de la sentencia replicada → la nube y la Main acaban con IDs distintos para las mismas filas | `trabajadores.commands.ts:307` |
+Ninguno.
 
-### TRAB-08 🟠 Copiar semana desde la Handy deja IDs distintos en cada lado
-
-- **Ubicación:** `apps/cloud-worker-licensing/src/domains/trabajadores/trabajadores.commands.ts`
-  (`copySemana`).
-- **Fallo:** el comando inserta con `INSERT INTO Asignacion_Turnos (...) SELECT
-  lower(hex(randomblob(16))), ...`. Ese `randomblob` va **dentro del SQL que se replica**: el DO
-  resuelve a literal los `datetime('now')` y los `$ref` de los pasos `value`, pero **no** las
-  funciones aleatorias. La Main recibe el texto y lo vuelve a ejecutar, así que genera **otros**
-  ID_Asignacion distintos de los que quedaron en Turso. El propio motor asume lo contrario
-  ([tenantHub.ts:993](../../../apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts#L993):
-  *"los IDs son UUID de JS"*).
-- **Rust ya lo evitaba, y lo dice:** `copy_semana` en
-  [trabajadores.rs:802](../../../crates/tpv-infra-sqlite/src/trabajadores.rs#L802) lee las filas
-  origen y las inserta una a una precisamente porque *"un INSERT…SELECT no puede generar ids
-  deterministas que sincronicen"*. Copiar semana **desde la Main es correcto**; el fallo es solo del
-  camino de la Handy.
-- **Escenario:** copiar una semana desde una Handy. Los turnos aparecen bien en los dos sitios (los
-  datos son iguales), pero con clave distinta. A partir de ahí, editar o borrar uno de esos turnos
-  —desde cualquiera de los dos lados— viaja con un ID que en el otro no existe: afecta a 0 filas y
-  el cambio se pierde en silencio. El cuadrante deja de coincidir y no converge solo.
-- **Arreglo:** el patrón de siempre (CLAUDE.md §9): leer las filas origen y emitir un INSERT por
-  fila con el UUID generado en JS, como hace Rust. Con eso el caso de contrato deja de ser
-  incomparable y `horarios.copiar_semana` puede salir de las exclusiones de `cobertura.json`.
-- **Estado:** detectado el 2026-08-22 al verificar TRAB-06; pendiente de arreglo.
 

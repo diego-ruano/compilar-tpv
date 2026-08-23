@@ -8,22 +8,18 @@
 
 ## Valoración general
 
+> **Paridad Main↔Handy de los KPI: retirada como hallazgo (2026-08-23, decisión del responsable).**
+> Los 7 KPI están implementados dos veces (`stats.rs` y `stats.queries.ts`) y el harness de contrato
+> no los cubre, porque compara el efecto de las **escrituras** y esto es solo lectura. Se asume: los
+> **datos** de los que salen sí convergen —de eso se encargan los casos de contrato de escritura—,
+> así que los agregados van detrás. Un desajuste aquí sería de presentación (un total que se calcula
+> distinto), no de datos, y se vería al comparar pantallas.
+
 **Acierto:** el manejo de **zona horaria** es correcto — compara `Fecha_Hora` (local almacenado)
 contra límites `datetime('now','localtime',…)` **sin re-convertir**. Este módulo sirve de patrón.
 
 ## Hallazgos abiertos
 
-| ID | Sev | Título | Ubicación |
-|----|-----|--------|-----------|
-| STAT-06 | 🔵 | Doble implementación Rust/worker (los KPIs deben coincidir Main↔Handy) | `stats.rs` ↔ `stats.*.ts` |
+Ninguno.
 
-### STAT-06 🔵 Doble implementación
-Los 7 KPI (`mesas`, `list_categorias`, `productos`, `reservas`, `trabajadores`, `clientes`,
-`proveedores`) están implementados dos veces, en `stats.rs` y en `stats.queries.ts`, y deben dar el
-mismo número; una divergencia se ve como "la Handy me da otro total".
 
-**Ojo con lo que dice el harness:** el de contrato compara el efecto de las **escrituras**, y stats
-es **solo lectura** — por eso `tests/contract/README.md` lo lista entre los "no cubiertos: no hay
-nada que contrastar". Es decir, **STAT-06 no lo cierra el harness actual**: hace falta el harness
-de **paridad de lectura** (mismo seed → mismas filas devueltas por cada lado), que cerraría también
-CLI-05. Mientras tanto la paridad se mantiene a mano y nada la vigila.

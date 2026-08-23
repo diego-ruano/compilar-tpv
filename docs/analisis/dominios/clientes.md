@@ -25,5 +25,7 @@ DTO resultante es el mismo.
 
 **Por qué sigue abierto:** el harness de contrato compara el **efecto de una escritura**, así que
 **no cubre lecturas**. Cerrarlo pide un harness hermano que, con el mismo estado sembrado, compare
-las **filas que devuelve la consulta** en los dos lados. Es la misma pieza que pide STAT-06, y con
-ella se cerrarían los dos.
+las **filas que devuelve la consulta** en los dos lados. (El caso equivalente de estadísticas se
+retiró como hallazgo: los datos de los que salen los KPI convergen, así que los agregados van
+detrás. Aquí se mantiene porque el overview además ordena y recorta a 10, y un desempate distinto
+cambiaría *qué clientes* salen en el ranking, no solo el número.)
