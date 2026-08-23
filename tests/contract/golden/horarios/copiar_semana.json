@@ -1,0 +1,70 @@
+{
+  "Asignacion_Turnos": [
+    {
+      "Area": "Sala",
+      "Fecha": "2026-03-02",
+      "Hora_Fin": "17:00",
+      "Hora_Inicio": "09:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000104",
+      "Notas": "Turno largo",
+      "Tiene_Id": 1
+    },
+    {
+      "Area": "Barra",
+      "Fecha": "2026-03-04",
+      "Hora_Fin": null,
+      "Hora_Inicio": "20:00",
+      "ID_Trabajador": "trab-2",
+      "ID_Turno": "00000000-0000-7000-8000-000000000105",
+      "Notas": null,
+      "Tiene_Id": 1
+    },
+    {
+      "Area": "Cocina",
+      "Fecha": "2026-03-08",
+      "Hora_Fin": "14:00",
+      "Hora_Inicio": "10:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000103",
+      "Notas": "Domingo",
+      "Tiene_Id": 1
+    },
+    {
+      "Area": "Sala",
+      "Fecha": "2026-03-09",
+      "Hora_Fin": "17:00",
+      "Hora_Inicio": "09:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000104",
+      "Notas": "Turno largo",
+      "Tiene_Id": 1
+    },
+    {
+      "Area": "Barra",
+      "Fecha": "2026-03-11",
+      "Hora_Fin": null,
+      "Hora_Inicio": "20:00",
+      "ID_Trabajador": "trab-2",
+      "ID_Turno": "00000000-0000-7000-8000-000000000105",
+      "Notas": null,
+      "Tiene_Id": 1
+    },
+    {
+      "Area": "Cocina",
+      "Fecha": "2026-03-15",
+      "Hora_Fin": "14:00",
+      "Hora_Inicio": "10:00",
+      "ID_Trabajador": "trab-1",
+      "ID_Turno": "00000000-0000-7000-8000-000000000103",
+      "Notas": "Domingo",
+      "Tiene_Id": 1
+    }
+  ],
+  "Ids_Unicos": [
+    {
+      "Filas": 6,
+      "Ids_Distintos": 6
+    }
+  ]
+}

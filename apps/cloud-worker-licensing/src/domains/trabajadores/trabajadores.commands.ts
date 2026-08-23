@@ -1,6 +1,7 @@
 // src/domains/trabajadores/trabajadores.commands.ts
 
 import type { ApplyCommand } from "../../lib/hub";
+import type { FilaSemanaOrigen } from "./trabajadores.queries";
 import type { PredeterminadoItem } from "./trabajadores.queries";
 import type {
 	AsignacionCreateInput,
@@ -276,7 +277,17 @@ export function deleteAsignacion(idAsignacion: string): BuiltCommand {
 	};
 }
 
-export function copySemana(input: CopySemanaInput): BuiltCommand {
+// TRAB-08: la semana se copia fila a fila, con el UUID generado aquí y pasado como argumento.
+// Antes era un `INSERT ... SELECT lower(hex(randomblob(16)))`, y eso es exactamente lo que no se
+// puede hacer: lo que viaja a la Main es el TEXTO de la sentencia (el DO solo resuelve a literal
+// las marcas de hora canónicas y los `$ref`), así que la Main volvía a ejecutar el randomblob y se
+// quedaba con otros ID_Asignacion. Mismas filas, claves distintas, y a partir de ahí editar o borrar
+// un turno solo afectaba a una de las dos copias. El repo de Rust ya lo hacía fila a fila por esto
+// mismo (ver el comentario en tpv-infra-sqlite/src/trabajadores.rs::copy_semana).
+export function copySemana(
+	input: CopySemanaInput,
+	filas: FilaSemanaOrigen[],
+): BuiltCommand {
 	const steps: any[] = [];
 	if (input.overwrite) {
 		steps.push({
@@ -289,36 +300,42 @@ export function copySemana(input: CopySemanaInput): BuiltCommand {
 			args: [input.to_monday],
 		});
 	}
+
+	const shift = diasEntre(input.from_monday, input.to_monday);
+	let insertadas = 0;
+
+	for (const f of filas) {
+		const destino = sumaDias(f.fecha, shift);
+		// Espejo del `continue` de Rust: una fecha que no se puede leer se salta, no revienta.
+		if (destino === null) continue;
+
+		steps.push({
+			kind: "execute",
+			sql: `
+				INSERT INTO Asignacion_Turnos (
+					ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas
+				)
+				VALUES (?1, ?2, date(?3), ?4, ?5, ?6, ?7, ?8);
+			`,
+			args: [
+				crypto.randomUUID(),
+				f.id_trabajador,
+				destino,
+				f.id_turno,
+				f.area ?? "Sala",
+				f.hora_inicio,
+				f.hora_fin,
+				f.notas,
+			],
+		});
+		insertadas++;
+	}
+
 	steps.push({
-		kind: "execute",
+		kind: "value",
 		saveAs: "inserted",
-		sql: `
-			INSERT INTO Asignacion_Turnos (
-				ID_Asignacion,
-				ID_Trabajador,
-				Fecha,
-				ID_Turno,
-				Area,
-				Hora_Inicio,
-				Hora_Fin,
-				Notas
-			)
-			SELECT
-				lower(hex(randomblob(16))),
-				a.ID_Trabajador,
-				date(a.Fecha, printf('%+d day',
-					CAST((julianday(date(?2)) - julianday(date(?1))) AS INTEGER)
-				)),
-				a.ID_Turno,
-				a.Area,
-				a.Hora_Inicio,
-				a.Hora_Fin,
-				a.Notas
-			FROM Asignacion_Turnos a
-			WHERE a.Fecha >= date(?1)
-				AND a.Fecha < date(?1, '+7 day');
-		`,
-		args: [input.from_monday, input.to_monday],
+		sql: "SELECT ?1;",
+		args: [insertadas],
 	});
 
 	return {
@@ -329,6 +346,28 @@ export function copySemana(input: CopySemanaInput): BuiltCommand {
 		},
 		cloudPayload: input,
 	};
+}
+
+/** Días de diferencia entre dos fechas YYYY-MM-DD (UTC, para no arrastrar husos). */
+function diasEntre(desde: string, hasta: string): number {
+	const a = fechaUtc(desde);
+	const b = fechaUtc(hasta);
+	if (a === null || b === null) return 0;
+	return Math.round((b - a) / 86400000);
+}
+
+/** Suma días a una fecha YYYY-MM-DD y devuelve YYYY-MM-DD, o null si la fecha no es legible. */
+function sumaDias(fecha: string, dias: number): string | null {
+	const base = fechaUtc(fecha);
+	if (base === null) return null;
+	return new Date(base + dias * 86400000).toISOString().slice(0, 10);
+}
+
+function fechaUtc(s: unknown): number | null {
+	const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(s ?? "").trim());
+	if (!m) return null;
+	const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+	return Number.isFinite(t) ? t : null;
 }
 
 export function setPredeterminadoDesdeSemana(

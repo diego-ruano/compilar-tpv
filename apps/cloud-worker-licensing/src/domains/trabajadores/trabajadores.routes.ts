@@ -142,7 +142,12 @@ trabajadoresRoutes.delete("/horarios/asignaciones/:id", async (c) => {
 trabajadoresRoutes.post("/horarios/copy-semana", async (c) => {
 	const p = await parseBody(c, S.copySemanaSchema);
 	if (!p.ok) return p.res;
-	const data = await apply(c, cmd.copySemana(p.data));
+	// TRAB-08: las filas origen se leen antes de construir el comando, para que cada copia lleve su
+	// ID ya resuelto en la sentencia que se replica.
+	const filas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		q.filasSemana(db, p.data.from_monday),
+	);
+	const data = await apply(c, cmd.copySemana(p.data, filas));
 	return c.json({ ok: true, inserted: data });
 });
 

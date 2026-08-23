@@ -366,6 +366,7 @@ casos_de_contrato! {
     login__set_turno_partido,
     login__punch_entrada,
     login__punch_salida,
+    horarios__copiar_semana,
     horarios__create_asignacion,
     horarios__update_asignacion,
     horarios__delete_asignacion,
@@ -864,6 +865,16 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             )
             .await
             .expect("set turno partido");
+        }
+        "horarios.copiar_semana" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            repo.copy_semana(
+                s(&e["from_monday"]),
+                s(&e["to_monday"]),
+                e["overwrite"].as_bool().unwrap_or(false),
+            )
+            .await
+            .expect("copiar semana");
         }
         "horarios.create_asignacion" => {
             let repo = SqliteTrabajadoresRepository::new(db.clone());

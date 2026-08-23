@@ -4,7 +4,6 @@
     "login.completeInitialSetup": "El lado Rust verifica el PIN contra el hash guardado (PBKDF2), así que el fixture tendría que sembrar un hash válido precomputado; además escribe Password_Hash con salt aleatorio (distinto por diseño en cada lado).",
     "trabajadores.createTrabajador": "Escribe PII cifrada (DNI/IBAN/nº SS) que el worker ni siquiera guarda, y Password_Hash con salt aleatorio. Solo las columnas no sensibles serían comparables y haría falta cablear el field cipher: cubrible a medias y de bajo valor.",
     "trabajadores.updateTrabajador": "Mismo motivo que createTrabajador (PII cifrada + hash con salt).",
-    "trabajadores.copySemana": "Genera los ID de las asignaciones nuevas de forma distinta en cada lado (Rust new_id() vs randomblob/randomUUID); solo el resto de columnas sería comparable.",
     "trabajadores.setPredeterminadoDesdeSemana": "Mismo motivo que copySemana: los ID nuevos son asimétricos."
   }
 }

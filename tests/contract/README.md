@@ -108,7 +108,7 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**62 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
+**63 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
 tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
@@ -133,7 +133,7 @@ tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). P
   `crear_producto`. **Reservas** (RES-07/RES-05): `guardar` (cliente nuevo + merge de existente), `eliminar`.
   **Configuración** (CONF-06): `patch_business`, `patch_contact`, `patch_ticket`.
 - **Login/Horarios** (parcial): `login.punch` (**entrada y salida**, TRAB-07), `login.set_turno_partido`,
-  `horarios.create/update/delete_asignacion`.
+  `horarios.create/update/delete_asignacion` y `horarios.copiar_semana` (TRAB-08).
 
 ## Qué falta por cubrir (y quién lo vigila)
 
@@ -150,10 +150,24 @@ Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y 
 el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
 push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **59/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
+Hoy dice **60/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
 que se ejecutó encontró 10 comandos sin caso que no estaban documentados en ninguna parte —todo
 `cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y dos de ellos escondían divergencias
 reales. Por eso existe.
+
+## El guard de SQL replicable determinista (TRAB-08)
+
+Comparar el efecto **no basta** cuando el fallo está en la propia sentencia. `copiar semana`
+generaba el ID con `lower(hex(randomblob(16)))` **dentro** del INSERT: cada lado aplicaba eso por su
+cuenta y obtenía filas correctas —IDs válidos, distintos entre sí—, así que el snapshot daba verde.
+Pero lo que viaja a la Main es el **texto** de la sentencia (el DO solo resuelve a literal
+`datetime('now')` y los `$ref`), de modo que la Main volvía a evaluar el `randomblob` y se quedaba
+con **otras** claves para las mismas filas.
+
+Por eso `aplicar()` comprueba, en cada caso, que ninguna sentencia **replicada** lleve SQL no
+determinista (`SQL_NO_DETERMINISTA`). Es una comprobación sobre el texto, no sobre el efecto, y
+protege a todos los comandos del harness a la vez —no solo al que motivó el guard—. Tiene su propio
+test, para que relajarlo salga rojo antes de que el fallo pueda volver.
 
 ## No cubiertos (por qué)
 
@@ -180,5 +194,7 @@ reales. Por eso existe.
 - **`trabajadores.crear/actualizar`**: escriben **PII cifrada** (DNI/IBAN/nº SS — el worker ni la
   escribe) y `Password_Hash` (salt aleatorio → distinto por diseño); solo las columnas no sensibles
   serían comparables, y hace falta cablear el *field cipher*. Cubrible parcialmente, bajo valor.
-- **`horarios.copiar_semana`, `set_predeterminado`**: generan los IDs nuevos de forma **distinta** en
-  cada lado (Rust `new_id` vs `randomblob`/`randomUUID`), así que solo el resto de columnas es comparable.
+- **`horarios.set_predeterminado`**: genera los IDs nuevos de forma distinta en cada lado (Rust
+  `new_id` vs `randomUUID`), así que solo el resto de columnas sería comparable. (`copiar_semana`
+  **sí** está cubierto desde el 2026-08-23: su caso excluye el ID del snapshot pero comprueba que no
+  viene vacío ni repetido.)

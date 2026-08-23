@@ -22,6 +22,43 @@ function rows(rs: any): any[] {
 	});
 }
 
+// TRAB-08: filas de la semana origen para copiarla. Se leen aquí, igual que hace el repo de Rust,
+// porque el ID de cada copia NO puede salir de la propia sentencia: lo que se replica es el texto
+// SQL, así que un `randomblob()` dentro del INSERT se evalúa otra vez en la Main y deja claves
+// distintas a cada lado. El ID tiene que ser un literal antes de escribir.
+export type FilaSemanaOrigen = {
+	id_trabajador: string;
+	fecha: string;
+	id_turno: string;
+	area: string;
+	hora_inicio: string | null;
+	hora_fin: string | null;
+	notas: string | null;
+};
+
+export async function filasSemana(
+	db: Client,
+	fromMonday: string,
+): Promise<FilaSemanaOrigen[]> {
+	const rs = await db.execute({
+		sql: `
+			SELECT
+				ID_Trabajador AS id_trabajador,
+				Fecha AS fecha,
+				ID_Turno AS id_turno,
+				Area AS area,
+				Hora_Inicio AS hora_inicio,
+				Hora_Fin AS hora_fin,
+				Notas AS notas
+			FROM Asignacion_Turnos
+			WHERE Fecha >= date(?1)
+				AND Fecha < date(?1, '+7 day');
+		`,
+		args: [fromMonday],
+	});
+	return rows(rs) as FilaSemanaOrigen[];
+}
+
 // TRAB-04: ¿ya existe una asignación del mismo turno para ese trabajador ese día? Espejo de la
 // comprobación del repo local (el área puede diferir; el duplicado es trabajador+fecha+turno).
 export async function existeAsignacionTurno(

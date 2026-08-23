@@ -36,10 +36,12 @@ import {
 	idsNoLeidas,
 } from "../src/domains/notificaciones/notificaciones.queries";
 import {
+	copySemana,
 	createAsignacion,
 	deleteAsignacion,
 	updateAsignacion,
 } from "../src/domains/trabajadores/trabajadores.commands";
+import { filasSemana } from "../src/domains/trabajadores/trabajadores.queries";
 import {
 	patchBusiness,
 	patchContact,
@@ -212,6 +214,8 @@ import casoNotifBatch from "../../../tests/contract/casos/notificaciones/marcar_
 import goldenNotifBatch from "../../../tests/contract/golden/notificaciones/marcar_leidas_batch.json";
 import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
+import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
+import goldenHorariosCopiar from "../../../tests/contract/golden/horarios/copiar_semana.json";
 import casoLoginPunchEntrada from "../../../tests/contract/casos/login/punch_entrada.json";
 import goldenLoginPunchEntrada from "../../../tests/contract/golden/login/punch_entrada.json";
 import casoLoginPunchSalida from "../../../tests/contract/casos/login/punch_salida.json";
@@ -282,6 +286,7 @@ const CASOS = [
 	{ nombre: "notificaciones_marcar_leida", caso: casoNotifLeida, golden: goldenNotifLeida },
 	{ nombre: "notificaciones_marcar_leidas_batch", caso: casoNotifBatch, golden: goldenNotifBatch },
 	{ nombre: "notificaciones_resolver_por_clave", caso: casoNotifResolver, golden: goldenNotifResolver },
+	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
 	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
 	{ nombre: "login_set_turno_partido", caso: casoLoginTurno, golden: goldenLoginTurno },
@@ -334,8 +339,20 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
  * antes que sus `Pago_Detalles`— revienta por FK sin el pragma. Sin esto el harness diría que hay
  * divergencia donde solo había un envoltorio distinto.
  */
+// TRAB-08: lo que viaja a la Main es el TEXTO de las sentencias replicadas. Una funcion no
+// determinista dentro (randomblob, random) se evalua OTRA VEZ alli y da otro valor: mismas filas
+// con claves distintas. El snapshot NO lo ve --cada lado genera IDs validos por su cuenta-- asi que
+// hay que mirar la sentencia, no solo su efecto. Los IDs van como argumento, ya resueltos.
+export const SQL_NO_DETERMINISTA = /\brandomblob\s*\(|\brandom\s*\(/i;
+
 function aplicar(hub: any, sql: any, built: any): void {
 	const batch = hub.buildApplyBatch(built.command);
+	for (const st of batch.replicated) {
+		expect(
+			SQL_NO_DETERMINISTA.test(st.sql),
+			`sentencia replicada con SQL no determinista (se re-evaluaria en la Main): ${st.sql}`,
+		).toBe(false);
+	}
 	hub.state.storage.transactionSync(() => {
 		sql.exec("PRAGMA defer_foreign_keys = ON;");
 		for (const st of batch.middle) sql.exec(st.sql, ...(st.args ?? []));
@@ -772,6 +789,13 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			aplicar(hub, sql, setTurnoPartido(caso.entrada as any));
 			return;
 		}
+		case "horarios.copiar_semana": {
+			// Igual que la ruta: primero se leen las filas origen, y con ellas se construye el
+			// comando (cada copia con su ID ya resuelto).
+			const filas = await filasSemana(db, caso.entrada.from_monday);
+			aplicar(hub, sql, copySemana(caso.entrada as any, filas));
+			return;
+		}
 		case "horarios.create_asignacion": {
 			aplicar(hub, sql, createAsignacion(caso.entrada as any));
 			return;
@@ -812,4 +836,32 @@ describe("contrato Main↔worker · efecto == golden", () => {
 			});
 		});
 	}
+});
+
+// El guard de arriba es la parte del harness que mira la SENTENCIA y no su efecto, así que conviene
+// que él mismo tenga una prueba: si alguien lo relaja, esto se pone rojo antes que el bug vuelva.
+describe("guard de SQL replicable determinista (TRAB-08)", () => {
+	it("reconoce el patrón que rompía copiar semana", () => {
+		expect(
+			SQL_NO_DETERMINISTA.test(
+				"INSERT INTO Asignacion_Turnos (...) SELECT lower(hex(randomblob(16))), a.ID_Trabajador FROM Asignacion_Turnos a",
+			),
+		).toBe(true);
+		expect(SQL_NO_DETERMINISTA.test("SELECT random();")).toBe(true);
+	});
+
+	it("no marca el SQL que sí se replica bien", () => {
+		// Los IDs viajan como argumento (?1), y `datetime('now')` lo resuelve el DO a literal antes
+		// de replicar, así que ninguno de los dos es un falso positivo.
+		expect(
+			SQL_NO_DETERMINISTA.test(
+				"INSERT INTO Asignacion_Turnos (ID_Asignacion, Fecha) VALUES (?1, date(?2));",
+			),
+		).toBe(false);
+		expect(
+			SQL_NO_DETERMINISTA.test(
+				"INSERT INTO Fichajes (ID_Fichaje, Hora_Entrada) VALUES (?1, datetime('now','localtime'));",
+			),
+		).toBe(false);
+	});
 });
