@@ -36,9 +36,12 @@ Local-First y React Query con hooks co-locados por feature.
   en CI en los dos lados (62 casos, 0 comandos sin cubrir ni excluir con motivo) y cerró MESA-11,
   VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06 y el **fichaje**. Sigue **sin red** lo que el
   harness no mira: la paridad de **lectura** (STAT-06, CLI-05 — compara escrituras, no consultas) y
-  lo que queda **excluido con motivo** (`complete_initial_setup`, ficha con PII, horarios con IDs
-  asimétricos). Que esa segunda laguna no era teórica lo demostró **TRAB-07**: un `INSERT` sin su
-  clave primaria vivió en el worker hasta que se cubrió el fichaje.
+  lo que queda **excluido con motivo** (`complete_initial_setup`, ficha con PII, `copiar_semana`).
+  Que esa laguna no era teórica lo demostraron **dos bugs reales** que vivían justo ahí: TRAB-07
+  (INSERT sin clave primaria en el fichaje, corregido) y **TRAB-08** (`copiar semana` genera los IDs
+  con `randomblob` dentro de la sentencia replicada, abierto). El resto de aquel bloque se verificó
+  a mano y está bien: el formato del hash de PIN es intercambiable entre Rust y el worker
+  —comprobado en las dos direcciones— y la PII de la ficha es una asimetría diseñada.
 - **Arreglo:** hecho el primer paso (**tests de contrato por efecto**). Siguientes: un harness
   hermano de **paridad de lectura** y cubrir el efecto del fichaje. Opciones más ambiciosas (SQL en fuente compartida,
   WASM, codegen) en [BACKLOG.md §Unificación](../BACKLOG.md#unificación-de-la-doble-implementación-mainworker).

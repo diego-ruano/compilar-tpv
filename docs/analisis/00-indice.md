@@ -4,17 +4,20 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-22).** De los ~136 hallazgos del análisis original **quedan 9 abiertos** (la
-> tabla de abajo es la buena). En la revisión del 2026-08-22, hallazgo por hallazgo contra el código:
-> se cerraron los 7 `-parity` de **escritura** que el harness de contrato ya sujeta (MESA-11, VR-05,
-> INV-07, RES-07, TAR-04, PROV-07, CONF-06), **TAR-05** (papelera de tareas) y **TRAB-07** (un bug
-> real que salió en esa revisión: el fichaje de la Handy insertaba sin `ID_Fichaje` — arreglado y
-> con caso de contrato que lo vigila). Se retiraron por decisión del responsable **MESA-14** (troceo
-> de UI, se hará más adelante), **RES-05** (identidad del cliente al reservar: comportamiento
-> aceptado), **LOGIN-03** (enumeración de usuarios: es el patrón de un kiosco) y **VR-07** (coste del
-> FEFO: medido, ~15 ms en un ticket extremo de 100 líneas). **Un hallazgo corregido se borra de
-> aquí**: la traza del arreglo vive en el código, no en un documento (ver *Trazabilidad* abajo). Si
-> buscas un ID que no aparece, está resuelto.
+> **Estado (2026-08-23).** De los ~136 hallazgos del análisis original **quedan 8 abiertos**, y
+> **solo uno es un bug**: TRAB-08. La revisión del 22-23 de agosto fue hallazgo por hallazgo contra
+> el código, y de ahí salieron los dos únicos fallos reales que quedaban escondidos, los dos en el
+> mismo sitio —el camino de escritura de la Handy que el harness no contrastaba—: **TRAB-07**
+> (fichaje sin `ID_Fichaje`, **corregido** y con caso de contrato) y **TRAB-08** (`copiar semana`
+> genera los IDs dentro del SQL replicado, **abierto**).
+>
+> Se cerraron además: los 7 `-parity` de escritura que el harness ya sujeta (MESA-11, VR-05, INV-07,
+> RES-07, TAR-04, PROV-07, CONF-06), **TAR-05** (papelera de tareas, implementada), **LOGIN-05** (la
+> compatibilidad del hash de PIN entre Rust y worker se verificó en las dos direcciones) y **TRAB-06**
+> (la PII de la ficha es una asimetría diseñada; lo único que estaba mal era `copiar_semana` →
+> TRAB-08). Y se retiraron por decisión del responsable **MESA-14**, **RES-05**, **LOGIN-03** y
+> **VR-07**. **Un hallazgo corregido se borra de aquí**: la traza del arreglo vive en el código, no
+> en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no aparece, está resuelto.
 
 ---
 
@@ -69,11 +72,11 @@
 
 | Módulo | Abiertos | Cuáles |
 |--------|----------|--------|
+| D9 Trabajadores | 1 | **TRAB-08 🟠 — el único bug abierto** |
 | T5 Arquitectura | 1 | ARCH-01 🟠 (lo que queda: las **lecturas** y lo excluido del harness) |
 | D5 Clientes | 1 | CLI-05 🔵 (paridad de **lectura**) |
-| D9 Trabajadores | 1 | TRAB-06 🔵 (ficha con PII + horarios; el fichaje ya está cubierto) |
-| D11 Login | 2 | LOGIN-04 🔵 · LOGIN-05 🔵 (queda `complete_initial_setup`) |
 | D12 Estadísticas | 1 | STAT-06 🔵 (paridad de **lectura**) |
+| D11 Login | 1 | LOGIN-04 🔵 |
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
 | D3 Cuentas | 1 | CUENTA-06 🔵 |
 | D1 Mesas · D2 Venta rápida · D4 Inventario · D6 Reservas · D7 Proveedores · D8 Tareas · D10 Configuración · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
@@ -84,28 +87,22 @@
 (mismo seed → mismas filas) y está en verde en los dos lados: **62 casos** sobre 59 comandos, 5
 excluidos con motivo en [`cobertura.json`](../../tests/contract/cobertura.json) y 0 pendientes;
 `scripts/check-contract-coverage.mjs` avisa en CI —sin romperlo— de todo comando que entre sin caso.
-Eso cerró los `-parity` de escritura (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06) y,
-desde el 2026-08-22, también el **fichaje** (`login__punch_entrada` / `login__punch_salida`, que se
-saltan la verificación del PIN vía `exec_punch` porque autenticar no es parte del contrato de
-replicación).
+Eso cerró los `-parity` de escritura y, desde el 2026-08-22, también el **fichaje**.
 
-Lo que **no** cierra, y por eso sigue abierto:
+Lo que **no** cierra:
 
 - **Paridad de lectura** — CLI-05 (overview de clientes) y STAT-06 (los 7 KPI). El harness no mira
   consultas. Ambos están verificados idénticos a mano, pero nada los vigila; los cierra un harness
   hermano que compare **las filas devueltas** por cada lado con el mismo seed.
-- **Lo que queda excluido con motivo** — `login.complete_initial_setup` (LOGIN-05) y
-  `trabajadores.crear/actualizar` + `horarios.copiar_semana/set_predeterminado` (TRAB-06): escriben
-  hash con salt aleatorio, PII cifrada o IDs generados distinto en cada lado, así que el efecto no
-  es comparable columna a columna sin cablear antes el *field cipher*.
+- **Lo que sigue excluido con motivo** — `login.complete_initial_setup` (salt aleatorio: el golden
+  nunca casaría; la compatibilidad del formato **sí** se verificó a mano, ver
+  [login.md](dominios/login.md)), la ficha de trabajador con PII (asimetría diseñada: el worker no
+  escribe esas columnas) y `horarios.copiar_semana` (**que es justo donde vive TRAB-08**; al
+  arreglarlo, deja de ser incomparable y puede salir de las exclusiones).
 
-**ARCH-01** sigue siendo el paraguas, pero ya solo de esos dos frentes y del refactor de fondo
-(WASM, post-lanzamiento). Ver [tests/contract/README.md](../../tests/contract/README.md) y
-[BACKLOG §Unificación](BACKLOG.md#unificación-de-la-doble-implementación-mainworker).
-
-El resto se agrupa en:
-- **Seguridad de datos:** LOGIN-04 (keyspace del PIN).
-- **Decisiones de producto pendientes, no bugs:** CUENTA-06 (arqueo), LIC-02, LIC-04.
+**La lección del recuento:** de los 11 `-parity` originales, 9 estaban bien y 2 escondían un bug
+real. Los dos bugs vivían en comandos **excluidos o sin caso** del harness. Lo que decide si un
+fallo aparece o no es si alguien contrasta ese comando, no lo bajo que parezca su riesgo.
 
 ## Dónde está el resto
 

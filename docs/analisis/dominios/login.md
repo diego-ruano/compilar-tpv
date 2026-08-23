@@ -23,7 +23,15 @@ antes acceso de lectura a la BD de la nube.
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
 | LOGIN-04 | 🔵 | El hash del PIN es **crackeable offline** si alguien lee la BD del tenant; subir iteraciones no lo arregla | `domain/login.rs:11-16`, `login.crypto.ts` |
-| LOGIN-05 | 🔵 | Doble implementación Rust/worker de login/verify (parity, crítico) | `login.rs` ↔ `login.commands.ts` |
+
+> **Compatibilidad del hash entre Rust y el worker: verificada (2026-08-22).** Los dos escriben
+> exactamente el mismo formato —`$pbkdf2-sha256$i=100000$<sal>$<derivada>`, SHA-256, 100k
+> iteraciones, sal de 16 bytes, clave de 32, base64 estándar— y se comprobó **en las dos
+> direcciones** con hashes reales: el worker verifica un hash escrito por Rust y Rust verifica uno
+> escrito por el worker, y ambos rechazan el PIN incorrecto. Que el texto guardado difiera entre
+> ejecuciones es la **sal aleatoria**, que tiene que ser distinta: sin ella, dos usuarios con el
+> mismo PIN compartirían hash. Por eso `complete_initial_setup` no puede tener un caso de contrato
+> por efecto (el golden nunca casaría) y sigue excluido con motivo en `cobertura.json`.
 
 ### LOGIN-04 🔵 El hash es crackeable offline (y las iteraciones no son la palanca)
 
@@ -59,17 +67,6 @@ antes acceso de lectura a la BD de la nube.
   de seguridad reales.
 - **Ya hecho y aprovechable:** el **rehash-en-login** está cableado (`crates/tpv-infra-sqlite/src/login.rs`),
   así que cualquier cambio de esquema de hash migra solo en el primer login de cada usuario.
-
-### LOGIN-05 🔵 Doble implementación crítica
-Login/verify existe en Rust y en el worker; una divergencia en la verificación sería grave.
-
-**El fichaje ya está cubierto** (2026-08-22, `login__punch_entrada` / `login__punch_salida`): se
-contrasta el **efecto** llamando a `exec_punch`, saltándose la verificación del PIN, que es
-autenticación y no forma parte del contrato de replicación. Lo que queda sin contrastar es
-`login.completeInitialSetup`, excluido con motivo en
-[`cobertura.json`](../../../tests/contract/cobertura.json): escribe `Password_Hash` con salt
-aleatorio, distinto por diseño en cada lado, así que el efecto no es comparable columna a columna.
-La verificación del PIN en sí (PBKDF2, 100k, misma sal) sigue igualada a mano en los dos runtimes.
 
 ---
 
