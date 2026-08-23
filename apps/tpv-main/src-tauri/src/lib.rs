@@ -1874,6 +1874,10 @@ pub fn run() {
             commands::notificaciones::notificaciones_marcar_leida,
             commands::notificaciones::notificaciones_marcar_todas_leidas,
             commands::notificaciones::notificaciones_crear,
+            commands::notificaciones::notificaciones_descartar,
+            commands::notificaciones::notificaciones_papelera,
+            commands::notificaciones::notificaciones_restaurar,
+            commands::notificaciones::notificaciones_eliminar,
             // venta rápida
             commands::venta_rapida::vr_list_categorias_vendibles,
             commands::venta_rapida::vr_list_productos_by_categoria,

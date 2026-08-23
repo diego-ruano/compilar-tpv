@@ -1,14 +1,14 @@
 //! Comandos Tauri finos para **notificaciones**. Solo adaptan entrada/salida e invocan el caso de
 //! uso. Local-First, modo Main (SQLite): las notificaciones se emiten/leen contra la BD local y se
-//! replican por el outbox. En modo Handy aún no hay repositorio HTTP (se añadirá al cablear la
-//! lectura desde la nube).
+//! replican por el outbox. En modo Handy el mismo comando cae en el repositorio HTTP
+//! (`tpv-infra-http`), que habla con `/v1/notificaciones` — las firmas no cambian.
 
 use tauri::State;
 
 use tpv_application::use_cases::notificaciones as uc;
 use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionRow,
-    NotificacionesListArgs, NotificacionesUsuarioArgs,
+    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionIdInput,
+    NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs,
 };
 
 use crate::AppState;
@@ -63,6 +63,50 @@ pub async fn notificaciones_crear(
 ) -> Result<String, AppErrorDto> {
     let notifier = state.notifier().await?;
     uc::crear(notifier.as_ref(), args)
+        .await
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub async fn notificaciones_descartar(
+    state: State<'_, AppState>,
+    args: NotificacionIdInput,
+) -> Result<bool, AppErrorDto> {
+    let repo = state.notificaciones_repo().await?;
+    uc::descartar(repo.as_ref(), args)
+        .await
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub async fn notificaciones_papelera(
+    state: State<'_, AppState>,
+    args: NotificacionesUsuarioArgs,
+) -> Result<Vec<NotificacionRow>, AppErrorDto> {
+    let repo = state.notificaciones_repo().await?;
+    uc::listar_descartadas(repo.as_ref(), args)
+        .await
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub async fn notificaciones_restaurar(
+    state: State<'_, AppState>,
+    args: NotificacionIdInput,
+) -> Result<bool, AppErrorDto> {
+    let repo = state.notificaciones_repo().await?;
+    uc::restaurar(repo.as_ref(), args)
+        .await
+        .map_err(AppErrorDto::from)
+}
+
+#[tauri::command]
+pub async fn notificaciones_eliminar(
+    state: State<'_, AppState>,
+    args: NotificacionIdInput,
+) -> Result<bool, AppErrorDto> {
+    let repo = state.notificaciones_repo().await?;
+    uc::eliminar(repo.as_ref(), args)
         .await
         .map_err(AppErrorDto::from)
 }

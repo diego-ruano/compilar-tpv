@@ -53,6 +53,18 @@ pub struct MarcarLeidaInput {
     pub id_usuario: String,
 }
 
+/// Identifica una notificación para las acciones de la papelera (descartar, restaurar, eliminar).
+///
+/// El estado de la papelera es de la NOTIFICACIÓN, no del usuario que la mira: una notificación es
+/// un aviso del negocio (stock bajo, pedido por aprobar) y borrarla es decir "esto ya está visto",
+/// no "no me lo enseñes a mí". Por eso aquí no viaja el `id_usuario`: lo que sí es por usuario es
+/// la lectura, que tiene su propia tabla.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct NotificacionIdInput {
+    pub id_notificacion: String,
+}
+
 /// Marca como leídas todas las notificaciones visibles de un usuario.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]

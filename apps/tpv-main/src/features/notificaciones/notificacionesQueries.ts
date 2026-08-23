@@ -11,10 +11,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  notificacionesDescartar,
+  notificacionesEliminar,
   notificacionesListar,
   notificacionesMarcarLeida,
   notificacionesMarcarTodasLeidas,
   notificacionesNoLeidas,
+  notificacionesPapelera,
+  notificacionesRestaurar,
 } from "./notificacionesApis";
 
 /** Prefijo de claves de la feature; invalidar esto refresca lista y contador. */
@@ -23,6 +27,7 @@ export const notificacionesKeys = {
   lista: (idUsuario: string, soloNoLeidas: boolean) =>
     ["notificaciones", "lista", idUsuario, soloNoLeidas] as const,
   noLeidas: (idUsuario: string) => ["notificaciones", "noLeidas", idUsuario] as const,
+  papelera: (idUsuario: string) => ["notificaciones", "papelera", idUsuario] as const,
 };
 
 /** Lista de notificaciones del usuario (deshabilitada sin sesión). */
@@ -59,4 +64,41 @@ export function useMarcarTodasLeidas() {
     mutationFn: notificacionesMarcarTodasLeidas,
     onSuccess: () => qc.invalidateQueries({ queryKey: notificacionesKeys.all }),
   });
+}
+
+/** Contenido de la papelera del usuario (sólo se consulta con el modal abierto). */
+export function usePapelera(idUsuario: string | null, activa: boolean) {
+  return useQuery({
+    queryKey: notificacionesKeys.papelera(idUsuario ?? ""),
+    queryFn: () => notificacionesPapelera({ idUsuario: idUsuario as string }),
+    enabled: !!idUsuario && activa,
+  });
+}
+
+/**
+ * Las tres acciones de la papelera invalidan la feature ENTERA, no sólo su lista: descartar quita
+ * la notificación del centro y del contador de no leídas, y restaurar la devuelve. Media
+ * invalidación dejaría el badge diciendo una cosa y la lista otra.
+ */
+function useAccionPapelera<T>(mutationFn: (v: T) => Promise<unknown>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => qc.invalidateQueries({ queryKey: notificacionesKeys.all }),
+  });
+}
+
+/** Manda una notificación a la papelera. */
+export function useDescartar() {
+  return useAccionPapelera(notificacionesDescartar);
+}
+
+/** Devuelve una notificación de la papelera al centro. */
+export function useRestaurar() {
+  return useAccionPapelera(notificacionesRestaurar);
+}
+
+/** Borra una notificación para siempre. */
+export function useEliminar() {
+  return useAccionPapelera(notificacionesEliminar);
 }

@@ -129,3 +129,49 @@ export function resolverPorClave(clave: string): BuiltCommand {
 		cloudPayload: { clave_dedupe: clave },
 	};
 }
+
+/**
+ * Papelera: descartar y restaurar son el MISMO cambio de estado en direcciones opuestas, así que
+ * comparten constructor. Como toda escritura replicable, va por el DO: la Main y las demás Handy
+ * lo reciben por el broadcast y su papelera es la misma que la de aquí.
+ */
+function cambiarEstado(
+	idNotificacion: string,
+	estado: "activa" | "descartada",
+	commandName: string,
+): BuiltCommand {
+	return {
+		commandName,
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `UPDATE Notificaciones SET Estado = ?2 WHERE ID_Notificacion = ?1;`,
+				args: [idNotificacion, estado],
+			},
+		},
+		cloudPayload: { id_notificacion: idNotificacion, estado },
+	};
+}
+
+export function descartar(idNotificacion: string): BuiltCommand {
+	return cambiarEstado(idNotificacion, "descartada", "notificaciones_descartar");
+}
+
+export function restaurar(idNotificacion: string): BuiltCommand {
+	return cambiarEstado(idNotificacion, "activa", "notificaciones_restaurar");
+}
+
+/** Borrado definitivo. Los recibos de lectura caen por ON DELETE CASCADE en cada motor. */
+export function eliminar(idNotificacion: string): BuiltCommand {
+	return {
+		commandName: "notificaciones_eliminar",
+		command: {
+			type: "tenantDb.exec",
+			payload: {
+				sql: `DELETE FROM Notificaciones WHERE ID_Notificacion = ?1;`,
+				args: [idNotificacion],
+			},
+		},
+		cloudPayload: { id_notificacion: idNotificacion },
+	};
+}

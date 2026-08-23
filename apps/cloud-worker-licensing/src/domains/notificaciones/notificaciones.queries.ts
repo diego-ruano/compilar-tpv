@@ -32,6 +32,22 @@ const VISIBLE = `
 	)
 `;
 
+/**
+ * Predicado de la PAPELERA: lo descartado que ese usuario puede ver.
+ *
+ * Sin filtro de caducidad, igual que en `tpv-infra-sqlite`: una notificación caducada que alguien
+ * borró sigue en su papelera hasta que decida qué hacer con ella.
+ */
+const VISIBLE_PAPELERA = `
+	n.Estado = 'descartada'
+	AND (
+		n.Destino_Tipo = 'todos'
+		OR (n.Destino_Tipo = 'usuario' AND n.Destino_Valor = ?1)
+		OR (n.Destino_Tipo = 'rol'
+			AND n.Destino_Valor = (SELECT u.ID_Rol FROM Usuarios u WHERE u.ID_Usuario = ?1))
+	)
+`;
+
 const LIST_LIMIT = 200;
 
 export async function listar(
@@ -40,6 +56,24 @@ export async function listar(
 	soloNoLeidas: boolean,
 ): Promise<NotificacionRow[]> {
 	const filtro = soloNoLeidas ? "AND l.ID_Usuario IS NULL" : "";
+	return filas(db, idUsuario, VISIBLE, filtro);
+}
+
+/** Contenido de la papelera del usuario. */
+export async function listarPapelera(
+	db: Client,
+	idUsuario: string,
+): Promise<NotificacionRow[]> {
+	return filas(db, idUsuario, VISIBLE_PAPELERA, "");
+}
+
+/** Cuerpo común de los dos listados. El predicado sale SIEMPRE de una constante de este módulo. */
+async function filas(
+	db: Client,
+	idUsuario: string,
+	predicado: string,
+	filtro: string,
+): Promise<NotificacionRow[]> {
 	const rs = await db.execute({
 		sql: `
 			SELECT
@@ -50,7 +84,7 @@ export async function listar(
 			FROM Notificaciones n
 			LEFT JOIN Notificacion_Lecturas l
 				ON l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
-			WHERE ${VISIBLE}
+			WHERE ${predicado}
 				${filtro}
 			ORDER BY n.Creada_En DESC, n.ID_Notificacion DESC
 			LIMIT ${LIST_LIMIT};

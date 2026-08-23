@@ -2,8 +2,8 @@
 //! Lecturas/gestión van por `NotificacionesRepository`; la emisión, por `Notifier`.
 
 use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionRow,
-    NotificacionesListArgs, NotificacionesUsuarioArgs,
+    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionIdInput,
+    NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs,
 };
 use tpv_domain::notificaciones::NuevaNotificacion;
 
@@ -60,6 +60,52 @@ pub async fn marcar_todas_leidas(
     repo.marcar_todas_leidas(id_usuario).await
 }
 
+/// Manda una notificación a la papelera. Reversible con [`restaurar`].
+pub async fn descartar(
+    repo: &dyn NotificacionesRepository,
+    input: NotificacionIdInput,
+) -> AppResult<bool> {
+    repo.descartar(id_no_vacio(&input.id_notificacion)?).await
+}
+
+/// Contenido de la papelera visible para un usuario. Sin usuario => lista vacía.
+pub async fn listar_descartadas(
+    repo: &dyn NotificacionesRepository,
+    args: NotificacionesUsuarioArgs,
+) -> AppResult<Vec<NotificacionRow>> {
+    let id_usuario = args.id_usuario.trim();
+    if id_usuario.is_empty() {
+        return Ok(Vec::new());
+    }
+    repo.listar_descartadas(id_usuario).await
+}
+
+/// Saca una notificación de la papelera y la devuelve al centro.
+pub async fn restaurar(
+    repo: &dyn NotificacionesRepository,
+    input: NotificacionIdInput,
+) -> AppResult<bool> {
+    repo.restaurar(id_no_vacio(&input.id_notificacion)?).await
+}
+
+/// Borra una notificación para siempre. No hay vuelta atrás: sólo se ofrece desde la papelera.
+pub async fn eliminar(
+    repo: &dyn NotificacionesRepository,
+    input: NotificacionIdInput,
+) -> AppResult<bool> {
+    repo.eliminar(id_no_vacio(&input.id_notificacion)?).await
+}
+
+/// Un id vacío llegaría al SQL como un `WHERE ID = ''`: no borra nada, pero tampoco avisa de que
+/// la llamada venía mal. Mejor un error de validación.
+fn id_no_vacio(id: &str) -> AppResult<&str> {
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(AppError::validation("id_notificacion requerido"));
+    }
+    Ok(id)
+}
+
 /// Emite una notificación manual (validando en el dominio). Devuelve su `ID_Notificacion`.
 pub async fn crear(notifier: &dyn Notifier, input: CrearNotificacionInput) -> AppResult<String> {
     let nueva = NuevaNotificacion::validar(
@@ -100,6 +146,18 @@ mod tests {
         async fn marcar_todas_leidas(&self, _: &str) -> AppResult<i64> {
             panic!("repo llamado")
         }
+        async fn descartar(&self, _: &str) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn listar_descartadas(&self, _: &str) -> AppResult<Vec<NotificacionRow>> {
+            panic!("repo llamado")
+        }
+        async fn restaurar(&self, _: &str) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
+        async fn eliminar(&self, _: &str) -> AppResult<bool> {
+            panic!("repo llamado")
+        }
     }
 
     struct NotifierQueNoDebeLlamarse;
@@ -133,6 +191,39 @@ mod tests {
             marcar_leida(&RepoQueNoDebeLlamarse, input).await,
             Err(AppError::Validation(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn las_acciones_de_la_papelera_exigen_id() {
+        // Un id vacío daría un UPDATE/DELETE que no toca nada y una UI que dice "hecho".
+        for id in ["", "   "] {
+            let input = NotificacionIdInput { id_notificacion: id.into() };
+            assert!(matches!(
+                descartar(&RepoQueNoDebeLlamarse, input.clone()).await,
+                Err(AppError::Validation(_))
+            ));
+
+            let input = NotificacionIdInput { id_notificacion: id.into() };
+            assert!(matches!(
+                restaurar(&RepoQueNoDebeLlamarse, input.clone()).await,
+                Err(AppError::Validation(_))
+            ));
+
+            let input = NotificacionIdInput { id_notificacion: id.into() };
+            assert!(matches!(
+                eliminar(&RepoQueNoDebeLlamarse, input).await,
+                Err(AppError::Validation(_))
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn la_papelera_sin_usuario_no_toca_repo() {
+        let args = NotificacionesUsuarioArgs { id_usuario: " ".into() };
+        assert!(listar_descartadas(&RepoQueNoDebeLlamarse, args)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

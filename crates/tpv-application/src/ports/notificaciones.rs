@@ -28,6 +28,19 @@ pub trait NotificacionesRepository: Send + Sync {
 
     /// Marca como leídas todas las visibles y no leídas de `id_usuario`. Devuelve cuántas marcó.
     async fn marcar_todas_leidas(&self, id_usuario: &str) -> AppResult<i64>;
+
+    /// Manda una notificación a la papelera (`Estado = 'descartada'`). Reversible: la fila sigue
+    /// ahí, sólo deja de aparecer en el centro de notificaciones. `true` si cambió alguna.
+    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool>;
+
+    /// Contenido de la papelera visible para `id_usuario`: lo descartado, sin borrar del todo.
+    async fn listar_descartadas(&self, id_usuario: &str) -> AppResult<Vec<NotificacionRow>>;
+
+    /// Devuelve una notificación de la papelera al centro (`Estado = 'activa'`).
+    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool>;
+
+    /// Borra la fila para siempre. Sus recibos de lectura se van con ella (ON DELETE CASCADE).
+    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool>;
 }
 
 /// Puerto de **emisión** de notificaciones. Cualquier módulo lo recibe y emite en una línea.

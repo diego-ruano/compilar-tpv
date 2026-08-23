@@ -55,3 +55,43 @@ export async function notificacionesMarcarTodasLeidas(params: {
   });
   return Number(n ?? 0);
 }
+
+/**
+ * Manda una notificación a la papelera. Es un cambio de estado reversible (`descartada`), no un
+ * borrado: la fila sigue ahí hasta que alguien la elimine desde la papelera.
+ */
+export async function notificacionesDescartar(params: {
+  idNotificacion: string;
+}): Promise<boolean> {
+  return await invokeClient<boolean>("notificaciones_descartar", {
+    args: { id_notificacion: params.idNotificacion },
+  });
+}
+
+/** Contenido de la papelera del usuario (lo descartado que él puede ver). */
+export async function notificacionesPapelera(params: {
+  idUsuario: string;
+}): Promise<NotificacionRow[]> {
+  const rows = await invokeClient<NotificacionRow[]>("notificaciones_papelera", {
+    args: { id_usuario: params.idUsuario },
+  });
+  return rows ?? [];
+}
+
+/** Saca una notificación de la papelera y la devuelve al centro. */
+export async function notificacionesRestaurar(params: {
+  idNotificacion: string;
+}): Promise<boolean> {
+  return await invokeClient<boolean>("notificaciones_restaurar", {
+    args: { id_notificacion: params.idNotificacion },
+  });
+}
+
+/** Borra una notificación para siempre. Sin vuelta atrás. */
+export async function notificacionesEliminar(params: {
+  idNotificacion: string;
+}): Promise<boolean> {
+  return await invokeClient<boolean>("notificaciones_eliminar", {
+    args: { id_notificacion: params.idNotificacion },
+  });
+}

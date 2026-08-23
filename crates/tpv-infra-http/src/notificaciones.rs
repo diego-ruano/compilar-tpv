@@ -85,6 +85,45 @@ impl NotificacionesRepository for HttpNotificacionesRepository {
             .await?;
         Ok(r.marcadas)
     }
+
+    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool> {
+        let _: JsonValue = self
+            .client
+            .post_json(
+                &format!("/v1/notificaciones/{id_notificacion}/descartar"),
+                &json!({}),
+            )
+            .await?;
+        Ok(true)
+    }
+
+    async fn listar_descartadas(&self, id_usuario: &str) -> AppResult<Vec<NotificacionRow>> {
+        self.client
+            .get_query(
+                "/v1/notificaciones/papelera",
+                &[("usuario", id_usuario.to_string())],
+            )
+            .await
+    }
+
+    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool> {
+        let _: JsonValue = self
+            .client
+            .post_json(
+                &format!("/v1/notificaciones/{id_notificacion}/restaurar"),
+                &json!({}),
+            )
+            .await?;
+        Ok(true)
+    }
+
+    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool> {
+        let _: JsonValue = self
+            .client
+            .delete_json(&format!("/v1/notificaciones/{id_notificacion}"))
+            .await?;
+        Ok(true)
+    }
 }
 
 #[async_trait]

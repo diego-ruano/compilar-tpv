@@ -33,6 +33,19 @@ const VISIBLE: &str = r#"
     )
 "#;
 
+/// Igual que [`VISIBLE`] pero para la PAPELERA: lo descartado. Sin filtro de caducidad — una
+/// notificación caducada que alguien borró sigue estando en su papelera hasta que decida qué hacer
+/// con ella, y esconderla sólo daría la sensación de que el "borrar para siempre" se ejecutó solo.
+const VISIBLE_PAPELERA: &str = r#"
+    n.Estado = 'descartada'
+    AND (
+          n.Destino_Tipo = 'todos'
+       OR (n.Destino_Tipo = 'usuario' AND n.Destino_Valor = ?1)
+       OR (n.Destino_Tipo = 'rol'
+           AND n.Destino_Valor = (SELECT u.ID_Rol FROM Usuarios u WHERE u.ID_Usuario = ?1))
+    )
+"#;
+
 /// Tope de filas del centro de notificaciones (defensivo; en la práctica hay pocas activas).
 const LIST_LIMIT: i64 = 200;
 
@@ -43,6 +56,78 @@ pub struct SqliteNotificacionesRepository {
 impl SqliteNotificacionesRepository {
     pub fn new(db: Arc<Db>) -> Self {
         Self { db }
+    }
+
+    /// Filas de notificación de un usuario bajo el predicado que se le pase (centro o papelera).
+    /// El `where_extra` sale SIEMPRE de una constante de este módulo, nunca de la entrada.
+    async fn filas(
+        &self,
+        id_usuario: &str,
+        predicado: &str,
+        filtro_no_leidas: &str,
+    ) -> AppResult<Vec<NotificacionRow>> {
+        let sql = format!(
+            r#"
+            SELECT
+              n.ID_Notificacion, n.Tipo, n.Severidad, n.Titulo, n.Cuerpo,
+              n.Destino_Tipo, n.Destino_Valor, n.Accion, n.Payload, n.Estado,
+              n.Creada_En, n.Expira_En,
+              CASE WHEN l.ID_Usuario IS NOT NULL THEN 1 ELSE 0 END AS Leida
+            FROM Notificaciones n
+            LEFT JOIN Notificacion_Lecturas l
+              ON l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
+            WHERE {predicado}
+              {filtro_no_leidas}
+            ORDER BY n.Creada_En DESC, n.ID_Notificacion DESC
+            LIMIT {limit};
+            "#,
+            predicado = predicado,
+            filtro_no_leidas = filtro_no_leidas,
+            limit = LIST_LIMIT
+        );
+
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(&sql, vec![Value::Text(id_usuario.to_string())])
+            .await
+            .map_err(db_err)?;
+
+        let mut out: Vec<NotificacionRow> = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            out.push(NotificacionRow {
+                id_notificacion: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                tipo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                severidad: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                titulo: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
+                cuerpo: norm_opt_string(row.get_value(4).map_err(db_err)?),
+                destino_tipo: v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default(),
+                destino_valor: norm_opt_string(row.get_value(6).map_err(db_err)?),
+                accion: norm_opt_string(row.get_value(7).map_err(db_err)?),
+                payload: norm_opt_string(row.get_value(8).map_err(db_err)?),
+                estado: v_string(row.get_value(9).map_err(db_err)?).unwrap_or_default(),
+                creada_en: v_string(row.get_value(10).map_err(db_err)?).unwrap_or_default(),
+                expira_en: norm_opt_string(row.get_value(11).map_err(db_err)?),
+                leida: v_i64(row.get_value(12).map_err(db_err)?).unwrap_or(0) > 0,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Cambia el estado de una notificación. Es una escritura normal (`execute`), así que la
+    /// captura del outbox la replica a la nube y a las Handy como cualquier otra.
+    async fn set_estado(&self, id_notificacion: &str, estado: &'static str) -> AppResult<bool> {
+        let db = self.db.write().await;
+        let affected = db
+            .execute(
+                "UPDATE Notificaciones SET Estado = ?2 WHERE ID_Notificacion = ?1;",
+                vec![
+                    Value::Text(id_notificacion.to_string()),
+                    Value::Text(estado.to_string()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(affected > 0)
     }
 
     /// IDs de las notificaciones visibles y **no leídas** por `id_usuario` (orden estable).
@@ -94,51 +179,7 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
             ""
         };
 
-        let sql = format!(
-            r#"
-            SELECT
-              n.ID_Notificacion, n.Tipo, n.Severidad, n.Titulo, n.Cuerpo,
-              n.Destino_Tipo, n.Destino_Valor, n.Accion, n.Payload, n.Estado,
-              n.Creada_En, n.Expira_En,
-              CASE WHEN l.ID_Usuario IS NOT NULL THEN 1 ELSE 0 END AS Leida
-            FROM Notificaciones n
-            LEFT JOIN Notificacion_Lecturas l
-              ON l.ID_Notificacion = n.ID_Notificacion AND l.ID_Usuario = ?1
-            WHERE {visible}
-              {filtro_no_leidas}
-            ORDER BY n.Creada_En DESC, n.ID_Notificacion DESC
-            LIMIT {limit};
-            "#,
-            visible = VISIBLE,
-            filtro_no_leidas = filtro_no_leidas,
-            limit = LIST_LIMIT
-        );
-
-        let db = self.db.read().await;
-        let mut rows = db
-            .query(&sql, vec![Value::Text(id_usuario.to_string())])
-            .await
-            .map_err(db_err)?;
-
-        let mut out: Vec<NotificacionRow> = Vec::new();
-        while let Some(row) = rows.next().await.map_err(db_err)? {
-            out.push(NotificacionRow {
-                id_notificacion: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                tipo: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-                severidad: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                titulo: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
-                cuerpo: norm_opt_string(row.get_value(4).map_err(db_err)?),
-                destino_tipo: v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default(),
-                destino_valor: norm_opt_string(row.get_value(6).map_err(db_err)?),
-                accion: norm_opt_string(row.get_value(7).map_err(db_err)?),
-                payload: norm_opt_string(row.get_value(8).map_err(db_err)?),
-                estado: v_string(row.get_value(9).map_err(db_err)?).unwrap_or_default(),
-                creada_en: v_string(row.get_value(10).map_err(db_err)?).unwrap_or_default(),
-                expira_en: norm_opt_string(row.get_value(11).map_err(db_err)?),
-                leida: v_i64(row.get_value(12).map_err(db_err)?).unwrap_or(0) > 0,
-            });
-        }
-        Ok(out)
+        self.filas(id_usuario, VISIBLE, filtro_no_leidas).await
     }
 
     async fn contar_no_leidas(&self, id_usuario: &str) -> AppResult<i64> {
@@ -218,6 +259,36 @@ impl NotificacionesRepository for SqliteNotificacionesRepository {
         }
         db.execute_batch("COMMIT;").await.map_err(db_err)?;
         Ok(ids.len() as i64)
+    }
+
+    async fn descartar(&self, id_notificacion: &str) -> AppResult<bool> {
+        self.set_estado(id_notificacion, "descartada").await
+    }
+
+    async fn listar_descartadas(&self, id_usuario: &str) -> AppResult<Vec<NotificacionRow>> {
+        self.filas(id_usuario, VISIBLE_PAPELERA, "").await
+    }
+
+    async fn restaurar(&self, id_notificacion: &str) -> AppResult<bool> {
+        // Vuelve a 'activa'. Ojo con el índice único de dedupe: si mientras estaba en la papelera
+        // se volvió a emitir el mismo aviso, restaurarla chocaría con la nueva. El error sube tal
+        // cual (la UI lo enseña): inventarse un desempate aquí sería decidir por el usuario cuál
+        // de las dos vale.
+        self.set_estado(id_notificacion, "activa").await
+    }
+
+    async fn eliminar(&self, id_notificacion: &str) -> AppResult<bool> {
+        // Los recibos de lectura se van con ella por ON DELETE CASCADE. El DELETE se captura en el
+        // outbox y cada motor re-deriva su cascada al aplicarlo (FK activadas en toda conexión).
+        let db = self.db.write().await;
+        let affected = db
+            .execute(
+                "DELETE FROM Notificaciones WHERE ID_Notificacion = ?1;",
+                vec![Value::Text(id_notificacion.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(affected > 0)
     }
 }
 

@@ -68,6 +68,14 @@ notificacionesRoutes.get("/", async (c) => {
 	);
 });
 
+notificacionesRoutes.get("/papelera", async (c) => {
+	const uid = parseId(c.req.query("usuario"));
+	if (uid == null) return badRequest(c, "id_usuario invalido");
+	return c.json(
+		await tenantQuery(c.env, c.get("tenantId"), (db) => q.listarPapelera(db, uid)),
+	);
+});
+
 notificacionesRoutes.get("/count", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
 	if (uid == null) return badRequest(c, "id_usuario invalido");
@@ -113,6 +121,27 @@ notificacionesRoutes.post("/resolver", async (c) => {
 	const p = await parseBody(c, S.resolverSchema);
 	if (!p.ok) return p.res;
 	await apply(c, cmd.resolverPorClave(p.data.clave_dedupe));
+	return c.json({ ok: true });
+});
+
+notificacionesRoutes.post("/:id/descartar", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_notificacion invalido");
+	await apply(c, cmd.descartar(id));
+	return c.json({ ok: true });
+});
+
+notificacionesRoutes.post("/:id/restaurar", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_notificacion invalido");
+	await apply(c, cmd.restaurar(id));
+	return c.json({ ok: true });
+});
+
+notificacionesRoutes.delete("/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_notificacion invalido");
+	await apply(c, cmd.eliminar(id));
 	return c.json({ ok: true });
 });
 

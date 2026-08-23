@@ -5,6 +5,12 @@
 //
 // Al pulsar una notificación se marca como leída y, si su `accion` tiene destino conocido
 // (ver `features/notificaciones/acciones.ts`), se navega a la pantalla que resuelve el aviso.
+//
+// Papelera: borrar una notificación NO la elimina, la manda a `Estado = 'descartada'`. Se puede
+// mirar lo borrado desde el botón de la papelera y, desde ahí, restaurarlo o eliminarlo de verdad.
+// Un aviso puede ser lo único que quede de un incidente (un cobro raro, un stock que se fue), así
+// que un toque sin querer no puede perderlo para siempre.
+import { useState } from "react";
 import {
   Bell,
   CheckCheck,
@@ -14,18 +20,27 @@ import {
   AlertTriangle,
   AlertCircle,
   RefreshCw,
+  RotateCcw,
+  Trash2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 
 import { useAuth } from "../../shared/stores/useAuth";
 import { cn } from "../../shared/lib/cn";
+import { ModalShell } from "../../shared/ui/ModalShell";
 import type { NotificacionRow } from "../../features/notificaciones/notificacionesApis";
 import { destinoDeAccion } from "../../features/notificaciones/acciones";
 import {
+  useDescartar,
+  useEliminar,
   useMarcarLeida,
   useMarcarTodasLeidas,
   useNotificaciones,
+  usePapelera,
+  useRestaurar,
 } from "../../features/notificaciones/notificacionesQueries";
 
 /** Aspecto por severidad (icono + colores suaves, claro/oscuro). */
@@ -53,11 +68,23 @@ export default function Notificaciones() {
   const notificaciones = useNotificaciones(idUsuario);
   const marcarLeida = useMarcarLeida();
   const marcarTodas = useMarcarTodasLeidas();
+  const descartar = useDescartar();
+
+  const [papeleraAbierta, setPapeleraAbierta] = useState(false);
+  // Sólo se consulta con el modal abierto: es una lista que casi nunca se mira.
+  const papelera = usePapelera(idUsuario, papeleraAbierta);
+  const restaurar = useRestaurar();
+  const eliminar = useEliminar();
 
   const items: NotificacionRow[] = notificaciones.data ?? [];
   const noLeidas = items.filter((n) => !n.leida).length;
   const loading =
-    notificaciones.isFetching || marcarLeida.isPending || marcarTodas.isPending;
+    notificaciones.isFetching ||
+    marcarLeida.isPending ||
+    marcarTodas.isPending ||
+    descartar.isPending;
+
+  const borradas: NotificacionRow[] = papelera.data ?? [];
 
   function onCardClick(n: NotificacionRow) {
     if (idUsuario && !n.leida) {
@@ -67,6 +94,17 @@ export default function Notificaciones() {
     // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
     const destino = destinoDeAccion(n.accion);
     if (destino) navigate(destino.to, { state: destino.state });
+  }
+
+  // El borrado definitivo se confirma: es la única acción de esta pantalla que no se puede
+  // deshacer, y el botón está justo al lado del de restaurar.
+  async function onEliminar(n: NotificacionRow) {
+    const ok = await confirmDialog(
+      `Se eliminará "${n.titulo}" definitivamente. Esta acción no se puede deshacer.`,
+      { title: "Eliminar notificación", kind: "warning" },
+    );
+    if (!ok) return;
+    eliminar.mutate({ idNotificacion: n.id_notificacion });
   }
 
   function onMarcarTodas() {
@@ -105,6 +143,16 @@ export default function Notificaciones() {
 
           <button
             type="button"
+            onClick={() => setPapeleraAbierta(true)}
+            aria-label="Papelera"
+            title="Papelera"
+            className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+          >
+            <Trash2 className="size-4" aria-hidden />
+          </button>
+
+          <button
+            type="button"
             onClick={onMarcarTodas}
             disabled={noLeidas === 0}
             className={cn(
@@ -138,11 +186,8 @@ export default function Notificaciones() {
             const Icon = a.icon;
             const destino = destinoDeAccion(n.accion);
             return (
-              <button
+              <div
                 key={n.id_notificacion}
-                type="button"
-                onClick={() => onCardClick(n)}
-                title={destino ? "Ir a la pantalla relacionada" : undefined}
                 className={cn(
                   "group flex w-full min-w-0 items-start gap-2 rounded-2xl border p-3 text-left shadow-sm transition sm:gap-3 sm:p-4",
                   n.leida
@@ -150,54 +195,194 @@ export default function Notificaciones() {
                     : "border-accent/40 bg-accent-soft/40 hover:bg-accent-soft/60",
                 )}
               >
-                <div
-                  className={cn(
-                    "grid size-9 shrink-0 place-items-center rounded-xl sm:size-10",
-                    a.className,
-                  )}
+                <button
+                  type="button"
+                  onClick={() => onCardClick(n)}
+                  title={destino ? "Ir a la pantalla relacionada" : undefined}
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left sm:gap-3"
                 >
-                  <Icon className="size-5" aria-hidden />
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 flex-col gap-0.5 xs:flex-row xs:items-start xs:justify-between xs:gap-2">
-                    <p
-                      className={cn(
-                        "min-w-0 break-words text-sm xs:truncate",
-                        n.leida ? "font-medium text-fg" : "font-bold text-fg",
-                      )}
-                    >
-                      {n.titulo}
-                    </p>
-                    <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-subtle sm:text-xs">
-                      {fmtFecha(n.creada_en)}
-                    </span>
+                  <div
+                    className={cn(
+                      "grid size-9 shrink-0 place-items-center rounded-xl sm:size-10",
+                      a.className,
+                    )}
+                  >
+                    <Icon className="size-5" aria-hidden />
                   </div>
 
-                  {n.cuerpo ? (
-                    <p className="mt-1 line-clamp-3 break-words text-sm text-fg-muted sm:mt-0.5 sm:line-clamp-2">{n.cuerpo}</p>
-                  ) : null}
-                </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-col gap-0.5 xs:flex-row xs:items-start xs:justify-between xs:gap-2">
+                      <p
+                        className={cn(
+                          "min-w-0 break-words text-sm xs:truncate",
+                          n.leida ? "font-medium text-fg" : "font-bold text-fg",
+                        )}
+                      >
+                        {n.titulo}
+                      </p>
+                      <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-subtle sm:text-xs">
+                        {fmtFecha(n.creada_en)}
+                      </span>
+                    </div>
 
-                {!n.leida && (
-                  <span
-                    className="mt-1.5 size-2 shrink-0 rounded-full bg-accent sm:size-2.5"
-                    aria-label="No leída"
-                    title="No leída"
-                  />
-                )}
+                    {n.cuerpo ? (
+                      <p className="mt-1 line-clamp-3 break-words text-sm text-fg-muted sm:mt-0.5 sm:line-clamp-2">{n.cuerpo}</p>
+                    ) : null}
+                  </div>
 
-                {destino && (
-                  <ChevronRight
-                    className="mt-0.5 size-4 shrink-0 text-fg-subtle transition group-hover:translate-x-0.5 group-hover:text-fg-muted"
-                    aria-hidden
-                  />
-                )}
-              </button>
+                  {!n.leida && (
+                    <span
+                      className="mt-1.5 size-2 shrink-0 rounded-full bg-accent sm:size-2.5"
+                      aria-label="No leída"
+                      title="No leída"
+                    />
+                  )}
+
+                  {destino && (
+                    <ChevronRight
+                      className="mt-0.5 size-4 shrink-0 text-fg-subtle transition group-hover:translate-x-0.5 group-hover:text-fg-muted"
+                      aria-hidden
+                    />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    descartar.mutate({ idNotificacion: n.id_notificacion })
+                  }
+                  disabled={
+                    descartar.isPending &&
+                    descartar.variables?.idNotificacion === n.id_notificacion
+                  }
+                  aria-label="Borrar notificación"
+                  title="Borrar (va a la papelera)"
+                  className="grid size-8 shrink-0 cursor-pointer place-items-center rounded-xl border border-transparent text-fg-subtle transition hover:border-border hover:bg-surface-2 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Trash2 className="size-4" aria-hidden />
+                </button>
+              </div>
             );
           })}
         </div>
       )}
+
+      {/* PAPELERA */}
+      <ModalShell
+        open={papeleraAbierta}
+        onClose={() => setPapeleraAbierta(false)}
+        className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      >
+        <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl border border-border bg-surface shadow-xl sm:rounded-2xl">
+          <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border p-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-surface-2 text-fg-muted">
+                <Trash2 className="size-5" aria-hidden />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-lg font-bold leading-tight text-fg">Papelera</h3>
+                <p className="text-xs text-fg-muted">
+                  Notificaciones borradas. Puedes recuperarlas o eliminarlas del todo.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setPapeleraAbierta(false)}
+              aria-label="Cerrar"
+              className="grid size-9 shrink-0 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+            {papelera.isLoading ? (
+              <p className="text-sm text-fg-muted">Cargando…</p>
+            ) : borradas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
+                <div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-fg-subtle">
+                  <Trash2 className="size-6" aria-hidden />
+                </div>
+                <p className="text-sm font-medium text-fg">La papelera está vacía</p>
+                <p className="text-xs text-fg-muted">
+                  Lo que borres desde el centro de notificaciones aparecerá aquí.
+                </p>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {borradas.map((n) => {
+                  const a = aspecto(n.severidad);
+                  const Icon = a.icon;
+                  const ocupada =
+                    (restaurar.isPending && restaurar.variables?.idNotificacion === n.id_notificacion) ||
+                    (eliminar.isPending && eliminar.variables?.idNotificacion === n.id_notificacion);
+
+                  return (
+                    <div
+                      key={n.id_notificacion}
+                      className="flex w-full min-w-0 items-start gap-2 rounded-2xl border border-border bg-surface p-3 sm:gap-3"
+                    >
+                      <div
+                        className={cn(
+                          "grid size-9 shrink-0 place-items-center rounded-xl opacity-70",
+                          a.className,
+                        )}
+                      >
+                        <Icon className="size-5" aria-hidden />
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 flex-col gap-0.5 xs:flex-row xs:items-start xs:justify-between xs:gap-2">
+                          <p className="min-w-0 break-words text-sm font-medium text-fg-muted xs:truncate">
+                            {n.titulo}
+                          </p>
+                          <span className="shrink-0 whitespace-nowrap text-[11px] text-fg-subtle">
+                            {fmtFecha(n.creada_en)}
+                          </span>
+                        </div>
+
+                        {n.cuerpo ? (
+                          <p className="mt-1 line-clamp-2 break-words text-sm text-fg-subtle">
+                            {n.cuerpo}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            restaurar.mutate({ idNotificacion: n.id_notificacion })
+                          }
+                          disabled={ocupada}
+                          aria-label="Restaurar"
+                          title="Restaurar"
+                          className="grid size-8 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <RotateCcw className="size-4" aria-hidden />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onEliminar(n)}
+                          disabled={ocupada}
+                          aria-label="Eliminar para siempre"
+                          title="Eliminar para siempre"
+                          className="grid size-8 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:border-danger/40 hover:bg-danger-soft hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Trash2 className="size-4" aria-hidden />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </ModalShell>
     </div>
   );
 }

@@ -361,6 +361,16 @@ export type MisTareasArgs = { id_trabajador: string, };
 export type MisTareasRow = { ID_Tarea: string, Titulo: string, Descripcion: string | null, Fecha_Limite: string | null, Asignada_At: string, Estado: string, Finalizada_At: string | null, };
 
 /**
+ * Identifica una notificación para las acciones de la papelera (descartar, restaurar, eliminar).
+ *
+ * El estado de la papelera es de la NOTIFICACIÓN, no del usuario que la mira: una notificación es
+ * un aviso del negocio (stock bajo, pedido por aprobar) y borrarla es decir "esto ya está visto",
+ * no "no me lo enseñes a mí". Por eso aquí no viaja el `id_usuario`: lo que sí es por usuario es
+ * la lectura, que tiene su propia tabla.
+ */
+export type NotificacionIdInput = { id_notificacion: string, };
+
+/**
  * Fila del centro de notificaciones **para un usuario concreto**: incluye `leida`, que se calcula
  * respecto a ese usuario (una notificación "a todos" está leída para unos y no para otros).
  */
