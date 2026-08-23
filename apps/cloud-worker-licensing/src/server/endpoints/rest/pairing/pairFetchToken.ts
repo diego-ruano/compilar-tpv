@@ -1,5 +1,10 @@
 import type { Client } from "@libsql/client/web";
 
+import {
+	cargarDevice,
+	estaRevocado,
+	normalizarRol,
+} from "../../../../lib/deviceAuth";
 import { b64ToBytes, bytesToB64 } from "../../../utils/base64";
 import { json, serverError } from "../../../utils/response";
 import { ed25519Verify, nobleForceU8 } from "../../../utils/nobleEd25519";
@@ -64,27 +69,12 @@ async function getActiveHandyDevicePubkey(
 	tenantId: string,
 	deviceId: string,
 ): Promise<string | null> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role, revoked_at_ms, device_pubkey_b64
-			FROM devices
-			WHERE tenant_id=?
-			  AND device_id=?
-			LIMIT 1;
-		`,
-		args: [tenantId, deviceId],
-	});
+	const fila = await cargarDevice(dbCentral, tenantId, deviceId);
+	if (!fila) return null;
+	if (normalizarRol(fila.role) !== "handy") return null;
+	if (estaRevocado(fila)) return null;
 
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return null;
-
-	const role = String(row.role || "").trim().toLowerCase();
-	if (role !== "handy") return null;
-
-	const revoked = row.revoked_at_ms == null ? 0 : Number(row.revoked_at_ms);
-	if (revoked !== 0) return null;
-
-	const pub = String(row.device_pubkey_b64 || "").trim();
+	const pub = String(fila.device_pubkey_b64 || "").trim();
 	return pub || null;
 }
 

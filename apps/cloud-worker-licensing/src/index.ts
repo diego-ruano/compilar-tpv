@@ -22,6 +22,7 @@ import * as Sentry from "@sentry/cloudflare";
 import type { Env } from "./env";
 import { sentryOptions } from "./observability/sentry";
 import { getDb } from "./server/db";
+import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
 import {
 	json,
 	unauthorized,
@@ -113,22 +114,12 @@ app.get("/ws", async (c) => {
 			return unauthorized(request, "invalid_ticket");
 		}
 
-		const r = await dbCentral.execute({
-			sql: `
-				SELECT revoked_at_ms, role, device_pubkey_b64
-				FROM devices
-				WHERE tenant_id=? AND device_id=?
-				LIMIT 1
-			`,
-			args: [tenantId, deviceId],
-		});
+		const fila = await cargarDevice(dbCentral, tenantId, deviceId);
+		if (!fila) return unauthorized(request, "device_not_registered");
+		if (estaRevocado(fila)) return unauthorized(request, "device_revoked");
 
-		const row = r.rows?.[0] as any | undefined;
-		if (!row) return unauthorized(request, "device_not_registered");
-		if (row.revoked_at_ms) return unauthorized(request, "device_revoked");
-
-		const roleFinal = String(row.role || roleFromToken || "unknown");
-		const pubB64 = String(row.device_pubkey_b64 || "").trim();
+		const roleFinal = String(fila.role || roleFromToken || "unknown");
+		const pubB64 = String(fila.device_pubkey_b64 || "").trim();
 
 		const id = env.TenantHub.idFromName(tenantId);
 		const stub = env.TenantHub.get(id);

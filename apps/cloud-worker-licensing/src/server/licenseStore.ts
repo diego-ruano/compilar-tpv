@@ -935,6 +935,14 @@ export async function consumeDeviceOtp(
    Dispositivos (anti-copia por pubkey ed25519)
 ============================================================ */
 
+/**
+ * Pubkey del dispositivo **sin mirar la revocación**, a diferencia del resto del worker
+ * (ver `lib/deviceAuth.ts`). La usan el device-proof de `/v1/license/status` y `/refresh`,
+ * que son el gate de licencia: un equipo revocado tiene que poder seguir preguntando en qué
+ * estado está su licencia — si también se le cerrara esta puerta, el cliente vería un fallo
+ * de red, entraría en gracia offline y acabaría bloqueado sin saber por qué. La asimetría es
+ * deliberada; quien la unifique con el criterio general está cambiando eso a propósito.
+ */
 export async function getDevicePubKeyB64(
 	db: Client,
 	tenantId: string,
@@ -973,6 +981,19 @@ export async function setDevicePubKeyB64IfEmptyOrThrow(
 	}
 }
 
+/**
+ * Alta o readmisión del dispositivo. La llama `/v1/license/activate`, es decir: alguien ha
+ * presentado una clave de licencia válida (y el OTP al email del titular si era un cambio de
+ * equipo). Eso **es** la autorización, así que la fila queda como la de un dispositivo vivo.
+ *
+ * ⚠️ `revoked_at_ms=NULL` no sobra. La PK de `devices` es el `device_id`, que en el cliente
+ * vive en el keyring del SO y sobrevive a reinstalar la app, borrar AppData y cambiar de
+ * licencia y de tenant. Sin esta línea, una revocación vieja —por ejemplo la de cuando ese
+ * mismo equipo se desvinculó siendo Handy— seguía en la fila para siempre: el dispositivo
+ * activaba bien, pasaba `/v1/license/status` y fallaba con 401 en TODO lo demás, sin que el
+ * cliente pudiera hacer nada desde su lado. Aprobar un pairing ya normaliza la columna igual
+ * (ver `pairApprove`); activar tenía que hacerlo también.
+ */
 export async function ensureDevice(
 	db: Client,
 	tenantId: string,
@@ -985,12 +1006,13 @@ export async function ensureDevice(
 	await exec(
 		db,
 		`
-    INSERT INTO devices (device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO devices (device_id, tenant_id, role, first_seen_at_ms, last_seen_at_ms, revoked_at_ms)
+    VALUES (?, ?, ?, ?, ?, NULL)
     ON CONFLICT(device_id) DO UPDATE SET
       tenant_id=excluded.tenant_id,
       role=excluded.role,
-      last_seen_at_ms=excluded.last_seen_at_ms;
+      last_seen_at_ms=excluded.last_seen_at_ms,
+      revoked_at_ms=NULL;
     `,
 		[deviceId, tenantId, role, now, now],
 	);

@@ -2,14 +2,8 @@ import type { Client } from "@libsql/client/web";
 
 import { buildTenantContext } from "../../../middleware/withTenant";
 import { createDbClient } from "../../../db/clients";
+import { SQL_DEVICE_ACTIVO, tieneRol } from "../../../../lib/deviceAuth";
 import { json, unauthorized, serverError } from "../../../utils/response";
-
-function roleNormalize(r: any) {
-	const s = String(r || "").toLowerCase();
-	if (s === "tpv") return "tpv";
-	if (s === "handy") return "handy";
-	return "unknown";
-}
 
 function isAuthError(msg: string): boolean {
 	return (
@@ -26,26 +20,6 @@ function isAuthError(msg: string): boolean {
 		msg.includes("device_revoked") ||
 		msg.includes("forbidden")
 	);
-}
-
-async function isMainDevice(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role, revoked_at_ms
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			LIMIT 1;
-		`,
-		args: [tenantId, deviceId],
-	});
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return false;
-	if (row.revoked_at_ms) return false;
-	return roleNormalize(row.role) === "tpv";
 }
 
 // Lista los dispositivos Handy vinculados (no revocados) del tenant. Solo la Main (rol tpv)
@@ -65,7 +39,7 @@ export async function handleListDevices(
 			return unauthorized(req, "invalid_token_claims");
 		}
 
-		const okMain = await isMainDevice(dbCentral, tenantId, requesterDeviceId);
+		const okMain = await tieneRol(dbCentral, tenantId, requesterDeviceId, "tpv");
 		if (!okMain) return unauthorized(req, "forbidden_not_main");
 
 		const r = await dbCentral.execute({
@@ -74,7 +48,7 @@ export async function handleListDevices(
 				FROM devices
 				WHERE tenant_id=?
 				  AND role='handy'
-				  AND (revoked_at_ms IS NULL OR revoked_at_ms=0)
+				  AND ${SQL_DEVICE_ACTIVO}
 				ORDER BY last_seen_at_ms DESC
 				LIMIT 100;
 			`,

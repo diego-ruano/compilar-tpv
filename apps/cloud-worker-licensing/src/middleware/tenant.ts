@@ -11,7 +11,9 @@ import type { MiddlewareHandler } from "hono";
 
 import type { Env } from "../env";
 import { getDb } from "../server/db";
+import { SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
+import { unauthorized } from "../server/utils/response";
 
 export type TenantVars = {
 	tenantId: string;
@@ -31,7 +33,7 @@ export async function rolDelDispositivo(
 	deviceId: string,
 ): Promise<string> {
 	const r = await getDb(env).execute({
-		sql: `SELECT role FROM devices WHERE tenant_id=? AND device_id=? AND revoked_at_ms IS NULL LIMIT 1;`,
+		sql: `SELECT role FROM devices WHERE tenant_id=? AND device_id=? AND ${SQL_DEVICE_ACTIVO} LIMIT 1;`,
 		args: [tenantId, deviceId],
 	});
 	return String((r.rows?.[0] as any)?.role || "").toLowerCase();
@@ -74,7 +76,10 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("token", token);
 		c.set("licHash", claims.licHash);
 	} catch (e: any) {
-		return c.json({ error: String(e?.message || e) }, 401);
+		// Por `unauthorized` y no por `c.json` a pelo: así la respuesta lleva el `code` del
+		// catálogo compartido (ARCH-05) además del `error` de siempre. Es lo que permite al
+		// cliente ramificar ante un `device_revoked` en vez de reintentar contra una pared.
+		return unauthorized(c.req.raw, String(e?.message || e));
 	}
 
 	await next();

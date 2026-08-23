@@ -3,6 +3,7 @@ import { createDbClient } from "../server/db/clients";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
 import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
+import { estaRevocado } from "../lib/deviceAuth";
 import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 import { ingestToAxiom } from "../observability/axiom";
 
@@ -343,7 +344,7 @@ export class TenantHub {
 
 		const role = roleNormalize(row.role);
 		const pubkeyB64 = String(row.device_pubkey_b64 || "").trim() || null;
-		const revoked = Boolean(row.revoked_at_ms);
+		const revoked = estaRevocado(row);
 
 		return { role, pubkeyB64, revoked };
 	}

@@ -2,6 +2,7 @@ import type { Client } from "@libsql/client/web";
 
 import { buildTenantContext } from "../../../middleware/withTenant";
 import { createDbClient } from "../../../db/clients";
+import { SQL_DEVICE_ACTIVO, tieneRol } from "../../../../lib/deviceAuth";
 import { json, unauthorized, serverError } from "../../../utils/response";
 import { signInternalWorkerRequest } from "../../../../lib/internalAuth";
 
@@ -11,13 +12,6 @@ async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	} catch {
 		return fallback;
 	}
-}
-
-function roleNormalize(r: any) {
-	const s = String(r || "").toLowerCase();
-	if (s === "tpv") return "tpv";
-	if (s === "handy") return "handy";
-	return "unknown";
 }
 
 function isAuthError(msg: string): boolean {
@@ -41,28 +35,6 @@ function rowsAffected(result: any): number {
 	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
 }
 
-async function isMainDevice(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role, revoked_at_ms
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			LIMIT 1;
-		`,
-		args: [tenantId, deviceId],
-	});
-
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return false;
-	if (row.revoked_at_ms) return false;
-
-	return roleNormalize(row.role) === "tpv";
-}
-
 export async function handleRevokeDevice(
 	req: Request,
 	env: any,
@@ -79,12 +51,7 @@ export async function handleRevokeDevice(
 			return unauthorized(req, "invalid_token_claims");
 		}
 
-		const okMain = await isMainDevice(
-			dbCentral,
-			tenantId,
-			requesterDeviceId,
-		);
-
+		const okMain = await tieneRol(dbCentral, tenantId, requesterDeviceId, "tpv");
 		if (!okMain) return unauthorized(req, "forbidden_not_main");
 
 		const body = await readJsonSafe(req, { deviceId: "" });
@@ -107,7 +74,7 @@ export async function handleRevokeDevice(
 				    last_seen_at_ms=?
 				WHERE tenant_id=?
 				  AND device_id=?
-				  AND (revoked_at_ms IS NULL OR revoked_at_ms=0);
+				  AND ${SQL_DEVICE_ACTIVO};
 			`,
 			args: [now, now, tenantId, targetDeviceId],
 		});

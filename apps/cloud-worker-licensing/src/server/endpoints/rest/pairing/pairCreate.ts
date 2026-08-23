@@ -2,6 +2,7 @@ import type { Client } from "@libsql/client/web";
 
 import { buildTenantContext } from "../../../middleware/withTenant";
 import { createDbClient } from "../../../db/clients";
+import { tieneRol } from "../../../../lib/deviceAuth";
 import { json, unauthorized, serverError } from "../../../utils/response";
 import { sha256HexStr } from "../../../utils/crypto";
 import { bytesToB64 } from "../../../utils/base64";
@@ -21,28 +22,6 @@ function isAuthError(msg: string): boolean {
 		msg.includes("device_revoked") ||
 		msg.includes("forbidden")
 	);
-}
-
-async function isTpvDevice(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			  AND (revoked_at_ms IS NULL OR revoked_at_ms=0)
-			LIMIT 1;
-		`,
-		args: [tenantId, deviceId],
-	});
-
-	const row = r.rows?.[0] as any | undefined;
-	const role = String(row?.role || "").trim().toLowerCase();
-
-	return role === "tpv";
 }
 
 function randomDigits6(): string {
@@ -74,7 +53,7 @@ export async function handlePairCreate(
 			return unauthorized(req, "invalid_token_claims");
 		}
 
-		const okTpv = await isTpvDevice(dbCentral, tenantId, deviceId);
+		const okTpv = await tieneRol(dbCentral, tenantId, deviceId, "tpv");
 		if (!okTpv) return unauthorized(req, "forbidden_not_tpv");
 
 		const now = Date.now();

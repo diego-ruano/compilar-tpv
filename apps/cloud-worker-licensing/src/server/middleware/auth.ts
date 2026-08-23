@@ -2,6 +2,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { verifyJwtHs256 } from "./jwtHs256";
+import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
 import { b64ToBytes } from "../utils/base64";
 import { sha256HexStr } from "../utils/crypto";
 import { ed25519Verify, nobleForceU8 } from "../utils/nobleEd25519";
@@ -45,35 +46,50 @@ export async function verifyJwt(env: any, req: Request): Promise<{ token: string
 	return { token, claims: { tenantId, deviceId, licHash } };
 }
 
-async function getDevicePubKeyB64(dbCentral: Client, tenantId: string, deviceId: string): Promise<string | null> {
+/**
+ * Estado del dispositivo para firmar: o su pubkey, o el motivo exacto por el que no.
+ *
+ * Los tres motivos se distinguen a propósito. Antes los tres devolvían
+ * `device_pubkey_not_registered`, así que un dispositivo **revocado** decía "no tienes
+ * pubkey registrada" — un mensaje que apunta al sitio equivocado y convierte un
+ * diagnóstico de diez segundos en una investigación. Además `device_revoked` sí está en el
+ * catálogo compartido de códigos (`ErrorCode::DeviceRevoked`), así que el cliente puede
+ * ramificar: la sync deja de reintentar en bucle y la UI enseña un texto que se entiende.
+ */
+type EstadoDevice =
+	| { ok: true; pubB64: string }
+	| { ok: false; error: "device_not_registered" | "device_revoked" | "device_pubkey_not_registered" };
+
+async function resolverDevice(
+	dbCentral: Client,
+	tenantId: string,
+	deviceId: string,
+): Promise<EstadoDevice> {
 	const key = deviceCacheKey(tenantId, deviceId);
 	const hit = devicePubkeyCache.get(key);
-	if (hit && hit.expiresAtMs > Date.now()) return hit.pubB64;
+	if (hit && hit.expiresAtMs > Date.now()) return { ok: true, pubB64: hit.pubB64 };
 
-	const r = await dbCentral.execute({
-		sql: `
-      SELECT device_pubkey_b64
-      FROM devices
-      WHERE tenant_id = ? AND device_id = ?
-        AND revoked_at_ms IS NULL
-      LIMIT 1
-    `,
-		args: [tenantId, deviceId],
-	});
+	const fila = await cargarDevice(dbCentral, tenantId, deviceId);
 
-	const row = r.rows?.[0] as any | undefined;
-	const v = row ? String(row.device_pubkey_b64 || "").trim() : "";
-	const pubB64 = v ? v : null;
-
-	if (pubB64) {
-		devicePubkeyCache.set(key, { pubB64, expiresAtMs: Date.now() + DEVICE_CACHE_TTL_MS });
-	} else {
-		// No cachear null: si el dispositivo fue revocado o aún no existe,
-		// la comprobación vuelve a la BD en la siguiente petición.
+	// Nada de esto se cachea: si el dispositivo se registra, se readmite o le llega su
+	// pubkey, la comprobación vuelve a la BD en la siguiente petición.
+	if (!fila) {
 		devicePubkeyCache.delete(key);
+		return { ok: false, error: "device_not_registered" };
+	}
+	if (estaRevocado(fila)) {
+		devicePubkeyCache.delete(key);
+		return { ok: false, error: "device_revoked" };
 	}
 
-	return pubB64;
+	const pubB64 = String(fila.device_pubkey_b64 || "").trim();
+	if (!pubB64) {
+		devicePubkeyCache.delete(key);
+		return { ok: false, error: "device_pubkey_not_registered" };
+	}
+
+	devicePubkeyCache.set(key, { pubB64, expiresAtMs: Date.now() + DEVICE_CACHE_TTL_MS });
+	return { ok: true, pubB64 };
 }
 
 /**
@@ -105,8 +121,9 @@ export async function verifyDeviceProofOrThrow(
 	const MAX_SKEW_MS = 2 * 60 * 1000;
 	if (Math.abs(now - ts) > MAX_SKEW_MS) throw new Error("device_ts_out_of_range");
 
-	const pubB64 = await getDevicePubKeyB64(dbCentral, claims.tenantId, claims.deviceId);
-	if (!pubB64) throw new Error("device_pubkey_not_registered");
+	const dev = await resolverDevice(dbCentral, claims.tenantId, claims.deviceId);
+	if (!dev.ok) throw new Error(dev.error);
+	const pubB64 = dev.pubB64;
 
 	const url = new URL(req.url);
 	const tokenHash = await sha256HexStr(bearerToken);

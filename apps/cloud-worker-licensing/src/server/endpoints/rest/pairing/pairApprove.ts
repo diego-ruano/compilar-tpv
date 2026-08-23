@@ -2,6 +2,7 @@ import type { Client } from "@libsql/client/web";
 
 import { buildTenantContext } from "../../../middleware/withTenant";
 import { createDbClient } from "../../../db/clients";
+import { tieneRol } from "../../../../lib/deviceAuth";
 import { json, unauthorized, serverError } from "../../../utils/response";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
@@ -29,30 +30,6 @@ function isAuthError(msg: string): boolean {
 	);
 }
 
-async function isTpvDevice(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<boolean> {
-	const r = await dbCentral.execute({
-		sql: `
-			SELECT role, revoked_at_ms
-			FROM devices
-			WHERE tenant_id=? AND device_id=?
-			LIMIT 1
-		`,
-		args: [tenantId, deviceId],
-	});
-
-	const row = r.rows?.[0] as any | undefined;
-	if (!row) return false;
-
-	const revoked = row.revoked_at_ms == null ? 0 : Number(row.revoked_at_ms);
-	if (revoked !== 0) return false;
-
-	return String(row.role || "").trim().toLowerCase() === "tpv";
-}
-
 function rowsAffected(result: any): number {
 	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
 }
@@ -72,7 +49,7 @@ export async function handlePairApprove(
 			return unauthorized(req, "invalid_token_claims");
 		}
 
-		const okTpv = await isTpvDevice(dbCentral, tenantId, deviceId);
+		const okTpv = await tieneRol(dbCentral, tenantId, deviceId, "tpv");
 		if (!okTpv) return unauthorized(req, "forbidden_not_tpv");
 
 		const body = await readJsonSafe(req, { pairCode: "" });
