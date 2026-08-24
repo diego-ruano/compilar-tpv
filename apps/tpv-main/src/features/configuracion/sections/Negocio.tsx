@@ -247,13 +247,9 @@ export function Negocio({
                     </Field>
                 </div>
 
-                <div className="mt-4 flex items-center justify-between gap-2">
-                    <div className="text-xs text-fg-muted invis">
-                        {bizHydrated
-                            ? "Persistencia en DB local (SQLite)"
-                            : "Cargando configuración..."}
-                    </div>
-
+                {/* `justify-end` y no `justify-between`: al quitar el texto de la izquierda, un
+                    `between` con un solo hijo lo empujaría al principio de la fila. */}
+                <div className="mt-4 flex items-center justify-end gap-2">
                     <div className="flex items-center gap-2">
                         <GhostButton
                             onClick={onReset}
