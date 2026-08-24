@@ -19,6 +19,7 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 
 use tpv_application::use_cases::avisos as uc_avisos;
+use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
@@ -29,6 +30,14 @@ use crate::AppState;
 
 /// Cada cuánto se revalida la licencia contra el worker mientras la app está abierta.
 const LICENCIA_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+/// Cada cuánto se mira si la caja lleva demasiado sin cerrarse. Una hora sobra: el aviso no es
+/// urgente, sólo tiene que llegar antes de que se acumulen dos servicios sin arqueo.
+const CAJA_ABIERTA_INTERVAL_SECS: u64 = 60 * 60;
+
+/// A partir de cuántas horas abiertas se avisa. 20 h deja pasar una jornada larga —un bar que abre
+/// a las 09:00 y cierra a las 03:00 sigue dentro— y salta cuando de verdad se ha saltado un cierre.
+const CAJA_ABIERTA_HORAS: i64 = 20;
 
 /// Cada cuánto se buscan tareas vencidas y reservas próximas.
 const AVISOS_INTERVAL_SECS: u64 = 10 * 60;
@@ -86,6 +95,15 @@ pub(crate) fn catalogo() -> Vec<Job> {
             retardo_inicial: Duration::from_secs(60),
             requiere: Requiere::MainConBd,
             ejecutar: tarea(avisos),
+        },
+        Job {
+            nombre: "caja_sin_cerrar",
+            cada: Duration::from_secs(CAJA_ABIERTA_INTERVAL_SECS),
+            // Pronto tras arrancar: si el bar cerró anoche sin hacer el arqueo, el aviso tiene que
+            // estar ahí cuando abran, no una hora después.
+            retardo_inicial: Duration::from_secs(120),
+            requiere: Requiere::MainConBd,
+            ejecutar: tarea(caja_sin_cerrar),
         },
         Job {
             nombre: "stock_negativo",
@@ -225,6 +243,21 @@ async fn stock_negativo(app: AppHandle) -> Result<(), String> {
     let notifier = state.notifier().await?;
 
     uc_stock_alertas::escanear(repo.as_ref(), notifier.as_ref()).await?;
+    Ok(())
+}
+
+/// Avisa si la caja lleva demasiado tiempo sin cerrarse (CUENTA-06).
+///
+/// **Avisa, no cierra.** Un cierre automático se inventaría el recuento: tendría el esperado pero
+/// nadie habría abierto el cajón, y guardaría un arqueo con descuadre cero que no ha comprobado
+/// nadie. Lo único honrado que puede hacer el programa es dar un toque.
+async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.cierre_caja_repo().await?;
+    let notifier = state.notifier().await?;
+
+    uc_cierre_caja::avisar_si_lleva_mucho_abierta(repo.as_ref(), notifier.as_ref(), CAJA_ABIERTA_HORAS)
+        .await?;
     Ok(())
 }
 

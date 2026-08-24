@@ -66,6 +66,13 @@ pub trait CierreCajaRepository: Send + Sync {
     /// un gate no puede hacer.
     async fn fecha_apunte(&self, tipo: ApunteCaja, id: &str) -> AppResult<Option<String>>;
 
+    /// Cuántas horas lleva abierto el periodo actual. Sin ningún cierre previo cuenta desde el
+    /// cobro más antiguo; si no hay ni cobros, 0 (no hay nada que cerrar).
+    ///
+    /// Lo calcula la BD y no el llamante: es una resta de fechas, y hacerla en Rust obligaría a
+    /// parsear el texto de la fecha para acabar en el mismo número.
+    async fn horas_periodo_abierto(&self) -> AppResult<i64>;
+
     /// Fecha del corte vigente: la del último cierre no reabierto, o `None` si no hay ninguno.
     ///
     /// Es lo que consulta el gate `periodo_cerrado` antes de dejar tocar un cobro o un gasto. Va

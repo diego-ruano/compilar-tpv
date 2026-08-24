@@ -8,8 +8,11 @@ use tpv_domain::cierre_caja::{
     calcular, total_recuento, validar, Denominacion, UMBRAL_DESCUADRE_POR_DEFECTO,
 };
 
+use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
 use crate::error::{AppError, AppResult};
 use crate::ports::cierre_caja::{CierreCajaRepository, CierreNuevo};
+use crate::ports::notificaciones::Notifier;
 
 fn a_denoms(input: &[tpv_contracts::cierre_caja::DenominacionInput]) -> Vec<Denominacion> {
     input
@@ -177,4 +180,63 @@ pub async fn exigir_periodo_abierto(
         ));
     }
     Ok(())
+}
+
+/// Clave de deduplicación del aviso de caja sin cerrar. Sólo puede haber uno activo a la vez.
+pub const CLAVE_CAJA_ABIERTA: &str = "caja_sin_cerrar";
+
+/// Avisa si la caja lleva demasiado tiempo sin cerrarse.
+///
+/// **Avisa; no cierra.** Un cierre automático tendría el esperado pero no el contado —nadie habría
+/// abierto el cajón—, así que guardaría un arqueo con descuadre cero que nadie ha comprobado: un
+/// dato falso que parece bueno. Lo único que puede hacer el programa es dar un toque.
+///
+/// Va como job y no "al arrancar" porque el runner sólo corre con la app abierta, que es
+/// exactamente cuando el aviso sirve, y así también salta en un TPV que lleva días encendido.
+///
+/// Idempotente por la clave de dedupe: mientras el aviso siga activo no se emite otro, por muchas
+/// pasadas que haga el motor. Al cerrar la caja se resuelve solo.
+pub async fn avisar_si_lleva_mucho_abierta(
+    repo: &dyn CierreCajaRepository,
+    notifier: &dyn Notifier,
+    horas_limite: i64,
+) -> AppResult<bool> {
+    let horas_abierta = repo.horas_periodo_abierto().await?;
+    if horas_abierta < horas_limite {
+        // Nada que avisar. Y si había un aviso de antes, se cierra: la caja ya se cerró.
+        let _ = notifier.resolver_por_clave(CLAVE_CAJA_ABIERTA).await;
+        return Ok(false);
+    }
+
+    let desde = repo
+        .ultimo_cierre()
+        .await?
+        .map(|c| c.fecha_hora)
+        .unwrap_or_else(|| "el principio".to_string());
+
+    let dias = horas_abierta / 24;
+    let cuanto = if dias >= 1 {
+        format!("{dias} día(s)")
+    } else {
+        format!("{horas_abierta} horas")
+    };
+
+    let _ = notifier
+        .emitir(NuevaNotificacion {
+            tipo: "caja_sin_cerrar".to_string(),
+            severidad: Severidad::Aviso,
+            titulo: format!("La caja lleva {cuanto} sin cerrarse"),
+            cuerpo: Some(format!(
+                "El periodo abierto empezó el {desde}. Si pasan varios servicios sin cerrar, el \
+                 descuadre deja de poder atribuirse a nadie."
+            )),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_cuentas".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_CAJA_ABIERTA.to_string()),
+            expira_en: None,
+        })
+        .await;
+
+    Ok(true)
 }

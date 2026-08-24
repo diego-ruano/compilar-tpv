@@ -17,9 +17,12 @@
 
 | ID | Sev | Título | Ubicación |
 |----|-----|--------|-----------|
-| CUENTA-06 | 🔵 | No hay **cierre/arqueo de caja** persistido (fondo inicial, sesiones, descuadre) | dominio |
 
-### CUENTA-06 🔵 Sin arqueo de caja
-No existe el concepto de sesión de caja: no se guarda fondo inicial, ni cierre, ni descuadre entre
-lo contado y lo registrado. **Aplazado por decisión del responsable**, a revisar en el futuro; es
-una funcionalidad nueva, no un bug.
+
+> **CUENTA-06 cerrado (2026-08-25).** Ya existe el cierre de caja: `Cierres_Caja` +
+> `Cierre_Denominaciones`, con fondo heredado, esperado, contado, descuadre, retirada y el doble
+> recuento por denominación. El periodo va de un cierre al siguiente —sin fechas de por medio, que es
+> lo único que sabe partir la jornada de un bar— y lo que se deja en el cajón es el fondo del
+> siguiente, así que se encadenan solos. Cerrar bloquea los cobros y gastos de ese periodo
+> (`periodo_cerrado`), y reabrir queda registrado. Diseño y porqués en
+> [PLAN_CIERRE_CAJA.md](../../PLAN_CIERRE_CAJA.md).

@@ -61,6 +61,11 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Ok(None)
     }
 
+    /// Siempre 0: el aviso de caja sin cerrar lo da la Main, que es la única que puede cerrarla.
+    async fn horas_periodo_abierto(&self) -> AppResult<i64> {
+        Ok(0)
+    }
+
     // ── De aquí abajo, cosas de la Main ──────────────────────────────────────────
 
     async fn ventas_efectivo_desde(&self, _desde: Option<&str>) -> AppResult<f64> {

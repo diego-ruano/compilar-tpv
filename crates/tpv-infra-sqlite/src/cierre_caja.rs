@@ -118,6 +118,33 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         })
     }
 
+    async fn horas_periodo_abierto(&self) -> AppResult<i64> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                r#"
+                WITH inicio AS (
+                  SELECT COALESCE(
+                    (SELECT MAX(Fecha_Hora) FROM Cierres_Caja WHERE Reabierto_En IS NULL),
+                    (SELECT MIN(Fecha_Hora) FROM Pagos)
+                  ) AS desde
+                )
+                SELECT CASE
+                         WHEN desde IS NULL THEN 0
+                         ELSE CAST((julianday('now','localtime') - julianday(desde)) * 24 AS INTEGER)
+                       END
+                FROM inicio;
+                "#,
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(match rows.next().await.map_err(db_err)? {
+            Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0).max(0),
+            None => 0,
+        })
+    }
+
     async fn fecha_apunte(&self, tipo: ApunteCaja, id: &str) -> AppResult<Option<String>> {
         let db = self.db.read().await;
         let sql = match tipo {

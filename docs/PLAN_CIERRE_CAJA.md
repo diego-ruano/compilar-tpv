@@ -1,8 +1,9 @@
 # Cierre de caja (arqueo) — diseño e implementación
 
-> **Estado: DISEÑO CERRADO, sin implementar.** Cierra **CUENTA-06** («no existe el concepto de sesión
-> de caja: no se guarda fondo inicial, ni cierre, ni descuadre»).
-> **Escrito:** 2026-08-24 · **Decisiones acordadas con el responsable** (ver §0).
+> **Estado: IMPLEMENTADO** (2026-08-25). Cierra **CUENTA-06** («no existía el concepto de sesión de
+> caja: no se guardaba fondo inicial, ni cierre, ni descuadre»). Lo que sigue es el **diseño** —el
+> modelo, las decisiones y sus porqués—, no una lista de tareas pendientes.
+> **Escrito:** 2026-08-24 · **Implementado:** 2026-08-25 · **Decisiones acordadas con el responsable** (ver §0).
 > **Ámbito:** el arqueo del cajón y el bloqueo del periodo cerrado. Toca `cuentas`, y de refilón
 > `configuracion` (un ajuste) e impresión (un documento nuevo).
 
@@ -14,7 +15,7 @@
 |---|---|---|
 | **Cuándo se cierra** | **Botón manual**, sin automatismo | El periodo va del cierre anterior al siguiente. **No hay fechas de por medio**: una cena de 23:30 a 01:30 es un servicio, no dos días |
 | **Quién** | Cualquiera… pero ver la fila siguiente | Cerrar es rutina diaria, no un acto de autoridad |
-| **Desde dónde** | **Sólo Main.** Y toda la sección Cuentas pasa a ser **sólo rol administrador** | La Handy deja de ver Cuentas entera (ver §1.1: contradice una respuesta anterior, y manda ésta) |
+| **Desde dónde** | **Escribe sólo la Main.** Y toda la sección Cuentas pasa a ser **sólo rol administrador** | La Handy **mira** la caja y el histórico, pero no cambia nada (§1.1) |
 | **Efecto de cerrar** | **Bloquea** los cobros y gastos del periodo; **reabrir puede cualquiera** y queda registrado | El bloqueo es un badén, no una puerta: hace que tocar el pasado sea deliberado y deje rastro |
 | **Qué se cuadra** | **Sólo el efectivo** | El cajón es lo único que se puede perder físicamente. La tarjeta la cuadra el banco |
 | **Qué entra en el esperado** | Fondo heredado **+ cobros en efectivo**. **Nada de gastos** | De esta caja no se paga a proveedores ni a nómina. Ver §1.2 |
@@ -41,23 +42,36 @@ Dos razones, y la segunda es la definitiva:
    ([CLAUDE.md §10](../CLAUDE.md)) sólo corre con la app abierta, y el TPV se apaga al cerrar el bar.
    Un «cerrar todos los días a las 3:00» **no se ejecutaría nunca** en un local que apaga a las 2:30.
 
-**La red contra el olvido** es un aviso, no una acción: al arrancar, si el periodo abierto lleva más
-de N horas, se propone cerrar. Avisa; no cierra solo.
+**La red contra el olvido** es un aviso, no una acción. Va como **job** (`caja_sin_cerrar`, cada
+hora, umbral 20 h): si el periodo lleva demasiado abierto, emite una notificación deduplicada que se
+resuelve sola al cerrar. Como job y no "al arrancar" porque el runner sólo corre con la app abierta
+—que es justo cuando el aviso sirve— y así también salta en un TPV que lleva días encendido. Avisa;
+no cierra solo.
+
+Las 20 horas dejan pasar una jornada larga (un bar que abre a las 09:00 y cierra a las 03:00 sigue
+dentro) y saltan cuando de verdad se ha saltado un cierre.
 
 ---
 
 ## 1. Dos cosas que conviene leer antes de escribir código
 
-### 1.1 «Cuentas sólo Main» contradice una respuesta anterior, y manda ésta
+### 1.1 La Handy MIRA la caja; no la toca
 
-En la ronda de preguntas se dijo que **la Handy podría ver el cierre** sin modificarlo. Después se
-decidió que **toda la sección Cuentas es sólo rol administrador y sólo desde la Main**. La segunda
-decisión es posterior y más amplia, así que gana: **la Handy no ve Cuentas, ni el cierre.**
+Decisión final (2026-08-25), que corrige lo que este plan decía antes. Toda la sección Cuentas es
+**sólo del rol administrador**, y desde la **Handy es de sólo lectura**: puede ver los ingresos, los
+gastos y el histórico de arqueos, pero no cambiar nada. Cerrar y reabrir viven únicamente en la Main,
+donde están el cajón, el recuento y la impresora.
 
-Consecuencia práctica: **no hace falta implementar nada del cierre en el worker**, y por tanto
-tampoco casos de contrato de lectura para él. Lo único que el worker necesita saber es **rechazar**
-las escrituras de cuentas que le lleguen de una Handy, igual que ya hace con el cobro
-(`cobro_solo_en_main`).
+Consecuencias en el código:
+
+- El worker **sí** implementa las lecturas de cierres (tres rutas `GET /v1/cuentas/cierres…`), y sus
+  casos de contrato de lectura entran con ellas.
+- Las escrituras de caja se rechazan **dos veces**: en el adaptador HTTP de la Handy y otra vez en el
+  worker (`soloLaMainEscribeCaja`). No es redundancia por gusto — una regla que sólo vive en el
+  cliente es una sugerencia, y esconder el botón deja la puerta abierta a cualquiera con el token de
+  un Handy.
+- El rol se comprueba en el menú y en la **ruta**, porque un menú no es un permiso: sin el candado de
+  ruta bastaba con escribir la URL.
 
 ### 1.2 Sin gastos, el esperado es más simple — y eso hay que decirlo en la pantalla
 
@@ -207,10 +221,10 @@ Un **documento interno**, no un ticket de venta. Consecuencias concretas:
 
 - **Dominio (Rust puro).** El grueso: aritmética del recuento, el descuadre con sus signos, el
   redondeo y la regla del umbral. Sin BD, como `ticketMath`.
-- **Contrato de escritura.** `cierre_caja.confirmar` y `cierre_caja.reabrir`… **sólo si el worker
-  llega a implementarlos**. Como la Handy no toca Cuentas (§1.1), lo correcto es **no** implementarlo
-  en el worker y anotarlo en `tests/contract/cobertura.json` con ese motivo. Un comando que sólo
-  existe en un lado no tiene contrato que fijar.
+- **Contrato de lectura.** Las tres lecturas de cierres (último, listado y detalle) tienen su caso:
+  la Handy las usa de verdad, así que tienen dos implementaciones que pueden divergir.
+- **Contrato de escritura.** No aplica: cerrar y reabrir sólo existen en la Main. Un comando que sólo
+  está en un lado no tiene contrato que fijar.
 - **Impresión.** Golden del ESC/POS en `printing/tests.rs` y su gemelo en `test/ticketMath.test.ts`.
 - **El gate.** Un test por cada uno de los cuatro comandos de cuentas: con periodo cerrado devuelven
   `periodo_cerrado` y **no tocan la fila**.
@@ -228,21 +242,29 @@ Un **documento interno**, no un ticket de venta. Consecuencias concretas:
 5. Contratos (`pnpm generate-types`) y comandos Tauri.
 6. Pantalla: el modal de cuatro pasos y el histórico; retirar «Entrada de Caja» como pantalla suelta.
 7. Impresión + espejo + goldens.
-8. El aviso de arranque (periodo abierto desde hace demasiado).
-9. **Cuentas sólo admin y sólo Main** — ver §8, va aparte.
+8. El aviso de caja sin cerrar. Va como **job** (`jobs/registro.rs`) y no "al arrancar": el runner
+   sólo corre con la app abierta —que es justo cuando el aviso sirve— y así también salta en un TPV
+   que lleva días encendido. Avisa por notificación, deduplicada, y se resuelve sola al cerrar.
+9. **Cuentas sólo admin, y sólo escribe la Main** — ver §8.
 
 ---
 
-## 8. Lo que va aparte: Cuentas sólo administrador y sólo Main
+## 8. Cuentas: sólo administrador, y sólo escribe la Main
 
 Es una decisión del mismo día pero **no es parte del cierre**: afecta a la sección entera y se puede
 hacer antes o después. Tres piezas:
 
 1. **Rol.** El gate por rol de administrador en la ruta del frontend y, sobre todo, **en los comandos
    Tauri** — un gate que sólo vive en la UI no es un gate.
-2. **Modo.** Rechazar en modo Handy. En el worker, devolver el error de dominio que corresponda a
-   cualquier escritura de cuentas, igual que ya se hace con `cobro_solo_en_main`.
-3. **Navegación.** Que Cuentas no aparezca en el menú de una Handy ni de un usuario sin el rol.
+2. **Modo.** La Handy lee pero no escribe: rechazo en el adaptador HTTP y otra vez en el worker
+   (`soloLaMainEscribeCaja`, hermano de `cobro_solo_en_main`).
+3. **Navegación.** Cuentas no aparece en el menú de quien no es administrador, y la ruta lo
+   comprueba también.
+
+**Lo que este candado NO cubre, dicho claro:** el worker autentica por **dispositivo**, no por
+usuario, así que no puede saber qué persona está mirando la Handy. El filtro por rol es de la
+aplicación. Cerrarlo del todo pediría que el token llevara el usuario de la sesión, y eso es otro
+trabajo.
 
 ---
 

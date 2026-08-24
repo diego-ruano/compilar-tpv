@@ -4,8 +4,11 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-24).** De los ~136 hallazgos del análisis original **quedan 5 abiertos, y
-> ninguno es un bug**. El 24/08 se montó el harness de contrato de **lectura**, se llevó su cobertura
+> **Estado (2026-08-25).** De los ~136 hallazgos del análisis original **quedan 4 abiertos, y
+> ninguno es un bug**. El 25/08 se cerró **CUENTA-06** implementando el cierre de caja (ver
+> [PLAN_CIERRE_CAJA.md](../PLAN_CIERRE_CAJA.md)).
+>
+> **Antes (2026-08-24).** El 24/08 se montó el harness de contrato de **lectura**, se llevó su cobertura
 > al **100 % (61/61, sin exclusiones)** y se corrigió **todo** lo que destapó: **trece divergencias
 > reales** Main↔Handy que la revisión a mano de agosto no había visto. Cierra **CLI-05** y
 > **STAT-07**. Detalle en [tests/contract/README.md](../../tests/contract/README.md).
@@ -82,8 +85,7 @@ Ningún bug. Lo que queda son decisiones de producto aplazadas.
 | T5 Arquitectura | 1 | ARCH-01 🟠 (lo poco que queda excluido del harness de escritura, y el WASM de fondo) |
 | D11 Login | 1 | LOGIN-04 🔵 (keyspace del PIN) |
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
-| D3 Cuentas | 1 | CUENTA-06 🔵 (arqueo de caja) |
-| D1 Mesas · D2 Venta rápida · D4 Inventario · D5 Clientes · D6 Reservas · D7 Proveedores · D8 Tareas · D9 Trabajadores · D10 Configuración · D12 Estadísticas · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
+| D1 Mesas · D2 Venta rápida · D3 Cuentas · D4 Inventario · D5 Clientes · D6 Reservas · D7 Proveedores · D8 Tareas · D9 Trabajadores · D10 Configuración · D12 Estadísticas · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento
 

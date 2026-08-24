@@ -582,6 +582,53 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   punto de los miles y un espacio duro que el papel no lleva, y `String.slice` cuenta unidades
   UTF-16, así que parte un emoji por la mitad donde Rust cuenta caracteres.
 
+---
+
+## 12. Cierre de caja (arqueo)
+
+El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
+[docs/PLAN_CIERRE_CAJA.md](docs/PLAN_CIERRE_CAJA.md).
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Aritmética | `crates/tpv-domain/src/cierre_caja.rs` | Recuento, esperado, descuadre, umbral del motivo. Sin BD ni reloj: aquí están los tests |
+| Persistencia | `crates/tpv-infra-sqlite/src/cierre_caja.rs` | `Cierres_Caja` + `Cierre_Denominaciones` |
+| Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | Preparar, confirmar, reabrir, el gate y el aviso |
+| Pantalla | `src/features/cuentas/CierreCajaModal.tsx` | El modal y el contador; el histórico vive en `pages/Cuentas.tsx` |
+| Papel | `src-tauri/src/printing.rs::build_arqueo` | Documento interno |
+| Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si lleva >20 h abierta |
+
+### Reglas
+
+- **El periodo va de un cierre al siguiente, sin fechas de por medio.** El calendario no sabe partir
+  la jornada de un bar: una cena de 23:30 a 01:30 es un servicio, no dos días.
+- **Lo dispara un botón, nunca un reloj.** Un cierre automático tendría el esperado pero no el
+  contado —nadie habría abierto el cajón— y guardaría un arqueo con descuadre 0 que no ha comprobado
+  nadie: un dato falso que parece bueno. Y una hora programada no se ejecutaría jamás en un equipo
+  que se apaga al cerrar el bar. La red contra el olvido es un **aviso**, no una acción.
+- **Lo que se deja en el cajón es el fondo del cierre siguiente.** Así se encadenan los periodos sin
+  que nadie declare dos veces el mismo número. El fondo sólo se pregunta en el primer cierre; en los
+  demás no se acepta de la entrada, o cualquiera podría reescribir el punto de partida a posteriori y
+  hacer desaparecer un descuadre.
+- **Los importes se guardan, no se derivan al leer.** Un arqueo es la foto de lo que se vio esa
+  noche. Si mañana se reabre el periodo y se corrige un cobro, el arqueo de ayer no puede cambiar
+  solo: dejaría de explicar por qué faltaban 20 €.
+- **Sólo se cuadra el efectivo, y sólo con ventas.** De esta caja no se paga a proveedores ni a
+  nómina, así que `esperado = fondo + cobros en efectivo`. El hueco que eso deja —sacar dinero para
+  otra cosa sale como que falta— **se tapa diciéndolo en la pantalla**, no con código.
+- **Cerrar bloquea el periodo; reabrir deja rastro.** El bloqueo no tiene columna: se deduce
+  comparando la fecha del apunte con el último cierre no reabierto, que es un estado menos que
+  mantener sincronizado. El gate vive en los comandos, no en la UI, y la fecha se lee de la BD y no
+  de la entrada: en un borrado sólo llega el id.
+- **El papel es un documento interno.** No gasta número de ticket (dejaría huecos en la serie de
+  ventas), no lleva desglose de IVA y no abre el cajón, que ya está abierto.
+- **La Handy mira, no toca.** Sus escrituras de caja se rechazan dos veces —adaptador HTTP y worker
+  (`soloLaMainEscribeCaja`)—, porque una regla que sólo vive en el cliente es una sugerencia.
+
+---
+
+## 13. Notas del generador de tickets
+
 Los tests del generador están en `src-tauri/src/printing/tests.rs`, e incluyen un mini-intérprete
 ESC/POS: separa texto de comandos y **falla si encuentra un byte que no es ninguna de las dos
 cosas**, que es la única forma de comprobar el trabajo de impresión sin una impresora delante.
