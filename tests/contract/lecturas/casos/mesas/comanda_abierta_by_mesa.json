@@ -1,0 +1,16 @@
+{
+  "descripcion": "La comanda abierta de una mesa (o null). Se pide con el id con prefijo de UI ('db-mesa-...') porque es como lo manda el frontend, y los dos lados tienen que quitarlo igual. La mesa tiene ademas una comanda anterior ya pagada: si un lado no filtrara por Estado, devolveria la vieja.",
+  "lectura": "mesas.comanda_abierta_by_mesa",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-1', 'Salon', '[0,0,400,0,400,300,0,300]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-2', 'Terraza');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 10, 20, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-2', 'zona-1', '2', 2, 200, 20, 'circle', 80, 80, 40);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-3', 'zona-2', 'T1', 6, 10, 10, 'rect', 150, 90);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda) VALUES ('com-vieja', 'MESA', 'mesa-1', '2026-05-09 12:00:00', '2026-05-09 13:00:00', 'Pagada', 25.0);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-actual', 'MESA', 'mesa-1', '2026-05-10 12:00:00', 'Abierta', 12.0);"
+  ],
+  "entrada": {
+    "id_mesa": "db-mesa-mesa-1"
+  }
+}

@@ -473,7 +473,12 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 SELECT
                   dc.ID_Detalle,
                   dc.ID_Producto,
-                  COALESCE(p.Nombre,'Producto') AS Nombre,
+                  -- El nombre congelado en la linea manda sobre el del catalogo, igual que en las
+                  -- otras dos consultas de lineas (mesas y la comanda de barra). Esta se lo saltaba,
+                  -- asi que un producto retirado del catalogo salia como "Producto" en ver-ticket y
+                  -- con su nombre de verdad en la comanda: el mismo articulo con dos nombres segun
+                  -- por donde se mirase.
+                  COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
                   COALESCE(dc.Cantidad,1) AS Cantidad,
                   COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
                   COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,

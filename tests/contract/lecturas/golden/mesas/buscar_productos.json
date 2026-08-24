@@ -1,0 +1,9 @@
+[
+  {
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-croquetas",
+    "Nombre": "Croquetas",
+    "Precio_Venta": 7.5,
+    "Ruta_Imagen": null
+  }
+]

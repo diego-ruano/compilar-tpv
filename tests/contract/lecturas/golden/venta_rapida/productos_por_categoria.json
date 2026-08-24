@@ -1,0 +1,24 @@
+[
+  {
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-croquetas",
+    "Nombre": "Croquetas",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 7.5,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  },
+  {
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-tortilla",
+    "Nombre": "Tortilla de patatas",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 9.0,
+    "Ruta_Imagen": "/img/tortilla.png",
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  }
+]

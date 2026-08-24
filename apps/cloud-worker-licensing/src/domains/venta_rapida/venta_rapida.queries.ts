@@ -264,7 +264,9 @@ export async function detallesVerTicket(
 		sql: `
 			SELECT
 				dc.ID_Detalle AS ID_Detalle,
-				dc.ID_Producto AS ID_Producto,
+				-- Mismo motivo que en lineas(): en el DTO ID_Producto es String, no Option, y un
+				-- producto retirado del catalogo deja la columna a NULL.
+				COALESCE(dc.ID_Producto, '') AS ID_Producto,
 				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				COALESCE(dc.Cantidad,1) AS Cantidad,
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,

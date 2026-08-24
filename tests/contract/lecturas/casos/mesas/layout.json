@@ -1,0 +1,13 @@
+{
+  "descripcion": "El plano del salon: zonas con su poligono y sus mesas dentro. Es la lectura que dibuja la pantalla principal del TPV. Contrasta el anidamiento (cada mesa cuelga de su zona), los ids con prefijo de UI ('db-zona-' y 'db-mesa-'), los valores por defecto de una mesa sin medidas y una zona SIN mesas, que tiene que salir igual con la lista vacia y no desaparecer.",
+  "lectura": "mesas.layout",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Room_Points) VALUES ('zona-1', 'Salon', '[0,0,400,0,400,300,0,300]');",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-2', 'Terraza');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 10, 20, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height, Radius) VALUES ('mesa-2', 'zona-1', '2', 2, 200, 20, 'circle', 80, 80, 40);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-3', 'zona-2', 'T1', 6, 10, 10, 'rect', 150, 90);",
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-vacia', 'Reservado');"
+  ],
+  "entrada": {}
+}

@@ -29,12 +29,26 @@ import {
 	listProductosByCategoria,
 	resumen as resumenInventario,
 } from "../src/domains/inventario/inventario.queries";
-import { lineas as lineasMesa } from "../src/domains/mesas/mesas.queries";
+import {
+	categorias as categoriasMesa,
+	comandaAbiertaByMesa,
+	kitchenList,
+	lineas as lineasMesa,
+	loadLayout,
+	mesasMetaAll,
+	mesasOcupadas,
+	productosByCategoria as productosByCategoriaMesa,
+	searchProductos as searchProductosMesa,
+} from "../src/domains/mesas/mesas.queries";
 import { getMisTareas, getTareasAdmin } from "../src/domains/tareas/tareas.queries";
 import { asignacionesSemana } from "../src/domains/trabajadores/trabajadores.queries";
 import {
+	categorias as categoriasBarra,
+	detallesVerTicket,
 	lineas as lineasBarra,
 	listComandas,
+	productosByCategoria as productosByCategoriaBarra,
+	searchProductos as searchProductosBarra,
 } from "../src/domains/venta_rapida/venta_rapida.queries";
 
 // Casos del harness. Los goldens los bendice Rust (lado canónico). Añadir uno: crear el fixture,
@@ -74,6 +88,30 @@ import casoHorSemana from "../../../tests/contract/lecturas/casos/trabajadores/a
 import goldenHorSemana from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana.json";
 import casoHorSemanaDef from "../../../tests/contract/lecturas/casos/trabajadores/asignaciones_semana_con_predeterminado.json";
 import goldenHorSemanaDef from "../../../tests/contract/lecturas/golden/trabajadores/asignaciones_semana_con_predeterminado.json";
+import casoMesaOcupadas from "../../../tests/contract/lecturas/casos/mesas/ocupadas.json";
+import goldenMesaOcupadas from "../../../tests/contract/lecturas/golden/mesas/ocupadas.json";
+import casoMesaLayout from "../../../tests/contract/lecturas/casos/mesas/layout.json";
+import goldenMesaLayout from "../../../tests/contract/lecturas/golden/mesas/layout.json";
+import casoMesaMetaAll from "../../../tests/contract/lecturas/casos/mesas/meta_all.json";
+import goldenMesaMetaAll from "../../../tests/contract/lecturas/golden/mesas/meta_all.json";
+import casoMesaComandaAbierta from "../../../tests/contract/lecturas/casos/mesas/comanda_abierta_by_mesa.json";
+import goldenMesaComandaAbierta from "../../../tests/contract/lecturas/golden/mesas/comanda_abierta_by_mesa.json";
+import casoMesaCategorias from "../../../tests/contract/lecturas/casos/mesas/categorias.json";
+import goldenMesaCategorias from "../../../tests/contract/lecturas/golden/mesas/categorias.json";
+import casoMesaProductos from "../../../tests/contract/lecturas/casos/mesas/productos_por_categoria.json";
+import goldenMesaProductos from "../../../tests/contract/lecturas/golden/mesas/productos_por_categoria.json";
+import casoMesaBuscar from "../../../tests/contract/lecturas/casos/mesas/buscar_productos.json";
+import goldenMesaBuscar from "../../../tests/contract/lecturas/golden/mesas/buscar_productos.json";
+import casoMesaCocina from "../../../tests/contract/lecturas/casos/mesas/cocina_pendiente.json";
+import goldenMesaCocina from "../../../tests/contract/lecturas/golden/mesas/cocina_pendiente.json";
+import casoVrCategorias from "../../../tests/contract/lecturas/casos/venta_rapida/categorias.json";
+import goldenVrCategorias from "../../../tests/contract/lecturas/golden/venta_rapida/categorias.json";
+import casoVrProductos from "../../../tests/contract/lecturas/casos/venta_rapida/productos_por_categoria.json";
+import goldenVrProductos from "../../../tests/contract/lecturas/golden/venta_rapida/productos_por_categoria.json";
+import casoVrBuscar from "../../../tests/contract/lecturas/casos/venta_rapida/buscar_productos.json";
+import goldenVrBuscar from "../../../tests/contract/lecturas/golden/venta_rapida/buscar_productos.json";
+import casoVrVerTicket from "../../../tests/contract/lecturas/casos/venta_rapida/detalles_ver_ticket.json";
+import goldenVrVerTicket from "../../../tests/contract/lecturas/golden/venta_rapida/detalles_ver_ticket.json";
 
 const CASOS = [
 	{ nombre: "clientes_overview_reciente", caso: casoCliReciente, golden: goldenCliReciente },
@@ -104,6 +142,30 @@ const CASOS = [
 		nombre: "trabajadores_asignaciones_semana_con_predeterminado",
 		caso: casoHorSemanaDef,
 		golden: goldenHorSemanaDef,
+	},
+	{ nombre: "mesas_ocupadas", caso: casoMesaOcupadas, golden: goldenMesaOcupadas },
+	{ nombre: "mesas_layout", caso: casoMesaLayout, golden: goldenMesaLayout },
+	{ nombre: "mesas_meta_all", caso: casoMesaMetaAll, golden: goldenMesaMetaAll },
+	{
+		nombre: "mesas_comanda_abierta_by_mesa",
+		caso: casoMesaComandaAbierta,
+		golden: goldenMesaComandaAbierta,
+	},
+	{ nombre: "mesas_categorias", caso: casoMesaCategorias, golden: goldenMesaCategorias },
+	{ nombre: "mesas_productos_por_categoria", caso: casoMesaProductos, golden: goldenMesaProductos },
+	{ nombre: "mesas_buscar_productos", caso: casoMesaBuscar, golden: goldenMesaBuscar },
+	{ nombre: "mesas_cocina_pendiente", caso: casoMesaCocina, golden: goldenMesaCocina },
+	{ nombre: "venta_rapida_categorias", caso: casoVrCategorias, golden: goldenVrCategorias },
+	{
+		nombre: "venta_rapida_productos_por_categoria",
+		caso: casoVrProductos,
+		golden: goldenVrProductos,
+	},
+	{ nombre: "venta_rapida_buscar_productos", caso: casoVrBuscar, golden: goldenVrBuscar },
+	{
+		nombre: "venta_rapida_detalles_ver_ticket",
+		caso: casoVrVerTicket,
+		golden: goldenVrVerTicket,
 	},
 ];
 
@@ -187,10 +249,34 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return resumenInventario(db, e.limit);
 		case "mesas.lineas_comanda":
 			return lineasMesa(db, e.id_comanda);
+		case "mesas.ocupadas":
+			return mesasOcupadas(db);
+		case "mesas.layout":
+			return loadLayout(db);
+		case "mesas.meta_all":
+			return mesasMetaAll(db);
+		case "mesas.comanda_abierta_by_mesa":
+			return comandaAbiertaByMesa(db, e.id_mesa);
+		case "mesas.categorias":
+			return categoriasMesa(db);
+		case "mesas.productos_por_categoria":
+			return productosByCategoriaMesa(db, e.id_categoria);
+		case "mesas.buscar_productos":
+			return searchProductosMesa(db, e.query);
+		case "mesas.cocina_pendiente":
+			return kitchenList(db);
 		case "venta_rapida.comandas_barra":
 			return listComandas(db, e.include_pagadas, e.limit);
 		case "venta_rapida.lineas_comanda":
 			return lineasBarra(db, e.id_comanda);
+		case "venta_rapida.categorias":
+			return categoriasBarra(db);
+		case "venta_rapida.productos_por_categoria":
+			return productosByCategoriaBarra(db, e.id_categoria);
+		case "venta_rapida.buscar_productos":
+			return searchProductosBarra(db, e.query, e.limit);
+		case "venta_rapida.detalles_ver_ticket":
+			return detallesVerTicket(db, e.id_comanda);
 		case "tareas.admin":
 			return getTareasAdmin(db);
 		case "tareas.mias":

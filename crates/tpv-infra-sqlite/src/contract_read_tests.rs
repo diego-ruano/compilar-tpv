@@ -200,8 +200,20 @@ lecturas_de_contrato! {
     inventario__productos_por_categoria,
     inventario__resumen,
     mesas__lineas_comanda,
+    mesas__ocupadas,
+    mesas__layout,
+    mesas__meta_all,
+    mesas__comanda_abierta_by_mesa,
+    mesas__categorias,
+    mesas__productos_por_categoria,
+    mesas__buscar_productos,
+    mesas__cocina_pendiente,
     venta_rapida__comandas_barra,
     venta_rapida__lineas_comanda,
+    venta_rapida__categorias,
+    venta_rapida__productos_por_categoria,
+    venta_rapida__buscar_productos,
+    venta_rapida__detalles_ver_ticket,
     tareas__admin,
     tareas__mias,
     trabajadores__asignaciones_semana,
@@ -272,6 +284,85 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
         "mesas.ocupadas" => {
             let repo = SqliteMesasRepository::new(db.clone());
             let r = repo.get_mesas_ocupadas().await.expect("mesas ocupadas");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.layout" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo.load_layout().await.expect("layout");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.meta_all" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo.mesas_meta_all().await.expect("meta all");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.comanda_abierta_by_mesa" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo
+                .get_comanda_abierta_by_mesa(&s(&e["id_mesa"]))
+                .await
+                .expect("comanda abierta by mesa");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.categorias" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo
+                .list_categorias_vendibles()
+                .await
+                .expect("categorias vendibles mesas");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.productos_por_categoria" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = MesasRepository::list_productos_by_categoria(&repo, &s(&e["id_categoria"]))
+                .await
+                .expect("productos por categoria mesas");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.buscar_productos" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo
+                .search_productos_by_nombre(s(&e["query"]))
+                .await
+                .expect("buscar productos mesas");
+            serde_json::to_value(r).unwrap()
+        }
+        "mesas.cocina_pendiente" => {
+            let repo = SqliteMesasRepository::new(db.clone());
+            let r = repo
+                .kitchen_list_today_pending()
+                .await
+                .expect("cocina pendiente");
+            serde_json::to_value(r).unwrap()
+        }
+        "venta_rapida.categorias" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let r = VentaRapidaRepository::list_categorias_vendibles(&repo)
+                .await
+                .expect("categorias vendibles vr");
+            serde_json::to_value(r).unwrap()
+        }
+        "venta_rapida.productos_por_categoria" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let r = VentaRapidaRepository::list_productos_by_categoria(&repo, &s(&e["id_categoria"]))
+                .await
+                .expect("productos por categoria vr");
+            serde_json::to_value(r).unwrap()
+        }
+        "venta_rapida.buscar_productos" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let r = repo
+                .search_productos(s(&e["query"]), e["limit"].as_i64().unwrap_or(200))
+                .await
+                .expect("buscar productos vr");
+            serde_json::to_value(r).unwrap()
+        }
+        "venta_rapida.detalles_ver_ticket" => {
+            let repo = SqliteVentaRapidaRepository::new(db.clone());
+            let r = repo
+                .get_detalles_ver_ticket(&s(&e["id_comanda"]))
+                .await
+                .expect("detalles ver ticket");
             serde_json::to_value(r).unwrap()
         }
         "venta_rapida.comandas_barra" => {

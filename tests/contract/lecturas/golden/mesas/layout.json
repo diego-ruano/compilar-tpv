@@ -1,0 +1,73 @@
+[
+  {
+    "id": "db-zona-zona-1",
+    "name": "Salon",
+    "room": {
+      "points": [
+        0.0,
+        0.0,
+        400.0,
+        0.0,
+        400.0,
+        300.0,
+        0.0,
+        300.0
+      ],
+      "type": "poly"
+    },
+    "tables": [
+      {
+        "height": 70,
+        "id": "db-mesa-mesa-1",
+        "name": "1",
+        "radius": null,
+        "seats": 4,
+        "shape": "rect",
+        "width": 120,
+        "x": 10,
+        "y": 20
+      },
+      {
+        "height": 80,
+        "id": "db-mesa-mesa-2",
+        "name": "2",
+        "radius": 40,
+        "seats": 2,
+        "shape": "circle",
+        "width": 80,
+        "x": 200,
+        "y": 20
+      }
+    ]
+  },
+  {
+    "id": "db-zona-zona-2",
+    "name": "Terraza",
+    "room": {
+      "points": [],
+      "type": "poly"
+    },
+    "tables": [
+      {
+        "height": 90,
+        "id": "db-mesa-mesa-3",
+        "name": "T1",
+        "radius": null,
+        "seats": 6,
+        "shape": "rect",
+        "width": 150,
+        "x": 10,
+        "y": 10
+      }
+    ]
+  },
+  {
+    "id": "db-zona-zona-vacia",
+    "name": "Reservado",
+    "room": {
+      "points": [],
+      "type": "poly"
+    },
+    "tables": []
+  }
+]

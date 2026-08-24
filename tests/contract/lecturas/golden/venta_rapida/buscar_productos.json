@@ -1,0 +1,35 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-sin-precio",
+    "Nombre": "Agua del grifo",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 0.0,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  },
+  {
+    "ID_Categoria": "cat-barra",
+    "ID_Producto": "prod-cerveza",
+    "Nombre": "Cerveza",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 3.0,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  },
+  {
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-croquetas",
+    "Nombre": "Croquetas",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 7.5,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Unidad_Medida": null
+  }
+]

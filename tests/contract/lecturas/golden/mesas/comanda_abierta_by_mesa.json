@@ -1,0 +1,10 @@
+{
+  "estado": "Abierta",
+  "fecha_hora_apertura": "2026-05-10 12:00:00",
+  "fecha_hora_cierre": null,
+  "id_comanda": "com-actual",
+  "id_mesa": "mesa-1",
+  "id_reserva": null,
+  "id_trabajador": null,
+  "total_comanda": 12.0
+}

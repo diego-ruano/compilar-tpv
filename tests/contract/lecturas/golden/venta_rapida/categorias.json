@@ -1,0 +1,16 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "Nombre": "Bebidas",
+    "Nombre_Imagen": null,
+    "Ruta_Imagen": null,
+    "Vendible": 1
+  },
+  {
+    "ID_Categoria": "cat-cocina",
+    "Nombre": "Platos",
+    "Nombre_Imagen": null,
+    "Ruta_Imagen": "/img/platos.png",
+    "Vendible": 1
+  }
+]

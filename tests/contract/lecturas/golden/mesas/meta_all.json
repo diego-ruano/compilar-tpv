@@ -1,0 +1,11 @@
+{
+  "mesa-1": {
+    "estado": "PENDIENTE",
+    "idComanda": "com-1",
+    "id_comanda": "com-1",
+    "ocupada": true,
+    "pendientesCocina": 1,
+    "pendientesPago": 2,
+    "totalPendiente": 25.5
+  }
+}
