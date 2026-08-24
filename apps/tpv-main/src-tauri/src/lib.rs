@@ -25,6 +25,7 @@ use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     avisos::AvisosScanRepository,
     reconciliacion::ReconciliacionRepository,
+    cierre_caja::CierreCajaRepository,
     clientes::ClientesRepository, configuracion::ConfiguracionRepository,
     cuentas::CuentasRepository, inventario::InventarioRepository, jobs::JobsStateRepository,
     login::LoginRepository,
@@ -37,7 +38,7 @@ use tpv_application::ports::{
     trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
 };
 use tpv_infra_http::{
-    clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
+    cierre_caja::HttpCierreCajaRepository, clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
     cuentas::HttpCuentasRepository, inventario::HttpInventarioRepository,
     login::HttpLoginRepository, mesas::HttpMesasRepository,
     notificaciones::HttpNotificacionesRepository, proveedores::HttpProveedoresRepository,
@@ -50,6 +51,7 @@ use tpv_infra_licensing::PairingAdapter;
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
     reconciliacion::SqliteReconciliacionRepository,
+    cierre_caja::SqliteCierreCajaRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
     jobs::SqliteJobsStateRepository,
@@ -460,6 +462,12 @@ impl AppState {
         CuentasRepository,
         SqliteCuentasRepository,
         HttpCuentasRepository
+    );
+    repo_accessor!(
+        cierre_caja_repo,
+        CierreCajaRepository,
+        SqliteCierreCajaRepository,
+        HttpCierreCajaRepository
     );
     repo_accessor!(
         inventario_repo,
@@ -1844,6 +1852,11 @@ pub fn run() {
             commands::cuentas::cuentas_delete_gasto,
             commands::cuentas::cuentas_update_pago,
             commands::cuentas::cuentas_delete_pago,
+            commands::cierre_caja::cierre_preparar,
+            commands::cierre_caja::cierre_confirmar,
+            commands::cierre_caja::cierre_listar,
+            commands::cierre_caja::cierre_detalle,
+            commands::cierre_caja::cierre_reabrir,
             commands::cuentas::cuentas_ticket_para_reimprimir,
             // clientes (migrado a arquitectura hexagonal — commands/clientes.rs)
             commands::clientes::clientes_get_overview,

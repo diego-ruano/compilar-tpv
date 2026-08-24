@@ -6,7 +6,11 @@ import { z } from "zod";
 import type { Env } from "../../env";
 import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
-import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import {
+	soloLaMainEscribeCaja,
+	tenantAuth,
+	type TenantVars,
+} from "../../middleware/tenant";
 
 import * as cmd from "./cuentas.commands";
 import * as q from "./cuentas.queries";
@@ -97,6 +101,8 @@ cuentasRoutes.get("/resumen", async (c) => {
 });
 
 cuentasRoutes.post("/gastos", async (c) => {
+	const veto = await soloLaMainEscribeCaja(c);
+	if (veto) return veto;
 	const p = await parseBody(c, S.createGastoSchema);
 	if (!p.ok) return p.res;
 	const id = await apply(c, cmd.createGasto(p.data));
@@ -104,6 +110,8 @@ cuentasRoutes.post("/gastos", async (c) => {
 });
 
 cuentasRoutes.put("/gastos/:id", async (c) => {
+	const veto = await soloLaMainEscribeCaja(c);
+	if (veto) return veto;
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_gasto invalido");
 	const p = await parseBody(c, S.updateGastoSchema);
@@ -113,6 +121,8 @@ cuentasRoutes.put("/gastos/:id", async (c) => {
 });
 
 cuentasRoutes.delete("/gastos/:id", async (c) => {
+	const veto = await soloLaMainEscribeCaja(c);
+	if (veto) return veto;
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_gasto invalido");
 	await apply(c, cmd.deleteGasto(id));
@@ -120,6 +130,8 @@ cuentasRoutes.delete("/gastos/:id", async (c) => {
 });
 
 cuentasRoutes.put("/pagos/:id", async (c) => {
+	const veto = await soloLaMainEscribeCaja(c);
+	if (veto) return veto;
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_pago invalido");
 	const p = await parseBody(c, S.updatePagoSchema);
@@ -129,8 +141,40 @@ cuentasRoutes.put("/pagos/:id", async (c) => {
 });
 
 cuentasRoutes.delete("/pagos/:id", async (c) => {
+	const veto = await soloLaMainEscribeCaja(c);
+	if (veto) return veto;
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_pago invalido");
 	await apply(c, cmd.deletePago(id));
 	return c.json({ ok: true });
+});
+
+/* =========================================================
+   Cierre de caja (arqueo) — SOLO LECTURA desde la Handy (CUENTA-06)
+   Cerrar y reabrir viven en la Main: aquí no hay ruta que los haga.
+========================================================= */
+
+// Va ANTES de "/cierres/:id" a propósito: si no, "ultimo" entraría por el parámetro y se buscaría un
+// cierre con ese id.
+cuentasRoutes.get("/cierres/ultimo", async (c) => {
+	return c.json(
+		await tenantQuery(c.env, c.get("tenantId"), (db) => q.ultimoCierre(db)),
+	);
+});
+
+cuentasRoutes.get("/cierres", async (c) => {
+	const limite = Number(c.req.query("limite") ?? 50);
+	return c.json(
+		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+			q.listarCierres(db, Number.isFinite(limite) ? limite : 50),
+		),
+	);
+});
+
+cuentasRoutes.get("/cierres/:id", async (c) => {
+	const id = parseId(c.req.param("id"));
+	if (id == null) return badRequest(c, "id_cierre invalido");
+	return c.json(
+		await tenantQuery(c.env, c.get("tenantId"), (db) => q.detalleCierre(db, id)),
+	);
 });

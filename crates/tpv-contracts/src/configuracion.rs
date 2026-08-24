@@ -14,6 +14,8 @@ pub struct BusinessSettings {
     pub cif: String,
     pub mensaje_footer: String,
     pub iva_percent: f64,
+    /// A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
+    pub umbral_descuadre: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

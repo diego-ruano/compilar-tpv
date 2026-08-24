@@ -7,10 +7,10 @@
       "id_trabajador": "t-cam",
       "nombre": "Ana Gomez",
       "puntualidad": {
-        "entrada": "09:00",
-        "minutos_retraso": 30,
-        "programado": "08:30",
-        "puntual": false
+        "entrada": "00:00",
+        "minutos_retraso": 0,
+        "programado": "00:00",
+        "puntual": true
       },
       "rol": "Camarero",
       "tareas_asignadas": 2,
@@ -35,7 +35,12 @@
       "horas_trabajadas": 0.0,
       "id_trabajador": "t-lim",
       "nombre": "Cira Diaz",
-      "puntualidad": null,
+      "puntualidad": {
+        "entrada": "09:00",
+        "minutos_retraso": 540,
+        "programado": "00:00",
+        "puntual": false
+      },
       "rol": "Limpieza",
       "tareas_asignadas": 1,
       "tareas_finalizadas": 0

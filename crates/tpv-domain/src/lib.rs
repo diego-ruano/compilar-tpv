@@ -8,6 +8,7 @@
 //! Durante la migración, cada módulo de negocio (mesas, venta_rapida, inventario,
 //! caja, etc.) irá publicando aquí sus structs y validaciones puras.
 
+pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;

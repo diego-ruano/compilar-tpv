@@ -21,9 +21,12 @@ import { enElHub } from "./helpers/hub";
 
 import { form as clienteForm, overview } from "../src/domains/clientes/clientes.queries";
 import {
+	detalleCierre,
 	entradas,
+	listarCierres,
 	resumen as resumenCuentas,
 	salidas,
+	ultimoCierre,
 } from "../src/domains/cuentas/cuentas.queries";
 import {
 	alergenosProducto,
@@ -118,6 +121,12 @@ import casoCtaEntradasPag from "../../../tests/contract/lecturas/casos/cuentas/e
 import goldenCtaEntradasPag from "../../../tests/contract/lecturas/golden/cuentas/entradas_busqueda_paginada.json";
 import casoCtaSalidas from "../../../tests/contract/lecturas/casos/cuentas/salidas.json";
 import goldenCtaSalidas from "../../../tests/contract/lecturas/golden/cuentas/salidas.json";
+import casoCtaCierreUltimo from "../../../tests/contract/lecturas/casos/cuentas/cierre_ultimo.json";
+import goldenCtaCierreUltimo from "../../../tests/contract/lecturas/golden/cuentas/cierre_ultimo.json";
+import casoCtaCierreListar from "../../../tests/contract/lecturas/casos/cuentas/cierre_listar.json";
+import goldenCtaCierreListar from "../../../tests/contract/lecturas/golden/cuentas/cierre_listar.json";
+import casoCtaCierreDetalle from "../../../tests/contract/lecturas/casos/cuentas/cierre_detalle.json";
+import goldenCtaCierreDetalle from "../../../tests/contract/lecturas/golden/cuentas/cierre_detalle.json";
 import casoCtaResumen from "../../../tests/contract/lecturas/casos/cuentas/resumen.json";
 import goldenCtaResumen from "../../../tests/contract/lecturas/golden/cuentas/resumen.json";
 import casoInvProductos from "../../../tests/contract/lecturas/casos/inventario/productos_por_categoria.json";
@@ -249,6 +258,9 @@ const CASOS = [
 	},
 	{ nombre: "cuentas_salidas", caso: casoCtaSalidas, golden: goldenCtaSalidas },
 	{ nombre: "cuentas_resumen", caso: casoCtaResumen, golden: goldenCtaResumen },
+	{ nombre: "cuentas_cierre_ultimo", caso: casoCtaCierreUltimo, golden: goldenCtaCierreUltimo },
+	{ nombre: "cuentas_cierre_listar", caso: casoCtaCierreListar, golden: goldenCtaCierreListar },
+	{ nombre: "cuentas_cierre_detalle", caso: casoCtaCierreDetalle, golden: goldenCtaCierreDetalle },
 	{
 		nombre: "inventario_productos_por_categoria",
 		caso: casoInvProductos,
@@ -421,6 +433,12 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return entradas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page ?? null, e.page_size ?? null);
 		case "cuentas.salidas":
 			return salidas(db, e.del ?? null, e.al ?? null, e.q ?? null, e.page ?? null, e.page_size ?? null);
+		case "cuentas.cierre_ultimo":
+			return ultimoCierre(db);
+		case "cuentas.cierre_listar":
+			return listarCierres(db, e.limite ?? 50);
+		case "cuentas.cierre_detalle":
+			return detalleCierre(db, e.id_cierre);
 		case "cuentas.resumen":
 			return resumenCuentas(db, e.del ?? null, e.al ?? null, e.q ?? null);
 		case "inventario.productos_por_categoria":

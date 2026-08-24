@@ -2,7 +2,13 @@
 
 import type { Client } from "@libsql/client/web";
 
-import type { EntradaDto, ResumenCajaDto, SalidaDto } from "@tpv/contracts";
+import type {
+	CierreDto,
+	CierreResumenDto,
+	EntradaDto,
+	ResumenCajaDto,
+	SalidaDto,
+} from "@tpv/contracts";
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -192,4 +198,106 @@ export async function resumen(
 		count_entradas: Number(e.ce ?? 0),
 		count_salidas: Number(s.cs ?? 0),
 	};
+}
+
+/* =========================================================
+   Cierre de caja (arqueo) — SOLO LECTURA (CUENTA-06)
+   La Handy mira el histórico; cerrar y reabrir es de la Main (`soloLaMainEscribeCaja`).
+========================================================= */
+
+// El nombre de quien cerró se resuelve aquí y no en la UI: la fila sólo guarda el id, y un LEFT JOIN
+// evita que borrar a un usuario haga desaparecer su arqueo.
+const CIERRE_COLS = `
+	c.ID_Cierre AS id_cierre,
+	c.Fecha_Hora AS fecha_hora,
+	c.ID_Usuario AS id_usuario,
+	NULLIF(TRIM(COALESCE(u.Nombre,'') || CASE WHEN COALESCE(u.Apellido,'')='' THEN '' ELSE ' ' || u.Apellido END), '') AS usuario_nombre,
+	c.Fondo_Inicial AS fondo_inicial,
+	c.Ventas_Efectivo AS ventas_efectivo,
+	c.Esperado AS esperado,
+	c.Contado AS contado,
+	c.Descuadre AS descuadre,
+	c.Dejado AS dejado,
+	c.Retirado AS retirado,
+	c.Motivo AS motivo,
+	c.Reabierto_En AS reabierto_en,
+	c.Reabierto_Por AS reabierto_por
+`;
+
+/** Adjunta el desglose por denominación, separado en los dos momentos del recuento. */
+async function conDenominaciones(db: Client, fila: any): Promise<CierreDto> {
+	const rs = await db.execute({
+		sql: `
+			SELECT Momento AS momento, Valor AS valor, Unidades AS unidades
+			FROM Cierre_Denominaciones
+			WHERE ID_Cierre = ?1
+			ORDER BY Momento ASC, Valor ASC;
+		`,
+		args: [String(fila.id_cierre ?? "")],
+	});
+	const contado: any[] = [];
+	const dejado: any[] = [];
+	for (const r of rows(rs)) {
+		const item = { valor: Number(r.valor ?? 0), unidades: Number(r.unidades ?? 0) };
+		if (String(r.momento ?? "") === "DEJADO") dejado.push(item);
+		else contado.push(item);
+	}
+	return { ...fila, contado_denoms: contado, dejado_denoms: dejado } as CierreDto;
+}
+
+/**
+ * El último cierre **no reabierto**, que es el que marca dónde empieza el periodo actual.
+ *
+ * Un cierre reabierto deja de contar como corte, así que el "último" no es el de fecha más alta
+ * sino el más reciente que siga cerrado.
+ */
+export async function ultimoCierre(db: Client): Promise<CierreDto | null> {
+	const rs = await db.execute(`
+		SELECT ${CIERRE_COLS}
+		FROM Cierres_Caja c
+		LEFT JOIN Usuarios u ON u.ID_Usuario = c.ID_Usuario
+		WHERE c.Reabierto_En IS NULL
+		ORDER BY c.Fecha_Hora DESC, c.ID_Cierre DESC
+		LIMIT 1;
+	`);
+	const fila = rows(rs)[0];
+	return fila ? conDenominaciones(db, fila) : null;
+}
+
+export async function listarCierres(db: Client, limite: number): Promise<CierreResumenDto[]> {
+	const rs = await db.execute({
+		sql: `
+			SELECT
+				c.ID_Cierre AS id_cierre,
+				c.Fecha_Hora AS fecha_hora,
+				NULLIF(TRIM(COALESCE(u.Nombre,'') || CASE WHEN COALESCE(u.Apellido,'')='' THEN '' ELSE ' ' || u.Apellido END), '') AS usuario_nombre,
+				c.Esperado AS esperado,
+				c.Contado AS contado,
+				c.Descuadre AS descuadre,
+				c.Retirado AS retirado,
+				c.Motivo AS motivo,
+				c.Reabierto_En AS reabierto_en
+			FROM Cierres_Caja c
+			LEFT JOIN Usuarios u ON u.ID_Usuario = c.ID_Usuario
+			ORDER BY c.Fecha_Hora DESC, c.ID_Cierre DESC
+			LIMIT ?1;
+		`,
+		args: [limite > 0 ? limite : 50],
+	});
+	return rows(rs) as CierreResumenDto[];
+}
+
+export async function detalleCierre(db: Client, idCierre: string): Promise<CierreDto | null> {
+	const rs = await db.execute({
+		sql: `
+			SELECT ${CIERRE_COLS}
+			FROM Cierres_Caja c
+			LEFT JOIN Usuarios u ON u.ID_Usuario = c.ID_Usuario
+			WHERE c.ID_Cierre = ?1
+			LIMIT 1;
+		`,
+		args: [idCierre],
+	});
+	const fila = rows(rs)[0];
+	return fila ? conDenominaciones(db, fila) : null;
 }

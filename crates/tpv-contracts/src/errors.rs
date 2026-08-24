@@ -58,6 +58,10 @@ pub enum ErrorCode {
     LicenseNotFound,
     /// PIN incorrecto en login/fichaje.
     InvalidPin,
+    /// El cobro o el gasto que se quiere tocar pertenece a un periodo de caja ya cerrado
+    /// (CUENTA-06). La UI ramifica por él para ofrecer "reabrir el cierre" en vez de un mensaje
+    /// genérico: sin código propio, el usuario sólo vería "no se puede" y no sabría por qué.
+    PeriodoCerrado,
 }
 
 impl ErrorCode {
@@ -76,6 +80,7 @@ impl ErrorCode {
             ErrorCode::LicenseExpired => "La licencia ha caducado",
             ErrorCode::LicenseNotFound => "No hay una licencia activa",
             ErrorCode::InvalidPin => "PIN incorrecto",
+            ErrorCode::PeriodoCerrado => "El periodo de caja está cerrado",
         }
     }
 
@@ -95,6 +100,7 @@ impl ErrorCode {
             ErrorCode::LicenseExpired => "license_expired",
             ErrorCode::LicenseNotFound => "license_not_found",
             ErrorCode::InvalidPin => "invalid_pin",
+            ErrorCode::PeriodoCerrado => "periodo_cerrado",
         }
     }
 
@@ -121,6 +127,7 @@ impl ErrorCode {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
+            ErrorCode::PeriodoCerrado,
         ]
         .into_iter()
         .find(|c| c.wire() == s)

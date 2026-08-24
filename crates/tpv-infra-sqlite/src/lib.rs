@@ -40,6 +40,7 @@ pub mod migrations;
 // `Reader`/`Writer` de `db.rs`.
 pub mod auth;
 pub mod avisos;
+pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;

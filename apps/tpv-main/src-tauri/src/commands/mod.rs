@@ -2,6 +2,7 @@
 //! construyen el repositorio de infraestructura e invocan el caso de uso de
 //! `tpv-application`. No contienen SQL ni reglas de negocio.
 
+pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod email_config;

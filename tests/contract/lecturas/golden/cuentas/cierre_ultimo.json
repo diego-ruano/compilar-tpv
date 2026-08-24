@@ -1,0 +1,40 @@
+{
+  "contado": 520.5,
+  "contado_denoms": [
+    {
+      "unidades": 41,
+      "valor": 0.5
+    },
+    {
+      "unidades": 5,
+      "valor": 20.0
+    },
+    {
+      "unidades": 8,
+      "valor": 50.0
+    }
+  ],
+  "dejado": 150.0,
+  "dejado_denoms": [
+    {
+      "unidades": 5,
+      "valor": 10.0
+    },
+    {
+      "unidades": 5,
+      "valor": 20.0
+    }
+  ],
+  "descuadre": 0.0,
+  "esperado": 520.5,
+  "fecha_hora": "2026-05-10 23:45:00",
+  "fondo_inicial": 100.0,
+  "id_cierre": "cierre-vigente",
+  "id_usuario": "u-1",
+  "motivo": null,
+  "reabierto_en": null,
+  "reabierto_por": null,
+  "retirado": 370.5,
+  "usuario_nombre": "Ana Gomez",
+  "ventas_efectivo": 420.5
+}

@@ -1,8 +1,8 @@
 {
-  "descripcion": "Los datos del negocio (fila unica). Es lo que encabeza cada ticket, asi que un valor que no viaje igual sale impreso. Se cambian todos los campos respecto al default para que ninguno pase por casualidad.",
+  "descripcion": "Los datos del negocio (fila unica). Es lo que encabeza cada ticket, asi que un valor que no viaje igual sale impreso. Se cambian todos los campos respecto al default para que ninguno pase por casualidad. Incluye el umbral del descuadre del cierre de caja (CUENTA-06), cambiado del defecto para que no pase por casualidad.",
   "lectura": "configuracion.business",
   "seed": [
-    "UPDATE Business_Settings SET Business_Name='Bar Paco', Direccion='Calle Mayor 1', Telefono='961111111', CIF='B12345678', Mensaje_Footer='Hasta pronto', IVA_Percent=21 WHERE ID=1;"
+    "UPDATE Business_Settings SET Business_Name='Bar Paco', Direccion='Calle Mayor 1', Telefono='961111111', CIF='B12345678', Mensaje_Footer='Hasta pronto', IVA_Percent=21, Umbral_Descuadre=12.5 WHERE ID=1;"
   ],
   "entrada": {},
   "omitir": [

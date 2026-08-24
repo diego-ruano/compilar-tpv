@@ -2,6 +2,8 @@
 
 use tauri::State;
 
+use tpv_application::ports::cierre_caja::ApunteCaja;
+use tpv_application::use_cases::cierre_caja as cierre_uc;
 use tpv_application::use_cases::cuentas as uc;
 use tpv_contracts::cuentas::{
     CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
@@ -46,11 +48,33 @@ pub async fn cuentas_create_gasto(
     Ok(uc::create_gasto(repo.as_ref(), args).await?)
 }
 
+/// Gate del cierre de caja (CUENTA-06): un cobro o un gasto de un periodo ya cerrado no se toca.
+///
+/// Vive aquí, delante de los cuatro comandos que modifican caja, y no en la pantalla: un candado que
+/// sólo está en la interfaz no es un candado. La fecha se lee de la BD y no se acepta de la entrada,
+/// porque en un borrado sólo llega el id y porque fiarse de la fecha que manda quien quiere borrar
+/// es no tener gate.
+///
+/// Si el apunte no existe se deja pasar: no es cosa de este gate decidir eso, y el comando de abajo
+/// ya devuelve `false` cuando no encuentra la fila.
+async fn exigir_periodo_abierto(
+    state: &State<'_, AppState>,
+    tipo: ApunteCaja,
+    id: &str,
+) -> Result<(), AppErrorDto> {
+    let repo = state.cierre_caja_repo().await?;
+    if let Some(fecha) = repo.fecha_apunte(tipo, id).await? {
+        cierre_uc::exigir_periodo_abierto(repo.as_ref(), &fecha).await?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn cuentas_update_gasto(
     state: State<'_, AppState>,
     args: UpdateGastoInput,
 ) -> Result<bool, AppErrorDto> {
+    exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_gasto(repo.as_ref(), args).await?)
 }
@@ -60,6 +84,7 @@ pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
 ) -> Result<bool, AppErrorDto> {
+    exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_gasto(repo.as_ref(), args).await?)
 }
@@ -69,6 +94,7 @@ pub async fn cuentas_update_pago(
     state: State<'_, AppState>,
     args: UpdatePagoInput,
 ) -> Result<bool, AppErrorDto> {
+    exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_pago(repo.as_ref(), args).await?)
 }
@@ -78,6 +104,7 @@ pub async fn cuentas_delete_pago(
     state: State<'_, AppState>,
     args: DeletePagoInput,
 ) -> Result<bool, AppErrorDto> {
+    exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_pago(repo.as_ref(), args).await?)
 }

@@ -18,6 +18,7 @@
 //! - los métodos de **barra** de `MesasRepository` (el worker los sirve bajo `venta_rapida`):
 //!   se implementan como error explícito `endpoint_no_disponible_en_handy`.
 
+pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;

@@ -1,0 +1,17 @@
+{
+  "descripcion": "El ultimo cierre NO REABIERTO, que es el que marca donde empieza el periodo actual y contra el que se comprueba si un apunte esta bloqueado. El seed pone un cierre posterior en pie y otro anterior ya reabierto: si un lado se quedara con el de fecha mas alta sin mirar Reabierto_En, el corte caeria en el sitio equivocado y se podrian editar cobros que estan cerrados. Trae ademas el desglose por denominacion y el nombre de quien cerro, resuelto por LEFT JOIN.",
+  "lectura": "cuentas.cierre_ultimo",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-cierre', 'RolCierreContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('u-1', 'rol-cierre', 'jefe@bar.com', 'h', 'Ana', 'Gomez');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('u-2', 'rol-cierre', 'otro@bar.com', 'h', 'Beto');",
+    "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario, Fondo_Inicial, Ventas_Efectivo, Esperado, Contado, Descuadre, Dejado, Retirado, Motivo, Reabierto_En, Reabierto_Por) VALUES ('cierre-reabierto', '2026-05-09 23:30:00', 'u-1', 100.0, 250.0, 350.0, 340.0, -10.0, 100.0, 240.0, 'faltaba un billete', '2026-05-10 09:00:00', 'u-2');",
+    "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario, Fondo_Inicial, Ventas_Efectivo, Esperado, Contado, Descuadre, Dejado, Retirado) VALUES ('cierre-vigente', '2026-05-10 23:45:00', 'u-1', 100.0, 420.5, 520.5, 520.5, 0.0, 150.0, 370.5);",
+    "INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades) VALUES ('cierre-vigente', 'CONTADO', 50.0, 8);",
+    "INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades) VALUES ('cierre-vigente', 'CONTADO', 20.0, 5);",
+    "INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades) VALUES ('cierre-vigente', 'CONTADO', 0.5, 41);",
+    "INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades) VALUES ('cierre-vigente', 'DEJADO', 20.0, 5);",
+    "INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades) VALUES ('cierre-vigente', 'DEJADO', 10.0, 5);"
+  ],
+  "entrada": {}
+}

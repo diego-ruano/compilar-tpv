@@ -10,6 +10,7 @@
 //! Regla: el dominio (`tpv-domain`) permanece puro; los tipos que se exponen a la UI
 //! se definen o se re-exportan aquí con la macro `#[derive(TS)]`.
 
+pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod errors;

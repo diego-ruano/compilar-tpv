@@ -49,6 +49,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value as Json};
 
+use tpv_application::ports::cierre_caja::CierreCajaRepository;
 use tpv_application::ports::clientes::ClientesRepository;
 use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
@@ -68,6 +69,7 @@ use tpv_contracts::stats::{
 };
 use tpv_domain::clientes::ClienteRanking;
 
+use crate::cierre_caja::SqliteCierreCajaRepository;
 use crate::clientes::SqliteClientesRepository;
 use crate::configuracion::SqliteConfiguracionRepository;
 use crate::contract_comun::{cell_eq, contract_dir, db_temporal, sembrar};
@@ -239,6 +241,9 @@ lecturas_de_contrato! {
     cuentas__entradas_busqueda_paginada,
     cuentas__salidas,
     cuentas__resumen,
+    cuentas__cierre_ultimo,
+    cuentas__cierre_listar,
+    cuentas__cierre_detalle,
     inventario__productos_por_categoria,
     inventario__resumen,
     mesas__lineas_comanda,
@@ -494,6 +499,26 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
         "configuracion.contact" => {
             let repo = SqliteConfiguracionRepository::new(db.clone());
             serde_json::to_value(repo.get_contact().await.expect("contact")).unwrap()
+        }
+        "cuentas.cierre_ultimo" => {
+            let repo = SqliteCierreCajaRepository::new(db.clone());
+            serde_json::to_value(repo.ultimo_cierre().await.expect("ultimo cierre")).unwrap()
+        }
+        "cuentas.cierre_listar" => {
+            let repo = SqliteCierreCajaRepository::new(db.clone());
+            let r = repo
+                .listar(e["limite"].as_i64().unwrap_or(50))
+                .await
+                .expect("listar cierres");
+            serde_json::to_value(r).unwrap()
+        }
+        "cuentas.cierre_detalle" => {
+            let repo = SqliteCierreCajaRepository::new(db.clone());
+            let r = repo
+                .detalle(&s(&e["id_cierre"]))
+                .await
+                .expect("detalle cierre");
+            serde_json::to_value(r).unwrap()
         }
         "inventario.categorias" => {
             let repo = SqliteInventarioRepository::new(db.clone());

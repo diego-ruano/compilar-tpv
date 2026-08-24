@@ -55,7 +55,8 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 			Telefono AS telefono,
 			CIF AS cif,
 			Mensaje_Footer AS mensaje_footer,
-			IVA_Percent AS iva_percent
+			IVA_Percent AS iva_percent,
+			Umbral_Descuadre AS umbral_descuadre
 		FROM Business_Settings
 		WHERE ID=1
 		LIMIT 1;
@@ -69,6 +70,8 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		cif: String(r.cif ?? ""),
 		mensaje_footer: String(r.mensaje_footer ?? "¡Gracias por su visita!"),
 		iva_percent: Number(r.iva_percent ?? 10),
+		// CUENTA-06: a partir de cuanto descuadre el cierre de caja pide un motivo escrito.
+		umbral_descuadre: Number(r.umbral_descuadre ?? 5),
 	};
 }
 

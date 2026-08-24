@@ -56,7 +56,11 @@ export type AsignacionRow = { ID_Asignacion: string, ID_Trabajador: string, Fech
 
 export type AsignacionUpdateInput = { id_asignacion: string, id_turno: string, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
-export type BusinessSettings = { business_name: string, logo_data_url: string | null, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, };
+export type BusinessSettings = { business_name: string, logo_data_url: string | null, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, 
+/**
+ * A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
+ */
+umbral_descuadre: number, };
 
 export type CategoriaInvDto = { ID_Categoria: string, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
 
@@ -69,6 +73,28 @@ export type CategoriaVendibleOut = { ID_Categoria: string, Nombre: string, Ruta_
 export type ChartSeriesF64Out = { labels: Array<string>, values: Array<number>, };
 
 export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
+
+/**
+ * Un cierre completo, con su doble recuento. Lo que pinta la ficha del histórico.
+ */
+export type CierreDto = { id_cierre: string, fecha_hora: string, id_usuario?: string, 
+/**
+ * Nombre de quien cerró, resuelto al leer (la fila sólo guarda el id).
+ */
+usuario_nombre?: string, fondo_inicial: number, ventas_efectivo: number, esperado: number, contado: number, descuadre: number, dejado: number, retirado: number, motivo?: string, 
+/**
+ * `None` = el cierre sigue en pie y su periodo está bloqueado.
+ */
+reabierto_en?: string, reabierto_por?: string, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, };
+
+export type CierreIdInput = { id_cierre: string, id_usuario?: string, };
+
+export type CierreListarArgs = { limite?: bigint, };
+
+/**
+ * Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha.
+ */
+export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: number, contado: number, descuadre: number, retirado: number, motivo?: string, reabierto_en?: string, };
 
 /**
  * Datos del formulario de edición de un cliente.
@@ -108,6 +134,13 @@ export type CompleteInitialSetupInput = { id_usuario: string, pin_actual: string
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
  */
 export type ConfigPatchInput = { patch: Record<string, unknown>, };
+
+export type ConfirmarCierreInput = { 
+/**
+ * Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
+ * ignora, para que nadie pueda reescribir el punto de partida a posteriori.
+ */
+fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, id_usuario?: string, };
 
 export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
 
@@ -152,6 +185,13 @@ export type DeleteGastoInput = { id_gasto: string, };
 
 export type DeletePagoInput = { id_pago: string, };
 
+/**
+ * Una moneda o billete del recuento.
+ */
+export type DenominacionDto = { valor: number, unidades: number, };
+
+export type DenominacionInput = { valor: number, unidades: number, };
+
 export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 export type DeviceSignB64Args = { payload: string, };
@@ -166,7 +206,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado";
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
@@ -441,6 +481,32 @@ export type PedidosGetPageInput = { limit: number, offset: number, search?: stri
  * el filtro (para saber si quedan más páginas).
  */
 export type PedidosPageDto = { pedidos: Array<PedidoProveedorDto>, total: number, };
+
+/**
+ * Lo que la pantalla necesita saber **antes** de que nadie cuente nada.
+ */
+export type PreparacionCierreDto = { 
+/**
+ * Desde cuándo está abierto el periodo. `None` = no hay ningún cierre previo, así que éste es
+ * el primero y la pantalla tiene que pedir además el fondo de partida.
+ */
+desde?: string, 
+/**
+ * `true` en el primer cierre de la vida del negocio.
+ */
+es_primer_cierre: boolean, 
+/**
+ * Lo que dejó el cierre anterior. En el primero es 0 y lo declara el usuario.
+ */
+fondo_inicial: number, ventas_efectivo: number, esperado: number, 
+/**
+ * Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
+ */
+comandas_abiertas: number, 
+/**
+ * A partir de cuánto descuadre hay que escribir un motivo.
+ */
+umbral_descuadre: number, };
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 

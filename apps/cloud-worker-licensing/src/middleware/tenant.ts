@@ -59,6 +59,27 @@ export async function soloLaMainCobra(c: any): Promise<Response | null> {
 	);
 }
 
+/**
+ * La caja se MIRA desde una Handy, pero no se toca (CUENTA-06).
+ *
+ * Ver los ingresos, los gastos y el histórico de arqueos desde la Handy es útil y no rompe nada.
+ * Cambiarlos, no: el cajón, el recuento y la impresora están en la Main, y un gasto corregido desde
+ * la sala sin ver el dinero es justo lo que hace que un arqueo deje de significar algo.
+ *
+ * Como con el cobro, quien lo hace cumplir es el servidor. Esconder el botón en la interfaz deja la
+ * puerta abierta a cualquiera con el token de un Handy.
+ *
+ * Devuelve la respuesta de rechazo, o `null` si puede seguir.
+ */
+export async function soloLaMainEscribeCaja(c: any): Promise<Response | null> {
+	const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (rol === "tpv") return null;
+	return c.json(
+		{ ok: false, code: "external", error: "caja_solo_en_main" },
+		403,
+	);
+}
+
 export const tenantAuth: MiddlewareHandler<{
 	Bindings: Env;
 	Variables: TenantVars;

@@ -112,6 +112,10 @@ export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 		const n = Number(patch.iva_percent);
 		if (Number.isFinite(n)) add("IVA_Percent", n);
 	}
+	if ("umbral_descuadre" in patch) {
+		const n = Number(patch.umbral_descuadre);
+		if (Number.isFinite(n)) add("Umbral_Descuadre", n);
+	}
 
 	if (sets.length) {
 		sets.push("Updated_At = datetime('now','localtime')");

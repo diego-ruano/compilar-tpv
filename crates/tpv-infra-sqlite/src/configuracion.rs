@@ -111,7 +111,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent FROM Business_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre FROM Business_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -130,6 +130,9 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             cif: v_string(g(4)?).unwrap_or_default(),
             mensaje_footer: v_string(g(5)?).unwrap_or_else(|| "¡Gracias por su visita!".to_string()),
             iva_percent: v_f64(g(6)?).unwrap_or(10.0),
+            umbral_descuadre: v_f64(g(7)?).unwrap_or(
+                tpv_domain::cierre_caja::UMBRAL_DESCUADRE_POR_DEFECTO,
+            ),
         })
     }
 
@@ -238,6 +241,12 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             if let Some(v) = patch_string(patch, "mensaje_footer") {
                 sets.push("Mensaje_Footer = ?");
                 args.push(Value::Text(v));
+            }
+        }
+        if patch_has(patch, "umbral_descuadre") {
+            if let Some(v) = patch_f64(patch, "umbral_descuadre") {
+                sets.push("Umbral_Descuadre = ?");
+                args.push(Value::Real(v));
             }
         }
         if patch_has(patch, "iva_percent") {

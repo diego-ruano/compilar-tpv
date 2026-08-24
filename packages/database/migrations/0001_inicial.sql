@@ -555,6 +555,54 @@ ON Cuentas_Gastos(Fecha);
 CREATE INDEX IF NOT EXISTS idx_cuentas_gastos_proveedor
 ON Cuentas_Gastos(ID_Proveedor);
 
+-- Cierre de caja (arqueo). CUENTA-06.
+--
+-- Un cierre es el corte del periodo: va del cierre ANTERIOR a este, sin fechas de por medio. Lo
+-- dispara un boton, no un reloj, porque el calendario no sabe partir la jornada de un bar -una cena
+-- de 23:30 a 01:30 es un servicio, no dos dias- y porque un cierre automatico se inventaria el
+-- recuento: tendria el esperado, pero nadie habria contado el cajon.
+--
+-- Los importes se GUARDAN, no se derivan al leer. Un arqueo es la foto de lo que se vio esa noche:
+-- si manana alguien reabre el periodo y corrige un cobro, el arqueo de ayer no puede cambiar solo,
+-- porque entonces dejaria de explicar por que faltaban 20 euros.
+--
+-- Lo que se DEJA en el cajon es el Fondo_Inicial del cierre siguiente: asi se encadenan los
+-- periodos sin que nadie tenga que declarar dos veces el mismo numero.
+CREATE TABLE IF NOT EXISTS Cierres_Caja (
+  ID_Cierre TEXT PRIMARY KEY,
+  Fecha_Hora DATETIME NOT NULL,
+  ID_Usuario TEXT,
+  Fondo_Inicial REAL NOT NULL DEFAULT 0,
+  Ventas_Efectivo REAL NOT NULL DEFAULT 0,
+  Esperado REAL NOT NULL DEFAULT 0,
+  Contado REAL NOT NULL DEFAULT 0,
+  Descuadre REAL NOT NULL DEFAULT 0,
+  Dejado REAL NOT NULL DEFAULT 0,
+  Retirado REAL NOT NULL DEFAULT 0,
+  Motivo TEXT,
+  Reabierto_En DATETIME,
+  Reabierto_Por TEXT,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
+  FOREIGN KEY (Reabierto_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
+);
+
+-- "Cual es el ultimo cierre" se pregunta al abrir la pantalla y en cada escritura de caja (el gate
+-- del periodo bloqueado), asi que es la consulta caliente de esta tabla.
+CREATE INDEX IF NOT EXISTS idx_cierres_fecha
+ON Cierres_Caja(Fecha_Hora DESC);
+
+-- El recuento por monedas y billetes, del dinero contado y del que se deja. Sin esto un descuadre
+-- pasado solo dice cuanto falto: "faltan 50" y "falta un billete de 50" no se investigan igual.
+CREATE TABLE IF NOT EXISTS Cierre_Denominaciones (
+  ID_Cierre TEXT NOT NULL,
+  Momento TEXT NOT NULL,
+  Valor REAL NOT NULL,
+  Unidades INTEGER NOT NULL,
+  PRIMARY KEY (ID_Cierre, Momento, Valor),
+  CHECK (Momento IN ('CONTADO','DEJADO')),
+  FOREIGN KEY (ID_Cierre) REFERENCES Cierres_Caja(ID_Cierre) ON DELETE CASCADE
+);
+
 /* =========================================================
    7. Tareas
 ========================================================= */
@@ -740,6 +788,10 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   CIF TEXT DEFAULT '',
   Mensaje_Footer TEXT DEFAULT '¡Gracias por su visita!',
   IVA_Percent REAL NOT NULL DEFAULT 10,
+  -- A partir de cuanto descuadre el cierre de caja exige escribir un motivo (CUENTA-06). 5 euros
+  -- deja pasar el centimo de redondeo y el error de vuelta sin dar la lata, y obliga a explicar lo
+  -- que ya es dinero de verdad. Cada negocio lo ajusta.
+  Umbral_Descuadre REAL NOT NULL DEFAULT 5,
   Updated_At TEXT DEFAULT (datetime('now','localtime'))
 );
 

@@ -5,5 +5,6 @@
   "iva_percent": 21.0,
   "logo_data_url": null,
   "mensaje_footer": "Hasta pronto",
-  "telefono": "961111111"
+  "telefono": "961111111",
+  "umbral_descuadre": 12.5
 }
