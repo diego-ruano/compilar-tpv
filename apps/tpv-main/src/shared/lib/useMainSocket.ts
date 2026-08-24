@@ -256,7 +256,11 @@ export function useMainSocket() {
 						}
 					}
 				} catch (e) {
+					// No es ruido de red: los cambios YA estaban descargados y no se han podido
+					// escribir en la BD local. Este dispositivo deja de converger hasta que se
+					// arregle, así que tiene que verse fuera de la consola de quien lo esté mirando.
 					console.warn("sync_apply_changes falló:", e);
+					captureException(e, { fase: "sync_apply_changes" });
 				}
 			});
 		}
@@ -721,9 +725,21 @@ export function useMainSocket() {
 					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
 					void catchUpThenLive();
 					void subirLoPendiente(socket);
+					// El drenado a R2 estuvo dos meses fallando en silencio (device-proof) y sólo se
+					// vio porque alguien miró la consola: las fotos no llegaban a las Handy y nada
+					// lo decía. Un fallo aquí se reporta.
 					void invoke<string>("images_drain_pending")
-						.then((r) => { if (r && r !== "vacio" && r !== "sin_modo") console.log("[images_drain/hello_ok]", r); })
-						.catch((e) => console.error("[images_drain/hello_ok] error:", e));
+						.then((r) => {
+							if (!r || r === "vacio" || r === "sin_modo") return;
+							console.log("[images_drain/hello_ok]", r);
+							if (r.includes("error=")) {
+								captureException(new Error("images_drain_con_errores"), { resultado: r });
+							}
+						})
+						.catch((e) => {
+							console.error("[images_drain/hello_ok] error:", e);
+							captureException(e, { fase: "images_drain_pending" });
+						});
 					// Solo el outbox: es lo que pertenece a esta conexión. La subida de imágenes a R2
 					// va por HTTP y no necesita el socket, así que su red de seguridad periódica es
 					// el job `imagenes` (jobs/registro.rs); aquí se queda el intento del `hello_ok`,

@@ -16,6 +16,7 @@
 import type { Client } from "@libsql/client/web";
 
 import { verifyJwt, verifyDeviceProofOrThrow, type AuthClaims } from "./auth";
+import { reportarRechazoDeDispositivo } from "../../observability/axiom";
 
 export type { AuthClaims };
 
@@ -42,7 +43,20 @@ export async function buildTenantContext(
 		? new Uint8Array(await req.clone().arrayBuffer())
 		: new Uint8Array();
 
-	await verifyDeviceProofOrThrow(req, dbCentral, claims, token, rawBody);
+	try {
+		await verifyDeviceProofOrThrow(req, dbCentral, claims, token, rawBody);
+	} catch (e: any) {
+		// Mismo rastro que en `tenantAuth`: por aquí pasan pairing, revoke y el listado de
+		// dispositivos, que es justo donde un TPV rechazado se queda sin poder emparejar nada.
+		reportarRechazoDeDispositivo(env, {
+			motivo: String(e?.message || e),
+			ruta: new URL(req.url).pathname,
+			metodo: req.method,
+			tenant_id: claims.tenantId,
+			device_id: claims.deviceId,
+		});
+		throw e;
+	}
 
 	return {
 		token,

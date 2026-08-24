@@ -48,7 +48,7 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 
 | Pieza | Dónde | Cómo |
 |---|---|---|
-| DSN escritorio | build de la app | variable de entorno **`TPV_SENTRY_DSN`** al compilar (`option_env!`). DSN público, embebido. |
+| DSN escritorio | build de la app | variable de entorno **`TPV_SENTRY_DSN`** al compilar (`option_env!`). DSN público, embebido. Sólo la pone el workflow de release: **en `pnpm tauri dev` no hay Sentry** (cliente deshabilitado), y como la Webview envía sus eventos a través del cliente de Rust, tampoco llega nada del frontend. `build.rs` declara `rerun-if-env-changed` para que ponerla recompile de verdad. |
 | DSN worker | secreto del Worker | `wrangler secret put SENTRY_DSN` (en `apps/cloud-worker-licensing`) |
 | Entorno worker | `wrangler.json` `vars` | `ENVIRONMENT`. **Hoy NO está puesta**, así que todo entra en Sentry como `prod` (`env.ENVIRONMENT ?? "prod"` en `observability/sentry.ts`). Es correcto mientras solo haya producción; separar entornos de verdad exige montar staging → ver [BACKLOG §Entorno de staging](analisis/BACKLOG.md#entorno-de-staging-infra-01--pendiente-completo). |
 | Entorno escritorio | automático | No hay variable: `Environment::detect()` (`tpv-telemetry/src/config.rs`) etiqueta `dev` en builds de debug y `prod` en release. Solo existen esas dos variantes; un canal `staging` exigiría añadirla. |
@@ -118,6 +118,12 @@ restaurante/dispositivo/versión.
 - **Errores de dispositivo**: tasa de `level == "ERROR"` en `tpv-device-logs` por `tenant_id`.
 - **Backlog de subida**: si un `device_id` deja de mandar lotes durante > X (puede estar offline o
   con la cola atascada).
+- **Dispositivo rechazado**: N eventos `device_auth_rechazado` del mismo `device_id` en 5 min. Un
+  rechazo suelto es normal (token caducado, reloj desviado); una racha significa que ese TPV **no
+  puede trabajar contra la nube** y nadie se ha enterado todavía. Estos rechazos NO van a Sentry a
+  propósito: un 401 es esperable y llenaría el proyecto de ruido; lo que hay que vigilar es el
+  agregado. Agrupa por `motivo` para distinguir `device_revoked` (alguien lo desvinculó) de
+  `bad_device_signature` (contrato de firma roto) o `device_ts_out_of_range` (reloj del equipo).
 
 ## 7. Eventos del sistema de sync (dataset `AXIOM_DATASET_SYNC`)
 
@@ -131,6 +137,7 @@ comando + ids + error truncado, **sin** el comando ni sus args (ni datos ni volu
 | `apply_error` | un apply **falla** en el DO (excepción/DB) | `command_name`, `op_id`, `device_id`, `error`, `latency_ms` |
 | `main_online` | una Main (tpv) se autentica | `device_id`, `connected_devices` |
 | `main_offline` | se va la última Main → freeze | `device_id`, `connected_devices` |
+| `device_auth_rechazado` | el worker rechaza a un dispositivo (device-proof/JWT) | `motivo`, `ruta`, `metodo`, `tenant_id`, `device_id` |
 
 > **Nota (SYNC-16, hibernación del DO).** `connected_devices` se calcula recorriendo
 > `state.getWebSockets()` y contando los sockets con sesión autenticada (antes era el tamaño de un

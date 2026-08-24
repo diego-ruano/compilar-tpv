@@ -929,10 +929,10 @@ pub(crate) async fn drenar_imagenes(
     let mut subidas = 0u32;
     let mut ultimo_error: Option<String> = None;
 
-    eprintln!("[image_drain] modo={mode_str} en_cola={}", pending.len());
+    tracing::debug!(target: "tpv::imagenes", modo = %mode_str, en_cola = pending.len(), "drenando cola de imágenes");
 
     for item in &pending {
-        eprintln!("[image_drain]   pendiente: {} ({})", item.rel_path, item.content_type);
+        tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, tipo = %item.content_type, "pendiente");
     }
 
     for item in pending {
@@ -945,21 +945,21 @@ pub(crate) async fn drenar_imagenes(
         let bytes = match fs::read(&file_path) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("[image_drain] fichero no encontrado '{}': {e}", item.rel_path);
+                tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %e, "no se pudo leer el fichero a subir");
                 continue;
             },
         };
 
         let path = format!("/v1/images/{}", item.rel_path);
-        eprintln!("[image_drain] subiendo '{}' → PUT {}", item.rel_path, path);
+        tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, %path, "subiendo");
         match uc_pairing::upload_image(&svc, mode_str, &path, &item.content_type, bytes).await {
             Ok(_) => {
-                eprintln!("[image_drain] ✓ subida OK: {}", item.rel_path);
+                tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, "subida OK");
                 subidas += 1;
             },
             Err(e) => {
                 let msg = format!("{e:?}");
-                eprintln!("[image_drain] ✗ FALLO '{}': {}", item.rel_path, msg);
+                tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %msg, "fallo subiendo imagen a R2");
                 if ultimo_error.is_none() {
                     ultimo_error = Some(msg);
                 }
@@ -974,7 +974,7 @@ pub(crate) async fn drenar_imagenes(
         Some(err) => format!("subidas={subidas} pendientes={} error={err}", remaining.len()),
         None => format!("subidas={subidas} pendientes={}", remaining.len()),
     };
-    eprintln!("[image_drain] resultado: {resultado}");
+    tracing::debug!(target: "tpv::imagenes", %resultado, "fin del drenado");
     if ultimo_error.is_some() {
         Err(resultado)
     } else {
@@ -1065,7 +1065,9 @@ async fn images_ensure_local(
         // Aún no está en R2 (404) o falló la red: no es un error duro, el UI reintentará.
         Ok(None) => Ok(false),
         Err(e) => {
-            eprintln!("[images_ensure_local] fallo bajando '{}': {e:?}", rel_path);
+            // WARN y no DEBUG: si esto falla, la imagen no está ni en disco ni en R2 y la UI la
+            // reintentará en cada resolución. Merece verse en Axiom, no sólo en la consola de dev.
+            tracing::warn!(target: "tpv::imagenes", ruta = %rel_path, error = ?e, "fallo bajando imagen de R2");
             Ok(false)
         }
     }
@@ -1655,7 +1657,7 @@ pub fn run() {
                     signer: Some(signer),
                 };
                 if let Err(e) = tpv_telemetry::init(tcfg) {
-                    eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}");
+                    eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}"); // sin `tracing` todavía: es lo que está fallando
                 }
                 // Etiqueta el contexto de correlación cuanto antes con la identidad REAL del
                 // dispositivo (id estable derivado de su clave, disponible desde el primer arranque).

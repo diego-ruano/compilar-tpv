@@ -20,10 +20,12 @@ export default function GlobalErrorListener({
         };
 
         const onUnhandledRejection = (event: PromiseRejectionEvent) => {
-            // Igual que arriba: las promesas rechazadas no controladas también se reportan aquí.
+            // Las promesas rechazadas se REPORTAN pero no tumban la pantalla. En un TPV, la
+            // mayoría son un fallo de red pasajero (una subida, un refetch); cambiar la caja por
+            // una pantalla de error a mitad de servicio es peor que el propio error, y el
+            // camarero no puede hacer nada con ella. Un error SÍNCRONO no controlado (el `error`
+            // de arriba) es otra cosa: ahí la UI ya está en un estado indefinido.
             captureException(event.reason);
-            event.preventDefault?.();
-            setFatal(event.reason);
         };
 
         window.addEventListener("error", onError);

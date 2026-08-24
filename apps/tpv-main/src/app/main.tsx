@@ -2,6 +2,7 @@ import React, { StrictMode } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import AppErrorBoundary from "./pages/errorPages/AppErrorBoundary";
+import GlobalErrorListener from "./pages/errorPages/GlobalErrorListener";
 
 import AppBoot from "./AppBoot";
 import { appRouter } from "./Router";
@@ -24,10 +25,17 @@ if (!container) {
 
 const root = ReactDOM.createRoot(container);
 
+// `AppErrorBoundary` sólo ve lo que revienta DURANTE el render de React. Todo lo asíncrono —una
+// promesa rechazada sin `catch`, un error dentro de un `setTimeout`— pasa de largo, y en esta app
+// eso es casi todo (sockets, invokes, mutaciones). `GlobalErrorListener` engancha `window.onerror`
+// y `unhandledrejection` y los reporta. Existía desde hace tiempo pero no lo montaba nadie: ni se
+// reportaban esos errores ni aparecía la pantalla de fallo escrita para ellos.
 root.render(
     <AppErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-            <AppBoot router={appRouter} />
-        </QueryClientProvider>
+        <GlobalErrorListener>
+            <QueryClientProvider client={queryClient}>
+                <AppBoot router={appRouter} />
+            </QueryClientProvider>
+        </GlobalErrorListener>
     </AppErrorBoundary>
 );

@@ -13,6 +13,7 @@ import type { Env } from "../env";
 import { getDb } from "../server/db";
 import { SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
+import { reportarRechazoDeDispositivo } from "../observability/axiom";
 import { unauthorized } from "../server/utils/response";
 
 export type TenantVars = {
@@ -80,10 +81,20 @@ export const tenantAuth: MiddlewareHandler<{
 		c.set("token", token);
 		c.set("licHash", claims.licHash);
 	} catch (e: any) {
+		const motivo = String(e?.message || e);
+
+		// Que un dispositivo no pueda autenticarse deja rastro (agregable en Axiom). Sin esto, un
+		// TPV rechazado es invisible para nosotros hasta que su dueño llama por teléfono.
+		reportarRechazoDeDispositivo(c.env, {
+			motivo,
+			ruta: new URL(c.req.url).pathname,
+			metodo: c.req.method,
+		});
+
 		// Por `unauthorized` y no por `c.json` a pelo: así la respuesta lleva el `code` del
 		// catálogo compartido (ARCH-05) además del `error` de siempre. Es lo que permite al
 		// cliente ramificar ante un `device_revoked` en vez de reintentar contra una pared.
-		return unauthorized(c.req.raw, String(e?.message || e));
+		return unauthorized(c.req.raw, motivo);
 	}
 
 	await next();

@@ -20,6 +20,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { appDataDir, join } from "@tauri-apps/api/path";
 
 import { useMode } from "../stores/useMode";
+import { captureException } from "../observability/sentry";
 
 /**
  * Base pública desde la que el Handy carga las imágenes: la URL r2.dev del bucket.
@@ -105,10 +106,14 @@ export function triggerImageUploadDrain(): void {
       if (r && r !== "vacio" && r !== "sin_modo") {
         if (r.includes("error=")) {
           console.warn("[images_drain]", r);
+          captureException(new Error("images_drain_con_errores"), { resultado: r });
         } else {
           console.log("[images_drain]", r);
         }
       }
     })
-    .catch((e) => console.error("[images_drain] Tauri error:", e));
+    .catch((e) => {
+      console.error("[images_drain] Tauri error:", e);
+      captureException(e, { fase: "images_drain_pending" });
+    });
 }

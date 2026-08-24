@@ -50,3 +50,42 @@ export async function ingestToAxiom(
 		return false;
 	}
 }
+
+/**
+ * Deja rastro de un rechazo de autenticación de dispositivo (device-proof / JWT).
+ *
+ * NO va a Sentry a propósito: un 401 suelto es esperable (un token caducado, un reloj desviado) y
+ * llenaría el proyecto de errores que no hay que mirar. Lo que sí importa es el AGREGADO: durante
+ * dos meses este worker rechazó miles de peticiones de un TPV con `device_pubkey_not_registered` y
+ * después con `bad_device_signature`, y no quedó rastro en ningún sitio — se descubrió leyendo la
+ * consola de un desarrollador. Con esto se puede montar una alerta del tipo "N rechazos del mismo
+ * dispositivo en 5 minutos", que es justo la señal que faltaba.
+ *
+ * Best-effort y sin `await`: la observabilidad no puede añadir latencia ni fallar la petición.
+ */
+export function reportarRechazoDeDispositivo(
+	env: Env,
+	campos: {
+		motivo: string;
+		ruta: string;
+		metodo: string;
+		tenant_id?: string;
+		device_id?: string;
+	},
+): void {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return;
+
+	try {
+		void ingestToAxiom(env, dataset, [
+			{
+				_time: new Date().toISOString(),
+				service: "tpv-api",
+				event: "device_auth_rechazado",
+				...campos,
+			},
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+	}
+}
