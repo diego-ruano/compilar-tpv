@@ -776,6 +776,163 @@ pub fn build_abrir_cajon() -> Vec<u8> {
     vec![0x10, 0x14, 0x01, 0x00, 0x02]
 }
 
+/// Lo que hace falta para imprimir un arqueo. CUENTA-06.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct PrintArqueoPayload {
+    #[serde(default)]
+    pub printer_name: Option<String>,
+    #[serde(default)]
+    pub business_name: String,
+    #[serde(default)]
+    pub fecha_hora: String,
+    #[serde(default)]
+    pub desde: Option<String>,
+    #[serde(default)]
+    pub usuario: Option<String>,
+    #[serde(default)]
+    pub fondo_inicial: f64,
+    #[serde(default)]
+    pub ventas_efectivo: f64,
+    #[serde(default)]
+    pub esperado: f64,
+    #[serde(default)]
+    pub contado: f64,
+    #[serde(default)]
+    pub descuadre: f64,
+    #[serde(default)]
+    pub dejado: f64,
+    #[serde(default)]
+    pub retirado: f64,
+    #[serde(default)]
+    pub motivo: Option<String>,
+    /// `(valor, unidades)` de lo contado, para el desglose.
+    #[serde(default)]
+    pub contado_denoms: Vec<(f64, i64)>,
+    // ── Formato del papel: los mismos ajustes que el ticket ──
+    #[serde(default = "def_paper_width")]
+    pub paper_width_mm: u32,
+    #[serde(default = "def_dpi")]
+    pub paper_dpi: u32,
+    #[serde(default = "def_cpl")]
+    pub chars_per_line: u32,
+    #[serde(default)]
+    pub margin_left_mm: f64,
+    #[serde(default)]
+    pub margin_right_mm: f64,
+    #[serde(default)]
+    pub margin_top_mm: f64,
+    #[serde(default)]
+    pub margin_bottom_mm: f64,
+}
+
+fn def_paper_width() -> u32 {
+    80
+}
+fn def_dpi() -> u32 {
+    203
+}
+fn def_cpl() -> u32 {
+    42
+}
+
+/// El papel del arqueo (CUENTA-06).
+///
+/// Es un **documento interno**, no un ticket de venta, y de ahí salen sus tres diferencias:
+/// - **No consume numeración.** No pasa por `siguiente_numero_ticket`: gastar un correlativo en un
+///   arqueo dejaría huecos sin explicación en la serie de ventas.
+/// - **Sin datos fiscales**: ni CIF, ni desglose de IVA. Sí el nombre del negocio y la fecha, para
+///   saber de quién y de cuándo es el papel.
+/// - **No abre el cajón.** El cajón ya está abierto: se acaba de contar.
+pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
+    let cols = cols_efectivas(
+        p.paper_width_mm,
+        p.chars_per_line,
+        p.margin_left_mm,
+        p.margin_right_mm,
+    );
+    let dpi = if p.paper_dpi == 300 { 300 } else { 203 };
+    let mut out: Vec<u8> = Vec::new();
+
+    esc_init(&mut out);
+    esc_left_margin(&mut out, mm_to_dots(p.margin_left_mm, dpi));
+    esc_feed_dots(&mut out, mm_to_dots(p.margin_top_mm, dpi));
+    esc_size(&mut out, 0x00);
+
+    esc_align(&mut out, 0);
+    if !p.business_name.trim().is_empty() {
+        esc_bold(&mut out, true);
+        text_wrap(&mut out, p.business_name.trim(), cols);
+        esc_bold(&mut out, false);
+    }
+
+    esc_bold(&mut out, true);
+    esc_size(&mut out, 0x01);
+    text_line(&mut out, "CIERRE DE CAJA");
+    esc_size(&mut out, 0x00);
+    esc_bold(&mut out, false);
+
+    sep(&mut out, cols);
+    text_line(&mut out, &line_two("Cerrado", &p.fecha_hora, cols));
+    if let Some(d) = p.desde.as_deref().filter(|d| !d.trim().is_empty()) {
+        text_line(&mut out, &line_two("Desde", d.trim(), cols));
+    } else {
+        text_line(&mut out, &line_two("Desde", "primer cierre", cols));
+    }
+    if let Some(u) = p.usuario.as_deref().filter(|u| !u.trim().is_empty()) {
+        text_line(&mut out, &line_two("Por", u.trim(), cols));
+    }
+
+    sep(&mut out, cols);
+    text_line(&mut out, &line_two("Fondo de partida", &fmt_eur(p.fondo_inicial), cols));
+    text_line(&mut out, &line_two("Cobrado en efectivo", &fmt_eur(p.ventas_efectivo), cols));
+    esc_bold(&mut out, true);
+    text_line(&mut out, &line_two("Deberia haber", &fmt_eur(p.esperado), cols));
+    text_line(&mut out, &line_two("Contado", &fmt_eur(p.contado), cols));
+    esc_bold(&mut out, false);
+
+    sep(&mut out, cols);
+    // El descuadre es lo que se busca al coger este papel, así que va en grande y con su signo.
+    esc_bold(&mut out, true);
+    esc_size(&mut out, 0x01);
+    let etiqueta = if p.descuadre == 0.0 {
+        "CUADRA".to_string()
+    } else if p.descuadre < 0.0 {
+        format!("FALTAN {}", fmt_eur(-p.descuadre))
+    } else {
+        format!("SOBRAN {}", fmt_eur(p.descuadre))
+    };
+    text_line(&mut out, &etiqueta);
+    esc_size(&mut out, 0x00);
+    esc_bold(&mut out, false);
+
+    if let Some(m) = p.motivo.as_deref().filter(|m| !m.trim().is_empty()) {
+        text_wrap(&mut out, &format!("Motivo: {}", m.trim()), cols);
+    }
+
+    sep(&mut out, cols);
+    text_line(&mut out, &line_two("Se deja en el cajon", &fmt_eur(p.dejado), cols));
+    text_line(&mut out, &line_two("Se retira", &fmt_eur(p.retirado), cols));
+
+    // El desglose por denominación es lo que convierte "faltan 50" en "falta un billete de 50".
+    let denoms: Vec<&(f64, i64)> = p.contado_denoms.iter().filter(|(_, u)| *u > 0).collect();
+    if !denoms.is_empty() {
+        sep(&mut out, cols);
+        text_line(&mut out, "Recuento");
+        for (valor, unidades) in denoms {
+            let izq = format!("  {} x {}", unidades, fmt_eur(*valor));
+            text_line(
+                &mut out,
+                &line_two(&izq, &fmt_eur(a_centimos(valor * *unidades as f64)), cols),
+            );
+        }
+    }
+
+    esc_feed_dots(&mut out, mm_to_dots(p.margin_bottom_mm, dpi));
+    esc_feed(&mut out, 4);
+    esc_cut(&mut out);
+    out
+}
+
 /// Formatea un porcentaje sin decimales innecesarios (`10` en vez de `10,00`).
 fn fmt_pct(n: f64) -> String {
     if (n - n.round()).abs() < f64::EPSILON {

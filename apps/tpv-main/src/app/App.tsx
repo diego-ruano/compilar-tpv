@@ -34,6 +34,14 @@ function AppInner() {
         return <Navigate to="/Comandas" replace />;
     }
 
+    // Cuentas es solo del administrador (CUENTA-06). El menu ya no la enseña a los demas, pero un
+    // menu no es un permiso: sin esto bastaria con escribir la URL. El candado de verdad para lo que
+    // se ESCRIBE vive mas abajo -en los comandos y, para la Handy, en el worker-; esto solo evita
+    // que la pantalla se abra.
+    if (role && role !== "Administrador" && path === "/cuentas") {
+        return <Navigate to="/" replace />;
+    }
+
     return (
         <Layout>
             <Outlet />

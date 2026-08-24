@@ -1745,3 +1745,125 @@ mod tests_spooler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests_arqueo {
+    //! El papel del cierre de caja (CUENTA-06).
+    //!
+    //! Es un documento INTERNO, y los tests van sobre todo a eso: que no se comporte como un ticket
+    //! de venta. Lo que se imprime de un arqueo es un dato contable de la casa, y confundirlo con un
+    //! recibo tiene consecuencias -numeración gastada, cajón abierto de más-.
+
+    use super::fixtures::contiene;
+    use super::*;
+
+    fn arqueo() -> PrintArqueoPayload {
+        PrintArqueoPayload {
+            business_name: "Bar Paco".into(),
+            fecha_hora: "2026-05-10 23:45:00".into(),
+            desde: Some("2026-05-09 23:30:00".into()),
+            usuario: Some("Ana Gomez".into()),
+            fondo_inicial: 150.0,
+            ventas_efectivo: 420.5,
+            esperado: 570.5,
+            contado: 550.5,
+            descuadre: -20.0,
+            dejado: 150.0,
+            retirado: 400.5,
+            motivo: Some("se pago un pedido en efectivo".into()),
+            contado_denoms: vec![(50.0, 10), (20.0, 2), (0.5, 21)],
+            paper_width_mm: 80,
+            paper_dpi: 203,
+            chars_per_line: 42,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn el_arqueo_es_escpos_valido_en_todos_los_anchos() {
+        for mm in [58u32, 80, 112] {
+            for cpl in [20u32, 42, 80] {
+                let mut p = arqueo();
+                p.paper_width_mm = mm;
+                p.chars_per_line = cpl;
+                p.margin_top_mm = 8.0;
+                p.margin_bottom_mm = 8.0;
+                p.margin_left_mm = 3.0;
+                let bytes = build_arqueo(&p);
+                super::parser::trocear(&bytes)
+                    .unwrap_or_else(|e| panic!("{mm}mm/{cpl}col: {e}"));
+            }
+        }
+    }
+
+    #[test]
+    fn dice_lo_que_es_y_de_quien() {
+        let bytes = build_arqueo(&arqueo());
+        assert!(contiene(&bytes, "CIERRE DE CAJA"), "tiene que decir que es");
+        assert!(contiene(&bytes, "Bar Paco"));
+        assert!(contiene(&bytes, "2026-05-10 23:45:00"));
+        assert!(contiene(&bytes, "Ana Gomez"));
+    }
+
+    #[test]
+    fn el_descuadre_sale_con_su_signo_en_palabras() {
+        // Un numero con signo se lee mal a las dos de la manana. "FALTAN" y "SOBRAN" no.
+        let mut p = arqueo();
+        assert!(contiene(&build_arqueo(&p), "FALTAN"), "descuadre negativo");
+
+        p.descuadre = 12.5;
+        assert!(contiene(&build_arqueo(&p), "SOBRAN"), "descuadre positivo");
+
+        p.descuadre = 0.0;
+        let b = build_arqueo(&p);
+        assert!(contiene(&b, "CUADRA"));
+        assert!(!contiene(&b, "FALTAN") && !contiene(&b, "SOBRAN"));
+    }
+
+    #[test]
+    fn lleva_el_desglose_del_recuento() {
+        // Es lo que convierte "faltan 50" en "falta un billete de 50".
+        let bytes = build_arqueo(&arqueo());
+        assert!(contiene(&bytes, "Recuento"));
+        assert!(contiene(&bytes, "10 x"), "las unidades de cada denominacion");
+    }
+
+    #[test]
+    fn el_motivo_se_imprime_y_se_envuelve() {
+        let mut p = arqueo();
+        p.chars_per_line = 24;
+        p.motivo = Some("se pago en efectivo un pedido de bebidas que llego sin previo aviso".into());
+        let bytes = build_arqueo(&p);
+        assert!(contiene(&bytes, "Motivo:"));
+        // Ninguna linea puede pasarse del ancho: la termica no envuelve, corta.
+        for t in super::parser::lineas(&bytes) {
+            assert!(t.chars().count() <= 24, "linea de {} chars: {t:?}", t.chars().count());
+        }
+    }
+
+    #[test]
+    fn sin_motivo_no_aparece_la_etiqueta() {
+        let mut p = arqueo();
+        p.motivo = None;
+        assert!(!contiene(&build_arqueo(&p), "Motivo:"));
+        p.motivo = Some("   ".into());
+        assert!(!contiene(&build_arqueo(&p), "Motivo:"), "un motivo en blanco no es un motivo");
+    }
+
+    #[test]
+    fn no_abre_el_cajon_ni_gasta_numero_de_ticket() {
+        // Las dos cosas que lo separan de un ticket de venta. El cajon ya esta abierto -se acaba de
+        // contar-, y gastar un correlativo dejaria un hueco sin explicacion en la serie de ventas.
+        let bytes = build_arqueo(&arqueo());
+        let cmds = super::parser::comandos(&bytes);
+        assert!(!cmds.contains(&"cajon"), "un arqueo no abre el cajon: {cmds:?}");
+        assert!(!contiene(&bytes, "TICKET"), "no lleva numero de ticket");
+        assert!(!contiene(&bytes, "IVA"), "un arqueo no lleva desglose fiscal");
+    }
+
+    #[test]
+    fn termina_cortando_el_papel() {
+        let cmds = super::parser::comandos(&build_arqueo(&arqueo()));
+        assert_eq!(cmds.last(), Some(&"corte"), "{cmds:?}");
+    }
+}

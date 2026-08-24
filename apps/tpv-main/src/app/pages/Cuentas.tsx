@@ -21,7 +21,7 @@ import PrintTicketModal, {
 } from "../../shared/ticket/PrintTicketModal";
 import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
 import type { LineaTicketDto, TicketReimpresionDto } from "@tpv/contracts";
-import { invokeClient } from "@tpv/client";
+import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import {
@@ -31,16 +31,24 @@ import {
     type Entrada,
     type Salida,
     DEFAULT_DENOMS,
-    getXFondo,
-    setXFondo,
     cashTotal,
-    calcDeltaToReachFondo,
     incCash,
     decCash,
     resetCash,
     type Denom,
     type CashCount,
 } from "../../features/cuentas/cuentasApis";
+import { euro, moneyLabel } from "../../features/cuentas/formato";
+import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
+import {
+    cierreDetalle,
+    cierreImprimir,
+    cierreListar,
+    cierreReabrir,
+    type CierreResumenDto,
+} from "../../features/cuentas/cierreApis";
+import { useAuth } from "../../shared/stores/useAuth";
+import DenomsGrid from "../../features/cuentas/DenomsGrid";
 import {
     useCuentasEntradas,
     useCuentasSalidas,
@@ -60,10 +68,6 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 // Tauri: guardar en ruta elegida por el usuario
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
-
-function euro(n: number) {
-    return n.toLocaleString("es-ES", { style: "currency", currency: "EUR" });
-}
 
 function todayYMD() {
     const d = new Date();
@@ -147,123 +151,6 @@ function MiniIconButton({
     );
 }
 
-function moneyLabel(value: number) {
-    if (value < 1) return `${Math.round(value * 100)}c`;
-    return `${value}€`;
-}
-
-function DenomsGrid({
-    title,
-    subtitle,
-    denoms,
-    count,
-    onAdd,
-    onRemove,
-    onReset,
-    total,
-}: {
-    title: string;
-    subtitle?: string;
-    denoms: Denom[];
-    count: CashCount;
-    onAdd: (label: string) => void;
-    onRemove: (label: string) => void;
-    onReset: () => void;
-    total: number;
-}) {
-    return (
-        <div className="min-w-0 rounded-2xl border border-border bg-surface p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="text-base font-bold text-fg sm:text-lg">
-                            {title}
-                        </h3>
-                        <Badge>Total: {euro(total)}</Badge>
-                    </div>
-                    {subtitle ? (
-                        <p className="mt-1 text-sm text-fg-muted">{subtitle}</p>
-                    ) : null}
-                </div>
-
-                <button
-                    type="button"
-                    onClick={onReset}
-                    className="h-8 shrink-0 rounded-lg border border-border bg-surface px-3 text-xs font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98]"
-                >
-                    Reset
-                </button>
-            </div>
-
-            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(135px,1fr))] gap-2.5">
-                {denoms.map((d) => {
-                    const c = count[d.label] || 0;
-                    const active = c > 0;
-                    const subtotal = Math.round(c * d.value * 100) / 100;
-                    return (
-                        <div
-                            key={d.label}
-                            className={cn(
-                                "min-w-0 rounded-xl border p-3 transition-colors",
-                                active
-                                    ? "border-accent bg-accent-soft ring-1 ring-accent/30"
-                                    : "border-border bg-surface-2",
-                            )}
-                        >
-                            <div className="flex items-center justify-between gap-2">
-                                <p className="truncate text-base font-extrabold text-fg">
-                                    {d.label}
-                                </p>
-                                {active ? (
-                                    <span className="grid min-w-5 place-items-center rounded-full bg-accent px-1.5 text-[11px] font-bold text-accent-fg">
-                                        {c}
-                                    </span>
-                                ) : (
-                                    <span className="text-xs text-fg-subtle">{moneyLabel(d.value)}</span>
-                                )}
-                            </div>
-
-                            <p className="mt-0.5 truncate text-[11px] text-fg-muted">
-                                {active ? `Subtotal ${euro(subtotal)}` : moneyLabel(d.value)}
-                            </p>
-
-                            <div className="mt-3 grid grid-cols-[2rem_minmax(1.5rem,1fr)_2rem] items-center gap-1.5">
-                                <button
-                                    type="button"
-                                    onClick={() => onRemove(d.label)}
-                                    disabled={c === 0}
-                                    aria-label={`Quitar ${d.label}`}
-                                    className={cn(
-                                        "grid size-8 place-items-center rounded-lg border border-border bg-surface text-fg transition hover:bg-surface-2 active:scale-[0.95] cursor-pointer",
-                                        c === 0 && "cursor-not-allowed opacity-40",
-                                    )}
-                                >
-                                    <Minus className="size-4" aria-hidden />
-                                </button>
-
-                                <div className="min-w-0 text-center">
-                                    <p className="truncate text-lg font-extrabold leading-none text-fg">
-                                        {c}
-                                    </p>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    onClick={() => onAdd(d.label)}
-                                    aria-label={`Añadir ${d.label}`}
-                                    className="grid size-8 place-items-center rounded-lg bg-accent text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.95] cursor-pointer"
-                                >
-                                    <Plus className="size-4" aria-hidden />
-                                </button>
-                            </div>
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
-    );
-}
-
 type SalidaExt = Salida & {
     proveedorId?: string | null;
     proveedorNombre?: string | null;
@@ -318,6 +205,7 @@ function mapSalidaUI(
 }
 
 export default function Cuentas() {
+    const { idUsuario } = useAuth();
     const [busqueda, setBusqueda] = useState("");
     const [del, setDel] = useState(() => todayYMD());
     const [al, setAl] = useState(() => todayYMD());
@@ -438,53 +326,45 @@ export default function Cuentas() {
     const [savingEditPago, setSavingEditPago] = useState(false);
     const [errEditPago, setErrEditPago] = useState<string | null>(null);
 
-    const [openX, setOpenX] = useState(false);
-    const [xFondo, setXFondoState] = useState<CashCount>({});
-    const [xCierre, setXCierreState] = useState<CashCount>({});
-    const [xSavedToast, setXSavedToast] = useState<string | null>(null);
+    const [openCierre, setOpenCierre] = useState(false);
+    const [cierres, setCierres] = useState<CierreResumenDto[]>([]);
+    const [cierresError, setCierresError] = useState<string | null>(null);
 
     const denoms = DEFAULT_DENOMS;
 
-    const totalFondo = useMemo(() => cashTotal(denoms, xFondo), [denoms, xFondo]);
-    const totalCierre = useMemo(() => cashTotal(denoms, xCierre), [denoms, xCierre]);
-
-    const deltas = useMemo(() => {
-        return calcDeltaToReachFondo({
-            denoms,
-            fondo: xFondo,
-            cierre: xCierre,
-        });
-    }, [denoms, xFondo, xCierre]);
-
-    const deltaResumen = useMemo(() => {
-        let add = 0;
-        let remove = 0;
-        for (const d of deltas) {
-            const v = d.delta * d.value;
-            if (d.delta > 0) add += v;
-            if (d.delta < 0) remove += Math.abs(v);
+    const recargarCierres = React.useCallback(async () => {
+        try {
+            setCierres(await cierreListar(50));
+            setCierresError(null);
+        } catch (e) {
+            setCierresError(toAppError(e).message);
         }
-        add = Math.round(add * 100) / 100;
-        remove = Math.round(remove * 100) / 100;
-        return {
-            add,
-            remove,
-            neto: Math.round((totalFondo - totalCierre) * 100) / 100,
-        };
-    }, [deltas, totalFondo, totalCierre]);
+    }, []);
 
-    const abrirModalX = () => {
-        const saved = getXFondo();
-        setXFondoState(saved || {});
-        setXCierreState({});
-        setXSavedToast(null);
-        setOpenX(true);
+    useEffect(() => {
+        void recargarCierres();
+    }, [recargarCierres]);
+
+    const imprimirCierre = async (idCierre: string) => {
+        try {
+            await cierreImprimir(await cierreDetalle(idCierre));
+        } catch (e) {
+            setCierresError(toAppError(e).message);
+        }
     };
 
-    const guardarFondoPredeterminado = () => {
-        setXFondo(xFondo);
-        setXSavedToast("✅ Fondo predeterminado guardado.");
-        setTimeout(() => setXSavedToast(null), 1800);
+    // Reabrir desbloquea el periodo para poder corregirlo. Lo puede hacer cualquiera -asi se
+    // decidio-, pero queda registrado quien y cuando: el valor esta en que tocar el pasado sea un
+    // acto deliberado y con nombre, no en impedirlo.
+    const reabrirCierre = async (idCierre: string) => {
+        try {
+            await cierreReabrir(idCierre, idUsuario);
+            await recargarCierres();
+            entradasQuery.refetch();
+            salidasQuery.refetch();
+        } catch (e) {
+            setCierresError(toAppError(e).message);
+        }
     };
 
     // Mostrar errores de carga como antes (los logs/efectos previos se sustituyen por
@@ -1609,11 +1489,11 @@ export default function Cuentas() {
 
                         <button
                             type="button"
-                            onClick={abrirModalX}
+                            onClick={() => setOpenCierre(true)}
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-accent bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
                         >
                             <Calculator className="size-4" aria-hidden />
-                            Entrada de Caja
+                            Cerrar caja
                         </button>
                     </div>
 
@@ -1629,6 +1509,91 @@ export default function Cuentas() {
                         Sacar cuenta del día
                     </button>
                 </div>
+            </div>
+
+            {/* Histórico de arqueos. Es donde se investiga un descuadre pasado: sin esto, "faltaban
+                50 €" es un recuerdo, no un dato. */}
+            <div className="mt-4 rounded-2xl border border-border bg-surface p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h3 className="text-base font-bold text-fg sm:text-lg">Cierres de caja</h3>
+                    <span className="text-xs text-fg-muted">
+                        Los últimos {cierres.length || 0}
+                    </span>
+                </div>
+
+                {cierresError ? (
+                    <p className="mt-3 text-sm text-danger">{cierresError}</p>
+                ) : cierres.length === 0 ? (
+                    <p className="mt-3 text-sm text-fg-muted">
+                        Todavía no se ha cerrado la caja ninguna vez.
+                    </p>
+                ) : (
+                    <div className="mt-3 overflow-x-auto">
+                        <table className="w-full min-w-[640px] text-sm">
+                            <thead>
+                                <tr className="text-left text-xs font-semibold text-fg-muted">
+                                    <th className="py-2">Cuándo</th>
+                                    <th className="py-2">Quién</th>
+                                    <th className="py-2 text-right">Esperado</th>
+                                    <th className="py-2 text-right">Contado</th>
+                                    <th className="py-2 text-right">Diferencia</th>
+                                    <th className="py-2 text-right">Retirado</th>
+                                    <th className="py-2">Motivo</th>
+                                    <th className="py-2" />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {cierres.map((c) => (
+                                    <tr key={c.id_cierre} className="border-t border-border">
+                                        <td className="py-2 text-fg">
+                                            {c.fecha_hora}
+                                            {c.reabierto_en ? (
+                                                <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-[11px] text-fg-muted">
+                                                    reabierto
+                                                </span>
+                                            ) : null}
+                                        </td>
+                                        <td className="py-2 text-fg-muted">{c.usuario_nombre ?? "—"}</td>
+                                        <td className="py-2 text-right text-fg-muted">{euro(c.esperado)}</td>
+                                        <td className="py-2 text-right text-fg">{euro(c.contado)}</td>
+                                        <td
+                                            className={cn(
+                                                "py-2 text-right font-semibold",
+                                                c.descuadre === 0 ? "text-success" : "text-danger",
+                                            )}
+                                        >
+                                            {c.descuadre === 0 ? "—" : euro(c.descuadre)}
+                                        </td>
+                                        <td className="py-2 text-right text-fg-muted">{euro(c.retirado)}</td>
+                                        <td className="py-2 text-fg-muted">{c.motivo ?? ""}</td>
+                                        <td className="py-2">
+                                            <div className="flex items-center justify-end gap-1.5">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => void imprimirCierre(c.id_cierre)}
+                                                    title="Imprimir el arqueo"
+                                                    className="grid size-8 cursor-pointer place-items-center rounded-lg border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
+                                                >
+                                                    <Printer className="size-4" aria-hidden />
+                                                </button>
+                                                {c.reabierto_en ? null : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => void reabrirCierre(c.id_cierre)}
+                                                        title="Reabrir para poder corregir su periodo"
+                                                        className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-fg transition hover:bg-surface-2"
+                                                    >
+                                                        Reabrir
+                                                    </button>
+                                                )}
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             <ModalShell
@@ -2020,230 +1985,18 @@ export default function Cuentas() {
                     </div>
             </ModalShell>
 
-            <ModalShell
-                open={openX}
-                onClose={() => setOpenX(false)}
-                className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4"
-            >
-                    <div
-                        className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
-                        onClick={() => setOpenX(false)}
-                    />
-
-                    <div className="relative flex h-[92vh] w-full max-w-[1200px] flex-col overflow-hidden rounded-3xl border border-border bg-surface shadow-2xl">
-                        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border bg-surface px-4 py-4 sm:px-6">
-                            <div className="flex min-w-0 items-center gap-3">
-                                <div className="grid size-11 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
-                                    <Calculator className="size-6" aria-hidden />
-                                </div>
-                                <div className="min-w-0">
-                                    <h3 className="text-xl font-extrabold text-fg">
-                                        Entrada de Caja
-                                    </h3>
-                                    <p className="mt-0.5 text-sm text-fg-muted">
-                                        Cuenta el efectivo del fondo y del cierre para preparar el
-                                        siguiente turno.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <button
-                                type="button"
-                                onClick={() => setOpenX(false)}
-                                className="grid size-10 shrink-0 cursor-pointer place-items-center rounded-2xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg active:scale-[0.98]"
-                                title="Cerrar"
-                            >
-                                <X className="size-4" aria-hidden />
-                            </button>
-                        </div>
-
-                        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
-                            {xSavedToast ? (
-                                <div className="mb-4 rounded-2xl border border-success/30 bg-success-soft px-4 py-2 text-sm text-success">
-                                    {xSavedToast}
-                                </div>
-                            ) : null}
-
-                            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                                <div className="rounded-2xl border border-border bg-surface-2 p-4">
-                                    <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
-                                        <Wallet className="size-4 text-accent" aria-hidden />
-                                        Fondo total
-                                    </p>
-                                    <p className="mt-1 text-2xl font-extrabold text-fg">{euro(totalFondo)}</p>
-                                    <p className="mt-2 text-xs text-fg-muted">
-                                        Lo que quieres tener al empezar cada turno.
-                                    </p>
-                                </div>
-
-                                <div className="rounded-2xl border border-border bg-surface-2 p-4">
-                                    <p className="flex items-center gap-1.5 text-xs font-semibold text-fg-muted">
-                                        <Coins className="size-4 text-accent" aria-hidden />
-                                        Cierre total
-                                    </p>
-                                    <p className="mt-1 text-2xl font-extrabold text-fg">{euro(totalCierre)}</p>
-                                    <p className="mt-2 text-xs text-fg-muted">
-                                        Lo que tienes ahora mismo al acabar.
-                                    </p>
-                                </div>
-
-                                <div
-                                    className={cn(
-                                        "rounded-2xl border p-4",
-                                        deltaResumen.neto >= 0
-                                            ? "border-danger/30 bg-danger-soft"
-                                            : "border-success/30 bg-success-soft",
-                                    )}
-                                >
-                                    <p
-                                        className={cn(
-                                            "flex items-center gap-1.5 text-xs font-semibold",
-                                            deltaResumen.neto >= 0 ? "text-danger" : "text-success",
-                                        )}
-                                    >
-                                        <ArrowRightLeft className="size-4" aria-hidden />
-                                        Diferencia neta
-                                    </p>
-                                    <p
-                                        className={cn(
-                                            "mt-1 text-2xl font-extrabold",
-                                            deltaResumen.neto >= 0 ? "text-danger" : "text-success",
-                                        )}
-                                    >
-                                        {deltaResumen.neto >= 0
-                                            ? `Faltan ${euro(deltaResumen.neto)}`
-                                            : `Sobran ${euro(Math.abs(deltaResumen.neto))}`}
-                                    </p>
-                                    <p
-                                        className={cn(
-                                            "mt-2 text-xs",
-                                            deltaResumen.neto >= 0 ? "text-danger/80" : "text-success/80",
-                                        )}
-                                    >
-                                        Detalle por monedas/billetes abajo.
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2">
-                                <DenomsGrid
-                                    title="1 · Fondo (predeterminado)"
-                                    subtitle="Con cuánto quieres empezar siempre todos los turnos."
-                                    denoms={denoms}
-                                    count={xFondo}
-                                    total={totalFondo}
-                                    onAdd={(label) => setXFondoState((prev) => incCash(prev, label))}
-                                    onRemove={(label) => setXFondoState((prev) => decCash(prev, label))}
-                                    onReset={() => setXFondoState(resetCash())}
-                                />
-
-                                <DenomsGrid
-                                    title="2 · Cierre (final del día)"
-                                    subtitle="Lo que tienes hoy en caja al cerrar."
-                                    denoms={denoms}
-                                    count={xCierre}
-                                    total={totalCierre}
-                                    onAdd={(label) => setXCierreState((prev) => incCash(prev, label))}
-                                    onRemove={(label) => setXCierreState((prev) => decCash(prev, label))}
-                                    onReset={() => setXCierreState(resetCash())}
-                                />
-                            </div>
-
-                            <div className="mt-4 rounded-2xl border border-border bg-surface-2 p-4 sm:p-5">
-                                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-                                    <div>
-                                        <h4 className="text-lg font-extrabold text-fg">
-                                            3 · Qué añadir / quitar para el siguiente servicio
-                                        </h4>
-                                        <p className="mt-1 text-sm text-fg-muted">
-                                            Objetivo: que el cierre se convierta en tu fondo predeterminado.
-                                        </p>
-                                    </div>
-
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <Badge>Añadir aprox: {euro(deltaResumen.add)}</Badge>
-                                        <Badge>Quitar aprox: {euro(deltaResumen.remove)}</Badge>
-                                    </div>
-                                </div>
-
-                                <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {deltas
-                                        .filter((d) => d.delta !== 0)
-                                        .map((d) => {
-                                            const sign = d.delta > 0 ? "add" : "remove";
-                                            return (
-                                                <div
-                                                    key={d.label}
-                                                    className={[
-                                                        "rounded-2xl border p-3",
-                                                        sign === "add"
-                                                            ? "border-success/30 bg-success-soft"
-                                                            : "border-danger/30 bg-danger-soft",
-                                                    ].join(" ")}
-                                                >
-                                                    <div className="flex items-center justify-between">
-                                                        <p className="font-extrabold text-fg">{d.label}</p>
-                                                        <span className="text-xs text-fg-muted">{moneyLabel(d.value)}</span>
-                                                    </div>
-
-                                                    <div className="mt-2 flex items-end justify-between gap-2">
-                                                        <div>
-                                                            <p className="text-xs text-fg-muted">Acción</p>
-                                                            <p
-                                                                className={[
-                                                                    "text-sm font-extrabold",
-                                                                    sign === "add" ? "text-success" : "text-danger",
-                                                                ].join(" ")}
-                                                            >
-                                                                {sign === "add" ? "Añadir" : "Quitar"} {Math.abs(d.delta)}
-                                                            </p>
-                                                        </div>
-
-                                                        <div className="text-right">
-                                                            <p className="text-xs text-fg-muted">Impacto</p>
-                                                            <p className="text-sm font-extrabold text-fg">
-                                                                {euro(Math.round(Math.abs(d.delta * d.value) * 100) / 100)}
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-
-                                    {!deltas.some((d) => d.delta !== 0) ? (
-                                        <div className="rounded-2xl border border-border bg-surface-2 px-4 py-3 text-sm text-fg-muted">
-                                            ✅ Perfecto: el cierre ya coincide con tu fondo predeterminado.
-                                        </div>
-                                    ) : null}
-                                </div>
-
-                                <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2">
-                                    <button
-                                        type="button"
-                                        onClick={() => {
-                                            setXFondoState(xCierre);
-                                            setXFondo(xCierre);
-                                            setXSavedToast("✅ Fondo actualizado con el cierre actual.");
-                                            setTimeout(() => setXSavedToast(null), 1800);
-                                        }}
-                                        className="h-10 px-4 rounded-2xl border border-border bg-surface text-sm font-semibold text-fg hover:bg-surface-2 active:scale-[0.98] transition"
-                                        title="Si quieres que el fondo predeterminado pase a ser lo que tienes ahora mismo"
-                                    >
-                                        Usar cierre como nuevo fondo
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={guardarFondoPredeterminado}
-                                        className="inline-flex h-10 items-center justify-center gap-2 rounded-2xl border border-accent bg-accent px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer"
-                                    >
-                                        <Save className="size-4" aria-hidden />
-                                        Guardar fondo
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-            </ModalShell>
+            <CierreCajaModal
+                open={openCierre}
+                onClose={() => setOpenCierre(false)}
+                idUsuario={idUsuario}
+                onCerrado={() => {
+                    // Un cierre cambia lo que se puede editar (bloquea su periodo) y estrena el
+                    // historico, asi que se recarga todo lo que cuelga de el.
+                    void recargarCierres();
+                    entradasQuery.refetch();
+                    salidasQuery.refetch();
+                }}
+            />
 
             {confirmAccion ? (
             <ModalShell

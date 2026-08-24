@@ -1264,6 +1264,24 @@ async fn printer_print_ticket(
     Ok("OK".into())
 }
 
+/// Imprime el papel de un arqueo (CUENTA-06).
+///
+/// Documento **interno**: no gasta numero de ticket ni abre el cajon -que ya esta abierto, se acaba
+/// de contar-. Va aparte de `printer_print_ticket` a proposito: compartir el camino del ticket de
+/// venta invitaria a que un cambio en uno se colara en el otro.
+#[tauri::command]
+async fn printer_print_arqueo(
+    app: AppHandle,
+    payload: printing::PrintArqueoPayload,
+) -> Result<String, AppErrorDto> {
+    let printer = resolve_printer(&app, payload.printer_name.clone())?;
+    let bytes = printing::build_arqueo(&payload);
+    tokio::task::spawn_blocking(move || printing::print_raw(&printer, "Cierre de caja", &bytes))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok("OK".into())
+}
+
 /// Columnas de caracteres que de verdad caben con la configuración actual de papel y márgenes.
 ///
 /// Lo pregunta la previsualización para enseñar el ancho real (y recortar los nombres donde los
@@ -1760,6 +1778,7 @@ pub fn run() {
             printer_get_selected,
             printer_set_selected,
             printer_print_ticket,
+            printer_print_arqueo,
             printer_ticket_cols,
             printer_open_drawer,
             printer_print_test,

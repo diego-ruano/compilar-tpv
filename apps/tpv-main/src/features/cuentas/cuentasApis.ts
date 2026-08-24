@@ -56,8 +56,6 @@ export type CashCount = Record<string, number>;
    Constantes
 ========================= */
 
-const LS_KEY_X_FONDO = "cuentas_x_fondo_v1";
-
 export const DEFAULT_DENOMS: Denom[] = [
     { label: "0.01€", value: 0.01, kind: "moneda" },
     { label: "0.02€", value: 0.02, kind: "moneda" },
@@ -291,30 +289,8 @@ export async function cuentasDeletePago(idPago: string): Promise<boolean> {
 }
 
 /* =========================================================
-   X Caja - solo frontend
+   Recuento de efectivo (lo usa el cierre de caja)
 ========================================================= */
-
-export function getXFondo(): CashCount {
-    try {
-        const raw = localStorage.getItem(LS_KEY_X_FONDO);
-        if (!raw) return {};
-
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== "object") return {};
-
-        return parsed as CashCount;
-    } catch {
-        return {};
-    }
-}
-
-export function setXFondo(count: CashCount): void {
-    try {
-        localStorage.setItem(LS_KEY_X_FONDO, JSON.stringify(count ?? {}));
-    } catch {
-        // noop
-    }
-}
 
 export function cashTotal(denoms: Denom[], count: CashCount): number {
     let sum = 0;
@@ -327,35 +303,6 @@ export function cashTotal(denoms: Denom[], count: CashCount): number {
     }
 
     return Math.round(sum * 100) / 100;
-}
-
-export function calcDeltaToReachFondo(args: {
-    denoms: Denom[];
-    fondo: CashCount;
-    cierre: CashCount;
-}): Array<{
-    label: string;
-    value: number;
-    delta: number;
-    kind: Denom["kind"];
-}> {
-    const { denoms, fondo, cierre } = args;
-
-    return denoms.map((d) => {
-        const target = Number(fondo?.[d.label] ?? 0);
-        const end = Number(cierre?.[d.label] ?? 0);
-
-        const delta =
-            (Number.isFinite(target) ? target : 0) -
-            (Number.isFinite(end) ? end : 0);
-
-        return {
-            label: d.label,
-            value: d.value,
-            delta,
-            kind: d.kind,
-        };
-    });
 }
 
 export function incCash(count: CashCount, label: string, step = 1): CashCount {
