@@ -1,0 +1,9 @@
+{
+  "descripcion": "Ficha de un cliente por id (devuelve un objeto o null). El cliente tiene notas y teléfono con espacios alrededor, que es donde los dos lados pueden discrepar: uno recorta y el otro no.",
+  "lectura": "clientes.form",
+  "seed": [
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono, Notas) VALUES ('cli-1', 'Ana Gomez', 'ana@bar.com', ' 600100200 ', 'Alergica al marisco');",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-2', 'Otro');"
+  ],
+  "entrada": { "id_cliente": "cli-1" }
+}

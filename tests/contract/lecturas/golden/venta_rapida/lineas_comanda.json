@@ -1,0 +1,38 @@
+[
+  {
+    "Cantidad": 2.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-barra",
+    "ID_Detalle": "det-1",
+    "ID_Producto": "prod-1",
+    "IVA_Percent": 21.0,
+    "Nombre": "Cerveza",
+    "Notas": "muy fria",
+    "Pagado": 0,
+    "Precio_Unitario": 3.0
+  },
+  {
+    "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-barra",
+    "ID_Detalle": "det-2",
+    "ID_Producto": "prod-1",
+    "IVA_Percent": null,
+    "Nombre": "Cerveza",
+    "Notas": null,
+    "Pagado": 1,
+    "Precio_Unitario": 3.0
+  },
+  {
+    "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-barra",
+    "ID_Detalle": "det-3",
+    "ID_Producto": "",
+    "IVA_Percent": null,
+    "Nombre": "Suelto",
+    "Notas": null,
+    "Pagado": 0,
+    "Precio_Unitario": 1.0
+  }
+]

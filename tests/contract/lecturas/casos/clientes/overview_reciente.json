@@ -1,0 +1,15 @@
+{
+  "descripcion": "Overview de clientes en ranking 'reciente' (la lista completa, sin LIMIT: es la que el frontend usa para buscar y contar). Cubre CLI-05. El seed mete a propósito los tres casos que separan a los dos lados: un email vacío y un teléfono con espacios (Rust normaliza con norm_opt_string, el worker devuelve la celda cruda), un cliente sin ninguna reserva (agregados a 0 por COALESCE) y otro con dos reservas para que ROW_NUMBER tenga que elegir la última.",
+  "lectura": "clientes.overview",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono, Notas, Total_Gastado) VALUES ('cli-1', 'Ana Gomez', 'ana@bar.com', '600100200', 'VIP', 120.5);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono, Total_Gastado) VALUES ('cli-2', 'Beto Ruiz', '', '  600300400  ', 40.0);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono) VALUES ('cli-3', 'Sin Reservas', NULL, NULL);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-vieja', 'cli-1', 'mesa-1', '2000-01-01', '13:00', 'COMIDA', 2, 'FINALIZADA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-futura', 'cli-1', 'mesa-1', '2099-12-31', '21:30', 'CENA', 4, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-cli2', 'cli-2', 'mesa-1', '2000-06-15', '14:00', 'COMIDA', 3, 'ACTIVA');"
+  ],
+  "entrada": { "ranking": "reciente" }
+}

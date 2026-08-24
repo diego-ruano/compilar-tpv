@@ -1,0 +1,46 @@
+[
+  {
+    "Area": "barra",
+    "Fecha": "2099-01-05",
+    "Hora_Fin": "16:00",
+    "Hora_Inicio": "09:00",
+    "ID_Asignacion": "",
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-m",
+    "Nombre_Turno": "Manana",
+    "Notas": null
+  },
+  {
+    "Area": "cocina",
+    "Fecha": "2099-01-06",
+    "Hora_Fin": "23:00",
+    "Hora_Inicio": "16:00",
+    "ID_Asignacion": "asig-real",
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-t",
+    "Nombre_Turno": "Tarde",
+    "Notas": "cambiado a mano"
+  },
+  {
+    "Area": "sala",
+    "Fecha": "2099-01-06",
+    "Hora_Fin": "23:00",
+    "Hora_Inicio": "16:00",
+    "ID_Asignacion": "",
+    "ID_Trabajador": "trab-2",
+    "ID_Turno": "turno-t",
+    "Nombre_Turno": "Tarde",
+    "Notas": "siempre tardes"
+  },
+  {
+    "Area": "sala",
+    "Fecha": "2099-01-11",
+    "Hora_Fin": null,
+    "Hora_Inicio": null,
+    "ID_Asignacion": "",
+    "ID_Trabajador": "trab-2",
+    "ID_Turno": "turno-m",
+    "Nombre_Turno": "Manana",
+    "Notas": null
+  }
+]

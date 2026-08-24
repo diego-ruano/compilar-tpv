@@ -7,6 +7,29 @@
 // Un doble en memoria que "emule" esas cláusulas probaría el doble, no el código.
 
 /**
+ * Da a una fila del SqlStorage el acceso POSICIONAL que también tiene la de libsql.
+ *
+ * Una `Row` de libsql se lee de las dos formas, `r.Nombre` y `r[3]`, y el worker usa las dos: la
+ * mayoria de los `rows()` de cada dominio miran las claves, pero el de `inventario.queries.ts`
+ * indexa por posición contra `rs.columns`. El SqlStorage del DO solo devuelve objetos con nombre,
+ * así que sin esto ese dominio recibía filas vacías — un fallo del doble que se lee igual que una
+ * divergencia real entre las dos implementaciones, que es justo lo que un harness no puede
+ * permitirse.
+ *
+ * Los índices van como propiedades **no enumerables** a propósito: `Object.keys` y `JSON.stringify`
+ * tienen que seguir viendo solo las columnas, porque los dos harness comparan las filas por su
+ * conjunto de claves.
+ */
+function filaConAccesoPosicional(fila: any, columnas: string[]): any {
+	if (!fila || typeof fila !== "object" || Array.isArray(fila)) return fila;
+	columnas.forEach((col, i) => {
+		Object.defineProperty(fila, i, { value: fila[col], enumerable: false });
+	});
+	Object.defineProperty(fila, "length", { value: columnas.length, enumerable: false });
+	return fila;
+}
+
+/**
  * Devuelve algo con la forma de `Client` (libsql) sobre `ctx.storage.sql` del Durable Object.
  *
  * Implementa `execute` y `batch`. El `batch` importa: es lo que usa el apply agrupado (SYNC-18) y
@@ -20,7 +43,8 @@ export function clienteSobre(sql: any, storage?: any) {
 		const args = typeof entrada === "string" ? [] : (entrada.args ?? []);
 
 		const cursor = sql.exec(texto, ...args);
-		const rows = cursor.toArray();
+		const columnas: string[] = cursor.columnNames ?? [];
+		const rows = cursor.toArray().map((f: any) => filaConAccesoPosicional(f, columnas));
 		// El SqlStorage del DO no expone `lastInsertRowid`, así que se le pregunta a SQLite. Solo
 		// tras un INSERT: en cualquier otra sentencia el valor sería el del INSERT anterior y
 		// confundiría a quien lo lea.
@@ -29,7 +53,7 @@ export function clienteSobre(sql: any, storage?: any) {
 			? Number(sql.exec("SELECT last_insert_rowid() AS id;").toArray()[0]?.id ?? 0)
 			: 0;
 
-		return { rows, rowsAffected: cursor.rowsWritten ?? 0, lastInsertRowid };
+		return { rows, columns: columnas, rowsAffected: cursor.rowsWritten ?? 0, lastInsertRowid };
 	};
 
 	return {

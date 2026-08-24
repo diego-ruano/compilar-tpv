@@ -1,0 +1,41 @@
+[
+  {
+    "Cantidad": 2.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-1",
+    "ID_Detalle": "det-1",
+    "ID_Producto": "prod-plato",
+    "IVA_Percent": 10.0,
+    "Nombre": "Tortilla",
+    "Notas": "sin cebolla",
+    "Pagado": 0,
+    "Pasa_Cocina": 1,
+    "Precio_Unitario": 9.0
+  },
+  {
+    "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-1",
+    "ID_Detalle": "det-2",
+    "ID_Producto": "prod-bebida",
+    "IVA_Percent": null,
+    "Nombre": "Cerveza",
+    "Notas": null,
+    "Pagado": 1,
+    "Pasa_Cocina": 0,
+    "Precio_Unitario": 3.0
+  },
+  {
+    "Cantidad": 1.0,
+    "Estado_Cocina": "PENDIENTE",
+    "ID_Comanda": "com-1",
+    "ID_Detalle": "det-3",
+    "ID_Producto": "",
+    "IVA_Percent": null,
+    "Nombre": "Producto retirado",
+    "Notas": null,
+    "Pagado": 0,
+    "Pasa_Cocina": 0,
+    "Precio_Unitario": 5.0
+  }
+]

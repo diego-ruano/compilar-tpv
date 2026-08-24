@@ -24,7 +24,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use libsql::{Connection, Value};
+use libsql::Value;
 use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
@@ -54,6 +54,7 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::clientes::SqliteClientesRepository;
 use crate::configuracion::SqliteConfiguracionRepository;
+use crate::contract_comun::{cell_eq, cell_to_json, contract_dir, db_temporal, sembrar};
 use crate::cuentas::SqliteCuentasRepository;
 use crate::db::{Db, Reader};
 use crate::inventario::SqliteInventarioRepository;
@@ -66,53 +67,11 @@ use crate::tareas::SqliteTareasRepository;
 use crate::trabajadores::SqliteTrabajadoresRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
 
-/// Tolerancia al comparar números (stock decimal, importes): absorbe el ruido de coma flotante.
-const TOL: f64 = 1e-9;
-
-fn contract_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/contract")
-}
-
 /// Ruta del fichero (`casos` o `golden`) de un caso. Se organizan por módulo: el nombre lógico
 /// `<modulo>__<caso>` vive en `<base>/<modulo>/<caso>.json`.
 fn ruta_caso(base: &str, nombre: &str) -> PathBuf {
     let (modulo, caso) = nombre.split_once("__").unwrap_or(("otros", nombre));
     contract_dir().join(base).join(modulo).join(format!("{caso}.json"))
-}
-
-fn uniq() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
-}
-
-async fn db_temporal() -> (Arc<Db>, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("tpv_contract_{}", uniq()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
-    (db, dir)
-}
-
-async fn sembrar(db: &Arc<Db>, sentencias: &[Json]) {
-    let w = db.write().await;
-    let conn: &Connection = w.raw();
-    for s in sentencias {
-        let sql = s.as_str().expect("cada seed es un string SQL");
-        conn.execute(sql, Vec::<Value>::new())
-            .await
-            .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
-    }
-}
-
-/// `libsql::Value` → `serde_json::Value`. Los blobs no se replican, así que no aparecen aquí.
-fn cell_to_json(v: Value) -> Json {
-    match v {
-        Value::Null => Json::Null,
-        Value::Integer(i) => Json::from(i),
-        Value::Real(f) => Json::from(f),
-        Value::Text(s) => Json::String(s),
-        Value::Blob(_) => Json::Null,
-    }
 }
 
 /// Nombres de columna del SELECT (entre `SELECT` y `FROM`). Los SELECT del harness son planos a
@@ -160,19 +119,6 @@ async fn snapshot_tabla(db: &Arc<Db>, select: &str) -> Vec<Json> {
         out.push(Json::Object(obj));
     }
     out
-}
-
-/// Igualdad estructural de dos celdas: números con tolerancia; strings/null exactos.
-fn cell_eq(a: &Json, b: &Json) -> bool {
-    match (a, b) {
-        (Json::Null, Json::Null) => true,
-        (Json::Bool(x), Json::Bool(y)) => x == y,
-        (Json::String(x), Json::String(y)) => x == y,
-        (Json::Number(_), Json::Number(_)) => {
-            (a.as_f64().unwrap_or(f64::NAN) - b.as_f64().unwrap_or(f64::NAN)).abs() < TOL
-        }
-        _ => false,
-    }
 }
 
 /// Igualdad de dos filas (mismos campos, valores estructuralmente iguales).

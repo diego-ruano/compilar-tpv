@@ -1,0 +1,36 @@
+[
+  {
+    "Caducidad_Proxima": null,
+    "Cantidad_Pedido_Esperada": null,
+    "ID_Categoria": "cat-1",
+    "ID_Producto": "prod-1",
+    "ID_Proveedor": null,
+    "IVA_Percent": null,
+    "Lote_Proximo": null,
+    "Nombre": "Agua",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 1.5,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 0.0,
+    "Stock_Minimo": 0.0,
+    "Stock_Suelto": 0.0,
+    "Unidad_Medida": null
+  },
+  {
+    "Caducidad_Proxima": "2026-09-30",
+    "Cantidad_Pedido_Esperada": null,
+    "ID_Categoria": "cat-1",
+    "ID_Producto": "prod-2",
+    "ID_Proveedor": "prov-1",
+    "IVA_Percent": 21.0,
+    "Lote_Proximo": "L-BUENO",
+    "Nombre": "Cerveza",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 3.0,
+    "Ruta_Imagen": null,
+    "Stock_Actual": 31.0,
+    "Stock_Minimo": 10.0,
+    "Stock_Suelto": 7.0,
+    "Unidad_Medida": "ud"
+  }
+]

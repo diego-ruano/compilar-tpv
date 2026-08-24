@@ -1,14 +1,29 @@
 # Tests de contrato Main (Rust) ↔ worker (TS) — ARCH-01
 
-La lógica de convertir un comando de negocio (un cobro, un ajuste de stock…) en **sentencias SQL
-replicables** vive **dos veces**: en Rust (la Main, escritora única) y en TypeScript (el worker, que
-escribe por las Handy). Las dos tienen que comportarse **igual** para que la replicación converja, se
-igualan a mano y ya han divergido (MESA-04/MESA-07). Este harness pincha esa igualdad: convierte una
-divergencia futura en un **test rojo** en CI.
+La lógica de hablar con la base de datos vive **dos veces**: en Rust (la Main, escritora única, contra
+su SQLite local) y en TypeScript (el worker, que sirve a las Handy contra Turso). Las dos tienen que
+comportarse **igual**, se igualan a mano y ya han divergido (MESA-04/MESA-07). Estos harness pinchan
+esa igualdad: convierten una divergencia futura en un **test rojo** en CI.
 
-No elimina la duplicación (para eso está el WASM del futuro, ver
+No eliminan la duplicación (para eso está el WASM del futuro, ver
 [BACKLOG §Unificación](../../docs/analisis/BACKLOG.md#unificación-de-la-doble-implementación-mainworker));
-la **fija**. Es el máximo retorno por esfuerzo, sin cambio de arquitectura.
+la **fijan**. Es el máximo retorno por esfuerzo, sin cambio de arquitectura.
+
+## Son dos, y comparan cosas distintas
+
+| | Qué fija | Qué falla si no está | Dónde vive |
+|---|---|---|---|
+| **Escritura** | Mismo comando → **mismas filas** en la BD | La replicación **no converge**: los dos lados guardan cosas distintas | `casos/` · `golden/` |
+| **Lectura** | Mismas filas → **mismo resultado devuelto** | Los datos convergen pero **se presentan distinto**: el camarero mira la Handy y la Main y ve otra cosa | `lecturas/` |
+
+La diferencia de fondo está en el **orden**. En una escritura el orden en que SQLite deje las filas
+de una tabla no es parte del contrato, así que se comparan como **multiconjunto**. Una lectura, en
+cambio, es una lista que se pinta en la pantalla en ese orden: dos implementaciones que devuelvan lo
+mismo desordenado **no** son equivalentes, y se comparan **por secuencia**.
+
+El resto de este documento describe el harness de **escritura**; el de **lectura** tiene su sección
+propia (§[Harness de lectura](#harness-de-lectura-cli-05)) y comparte con él la filosofía, el
+formato de los casos y el script de cobertura.
 
 ## Qué se compara: el EFECTO, no el texto SQL
 
@@ -37,7 +52,12 @@ Los ficheros se organizan **por módulo** en subcarpetas. El nombre lógico del 
 ```
 tests/contract/
 ├── casos/<modulo>/<caso>.json      # seed + entrada + snapshot (SELECT por tabla)
-└── golden/<modulo>/<caso>.json     # { tabla: [filas] } — el efecto esperado, bendecido por Rust
+├── golden/<modulo>/<caso>.json     # { tabla: [filas] } — el efecto esperado, bendecido por Rust
+├── cobertura.json                  # comandos excluidos, con motivo
+└── lecturas/                       # el harness hermano (ver §Harness de lectura)
+    ├── casos/<modulo>/<caso>.json  # seed + entrada
+    ├── golden/<modulo>/<caso>.json # el valor devuelto, bendecido por Rust
+    └── cobertura.json              # lecturas excluidas, con motivo
 ```
 
 Ej.: el caso `venta_rapida__cobro_fraccionado_un_lote` está en
@@ -141,19 +161,119 @@ La cobertura es una lista escrita a mano en dos ficheros, así que el punto déb
 lo que tiene caso: es lo que **entra sin caso**. Un comando nuevo es justo cuando más fácil es que
 las dos implementaciones nazcan distintas, y hasta ahora nadie se enteraba.
 
-`node scripts/check-contract-coverage.mjs` compara los `export function` de los `*.commands.ts` del
-worker (si el worker construye SQL para algo, ese algo está implementado dos veces) con los builders
-que este harness importa de verdad, y lista lo que queda fuera. Lo que está fuera **a propósito** va
-en [`cobertura.json`](cobertura.json) con su motivo; lo demás sale como pendiente.
+`node scripts/check-contract-coverage.mjs` vigila **las dos vertientes**:
+
+- **Escritura**: los `export function` de los `*.commands.ts` del worker (si el worker construye SQL
+  para algo, ese algo está implementado dos veces) frente a los builders que el harness importa de
+  verdad.
+- **Lectura**: los `export function` de los `*.queries.ts` **que sirven a un GET**, frente a las
+  consultas que importa el harness de lectura. El recorte a los GET es deliberado: media docena de
+  esos ficheros son comprobaciones previas de una escritura (`cobrarPlan`, `hasPaidLines`, el
+  throttle del login) que ya viajan dentro del harness de escritura al correr su comando. Contarlas
+  llenaría el aviso de deuda que no existe, y un aviso que nadie puede vaciar deja de leerse.
+
+Lo que está fuera **a propósito** va en el `cobertura.json` de cada vertiente con su motivo; lo demás
+sale como pendiente.
 
 Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y deja anotaciones en
-el PR y una tabla en el resumen del job. Un comando sin contrastar es deuda que hay que ver, no un
-push que haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
+el PR y una tabla en el resumen del job. Algo sin contrastar es deuda que hay que ver, no un push que
+haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **60/64 con 0 pendientes** (los otros 7 son las exclusiones documentadas). La primera vez
-que se ejecutó encontró 10 comandos sin caso que no estaban documentados en ninguna parte —todo
-`cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y dos de ellos escondían divergencias
-reales. Por eso existe.
+Hoy dice **60/67 comandos** y **13/61 lecturas**. La primera vez que se ejecutó encontró 10 comandos
+sin caso que no estaban documentados en ninguna parte —todo `cuentas`, todo `notificaciones` y
+`mesas.setReservaEstado`—, y dos de ellos escondían divergencias reales. Por eso existe. Y lo ha
+vuelto a hacer: los tres comandos de la papelera de notificaciones (`descartar`, `restaurar`,
+`eliminar`, del commit `eed739b`) entraron **después** de escribirse este documento y siguen sin
+caso, que es exactamente el agujero que el script está para enseñar.
+
+## Harness de lectura (CLI-05)
+
+El hermano del de arriba. Fija que, **partiendo de las mismas filas**, la consulta de la Main y la
+del worker devuelvan **lo mismo y en el mismo orden**.
+
+### Por qué hace falta
+
+Los datos convergen —de eso se encarga la replicación—, pero el SQL que los lee **no es el mismo
+código**: está en `crates/tpv-infra-sqlite` para la Main y en `domains/*/*.queries.ts` para la Handy.
+Las mismas filas pueden acabar presentadas distinto: un JOIN de más, un filtro de borrados que sólo
+está en un lado, un `ROUND` en otro sitio, los límites de un rango de fechas (`<` vs `<=`), un `NULL`
+que uno normaliza y el otro no. El fallo que produce no es corrupción de datos, es **discrepancia**:
+el camarero mira el total en la Handy y la Main dice otra cosa, y nadie sabe cuál creer.
+
+El punto exacto donde se comparan es el **DTO**, y no es una elección arbitraria: en modo Handy,
+`tpv-infra-http` deserializa la respuesta JSON del worker **dentro del mismo struct** que devuelve el
+repositorio SQLite (`HttpClientesRepository::overview` → `Vec<ClienteOverview>`). El contrato ya es
+exactamente ése; el harness sólo lo pincha.
+
+### Reglas de los casos
+
+- **El orden es el contrato.** Los arrays se comparan posición a posición, no como multiconjunto.
+- **Los IDs sí entran en el golden.** Al revés que en las escrituras: aquí no los genera nadie, los
+  fija el `seed`. Lo que se lee es lo que se sembró.
+- **Las fechas del seed son extremas a propósito** (`2000-…` para el pasado, `2099-…` para el
+  futuro). Varias consultas comparan contra `date('now','localtime')` —reservas pendientes, tareas
+  de hoy, el cuadrante que se rellena con el horario predeterminado— y un seed con fechas cercanas
+  convertiría el golden en algo que caduca. Con los extremos, el lado de la comparación en el que
+  cae cada fila es el mismo hoy y dentro de setenta años.
+- **Un `null` y un campo ausente son lo mismo.** Es lo que hace serde al deserializar la respuesta
+  del worker en el DTO (`Option<T>` acepta las dos formas), así que exigir que coincidan sería
+  inventarse un requisito que el sistema real no tiene.
+
+Un **caso** (`lecturas/casos/<modulo>/<caso>.json`):
+
+```jsonc
+{
+  "descripcion": "…",
+  "lectura": "cuentas.entradas",          // clave que despacha a la consulta en cada lado
+  "seed":     ["INSERT INTO …;", "…"],    // estado de partida (idéntico en ambos lados)
+  "entrada":  { "del": "2026-05-01", "al": "2026-05-31", "q": null }
+}
+```
+
+El **golden** (`lecturas/golden/<modulo>/<caso>.json`) es el valor devuelto tal cual: una lista, un
+objeto o `null`.
+
+### Dónde corre cada lado
+
+| Lado | Fichero | Se ejecuta con |
+|---|---|---|
+| Rust (Main) | `crates/tpv-infra-sqlite/src/contract_read_tests.rs` | `cargo test -p tpv-infra-sqlite contract_read_tests` |
+| Worker (Handy) | `apps/cloud-worker-licensing/test/contractLectura.test.ts` | `pnpm --filter tpv-api test contractLectura` |
+
+Regenerar los goldens: `BLESS_CONTRACT_READ=1 cargo test -p tpv-infra-sqlite contract_read_tests`.
+
+### Añadir una lectura
+
+1. Crea `lecturas/casos/<modulo>/<caso>.json`.
+2. Añade el nombre lógico `<modulo>__<caso>` a la macro `lecturas_de_contrato!` en
+   `contract_read_tests.rs`, y su par caso/golden en `contractLectura.test.ts`.
+3. Si la consulta es nueva, añade su brazo de despacho en los dos sitios (`ejecutar_lectura` en Rust,
+   `ejecutarLectura` en el worker).
+4. Bendice el golden desde Rust y corre el worker. Si sale rojo, **has encontrado una divergencia
+   real**.
+
+### Cobertura actual
+
+**17 casos sobre 13 lecturas**, todos verdes: `clientes.overview` (los tres rankings) y
+`clientes.form` —que son el CLI-05 original—, `cuentas.entradas` (llano y con búsqueda + paginación),
+`cuentas.salidas`, `cuentas.resumen`, `inventario.productos_por_categoria`, `inventario.resumen`,
+`mesas.lineas_comanda`, `venta_rapida.comandas_barra`, `venta_rapida.lineas_comanda`, `tareas.admin`,
+`tareas.mias` y `trabajadores.asignaciones_semana` (semana pasada y semana futura, que es la que
+dispara el relleno con el horario predeterminado: ahí no se contrasta un SQL sino dos algoritmos,
+uno con un `BTreeMap` de Rust y otro con un `sort` de JS).
+
+Quedan **47 lecturas sin caso**, que el script de cobertura lista una por una. Las gordas: todo
+`stats`, `mesas.loadLayout`/`mesasMetaAll`/`kitchenList`, `reservas.mes`, `proveedores.*`,
+`trabajadores.all`/`detail` y los catálogos de producto de mesas y venta rápida.
+
+### No cubierto (por qué)
+
+- **`mesas.mesasOcupadas`** — divergencia **conocida** y a propósito sin caso; el motivo largo está
+  en [`lecturas/cobertura.json`](lecturas/cobertura.json). En resumen: la Main devuelve una clave por
+  mesa ocupada (`db-zona-Z:db-mesa-M`) y el worker devuelve tres. Igualar el worker a la Main lo
+  empeoraría, porque la clave compuesta es justo la que el frontend no sabe parsear: son las claves
+  de más del worker las que hacen que la Handy acierte. El arreglo de verdad es que la Main deje de
+  emitir la compuesta, y eso es un cambio de comportamiento que no toca decidir en un harness.
 
 ## El guard de SQL replicable determinista (TRAB-08)
 

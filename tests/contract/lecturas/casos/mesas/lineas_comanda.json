@@ -1,0 +1,21 @@
+{
+  "descripcion": "Lineas de una comanda de mesa: lo que ve el camarero al abrir la mesa. Contrasta los tres COALESCE que deciden lo que se pinta cuando falta el dato (Cantidad, Precio_Unitario y el Nombre, que cae a Productos.Nombre y de ahi al literal 'Producto'), el flag Pagado calculado con un EXISTS sobre Pago_Detalles y el Pasa_Cocina heredado de la categoria. Una linea se quedo sin producto (ID_Producto NULL, que es lo que deja el ON DELETE SET NULL al retirar un articulo del catalogo) y solo conserva su Nombre_Producto: ahi es donde el LEFT JOIN se gana el sueldo, porque con un INNER esa linea desapareceria del ticket.",
+  "lectura": "mesas.lineas_comanda",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-plato', 'cat-cocina', 'Tortilla', 9.0, 10.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-bebida', 'cat-barra', 'Cerveza', 3.0);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', '2026-05-10 12:00:00', 'Abierta');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-otra', 'MESA', 'mesa-1', '2026-05-09 12:00:00', 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina, IVA_Percent) VALUES ('det-1', 'com-1', 'prod-plato', 2, 9.0, 'sin cebolla', 'PENDIENTE', 10.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'com-1', 'prod-bebida', 1, 3.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-1', NULL, 'Producto retirado', 1, 5.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-4', 'com-otra', 'prod-bebida', 1, 3.0);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 13:00:00', 'Efectivo', 3.0, 'parcial');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-2');"
+  ],
+  "entrada": { "id_comanda": "com-1" }
+}

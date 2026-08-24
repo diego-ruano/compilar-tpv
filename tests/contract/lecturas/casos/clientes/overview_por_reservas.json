@@ -1,0 +1,15 @@
+{
+  "descripcion": "Overview ordenado por número de reservas (con LIMIT 10). Mismo seed que 'reciente': lo que se contrasta aquí es el ORDER BY, que en una lectura SÍ es parte del contrato — dos implementaciones que devuelvan los mismos clientes en distinto orden pintan pantallas distintas. El desempate por Total_Gastado y por ID_Cliente DESC está sembrado a propósito (cli-2 y cli-3 empatan a reservas... no: cli-2 tiene 1 y cli-3 ninguna).",
+  "lectura": "clientes.overview",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono, Total_Gastado) VALUES ('cli-1', 'Ana Gomez', 'ana@bar.com', '600100200', 120.5);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Email, Telefono, Total_Gastado) VALUES ('cli-2', 'Beto Ruiz', 'beto@bar.com', '600300400', 40.0);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-3', 'Sin Reservas', 999.0);",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-1', 'cli-1', 'mesa-1', '2000-01-01', '13:00', 'COMIDA', 2, 'FINALIZADA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-2', 'cli-1', 'mesa-1', '2099-12-31', '21:30', 'CENA', 4, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-3', 'cli-2', 'mesa-1', '2000-06-15', '14:00', 'COMIDA', 3, 'ACTIVA');"
+  ],
+  "entrada": { "ranking": "reservas" }
+}

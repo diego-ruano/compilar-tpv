@@ -6,54 +6,59 @@
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
-| CLI-05 | 🔵 | Paridad de **lectura** del overview de clientes: verificada idéntica a mano el 2026-08-22, pero el harness de contrato compara escrituras y **no cubre consultas**. Falta el harness hermano de lectura (mismo seed → mismas filas). La equivalente de estadísticas (STAT-06) se retiró como hallazgo: los datos convergen y los agregados van detrás. | [clientes.md](dominios/clientes.md) |
 | LOGIN-04 | 🔵 | **PBKDF2 a 600k (OWASP): BLOQUEADO por el runtime, no por el plan.** ⚠️ Corregido 2026-08-09: el tope de 100k **no** viene del plan Free sino de `crypto.subtle` de Cloudflare Workers, que **rechaza** PBKDF2 con más de 100.000 iteraciones (ver la nota en `crates/tpv-domain/src/login.rs:11-15`). Como el worker **verifica** el hash en cada login/fichaje de Handy, 100k es el techo común de ambos runtimes; tener el plan de pago **no lo desbloquea**. Además, con un PIN de 4 dígitos (10⁴) pasar de 100k a 600k solo multiplica por 6 el coste del crackeo offline: irrelevante frente al tamaño del espacio de claves. **Lo que sí movería la aguja** (por orden): un **pepper** fuera de la BD (hace inútil el hash replicado), ampliar el espacio de PIN, o dejar de replicar `Password_Hash` (descartado: la Handy necesita que el worker verifique). El anti-brute-force online ya está resuelto por el lockout escalado de LOGIN-01. **Decisión (2026-08-09): aplazado a cambios futuros.** Riesgo bajo: para explotarlo hay que tener antes acceso de lectura a la BD del tenant en Turso, que es un escenario raro. Se retoma si algún día hay volumen de clientes que lo justifique. | [login.md](dominios/login.md) |
 | INFRA-01 | 🟡 | **No hay entorno de staging: se prueba contra producción.** Hoy existe un único worker (`tpv-api`) con una sola BD de control y los binarios apuntan a él por constante. No hay dónde validar un cambio de worker, de esquema o de licencias antes de que lo vea un cliente real. Ver §[Entorno de staging](#entorno-de-staging-infra-01--pendiente-completo). **Aplazado a cuando el SaaS esté más asentado** (decisión 2026-08-09): es un montaje completo, no un ajuste. | §Entorno de staging |
 | FABLE-E | 🔵 | **Nonce anti-repetición en el device-proof.** La firma ya cubre el cuerpo (hecho el 2026-08-15), pero no lleva número de serie: dentro de la ventana de 2 min una petición firmada podría **reproducirse tal cual**. **Decisión: aplazado.** Para reproducirla hay que haber capturado el tráfico (va por TLS) y las escrituras son idempotentes por `Op_Id`, así que repetir una no duplica nada. **Lo que hace falta cuando se retome:** un almacén de nonces vistos, compartido — los isolates del worker no comparten memoria, así que un `Set` en RAM no vale. Opciones: **KV** (barato, pero eventualmente consistente: un replay en otro colo podría no ver el nonce todavía → mal encaje), **Durable Object** (consistente de verdad, ya existe `TenantHub`, pero mete un salto por petición) o una **tabla en Turso** con TTL (un INSERT por petición). Yo iría al DO si algún día pesa. | [auditoria-fable.md](../../auditoria-fable.md) |
 | FABLE-B | 🟠 | **Fuga de stack traces al cliente.** `serverError(req, code, details)` serializa `details` en el cuerpo JSON, y varios handlers de pairing le pasan `{ message, name, stack }` del `Error` ([response.ts:48-63](../../apps/cloud-worker-licensing/src/server/utils/response.ts#L48-L63)). Cualquiera que llame a la API recibe la traza y el texto crudo del motor de Turso. **Decisión (2026-08-14): aplazado**, no hay clientes en producción todavía. **Cuando se haga, el cambio es en tres partes y hay que hacer las tres:** (1) `serverError` deja de serializar `details` y devuelve `{ ok, error, trace_id }`; (2) en cada `catch`, `console.error(trace_id, e?.stack)` + `Sentry.captureException` — hoy solo 9 ficheros loguean, así que sin esto **sí** se perdería información al quitar el `details`; (3) opcional pero recomendable, seguir devolviendo `details` cuando `env.ENVIRONMENT !== "prod"` (requiere añadir `ENVIRONMENT` a los `vars` de `wrangler.json`, hoy ausente). El stack se sigue viendo en `wrangler tail`, Sentry y Axiom. La forma de la respuesta ya la fijó el catálogo de códigos (`{ ok, code, error }`): lo que queda aquí es **dejar de serializar `details`**. | [auditoria-fable.md](../../auditoria-fable.md) |
 
-**Nota (actualizada 2026-08-22):** el harness de contrato **ya está** y cerró los `-parity` de
-**escritura** (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06). Lo que queda de esa
-familia queda la **paridad de lectura** (CLI-05), que pide un harness hermano que compare filas
-devueltas. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo, **TRAB-08**, ya
-corregido. Ver
+**Nota (actualizada 2026-08-24):** los **dos** harness de contrato ya están. El de escritura cerró
+los `-parity` (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06); el de **lectura** cerró
+**CLI-05** y, de paso, sacó cuatro divergencias reales que la revisión a mano de agosto no había
+visto (dos de normalización de texto en clientes, el `IVA_Percent` que el worker no devolvía en el
+listado de inventario y un `ID_Producto` nulo que impedía a la Handy abrir una comanda con una línea
+huérfana), todas corregidas. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo,
+**TRAB-08**, ya corregido. Ver
 [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
 ---
 
 ## Unificación de la doble implementación Main↔worker
 
-> **Problema (transversal):** la lógica de construir las **sentencias replicables** vive dos veces —
-> Rust (Main) y TS (worker)— y tiene que ser **idéntica en comportamiento** para que la replicación
-> sea consistente, pero se desincroniza a mano. Las **escrituras** ya las sujeta el harness (punto 1);
-> lo que sigue expuesto es la paridad de **lectura** (CLI-05); lo excluido se revisó a mano el
-> 22-23/08 y escondía un fallo, TRAB-08, ya corregido.
+> **Problema (transversal):** la lógica de hablar con la base de datos vive dos veces — Rust (Main) y
+> TS (worker)— y tiene que ser **idéntica en comportamiento**, pero se desincroniza a mano. Las
+> **escrituras** las sujeta el harness de contrato y las **lecturas** su hermano (punto 1); lo que
+> sigue expuesto es lo que aún no tiene caso, que el script de cobertura lista en CI.
 > Opciones, de menos a más ambiciosas:
 
-1. **Tests de contrato (golden por EFECTO) — barato, primer paso. ✅ HECHO (escrituras).** Para cada comando,
-   con el mismo estado sembrado, comprobar que aplicar la implementación de Rust y la del worker deja
-   **las mismas filas**. No elimina la duplicación, pero convierte cada divergencia futura en un
-   **test rojo**. Máximo retorno por esfuerzo; sin cambio de arquitectura.
+1. **Tests de contrato (golden) — barato, primer paso. ✅ HECHO (escrituras y lecturas).** Con el mismo
+   estado sembrado, comprobar que la implementación de Rust y la del worker se comportan igual. No
+   elimina la duplicación, pero convierte cada divergencia futura en un **test rojo**. Máximo retorno
+   por esfuerzo; sin cambio de arquitectura.
 
-   > **Estado (2026-08-22): completo para escrituras; las lecturas siguen sin cubrir.** Ver
+   > **Estado (2026-08-24): montados los dos.** Ver
    > [tests/contract/README.md](../../tests/contract/README.md).
    >
-   > - **Se compara el EFECTO, no el texto SQL.** Los dos lados escribieron su SQL por separado, así
-   >   que el texto difiere aunque el resultado sea idéntico → compararlo daría falsos positivos. El
-   >   golden es el **estado resultante** (las filas que deja el comando), y cada lado corre su
-   >   implementación real y compara contra él. Los snapshots omiten columnas no deterministas
-   >   (UUID generado, `Fecha_Hora`); la comparación es por multiconjunto con igualdad estructural.
-   > - **Canónico = Rust** (escritor único): bendice el golden; el worker se conforma o sale rojo.
-   > - **Montado ya:** `tests/contract/` (fixtures + goldens), el lado Rust
-   >   (`crates/tpv-infra-sqlite/src/contract_tests.rs`) y el del worker sobre **vitest**
-   >   (`apps/cloud-worker-licensing/test/contract.test.ts`, corre en workerd con el
-   >   TenantHub real y el esquema de las migraciones). CI ya corre las dos suites.
-   > - **Cubierto:** 63 casos sobre 60 comandos, sin ninguno pendiente (venta rápida, mesas
-   >   —incluido `save_layout`—, cuentas, inventario, clientes, tareas, proveedores, reservas,
-   >   configuración, notificaciones y parte de login/horarios). Añadir un dominio = un brazo de
-   >   despacho en cada lado + sus fixtures.
+   > - **Escritura — se compara el EFECTO, no el texto SQL.** Los dos lados escribieron su SQL por
+   >   separado, así que el texto difiere aunque el resultado sea idéntico → compararlo daría falsos
+   >   positivos. El golden es el **estado resultante** (las filas que deja el comando). Los
+   >   snapshots omiten columnas no deterministas (UUID generado, `Fecha_Hora`); la comparación es
+   >   por **multiconjunto**, porque el orden en que queden las filas no es parte del contrato.
+   > - **Lectura — se compara el VALOR DEVUELTO, y en orden.** Ahí el orden **sí** es el contrato:
+   >   una lectura es una lista que se pinta en la pantalla, y dos implementaciones que devuelvan lo
+   >   mismo desordenado no son equivalentes. El punto de comparación es el DTO, que es literalmente
+   >   el mismo struct en el que `tpv-infra-http` deserializa la respuesta del worker.
+   > - **Canónico = Rust** (escritor único y dueño del DTO): bendice el golden; el worker se
+   >   conforma o sale rojo.
+   > - **Montado ya:** `tests/contract/` y `tests/contract/lecturas/` (fixtures + goldens), el lado
+   >   Rust (`contract_tests.rs` y `contract_read_tests.rs`) y el del worker sobre **vitest**
+   >   (`test/contract.test.ts` y `test/contractLectura.test.ts`, que corren en workerd con el
+   >   TenantHub real y el esquema de las migraciones). CI ya corre las cuatro suites.
+   > - **Cubierto:** 63 casos sobre 60 comandos y 17 casos sobre 13 lecturas. Añadir un dominio = un
+   >   brazo de despacho en cada lado + sus fixtures.
    > - **Lo que falta se ve solo:** `scripts/check-contract-coverage.mjs` avisa en CI (sin romperlo)
-   >   de cada comando del worker que no tenga caso ni exclusión documentada en `cobertura.json`.
+   >   de cada comando y cada lectura del worker que no tenga caso ni exclusión documentada. Hoy
+   >   quedan **3 comandos** (la papelera de notificaciones, que entró después del harness) y
+   >   **47 lecturas** sin caso.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
    (ficheros `.sql` con nombres, o un JSON de sentencias con placeholders) consumido por Rust
    (`include_str!`) y TS (`import`). La mayoría de divergencias reales son en el texto del SQL y las
@@ -152,7 +157,7 @@ probar la **app** completa contra staging.
 
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
-| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Las **escrituras** ya las sujeta el harness de contrato (63 casos verdes en CI) más el guard de SQL replicable determinista. Queda: la paridad de **lectura** (CLI-05), lo que sigue **excluido con motivo** (`complete_initial_setup`, ficha con PII) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Ya hay red por los dos lados: el harness de **escritura** (63 casos) más el guard de SQL replicable determinista, y desde el 2026-08-24 el de **lectura** (17 casos), que al montarse sacó cuatro divergencias reales. Queda **ampliar la cobertura** —47 lecturas y 3 comandos sin caso, todos listados en CI por `check-contract-coverage.mjs`—, lo que sigue **excluido con motivo** (`complete_initial_setup`, ficha con PII, `mesas.mesasOcupadas`) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
 
 ---
 

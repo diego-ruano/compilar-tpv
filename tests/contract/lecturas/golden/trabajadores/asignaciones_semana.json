@@ -1,0 +1,46 @@
+[
+  {
+    "Area": "barra",
+    "Fecha": "2026-05-04",
+    "Hora_Fin": "16:00",
+    "Hora_Inicio": "09:00",
+    "ID_Asignacion": "asig-lunes-t1-manana",
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-m",
+    "Nombre_Turno": "Manana",
+    "Notas": null
+  },
+  {
+    "Area": "barra",
+    "Fecha": "2026-05-04",
+    "Hora_Fin": "23:00",
+    "Hora_Inicio": "16:00",
+    "ID_Asignacion": "asig-lunes-t1-tarde",
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-t",
+    "Nombre_Turno": "Tarde",
+    "Notas": null
+  },
+  {
+    "Area": "cocina",
+    "Fecha": "2026-05-04",
+    "Hora_Fin": "23:00",
+    "Hora_Inicio": "16:00",
+    "ID_Asignacion": "asig-lunes-t2",
+    "ID_Trabajador": "trab-2",
+    "ID_Turno": "turno-t",
+    "Nombre_Turno": "Tarde",
+    "Notas": "cierra"
+  },
+  {
+    "Area": "sala",
+    "Fecha": "2026-05-10",
+    "Hora_Fin": null,
+    "Hora_Inicio": null,
+    "ID_Asignacion": "asig-domingo",
+    "ID_Trabajador": "trab-1",
+    "ID_Turno": "turno-m",
+    "Nombre_Turno": "Manana",
+    "Notas": null
+  }
+]

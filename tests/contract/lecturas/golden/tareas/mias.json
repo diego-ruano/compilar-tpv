@@ -1,0 +1,20 @@
+[
+  {
+    "Asignada_At": "2026-05-01 10:00:00",
+    "Descripcion": "el de rubia",
+    "Estado": "PENDIENTE",
+    "Fecha_Limite": "2026-05-10",
+    "Finalizada_At": null,
+    "ID_Tarea": "tarea-pronto",
+    "Titulo": "Reponer barril"
+  },
+  {
+    "Asignada_At": "2026-05-01 10:00:00",
+    "Descripcion": null,
+    "Estado": "PENDIENTE",
+    "Fecha_Limite": "2026-05-30",
+    "Finalizada_At": null,
+    "ID_Tarea": "tarea-tarde",
+    "Titulo": "Fregar suelo"
+  }
+]

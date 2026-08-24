@@ -1,0 +1,19 @@
+{
+  "descripcion": "La misma semana, pero de una semana FUTURA, que es cuando los dos lados rellenan los huecos con el Horario_Predeterminado. Es la lectura mas complicada del sistema: cada lado hace la mezcla en su propio lenguaje (Rust con un BTreeMap, el worker con un array y un sort en JS), asi que aqui no se contrasta un SQL sino dos algoritmos. Lo que se comprueba: que el relleno se salte al trabajador que YA tiene turno ese dia (celda ocupada, aunque el predeterminado diga otra cosa), que rellene el resto, que las filas inventadas lleven ID_Asignacion vacio y que el orden final sea el mismo. El lunes es de 2099 a proposito: una semana futura lo sigue siendo siempre, asi que el golden no caduca.",
+  "lectura": "trabajadores.asignaciones_semana",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolLecturaContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-m', 'Manana');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-t', 'Tarde');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-real', 'trab-1', '2099-01-06', 'turno-t', 'cocina', '16:00', '23:00', 'cambiado a mano');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('def-1', 'trab-1', 1, 1, 'turno-m', 'barra', '09:00', '16:00');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('def-2', 'trab-1', 2, 1, 'turno-m', 'barra', '09:00', '16:00');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('def-3', 'trab-2', 2, 1, 'turno-t', 'sala', '16:00', '23:00', 'siempre tardes');",
+    "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area) VALUES ('def-4', 'trab-2', 7, 1, 'turno-m', 'sala');"
+  ],
+  "entrada": { "fecha_lunes": "2099-01-05" }
+}

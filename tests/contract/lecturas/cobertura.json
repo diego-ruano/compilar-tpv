@@ -1,0 +1,6 @@
+{
+  "//": "Lecturas del worker que sirven a una ruta y NO tienen caso de contrato de lectura, con su motivo. Sin entrada aquí, una lectura sin caso sale como AVISO en CI (nunca rompe el build): ver scripts/check-contract-coverage.mjs. Este fichero es el que convierte «no cubierto» en «decidido no cubrir», así que el motivo importa más que la entrada.",
+  "exclusiones": {
+    "mesas.mesasOcupadas": "DIVERGENCIA CONOCIDA, no cubierta a propósito. La Main devuelve una sola clave por mesa ocupada ('db-zona-Z:db-mesa-M') y el worker devuelve tres (esa, 'db-mesa-M' y el id pelado). Un caso aquí saldría rojo, pero igualar el worker a la Main lo empeoraría: la clave compuesta es la que el frontend NO sabe parsear (`parseAnyMesaId` sólo entiende 'db-mesa-<id>' o el id suelto), así que son las claves de más del worker las que hacen que la Handy acierte. El arreglo de verdad es que la Main deje de emitir la clave compuesta, y eso es un cambio de comportamiento que no toca decidir aquí. Vive en un camino degradado: `mesasLoadMesaMeta` sólo llama a esta lectura si `mesas_meta_all` ha fallado antes."
+  }
+}

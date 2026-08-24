@@ -1,0 +1,18 @@
+{
+  "descripcion": "Panel de tareas del encargado: cada tarea con cuantos la tienen asignada y cuantos la han terminado. Lo que se contrasta son los dos contadores correlacionados y el filtro de la papelera (TAR-05: borrar es Estado='ELIMINADA', no un DELETE), asi que la tarea de la papelera NO debe aparecer. Una tarea sin asignar a nadie debe salir con los dos contadores a cero, no desaparecer.",
+  "lectura": "tareas.admin",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolLecturaContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Descripcion, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-1', 'Limpiar camara', 'a fondo', '2026-05-20', '2026-05-01 09:00:00');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion) VALUES ('tarea-2', 'Pedir hielo', '2026-05-02 09:00:00');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion, Estado) VALUES ('tarea-borrada', 'En la papelera', '2026-05-03 09:00:00', 'ELIMINADA');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-1', 'trab-1', '2026-05-01 10:00:00', 'PENDIENTE');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado, Finalizada_At) VALUES ('tarea-1', 'trab-2', '2026-05-01 10:00:00', 'FINALIZADA', '2026-05-02 18:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-borrada', 'trab-1', '2026-05-03 10:00:00', 'PENDIENTE');"
+  ],
+  "entrada": {}
+}

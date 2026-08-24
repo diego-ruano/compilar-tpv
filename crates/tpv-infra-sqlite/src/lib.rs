@@ -7,8 +7,14 @@
 //! sentencia SQL del backend antiguo (`mesas.rs`, `inventario.rs`, ...) se reubica
 //! aquí, dentro de repositorios que reciben la `Connection` de libsql.
 
-// Tests de contrato Main(Rust)↔worker(TS): que el EFECTO de un comando (las filas que deja) sea el
-// mismo en las dos implementaciones. Ver `contract_tests.rs` y `tests/contract/README.md`.
+// Tests de contrato Main(Rust)↔worker(TS). Son dos y fijan las dos mitades del contrato:
+//   · escritura → el EFECTO de un comando (las filas que deja) es el mismo en los dos lados.
+//   · lectura   → el VALOR DEVUELTO por una consulta es el mismo, y en el mismo orden.
+// Ver `contract_tests.rs`, `contract_read_tests.rs` y `tests/contract/README.md`.
+#[cfg(test)]
+mod contract_comun;
+#[cfg(test)]
+mod contract_read_tests;
 #[cfg(test)]
 mod contract_tests;
 

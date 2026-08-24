@@ -1,0 +1,11 @@
+{
+  "descripcion": "Listado de gastos. Uno con proveedor y otro sin el (proveedor_id NULL), que es donde se ve si un lado devuelve null y el otro cadena vacia. El rango filtra por date(g.Fecha), asi que el gasto de junio queda fuera.",
+  "lectura": "cuentas.salidas",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Bebidas SL');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('gasto-1', '2026-05-02', 'Compras', 'Cajas de cerveza', 150.0, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-2', '2026-05-20', 'Suministros', 'Luz', 90.55);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-3', '2026-06-01', 'Suministros', 'Agua', 30.0);"
+  ],
+  "entrada": { "del": "2026-05-01", "al": "2026-05-31", "q": null, "page": null, "page_size": null }
+}

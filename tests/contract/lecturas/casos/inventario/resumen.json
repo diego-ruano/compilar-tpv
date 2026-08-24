@@ -1,0 +1,15 @@
+{
+  "descripcion": "Resumen del inventario: los N lotes que antes caducan y los N productos con menos stock. Devuelve un OBJETO con dos listas, cada una con su propio orden, asi que contrasta dos consultas de golpe. El limite es 2 a proposito: con mas filas que hueco, el corte solo cae en el mismo sitio si los dos lados ordenan igual. 'Menos cantidad' suma lotes + suelto, y el producto sin lotes debe salir el primero con stock 0 (LEFT JOIN, no INNER).",
+  "lectura": "inventario.resumen",
+  "seed": [
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto, Unidad_Medida) VALUES ('prod-1', 'cat-1', 'Agua', 1.5, 0.0, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto, Unidad_Medida) VALUES ('prod-2', 'cat-1', 'Cerveza', 3.0, 2.0, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Unidad_Medida) VALUES ('prod-3', 'cat-1', 'Zumo', 2.0, 'ud');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-a', 'prod-1', 'L-A', 10, 5, '2026-03-01', '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-b', 'prod-2', 'L-B', 10, 4, '2026-02-01', '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-c', 'prod-2', 'L-C', 10, 3, '2026-04-01', '2026-01-02 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-1', 'L-AGOTADO', 10, 0, '2026-01-01', '2025-12-01 10:00:00');"
+  ],
+  "entrada": { "limit": 2 }
+}

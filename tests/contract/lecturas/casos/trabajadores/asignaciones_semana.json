@@ -1,0 +1,20 @@
+{
+  "descripcion": "El cuadrante de una semana. La ventana es semiabierta —date(lunes) inclusive, date(lunes,'+7 day') excluido— y el seed pone una asignacion justo en cada extremo: el domingo que SI entra y el lunes siguiente que NO. Un lado que use BETWEEN o '+6 day' pinta una semana distinta. El orden (fecha, trabajador, hora) es lo que coloca cada turno en su casilla.",
+  "lectura": "trabajadores.asignaciones_semana",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolLecturaContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-m', 'Manana');",
+    "INSERT INTO Turnos (ID_Turno, Nombre_Turno) VALUES ('turno-t', 'Tarde');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('asig-lunes-t2', 'trab-2', '2026-05-04', 'turno-t', 'cocina', '16:00', '23:00', 'cierra');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('asig-lunes-t1-tarde', 'trab-1', '2026-05-04', 'turno-t', 'barra', '16:00', '23:00');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area, Hora_Inicio, Hora_Fin) VALUES ('asig-lunes-t1-manana', 'trab-1', '2026-05-04', 'turno-m', 'barra', '09:00', '16:00');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-domingo', 'trab-1', '2026-05-10', 'turno-m', 'sala');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-semana-que-viene', 'trab-1', '2026-05-11', 'turno-m', 'sala');",
+    "INSERT INTO Asignacion_Turnos (ID_Asignacion, ID_Trabajador, Fecha, ID_Turno, Area) VALUES ('asig-semana-pasada', 'trab-1', '2026-05-03', 'turno-m', 'sala');"
+  ],
+  "entrada": { "fecha_lunes": "2026-05-04" }
+}

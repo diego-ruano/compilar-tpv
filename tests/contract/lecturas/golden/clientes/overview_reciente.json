@@ -1,0 +1,41 @@
+[
+  {
+    "email": null,
+    "id_cliente": "cli-3",
+    "nombre": "Sin Reservas",
+    "reservas_pendientes": 0,
+    "telefono": null,
+    "total_gastado_stored": 0.0,
+    "total_reservas": 0,
+    "ultima_reserva_fecha": null,
+    "ultima_reserva_hora": null,
+    "ultima_reserva_mesa": null,
+    "ultima_reserva_num_personas": null
+  },
+  {
+    "email": null,
+    "id_cliente": "cli-2",
+    "nombre": "Beto Ruiz",
+    "reservas_pendientes": 0,
+    "telefono": "600300400",
+    "total_gastado_stored": 40.0,
+    "total_reservas": 1,
+    "ultima_reserva_fecha": "2000-06-15",
+    "ultima_reserva_hora": "14:00",
+    "ultima_reserva_mesa": "7",
+    "ultima_reserva_num_personas": 3
+  },
+  {
+    "email": "ana@bar.com",
+    "id_cliente": "cli-1",
+    "nombre": "Ana Gomez",
+    "reservas_pendientes": 1,
+    "telefono": "600100200",
+    "total_gastado_stored": 120.5,
+    "total_reservas": 2,
+    "ultima_reserva_fecha": "2099-12-31",
+    "ultima_reserva_hora": "21:30",
+    "ultima_reserva_mesa": "7",
+    "ultima_reserva_num_personas": 4
+  }
+]

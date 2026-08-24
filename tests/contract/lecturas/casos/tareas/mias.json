@@ -1,0 +1,22 @@
+{
+  "descripcion": "Las tareas de UN trabajador, que es la pantalla que mas se mira desde la Handy. El orden lo decide un CASE (las pendientes primero) y luego la fecha limite, asi que un lado que ordenase solo por fecha pondria arriba una tarea ya hecha. El seed cubre las tres exclusiones: la tarea de otro trabajador, la que esta en la papelera y la que se finalizo un dia que no es hoy (una FINALIZADA solo sigue a la vista el mismo dia; con Finalizada_At en el ano 2000 la respuesta es la misma hoy que dentro de decadas, que es lo que mantiene el golden vivo).",
+  "lectura": "tareas.mias",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolLecturaContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'u1@x.com', 'h', 'Uno');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-2', 'rol-1', 'u2@x.com', 'h', 'Dos');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-1', 'user-1');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario) VALUES ('trab-2', 'user-2');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Descripcion, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-tarde', 'Fregar suelo', NULL, '2026-05-30', '2026-05-01 09:00:00');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Descripcion, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-pronto', 'Reponer barril', 'el de rubia', '2026-05-10', '2026-05-01 09:00:00');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-hecha', 'Ya terminada', '2026-05-05', '2026-05-01 09:00:00');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Creacion, Estado) VALUES ('tarea-borrada', 'En la papelera', '2026-05-01 09:00:00', 'ELIMINADA');",
+    "INSERT INTO Tareas (ID_Tarea, Titulo, Fecha_Limite, Fecha_Creacion) VALUES ('tarea-ajena', 'De otro', '2026-05-01', '2026-05-01 09:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-tarde', 'trab-1', '2026-05-01 10:00:00', 'PENDIENTE');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-pronto', 'trab-1', '2026-05-01 10:00:00', 'PENDIENTE');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado, Finalizada_At) VALUES ('tarea-hecha', 'trab-1', '2026-05-01 10:00:00', 'FINALIZADA', '2000-01-01 18:00:00');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-borrada', 'trab-1', '2026-05-01 10:00:00', 'PENDIENTE');",
+    "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-ajena', 'trab-2', '2026-05-01 10:00:00', 'PENDIENTE');"
+  ],
+  "entrada": { "id_trabajador": "trab-1" }
+}

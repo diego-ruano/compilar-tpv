@@ -53,12 +53,16 @@ function overviewBase(): string {
 		SELECT
 			c.ID_Cliente AS id_cliente,
 			c.Nombre AS nombre,
-			c.Email AS email,
-			c.Telefono AS telefono,
-			ur.Dia_YMD AS ultima_reserva_fecha,
-			ur.Hora AS ultima_reserva_hora,
+			-- CLI-05: los textos opcionales salen NORMALIZADOS (trim + vacio a NULL) porque asi los
+			-- devuelve la Main (norm_opt_string en tpv-infra-sqlite). Sin esto, un email guardado
+			-- como cadena vacia llegaba aqui como "" y alli como null: el mismo cliente con ficha
+			-- distinta en cada pantalla. Lo fija el harness de contrato de lectura.
+			NULLIF(TRIM(c.Email), '') AS email,
+			NULLIF(TRIM(c.Telefono), '') AS telefono,
+			NULLIF(TRIM(ur.Dia_YMD), '') AS ultima_reserva_fecha,
+			NULLIF(TRIM(ur.Hora), '') AS ultima_reserva_hora,
 			ur.Comensales AS ultima_reserva_num_personas,
-			m.Numero_Mesa AS ultima_reserva_mesa,
+			NULLIF(TRIM(m.Numero_Mesa), '') AS ultima_reserva_mesa,
 			IFNULL(c.Total_Gastado, 0) AS total_gastado_stored,
 			COALESCE(ar.total_reservas, 0) AS total_reservas,
 			COALESCE(ar.reservas_pendientes, 0) AS reservas_pendientes
@@ -98,9 +102,10 @@ export async function form(
 		sql: `
 			SELECT
 				Nombre AS nombre,
-				Email AS email,
-				Telefono AS telefono,
-				Notas AS notas
+				-- Mismo criterio que el overview (ver arriba): la Main normaliza estos tres.
+				NULLIF(TRIM(Email), '') AS email,
+				NULLIF(TRIM(Telefono), '') AS telefono,
+				NULLIF(TRIM(Notas), '') AS notas
 			FROM Clientes
 			WHERE ID_Cliente = ?1
 			LIMIT 1;

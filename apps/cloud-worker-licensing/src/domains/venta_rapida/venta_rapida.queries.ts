@@ -197,7 +197,11 @@ export async function lineas(
 			SELECT
 				dc.ID_Detalle AS ID_Detalle,
 				dc.ID_Comanda AS ID_Comanda,
-				dc.ID_Producto AS ID_Producto,
+				-- Un producto retirado del catalogo deja esta columna a NULL (ON DELETE SET NULL),
+				-- pero en el DTO ID_Producto es un String, no un Option: un null aqui hace que la
+				-- Handy no pueda deserializar la respuesta y se quede sin PODER ABRIR la comanda
+				-- entera por una sola linea huerfana. La Main ya devuelve "" en ese caso.
+				COALESCE(dc.ID_Producto, '') AS ID_Producto,
 				COALESCE(dc.Cantidad,1) AS Cantidad,
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
 				dc.Notas AS Notas,
