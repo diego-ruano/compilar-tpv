@@ -1,0 +1,17 @@
+{
+  "descripcion": "Las reservas de un rango de dias, que es lo que pinta el calendario. El rango es explicito (no depende de hoy), y hay una reserva de junio fuera del rango para comprobar que el corte es el mismo en los dos lados, mas dos el mismo dia en turnos distintos para fijar el orden.",
+  "lectura": "reservas.mes",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 2, 100, 0, 'rect', 80, 70);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Telefono) VALUES ('cli-1', 'Ana Gomez', '600100200');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado, Nota) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-05-10', '13:30', 'COMIDA', 4, 'ACTIVA', 'trona');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-2', 'cli-1', 'mesa-2', '2026-05-10', '21:00', 'CENA', 2, 'FINALIZADA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-fuera', 'cli-1', 'mesa-1', '2026-06-15', '13:30', 'COMIDA', 2, 'ACTIVA');"
+  ],
+  "entrada": {
+    "desde": "2026-05-01",
+    "hasta": "2026-05-31"
+  }
+}

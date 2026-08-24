@@ -1,0 +1,6 @@
+{
+  "descripcion": "El catalogo de alergenos, que lo siembra la propia migracion con los 14 oficiales. Por eso el caso no anade ninguno: lo que contrasta es que los dos lados vean ese contenido inicial igual y en el mismo orden, que es el que coloca las casillas en la ficha de producto.",
+  "lectura": "inventario.alergenos",
+  "seed": [],
+  "entrada": {}
+}

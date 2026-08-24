@@ -1,0 +1,20 @@
+[
+  {
+    "Apellido": "Gomez",
+    "Asignada_At": "2026-05-01 10:00:00",
+    "Estado": "PENDIENTE",
+    "Finalizada_At": null,
+    "ID_Trabajador": "trab-1",
+    "Nombre": "Ana",
+    "Puesto": "Camarera"
+  },
+  {
+    "Apellido": null,
+    "Asignada_At": "2026-05-01 10:00:00",
+    "Estado": "FINALIZADA",
+    "Finalizada_At": "2026-05-02 18:00:00",
+    "ID_Trabajador": "trab-2",
+    "Nombre": "Beto",
+    "Puesto": "Cocinero"
+  }
+]

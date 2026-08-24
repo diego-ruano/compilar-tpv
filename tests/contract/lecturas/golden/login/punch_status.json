@@ -1,0 +1,17 @@
+{
+  "partes": [
+    {
+      "entrada": "2099-01-01 09:00:00",
+      "estado": "CERRADO",
+      "parte": 1,
+      "salida": "2099-01-01 13:00:00"
+    },
+    {
+      "entrada": "2099-01-01 20:00:00",
+      "estado": "ABIERTO",
+      "parte": 2,
+      "salida": null
+    }
+  ],
+  "turno_partido": 1
+}

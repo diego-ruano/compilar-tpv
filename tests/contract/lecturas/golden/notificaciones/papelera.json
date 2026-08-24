@@ -1,0 +1,17 @@
+[
+  {
+    "accion": null,
+    "creada_en": "2026-05-08 10:00:00",
+    "cuerpo": null,
+    "destino_tipo": "todos",
+    "destino_valor": null,
+    "estado": "descartada",
+    "expira_en": null,
+    "id_notificacion": "n-papelera",
+    "leida": false,
+    "payload": null,
+    "severidad": "info",
+    "tipo": "stock",
+    "titulo": "Descartada"
+  }
+]

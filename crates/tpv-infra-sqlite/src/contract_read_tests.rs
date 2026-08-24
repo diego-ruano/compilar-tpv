@@ -50,20 +50,36 @@ use std::sync::Arc;
 use serde_json::{Map, Value as Json};
 
 use tpv_application::ports::clientes::ClientesRepository;
+use tpv_application::ports::configuracion::ConfiguracionRepository;
 use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
 use tpv_application::ports::inventario::InventarioRepository;
+use tpv_application::ports::login::LoginRepository;
 use tpv_application::ports::mesas::MesasRepository;
+use tpv_application::ports::notificaciones::NotificacionesRepository;
+use tpv_application::ports::proveedores::ProveedoresRepository;
+use tpv_application::ports::reservas::ReservasRepository;
+use tpv_application::ports::stats::StatsRepository;
 use tpv_application::ports::tareas::TareasRepository;
 use tpv_application::ports::trabajadores::TrabajadoresRepository;
 use tpv_application::ports::venta_rapida::VentaRapidaRepository;
+use tpv_contracts::stats::{
+    ClientesStatsArgs, ProductosStatsArgs, ProveedoresStatsArgs, ReservasStatsArgs, StatsRange,
+    StatsTurno, TrabajadoresStatsArgs,
+};
 use tpv_domain::clientes::ClienteRanking;
 
 use crate::clientes::SqliteClientesRepository;
+use crate::configuracion::SqliteConfiguracionRepository;
 use crate::contract_comun::{cell_eq, contract_dir, db_temporal, sembrar};
 use crate::cuentas::SqliteCuentasRepository;
 use crate::db::Db;
 use crate::inventario::SqliteInventarioRepository;
+use crate::login::SqliteLoginRepository;
 use crate::mesas::SqliteMesasRepository;
+use crate::notificaciones::SqliteNotificacionesRepository;
+use crate::proveedores::SqliteProveedoresRepository;
+use crate::reservas::SqliteReservasRepository;
+use crate::stats::SqliteStatsRepository;
 use crate::tareas::SqliteTareasRepository;
 use crate::trabajadores::SqliteTrabajadoresRepository;
 use crate::venta_rapida::SqliteVentaRapidaRepository;
@@ -125,6 +141,32 @@ fn valor_eq(a: &Json, b: &Json) -> Result<(), String> {
                 Err(format!("{a} frente a {b}"))
             }
         }
+    }
+}
+
+/// Borra, a cualquier profundidad, los campos que el caso declara en `omitir`.
+///
+/// Es el equivalente de lectura a los SELECT del harness de escritura, que dejan fuera las columnas
+/// no deterministas. Algunas consultas devuelven **dentro del resultado** algo que depende del
+/// reloj —`punch_status` echa la fecha de hoy en el propio objeto—, y ahí no hay seed que valga: el
+/// golden caducaría a medianoche. Se omite ese campo y se contrasta todo lo demás, que es lo que de
+/// verdad puede divergir entre las dos implementaciones.
+fn omitir_campos(v: &mut Json, campos: &[String]) {
+    match v {
+        Json::Object(o) => {
+            for c in campos {
+                o.remove(c);
+            }
+            for (_, val) in o.iter_mut() {
+                omitir_campos(val, campos);
+            }
+        }
+        Json::Array(a) => {
+            for val in a.iter_mut() {
+                omitir_campos(val, campos);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -216,8 +258,44 @@ lecturas_de_contrato! {
     venta_rapida__detalles_ver_ticket,
     tareas__admin,
     tareas__mias,
+    tareas__trabajadores,
+    tareas__papelera,
+    tareas__por_id,
+    tareas__asignados,
     trabajadores__asignaciones_semana,
     trabajadores__asignaciones_semana_con_predeterminado,
+    trabajadores__roles,
+    trabajadores__todos,
+    trabajadores__detalle,
+    trabajadores__id_por_usuario,
+    trabajadores__turnos,
+    configuracion__business,
+    configuracion__ticket,
+    configuracion__contact,
+    inventario__categorias,
+    inventario__proveedores_mini,
+    inventario__alergenos,
+    inventario__alergenos_producto,
+    inventario__lotes_por_producto,
+    inventario__product_detail,
+    login__usuarios,
+    login__punch_status,
+    notificaciones__listar,
+    notificaciones__contar_no_leidas,
+    notificaciones__papelera,
+    proveedores__todos,
+    proveedores__categorias,
+    proveedores__productos,
+    proveedores__productos_todos,
+    reservas__meta,
+    reservas__mes,
+    stats__categorias,
+    stats__mesas,
+    stats__productos,
+    stats__reservas,
+    stats__trabajadores,
+    stats__clientes,
+    stats__proveedores,
 }
 
 /// Corre la lectura del caso por su camino real (el repositorio SQLite que usa la Main) y devuelve
@@ -405,6 +483,223 @@ async fn ejecutar_lectura(db: &Arc<Db>, caso: &Json) -> Json {
                 .expect("asignaciones semana");
             serde_json::to_value(r).unwrap()
         }
+        "configuracion.business" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            serde_json::to_value(repo.get_business().await.expect("business")).unwrap()
+        }
+        "configuracion.ticket" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            serde_json::to_value(repo.get_ticket().await.expect("ticket")).unwrap()
+        }
+        "configuracion.contact" => {
+            let repo = SqliteConfiguracionRepository::new(db.clone());
+            serde_json::to_value(repo.get_contact().await.expect("contact")).unwrap()
+        }
+        "inventario.categorias" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            serde_json::to_value(repo.list_categorias().await.expect("categorias inv")).unwrap()
+        }
+        "inventario.proveedores_mini" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            serde_json::to_value(repo.list_proveedores_mini().await.expect("prov mini")).unwrap()
+        }
+        "inventario.alergenos" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            serde_json::to_value(repo.list_alergenos().await.expect("alergenos")).unwrap()
+        }
+        "inventario.alergenos_producto" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            let r = repo
+                .alergenos_producto(&s(&e["id_producto"]))
+                .await
+                .expect("alergenos producto");
+            serde_json::to_value(r).unwrap()
+        }
+        "inventario.lotes_por_producto" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            let r = repo
+                .list_lotes_by_producto(&s(&e["id_producto"]))
+                .await
+                .expect("lotes por producto");
+            serde_json::to_value(r).unwrap()
+        }
+        "inventario.product_detail" => {
+            let repo = SqliteInventarioRepository::new(db.clone());
+            let r = repo
+                .product_detail(&s(&e["id_producto"]))
+                .await
+                .expect("product detail");
+            serde_json::to_value(r).unwrap()
+        }
+        "login.usuarios" => {
+            let repo = SqliteLoginRepository::new(db.clone());
+            serde_json::to_value(repo.list_login_users().await.expect("login users")).unwrap()
+        }
+        "login.punch_status" => {
+            let repo = SqliteLoginRepository::new(db.clone());
+            let r = repo
+                .get_today_punch_status(&s(&e["id_usuario"]))
+                .await
+                .expect("punch status");
+            serde_json::to_value(r).unwrap()
+        }
+        "notificaciones.listar" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            let r = repo
+                .listar(&s(&e["id_usuario"]), e["solo_no_leidas"].as_bool().unwrap_or(false))
+                .await
+                .expect("listar notificaciones");
+            serde_json::to_value(r).unwrap()
+        }
+        "notificaciones.contar_no_leidas" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            let r = repo
+                .contar_no_leidas(&s(&e["id_usuario"]))
+                .await
+                .expect("contar no leidas");
+            serde_json::to_value(r).unwrap()
+        }
+        "notificaciones.papelera" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            let r = repo
+                .listar_descartadas(&s(&e["id_usuario"]))
+                .await
+                .expect("papelera notificaciones");
+            serde_json::to_value(r).unwrap()
+        }
+        "proveedores.todos" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            serde_json::to_value(repo.get_all().await.expect("proveedores")).unwrap()
+        }
+        "proveedores.categorias" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            serde_json::to_value(repo.get_categorias().await.expect("categorias prov")).unwrap()
+        }
+        "proveedores.productos" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            let r = repo
+                .get_productos(&s(&e["id_proveedor"]))
+                .await
+                .expect("productos proveedor");
+            serde_json::to_value(r).unwrap()
+        }
+        "proveedores.productos_todos" => {
+            let repo = SqliteProveedoresRepository::new(db.clone());
+            serde_json::to_value(repo.get_productos_all().await.expect("productos all")).unwrap()
+        }
+        "reservas.meta" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            serde_json::to_value(repo.meta().await.expect("reservas meta")).unwrap()
+        }
+        "reservas.mes" => {
+            let repo = SqliteReservasRepository::new(db.clone());
+            let r = repo
+                .mes(&s(&e["desde"]), &s(&e["hasta"]))
+                .await
+                .expect("reservas mes");
+            serde_json::to_value(r).unwrap()
+        }
+        "tareas.trabajadores" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            serde_json::to_value(repo.get_trabajadores().await.expect("trab tareas")).unwrap()
+        }
+        "tareas.papelera" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            serde_json::to_value(repo.get_papelera().await.expect("papelera tareas")).unwrap()
+        }
+        "tareas.por_id" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            let r = repo.get_tarea_by_id(&s(&e["id_tarea"])).await.expect("tarea by id");
+            serde_json::to_value(r).unwrap()
+        }
+        "tareas.asignados" => {
+            let repo = SqliteTareasRepository::new(db.clone());
+            let r = repo
+                .get_tarea_asignados(&s(&e["id_tarea"]))
+                .await
+                .expect("asignados tarea");
+            serde_json::to_value(r).unwrap()
+        }
+        "trabajadores.roles" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            serde_json::to_value(repo.get_roles().await.expect("roles")).unwrap()
+        }
+        "trabajadores.todos" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            serde_json::to_value(repo.get_all().await.expect("trabajadores")).unwrap()
+        }
+        "trabajadores.detalle" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            let r = repo.get_detail(&s(&e["id_trabajador"])).await.expect("detalle trab");
+            serde_json::to_value(r).unwrap()
+        }
+        "trabajadores.id_por_usuario" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            let r = repo
+                .get_id_by_usuario(&s(&e["id_usuario"]))
+                .await
+                .expect("id por usuario");
+            serde_json::to_value(r).unwrap()
+        }
+        "trabajadores.turnos" => {
+            let repo = SqliteTrabajadoresRepository::new(db.clone());
+            serde_json::to_value(repo.turnos_get_all().await.expect("turnos")).unwrap()
+        }
+        "stats.categorias" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            serde_json::to_value(repo.list_categorias().await.expect("stats categorias")).unwrap()
+        }
+        "stats.mesas" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            serde_json::to_value(repo.mesas(StatsRange::Hoy).await.expect("stats mesas")).unwrap()
+        }
+        "stats.productos" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            let r = repo
+                .productos(ProductosStatsArgs {
+                    range: StatsRange::Hoy,
+                    categoria_top_id: opt_str(&e["categoria_top_id"]),
+                    categoria_worst_id: opt_str(&e["categoria_worst_id"]),
+                })
+                .await
+                .expect("stats productos");
+            serde_json::to_value(r).unwrap()
+        }
+        "stats.reservas" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            let r = repo
+                .reservas(ReservasStatsArgs {
+                    range: StatsRange::Hoy,
+                    turno: StatsTurno::Todos,
+                })
+                .await
+                .expect("stats reservas");
+            serde_json::to_value(r).unwrap()
+        }
+        "stats.trabajadores" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            let r = repo
+                .trabajadores(TrabajadoresStatsArgs { range: StatsRange::Hoy })
+                .await
+                .expect("stats trabajadores");
+            serde_json::to_value(r).unwrap()
+        }
+        "stats.clientes" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            let r = repo
+                .clientes(ClientesStatsArgs { range: StatsRange::Hoy })
+                .await
+                .expect("stats clientes");
+            serde_json::to_value(r).unwrap()
+        }
+        "stats.proveedores" => {
+            let repo = SqliteStatsRepository::new(db.clone());
+            let r = repo
+                .proveedores(ProveedoresStatsArgs { range: StatsRange::Hoy })
+                .await
+                .expect("stats proveedores");
+            serde_json::to_value(r).unwrap()
+        }
         otro => panic!("lectura sin soporte en el harness de contrato: {otro}"),
     }
 }
@@ -414,6 +709,10 @@ async fn correr_lectura(nombre: &str) {
     let caso = leer_caso(nombre);
     let (db, _dir) = db_temporal().await;
     sembrar(&db, caso["seed"].as_array().unwrap()).await;
-    let obtenido = ejecutar_lectura(&db, &caso).await;
+    let mut obtenido = ejecutar_lectura(&db, &caso).await;
+    if let Some(campos) = caso.get("omitir").and_then(|v| v.as_array()) {
+        let campos: Vec<String> = campos.iter().filter_map(|c| c.as_str().map(String::from)).collect();
+        omitir_campos(&mut obtenido, &campos);
+    }
     comparar_o_bendecir(nombre, &obtenido);
 }

@@ -1,0 +1,33 @@
+{
+  "gasto_medio": 150.0,
+  "gasto_por_proveedor": {
+    "labels": [
+      "Bebidas SL"
+    ],
+    "values": [
+      150.0
+    ]
+  },
+  "gastos_evolucion": {
+    "labels": [
+      "00"
+    ],
+    "values": [
+      150.0
+    ]
+  },
+  "num_gastos": 1,
+  "porcentaje_sobre_total_gastos": 62.5,
+  "proveedor_top": {
+    "nombre": "Bebidas SL",
+    "total": 150.0
+  },
+  "total_gasto": 150.0,
+  "ultimos_gastos": [
+    {
+      "concepto": "Barriles",
+      "importe": 150.0,
+      "proveedor": "Bebidas SL"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "Apellido": "Gomez",
+  "DNI": null,
+  "Email": "ana@bar.com",
+  "Estado": "Activo",
+  "Fecha_Fin_Contrato": null,
+  "Fecha_Inicio_Contrato": "2026-01-15",
+  "IBAN": null,
+  "ID_Rol": "rol-lect",
+  "ID_Trabajador": "trab-1",
+  "ID_Usuario": "user-1",
+  "Nombre": "Ana",
+  "Numero_Seguridad_Social": null,
+  "Puesto": "Camarera",
+  "Telefono": "600100200"
+}

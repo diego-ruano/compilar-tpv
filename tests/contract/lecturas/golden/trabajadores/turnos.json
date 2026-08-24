@@ -1,0 +1,30 @@
+[
+  {
+    "ID_Turno": "00000000-0000-7000-8000-000000000101",
+    "Nombre_Turno": "LIBRE"
+  },
+  {
+    "ID_Turno": "00000000-0000-7000-8000-000000000103",
+    "Nombre_Turno": "MAÑANA"
+  },
+  {
+    "ID_Turno": "turno-m",
+    "Nombre_Turno": "Manana"
+  },
+  {
+    "ID_Turno": "00000000-0000-7000-8000-000000000105",
+    "Nombre_Turno": "NOCHE"
+  },
+  {
+    "ID_Turno": "00000000-0000-7000-8000-000000000102",
+    "Nombre_Turno": "PARTIDO"
+  },
+  {
+    "ID_Turno": "00000000-0000-7000-8000-000000000104",
+    "Nombre_Turno": "TARDE"
+  },
+  {
+    "ID_Turno": "turno-t",
+    "Nombre_Turno": "Tarde"
+  }
+]

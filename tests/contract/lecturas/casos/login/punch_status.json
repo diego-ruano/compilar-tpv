@@ -1,0 +1,22 @@
+{
+  "descripcion": "El estado del fichaje de HOY de un trabajador. La fecha del dia se omite de la comparacion (`omitir`) porque el resultado la echa dentro y cambiaria a medianoche; lo que se contrasta es lo demas: el turno partido y las partes con sus horas. Las partes llevan horas fijas y solo la columna Fecha se siembra con date('now'), que es la que decide si la fila entra.",
+  "lectura": "login.punch_status",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect-2', 'RolLecturaContrato2');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', 'rol-lect', 'ana@bar.com', 'hash-1', 'Ana', 'Gomez');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-2', 'rol-lect-2', 'beto@bar.com', 'hash-2', 'Beto', 'Baja');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Telefono, Puesto, Fecha_Inicio_Contrato) VALUES ('trab-1', 'user-1', '600100200', 'Camarera', '2026-01-15');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('trab-2', 'user-2', 'Cocinero');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Hora_Salida, Estado) VALUES ('fich-1', 'user-1', date('now','localtime'), 1, '2099-01-01 09:00:00', '2099-01-01 13:00:00', 'CERRADO');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado) VALUES ('fich-2', 'user-1', date('now','localtime'), 2, '2099-01-01 20:00:00', 'ABIERTO');",
+    "INSERT INTO Fichajes (ID_Fichaje, ID_Usuario, Fecha, Parte, Hora_Entrada, Estado) VALUES ('fich-ayer', 'user-1', date('now','localtime','-1 day'), 1, '2099-01-01 09:00:00', 'CERRADO');",
+    "INSERT INTO Fichaje_Dia (ID_Usuario, Fecha, Turno_Partido) VALUES ('user-1', date('now','localtime'), 1);"
+  ],
+  "entrada": {
+    "id_usuario": "user-1"
+  },
+  "omitir": [
+    "fecha"
+  ]
+}

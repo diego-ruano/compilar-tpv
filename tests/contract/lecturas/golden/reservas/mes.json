@@ -1,0 +1,36 @@
+[
+  {
+    "capacidad": 4,
+    "comensales": 4,
+    "dia_ymd": "2026-05-10",
+    "email_cliente": null,
+    "estado": "ACTIVA",
+    "hora": "13:30",
+    "id_mesa": "mesa-1",
+    "id_reserva": "res-1",
+    "id_zona": "zona-1",
+    "nombre_cliente": "Ana Gomez",
+    "nombre_zona": "Salon",
+    "nota": "trona",
+    "numero_mesa": "1",
+    "telefono_cliente": "600100200",
+    "turno": "COMIDA"
+  },
+  {
+    "capacidad": 2,
+    "comensales": 2,
+    "dia_ymd": "2026-05-10",
+    "email_cliente": null,
+    "estado": "FINALIZADA",
+    "hora": "21:00",
+    "id_mesa": "mesa-2",
+    "id_reserva": "res-2",
+    "id_zona": "zona-1",
+    "nombre_cliente": "Ana Gomez",
+    "nombre_zona": "Salon",
+    "nota": null,
+    "numero_mesa": "2",
+    "telefono_cliente": "600100200",
+    "turno": "CENA"
+  }
+]

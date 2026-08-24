@@ -1,0 +1,20 @@
+{
+  "no_recurrentes": 0,
+  "nuevos": 0,
+  "nuevos_por_bucket": {
+    "labels": [],
+    "values": []
+  },
+  "recurrentes": 1,
+  "ticket_medio_cliente": 30.0,
+  "top_clientes_gasto": {
+    "labels": [
+      "Ana Gomez #cli-1",
+      "Beto Ruiz #cli-2"
+    ],
+    "values": [
+      120.0,
+      40.0
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "Nombre": "Bebidas"
+  },
+  {
+    "ID_Categoria": "cat-cocina",
+    "Nombre": "Platos"
+  }
+]

@@ -26,9 +26,47 @@ import {
 	salidas,
 } from "../src/domains/cuentas/cuentas.queries";
 import {
+	alergenosProducto,
+	listAlergenos,
+	listCategorias as listCategoriasInv,
+	listLotesByProducto,
 	listProductosByCategoria,
+	listProveedoresMini,
+	productDetail,
 	resumen as resumenInventario,
 } from "../src/domains/inventario/inventario.queries";
+import {
+	getBusiness,
+	getContact,
+	getTicket,
+} from "../src/domains/configuracion/configuracion.queries";
+import { listLoginUsers, punchStatus } from "../src/domains/login/login.queries";
+import {
+	contarNoLeidas,
+	listar as listarNotificaciones,
+	listarPapelera,
+} from "../src/domains/notificaciones/notificaciones.queries";
+import {
+	getAll as proveedoresTodos,
+	getCategorias as proveedoresCategorias,
+	getProductos as proveedoresProductos,
+	getProductosAll as proveedoresProductosTodos,
+} from "../src/domains/proveedores/proveedores.queries";
+import {
+	mes as reservasMes,
+	meta as reservasMeta,
+} from "../src/domains/reservas/reservas.queries";
+import {
+	listCategorias as statsCategorias,
+	mesas as statsMesas,
+} from "../src/domains/stats/stats.queries";
+import {
+	all as trabajadoresTodos,
+	detail as trabajadorDetalle,
+	idByUsuario,
+	roles as trabajadoresRoles,
+	turnos as trabajadoresTurnos,
+} from "../src/domains/trabajadores/trabajadores.queries";
 import {
 	categorias as categoriasMesa,
 	comandaAbiertaByMesa,
@@ -40,7 +78,14 @@ import {
 	productosByCategoria as productosByCategoriaMesa,
 	searchProductos as searchProductosMesa,
 } from "../src/domains/mesas/mesas.queries";
-import { getMisTareas, getTareasAdmin } from "../src/domains/tareas/tareas.queries";
+import {
+	getMisTareas,
+	getPapelera,
+	getTareaAsignados,
+	getTareaById,
+	getTareasAdmin,
+	getTrabajadores,
+} from "../src/domains/tareas/tareas.queries";
 import { asignacionesSemana } from "../src/domains/trabajadores/trabajadores.queries";
 import {
 	categorias as categoriasBarra,
@@ -113,6 +158,69 @@ import goldenVrBuscar from "../../../tests/contract/lecturas/golden/venta_rapida
 import casoVrVerTicket from "../../../tests/contract/lecturas/casos/venta_rapida/detalles_ver_ticket.json";
 import goldenVrVerTicket from "../../../tests/contract/lecturas/golden/venta_rapida/detalles_ver_ticket.json";
 
+import casoCfgBusiness from "../../../tests/contract/lecturas/casos/configuracion/business.json";
+import goldenCfgBusiness from "../../../tests/contract/lecturas/golden/configuracion/business.json";
+import casoCfgTicket from "../../../tests/contract/lecturas/casos/configuracion/ticket.json";
+import goldenCfgTicket from "../../../tests/contract/lecturas/golden/configuracion/ticket.json";
+import casoCfgContact from "../../../tests/contract/lecturas/casos/configuracion/contact.json";
+import goldenCfgContact from "../../../tests/contract/lecturas/golden/configuracion/contact.json";
+import casoInvCategorias from "../../../tests/contract/lecturas/casos/inventario/categorias.json";
+import goldenInvCategorias from "../../../tests/contract/lecturas/golden/inventario/categorias.json";
+import casoInvProvMini from "../../../tests/contract/lecturas/casos/inventario/proveedores_mini.json";
+import goldenInvProvMini from "../../../tests/contract/lecturas/golden/inventario/proveedores_mini.json";
+import casoInvAlergenos from "../../../tests/contract/lecturas/casos/inventario/alergenos.json";
+import goldenInvAlergenos from "../../../tests/contract/lecturas/golden/inventario/alergenos.json";
+import casoInvAlergProd from "../../../tests/contract/lecturas/casos/inventario/alergenos_producto.json";
+import goldenInvAlergProd from "../../../tests/contract/lecturas/golden/inventario/alergenos_producto.json";
+import casoInvLotes from "../../../tests/contract/lecturas/casos/inventario/lotes_por_producto.json";
+import goldenInvLotes from "../../../tests/contract/lecturas/golden/inventario/lotes_por_producto.json";
+import casoInvDetalle from "../../../tests/contract/lecturas/casos/inventario/product_detail.json";
+import goldenInvDetalle from "../../../tests/contract/lecturas/golden/inventario/product_detail.json";
+import casoLoginUsuarios from "../../../tests/contract/lecturas/casos/login/usuarios.json";
+import goldenLoginUsuarios from "../../../tests/contract/lecturas/golden/login/usuarios.json";
+import casoLoginPunch from "../../../tests/contract/lecturas/casos/login/punch_status.json";
+import goldenLoginPunch from "../../../tests/contract/lecturas/golden/login/punch_status.json";
+import casoNotifListar from "../../../tests/contract/lecturas/casos/notificaciones/listar.json";
+import goldenNotifListar from "../../../tests/contract/lecturas/golden/notificaciones/listar.json";
+import casoNotifContar from "../../../tests/contract/lecturas/casos/notificaciones/contar_no_leidas.json";
+import goldenNotifContar from "../../../tests/contract/lecturas/golden/notificaciones/contar_no_leidas.json";
+import casoNotifPapelera from "../../../tests/contract/lecturas/casos/notificaciones/papelera.json";
+import goldenNotifPapelera from "../../../tests/contract/lecturas/golden/notificaciones/papelera.json";
+import casoProvTodos from "../../../tests/contract/lecturas/casos/proveedores/todos.json";
+import goldenProvTodos from "../../../tests/contract/lecturas/golden/proveedores/todos.json";
+import casoProvCategorias from "../../../tests/contract/lecturas/casos/proveedores/categorias.json";
+import goldenProvCategorias from "../../../tests/contract/lecturas/golden/proveedores/categorias.json";
+import casoProvProductos from "../../../tests/contract/lecturas/casos/proveedores/productos.json";
+import goldenProvProductos from "../../../tests/contract/lecturas/golden/proveedores/productos.json";
+import casoProvProductosTodos from "../../../tests/contract/lecturas/casos/proveedores/productos_todos.json";
+import goldenProvProductosTodos from "../../../tests/contract/lecturas/golden/proveedores/productos_todos.json";
+import casoResMeta from "../../../tests/contract/lecturas/casos/reservas/meta.json";
+import goldenResMeta from "../../../tests/contract/lecturas/golden/reservas/meta.json";
+import casoResMes from "../../../tests/contract/lecturas/casos/reservas/mes.json";
+import goldenResMes from "../../../tests/contract/lecturas/golden/reservas/mes.json";
+import casoTareaTrab from "../../../tests/contract/lecturas/casos/tareas/trabajadores.json";
+import goldenTareaTrab from "../../../tests/contract/lecturas/golden/tareas/trabajadores.json";
+import casoTareaPapelera from "../../../tests/contract/lecturas/casos/tareas/papelera.json";
+import goldenTareaPapelera from "../../../tests/contract/lecturas/golden/tareas/papelera.json";
+import casoTareaPorId from "../../../tests/contract/lecturas/casos/tareas/por_id.json";
+import goldenTareaPorId from "../../../tests/contract/lecturas/golden/tareas/por_id.json";
+import casoTareaAsignados from "../../../tests/contract/lecturas/casos/tareas/asignados.json";
+import goldenTareaAsignados from "../../../tests/contract/lecturas/golden/tareas/asignados.json";
+import casoTrabRoles from "../../../tests/contract/lecturas/casos/trabajadores/roles.json";
+import goldenTrabRoles from "../../../tests/contract/lecturas/golden/trabajadores/roles.json";
+import casoTrabTodos from "../../../tests/contract/lecturas/casos/trabajadores/todos.json";
+import goldenTrabTodos from "../../../tests/contract/lecturas/golden/trabajadores/todos.json";
+import casoTrabDetalle from "../../../tests/contract/lecturas/casos/trabajadores/detalle.json";
+import goldenTrabDetalle from "../../../tests/contract/lecturas/golden/trabajadores/detalle.json";
+import casoTrabIdUsuario from "../../../tests/contract/lecturas/casos/trabajadores/id_por_usuario.json";
+import goldenTrabIdUsuario from "../../../tests/contract/lecturas/golden/trabajadores/id_por_usuario.json";
+import casoTrabTurnos from "../../../tests/contract/lecturas/casos/trabajadores/turnos.json";
+import goldenTrabTurnos from "../../../tests/contract/lecturas/golden/trabajadores/turnos.json";
+import casoStatsCategorias from "../../../tests/contract/lecturas/casos/stats/categorias.json";
+import goldenStatsCategorias from "../../../tests/contract/lecturas/golden/stats/categorias.json";
+import casoStatsMesas from "../../../tests/contract/lecturas/casos/stats/mesas.json";
+import goldenStatsMesas from "../../../tests/contract/lecturas/golden/stats/mesas.json";
+
 const CASOS = [
 	{ nombre: "clientes_overview_reciente", caso: casoCliReciente, golden: goldenCliReciente },
 	{ nombre: "clientes_overview_por_reservas", caso: casoCliReservas, golden: goldenCliReservas },
@@ -167,6 +275,37 @@ const CASOS = [
 		caso: casoVrVerTicket,
 		golden: goldenVrVerTicket,
 	},
+	{ nombre: "configuracion_business", caso: casoCfgBusiness, golden: goldenCfgBusiness },
+	{ nombre: "configuracion_ticket", caso: casoCfgTicket, golden: goldenCfgTicket },
+	{ nombre: "configuracion_contact", caso: casoCfgContact, golden: goldenCfgContact },
+	{ nombre: "inventario_categorias", caso: casoInvCategorias, golden: goldenInvCategorias },
+	{ nombre: "inventario_proveedores_mini", caso: casoInvProvMini, golden: goldenInvProvMini },
+	{ nombre: "inventario_alergenos", caso: casoInvAlergenos, golden: goldenInvAlergenos },
+	{ nombre: "inventario_alergenos_producto", caso: casoInvAlergProd, golden: goldenInvAlergProd },
+	{ nombre: "inventario_lotes_por_producto", caso: casoInvLotes, golden: goldenInvLotes },
+	{ nombre: "inventario_product_detail", caso: casoInvDetalle, golden: goldenInvDetalle },
+	{ nombre: "login_usuarios", caso: casoLoginUsuarios, golden: goldenLoginUsuarios },
+	{ nombre: "login_punch_status", caso: casoLoginPunch, golden: goldenLoginPunch },
+	{ nombre: "notificaciones_listar", caso: casoNotifListar, golden: goldenNotifListar },
+	{ nombre: "notificaciones_contar_no_leidas", caso: casoNotifContar, golden: goldenNotifContar },
+	{ nombre: "notificaciones_papelera", caso: casoNotifPapelera, golden: goldenNotifPapelera },
+	{ nombre: "proveedores_todos", caso: casoProvTodos, golden: goldenProvTodos },
+	{ nombre: "proveedores_categorias", caso: casoProvCategorias, golden: goldenProvCategorias },
+	{ nombre: "proveedores_productos", caso: casoProvProductos, golden: goldenProvProductos },
+	{ nombre: "proveedores_productos_todos", caso: casoProvProductosTodos, golden: goldenProvProductosTodos },
+	{ nombre: "reservas_meta", caso: casoResMeta, golden: goldenResMeta },
+	{ nombre: "reservas_mes", caso: casoResMes, golden: goldenResMes },
+	{ nombre: "tareas_trabajadores", caso: casoTareaTrab, golden: goldenTareaTrab },
+	{ nombre: "tareas_papelera", caso: casoTareaPapelera, golden: goldenTareaPapelera },
+	{ nombre: "tareas_por_id", caso: casoTareaPorId, golden: goldenTareaPorId },
+	{ nombre: "tareas_asignados", caso: casoTareaAsignados, golden: goldenTareaAsignados },
+	{ nombre: "trabajadores_roles", caso: casoTrabRoles, golden: goldenTrabRoles },
+	{ nombre: "trabajadores_todos", caso: casoTrabTodos, golden: goldenTrabTodos },
+	{ nombre: "trabajadores_detalle", caso: casoTrabDetalle, golden: goldenTrabDetalle },
+	{ nombre: "trabajadores_id_por_usuario", caso: casoTrabIdUsuario, golden: goldenTrabIdUsuario },
+	{ nombre: "trabajadores_turnos", caso: casoTrabTurnos, golden: goldenTrabTurnos },
+	{ nombre: "stats_categorias", caso: casoStatsCategorias, golden: goldenStatsCategorias },
+	{ nombre: "stats_mesas", caso: casoStatsMesas, golden: goldenStatsMesas },
 ];
 
 // ── Comparación estructural ORDENADA (misma spec que el lado Rust) ───────────────────
@@ -228,6 +367,27 @@ function valorIgual(a: any, b: any): string | null {
 	return celdaIgual(a, b) ? null : `${JSON.stringify(a)} frente a ${JSON.stringify(b)}`;
 }
 
+/**
+ * Borra, a cualquier profundidad, los campos que el caso declara en `omitir`.
+ *
+ * Es el equivalente de lectura a los SELECT del harness de escritura, que dejan fuera las columnas
+ * no deterministas. Algunas consultas devuelven **dentro del resultado** algo que depende del reloj
+ * —`punch_status` echa la fecha de hoy en el propio objeto—, y ahí no hay seed que valga: el golden
+ * caducaría a medianoche.
+ */
+function omitirCampos(v: any, campos: string[]): any {
+	if (Array.isArray(v)) return v.map((x) => omitirCampos(x, campos));
+	if (v !== null && typeof v === "object") {
+		const out: Record<string, any> = {};
+		for (const [k, val] of Object.entries(v)) {
+			if (campos.includes(k)) continue;
+			out[k] = omitirCampos(val, campos);
+		}
+		return out;
+	}
+	return v;
+}
+
 /** Corre la lectura del caso por su camino real. El `switch` es el punto de extensión: una lectura
  *  nueva añade su brazo aquí y en el lado Rust (`ejecutar_lectura`). */
 async function ejecutarLectura(db: any, caso: any): Promise<any> {
@@ -283,6 +443,68 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return getMisTareas(db, e.id_trabajador);
 		case "trabajadores.asignaciones_semana":
 			return asignacionesSemana(db, e.fecha_lunes);
+		case "configuracion.business":
+			return getBusiness(db);
+		case "configuracion.ticket":
+			return getTicket(db);
+		case "configuracion.contact":
+			return getContact(db);
+		case "inventario.categorias":
+			return listCategoriasInv(db);
+		case "inventario.proveedores_mini":
+			return listProveedoresMini(db);
+		case "inventario.alergenos":
+			return listAlergenos(db);
+		case "inventario.alergenos_producto":
+			return alergenosProducto(db, e.id_producto);
+		case "inventario.lotes_por_producto":
+			return listLotesByProducto(db, e.id_producto);
+		case "inventario.product_detail":
+			return productDetail(db, e.id_producto);
+		case "login.usuarios":
+			return listLoginUsers(db);
+		case "login.punch_status":
+			return punchStatus(db, e.id_usuario);
+		case "notificaciones.listar":
+			return listarNotificaciones(db, e.id_usuario, e.solo_no_leidas);
+		case "notificaciones.contar_no_leidas":
+			return contarNoLeidas(db, e.id_usuario);
+		case "notificaciones.papelera":
+			return listarPapelera(db, e.id_usuario);
+		case "proveedores.todos":
+			return proveedoresTodos(db);
+		case "proveedores.categorias":
+			return proveedoresCategorias(db);
+		case "proveedores.productos":
+			return proveedoresProductos(db, e.id_proveedor);
+		case "proveedores.productos_todos":
+			return proveedoresProductosTodos(db);
+		case "reservas.meta":
+			return reservasMeta(db);
+		case "reservas.mes":
+			return reservasMes(db, e.desde, e.hasta);
+		case "tareas.trabajadores":
+			return getTrabajadores(db);
+		case "tareas.papelera":
+			return getPapelera(db);
+		case "tareas.por_id":
+			return getTareaById(db, e.id_tarea);
+		case "tareas.asignados":
+			return getTareaAsignados(db, e.id_tarea);
+		case "trabajadores.roles":
+			return trabajadoresRoles(db);
+		case "trabajadores.todos":
+			return trabajadoresTodos(db);
+		case "trabajadores.detalle":
+			return trabajadorDetalle(db, e.id_trabajador);
+		case "trabajadores.id_por_usuario":
+			return idByUsuario(db, e.id_usuario);
+		case "trabajadores.turnos":
+			return trabajadoresTurnos(db);
+		case "stats.categorias":
+			return statsCategorias(db);
+		case "stats.mesas":
+			return statsMesas(db, "hoy");
 		default:
 			throw new Error(`lectura sin soporte en el harness de contrato: ${caso.lectura}`);
 	}
@@ -300,7 +522,8 @@ describe("contrato de lectura Main↔worker · resultado == golden", () => {
 				for (const s of (caso as any).seed) sql.exec(s);
 
 				// 2) La consulta por su camino real.
-				const obtenido = await ejecutarLectura(db, caso);
+				const crudo = await ejecutarLectura(db, caso);
+				const obtenido = omitirCampos(crudo, (caso as any).omitir ?? []);
 
 				// 3) Resultado frente al golden que bendijo Rust.
 				const err = valorIgual(obtenido, golden);

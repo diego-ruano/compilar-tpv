@@ -1,0 +1,12 @@
+{
+  "descripcion": "Los correos y el telefono de contacto (fila unica). Corto, pero es de donde sale el email de recuperacion: si un lado lo devolviera vacio, la Handy creeria que no hay a donde escribir.",
+  "lectura": "configuracion.contact",
+  "seed": [
+    "UPDATE Contact_Settings SET Recovery_Email='recu@bar.com', Contact_Email='hola@bar.com', Contact_Phone='961111111' WHERE ID=1;"
+  ],
+  "entrada": {},
+  "omitir": [
+    "updated_at",
+    "Updated_At"
+  ]
+}

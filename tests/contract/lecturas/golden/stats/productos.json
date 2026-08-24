@@ -1,0 +1,18 @@
+{
+  "mejor_producto": null,
+  "peor_producto_vendible": "Agua",
+  "top10_mejores": {
+    "labels": [],
+    "values": []
+  },
+  "top10_peores": {
+    "labels": [
+      "Agua",
+      "Cerveza"
+    ],
+    "values": [
+      0,
+      0
+    ]
+  }
+}

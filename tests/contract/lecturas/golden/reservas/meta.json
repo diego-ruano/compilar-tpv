@@ -1,0 +1,22 @@
+{
+  "mesas": [
+    {
+      "capacidad": 4,
+      "id_mesa": "mesa-1",
+      "id_zona": "zona-1",
+      "numero_mesa": "1"
+    },
+    {
+      "capacidad": 2,
+      "id_mesa": "mesa-2",
+      "id_zona": "zona-1",
+      "numero_mesa": "2"
+    }
+  ],
+  "zonas": [
+    {
+      "id_zona": "zona-1",
+      "nombre_zona": "Salon"
+    }
+  ]
+}

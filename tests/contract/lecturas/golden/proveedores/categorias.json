@@ -1,0 +1,20 @@
+[
+  {
+    "id_categoria": "cat-barra",
+    "nombre": "Bebidas",
+    "nombre_imagen": null,
+    "ruta_imagen": null
+  },
+  {
+    "id_categoria": "cat-no-vendible",
+    "nombre": "Materia prima",
+    "nombre_imagen": null,
+    "ruta_imagen": null
+  },
+  {
+    "id_categoria": "cat-cocina",
+    "nombre": "Platos",
+    "nombre_imagen": null,
+    "ruta_imagen": "/img/platos.png"
+  }
+]

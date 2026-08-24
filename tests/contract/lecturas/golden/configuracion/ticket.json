@@ -1,0 +1,20 @@
+{
+  "chars_per_line": 32,
+  "font_scale": 1.0,
+  "margin_bottom_mm": 0.0,
+  "margin_left_mm": 2.5,
+  "margin_right_mm": 0.0,
+  "margin_top_mm": 0.0,
+  "paper_dpi": 203,
+  "paper_width_mm": 58,
+  "show_address": false,
+  "show_base_and_iva": false,
+  "show_business_name": true,
+  "show_cif": false,
+  "show_date_time": true,
+  "show_footer_message": false,
+  "show_line_items": true,
+  "show_logo": false,
+  "show_phone": true,
+  "show_total": true
+}

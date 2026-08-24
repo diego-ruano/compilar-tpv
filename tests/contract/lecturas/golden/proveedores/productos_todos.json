@@ -1,0 +1,47 @@
+[
+  {
+    "caducidad_proxima": null,
+    "cantidad_pedido_esperada": null,
+    "id_categoria": "cat-barra",
+    "id_producto": "prod-sin-prov",
+    "id_proveedor": null,
+    "nombre": "Agua",
+    "nombre_imagen": null,
+    "precio_venta": 1.5,
+    "ruta_imagen": null,
+    "stock_actual": 0.0,
+    "stock_minimo": null,
+    "ultima_entrada": null,
+    "unidad_medida": null
+  },
+  {
+    "caducidad_proxima": null,
+    "cantidad_pedido_esperada": null,
+    "id_categoria": "cat-barra",
+    "id_producto": "prod-cerveza",
+    "id_proveedor": "prov-1",
+    "nombre": "Cerveza",
+    "nombre_imagen": null,
+    "precio_venta": 3.0,
+    "ruta_imagen": null,
+    "stock_actual": 0.0,
+    "stock_minimo": null,
+    "ultima_entrada": null,
+    "unidad_medida": null
+  },
+  {
+    "caducidad_proxima": null,
+    "cantidad_pedido_esperada": null,
+    "id_categoria": "cat-cocina",
+    "id_producto": "prod-tortilla",
+    "id_proveedor": "prov-2",
+    "nombre": "Tortilla de patatas",
+    "nombre_imagen": null,
+    "precio_venta": 9.0,
+    "ruta_imagen": null,
+    "stock_actual": 0.0,
+    "stock_minimo": 5.0,
+    "ultima_entrada": null,
+    "unidad_medida": "ud"
+  }
+]

@@ -1,0 +1,24 @@
+[
+  {
+    "cif": "B11111111",
+    "contacto": "Luis",
+    "email": "luis@bebidas.es",
+    "id_proveedor": "prov-1",
+    "informacion_adicional": null,
+    "nombre_empresa": "Bebidas SL",
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "telefono": "911111111"
+  },
+  {
+    "cif": null,
+    "contacto": null,
+    "email": null,
+    "id_proveedor": "prov-2",
+    "informacion_adicional": null,
+    "nombre_empresa": "Carnes SA",
+    "nombre_imagen": null,
+    "ruta_imagen": null,
+    "telefono": null
+  }
+]

@@ -1,0 +1,9 @@
+{
+  "business_name": "Bar Paco",
+  "cif": "B12345678",
+  "direccion": "Calle Mayor 1",
+  "iva_percent": 21.0,
+  "logo_data_url": null,
+  "mensaje_footer": "Hasta pronto",
+  "telefono": "961111111"
+}

@@ -171,10 +171,18 @@ export async function detail(
 	return (rows(rs)[0] ?? null) as TrabajadorDetailRow | null;
 }
 
+/**
+ * El ID de trabajador a partir del de usuario, o null.
+ *
+ * Devolvia `number | null` y coercionaba el id con `Number(...) > 0`, pero `ID_Trabajador` es un
+ * TEXT (un UUID): `Number("...")` daba NaN y la comparacion era siempre falsa, asi que en la Handy
+ * esta consulta **no encontraba nunca a nadie**. Es el puente que usan el fichaje y la asignacion
+ * de una comanda a su camarero. Resto de un tiempo en que los ids eran enteros.
+ */
 export async function idByUsuario(
 	db: Client,
 	idUsuario: string,
-): Promise<number | null> {
+): Promise<string | null> {
 	const rs = await db.execute({
 		sql: `
 			SELECT ID_Trabajador AS id
@@ -184,8 +192,8 @@ export async function idByUsuario(
 		`,
 		args: [idUsuario],
 	});
-	const id = Number(rows(rs)[0]?.id ?? 0);
-	return id > 0 ? id : null;
+	const id = String(rows(rs)[0]?.id ?? "").trim();
+	return id ? id : null;
 }
 
 export async function turnos(db: Client): Promise<TurnoRow[]> {

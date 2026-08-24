@@ -1,0 +1,50 @@
+[
+  {
+    "Caducidad": "2026-02-01",
+    "Cantidad_Inicial": 24.0,
+    "Codigo_Lote": "L-0",
+    "Coste_Unitario": null,
+    "Fecha_Entrada": "2025-12-01 10:00:00",
+    "ID_Lote": "lote-agotado",
+    "ID_Producto": "prod-cerveza",
+    "ID_Proveedor": null,
+    "Notas": null,
+    "Stock_Disponible": 0.0
+  },
+  {
+    "Caducidad": "2026-06-30",
+    "Cantidad_Inicial": 24.0,
+    "Codigo_Lote": "L-A",
+    "Coste_Unitario": null,
+    "Fecha_Entrada": "2026-01-01 10:00:00",
+    "ID_Lote": "lote-a",
+    "ID_Producto": "prod-cerveza",
+    "ID_Proveedor": null,
+    "Notas": null,
+    "Stock_Disponible": 6.0
+  },
+  {
+    "Caducidad": "2026-09-30",
+    "Cantidad_Inicial": 24.0,
+    "Codigo_Lote": "L-B",
+    "Coste_Unitario": null,
+    "Fecha_Entrada": "2026-01-02 10:00:00",
+    "ID_Lote": "lote-b",
+    "ID_Producto": "prod-cerveza",
+    "ID_Proveedor": null,
+    "Notas": null,
+    "Stock_Disponible": 10.0
+  },
+  {
+    "Caducidad": null,
+    "Cantidad_Inicial": 12.0,
+    "Codigo_Lote": "L-SC",
+    "Coste_Unitario": null,
+    "Fecha_Entrada": "2026-01-03 10:00:00",
+    "ID_Lote": "lote-sin-cad",
+    "ID_Producto": "prod-cerveza",
+    "ID_Proveedor": null,
+    "Notas": null,
+    "Stock_Disponible": 12.0
+  }
+]

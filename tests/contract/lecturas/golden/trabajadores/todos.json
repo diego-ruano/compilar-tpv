@@ -1,0 +1,24 @@
+[
+  {
+    "Apellido": "Gomez",
+    "Email": "ana@bar.com",
+    "Estado": "Activo",
+    "ID_Trabajador": "trab-1",
+    "ID_Usuario": "user-1",
+    "Nombre": "Ana",
+    "Nombre_Rol": "RolLecturaContrato",
+    "Puesto": "Camarera",
+    "Telefono": "600100200"
+  },
+  {
+    "Apellido": null,
+    "Email": "beto@bar.com",
+    "Estado": "Baja",
+    "ID_Trabajador": "trab-2",
+    "ID_Usuario": "user-2",
+    "Nombre": "Beto",
+    "Nombre_Rol": "RolLecturaContrato2",
+    "Puesto": "Cocinero",
+    "Telefono": null
+  }
+]

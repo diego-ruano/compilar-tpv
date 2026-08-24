@@ -1,0 +1,11 @@
+{
+  "//": "Lecturas del worker que sirven a un GET y NO tienen caso de contrato de lectura, con su motivo. Sin entrada aquí, una lectura sin caso sale como AVISO en CI (nunca rompe el build): ver scripts/check-contract-coverage.mjs. Este fichero es el que convierte «no cubierto» en «decidido no cubrir», así que el motivo importa más que la entrada.",
+  "//stats": "Las cinco de stats comparten causa y NO son un SQL desalineado: el módulo de estadísticas del worker es una implementación PARCIAL del de la Main (434 líneas frente a 1764), con varias métricas devueltas a cero fijo. El caso de contrato de cada una existe y está bendecido en tests/contract/lecturas/ —el lado Rust los corre y define lo que la Handy debería devolver—, pero el lado worker no puede pasarlos hasta que se porte el cálculo. Enchufarlos es añadir su par caso/golden en contractLectura.test.ts y borrar la entrada de aquí. Esto invalida el motivo por el que se retiró STAT-06 («los datos convergen y los agregados van detrás»): los agregados no van detrás, los calcula otro código.",
+  "exclusiones": {
+    "stats.productos": "El worker no calcula `peor_producto_vendible` (lo deja sin poner); la Main sí lo resuelve. Ver la nota //stats.",
+    "stats.reservas": "Modelan la misma gráfica de forma distinta: el desglose por estado del worker agrupa por el valor crudo de la columna (una etiqueta por estado presente) mientras la Main devuelve siempre las tres barras fijas Activas/Finalizadas/Canceladas, y las franjas horarias del worker son la hora en crudo frente a las bandas 00-11/12-15/16-19/20-23 de la Main. Ver la nota //stats.",
+    "stats.trabajadores": "La más grave de las cinco: el worker devuelve las tarjetas con `tareas_asignadas`, `tareas_finalizadas` y `horas_trabajadas` a CERO fijo, `puntualidad` nula y el ranking de ventas vacío, y clasifica por el texto libre de `Puesto` en vez de por el rol de la tabla Roles. La Main lo calcula de verdad leyendo fichajes y tareas (~520 líneas). En la Handy esa pantalla enseña ceros. Ver la nota //stats.",
+    "stats.clientes": "El worker devuelve `recurrentes` y `ticket_medio_cliente` a cero fijo y da por no recurrentes a todos los nuevos. Ver la nota //stats.",
+    "stats.proveedores": "El worker no calcula `porcentaje_sobre_total_gastos` (queda a cero). Ver la nota //stats."
+  }
+}

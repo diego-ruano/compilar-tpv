@@ -1,0 +1,29 @@
+{
+  "descripcion": "El resumen de mesas del rango. Se pide 'hoy' y se siembra en el inicio del dia de hoy, que siempre cae dentro de la ventana [inicio de hoy, ahora) y cuyo bucket horario es siempre '00': asi el golden vale hoy y dentro de anos. El cobro de hace un mes queda fuera del rango y el de barra no tiene mesa, asi que ninguno de los dos debe contar.",
+  "lectura": "stats.mesas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 2, 100, 0, 'rect', 80, 70);",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Contacto, Telefono, Email, CIF) VALUES ('prov-1', 'Bebidas SL', 'Luis', '911111111', 'luis@bebidas.es', 'B11111111');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-2', 'Carnes SA');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-2', 'MESA', 'mesa-2', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-barra', 'BARRA', datetime('now','localtime','start of day'), 'Pagada');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-1', 'com-1', 'prod-tortilla', 2, 9.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-2', 'com-1', 'prod-cerveza', 3, 3.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-3', 'com-2', 'prod-cerveza', 1, 3.0);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-4', 'com-barra', 'prod-sin-prov', 1, 1.5);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day'), 'Efectivo', 27.0, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-2', datetime('now','localtime','start of day'), 'Tarjeta', 3.0, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-barra', 'com-barra', datetime('now','localtime','start of day'), 'Efectivo', 1.5, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-viejo', 'com-1', datetime('now','localtime','-30 days'), 'Efectivo', 999.0, 'total');"
+  ],
+  "entrada": {}
+}

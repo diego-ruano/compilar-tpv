@@ -1,0 +1,23 @@
+{
+  "descripcion": "El centro de notificaciones de un usuario. Es la lectura con mas reglas de visibilidad del sistema: entran las dirigidas a todos, a ese usuario y a su rol, y quedan fuera la de otro usuario, la ya resuelta y la de la papelera. Ademas cada fila trae si ESE usuario la ha leido, que es un dato por-usuario y no de la notificacion.",
+  "lectura": "notificaciones.listar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect-2', 'RolLecturaContrato2');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', 'rol-lect', 'ana@bar.com', 'hash-1', 'Ana', 'Gomez');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-2', 'rol-lect-2', 'beto@bar.com', 'hash-2', 'Beto', 'Baja');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Telefono, Puesto, Fecha_Inicio_Contrato) VALUES ('trab-1', 'user-1', '600100200', 'Camarera', '2026-01-15');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('trab-2', 'user-2', 'Cocinero');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Estado, Creada_En) VALUES ('n-todos', 'stock', 'aviso', 'Queda poca cerveza', 'Repon el barril', 'todos', 'activa', '2026-05-10 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-mia', 'tarea', 'info', 'Tienes una tarea', 'usuario', 'user-1', 'activa', '2026-05-11 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-ajena', 'tarea', 'info', 'De otro', 'usuario', 'user-2', 'activa', '2026-05-12 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-mi-rol', 'turno', 'info', 'Para tu rol', 'rol', 'rol-lect', 'activa', '2026-05-13 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-resuelta', 'stock', 'info', 'Ya resuelta', 'todos', 'resuelta', '2026-05-09 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-papelera', 'stock', 'info', 'Descartada', 'todos', 'descartada', '2026-05-08 10:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('n-todos', 'user-1', '2026-05-10 11:00:00');"
+  ],
+  "entrada": {
+    "id_usuario": "user-1",
+    "solo_no_leidas": false
+  }
+}

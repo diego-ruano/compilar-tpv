@@ -1,0 +1,12 @@
+[
+  {
+    "Email": "luis@bebidas.es",
+    "ID_Proveedor": "prov-1",
+    "Nombre_Empresa": "Bebidas SL"
+  },
+  {
+    "Email": null,
+    "ID_Proveedor": "prov-2",
+    "Nombre_Empresa": "Carnes SA"
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "ID_Categoria": "cat-barra",
+    "Nombre": "Bebidas",
+    "Nombre_Imagen": null,
+    "Pasa_Cocina": 0,
+    "Ruta_Imagen": null,
+    "Vendible": 1
+  },
+  {
+    "ID_Categoria": "cat-no-vendible",
+    "Nombre": "Materia prima",
+    "Nombre_Imagen": null,
+    "Pasa_Cocina": 0,
+    "Ruta_Imagen": null,
+    "Vendible": 0
+  },
+  {
+    "ID_Categoria": "cat-cocina",
+    "Nombre": "Platos",
+    "Nombre_Imagen": null,
+    "Pasa_Cocina": 1,
+    "Ruta_Imagen": "/img/platos.png",
+    "Vendible": 1
+  }
+]

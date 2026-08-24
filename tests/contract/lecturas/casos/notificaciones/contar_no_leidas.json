@@ -1,0 +1,22 @@
+{
+  "descripcion": "El numero del globito. Mismo seed que el centro: de las cuatro visibles, una esta leida, asi que tienen que salir tres. Un numero, pero es el que decide si el usuario ve que tiene algo pendiente.",
+  "lectura": "notificaciones.contar_no_leidas",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect', 'RolLecturaContrato');",
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-lect-2', 'RolLecturaContrato2');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', 'rol-lect', 'ana@bar.com', 'hash-1', 'Ana', 'Gomez');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado) VALUES ('user-2', 'rol-lect-2', 'beto@bar.com', 'hash-2', 'Beto', 'Baja');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Telefono, Puesto, Fecha_Inicio_Contrato) VALUES ('trab-1', 'user-1', '600100200', 'Camarera', '2026-01-15');",
+    "INSERT INTO Trabajadores (ID_Trabajador, ID_Usuario, Puesto) VALUES ('trab-2', 'user-2', 'Cocinero');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Cuerpo, Destino_Tipo, Estado, Creada_En) VALUES ('n-todos', 'stock', 'aviso', 'Queda poca cerveza', 'Repon el barril', 'todos', 'activa', '2026-05-10 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-mia', 'tarea', 'info', 'Tienes una tarea', 'usuario', 'user-1', 'activa', '2026-05-11 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-ajena', 'tarea', 'info', 'De otro', 'usuario', 'user-2', 'activa', '2026-05-12 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Destino_Valor, Estado, Creada_En) VALUES ('n-mi-rol', 'turno', 'info', 'Para tu rol', 'rol', 'rol-lect', 'activa', '2026-05-13 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-resuelta', 'stock', 'info', 'Ya resuelta', 'todos', 'resuelta', '2026-05-09 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('n-papelera', 'stock', 'info', 'Descartada', 'todos', 'descartada', '2026-05-08 10:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('n-todos', 'user-1', '2026-05-10 11:00:00');"
+  ],
+  "entrada": {
+    "id_usuario": "user-1"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "descripcion": "El gasto por proveedor del rango. Un gasto de hoy con proveedor, otro sin proveedor y otro de hace un mes: los tres casos que decide esta consulta. La fecha de cada gasto se omite de la comparacion: para entrar en el rango de hoy tiene que ser la de hoy, asi que en el golden caducaria a medianoche.",
+  "lectura": "stats.proveedores",
+  "seed": [
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa, Contacto, Telefono, Email, CIF) VALUES ('prov-1', 'Bebidas SL', 'Luis', '911111111', 'luis@bebidas.es', 'B11111111');",
+    "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-2', 'Carnes SA');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
+    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-1', date('now','localtime'), 'Compras', 'Barriles', 150.0, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('g-2', date('now','localtime'), 'Suministros', 'Luz', 90.0);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-viejo', date('now','localtime','-30 days'), 'Compras', 'Carne', 400.0, 'prov-2');"
+  ],
+  "entrada": {},
+  "omitir": [
+    "fecha"
+  ]
+}

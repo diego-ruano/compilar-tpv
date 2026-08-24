@@ -1,0 +1,26 @@
+[
+  {
+    "ID_Rol": "00000000-0000-7000-8000-000000000001",
+    "Nombre_Rol": "Administrador"
+  },
+  {
+    "ID_Rol": "00000000-0000-7000-8000-000000000002",
+    "Nombre_Rol": "Camarero"
+  },
+  {
+    "ID_Rol": "00000000-0000-7000-8000-000000000003",
+    "Nombre_Rol": "Cocinero"
+  },
+  {
+    "ID_Rol": "00000000-0000-7000-8000-000000000004",
+    "Nombre_Rol": "Limpieza"
+  },
+  {
+    "ID_Rol": "rol-lect",
+    "Nombre_Rol": "RolLecturaContrato"
+  },
+  {
+    "ID_Rol": "rol-lect-2",
+    "Nombre_Rol": "RolLecturaContrato2"
+  }
+]

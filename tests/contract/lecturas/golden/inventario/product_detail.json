@@ -1,0 +1,24 @@
+{
+  "alergenos": [
+    {
+      "ID_Alergeno": "00000000-0000-7000-8000-000000000203",
+      "Nombre": "Huevos",
+      "Nombre_Imagen": "huevos.png",
+      "Ruta_Imagen": "/alergenos/huevos.png"
+    }
+  ],
+  "producto": {
+    "Cantidad_Pedido_Esperada": null,
+    "ID_Categoria": "cat-cocina",
+    "ID_Producto": "prod-tortilla",
+    "ID_Proveedor": "prov-2",
+    "IVA_Percent": 10.0,
+    "Nombre": "Tortilla de patatas",
+    "Nombre_Imagen": null,
+    "Precio_Venta": 9.0,
+    "Ruta_Imagen": null,
+    "Stock_Minimo": 5.0,
+    "Stock_Suelto": null,
+    "Unidad_Medida": "ud"
+  }
+}

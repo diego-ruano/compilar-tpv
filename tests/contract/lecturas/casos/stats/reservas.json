@@ -1,0 +1,14 @@
+{
+  "descripcion": "El resumen de reservas por turno. Se piden todos los turnos y se siembran una comida y una cena del dia de hoy, mas una del mes pasado que debe quedar fuera.",
+  "lectura": "stats.reservas",
+  "seed": [
+    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 120, 70);",
+    "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 2, 100, 0, 'rect', 80, 70);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre) VALUES ('cli-1', 'Ana');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-comida', 'cli-1', 'mesa-1', date('now','localtime'), '13:30', 'COMIDA', 4, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-cena', 'cli-1', 'mesa-2', date('now','localtime'), '21:00', 'CENA', 2, 'ACTIVA');",
+    "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Estado) VALUES ('res-vieja', 'cli-1', 'mesa-1', date('now','localtime','-30 days'), '13:30', 'COMIDA', 2, 'FINALIZADA');"
+  ],
+  "entrada": {}
+}

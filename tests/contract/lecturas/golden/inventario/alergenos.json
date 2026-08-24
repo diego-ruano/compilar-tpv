@@ -1,0 +1,86 @@
+[
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-00000000020d",
+    "Nombre": "Altramuces",
+    "Nombre_Imagen": "altramuces.png",
+    "Ruta_Imagen": "/alergenos/altramuces.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000209",
+    "Nombre": "Apio",
+    "Nombre_Imagen": "apio.png",
+    "Ruta_Imagen": "/alergenos/apio.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000205",
+    "Nombre": "Cacahuetes",
+    "Nombre_Imagen": "cacahuetes.png",
+    "Ruta_Imagen": "/alergenos/cacahuetes.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000202",
+    "Nombre": "Crustáceos",
+    "Nombre_Imagen": "crustaceos.png",
+    "Ruta_Imagen": "/alergenos/crustaceos.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000208",
+    "Nombre": "Frutos de cáscara",
+    "Nombre_Imagen": "frutos_cascara.png",
+    "Ruta_Imagen": "/alergenos/frutos_cascara.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000201",
+    "Nombre": "Gluten",
+    "Nombre_Imagen": "gluten.png",
+    "Ruta_Imagen": "/alergenos/gluten.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000203",
+    "Nombre": "Huevos",
+    "Nombre_Imagen": "huevos.png",
+    "Ruta_Imagen": "/alergenos/huevos.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000207",
+    "Nombre": "Lácteos",
+    "Nombre_Imagen": "lacteos.png",
+    "Ruta_Imagen": "/alergenos/lacteos.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-00000000020e",
+    "Nombre": "Moluscos",
+    "Nombre_Imagen": "moluscos.png",
+    "Ruta_Imagen": "/alergenos/moluscos.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-00000000020a",
+    "Nombre": "Mostaza",
+    "Nombre_Imagen": "mostaza.png",
+    "Ruta_Imagen": "/alergenos/mostaza.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000204",
+    "Nombre": "Pescado",
+    "Nombre_Imagen": "pescado.png",
+    "Ruta_Imagen": "/alergenos/pescado.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-000000000206",
+    "Nombre": "Soja",
+    "Nombre_Imagen": "soja.png",
+    "Ruta_Imagen": "/alergenos/soja.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-00000000020c",
+    "Nombre": "Sulfitos",
+    "Nombre_Imagen": "sulfitos.png",
+    "Ruta_Imagen": "/alergenos/sulfitos.png"
+  },
+  {
+    "ID_Alergeno": "00000000-0000-7000-8000-00000000020b",
+    "Nombre": "Sésamo",
+    "Nombre_Imagen": "sesamo.png",
+    "Ruta_Imagen": "/alergenos/sesamo.png"
+  }
+]

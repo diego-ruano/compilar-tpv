@@ -1,0 +1,45 @@
+{
+  "cancelaciones": 0,
+  "estado": {
+    "labels": [
+      "Activas",
+      "Finalizadas",
+      "Canceladas"
+    ],
+    "values": [
+      2,
+      0,
+      0
+    ]
+  },
+  "franjas": {
+    "labels": [
+      "00-11",
+      "12-15",
+      "16-19",
+      "20-23"
+    ],
+    "values": [
+      0,
+      1,
+      0,
+      1
+    ]
+  },
+  "mesas_turno": {
+    "mesas_no_reservadas": 0,
+    "mesas_reservadas": 2,
+    "turno": "TODOS"
+  },
+  "reservas_por_bucket": {
+    "labels": [
+      "13",
+      "21"
+    ],
+    "values": [
+      1,
+      1
+    ]
+  },
+  "total_reservas": 2
+}

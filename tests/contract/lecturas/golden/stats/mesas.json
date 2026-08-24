@@ -1,0 +1,30 @@
+{
+  "mesa_top_comandas": {
+    "comandas": 1,
+    "mesa": "1",
+    "zona": "Salon"
+  },
+  "ocupadas": 2,
+  "servicios": {
+    "labels": [
+      "00"
+    ],
+    "values": [
+      2
+    ]
+  },
+  "ticket_medio_por_mesa": 15.0,
+  "top_mesas_ingresos": [
+    {
+      "mesa": "1",
+      "total": 27.0,
+      "zona": "Salon"
+    },
+    {
+      "mesa": "2",
+      "total": 3.0,
+      "zona": "Salon"
+    }
+  ],
+  "total_mesas": 2
+}
