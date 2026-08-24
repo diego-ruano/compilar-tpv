@@ -4,7 +4,7 @@ import type { Client } from "@libsql/client/web";
 import { verifyJwtHs256 } from "./jwtHs256";
 import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
 import { b64ToBytes } from "../utils/base64";
-import { sha256HexStr } from "../utils/crypto";
+import { sha256HexBytes, sha256HexStr } from "../utils/crypto";
 import { ed25519Verify, nobleForceU8 } from "../utils/nobleEd25519";
 
 export type AuthClaims = {
@@ -96,10 +96,15 @@ async function resolverDevice(
  * Verifica el “device proof”:
  * msg = "{ts}\n{METHOD}\n{PATH}\n{sha256(token)}\n{sha256(body)}"
  *
- * `rawBody` es el cuerpo **tal cual llegó** (cadena vacía si no hay). Cubrirlo con la firma
- * (FABLE-E) es lo que impide alterar el contenido de una petición ya firmada; antes la firma solo
- * ataba método y ruta. Quien llame a esto tiene que leer el cuerpo con `c.req.text()` y pasarlo:
- * Hono cachea esa lectura, así que el handler puede seguir usando `c.req.json()` después.
+ * `rawBody` son los **bytes** del cuerpo tal cual llegaron (vacío si no hay). Cubrirlos con la
+ * firma (FABLE-E) es lo que impide alterar el contenido de una petición ya firmada; antes la firma
+ * solo ataba método y ruta.
+ *
+ * ⚠️ **Bytes, no texto.** Quien llame a esto tiene que leer el cuerpo como `arrayBuffer`. Leerlo
+ * con `text()` lo decodifica como UTF-8, y un cuerpo binario —la subida de imágenes manda un
+ * JPEG— pierde ahí todos los bytes que no forman un carácter válido: el hash deja de cuadrar y la
+ * petición muere con `bad_device_signature` aunque la clave y la firma sean perfectas. En Hono,
+ * `c.req.arrayBuffer()` queda cacheado y el handler puede seguir usando `c.req.json()` después.
  *
  * ⚠️ El formato debe ser idéntico al de `sign_device_proof` (`tpv-infra-licensing/src/device.rs`).
  */
@@ -108,7 +113,7 @@ export async function verifyDeviceProofOrThrow(
 	dbCentral: Client,
 	claims: { tenantId: string; deviceId: string },
 	bearerToken: string,
-	rawBody: string
+	rawBody: Uint8Array
 ): Promise<void> {
 	const tsStr = (req.headers.get("X-Device-Ts") || "").trim();
 	const sigB64Raw = (req.headers.get("X-Device-Sig") || "").trim();
@@ -127,7 +132,7 @@ export async function verifyDeviceProofOrThrow(
 
 	const url = new URL(req.url);
 	const tokenHash = await sha256HexStr(bearerToken);
-	const bodyHash = await sha256HexStr(rawBody ?? "");
+	const bodyHash = await sha256HexBytes(rawBody ?? new Uint8Array());
 	const msg = `${ts}\n${req.method.toUpperCase()}\n${url.pathname}\n${tokenHash}\n${bodyHash}`;
 
 	// por si llega con comillas

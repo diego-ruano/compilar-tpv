@@ -16,7 +16,7 @@ import type { LicenseGateState, SignedLicenseAssertion } from "../../shared";
 import { getDevicePubKeyB64, type LicenseRow } from "../../server/licenseStore";
 import { sha256Hex } from "../../server/crypto";
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
-import { sha256HexStr, secretKey } from "../../server/utils/crypto";
+import { sha256HexBytes, sha256HexStr, secretKey } from "../../server/utils/crypto";
 import { runTenantMigrations } from "../../server/tenantMigrations";
 import {
 	getTenantDbRow,
@@ -249,7 +249,7 @@ export async function verifyDeviceProof(
 	dbi: Client,
 	claims: { tenantId: string; deviceId: string },
 	target?: { method: string; path: string },
-	rawBody?: string,
+	rawBody?: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const tsStr = (request.headers.get("X-Device-Ts") || "").trim();
 	const sigB64Raw = (request.headers.get("X-Device-Sig") || "").trim();
@@ -278,10 +278,11 @@ export async function verifyDeviceProof(
 	const method = String(target?.method || request.method).toUpperCase();
 	const path = String(target?.path || new URL(request.url).pathname);
 
-	// FABLE-E: el cuerpo entra en la firma. Estos endpoints (status/refresh) se llaman sin
-	// cuerpo, asi que `rawBody` suele ser "" — pero el tramo va SIEMPRE, para que el mensaje
-	// tenga la misma forma que el que firma el cliente (`sign_device_proof` en Rust).
-	const bodyHash = await sha256HexStr(rawBody ?? "");
+	// FABLE-E: el cuerpo entra en la firma, y entra como BYTES (leerlo como texto rompería
+	// cualquier cuerpo binario; ver `verifyDeviceProofOrThrow`). Estos endpoints (status/refresh)
+	// se llaman sin cuerpo, así que suele estar vacío — pero el tramo va SIEMPRE, para que el
+	// mensaje tenga la misma forma que el que firma el cliente (`sign_device_proof` en Rust).
+	const bodyHash = await sha256HexBytes(rawBody ?? new Uint8Array());
 	const msg = [ts, method, path, tokenHash, bodyHash].join("\n");
 
 	let pub: Uint8Array;

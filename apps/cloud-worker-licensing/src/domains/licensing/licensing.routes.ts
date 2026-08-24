@@ -340,7 +340,9 @@ licenseRoutes.get("/status", async (c) => {
 
 	const db = getDb(env);
 
-	const rawBody = c.req.raw.body ? await c.req.text() : "";
+	const rawBody = c.req.raw.body
+		? new Uint8Array(await c.req.arrayBuffer())
+		: new Uint8Array();
 	const proof = await verifyDeviceProof(
 		c.req.raw,
 		db,
@@ -405,7 +407,9 @@ licenseRoutes.post("/refresh", async (c) => {
 
 	const db = getDb(env);
 
-	const rawBody = c.req.raw.body ? await c.req.text() : "";
+	const rawBody = c.req.raw.body
+		? new Uint8Array(await c.req.arrayBuffer())
+		: new Uint8Array();
 	const proof = await verifyDeviceProof(
 		c.req.raw,
 		db,

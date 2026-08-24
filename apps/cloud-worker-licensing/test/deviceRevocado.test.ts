@@ -28,6 +28,9 @@ function bdFalsa(filas: any[]) {
 	return { db, consultas };
 }
 
+/** El cuerpo entra en la firma como bytes; estas peticiones no llevan ninguno. */
+const SIN_CUERPO = new Uint8Array();
+
 /** Petición con un device-proof bien formado (ts fresco); la firma da igual: no se llega a ella. */
 function peticionFirmada(): Request {
 	return new Request("https://tpv-api.test/v1/pair/pending", {
@@ -87,7 +90,7 @@ describe("qué error recibe el dispositivo", () => {
 		]);
 
 		await expect(
-			verifyDeviceProofOrThrow(peticionFirmada(), db, claims, "token", ""),
+			verifyDeviceProofOrThrow(peticionFirmada(), db, claims, "token", SIN_CUERPO),
 		).rejects.toThrow("device_revoked");
 	});
 
@@ -100,7 +103,7 @@ describe("qué error recibe el dispositivo", () => {
 				db,
 				{ tenantId: "t-nuevo", deviceId: "d-inexistente" },
 				"token",
-				"",
+				SIN_CUERPO,
 			),
 		).rejects.toThrow("device_not_registered");
 	});
@@ -116,7 +119,7 @@ describe("qué error recibe el dispositivo", () => {
 				db,
 				{ tenantId: "t-nuevo", deviceId: "d-sin-clave" },
 				"token",
-				"",
+				SIN_CUERPO,
 			),
 		).rejects.toThrow("device_pubkey_not_registered");
 	});

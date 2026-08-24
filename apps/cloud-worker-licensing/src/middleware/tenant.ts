@@ -66,9 +66,13 @@ export const tenantAuth: MiddlewareHandler<{
 		const dbCentral = getDb(c.env);
 		const { token, claims } = await verifyJwt(c.env, c.req.raw);
 
-		// El cuerpo entra en la firma (FABLE-E). Se lee aquí una vez; Hono cachea el texto, así
-		// que el handler puede seguir haciendo `c.req.json()` sin quedarse sin body.
-		const rawBody = c.req.raw.body ? await c.req.text() : "";
+		// El cuerpo entra en la firma (FABLE-E). Se leen los BYTES, no el texto: por aquí pasa la
+		// subida de imágenes, y un JPEG leído como texto deja de ser el mismo cuerpo (ver
+		// `verifyDeviceProofOrThrow`). Hono cachea el `arrayBuffer`, así que el handler puede
+		// seguir haciendo `c.req.json()` —o pidiendo el propio buffer— sin quedarse sin body.
+		const rawBody = c.req.raw.body
+			? new Uint8Array(await c.req.arrayBuffer())
+			: new Uint8Array();
 		await verifyDeviceProofOrThrow(c.req.raw, dbCentral, claims, token, rawBody);
 
 		c.set("tenantId", claims.tenantId);

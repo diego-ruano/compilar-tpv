@@ -34,10 +34,13 @@ export async function buildTenantContext(
 ): Promise<TenantContext> {
 	const { token, claims } = await verifyJwt(env, req);
 
-	// El cuerpo entra en la firma (FABLE-E). Se lee sobre un `clone()` a propósito: estos handlers
-	// reciben la `Request` cruda (no el contexto de Hono) y hacen su propio `req.json()` después;
-	// el cuerpo de una Request solo se puede consumir una vez, así que sin el clon se quedarían sin él.
-	const rawBody = req.body ? await req.clone().text() : "";
+	// El cuerpo entra en la firma (FABLE-E), y entra como BYTES (ver `verifyDeviceProofOrThrow`).
+	// Se lee sobre un `clone()` a propósito: estos handlers reciben la `Request` cruda (no el
+	// contexto de Hono) y hacen su propio `req.json()` después; el cuerpo de una Request solo se
+	// puede consumir una vez, así que sin el clon se quedarían sin él.
+	const rawBody = req.body
+		? new Uint8Array(await req.clone().arrayBuffer())
+		: new Uint8Array();
 
 	await verifyDeviceProofOrThrow(req, dbCentral, claims, token, rawBody);
 
