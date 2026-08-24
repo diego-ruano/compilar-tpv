@@ -591,15 +591,12 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     // Tamaño base del cuerpo (respeta font_scale); las cabeceras lo sobreescriben y restauran.
     esc_size(&mut out, base_size);
 
-    // ── Cabecera (centrada) ──
-    esc_align(&mut out, 1);
-    if p.show_logo {
-        let ancho_logo = ancho_logo_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm);
-        if let Some(bloque) = logo.and_then(|b| rasterizar_logo(b, ancho_logo)) {
-            out.extend_from_slice(&bloque);
-            esc_feed(&mut out, 1);
-        }
-    }
+    // ── Cabecera: los datos del negocio, a la izquierda ──
+    //
+    // El logo NO va aquí: cierra el ticket (ver el final de esta función). Arriba obligaba a
+    // centrar el texto debajo de él para que no quedara descolgado, y lo primero que se lee de un
+    // recibo debe ser de quién es y cuánto se ha pagado.
+    esc_align(&mut out, 0);
     if p.show_business_name {
         esc_bold(&mut out, true);
         esc_size(&mut out, 0x11); // doble alto+ancho para el nombre
@@ -621,7 +618,6 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     }
 
     // ── Cuerpo (izquierda) ──
-    esc_align(&mut out, 0);
     sep(&mut out, cols);
 
     // Encabezado del cuerpo: fecha a la izquierda y, a la derecha, QUÉ es este papel — su número
@@ -734,6 +730,21 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         esc_align(&mut out, 1);
         text_wrap(&mut out, msg, cols);
         esc_align(&mut out, 0);
+    }
+
+    // ── Logo, cerrando el ticket ──
+    //
+    // Lo último y centrado, como la firma de un papel. Aquí sí puede ocupar el ancho del papel:
+    // no compite con ningún texto por la línea, que era lo que obligaba a encogerlo cuando estaba
+    // arriba.
+    if p.show_logo {
+        let ancho_logo = ancho_logo_dots(p.paper_width_mm, p.margin_left_mm, p.margin_right_mm);
+        if let Some(bloque) = logo.and_then(|b| rasterizar_logo(b, ancho_logo)) {
+            esc_feed(&mut out, 1);
+            esc_align(&mut out, 1);
+            out.extend_from_slice(&bloque);
+            esc_align(&mut out, 0);
+        }
     }
 
     // Margen inferior (mm) + avance + corte.

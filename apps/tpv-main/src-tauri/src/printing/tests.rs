@@ -438,6 +438,47 @@ mod tests_logo {
     }
 
     #[test]
+    fn el_logo_cierra_el_ticket_centrado() {
+        // El logo es lo último del papel: después del mensaje de despedida y antes del corte. Lo
+        // que va primero son los datos del negocio, a la izquierda.
+        let mut p = base(vec![linea()]);
+        p.show_logo = true;
+        p.direccion = "Calle Mayor 1".into();
+        p.show_address = true;
+        p.show_footer_message = true;
+        p.mensaje_footer = "Hasta pronto".into();
+
+        let bytes = build_ticket(&p, Some(&png_1x1()));
+
+        let pos = |aguja: &[u8]| {
+            bytes
+                .windows(aguja.len())
+                .position(|w| w == aguja)
+                .unwrap_or_else(|| panic!("no está {:?}", String::from_utf8_lossy(aguja)))
+        };
+
+        let i_logo = bytes
+            .windows(4)
+            .position(|w| w == [0x1D, 0x76, 0x30, 0x00])
+            .expect("el logo tiene que estar");
+
+        assert!(pos(b"Calle Mayor 1") < i_logo, "los datos van los primeros");
+        assert!(pos(b"Hasta pronto") < i_logo, "el logo va después del mensaje");
+        assert_eq!(
+            &bytes[i_logo - 3..i_logo],
+            &[0x1B, 0x61, 0x01],
+            "el bloque del logo tiene que ir precedido de ESC a 1 (centrado)"
+        );
+
+        // Y antes del corte: si saliera después, la impresora ya habría cortado el papel.
+        let i_corte = bytes
+            .windows(2)
+            .position(|w| w == [0x1D, 0x56])
+            .expect("el corte tiene que estar");
+        assert!(i_logo < i_corte, "el logo tiene que salir antes del corte");
+    }
+
+    #[test]
     fn con_el_logo_desactivado_no_se_imprime_aunque_haya_imagen() {
         let mut p = base(vec![linea()]);
         p.show_logo = false;
@@ -1526,8 +1567,8 @@ mod tests_ancho_del_logo {
 
     #[test]
     fn el_logo_impreso_ocupa_ese_ancho_y_no_el_de_las_columnas() {
-        // De punta a punta: el bloque que acaba en el ticket declara el ancho del cabezal aunque
-        // el texto vaya a 20 columnas.
+        // De punta a punta: el bloque que acaba en el ticket declara el ancho que sale del papel
+        // aunque el texto vaya a 20 columnas.
         use image::{ImageBuffer, Rgba};
 
         let img: ImageBuffer<Rgba<u8>, Vec<u8>> =

@@ -98,7 +98,7 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
         };
     }, [logoDataUrl]);
 
-    const showHeaderLogo = settings.showLogo && !!logoDataUrl && !!logoSrc;
+    const showFooterLogo = settings.showLogo && !!logoDataUrl && !!logoSrc;
     const showHeaderName = settings.showBusinessName;
     const showAddress = settings.showAddress && !!direccion;
     const showPhone = settings.showPhone && !!telefono;
@@ -114,20 +114,9 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
             {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
                 las columnas que tendrá el de verdad. */}
             <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
-                <div style={{ textAlign: "center" }}>
-                    {showHeaderLogo ? (
-                        // El logo impreso ocupa el ancho del cabezal menos los márgenes (ver
-                        // `ancho_logo_dots` en printing.rs), no una fracción del bloque de texto:
-                        // enseñarlo al 70 % hacía creer que sale más pequeño de lo que sale.
-                        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
-                            <img
-                                src={logoSrc}
-                                alt="logo"
-                                style={{ maxHeight: 48, maxWidth: "100%", objectFit: "contain" }}
-                            />
-                        </div>
-                    ) : null}
-
+                {/* Cabecera: sólo los datos del negocio, a la izquierda. El logo cierra el
+                    ticket, abajo del todo (ver el final de este componente y de `build_ticket`). */}
+                <div style={{ textAlign: "left" }}>
                     {showHeaderName ? (
                         <div style={{ fontWeight: 800, fontSize: 16, letterSpacing: 0.2 }}>
                             {businessName || "TPV"}
@@ -241,6 +230,19 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
                             {mensajeFooter || "¡Gracias por su visita!"}
                         </div>
                     </>
+                ) : null}
+
+                {showFooterLogo ? (
+                    // El logo impreso ocupa el ancho del cabezal menos los márgenes (ver
+                    // `ancho_logo_dots` en printing.rs), no una fracción del bloque de texto:
+                    // enseñarlo al 70 % hacía creer que sale más pequeño de lo que sale.
+                    <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+                        <img
+                            src={logoSrc}
+                            alt="logo"
+                            style={{ maxHeight: 48, maxWidth: "100%", objectFit: "contain" }}
+                        />
+                    </div>
                 ) : null}
             </div>
         </div>

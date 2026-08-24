@@ -248,7 +248,7 @@ export function Negocio({
                 </div>
 
                 <div className="mt-4 flex items-center justify-between gap-2">
-                    <div className="text-xs text-fg-muted">
+                    <div className="text-xs text-fg-muted invis">
                         {bizHydrated
                             ? "Persistencia en DB local (SQLite)"
                             : "Cargando configuración..."}

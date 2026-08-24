@@ -559,6 +559,10 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   difumina con Floyd–Steinberg y emite `GS v 0`. La transparencia se compone sobre blanco antes de
   nada (un PNG de fondo transparente salía como un rectángulo negro). Si la imagen no se puede leer
   devuelve `None` y el ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
+- **El logo cierra el ticket, centrado.** Va lo último: después del mensaje de despedida y antes
+  del corte. Arriba obligaba a centrar debajo de él los datos del negocio para que no quedaran
+  descolgados, y lo primero que se lee de un recibo tiene que ser de quién es y cuánto se ha
+  pagado. La cabecera son esos datos **alineados a la izquierda**.
 - **El ancho del logo sale del papel, no del texto.** `ancho_logo_dots` parte del cabezal del
   formato y descuenta los márgenes; `chars_per_line` no entra. Esa opción es la densidad de las
   LETRAS: quien la baja a 20 quiere el texto más grande, no un logo del tercio del papel.

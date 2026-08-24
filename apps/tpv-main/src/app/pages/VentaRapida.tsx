@@ -1859,9 +1859,6 @@ export default function VentaRapida() {
       <div className="flex shrink-0 flex-col gap-3 border-b border-border bg-surface py-3 pl-16 pr-3 sm:flex-row sm:items-center sm:justify-between sm:pl-16 sm:pr-4 lg:px-4">
         <div className="min-w-0">
           <h1 className="truncate text-lg font-extrabold text-fg sm:text-xl">Venta rápida</h1>
-          <p className="truncate text-xs text-fg-muted sm:text-sm">
-            Ticket rápido de barra · {idComandaActiva ? `#${idComandaActiva}` : "sin ticket"}
-          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
