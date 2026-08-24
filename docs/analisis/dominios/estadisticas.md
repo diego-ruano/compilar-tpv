@@ -8,35 +8,29 @@
 
 ## Valoración general
 
-> ### STAT-07 🟠 El módulo de stats del worker es una implementación parcial (reabre STAT-06)
+> **STAT-07 cerrado (2026-08-24), y con él el retirado STAT-06.**
 >
-> **La suposición con la que se retiró STAT-06 el 2026-08-23 era falsa.** Decía: «los datos de los que
-> salen los KPI sí convergen, así que los agregados van detrás». No van detrás — **los calcula otro
-> código**, y ese código está a medias. Lo destapó el harness de contrato de **lectura** el 2026-08-24,
-> en cuanto hubo con qué contrastarlo: de las 7 consultas, **5 divergen**.
+> El módulo de stats del worker **era** una implementación parcial del de la Main: `stats.trabajadores`
+> devolvía tareas, horas y ranking a cero fijo y clasificaba por el texto libre de `Puesto` en vez de
+> por el rol; `clientes` daba recurrentes y ticket medio a cero; `proveedores` no calculaba el
+> porcentaje; `productos` no resolvía el peor producto vendible; y `reservas` modelaba el desglose por
+> estado y las franjas horarias de otra forma. **Las cinco están portadas** y las siete consultas
+> tienen caso de contrato de lectura en verde.
 >
-> `stats.queries.ts` tiene 434 líneas frente a las 1764 de `stats.rs`, y la diferencia no es
-> concisión:
+> Lo destapó el harness de lectura el mismo día que hubo con qué contrastarlo. La suposición con la
+> que se había retirado STAT-06 el 23/08 —«los datos convergen, así que los agregados van detrás»—
+> era falsa: **no van detrás, los calcula otro código**. Un par de detalles que sólo salen al
+> ejecutar los dos lados a la vez y que ahora están fijados por sus goldens:
 >
-> | Consulta | Qué hace el worker |
-> |---|---|
-> | `trabajadores` | **Devuelve las tarjetas con `tareas_asignadas`, `tareas_finalizadas` y `horas_trabajadas` a CERO FIJO**, `puntualidad` a null y el ranking de ventas vacío. Y clasifica por el texto libre de `Puesto` en vez de por el rol de la tabla `Roles`. La Main lo calcula leyendo fichajes y tareas (~520 líneas). En la Handy esa pantalla enseña ceros. |
-> | `clientes` | `recurrentes` y `ticket_medio_cliente` a cero fijo; da por no recurrentes a todos los nuevos. |
-> | `proveedores` | No calcula `porcentaje_sobre_total_gastos`. |
-> | `productos` | No resuelve `peor_producto_vendible`. |
-> | `reservas` | Modela dos gráficas distinto: el desglose por estado agrupa por el valor crudo de la columna (la Main devuelve siempre las tres barras Activas/Finalizadas/Canceladas) y las franjas horarias son la hora en crudo (la Main, bandas 00-11/12-15/16-19/20-23). |
->
-> `stats.categorias` y `stats.mesas` **sí** coinciden y ya tienen caso de contrato en verde.
->
-> **Estado:** los cinco casos están **escritos y bendecidos** en
-> [`tests/contract/lecturas/`](../../../tests/contract/lecturas/) —el lado Rust los corre, así que
-> definen exactamente lo que la Handy debería devolver—, y están excluidos del lado worker con su
-> motivo en `lecturas/cobertura.json`. Enchufarlos el día que se porte el cálculo es añadir su par
-> caso/golden y borrar la entrada. **Portar ~1300 líneas de analítica a TypeScript es un trabajo con
-> nombre propio**, no algo que quepa dentro de la tarea de escribir tests.
->
-> **La lección**, que vale para el resto del análisis: verificar a mano no es lo mismo que contrastar.
-> Esto se dio por bueno razonando sobre el código; bastó ejecutarlo en paralelo para verlo.
+> - El **peor producto vendible** se busca partiendo del **catálogo**, no de lo vendido: el producto
+>   que no compra nadie no aparece en ninguna línea de comanda, así que una consulta que salga de
+>   `Detalle_Comanda` jamás puede encontrarlo.
+> - El **ticket medio** de un camarero se agrupa primero **por comanda** y luego se promedia.
+>   Promediando los pagos sueltos, una mesa cobrada en tres veces hundiría su media.
+> - El desglose por **estado** y las **franjas horarias** son barras **fijas**, no un `GROUP BY`: un
+>   día sin cancelaciones no puede quedarse sin esa barra y cambiar la forma de la gráfica solo.
+> - El filtro de **turno** se aplica sólo al reparto de mesas, no al total: si filtrara en todo,
+>   elegir «cena» cambiaría el total de reservas del día, que no es lo que ese selector significa.
 
 **Acierto:** el manejo de **zona horaria** es correcto — compara `Fecha_Hora` (local almacenado)
 contra límites `datetime('now','localtime',…)` **sin re-convertir**. Este módulo sirve de patrón.

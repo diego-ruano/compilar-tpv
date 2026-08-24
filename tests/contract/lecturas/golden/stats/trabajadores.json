@@ -1,9 +1,52 @@
 {
-  "camareros": [],
-  "cocineros": [],
-  "limpieza": [],
+  "camareros": [
+    {
+      "cobros_realizados": 3,
+      "comandas_tomadas": 2,
+      "horas_trabajadas": 4.0,
+      "id_trabajador": "t-cam",
+      "nombre": "Ana Gomez",
+      "puntualidad": {
+        "entrada": "09:00",
+        "minutos_retraso": 30,
+        "programado": "08:30",
+        "puntual": false
+      },
+      "rol": "Camarero",
+      "tareas_asignadas": 2,
+      "tareas_finalizadas": 1,
+      "ticket_medio_eur": 30.0
+    }
+  ],
+  "cocineros": [
+    {
+      "comandas_preparadas": 1,
+      "horas_trabajadas": 8.0,
+      "id_trabajador": "t-coc",
+      "nombre": "Beto",
+      "puntualidad": null,
+      "rol": "Cocinero",
+      "tareas_asignadas": 0,
+      "tareas_finalizadas": 0
+    }
+  ],
+  "limpieza": [
+    {
+      "horas_trabajadas": 0.0,
+      "id_trabajador": "t-lim",
+      "nombre": "Cira Diaz",
+      "puntualidad": null,
+      "rol": "Limpieza",
+      "tareas_asignadas": 1,
+      "tareas_finalizadas": 0
+    }
+  ],
   "ranking_ventas": {
-    "labels": [],
-    "values": []
+    "labels": [
+      "Ana Gomez"
+    ],
+    "values": [
+      60.0
+    ]
   }
 }

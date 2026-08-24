@@ -16,8 +16,10 @@ de escritura cerró los `-parity` (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-
 **lectura** cerró **CLI-05** y, de paso, sacó **ocho** divergencias reales que la revisión a mano de
 agosto no había visto —entre ellas dos consultas de la Handy que devolvían **siempre vacío** por
 coercionar a número un id que es TEXT (`trabajadores.idByUsuario` e `inventario.alergenosProducto`)—,
-todas corregidas, y destapó **STAT-07**: el módulo de estadísticas del worker está a medias. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo,
-**TRAB-08**, ya corregido. Ver
+todas corregidas— y destapó **STAT-07**: el módulo de estadísticas del worker era una implementación
+parcial de la de la Main, ya portada. Las lecturas quedan al **100 %, sin exclusiones**. Lo excluido
+del harness de escritura se revisó a mano el 22-23/08 y escondía un fallo, **TRAB-08**, ya corregido.
+Ver
 [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
 ---
@@ -53,8 +55,8 @@ todas corregidas, y destapó **STAT-07**: el módulo de estadísticas del worker
    >   Rust (`contract_tests.rs` y `contract_read_tests.rs`) y el del worker sobre **vitest**
    >   (`test/contract.test.ts` y `test/contractLectura.test.ts`, que corren en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las cuatro suites.
-   > - **Cubierto:** 66 casos sobre 63 comandos y 65 casos sobre 56 lecturas, con **0 pendientes** en
-   >   las dos vertientes. Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
+   > - **Cubierto:** 66 casos sobre 63 comandos y 65 casos sobre las 61 lecturas (**el 100 % de
+   >   éstas, sin exclusiones**). Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
    > - **Lo que falta se ve solo:** `scripts/check-contract-coverage.mjs` avisa en CI (sin romperlo)
    >   de cada comando y cada lectura del worker que no tenga caso ni exclusión documentada.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
@@ -155,7 +157,7 @@ probar la **app** completa contra staging.
 
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
-| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Ya hay red por los dos lados y **sin huecos**: el harness de **escritura** (66 casos) más el guard de SQL replicable determinista, y el de **lectura** (65 casos), montado el 2026-08-24, que al ejecutarse sacó **ocho divergencias reales**. Queda lo que sigue **excluido con motivo** (`complete_initial_setup`, la ficha con PII y las cinco consultas de `stats` que el worker no implementa entero — ver STAT-07) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Ya hay red por los dos lados y **sin huecos**: el harness de **escritura** (66 casos) más el guard de SQL replicable determinista, y el de **lectura** (65 casos, **61/61 lecturas, sin exclusiones**), montado el 2026-08-24, que al ejecutarse sacó **trece divergencias reales**, todas corregidas. Queda lo que sigue **excluido con motivo** del lado de escritura (`complete_initial_setup` y la ficha con PII) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
 
 ---
 

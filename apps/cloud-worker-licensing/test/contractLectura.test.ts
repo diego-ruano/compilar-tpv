@@ -57,8 +57,13 @@ import {
 	meta as reservasMeta,
 } from "../src/domains/reservas/reservas.queries";
 import {
+	clientes as statsClientes,
 	listCategorias as statsCategorias,
 	mesas as statsMesas,
+	productos as statsProductos,
+	proveedores as statsProveedores,
+	reservas as statsReservas,
+	trabajadores as statsTrabajadores,
 } from "../src/domains/stats/stats.queries";
 import {
 	all as trabajadoresTodos,
@@ -218,6 +223,16 @@ import casoTrabTurnos from "../../../tests/contract/lecturas/casos/trabajadores/
 import goldenTrabTurnos from "../../../tests/contract/lecturas/golden/trabajadores/turnos.json";
 import casoStatsCategorias from "../../../tests/contract/lecturas/casos/stats/categorias.json";
 import goldenStatsCategorias from "../../../tests/contract/lecturas/golden/stats/categorias.json";
+import casoStatsClientes from "../../../tests/contract/lecturas/casos/stats/clientes.json";
+import goldenStatsClientes from "../../../tests/contract/lecturas/golden/stats/clientes.json";
+import casoStatsProductos from "../../../tests/contract/lecturas/casos/stats/productos.json";
+import goldenStatsProductos from "../../../tests/contract/lecturas/golden/stats/productos.json";
+import casoStatsTrabajadores from "../../../tests/contract/lecturas/casos/stats/trabajadores.json";
+import goldenStatsTrabajadores from "../../../tests/contract/lecturas/golden/stats/trabajadores.json";
+import casoStatsReservas from "../../../tests/contract/lecturas/casos/stats/reservas.json";
+import goldenStatsReservas from "../../../tests/contract/lecturas/golden/stats/reservas.json";
+import casoStatsProveedores from "../../../tests/contract/lecturas/casos/stats/proveedores.json";
+import goldenStatsProveedores from "../../../tests/contract/lecturas/golden/stats/proveedores.json";
 import casoStatsMesas from "../../../tests/contract/lecturas/casos/stats/mesas.json";
 import goldenStatsMesas from "../../../tests/contract/lecturas/golden/stats/mesas.json";
 
@@ -306,6 +321,11 @@ const CASOS = [
 	{ nombre: "trabajadores_turnos", caso: casoTrabTurnos, golden: goldenTrabTurnos },
 	{ nombre: "stats_categorias", caso: casoStatsCategorias, golden: goldenStatsCategorias },
 	{ nombre: "stats_mesas", caso: casoStatsMesas, golden: goldenStatsMesas },
+	{ nombre: "stats_proveedores", caso: casoStatsProveedores, golden: goldenStatsProveedores },
+	{ nombre: "stats_productos", caso: casoStatsProductos, golden: goldenStatsProductos },
+	{ nombre: "stats_clientes", caso: casoStatsClientes, golden: goldenStatsClientes },
+	{ nombre: "stats_reservas", caso: casoStatsReservas, golden: goldenStatsReservas },
+	{ nombre: "stats_trabajadores", caso: casoStatsTrabajadores, golden: goldenStatsTrabajadores },
 ];
 
 // ── Comparación estructural ORDENADA (misma spec que el lado Rust) ───────────────────
@@ -505,6 +525,16 @@ async function ejecutarLectura(db: any, caso: any): Promise<any> {
 			return statsCategorias(db);
 		case "stats.mesas":
 			return statsMesas(db, "hoy");
+		case "stats.proveedores":
+			return statsProveedores(db, "hoy");
+		case "stats.trabajadores":
+			return statsTrabajadores(db, "hoy");
+		case "stats.reservas":
+			return statsReservas(db, "hoy", "TODOS");
+		case "stats.clientes":
+			return statsClientes(db, "hoy");
+		case "stats.productos":
+			return statsProductos(db, "hoy", e.categoria_top_id ?? null, e.categoria_worst_id ?? null);
 		default:
 			throw new Error(`lectura sin soporte en el harness de contrato: ${caso.lectura}`);
 	}

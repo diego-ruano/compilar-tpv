@@ -181,8 +181,8 @@ Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y 
 el PR y una tabla en el resumen del job. Algo sin contrastar es deuda que hay que ver, no un push que
 haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **63/67 comandos** y **56/61 lecturas**, con **0 pendientes** en las dos: lo que queda fuera
-está excluido con motivo. La primera vez que se ejecutó encontró 10 comandos sin caso que no estaban
+Hoy dice **63/67 comandos** y **61/61 lecturas** — las lecturas al **100 %, sin una sola exclusión**
+— con 0 pendientes en las dos. La primera vez que se ejecutó encontró 10 comandos sin caso que no estaban
 documentados en ninguna parte —todo `cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y
 dos de ellos escondían divergencias reales. Por eso existe. Y lo volvió a hacer: los tres comandos de
 la papelera de notificaciones (del commit `eed739b`) entraron **después** de montarse el harness y
@@ -256,7 +256,7 @@ Regenerar los goldens: `BLESS_CONTRACT_READ=1 cargo test -p tpv-infra-sqlite con
 
 ### Cobertura actual
 
-**65 casos sobre 56 lecturas**, todos verdes, y **0 pendientes**. Entre ellos `clientes.overview` (los tres rankings) y
+**65 casos sobre las 61 lecturas**, todos verdes: **cobertura completa, sin exclusiones**. Entre ellos `clientes.overview` (los tres rankings) y
 `clientes.form` —que son el CLI-05 original—, `cuentas.entradas` (llano y con búsqueda + paginación),
 `cuentas.salidas`, `cuentas.resumen`, `inventario.productos_por_categoria`, `inventario.resumen`,
 `mesas.lineas_comanda`, `venta_rapida.comandas_barra`, `venta_rapida.lineas_comanda`, `tareas.admin`,
@@ -277,17 +277,10 @@ propio objeto— y ahí no hay seed que valga: el golden caducaría a medianoche
 
 ### No cubierto (por qué)
 
-Las **cinco de `stats`** (`productos`, `reservas`, `trabajadores`, `clientes`, `proveedores`), con
-el motivo largo en [`lecturas/cobertura.json`](lecturas/cobertura.json). No es un SQL desalineado: el
-módulo de estadísticas del worker es una implementación **parcial** del de la Main (434 líneas frente
-a 1764) con varias métricas devueltas a cero fijo —`stats.trabajadores` da tareas, horas y ranking a
-cero y clasifica por el texto libre de `Puesto` en vez de por el rol—. Sus casos **están escritos y
-bendecidos**: el lado Rust los corre y definen lo que la Handy debería devolver, así que enchufarlos
-el día que se porte el cálculo es añadir su par caso/golden y borrar la entrada de `cobertura.json`.
-Esto invalida el motivo por el que se retiró STAT-06 («los datos convergen y los agregados van
-detrás»): los agregados no van detrás, los calcula otro código.
-
-`stats.categorias` y `stats.mesas` **sí** están cubiertas y en verde.
+Nada. Las cinco consultas de `stats` que estuvieron excluidas —el módulo del worker era una
+implementación parcial del de la Main, con métricas a cero fijo (STAT-07)— **ya están portadas y en
+verde**, así que `lecturas/cobertura.json` desapareció por innecesario. Si algún día vuelve a hacer
+falta excluir una lectura, se crea de nuevo con su motivo y el script de cobertura lo lee solo.
 
 ## El guard de SQL replicable determinista (TRAB-08)
 
