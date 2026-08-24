@@ -12,6 +12,25 @@ export type AlergenoMiniDto = { ID_Alergeno: string, Nombre: string, Ruta_Imagen
 export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };
 
 /**
+ * Resultado de aplicar un lote de cambios.
+ *
+ * Lo importante es `aplicadas`: los `op_id` que se aplicaron **de verdad**. El frontend reacciona
+ * (invalidar caché, recargar el POS, releer ajustes) sólo a esos. Antes reaccionaba a todo lo que
+ * RECIBÍA, incluidas sus propias operaciones que vuelven de la nube y las que el gate de
+ * idempotencia descarta — así que una sola vuelta del catch-up recargaba media aplicación sin que
+ * nada hubiera cambiado, y en el caso de los ajustes eso realimentaba un bucle.
+ */
+export type AplicacionSync = { 
+/**
+ * `op_id` de las operaciones aplicadas en esta llamada (sin las ya aplicadas ni las saltadas).
+ */
+aplicadas: Array<string>, 
+/**
+ * Checkpoint local tras el lote (último `seq` aplicado).
+ */
+last_seq: number, };
+
+/**
  * Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri.
  */
 export type AppErrorDto = { 

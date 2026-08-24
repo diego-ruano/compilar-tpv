@@ -35,6 +35,23 @@ pub struct ApplySyncChangesArgs {
     pub changes: Vec<SyncChange>,
 }
 
+/// Resultado de aplicar un lote de cambios.
+///
+/// Lo importante es `aplicadas`: los `op_id` que se aplicaron **de verdad**. El frontend reacciona
+/// (invalidar caché, recargar el POS, releer ajustes) sólo a esos. Antes reaccionaba a todo lo que
+/// RECIBÍA, incluidas sus propias operaciones que vuelven de la nube y las que el gate de
+/// idempotencia descarta — así que una sola vuelta del catch-up recargaba media aplicación sin que
+/// nada hubiera cambiado, y en el caso de los ajustes eso realimentaba un bucle.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct AplicacionSync {
+    /// `op_id` de las operaciones aplicadas en esta llamada (sin las ya aplicadas ni las saltadas).
+    pub aplicadas: Vec<String>,
+    /// Checkpoint local tras el lote (último `seq` aplicado).
+    #[ts(type = "number")]
+    pub last_seq: i64,
+}
+
 /// Una operación pendiente en el outbox local de la Main (dirección Main → nube). El frontend
 /// la envía al worker por el WebSocket (`apply`) y, al recibir el `apply_ack`, la marca enviada.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

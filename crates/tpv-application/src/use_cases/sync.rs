@@ -1,6 +1,6 @@
 //! Casos de uso de **sincronización nube → Main**. Orquestación fina sobre `SyncRepository`.
 
-use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry, SyncHealth};
+use tpv_contracts::sync::{AplicacionSync, ApplySyncChangesArgs, OutboxEntry, SyncHealth};
 
 use crate::error::AppResult;
 use crate::ports::sync::SyncRepository;
@@ -9,9 +9,12 @@ use crate::ports::sync::SyncRepository;
 pub async fn apply_changes(
     repo: &dyn SyncRepository,
     args: ApplySyncChangesArgs,
-) -> AppResult<i64> {
+) -> AppResult<AplicacionSync> {
     if args.changes.is_empty() {
-        return repo.get_checkpoint().await;
+        return Ok(AplicacionSync {
+            aplicadas: Vec::new(),
+            last_seq: repo.get_checkpoint().await?,
+        });
     }
     repo.apply_changes(args.changes).await
 }
@@ -70,8 +73,14 @@ mod tests {
     }
     #[async_trait]
     impl SyncRepository for FakeRepo {
-        async fn apply_changes(&self, _: Vec<tpv_contracts::sync::SyncChange>) -> AppResult<i64> {
-            Ok(99)
+        async fn apply_changes(
+            &self,
+            changes: Vec<tpv_contracts::sync::SyncChange>,
+        ) -> AppResult<AplicacionSync> {
+            Ok(AplicacionSync {
+                aplicadas: changes.into_iter().map(|c| c.op_id).collect(),
+                last_seq: 99,
+            })
         }
         async fn get_checkpoint(&self) -> AppResult<i64> {
             *self.checkpoints.lock().unwrap() += 1;
@@ -101,10 +110,11 @@ mod tests {
     #[tokio::test]
     async fn lote_vacio_devuelve_checkpoint_sin_aplicar() {
         let repo = FakeRepo::default();
-        let seq = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![] })
+        let r = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![] })
             .await
             .unwrap();
-        assert_eq!(seq, 42);
+        assert_eq!(r.last_seq, 42);
+        assert!(r.aplicadas.is_empty(), "un lote vacío no aplica nada");
         assert_eq!(*repo.checkpoints.lock().unwrap(), 1);
     }
 
@@ -126,8 +136,9 @@ mod tests {
                 args: vec![serde_json::json!("nuevo")],
             }],
         };
-        let seq = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![change] }).await.unwrap();
-        assert_eq!(seq, 99);
+        let r = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![change] }).await.unwrap();
+        assert_eq!(r.last_seq, 99);
+        assert_eq!(r.aplicadas, vec!["op-1".to_string()]);
         assert_eq!(*repo.checkpoints.lock().unwrap(), 0);
     }
 

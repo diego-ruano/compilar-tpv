@@ -18,7 +18,7 @@ use libsql::{Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
-use tpv_contracts::sync::{OutboxEntry, SqlStatement, SyncChange, SyncHealth};
+use tpv_contracts::sync::{AplicacionSync, OutboxEntry, SqlStatement, SyncChange, SyncHealth};
 
 use crate::db::Db;
 use crate::mapping::v_i64;
@@ -300,7 +300,11 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
 
 #[async_trait]
 impl SyncRepository for SqliteSyncRepository {
-    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<i64> {
+    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<AplicacionSync> {
+        // Se anota lo que se aplica DE VERDAD. Lo que el gate de idempotencia salta (un
+        // re-broadcast, el eco de nuestras propias escrituras al volver por el catch-up, una op en
+        // cuarentena) no cambió nada en esta BD, así que el frontend no tiene por qué reaccionar.
+        let mut aplicadas: Vec<String> = Vec::new();
         // Acceso EXCLUSIVO de escritura durante todo el lote: serializa con las transacciones de
         // los repos (un único escritor). Conexión CRUDA → no se re-captura en el outbox.
         let w = self.db.write().await;
@@ -324,6 +328,7 @@ impl SyncRepository for SqliteSyncRepository {
                 Ok(()) => {
                     // Éxito (posible recuperación de un fallo transitorio previo): limpia su marca.
                     clear_failure(conn, &ch.op_id).await?;
+                    aplicadas.push(ch.op_id.clone());
                 }
                 Err(e) => {
                     // SYNC-01: política de poison-message. Contamos el intento; agotados los
@@ -363,7 +368,7 @@ impl SyncRepository for SqliteSyncRepository {
         // borra filas seguras.
         let last_seq = checkpoint(conn).await?;
         purge_by_cursor(conn, last_seq).await?;
-        Ok(last_seq)
+        Ok(AplicacionSync { aplicadas, last_seq })
     }
 
     async fn get_checkpoint(&self) -> AppResult<i64> {
@@ -676,5 +681,84 @@ mod tests_encoladas {
         // Con el plazo vencido, vuelve a estar disponible.
         assert_eq!(repo.liberar_encoladas_caducadas(0).await.unwrap(), 1);
         assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod tests_aplicadas {
+    //! Qué se aplica DE VERDAD en un lote.
+    //!
+    //! El frontend reacciona a esta lista: invalidar la caché, recargar el POS y releer los ajustes.
+    //! Si aquí se colaran las operaciones que el gate de idempotencia salta —las propias de esta
+    //! Main volviendo por el catch-up, o un re-broadcast—, media aplicación se recargaría sin que
+    //! nada hubiera cambiado. En el caso de los ajustes eso realimentaba un bucle que llegó a
+    //! generar decenas de miles de operaciones.
+
+    use super::*;
+    use crate::db::Db;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{SqlStatement, SyncChange};
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let dir = std::env::temp_dir().join(format!(
+            "tpv_aplicadas_test_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    fn cambio(op_id: &str, seq: i64) -> SyncChange {
+        SyncChange {
+            op_id: op_id.to_string(),
+            seq,
+            statements: vec![SqlStatement {
+                sql: "UPDATE Business_Settings SET Business_Name = ?1 WHERE ID = 1;".into(),
+                args: vec![serde_json::json!("Bar de Prueba")],
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn el_mismo_lote_solo_se_aplica_la_primera_vez() {
+        let (repo, _db, dir) = repo_temporal().await;
+        let lote = vec![cambio("op-1", 1), cambio("op-2", 2)];
+
+        let primera = repo.apply_changes(lote.clone()).await.unwrap();
+        assert_eq!(primera.aplicadas, vec!["op-1".to_string(), "op-2".to_string()]);
+        assert_eq!(primera.last_seq, 2);
+
+        // Segunda vuelta con el MISMO lote: el checkpoint sigue avanzando, pero no se aplica nada.
+        // Es exactamente lo que pasa cuando el catch-up devuelve las operaciones de esta Main.
+        let segunda = repo.apply_changes(lote).await.unwrap();
+        assert!(
+            segunda.aplicadas.is_empty(),
+            "un lote repetido no aplica nada: {:?}",
+            segunda.aplicadas
+        );
+        assert_eq!(segunda.last_seq, 2);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn en_un_lote_mixto_solo_salen_las_nuevas() {
+        let (repo, _db, dir) = repo_temporal().await;
+
+        repo.apply_changes(vec![cambio("op-1", 1)]).await.unwrap();
+
+        let r = repo
+            .apply_changes(vec![cambio("op-1", 1), cambio("op-2", 2)])
+            .await
+            .unwrap();
+
+        assert_eq!(r.aplicadas, vec!["op-2".to_string()]);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

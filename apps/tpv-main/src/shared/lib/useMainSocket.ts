@@ -22,7 +22,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import type { LicenseLocalState } from "@tpv/contracts";
+import type { AplicacionSync, LicenseLocalState } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 
 import { useEstadoSync } from "../stores/useEstadoSync";
@@ -213,15 +213,30 @@ export function useMainSocket() {
 			chain = chain.then(async () => {
 				if (cancelled) return;
 				try {
-					await invoke("sync_apply_changes", { args: { changes } });
+					const r = await invoke<AplicacionSync>("sync_apply_changes", {
+						args: { changes },
+					});
+
 					// Avisar al front de que los datos locales cambiaron:
 					//  - React Query: invalida (solo refetchea las queries MONTADAS, es barato).
 					//  - POS (mesas / venta_rápida): tick + qué comandas tocó el lote, para que
 					//    recarguen el ticket solo si es la comanda abierta (no la de otro device).
+					//
+					// Se reacciona SÓLO a lo que Rust aplicó de verdad. Lo que el gate de
+					// idempotencia salta —nuestras propias operaciones volviendo por el catch-up,
+					// un re-broadcast, una op en cuarentena— no cambió nada en esta BD. Reaccionar
+					// a todo lo recibido recargaba media aplicación en cada página del catch-up, y
+					// con los ajustes llegaba a realimentarse: releerlos generaba escrituras nuevas
+					// que volvían a llegar como cambios.
+					const aplicadas = new Set(r?.aplicadas ?? []);
+					if (aplicadas.size === 0) return;
+
 					if (!cancelled) {
-						const statements = changes.flatMap((c) =>
-							Array.isArray(c.statements) ? c.statements : [],
-						) as RawStatement[];
+						const statements = changes
+							.filter((c) => aplicadas.has(c.op_id))
+							.flatMap((c) =>
+								Array.isArray(c.statements) ? c.statements : [],
+							) as RawStatement[];
 						// SYNC-06: invalidación selectiva por feature (fallback global si el lote toca
 						// una tabla no mapeada).
 						const featureKeys = affectedFeatureKeys(statements);

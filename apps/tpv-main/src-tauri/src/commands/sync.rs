@@ -6,7 +6,7 @@
 use tauri::State;
 
 use tpv_application::use_cases::sync as uc;
-use tpv_contracts::sync::{ApplySyncChangesArgs, OutboxEntry, SyncHealth};
+use tpv_contracts::sync::{AplicacionSync, ApplySyncChangesArgs, OutboxEntry, SyncHealth};
 
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -16,7 +16,7 @@ use tpv_contracts::errors::AppErrorDto;
 pub async fn sync_apply_changes(
     state: State<'_, AppState>,
     args: ApplySyncChangesArgs,
-) -> Result<i64, AppErrorDto> {
+) -> Result<AplicacionSync, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::apply_changes(repo.as_ref(), args).await?)
 }

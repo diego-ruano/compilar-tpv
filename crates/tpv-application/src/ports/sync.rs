@@ -6,7 +6,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::sync::{OutboxEntry, SyncChange, SyncHealth};
+use tpv_contracts::sync::{AplicacionSync, OutboxEntry, SyncChange, SyncHealth};
 
 use crate::error::AppResult;
 
@@ -14,7 +14,7 @@ use crate::error::AppResult;
 pub trait SyncRepository: Send + Sync {
     /// Aplica los cambios en orden de `seq`, saltando los `op_id` ya aplicados. Cada operación
     /// es atómica. Devuelve el nuevo checkpoint (último `seq` aplicado).
-    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<i64>;
+    async fn apply_changes(&self, changes: Vec<SyncChange>) -> AppResult<AplicacionSync>;
 
     /// Último `seq` aplicado localmente (0 si todavía ninguno).
     async fn get_checkpoint(&self) -> AppResult<i64>;

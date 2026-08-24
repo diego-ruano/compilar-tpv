@@ -95,25 +95,20 @@ fn patch_bool(patch: &JsonValue, key: &str) -> Option<bool> {
     }
 }
 
-async fn ensure_config_rows<C: Writer>(conn: &C) -> AppResult<()> {
-    conn.execute("INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);", ())
-        .await
-        .map_err(db_err)?;
-    conn.execute("INSERT OR IGNORE INTO Ticket_Settings (ID) VALUES (1);", ())
-        .await
-        .map_err(db_err)?;
-    conn.execute("INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);", ())
-        .await
-        .map_err(db_err)?;
-    Ok(())
-}
+// Las tres filas singleton (`Business_Settings`, `Ticket_Settings` y `Contact_Settings`, ID=1) las
+// siembra la migración inicial, que corre igual en la BD local y en la del tenant en la nube. Aquí
+// había un `ensure_config_rows` que las re-aseguraba con tres `INSERT OR IGNORE` en CADA llamada,
+// incluidas las de LECTURA. No garantizaba nada que no estuviera ya garantizado y costaba caro:
+// toda escritura se captura en `_Sync_Outbox` por la FORMA del SQL (no por si cambió algo), así que
+// leer los ajustes mandaba tres operaciones a la nube y a las Handy. Y esas operaciones anunciaban
+// "los ajustes han cambiado", con lo que quien las recibía releía los ajustes... y las volvía a
+// generar. Una lectura no puede escribir.
 
 #[async_trait]
 impl ConfiguracionRepository for SqliteConfiguracionRepository {
     async fn get_business(&self) -> AppResult<BusinessSettings> {
-        let g = self.db.write().await;
+        let g = self.db.read().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
                 "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent FROM Business_Settings WHERE ID=1 LIMIT 1;",
@@ -139,9 +134,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     }
 
     async fn get_ticket(&self) -> AppResult<TicketSettings> {
-        let g = self.db.write().await;
+        let g = self.db.read().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
                 "SELECT Show_Logo, Show_BusinessName, Show_Address, Show_Phone, Show_CIF, Show_DateTime, Show_LineItems, Show_BaseAndIVA, Show_Total, Show_FooterMessage, Paper_Width_Mm, Paper_Dpi, Chars_Per_Line, Margin_Top_Mm, Margin_Bottom_Mm, Margin_Left_Mm, Margin_Right_Mm, Font_Scale FROM Ticket_Settings WHERE ID=1 LIMIT 1;",
@@ -195,7 +189,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     async fn patch_business(&self, patch: &JsonValue) -> AppResult<()> {
         let g = self.db.write().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
 
         let mut sets: Vec<&str> = Vec::new();
         let mut args: Vec<Value> = Vec::new();
@@ -268,9 +261,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     }
 
     async fn get_contact(&self) -> AppResult<ContactSettings> {
-        let g = self.db.write().await;
+        let g = self.db.read().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
         let mut rows = conn
             .query(
                 "SELECT Recovery_Email, Contact_Email, Contact_Phone FROM Contact_Settings WHERE ID=1 LIMIT 1;",
@@ -294,7 +286,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     async fn patch_contact(&self, patch: &JsonValue) -> AppResult<()> {
         let g = self.db.write().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
 
         let mut sets: Vec<&str> = Vec::new();
         let mut args: Vec<Value> = Vec::new();
@@ -334,7 +325,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
     async fn patch_ticket(&self, patch: &JsonValue) -> AppResult<()> {
         let g = self.db.write().await;
         let conn = &g;
-        ensure_config_rows(conn).await?;
 
         let mut sets: Vec<&str> = Vec::new();
         let mut args: Vec<Value> = Vec::new();
@@ -396,5 +386,97 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             return Err(AppError::not_found("No existe Ticket_Settings (ID=1)"));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_lecturas_no_escriben {
+    //! Una lectura de ajustes no puede dejar nada en el outbox.
+    //!
+    //! Aquí había tres `INSERT OR IGNORE` "por si las filas no existen" que se ejecutaban en cada
+    //! llamada, lectura incluida. Como la captura del outbox mira la FORMA del SQL y no si cambió
+    //! algo, abrir la app mandaba tres operaciones vacías a la nube... que anunciaban "los ajustes
+    //! han cambiado", y quien las recibía releía los ajustes y volvía a generarlas. El bucle
+    //! resultante generó decenas de miles de operaciones antes de que se viera.
+    //!
+    //! Este test es el que impide que vuelva: si alguien reintroduce un "ensure" en un camino de
+    //! lectura, el outbox deja de estar vacío y esto se pone en rojo.
+
+    use std::sync::Arc;
+
+    use libsql::Value;
+    use tpv_application::ports::configuracion::ConfiguracionRepository;
+
+    use super::SqliteConfiguracionRepository;
+    use crate::db::{Db, Reader};
+
+    async fn abrir_db() -> (Arc<Db>, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+        let dir = std::env::temp_dir().join(format!(
+            "tpv_cfg_test_{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("data.db");
+        let db = Db::open(path.to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn ops_en_outbox(db: &Db) -> i64 {
+        let g = db.read().await;
+        let mut rows = g
+            .query("SELECT COUNT(*) FROM _Sync_Outbox;", Vec::<Value>::new())
+            .await
+            .unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Integer(n) => n,
+            _ => -1,
+        }
+    }
+
+    #[tokio::test]
+    async fn leer_los_ajustes_no_deja_nada_en_el_outbox() {
+        let (db, dir) = abrir_db().await;
+        let repo = SqliteConfiguracionRepository::new(db.clone());
+
+        // Las tres filas existen desde la migración inicial: leerlas tiene que ser sólo leer.
+        assert_eq!(ops_en_outbox(&db).await, 0, "el arranque ya deja outbox");
+
+        for _ in 0..3 {
+            repo.get_business().await.unwrap();
+            repo.get_ticket().await.unwrap();
+            repo.get_contact().await.unwrap();
+        }
+
+        assert_eq!(
+            ops_en_outbox(&db).await,
+            0,
+            "nueve lecturas de ajustes han generado operaciones para replicar"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn guardar_ajustes_si_genera_exactamente_una_operacion() {
+        // El reverso: quitar los `ensure` no puede haber dejado mudas las escrituras de verdad.
+        let (db, dir) = abrir_db().await;
+        let repo = SqliteConfiguracionRepository::new(db.clone());
+
+        repo.patch_business(&serde_json::json!({ "business_name": "Bar Nuevo" }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            ops_en_outbox(&db).await,
+            1,
+            "un guardado son sus sentencias, ni más ni menos"
+        );
+        assert_eq!(repo.get_business().await.unwrap().business_name, "Bar Nuevo");
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
