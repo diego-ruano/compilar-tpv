@@ -33,6 +33,7 @@ import { useMode, type DeviceMode, type ModeStateValue } from "../shared/stores/
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
+import { useImageUrl } from "../shared/lib/useImageUrl";
 import { useContactSettings } from "../shared/stores/useContactSettings";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
@@ -277,6 +278,8 @@ type HandyPairState =
 export default function AppBoot({ router }: { router: any }) {
     const businessName = useBusinessSettings((s) => s.businessName);
     const logoDataUrl = useBusinessSettings((s) => s.logoDataUrl);
+    // Ruta relativa → URL utilizable (ver `useImageUrl`).
+    const logoSrc = useImageUrl(logoDataUrl);
 
     const bizInit = useBusinessSettings((s) => s.init);
     const ticketInit = useTicketSettings((s) => s.init);
@@ -831,7 +834,7 @@ export default function AppBoot({ router }: { router: any }) {
                                 <div className="flex min-w-0 items-center gap-3">
                                     <div className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
                                         <img
-                                            src={logoDataUrl ?? LogoAltaria}
+                                            src={logoSrc || LogoAltaria}
                                             className="size-8 rounded-lg object-cover"
                                             alt=""
                                         />

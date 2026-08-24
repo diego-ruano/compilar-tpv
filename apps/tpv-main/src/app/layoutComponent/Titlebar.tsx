@@ -3,6 +3,7 @@ import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import LogoAltaria from "../../assets/img/logo.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { IconButton, ThemeToggle } from "../../shared/ui";
 
 /**
@@ -12,6 +13,9 @@ import { IconButton, ThemeToggle } from "../../shared/ui";
 function Titlebar() {
     const ventana = getCurrentWindow();
     const { businessName, logoDataUrl } = useBusinessSettings();
+    // `logoDataUrl` es una ruta relativa (el nombre es herencia de cuando sí era un data URL):
+    // hay que resolverla, no meterla tal cual en el `src`.
+    const logoSrc = useImageUrl(logoDataUrl);
 
     return (
         <div className="flex shrink-0 items-center justify-between border-b border-border bg-surface">
@@ -20,7 +24,7 @@ function Titlebar() {
                 data-tauri-drag-region
             >
                 <img
-                    src={logoDataUrl ?? LogoAltaria}
+                    src={logoSrc || LogoAltaria}
                     className="size-6 rounded-md object-cover"
                     data-tauri-drag-region
                     alt="logo"

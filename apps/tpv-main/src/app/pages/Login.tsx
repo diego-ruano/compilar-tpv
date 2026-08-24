@@ -19,6 +19,7 @@ import {
 import LogoAltaria from "../../assets/img/logo.png";
 import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { useToast } from "../../shared/toast";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
@@ -76,6 +77,8 @@ export default function Login() {
     const toast = useToast();
     const deviceMode = useMode((s) => s.mode);
     const { businessName, logoDataUrl } = useBusinessSettings();
+    // Ruta relativa → URL utilizable (ver `useImageUrl`).
+    const logoSrc = useImageUrl(logoDataUrl);
 
     const [users, setUsers] = useState<DbUser[]>([]);
     const [loadingUsers, setLoadingUsers] = useState(true);
@@ -515,7 +518,7 @@ export default function Login() {
                     data-tauri-drag-region
                 >
                     <img
-                        src={logoDataUrl ?? LogoAltaria}
+                        src={logoSrc || LogoAltaria}
                         className="size-6 rounded-md object-cover"
                         data-tauri-drag-region
                         alt="logo"
