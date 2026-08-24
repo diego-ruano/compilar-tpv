@@ -1,0 +1,18 @@
+{
+  "descripcion": "Mandar una notificacion a la papelera. Es un borrado LOGICO (Estado='descartada'), no un DELETE: la fila sigue ahi y sus recibos de lectura tambien, que es lo que permite restaurarla despues tal como estaba. La otra notificacion del seed comprueba que no toca a las demas.",
+  "comando": "notificaciones.descartar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolPapeleraContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-activa', 'aviso', 'info', 'Sigue viva', 'todos', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-descartada', 'aviso', 'info', 'En la papelera', 'todos', 'descartada', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-descartada', 'user-1', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-activa"
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Estado FROM Notificaciones",
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

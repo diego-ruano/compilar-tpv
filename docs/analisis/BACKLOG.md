@@ -11,12 +11,12 @@
 | FABLE-E | 🔵 | **Nonce anti-repetición en el device-proof.** La firma ya cubre el cuerpo (hecho el 2026-08-15), pero no lleva número de serie: dentro de la ventana de 2 min una petición firmada podría **reproducirse tal cual**. **Decisión: aplazado.** Para reproducirla hay que haber capturado el tráfico (va por TLS) y las escrituras son idempotentes por `Op_Id`, así que repetir una no duplica nada. **Lo que hace falta cuando se retome:** un almacén de nonces vistos, compartido — los isolates del worker no comparten memoria, así que un `Set` en RAM no vale. Opciones: **KV** (barato, pero eventualmente consistente: un replay en otro colo podría no ver el nonce todavía → mal encaje), **Durable Object** (consistente de verdad, ya existe `TenantHub`, pero mete un salto por petición) o una **tabla en Turso** con TTL (un INSERT por petición). Yo iría al DO si algún día pesa. | [auditoria-fable.md](../../auditoria-fable.md) |
 | FABLE-B | 🟠 | **Fuga de stack traces al cliente.** `serverError(req, code, details)` serializa `details` en el cuerpo JSON, y varios handlers de pairing le pasan `{ message, name, stack }` del `Error` ([response.ts:48-63](../../apps/cloud-worker-licensing/src/server/utils/response.ts#L48-L63)). Cualquiera que llame a la API recibe la traza y el texto crudo del motor de Turso. **Decisión (2026-08-14): aplazado**, no hay clientes en producción todavía. **Cuando se haga, el cambio es en tres partes y hay que hacer las tres:** (1) `serverError` deja de serializar `details` y devuelve `{ ok, error, trace_id }`; (2) en cada `catch`, `console.error(trace_id, e?.stack)` + `Sentry.captureException` — hoy solo 9 ficheros loguean, así que sin esto **sí** se perdería información al quitar el `details`; (3) opcional pero recomendable, seguir devolviendo `details` cuando `env.ENVIRONMENT !== "prod"` (requiere añadir `ENVIRONMENT` a los `vars` de `wrangler.json`, hoy ausente). El stack se sigue viendo en `wrangler tail`, Sentry y Axiom. La forma de la respuesta ya la fijó el catálogo de códigos (`{ ok, code, error }`): lo que queda aquí es **dejar de serializar `details`**. | [auditoria-fable.md](../../auditoria-fable.md) |
 
-**Nota (actualizada 2026-08-24):** los **dos** harness de contrato ya están. El de escritura cerró
-los `-parity` (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06); el de **lectura** cerró
-**CLI-05** y, de paso, sacó cuatro divergencias reales que la revisión a mano de agosto no había
-visto (dos de normalización de texto en clientes, el `IVA_Percent` que el worker no devolvía en el
-listado de inventario y un `ID_Producto` nulo que impedía a la Handy abrir una comanda con una línea
-huérfana), todas corregidas. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo,
+**Nota (actualizada 2026-08-24):** los **dos** harness de contrato ya están y **sin pendientes**. El
+de escritura cerró los `-parity` (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06); el de
+**lectura** cerró **CLI-05** y, de paso, sacó **ocho** divergencias reales que la revisión a mano de
+agosto no había visto —entre ellas dos consultas de la Handy que devolvían **siempre vacío** por
+coercionar a número un id que es TEXT (`trabajadores.idByUsuario` e `inventario.alergenosProducto`)—,
+todas corregidas, y destapó **STAT-07**: el módulo de estadísticas del worker está a medias. Lo excluido con motivo se revisó a mano el 22-23/08 y escondía un fallo,
 **TRAB-08**, ya corregido. Ver
 [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
 
@@ -53,12 +53,10 @@ huérfana), todas corregidas. Lo excluido con motivo se revisó a mano el 22-23/
    >   Rust (`contract_tests.rs` y `contract_read_tests.rs`) y el del worker sobre **vitest**
    >   (`test/contract.test.ts` y `test/contractLectura.test.ts`, que corren en workerd con el
    >   TenantHub real y el esquema de las migraciones). CI ya corre las cuatro suites.
-   > - **Cubierto:** 63 casos sobre 60 comandos y 17 casos sobre 13 lecturas. Añadir un dominio = un
-   >   brazo de despacho en cada lado + sus fixtures.
+   > - **Cubierto:** 66 casos sobre 63 comandos y 65 casos sobre 56 lecturas, con **0 pendientes** en
+   >   las dos vertientes. Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
    > - **Lo que falta se ve solo:** `scripts/check-contract-coverage.mjs` avisa en CI (sin romperlo)
-   >   de cada comando y cada lectura del worker que no tenga caso ni exclusión documentada. Hoy
-   >   quedan **3 comandos** (la papelera de notificaciones, que entró después del harness) y
-   >   **47 lecturas** sin caso.
+   >   de cada comando y cada lectura del worker que no tenga caso ni exclusión documentada.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
    (ficheros `.sql` con nombres, o un JSON de sentencias con placeholders) consumido por Rust
    (`include_str!`) y TS (`import`). La mayoría de divergencias reales son en el texto del SQL y las
@@ -157,7 +155,7 @@ probar la **app** completa contra staging.
 
 | ID | Sev | Qué falta | Cuándo |
 |----|-----|-----------|--------|
-| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Ya hay red por los dos lados: el harness de **escritura** (63 casos) más el guard de SQL replicable determinista, y desde el 2026-08-24 el de **lectura** (17 casos), que al montarse sacó cuatro divergencias reales. Queda **ampliar la cobertura** —47 lecturas y 3 comandos sin caso, todos listados en CI por `check-contract-coverage.mjs`—, lo que sigue **excluido con motivo** (`complete_initial_setup`, ficha con PII, `mesas.mesasOcupadas`) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
+| ARCH-01 | 🟠 | **Doble implementación** Main(Rust)/Handy(worker). Ya hay red por los dos lados y **sin huecos**: el harness de **escritura** (66 casos) más el guard de SQL replicable determinista, y el de **lectura** (65 casos), montado el 2026-08-24, que al ejecutarse sacó **ocho divergencias reales**. Queda lo que sigue **excluido con motivo** (`complete_initial_setup`, la ficha con PII y las cinco consultas de `stats` que el worker no implementa entero — ver STAT-07) y, de fondo, una única fuente de generación de sentencias (WASM). Ver §Unificación. | Refactor gradual post-lanzamiento |
 
 ---
 

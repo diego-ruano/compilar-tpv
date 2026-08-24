@@ -128,7 +128,7 @@ comparación, golden) es común y no se toca.
 
 ## Cobertura actual
 
-**63 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
+**66 casos, todos verdes** — y **ningún comando con doble implementación sin cubrir**: los que no
 tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). Por dominio:
 
 - **Venta rápida** (VR-05) — completo: `cobrar_fraccionado` (un lote + FEFO multilote), `create_comanda_barra`,
@@ -144,7 +144,9 @@ tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). P
   anulación completa de un cobro: devuelve stock por lote y suelto, resta el gasto del cliente,
   borra las líneas cobradas y reabre la comanda si le quedaban pendientes.
 - **Notificaciones** — completo: `crear` (y el caso de dedupe, que NO crea una segunda),
-  `marcar_leida`, `marcar_leidas_batch` y `resolver_por_clave`.
+  `marcar_leida`, `marcar_leidas_batch`, `resolver_por_clave` y la papelera —`descartar`,
+  `restaurar` y `eliminar`, el único que borra de verdad y cuyo caso comprueba que los recibos de
+  lectura caen con la fila por `ON DELETE CASCADE`—.
 - **Inventario** (INV-07) — completo: `create_lote`, `create_categoria`, `upsert_producto`, `set_alergenos`,
   `delete_producto`, `update_lote`, `ajustar_lote`.
 - **Clientes**: `crear`, `actualizar` (ojo: CLI-05 es la paridad del **overview**, una lectura, y sigue abierta). **Tareas** (TAR-04): `crear`, `actualizar`, `set_asignaciones`,
@@ -179,12 +181,12 @@ Corre en CI (job `worker`) y **avisa sin romper**: sale siempre con código 0 y 
 el PR y una tabla en el resumen del job. Algo sin contrastar es deuda que hay que ver, no un push que
 haya que bloquear. Con `--estricto` sí sale 1, para cuando quieras usarlo a mano.
 
-Hoy dice **60/67 comandos** y **13/61 lecturas**. La primera vez que se ejecutó encontró 10 comandos
-sin caso que no estaban documentados en ninguna parte —todo `cuentas`, todo `notificaciones` y
-`mesas.setReservaEstado`—, y dos de ellos escondían divergencias reales. Por eso existe. Y lo ha
-vuelto a hacer: los tres comandos de la papelera de notificaciones (`descartar`, `restaurar`,
-`eliminar`, del commit `eed739b`) entraron **después** de escribirse este documento y siguen sin
-caso, que es exactamente el agujero que el script está para enseñar.
+Hoy dice **63/67 comandos** y **56/61 lecturas**, con **0 pendientes** en las dos: lo que queda fuera
+está excluido con motivo. La primera vez que se ejecutó encontró 10 comandos sin caso que no estaban
+documentados en ninguna parte —todo `cuentas`, todo `notificaciones` y `mesas.setReservaEstado`—, y
+dos de ellos escondían divergencias reales. Por eso existe. Y lo volvió a hacer: los tres comandos de
+la papelera de notificaciones (del commit `eed739b`) entraron **después** de montarse el harness y
+salieron aquí; ya tienen caso.
 
 ## Harness de lectura (CLI-05)
 
@@ -254,7 +256,7 @@ Regenerar los goldens: `BLESS_CONTRACT_READ=1 cargo test -p tpv-infra-sqlite con
 
 ### Cobertura actual
 
-**17 casos sobre 13 lecturas**, todos verdes: `clientes.overview` (los tres rankings) y
+**65 casos sobre 56 lecturas**, todos verdes, y **0 pendientes**. Entre ellos `clientes.overview` (los tres rankings) y
 `clientes.form` —que son el CLI-05 original—, `cuentas.entradas` (llano y con búsqueda + paginación),
 `cuentas.salidas`, `cuentas.resumen`, `inventario.productos_por_categoria`, `inventario.resumen`,
 `mesas.lineas_comanda`, `venta_rapida.comandas_barra`, `venta_rapida.lineas_comanda`, `tareas.admin`,
@@ -262,18 +264,30 @@ Regenerar los goldens: `BLESS_CONTRACT_READ=1 cargo test -p tpv-infra-sqlite con
 dispara el relleno con el horario predeterminado: ahí no se contrasta un SQL sino dos algoritmos,
 uno con un `BTreeMap` de Rust y otro con un `sort` de JS).
 
-Quedan **47 lecturas sin caso**, que el script de cobertura lista una por una. Las gordas: todo
-`stats`, `mesas.loadLayout`/`mesasMetaAll`/`kitchenList`, `reservas.mes`, `proveedores.*`,
-`trabajadores.all`/`detail` y los catálogos de producto de mesas y venta rápida.
+El resto del catálogo también está cubierto: el plano y el estado de las mesas, la pantalla de
+cocina, los catálogos y buscadores de los dos POS, el inventario entero (categorías, alérgenos,
+lotes, ficha completa), configuración, login, notificaciones, proveedores, reservas, tareas y
+trabajadores.
+
+**Casos con `omitir`.** Un caso puede declarar `"omitir": ["campo"]`: esos campos se borran, a
+cualquier profundidad, antes de comparar. Es el equivalente de lectura a los SELECT del harness de
+escritura, que dejan fuera las columnas no deterministas. Hace falta cuando la consulta devuelve
+**dentro del resultado** algo que depende del reloj —`login.punch_status` echa la fecha de hoy en el
+propio objeto— y ahí no hay seed que valga: el golden caducaría a medianoche.
 
 ### No cubierto (por qué)
 
-- **`mesas.mesasOcupadas`** — divergencia **conocida** y a propósito sin caso; el motivo largo está
-  en [`lecturas/cobertura.json`](lecturas/cobertura.json). En resumen: la Main devuelve una clave por
-  mesa ocupada (`db-zona-Z:db-mesa-M`) y el worker devuelve tres. Igualar el worker a la Main lo
-  empeoraría, porque la clave compuesta es justo la que el frontend no sabe parsear: son las claves
-  de más del worker las que hacen que la Handy acierte. El arreglo de verdad es que la Main deje de
-  emitir la compuesta, y eso es un cambio de comportamiento que no toca decidir en un harness.
+Las **cinco de `stats`** (`productos`, `reservas`, `trabajadores`, `clientes`, `proveedores`), con
+el motivo largo en [`lecturas/cobertura.json`](lecturas/cobertura.json). No es un SQL desalineado: el
+módulo de estadísticas del worker es una implementación **parcial** del de la Main (434 líneas frente
+a 1764) con varias métricas devueltas a cero fijo —`stats.trabajadores` da tareas, horas y ranking a
+cero y clasifica por el texto libre de `Puesto` en vez de por el rol—. Sus casos **están escritos y
+bendecidos**: el lado Rust los corre y definen lo que la Handy debería devolver, así que enchufarlos
+el día que se porte el cálculo es añadir su par caso/golden y borrar la entrada de `cobertura.json`.
+Esto invalida el motivo por el que se retiró STAT-06 («los datos convergen y los agregados van
+detrás»): los agregados no van detrás, los calcula otro código.
+
+`stats.categorias` y `stats.mesas` **sí** están cubiertas y en verde.
 
 ## El guard de SQL replicable determinista (TRAB-08)
 

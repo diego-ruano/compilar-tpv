@@ -4,10 +4,13 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-24).** De los ~136 hallazgos del análisis original **quedan 5 abiertos, y
-> ninguno es un bug**.  El 24/08 se cerró **CLI-05** montando el harness de contrato de **lectura**,
-> que al estrenarse sacó cuatro divergencias reales Main↔Handy que la revisión a mano de agosto no
-> había visto (ver [tests/contract/README.md](../../tests/contract/README.md)).
+> **Estado (2026-08-24).** De los ~136 hallazgos del análisis original **quedan 6 abiertos**, y uno
+> **sí** es un fallo real: **STAT-07**. El 24/08 se montó el harness de contrato de **lectura** y se
+> completó su cobertura (56/61, 0 pendientes). Cerró **CLI-05** y, al ejecutarse, sacó **ocho
+> divergencias reales** Main↔Handy que la revisión a mano de agosto no había visto —dos de ellas
+> dejaban una consulta de la Handy devolviendo siempre vacío— y destapó que el módulo de
+> estadísticas del worker está a medias (**STAT-07**, que reabre el retirado STAT-06). Detalle en
+> [tests/contract/README.md](../../tests/contract/README.md).
 >
 > **Antes (2026-08-23).** La revisión del 22-23 de agosto fue hallazgo por hallazgo contra el código, y
 > sacó los **dos únicos fallos reales** que quedaban escondidos —los dos en el mismo sitio: el
@@ -74,33 +77,34 @@
 
 ## Lo que queda abierto
 
-Ningún bug. Lo que queda es un frente de tests (ARCH-01) y decisiones de producto aplazadas.
+Un fallo real (STAT-07) y, por lo demás, decisiones de producto aplazadas.
 
 | Módulo | Abiertos | Cuáles |
 |--------|----------|--------|
-| T5 Arquitectura | 1 | ARCH-01 🟠 (ampliar la cobertura de los harness y lo excluido de ellos) |
+| D12 Estadísticas | 1 | **STAT-07 🟠 (el módulo de stats del worker está a medias: métricas a cero fijo en la Handy)** |
+| T5 Arquitectura | 1 | ARCH-01 🟠 (lo que queda excluido de los harness, y el WASM de fondo) |
 | D11 Login | 1 | LOGIN-04 🔵 (keyspace del PIN) |
 | T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
 | D3 Cuentas | 1 | CUENTA-06 🔵 (arqueo de caja) |
-| D1 Mesas · D2 Venta rápida · D4 Inventario · D5 Clientes · D6 Reservas · D7 Proveedores · D8 Tareas · D9 Trabajadores · D10 Configuración · D12 Estadísticas · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
+| D1 Mesas · D2 Venta rápida · D4 Inventario · D5 Clientes · D6 Reservas · D7 Proveedores · D8 Tareas · D9 Trabajadores · D10 Configuración · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento
 
 **Qué cierran los harness de contrato y qué no.** Son **dos**, y están verdes en los dos lados:
 
-- **Escritura** — mismo comando → mismas filas. **63 casos** sobre 60 comandos, 4 excluidos con
+- **Escritura** — mismo comando → mismas filas. **66 casos** sobre 63 comandos, 4 excluidos con
   motivo en [`cobertura.json`](../../tests/contract/cobertura.json).
-- **Lectura** — mismas filas → mismo resultado devuelto, **y en el mismo orden**. **17 casos** sobre
-  13 lecturas, 1 excluida con motivo. Cerró CLI-05.
+- **Lectura** — mismas filas → mismo resultado devuelto, **y en el mismo orden**. **65 casos** sobre
+  56 lecturas, 5 excluidas con motivo. Cerró CLI-05.
 
 `scripts/check-contract-coverage.mjs` avisa en CI —sin romperlo— de todo lo que entre sin caso. Hoy
-señala **3 comandos** (la papelera de notificaciones, que entró después del harness de escritura) y
-**47 lecturas** sin cubrir: ésa es la deuda que queda dentro de ARCH-01.
+señala **0 pendientes** en las dos vertientes: lo que queda fuera está excluido con su motivo.
 
 Sigue **excluido con motivo**: `login.complete_initial_setup` (salt aleatorio: el golden nunca
 casaría; la compatibilidad del formato **sí** se verificó a mano, ver [login.md](dominios/login.md)),
-la ficha de trabajador con PII (asimetría diseñada: el worker no escribe esas columnas) y
-`mesas.mesasOcupadas` (divergencia conocida cuyo arreglo correcto está en la Main, no en el worker).
+la ficha de trabajador con PII (asimetría diseñada: el worker no escribe esas columnas) y las **cinco
+consultas de `stats`** que el worker no implementa entero (STAT-07). `mesas.mesasOcupadas` ya **no**
+está excluida: su divergencia se corrigió en la Main y tiene caso en verde.
 
 **Las tres lecciones del recuento**, que valen más que la cifra:
 
@@ -111,11 +115,13 @@ la ficha de trabajador con PII (asimetría diseñada: el worker no escribe esas 
    separado* (IDs distintos, pero ni vacíos ni repetidos): el snapshot no lo veía. Lo que lo caza es
    mirar la **sentencia replicada** —lo que de verdad viaja a la Main— y rechazar el SQL no
    determinista. Ese guard (`SQL_NO_DETERMINISTA`) vive en el harness y tiene su propio test.
-3. **Verificar a mano no es lo mismo que contrastar.** CLI-05 se había revisado consulta a consulta
-   el 22/08 y se dio por equivalente. Al montar el harness de lectura el 24/08 aparecieron **cuatro**
-   divergencias reales en los primeros 13 casos —dos de normalización de texto, una columna que el
-   worker no devolvía y un `null` que impedía a la Handy abrir una comanda—. Leer dos SQL en paralelo
-   compara lo que uno **cree** que hacen; ejecutarlos compara lo que hacen.
+3. **Verificar a mano no es lo mismo que contrastar.** Es la lección más cara de todo el análisis.
+   CLI-05 se revisó consulta a consulta el 22/08 y se dio por equivalente; STAT-06 se **retiró** el
+   23/08 razonando que «los agregados van detrás de los datos». Al ejecutar las dos implementaciones
+   en paralelo el 24/08 aparecieron **ocho divergencias reales** —incluidas dos consultas de la Handy
+   que devolvían siempre vacío por coercionar a número un id que es texto— y el módulo entero de
+   estadísticas a medias. Leer dos SQL en paralelo compara lo que uno **cree** que hacen; ejecutarlos
+   compara lo que hacen.
 
 ## Dónde está el resto
 

@@ -1,0 +1,18 @@
+{
+  "descripcion": "El borrado definitivo, el unico que borra de verdad. Lo que se contrasta ademas de la fila es el ARRASTRE: los recibos de lectura de esa notificacion tienen que desaparecer con ella por ON DELETE CASCADE, y eso lo aplica cada motor por su cuenta. Si un lado no lo hiciera, la nube se quedaria con recibos huerfanos apuntando a una notificacion que ya no existe.",
+  "comando": "notificaciones.eliminar",
+  "seed": [
+    "INSERT INTO Roles (ID_Rol, Nombre_Rol) VALUES ('rol-1', 'RolPapeleraContrato');",
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', 'rol-1', 'a@a.com', 'x', 'Ana');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-activa', 'aviso', 'info', 'Sigue viva', 'todos', 'activa', '2026-01-01 10:00:00');",
+    "INSERT INTO Notificaciones (ID_Notificacion, Tipo, Severidad, Titulo, Destino_Tipo, Estado, Creada_En) VALUES ('notif-descartada', 'aviso', 'info', 'En la papelera', 'todos', 'descartada', '2026-01-01 11:00:00');",
+    "INSERT INTO Notificacion_Lecturas (ID_Notificacion, ID_Usuario, Leida_En) VALUES ('notif-descartada', 'user-1', '2026-01-01 12:00:00');"
+  ],
+  "entrada": {
+    "id_notificacion": "notif-descartada"
+  },
+  "snapshot": {
+    "Notificaciones": "SELECT ID_Notificacion, Estado FROM Notificaciones",
+    "Notificacion_Lecturas": "SELECT ID_Notificacion, ID_Usuario FROM Notificacion_Lecturas"
+  }
+}

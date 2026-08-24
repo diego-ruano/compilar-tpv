@@ -27,9 +27,12 @@ import {
 } from "../src/domains/cuentas/cuentas.commands";
 import {
 	crear as crearNotificacion,
+	descartar as descartarNotificacion,
+	eliminar as eliminarNotificacion,
 	marcarLeida,
 	marcarLeidasBatch,
 	resolverPorClave,
+	restaurar as restaurarNotificacion,
 } from "../src/domains/notificaciones/notificaciones.commands";
 import {
 	idActivaPorClave,
@@ -212,6 +215,12 @@ import casoNotifLeida from "../../../tests/contract/casos/notificaciones/marcar_
 import goldenNotifLeida from "../../../tests/contract/golden/notificaciones/marcar_leida.json";
 import casoNotifBatch from "../../../tests/contract/casos/notificaciones/marcar_leidas_batch.json";
 import goldenNotifBatch from "../../../tests/contract/golden/notificaciones/marcar_leidas_batch.json";
+import casoNotifDescartar from "../../../tests/contract/casos/notificaciones/descartar.json";
+import goldenNotifDescartar from "../../../tests/contract/golden/notificaciones/descartar.json";
+import casoNotifRestaurar from "../../../tests/contract/casos/notificaciones/restaurar.json";
+import goldenNotifRestaurar from "../../../tests/contract/golden/notificaciones/restaurar.json";
+import casoNotifEliminar from "../../../tests/contract/casos/notificaciones/eliminar.json";
+import goldenNotifEliminar from "../../../tests/contract/golden/notificaciones/eliminar.json";
 import casoNotifResolver from "../../../tests/contract/casos/notificaciones/resolver_por_clave.json";
 import goldenNotifResolver from "../../../tests/contract/golden/notificaciones/resolver_por_clave.json";
 import casoHorariosCopiar from "../../../tests/contract/casos/horarios/copiar_semana.json";
@@ -286,6 +295,9 @@ const CASOS = [
 	{ nombre: "notificaciones_marcar_leida", caso: casoNotifLeida, golden: goldenNotifLeida },
 	{ nombre: "notificaciones_marcar_leidas_batch", caso: casoNotifBatch, golden: goldenNotifBatch },
 	{ nombre: "notificaciones_resolver_por_clave", caso: casoNotifResolver, golden: goldenNotifResolver },
+	{ nombre: "notificaciones_descartar", caso: casoNotifDescartar, golden: goldenNotifDescartar },
+	{ nombre: "notificaciones_restaurar", caso: casoNotifRestaurar, golden: goldenNotifRestaurar },
+	{ nombre: "notificaciones_eliminar", caso: casoNotifEliminar, golden: goldenNotifEliminar },
 	{ nombre: "horarios_copiar_semana", caso: casoHorariosCopiar, golden: goldenHorariosCopiar },
 	{ nombre: "login_punch_entrada", caso: casoLoginPunchEntrada, golden: goldenLoginPunchEntrada },
 	{ nombre: "login_punch_salida", caso: casoLoginPunchSalida, golden: goldenLoginPunchSalida },
@@ -806,6 +818,18 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 		}
 		case "horarios.delete_asignacion": {
 			aplicar(hub, sql, deleteAsignacion(caso.entrada.id_asignacion));
+			return;
+		}
+		case "notificaciones.descartar": {
+			aplicar(hub, sql, descartarNotificacion(caso.entrada.id_notificacion));
+			return;
+		}
+		case "notificaciones.restaurar": {
+			aplicar(hub, sql, restaurarNotificacion(caso.entrada.id_notificacion));
+			return;
+		}
+		case "notificaciones.eliminar": {
+			aplicar(hub, sql, eliminarNotificacion(caso.entrada.id_notificacion));
 			return;
 		}
 		default:

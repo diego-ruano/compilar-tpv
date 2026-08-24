@@ -1,0 +1,18 @@
+{
+  "Notificacion_Lecturas": [
+    {
+      "ID_Notificacion": "notif-descartada",
+      "ID_Usuario": "user-1"
+    }
+  ],
+  "Notificaciones": [
+    {
+      "Estado": "descartada",
+      "ID_Notificacion": "notif-activa"
+    },
+    {
+      "Estado": "descartada",
+      "ID_Notificacion": "notif-descartada"
+    }
+  ]
+}

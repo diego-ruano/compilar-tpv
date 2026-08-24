@@ -1,0 +1,9 @@
+{
+  "Notificacion_Lecturas": [],
+  "Notificaciones": [
+    {
+      "Estado": "activa",
+      "ID_Notificacion": "notif-activa"
+    }
+  ]
+}

@@ -309,6 +309,9 @@ casos_de_contrato! {
     notificaciones__marcar_leida,
     notificaciones__marcar_leidas_batch,
     notificaciones__resolver_por_clave,
+    notificaciones__descartar,
+    notificaciones__restaurar,
+    notificaciones__eliminar,
     login__set_turno_partido,
     login__punch_entrada,
     login__punch_salida,
@@ -856,6 +859,18 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             repo.delete_asignacion(&s(&e["id_asignacion"]))
                 .await
                 .expect("delete asignacion");
+        }
+        "notificaciones.descartar" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.descartar(&s(&e["id_notificacion"])).await.expect("descartar");
+        }
+        "notificaciones.restaurar" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.restaurar(&s(&e["id_notificacion"])).await.expect("restaurar");
+        }
+        "notificaciones.eliminar" => {
+            let repo = SqliteNotificacionesRepository::new(db.clone());
+            repo.eliminar(&s(&e["id_notificacion"])).await.expect("eliminar");
         }
         otro => panic!("comando sin soporte en el harness de contrato: {otro}"),
     }
