@@ -461,7 +461,27 @@ export default function MesaComandaModal({
     const { idUsuario, idTrabajador, role } = useAuth();
     const isAdmin = (role || "").toLowerCase().includes("admin");
     const operador = isAdmin ? null : (idTrabajador ?? idUsuario ?? null);
-    const reserva = mesaMeta?.reserva ?? null;
+    // La reserva llega en `mesaMeta`, que es la FOTO del plano al abrir el modal: mientras está
+    // abierto su query se deshabilita (Mesas.tsx) para no refrescar el mapa en cada línea, y el
+    // único refetch es al cerrar. Por eso marcar la llegada o la salida del cliente no cambiaba
+    // nada en pantalla hasta salir del modal.
+    const reservaMeta = mesaMeta?.reserva ?? null;
+
+    // Lo que la propia pantalla acaba de hacer con la reserva. `null` = manda la foto del plano.
+    const [estadoReserva, setEstadoReserva] = useState<"ACTIVA" | "FINALIZADA" | null>(null);
+
+    // Al abrir, o si se salta a otra mesa/reserva, vuelve a mandar el plano.
+    useEffect(() => {
+        setEstadoReserva(null);
+    }, [open, mesaId, reservaMeta?.idReserva]);
+
+    // La reserva que se PINTA (cartel, botón y título). Una finalizada deja de colgar de la mesa:
+    // el meta sólo trae PROXIMA/ACTIVA, así que el cartel se va igual que al reabrir el modal.
+    const reserva = useMemo(() => {
+        if (!reservaMeta) return null;
+        if (estadoReserva === "FINALIZADA") return null;
+        return estadoReserva ? { ...reservaMeta, estado: estadoReserva } : reservaMeta;
+    }, [reservaMeta, estadoReserva]);
 
     // `onChanged` llega como arrow nueva en cada render del padre; la guardamos en un ref
     // para que `notifyChanged` (y, en cascada, reloadTicket/addProducto…) sea estable y
@@ -553,9 +573,12 @@ export default function MesaComandaModal({
             try {
                 setLoadingTicket(true);
 
+                // A propósito la foto (`reservaMeta`) y no `reserva`: si dependiera del estado
+                // que se pinta, marcar la llegada relanzaría este efecto y abriría la comanda dos
+                // veces (el botón ya la abre él), y marcar la salida la reabriría sin reserva.
                 const reservaActiva =
-                    reserva?.estado === "ACTIVA"
-                        ? { idReserva: reserva.idReserva }
+                    reservaMeta?.estado === "ACTIVA"
+                        ? { idReserva: reservaMeta.idReserva }
                         : null;
 
                 const cId = await ensureOpenComanda(
@@ -578,7 +601,7 @@ export default function MesaComandaModal({
             }
         })();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [open, mesaId, idUsuario, reserva?.estado, reserva?.idReserva]);
+    }, [open, mesaId, idUsuario, reservaMeta?.estado, reservaMeta?.idReserva]);
 
     const reloadTicket = useCallback(async () => {
         if (!idComanda) return;
@@ -1001,6 +1024,7 @@ export default function MesaComandaModal({
                                 onClick={async () => {
                                     try {
                                         await reservaMarcarActivaAhora(reserva.idReserva);
+                                        setEstadoReserva("ACTIVA");
                                         notifyChanged();
 
                                         setLoadingTicket(true);
@@ -1034,6 +1058,7 @@ export default function MesaComandaModal({
                                 onClick={async () => {
                                     try {
                                         await reservaFinalizar(reserva.idReserva);
+                                        setEstadoReserva("FINALIZADA");
                                         notifyChanged();
                                     } catch (e) {
                                         console.error(e);
