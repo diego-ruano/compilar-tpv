@@ -334,14 +334,13 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                     let insertadas = conn.execute(
                         r#"
                         INSERT OR IGNORE INTO Lotes_Producto
-                          (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+                          (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
                         VALUES
-                          (?7, ?1, ?2, datetime('now','localtime'), NULL, ?3, ?4, NULL, ?5, ?6);
+                          (?6, ?1, ?2, datetime('now','localtime'), NULL, ?3, NULL, ?4, ?5);
                         "#,
                         vec![
                             Value::Text(id_producto.clone()),
                             Value::Text(codigo_lote),
-                            Value::Real(stock),
                             Value::Real(stock),
                             Value::Text(p.id_proveedor.clone()),
                             Value::Text("Lote inicial creado desde Proveedores".into()),

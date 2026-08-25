@@ -2,7 +2,6 @@
   "Lotes_Producto": [
     {
       "Caducidad": "2026-09-01",
-      "Cantidad_Inicial": 10.0,
       "Codigo_Lote": "L1B",
       "Coste_Unitario": 2.0,
       "ID_Lote": "lote-1",

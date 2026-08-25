@@ -17,7 +17,7 @@
   },
   "snapshot": {
     "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida FROM Productos",
-    "Lotes_Producto": "SELECT ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, ID_Proveedor FROM Lotes_Producto",
+    "Lotes_Producto": "SELECT ID_Producto, Codigo_Lote, Stock_Disponible, ID_Proveedor FROM Lotes_Producto",
     "Movimientos_Stock": "SELECT Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

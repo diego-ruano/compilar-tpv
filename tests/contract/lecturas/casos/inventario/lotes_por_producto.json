@@ -10,11 +10,11 @@
     "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-b', 'prod-cerveza', 'L-B', 24, 10, '2026-09-30', '2026-01-02 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-a', 'prod-cerveza', 'L-A', 24, 6, '2026-06-30', '2026-01-01 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Fecha_Entrada) VALUES ('lote-sin-cad', 'prod-cerveza', 'L-SC', 12, 12, '2026-01-03 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-cerveza', 'L-0', 24, 0, '2026-02-01', '2025-12-01 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Fecha_Entrada) VALUES ('lote-otro-prod', 'prod-tortilla', 'L-X', 5, 5, '2026-01-04 10:00:00');"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-b', 'prod-cerveza', 'L-B', 10, '2026-09-30', '2026-01-02 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-a', 'prod-cerveza', 'L-A', 6, '2026-06-30', '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-sin-cad', 'prod-cerveza', 'L-SC', 12, '2026-01-03 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-cerveza', 'L-0', 0, '2026-02-01', '2025-12-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada) VALUES ('lote-otro-prod', 'prod-tortilla', 'L-X', 5, '2026-01-04 10:00:00');"
   ],
   "entrada": {
     "id_producto": "prod-cerveza"

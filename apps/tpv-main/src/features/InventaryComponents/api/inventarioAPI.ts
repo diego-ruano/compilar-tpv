@@ -67,7 +67,6 @@ export type LoteRow = {
     Fecha_Entrada: string;
     Caducidad: string | null;
 
-    Cantidad_Inicial: number;
     Stock_Disponible: number;
 
     Coste_Unitario: number | null;
@@ -140,9 +139,7 @@ export type CreateLoteArgs = {
     codigo_lote: string;
 
     caducidad: string | null;
-    cantidad_inicial: number;
-
-    stock_disponible?: number | null;
+    stock_disponible: number;
 
     fecha_entrada?: string | null;
     coste_unitario?: number | null;
@@ -156,7 +153,6 @@ export type UpdateLoteArgs = {
     codigo_lote: string;
 
     caducidad: string | null;
-    cantidad_inicial: number;
     stock_disponible: number;
 
     fecha_entrada?: string | null;
@@ -402,10 +398,6 @@ function normalizeLote(row: any): LoteRow {
             "",
         ),
         Caducidad: toStrOrNull(pick(row, ["Caducidad", "caducidad"])),
-        Cantidad_Inicial: toNum(
-            pick(row, ["Cantidad_Inicial", "cantidad_inicial", "cantidadInicial"]),
-            0,
-        ),
         Stock_Disponible: toNum(
             pick(row, ["Stock_Disponible", "stock_disponible", "stockDisponible"]),
             0,
@@ -600,11 +592,7 @@ export const inventarioAPI = {
                 codigo_lote: toStr(args.codigo_lote),
 
                 caducidad: toStrOrNull(args.caducidad),
-                cantidad_inicial: toNum(args.cantidad_inicial),
-
-                ...(args.stock_disponible == null
-                    ? {}
-                    : { stock_disponible: toNum(args.stock_disponible) }),
+                stock_disponible: toNum(args.stock_disponible),
 
                 fecha_entrada: toStrOrNull(args.fecha_entrada),
                 coste_unitario:
@@ -626,7 +614,6 @@ export const inventarioAPI = {
                 codigo_lote: toStr(args.codigo_lote),
 
                 caducidad: toStrOrNull(args.caducidad),
-                cantidad_inicial: toNum(args.cantidad_inicial),
                 stock_disponible: toNum(args.stock_disponible),
 
                 fecha_entrada: toStrOrNull(args.fecha_entrada),

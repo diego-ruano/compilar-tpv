@@ -399,7 +399,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                         <div className="grid grid-cols-12 gap-2 bg-surface-2 px-4 py-3 text-xs font-extrabold text-fg-muted">
                           <div className="col-span-3">Lote</div>
                           <div className="col-span-2">Caducidad</div>
-                          <div className="col-span-1 text-right">Stock</div>
+                          <div className="col-span-1 text-right">Cantidad</div>
                           <div className="col-span-4 pl-6">Entrada</div>
                           <div className="col-span-2 text-right">Acciones</div>
                         </div>

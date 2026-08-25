@@ -192,22 +192,19 @@ export async function productDetail(
 	} as unknown as ProductDetailResponse;
 }
 
-// `(Cantidad_Inicial, Stock_Disponible)` del lote si existe. Para validar la coherencia de un
-// ajuste (INV-01) antes de aplicarlo por el DO.
+// El `Stock_Disponible` del lote si existe. Es el disponible PREVIO, que da el delta del
+// movimiento de auditoría (INV-01b) al editar o ajustar.
 export async function getLoteStock(
 	db: Client,
 	idLote: string,
-): Promise<{ cantidad_inicial: number; stock_disponible: number } | null> {
+): Promise<{ stock_disponible: number } | null> {
 	const rs = await db.execute({
-		sql: "SELECT Cantidad_Inicial, Stock_Disponible FROM Lotes_Producto WHERE ID_Lote=?1 LIMIT 1;",
+		sql: "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote=?1 LIMIT 1;",
 		args: [idLote],
 	});
 	const r = rows(rs)[0];
 	if (!r) return null;
-	return {
-		cantidad_inicial: Number(r.Cantidad_Inicial ?? 0),
-		stock_disponible: Number(r.Stock_Disponible ?? 0),
-	};
+	return { stock_disponible: Number(r.Stock_Disponible ?? 0) };
 }
 
 // ¿El producto está referenciado por alguna Detalle_Comanda? (borrado con histórico, INV-05).
@@ -228,7 +225,7 @@ export async function listLotesByProducto(
 ): Promise<LoteDto[]> {
 	const rs = await db.execute({
 		sql: `
-			SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
+			SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
 			FROM Lotes_Producto
 			WHERE ID_Producto=?1
 			ORDER BY (Caducidad IS NULL) ASC, date(Caducidad) ASC, datetime(Fecha_Entrada) DESC, ID_Lote DESC;

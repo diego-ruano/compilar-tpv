@@ -7,7 +7,7 @@
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0, 7.0);",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 24, 18);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 18);",
     "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana', 50.0);",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-01-01', '13:00', 'COMIDA', 2);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda) VALUES ('comanda-1', 'MESA', 'mesa-1', 'res-1', '2026-01-01 12:00:00', '2026-01-01 13:00:00', 'Pagada', 12.0);",

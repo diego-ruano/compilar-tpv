@@ -28,9 +28,9 @@ pub trait InventarioRepository: Send + Sync {
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>>;
 
     // ── Escrituras ──
-    // Nota: la coherencia del ajuste (INV-01, stock ≤ cantidad_inicial) y el borrado con histórico
-    // (INV-05) se validan DENTRO de cada implementación de escritura (atómico con el read, sin
-    // TOCTOU). En el adaptador SQLite se hace localmente; en el HTTP lo valida el worker en sus rutas.
+    // Nota: el borrado con histórico (INV-05) se valida DENTRO de cada implementación de escritura
+    // (atómico con el read, sin TOCTOU). En el adaptador SQLite se hace localmente; en el HTTP lo
+    // valida el worker en sus rutas.
     async fn create_categoria(&self, cat: CategoriaUpsert) -> AppResult<()>;
     async fn set_alergenos_producto(&self, id_producto: &str, ids: Vec<String>) -> AppResult<()>;
     async fn delete_producto(&self, id_producto: &str) -> AppResult<()>;

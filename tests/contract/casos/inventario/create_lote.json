@@ -11,14 +11,13 @@
     "codigo_lote": "L1",
     "fecha_entrada": "2026-01-01 00:00:00",
     "caducidad": "2026-06-01",
-    "cantidad_inicial": 10,
     "stock_disponible": 10,
     "coste_unitario": 1.5,
     "id_proveedor": null,
     "notas": "alta inicial"
   },
   "snapshot": {
-    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas FROM Lotes_Producto",
+    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas FROM Lotes_Producto",
     "Movimientos_Stock": "SELECT ID_Lote, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

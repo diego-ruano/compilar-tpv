@@ -212,21 +212,22 @@ ON Productos(ID_Categoria);
 CREATE INDEX IF NOT EXISTS idx_productos_proveedor
 ON Productos(ID_Proveedor);
 
+-- Un lote tiene UNA cantidad: Stock_Disponible, la que queda. No hay 'inicial' aparte porque
+-- nadie la usaba para nada salvo para prohibir subir el disponible por encima de ella, o sea
+-- para convertir en un error corregir al alza justo lo que se acababa de contar.
 CREATE TABLE IF NOT EXISTS Lotes_Producto (
   ID_Lote TEXT PRIMARY KEY,
   ID_Producto TEXT NOT NULL,
   Codigo_Lote TEXT NOT NULL,
   Fecha_Entrada DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
   Caducidad DATE,
-  Cantidad_Inicial REAL NOT NULL DEFAULT 0,
   Stock_Disponible REAL NOT NULL DEFAULT 0,
   Coste_Unitario REAL,
   ID_Proveedor TEXT,
   Notas TEXT,
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
-  UNIQUE (ID_Producto, Codigo_Lote),
-  CHECK (Cantidad_Inicial >= 0)
+  UNIQUE (ID_Producto, Codigo_Lote)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lotes_producto_cad
@@ -240,7 +241,7 @@ ON Lotes_Producto(ID_Producto, Fecha_Entrada);
 
 -- Auditoria de movimientos de stock (INV-01b). Cada cambio manual de Stock_Disponible de un lote
 -- (alta y ajuste) deja una fila trazable en vez de sobrescribir el valor a pelo sin rastro. Base
--- para la reconciliacion (INV-06): Stock_Disponible == Cantidad_Inicial - SUM(consumo) + SUM(ajustes).
+-- para la reconciliacion (INV-06): Stock_Disponible == SUM(movimientos) - SUM(consumo).
 --
 -- Tipo: 'ALTA' (creacion del lote) | 'AJUSTE' (correccion manual del disponible).
 -- Delta: variacion aplicada a Stock_Disponible (+entrada / -salida).

@@ -154,8 +154,6 @@ pub struct LoteDto {
     pub fecha_entrada: String,
     #[serde(rename = "Caducidad")]
     pub caducidad: Option<String>,
-    #[serde(rename = "Cantidad_Inicial")]
-    pub cantidad_inicial: f64,
     #[serde(rename = "Stock_Disponible")]
     pub stock_disponible: f64,
     #[serde(rename = "Coste_Unitario")]
@@ -275,10 +273,7 @@ pub struct CreateLoteInput {
     #[serde(default)]
     #[ts(optional)]
     pub caducidad: Option<String>,
-    pub cantidad_inicial: f64,
-    #[serde(default)]
-    #[ts(optional)]
-    pub stock_disponible: Option<f64>,
+    pub stock_disponible: f64,
     #[serde(default)]
     #[ts(optional)]
     pub fecha_entrada: Option<String>,
@@ -302,7 +297,6 @@ pub struct UpdateLoteInput {
     #[serde(default)]
     #[ts(optional)]
     pub caducidad: Option<String>,
-    pub cantidad_inicial: f64,
     pub stock_disponible: f64,
     #[serde(default)]
     #[ts(optional)]

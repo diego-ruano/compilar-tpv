@@ -4,14 +4,13 @@
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Cerveza');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Cantidad_Inicial, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', '2026-01-01 00:00:00', 10, 5);"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', '2026-01-01 00:00:00', 5);"
   ],
   "entrada": {
     "id_lote": "lote-1",
     "id_producto": "prod-1",
     "codigo_lote": "L1B",
     "caducidad": "2026-09-01",
-    "cantidad_inicial": 10,
     "stock_disponible": 8,
     "fecha_entrada": "2026-01-01 00:00:00",
     "coste_unitario": 2.0,
@@ -19,7 +18,7 @@
     "notas": "editado"
   },
   "snapshot": {
-    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, Notas FROM Lotes_Producto",
+    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Stock_Disponible, Coste_Unitario, Notas FROM Lotes_Producto",
     "Movimientos_Stock": "SELECT ID_Lote, Tipo, Delta, Stock_Resultante, Motivo FROM Movimientos_Stock"
   }
 }

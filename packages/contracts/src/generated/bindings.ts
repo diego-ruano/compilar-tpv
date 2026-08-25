@@ -163,7 +163,7 @@ export type CreateClienteInput = { id_cliente?: string, nombre: string, email?: 
 
 export type CreateGastoInput = { id_gasto?: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, };
 
-export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lote: string, caducidad?: string, cantidad_inicial: number, stock_disponible?: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
+export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
 
 export type CreateTareaInput = { titulo: string, descripcion?: string, fecha_limite?: string, ids_trabajadores: Array<string>, };
 
@@ -336,7 +336,7 @@ export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre
 
 export type LoginUserArgs = { id_usuario: string, pin: string, };
 
-export type LoteDto = { ID_Lote: string, ID_Producto: string, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Cantidad_Inicial: number, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: string | null, Notas: string | null, };
+export type LoteDto = { ID_Lote: string, ID_Producto: string, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: string | null, Notas: string | null, };
 
 /**
  * Marca una notificación como leída por un usuario.
@@ -782,7 +782,7 @@ export type UpdateClienteInput = { id_cliente: string, nombre: string, email?: s
 
 export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, };
 
-export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, cantidad_inicial: number, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
+export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
 
 export type UpdatePagoInput = { id_pago: string, fecha_hora: string, metodo: string, importe: number, };
 

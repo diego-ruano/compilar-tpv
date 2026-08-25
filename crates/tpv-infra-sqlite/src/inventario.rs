@@ -103,11 +103,10 @@ fn map_lote(row: &Row) -> AppResult<LoteDto> {
         codigo_lote: s(g(2)?),
         fecha_entrada: s(g(3)?),
         caducidad: v_string(g(4)?),
-        cantidad_inicial: fl(g(5)?),
-        stock_disponible: fl(g(6)?),
-        coste_unitario: v_f64(g(7)?),
-        id_proveedor: norm_opt_string(g(8)?),
-        notas: v_string(g(9)?),
+        stock_disponible: fl(g(5)?),
+        coste_unitario: v_f64(g(6)?),
+        id_proveedor: norm_opt_string(g(7)?),
+        notas: v_string(g(8)?),
     })
 }
 
@@ -385,7 +384,7 @@ impl InventarioRepository for SqliteInventarioRepository {
 
     async fn list_lotes_by_producto(&self, id_producto: &str) -> AppResult<Vec<LoteDto>> {
         let sql = r#"
-          SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
+          SELECT ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas
           FROM Lotes_Producto
           WHERE ID_Producto=?1
           ORDER BY (Caducidad IS NULL) ASC, date(Caducidad) ASC, datetime(Fecha_Entrada) DESC, ID_Lote DESC;
@@ -595,9 +594,9 @@ impl InventarioRepository for SqliteInventarioRepository {
                 -- nunca pisa Stock_Disponible (que descuadraría con Lote_Consumos). La edición usa
                 -- update_lote / ajustar_lote.
                 INSERT INTO Lotes_Producto
-                  (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+                  (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
                 VALUES
-                  (?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9, ?10)
+                  (?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9)
                 ON CONFLICT(ID_Lote) DO NOTHING;
                 "#,
                 vec![
@@ -606,7 +605,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
-                    Value::Real(l.cantidad_inicial),
                     Value::Real(stock),
                     opt_real(l.coste_unitario),
                     match l.id_proveedor {
@@ -678,11 +676,10 @@ impl InventarioRepository for SqliteInventarioRepository {
                   Codigo_Lote = ?3,
                   Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
                   Caducidad = NULLIF(?5, ''),
-                  Cantidad_Inicial = ?6,
-                  Stock_Disponible = ?7,
-                  Coste_Unitario = ?8,
-                  ID_Proveedor = ?9,
-                  Notas = ?10
+                  Stock_Disponible = ?6,
+                  Coste_Unitario = ?7,
+                  ID_Proveedor = ?8,
+                  Notas = ?9
                 WHERE ID_Lote = ?1;
                 "#,
                 vec![
@@ -691,7 +688,6 @@ impl InventarioRepository for SqliteInventarioRepository {
                     Value::Text(l.codigo_lote),
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
-                    Value::Real(l.cantidad_inicial),
                     Value::Real(l.stock_disponible),
                     opt_real(l.coste_unitario),
                     match l.id_proveedor {
@@ -740,31 +736,20 @@ impl InventarioRepository for SqliteInventarioRepository {
         let conn = &g;
         conn.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<()> = async {
-            // Cantidad inicial + stock previo (dentro de la tx): para validar coherencia (INV-01) y
-            // calcular el delta del movimiento, todo atómico con la escritura.
-            let (cantidad_inicial, old_stock) = {
+            // Stock previo (dentro de la tx): da el delta del movimiento, atómico con la escritura.
+            let old_stock = {
                 let mut rows = conn
                     .query(
-                        "SELECT Cantidad_Inicial, Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
+                        "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote = ?1 LIMIT 1;",
                         vec![Value::Text(a.id_lote.clone())],
                     )
                     .await
                     .map_err(db_err)?;
                 match rows.next().await.map_err(db_err)? {
-                    Some(r) => (
-                        fl(r.get_value(0).map_err(db_err)?),
-                        fl(r.get_value(1).map_err(db_err)?),
-                    ),
+                    Some(r) => fl(r.get_value(0).map_err(db_err)?),
                     None => return Err(AppError::validation("Lote no encontrado")),
                 }
             };
-
-            // Coherencia (INV-01): no dejar más disponible del que jamás entró.
-            if new_stock > cantidad_inicial + 1e-9 {
-                return Err(AppError::validation(
-                    "El stock disponible no puede superar la cantidad inicial del lote.",
-                ));
-            }
 
             conn.execute(
                 "UPDATE Lotes_Producto SET Stock_Disponible = ?1, Notas = COALESCE(NULLIF(?2, ''), Notas) WHERE ID_Lote = ?3;",
@@ -992,8 +977,8 @@ mod tests_borrado_de_producto {
         sembrar(&db, UNA_COMANDA_ABIERTA).await;
         sembrar(
             &db,
-            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
-                 VALUES ('lote', 'vendido', 'L-1', 10, 10);"],
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
+                 VALUES ('lote', 'vendido', 'L-1', 10);"],
         )
         .await;
         let repo = SqliteInventarioRepository::new(db.clone());
@@ -1017,8 +1002,8 @@ mod tests_borrado_de_producto {
         sembrar(&db, CATALOGO).await;
         sembrar(
             &db,
-            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible)
-                 VALUES ('lote', 'nuevo', 'L-1', 10, 10);"],
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
+                 VALUES ('lote', 'nuevo', 'L-1', 10);"],
         )
         .await;
         let repo = SqliteInventarioRepository::new(db.clone());

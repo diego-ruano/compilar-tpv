@@ -134,7 +134,6 @@ pub struct LoteNuevo {
     pub id_producto: String,
     pub codigo_lote: String,
     pub caducidad: Option<String>,
-    pub cantidad_inicial: f64,
     pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
     pub coste_unitario: Option<f64>,
@@ -149,7 +148,6 @@ pub struct LoteUpdate {
     pub id_producto: String,
     pub codigo_lote: String,
     pub caducidad: Option<String>,
-    pub cantidad_inicial: f64,
     pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
     pub coste_unitario: Option<f64>,
@@ -164,7 +162,6 @@ impl LoteUpdate {
         id_producto: String,
         codigo_lote: String,
         caducidad: Option<String>,
-        cantidad_inicial: f64,
         stock_disponible: f64,
         fecha_entrada: Option<String>,
         coste_unitario: Option<f64>,
@@ -180,8 +177,7 @@ impl LoteUpdate {
             id_producto,
             codigo_lote,
             caducidad,
-            cantidad_inicial,
-            Some(stock_disponible),
+            stock_disponible,
             fecha_entrada,
             coste_unitario,
             id_proveedor,
@@ -192,7 +188,6 @@ impl LoteUpdate {
             id_producto: lote.id_producto,
             codigo_lote: lote.codigo_lote,
             caducidad: lote.caducidad,
-            cantidad_inicial: lote.cantidad_inicial,
             stock_disponible: lote.stock_disponible,
             fecha_entrada: lote.fecha_entrada,
             coste_unitario: lote.coste_unitario,
@@ -209,8 +204,7 @@ impl LoteNuevo {
         id_producto: String,
         codigo_lote: String,
         caducidad: Option<String>,
-        cantidad_inicial: f64,
-        stock_disponible: Option<f64>,
+        stock_disponible: f64,
         fecha_entrada: Option<String>,
         coste_unitario: Option<f64>,
         id_proveedor: Option<String>,
@@ -224,17 +218,11 @@ impl LoteNuevo {
         if codigo_lote.is_empty() {
             return Err("codigo_lote required".into());
         }
-        if !cantidad_inicial.is_finite() || cantidad_inicial < 0.0 {
-            return Err("Cantidad_Inicial inválida".into());
-        }
-        let stock = stock_disponible.unwrap_or(cantidad_inicial);
-        if !stock.is_finite() || stock < 0.0 {
-            return Err("Stock_Disponible inválido".into());
-        }
-        // Coherencia (INV-01): no puede haber más disponible del que jamás entró. Si de verdad
-        // entró más género, se sube la cantidad inicial (no se infla el disponible a pelo).
-        if stock > cantidad_inicial + 1e-9 {
-            return Err("El stock disponible no puede superar la cantidad inicial".into());
+        // Un lote tiene UNA cantidad, la que queda, y no tiene techo: manda el recuento. El par
+        // (inicial, disponible) sólo servía para rechazar un disponible mayor que el inicial, o
+        // sea para impedir corregir al alza justo lo que se acababa de contar.
+        if !stock_disponible.is_finite() || stock_disponible < 0.0 {
+            return Err("Cantidad inválida".into());
         }
 
         let caducidad = limpia(caducidad);
@@ -267,8 +255,7 @@ impl LoteNuevo {
             id_producto,
             codigo_lote,
             caducidad,
-            cantidad_inicial,
-            stock_disponible: stock,
+            stock_disponible,
             fecha_entrada,
             coste_unitario,
             id_proveedor,
@@ -379,13 +366,13 @@ mod tests {
         assert!(producto("Cafe", "c1", Some(f64::INFINITY), vec![]).unwrap().stock_suelto.is_none());
     }
 
-    fn lote(cantidad: f64, stock: Option<f64>, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
-        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, stock, entrada.map(str::to_string), Some(1.25), Some(" prov1 ".into()), Some(" fresco ".into()))
+    fn lote(cantidad: f64, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
+        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, entrada.map(str::to_string), Some(1.25), Some(" prov1 ".into()), Some(" fresco ".into()))
     }
 
     #[test]
-    fn lote_valido_usa_cantidad_como_stock_por_defecto_y_normaliza() {
-        let l = lote(10.0, None, Some("2026-12-31"), Some("2026-07-22 10:00:00")).unwrap();
+    fn lote_valido_guarda_la_cantidad_y_normaliza() {
+        let l = lote(10.0, Some("2026-12-31"), Some("2026-07-22 10:00:00")).unwrap();
         assert_eq!(l.id.as_deref(), Some("l1"));
         assert_eq!(l.id_producto, "p1");
         assert_eq!(l.codigo_lote, "L-001");
@@ -394,33 +381,35 @@ mod tests {
     }
 
     #[test]
-    fn lote_rechaza_cantidades_y_stock_invalidos() {
-        for cantidad in [-1.0, f64::NAN, f64::INFINITY] { assert!(lote(cantidad, None, None, None).is_err()); }
-        for stock in [-1.0, f64::NAN, f64::INFINITY, 10.1] { assert!(lote(10.0, Some(stock), None, None).is_err()); }
-        assert!(lote(10.0, Some(10.0 + 1e-8), None, None).is_err());
-        assert!(lote(10.0, Some(10.0 + 1e-10), None, None).is_ok());
+    fn lote_rechaza_cantidades_invalidas_pero_no_tiene_techo() {
+        for cantidad in [-1.0, f64::NAN, f64::INFINITY] { assert!(lote(cantidad, None, None).is_err()); }
+        // Cero es un lote agotado, no un error. Y no hay tope superior: la cantidad que se
+        // corrige al alza es un recuento, que es justo lo que antes se rechazaba.
+        assert!(lote(0.0, None, None).is_ok());
+        assert!(lote(999_999.0, None, None).is_ok());
     }
 
     #[test]
     fn lote_valida_fechas_reales_y_orden_temporal() {
-        assert!(lote(1.0, None, Some("2025-02-30"), None).is_err());
-        assert!(lote(1.0, None, None, Some("fecha mala")).is_err());
-        assert!(lote(1.0, None, Some("2026-01-01"), Some("2026-02-01")).is_err());
-        assert!(lote(1.0, None, Some("2024-02-29"), Some("2024-02-29")).is_ok());
+        assert!(lote(1.0, Some("2025-02-30"), None).is_err());
+        assert!(lote(1.0, None, Some("fecha mala")).is_err());
+        assert!(lote(1.0, Some("2026-01-01"), Some("2026-02-01")).is_err());
+        assert!(lote(1.0, Some("2024-02-29"), Some("2024-02-29")).is_ok());
     }
 
     #[test]
     fn lote_exige_producto_y_codigo() {
-        assert!(LoteNuevo::validar(None, " ".into(), "x".into(), None, 1.0, None, None, None, None, None).is_err());
-        assert!(LoteNuevo::validar(None, "p".into(), " ".into(), None, 1.0, None, None, None, None, None).is_err());
+        assert!(LoteNuevo::validar(None, " ".into(), "x".into(), None, 1.0, None, None, None, None).is_err());
+        assert!(LoteNuevo::validar(None, "p".into(), " ".into(), None, 1.0, None, None, None, None).is_err());
     }
 
     #[test]
     fn update_exige_id_y_reutiliza_reglas_de_lote() {
-        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, 1.0, 1.0, None, None, None, None).is_err());
-        assert!(LoteUpdate::validar("l1".into(), "p".into(), "l".into(), None, 1.0, 2.0, None, None, None, None).is_err());
-        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, 2.0, 1.0, None, None, None, Some(" nota ".into())).unwrap();
+        assert!(LoteUpdate::validar(" ".into(), "p".into(), "l".into(), None, 1.0, None, None, None, None).is_err());
+        assert!(LoteUpdate::validar("l1".into(), "p".into(), "l".into(), None, -1.0, None, None, None, None).is_err());
+        let l = LoteUpdate::validar(" l1 ".into(), " p1 ".into(), " lote ".into(), None, 2.0, None, None, None, Some(" nota ".into())).unwrap();
         assert_eq!(l.id_lote, "l1");
+        assert_eq!(l.stock_disponible, 2.0);
         assert_eq!(l.notas.as_deref(), Some("nota"));
     }
 

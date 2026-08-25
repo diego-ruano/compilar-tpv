@@ -2,7 +2,6 @@
   "Lotes_Producto": [
     {
       "Caducidad": "2026-06-01",
-      "Cantidad_Inicial": 10.0,
       "Codigo_Lote": "L1",
       "Coste_Unitario": 1.5,
       "Fecha_Entrada": "2026-01-01 00:00:00",

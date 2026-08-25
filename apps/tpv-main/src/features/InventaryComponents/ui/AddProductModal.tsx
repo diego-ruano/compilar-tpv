@@ -367,8 +367,7 @@ export function AddProductModal({
                     id_producto: finalProductId,
                     codigo_lote: codigoLoteInicial.trim(),
                     caducidad: caducidadLoteInicial.trim() ? caducidadLoteInicial : null,
-                    cantidad_inicial: ci,
-                    stock_disponible: null,
+                    stock_disponible: ci,
                     coste_unitario: null,
                     fecha_entrada: null,
                     id_proveedor: null,
@@ -651,7 +650,7 @@ export function AddProductModal({
                                         htmlFor="producto-lote-cantidad"
                                         className="block text-sm font-semibold"
                                     >
-                                        Cantidad inicial *
+                                        Cantidad *
                                     </label>
                                     <input
                                         id="producto-lote-cantidad"

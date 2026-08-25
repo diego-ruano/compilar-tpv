@@ -4,7 +4,7 @@
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-1', 'cat-1', 'Cerveza');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Notas) VALUES ('lote-1', 'prod-1', 'L1', 10, 5, 'original');"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Notas) VALUES ('lote-1', 'prod-1', 'L1', 5, 'original');"
   ],
   "entrada": {
     "id_lote": "lote-1",

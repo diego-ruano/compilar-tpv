@@ -11,7 +11,7 @@
     "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
     "INSERT INTO Producto_Alergenos (ID_Producto, ID_Alergeno) VALUES ('prod-tortilla', '00000000-0000-7000-8000-000000000203');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-1', 'prod-tortilla', 'L-1', 10, 4, '2026-07-01', '2026-01-01 10:00:00');"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-1', 'prod-tortilla', 'L-1', 4, '2026-07-01', '2026-01-01 10:00:00');"
   ],
   "entrada": {
     "id_producto": "prod-tortilla"

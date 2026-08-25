@@ -6,10 +6,10 @@
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto, Unidad_Medida) VALUES ('prod-1', 'cat-1', 'Agua', 1.5, 0.0, 'ud');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto, Unidad_Medida) VALUES ('prod-2', 'cat-1', 'Cerveza', 3.0, 2.0, 'ud');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Unidad_Medida) VALUES ('prod-3', 'cat-1', 'Zumo', 2.0, 'ud');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-a', 'prod-1', 'L-A', 10, 5, '2026-03-01', '2026-01-01 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-b', 'prod-2', 'L-B', 10, 4, '2026-02-01', '2026-01-01 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-c', 'prod-2', 'L-C', 10, 3, '2026-04-01', '2026-01-02 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-1', 'L-AGOTADO', 10, 0, '2026-01-01', '2025-12-01 10:00:00');"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-a', 'prod-1', 'L-A', 5, '2026-03-01', '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-b', 'prod-2', 'L-B', 4, '2026-02-01', '2026-01-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-c', 'prod-2', 'L-C', 3, '2026-04-01', '2026-01-02 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-1', 'L-AGOTADO', 0, '2026-01-01', '2025-12-01 10:00:00');"
   ],
   "entrada": { "limit": 2 }
 }

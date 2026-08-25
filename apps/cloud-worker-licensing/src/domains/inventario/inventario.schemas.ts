@@ -60,8 +60,7 @@ export const createLoteSchema = z.object({
 	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
 	caducidad: optStr,
-	cantidad_inicial: z.number().finite().min(0, "Cantidad_Inicial inválida"),
-	stock_disponible: z.number().finite().min(0).nullish(),
+	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
 	coste_unitario: optNum,
 	id_proveedor: idStr.nullish(),
@@ -73,8 +72,7 @@ export const updateLoteSchema = z.object({
 	id_producto: idStr,
 	codigo_lote: z.string().trim().min(1, "codigo_lote required"),
 	caducidad: optStr,
-	cantidad_inicial: z.number().finite().min(0, "Cantidad_Inicial inválida"),
-	stock_disponible: z.number().finite().min(0, "Stock_Disponible inválido"),
+	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
 	coste_unitario: optNum,
 	id_proveedor: idStr.nullish(),
@@ -82,7 +80,7 @@ export const updateLoteSchema = z.object({
 });
 
 export const ajusteLoteSchema = z.object({
-	stock_disponible: z.number().finite().min(0, "Stock_Disponible inválido"),
+	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	notas: optStr,
 });
 

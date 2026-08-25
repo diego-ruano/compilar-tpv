@@ -128,7 +128,6 @@ pub async fn create_lote(repo: &R, input: CreateLoteInput) -> AppResult<String> 
         input.id_producto,
         input.codigo_lote,
         input.caducidad,
-        input.cantidad_inicial,
         input.stock_disponible,
         input.fecha_entrada,
         input.coste_unitario,
@@ -146,7 +145,6 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
         input.id_producto,
         input.codigo_lote,
         input.caducidad,
-        input.cantidad_inicial,
         input.stock_disponible,
         input.fecha_entrada,
         input.coste_unitario,
@@ -161,8 +159,8 @@ pub async fn update_lote(repo: &R, input: UpdateLoteInput) -> AppResult<String> 
 pub async fn ajustar_lote(repo: &R, input: AjusteLoteInput) -> AppResult<String> {
     let ajuste = AjusteLote::validar(input.id_lote, input.stock_disponible, input.notas)
         .map_err(AppError::validation)?;
-    // Coherencia (INV-01, stock ≤ cantidad_inicial) validada en el repo, atómica con la lectura del
-    // stock previo (para el delta de auditoría).
+    // El repo lee el stock previo dentro de la misma transacción, que es lo que da el delta de
+    // auditoría (INV-01b) sin TOCTOU.
     repo.ajustar_lote(ajuste).await?;
     Ok("OK".to_string())
 }

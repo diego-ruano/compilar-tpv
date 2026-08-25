@@ -8,9 +8,9 @@
     "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Suelto, Stock_Minimo, Unidad_Medida, IVA_Percent) VALUES ('prod-2', 'cat-1', 'prov-1', 'Cerveza', 3.0, 7.0, 10, 'ud', 21.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Agua', 1.5, 0.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-otra-cat', 'cat-2', 'Tortilla', 9.0);",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-2', 'L-AGOTADO', 24, 0, '2026-01-01', '2025-12-01 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-bueno', 'prod-2', 'L-BUENO', 24, 18, '2026-09-30', '2026-01-15 10:00:00');",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Cantidad_Inicial, Stock_Disponible) VALUES ('lote-sin-cad', 'prod-2', 'L-SIN-CAD', 6, 6);"
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-agotado', 'prod-2', 'L-AGOTADO', 0, '2026-01-01', '2025-12-01 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Caducidad, Fecha_Entrada) VALUES ('lote-bueno', 'prod-2', 'L-BUENO', 18, '2026-09-30', '2026-01-15 10:00:00');",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-sin-cad', 'prod-2', 'L-SIN-CAD', 6);"
   ],
   "entrada": { "id_categoria": "cat-1" }
 }

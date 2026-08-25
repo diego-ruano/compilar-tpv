@@ -82,9 +82,9 @@ const SQL_UPSERT_CATEGORIA = `
 // Stock_Disponible (que descuadraría con Lote_Consumos). La edición usa updateLote / ajustarLote.
 const SQL_INSERT_LOTE = `
 	INSERT INTO Lotes_Producto
-		(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+		(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
 	VALUES
-		(?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9, ?10)
+		(?1, ?2, ?3, COALESCE(NULLIF(?4, ''), datetime('now','localtime')), NULLIF(?5, ''), ?6, ?7, ?8, ?9)
 	ON CONFLICT(ID_Lote) DO NOTHING;
 `;
 
@@ -210,8 +210,7 @@ export function setAlergenosProducto(
 }
 
 export function createLote(input: CreateLoteInput): BuiltCommand {
-	const stock =
-		input.stock_disponible == null ? input.cantidad_inicial : input.stock_disponible;
+	const stock = input.stock_disponible;
 	const movId = crypto.randomUUID();
 
 	const steps: any[] = [
@@ -225,7 +224,6 @@ export function createLote(input: CreateLoteInput): BuiltCommand {
 				input.codigo_lote.trim(),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
-				input.cantidad_inicial,
 				stock,
 				numOrNull(input.coste_unitario),
 				idOrNull(input.id_proveedor),
@@ -264,11 +262,10 @@ export function updateLote(
 					Codigo_Lote = ?3,
 					Fecha_Entrada = COALESCE(NULLIF(?4, ''), Fecha_Entrada),
 					Caducidad = NULLIF(?5, ''),
-					Cantidad_Inicial = ?6,
-					Stock_Disponible = ?7,
-					Coste_Unitario = ?8,
-					ID_Proveedor = ?9,
-					Notas = ?10
+					Stock_Disponible = ?6,
+					Coste_Unitario = ?7,
+					ID_Proveedor = ?8,
+					Notas = ?9
 				WHERE ID_Lote = ?1;
 			`,
 			args: [
@@ -277,7 +274,6 @@ export function updateLote(
 				input.codigo_lote.trim(),
 				cleanOrNull(input.fecha_entrada),
 				cleanOrNull(input.caducidad),
-				input.cantidad_inicial,
 				input.stock_disponible,
 				numOrNull(input.coste_unitario),
 				idOrNull(input.id_proveedor),

@@ -1,7 +1,6 @@
 {
   "Lotes_Producto": [
     {
-      "Cantidad_Inicial": 8.0,
       "Codigo_Lote": "INI-prod-1",
       "ID_Producto": "prod-1",
       "ID_Proveedor": "prov-1",

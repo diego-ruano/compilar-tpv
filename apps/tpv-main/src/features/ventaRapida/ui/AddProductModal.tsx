@@ -215,7 +215,6 @@ export default function AddProductModal({
           id_producto: nuevoProductoId,
           codigo_lote: buildInitialLoteCode(nuevoProductoId),
           caducidad: trimOrNull(caducidadProxima),
-          cantidad_inicial: stockInicial,
           stock_disponible: stockInicial,
           fecha_entrada: toSqlDateTimeOrNull(ultimaEntrada),
           id_proveedor: idProveedor === "" ? null : idProveedor,

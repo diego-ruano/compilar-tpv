@@ -487,7 +487,6 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 					codigo_lote: caso.entrada.codigo_lote,
 					fecha_entrada: caso.entrada.fecha_entrada,
 					caducidad: caso.entrada.caducidad,
-					cantidad_inicial: caso.entrada.cantidad_inicial,
 					stock_disponible: caso.entrada.stock_disponible,
 					coste_unitario: caso.entrada.coste_unitario,
 					id_proveedor: caso.entrada.id_proveedor,

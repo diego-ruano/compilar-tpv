@@ -226,8 +226,8 @@ mod tests {
     const SEMILLA_LOTE: &[&str] = &[
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod', 'cat', 'Cerveza', 2.5);",
-        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Cantidad_Inicial, Stock_Disponible)
-           VALUES ('lote', 'prod', 'L-1', '2026-01-01 10:00:00', 10, 10);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Stock_Disponible)
+           VALUES ('lote', 'prod', 'L-1', '2026-01-01 10:00:00', 10);",
         "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
            VALUES ('mov', 'lote', 'ALTA', 10, 10, '2026-01-01 10:00:00');",
     ];

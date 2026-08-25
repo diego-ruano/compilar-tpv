@@ -182,15 +182,9 @@ inventarioRoutes.patch("/lotes/:id", async (c) => {
 	if (id == null) return badRequest(c, "id_lote inválido");
 	const p = await parseBody(c, S.ajusteLoteSchema);
 	if (!p.ok) return p.res;
-	// Coherencia (INV-01): el ajuste no puede dejar más disponible del que entró.
+	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
 	const info = await tenantQuery(c.env, c.get("tenantId"), (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
-	if (p.data.stock_disponible > info.cantidad_inicial + 1e-9) {
-		return c.json(
-			{ error: "El stock disponible no puede superar la cantidad inicial del lote." },
-			400,
-		);
-	}
 	await apply(c, cmd.ajustarLote(id, p.data, info.stock_disponible));
 	return c.json({ ok: true });
 });

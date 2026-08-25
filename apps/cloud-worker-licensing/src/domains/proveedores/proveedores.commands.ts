@@ -195,15 +195,14 @@ export function crearProducto(input: CreateProductoInput): BuiltCommand {
 			kind: "execute",
 			sql: `
 				INSERT OR IGNORE INTO Lotes_Producto
-					(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Cantidad_Inicial, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
+					(ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Caducidad, Stock_Disponible, Coste_Unitario, ID_Proveedor, Notas)
 				VALUES
-					(?1, ?2, ?3, datetime('now','localtime'), NULL, ?4, ?5, NULL, ?6, ?7);
+					(?1, ?2, ?3, datetime('now','localtime'), NULL, ?4, NULL, ?5, ?6);
 			`,
 			args: [
 				idLoteInicial,
 				REF_ID,
 				{ $ref: "codigo_lote" },
-				stock,
 				stock,
 				cloudPayload.id_proveedor,
 				"Lote inicial creado desde Proveedores",
