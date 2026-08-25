@@ -1,5 +1,6 @@
 // components/mesasComponents/MesaComandaModal.tsx
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Printer, X, ImageOff } from "lucide-react";
 import { resolveImageUrl } from "../../shared/lib/imageUrl";
 import ImageWithFallback from "../../shared/ui/ImageWithFallback";
@@ -7,6 +8,7 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { useSyncSignal } from "../../shared/stores/useSyncSignal";
 import { shouldReloadTicket } from "../../shared/lib/syncStatements";
 import type { MesaMeta } from "./types";
+import { reservasKeys } from "../reservas/reservasQueries";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
 import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
@@ -469,6 +471,13 @@ export default function MesaComandaModal({
 
     // Lo que la propia pantalla acaba de hacer con la reserva. `null` = manda la foto del plano.
     const [estadoReserva, setEstadoReserva] = useState<"ACTIVA" | "FINALIZADA" | null>(null);
+
+    // Marcar la llegada o la salida escribe en Reservas, y esa pantalla lee de su propia cache:
+    // sin invalidarla podia seguir enseniando el estado viejo (staleTime 30 s) al navegar.
+    const qc = useQueryClient();
+    const invalidarReservas = useCallback(() => {
+        void qc.invalidateQueries({ queryKey: reservasKeys.all });
+    }, [qc]);
 
     // Al abrir, o si se salta a otra mesa/reserva, vuelve a mandar el plano.
     useEffect(() => {
@@ -1025,6 +1034,7 @@ export default function MesaComandaModal({
                                     try {
                                         await reservaMarcarActivaAhora(reserva.idReserva);
                                         setEstadoReserva("ACTIVA");
+                                        invalidarReservas();
                                         notifyChanged();
 
                                         setLoadingTicket(true);
@@ -1059,6 +1069,7 @@ export default function MesaComandaModal({
                                     try {
                                         await reservaFinalizar(reserva.idReserva);
                                         setEstadoReserva("FINALIZADA");
+                                        invalidarReservas();
                                         notifyChanged();
                                     } catch (e) {
                                         console.error(e);

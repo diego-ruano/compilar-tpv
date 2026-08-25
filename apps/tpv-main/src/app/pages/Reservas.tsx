@@ -493,6 +493,13 @@ export default function Reservas() {
       const telTrim = form.telefono.trim();
       const notaTrim = form.nota?.trim() || "";
 
+      // El estado NO se toca al editar: mandarlo fijo a "ACTIVA" resucitaba una reserva ya
+      // cerrada desde la mesa ("el cliente abandona la mesa") en cuanto alguien la modificaba,
+      // y de paso volvia a bloquear el hueco. En un alta va null: el backend fuerza PROXIMA.
+      const estadoActual = reservaEditandoId
+        ? (reservasMes.find((r) => r.id === reservaEditandoId)?.estado ?? null)
+        : null;
+
       const ok = await saveReserva.mutateAsync({
         idReserva: reservaEditandoId,
         diaYMD: seleccionadoClave,
@@ -500,7 +507,7 @@ export default function Reservas() {
         turno: turno as TurnoApi,
         comensales: Number(form.comensales),
         nota: notaTrim ? notaTrim : null,
-        estado: "ACTIVA",
+        estado: estadoActual,
 
         idMesa: form.idMesa,
 
