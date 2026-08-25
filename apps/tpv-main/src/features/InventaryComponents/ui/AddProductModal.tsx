@@ -230,6 +230,13 @@ export function AddProductModal({
                 ),
             );
 
+            // Editando, el lote se añade sólo si se pide: el interruptor arranca apagado
+            // para que guardar un cambio de nombre no exija rellenar un lote.
+            setCrearLoteInicial(false);
+            setCodigoLoteInicial("");
+            setCaducidadLoteInicial("");
+            setCantidadInicialLote("");
+
             setAlergenosOpen(false);
         })().catch((e) => {
             console.error("Error cargando modal producto:", e);
@@ -251,12 +258,11 @@ export function AddProductModal({
     };
 
     const loteInicialOk = useMemo(() => {
-        if (isEdit) return true;
         if (!crearLoteInicial) return true;
         if (!codigoLoteInicial.trim()) return false;
         const ci = Number(cantidadInicialLote.replace(",", "."));
         return Number.isFinite(ci) && ci >= 0;
-    }, [isEdit, crearLoteInicial, codigoLoteInicial, cantidadInicialLote]);
+    }, [crearLoteInicial, codigoLoteInicial, cantidadInicialLote]);
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
@@ -267,7 +273,7 @@ export function AddProductModal({
         }
 
         if (!loteInicialOk) {
-            toast.info("Validación", "Revisa el lote inicial (código y cantidad).");
+            toast.info("Validación", "Revisa el lote (código y cantidad).");
             return;
         }
 
@@ -354,7 +360,7 @@ export function AddProductModal({
                 }
             }
 
-            if (!isEdit && crearLoteInicial) {
+            if (crearLoteInicial) {
                 const ci = Number(cantidadInicialLote.replace(",", "."));
 
                 await createLote.mutateAsync({
@@ -571,100 +577,102 @@ export function AddProductModal({
                         </p>
                     </div>
 
-                    {!isEdit && (
-                        <div className="md:col-span-2 rounded-2xl border border-border bg-surface-2 p-4">
-                            <div className="flex items-center justify-between gap-3">
-                                <div>
-                                    <p className="font-extrabold text-fg">Lote inicial</p>
-                                    <p className="text-sm text-fg-muted">
-                                        Recomendado: así ya tienes stock y FEFO desde el primer día.
-                                    </p>
-                                </div>
-
-                                <button
-                                    type="button"
-                                    disabled={loading}
-                                    onClick={() => setCrearLoteInicial((v) => !v)}
-                                    className={[
-                                        "relative inline-flex h-8 w-14 items-center rounded-full transition",
-                                        crearLoteInicial ? "bg-accent" : "bg-negro/20",
-                                        loading ? "opacity-60" : "",
-                                    ].join(" ")}
-                                    aria-pressed={crearLoteInicial}
-                                >
-                                    <span
-                                        className={[
-                                            "inline-block h-7 w-7 transform rounded-full bg-surface shadow transition",
-                                            crearLoteInicial ? "translate-x-6" : "translate-x-1",
-                                        ].join(" ")}
-                                    />
-                                </button>
+                    <div className="md:col-span-2 rounded-2xl border border-border bg-surface-2 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="font-extrabold text-fg">
+                                    {isEdit ? "Añadir lote" : "Lote inicial"}
+                                </p>
+                                <p className="text-sm text-fg-muted">
+                                    {isEdit
+                                        ? "Se crea un lote nuevo para este producto al guardar."
+                                        : "Recomendado: así ya tienes stock y FEFO desde el primer día."}
+                                </p>
                             </div>
 
-                            {crearLoteInicial && (
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-                                    <div>
-                                        <label
-                                            htmlFor="producto-lote-codigo"
-                                            className="block text-sm font-semibold"
-                                        >
-                                            Código lote *
-                                        </label>
-                                        <input
-                                            id="producto-lote-codigo"
-                                            value={codigoLoteInicial}
-                                            onChange={(e) => setCodigoLoteInicial(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            disabled={loading}
-                                            required
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label
-                                            htmlFor="producto-lote-caducidad"
-                                            className="block text-sm font-semibold"
-                                        >
-                                            Caducidad
-                                        </label>
-                                        <input
-                                            id="producto-lote-caducidad"
-                                            type="date"
-                                            value={caducidadLoteInicial}
-                                            onChange={(e) => setCaducidadLoteInicial(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            disabled={loading}
-                                        />
-                                    </div>
-
-                                    <div>
-                                        <label
-                                            htmlFor="producto-lote-cantidad"
-                                            className="block text-sm font-semibold"
-                                        >
-                                            Cantidad inicial *
-                                        </label>
-                                        <input
-                                            id="producto-lote-cantidad"
-                                            type="number"
-                                            step="0.01"
-                                            value={cantidadInicialLote}
-                                            onChange={(e) => setCantidadInicialLote(e.target.value)}
-                                            className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                            disabled={loading}
-                                            required
-                                        />
-                                    </div>
-
-                                    {!loteInicialOk && (
-                                        <p className="md:col-span-3 text-xs text-danger font-semibold">
-                                            Revisa el código y la cantidad del lote inicial.
-                                        </p>
-                                    )}
-                                </div>
-                            )}
+                            <button
+                                type="button"
+                                disabled={loading}
+                                onClick={() => setCrearLoteInicial((v) => !v)}
+                                className={[
+                                    "relative inline-flex h-8 w-14 items-center rounded-full transition",
+                                    crearLoteInicial ? "bg-accent" : "bg-negro/20",
+                                    loading ? "opacity-60" : "",
+                                ].join(" ")}
+                                aria-pressed={crearLoteInicial}
+                            >
+                                <span
+                                    className={[
+                                        "inline-block h-7 w-7 transform rounded-full bg-surface shadow transition",
+                                        crearLoteInicial ? "translate-x-6" : "translate-x-1",
+                                    ].join(" ")}
+                                />
+                            </button>
                         </div>
-                    )}
+
+                        {crearLoteInicial && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                                <div>
+                                    <label
+                                        htmlFor="producto-lote-codigo"
+                                        className="block text-sm font-semibold"
+                                    >
+                                        Código lote *
+                                    </label>
+                                    <input
+                                        id="producto-lote-codigo"
+                                        value={codigoLoteInicial}
+                                        onChange={(e) => setCodigoLoteInicial(e.target.value)}
+                                        className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        disabled={loading}
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <label
+                                        htmlFor="producto-lote-caducidad"
+                                        className="block text-sm font-semibold"
+                                    >
+                                        Caducidad
+                                    </label>
+                                    <input
+                                        id="producto-lote-caducidad"
+                                        type="date"
+                                        value={caducidadLoteInicial}
+                                        onChange={(e) => setCaducidadLoteInicial(e.target.value)}
+                                        className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        disabled={loading}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label
+                                        htmlFor="producto-lote-cantidad"
+                                        className="block text-sm font-semibold"
+                                    >
+                                        Cantidad inicial *
+                                    </label>
+                                    <input
+                                        id="producto-lote-cantidad"
+                                        type="number"
+                                        step="0.01"
+                                        value={cantidadInicialLote}
+                                        onChange={(e) => setCantidadInicialLote(e.target.value)}
+                                        className="border border-border rounded-xl px-3 py-2 w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        disabled={loading}
+                                        required
+                                    />
+                                </div>
+
+                                {!loteInicialOk && (
+                                    <p className="md:col-span-3 text-xs text-danger font-semibold">
+                                        Revisa el código y la cantidad del lote.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
 
                     <div className="md:col-span-2">
                         <button
