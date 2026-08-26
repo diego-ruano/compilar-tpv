@@ -1,10 +1,13 @@
 import "../Global.css";
 import Layout from "./layouts/layout";
+import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
+import { fetchSetupPendiente } from "../features/login/loginApi";
 import Login from "./pages/Login";
+import SetupInicial from "./pages/SetUpInicial";
 
 // ✅ importa tu provider
 import { ToastProvider } from "../shared/toast";
@@ -20,7 +23,35 @@ function AppInner() {
     // Toast al llegar una notificación nueva (no-op sin sesión).
     useNotificacionesToast();
 
-    if (!role) return <Login />;
+    // Primer arranque: elegir el PIN va ANTES del login. Antes se entraba con el PIN del seed y
+    // se cambiaba después, o sea que había que teclear un PIN que no era de nadie. Es una lectura
+    // de la BD local (en un Handy responde que no sin salir a la red); si falla, login y ya.
+    const [setupPendiente, setSetupPendiente] = useState<boolean | null>(null);
+    useEffect(() => {
+        if (role) return;
+
+        let vivo = true;
+        fetchSetupPendiente()
+            .then((r) => {
+                if (vivo) setSetupPendiente(r.pendiente);
+            })
+            .catch((e) => {
+                console.error("No se pudo comprobar el setup inicial:", e);
+                if (vivo) setSetupPendiente(false);
+            });
+        return () => {
+            vivo = false;
+        };
+    }, [role]);
+
+    if (!role) {
+        if (setupPendiente === null) return null;
+        if (setupPendiente) {
+            // Al terminar se cae al login, que es donde se estrena el PIN recién elegido.
+            return <SetupInicial onCompletado={() => setSetupPendiente(false)} />;
+        }
+        return <Login />;
+    }
 
     if (requiresSetup) {
         if (location.pathname !== "/setup") {

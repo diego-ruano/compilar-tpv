@@ -4,7 +4,7 @@
 
 use tpv_contracts::login::{
     CompleteInitialSetupInput, LoginOk, LoginUserArgs, PunchInput, PunchStatus, PunchStatusArgs,
-    SetTurnoPartidoInput, UserListItem,
+    SetTurnoPartidoInput, SetupPendiente, UserListItem,
 };
 use tpv_domain::login::{hash_pin, limpiar_opcional, requerido, validate_email_basic};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
@@ -23,6 +23,10 @@ pub fn hash_password(pin: &str) -> AppResult<String> {
 
 pub async fn list_login_users(repo: &dyn LoginRepository) -> AppResult<Vec<UserListItem>> {
     repo.list_login_users().await
+}
+
+pub async fn setup_pendiente(repo: &dyn LoginRepository) -> AppResult<SetupPendiente> {
+    repo.setup_pendiente().await
 }
 
 pub async fn login_user(
@@ -88,8 +92,10 @@ pub async fn complete_initial_setup(
     input: CompleteInitialSetupInput,
 ) -> AppResult<()> {
     let email_nuevo = requerido(&input.email_nuevo, "email_nuevo").map_err(AppError::validation)?;
-    let pin_actual = requerido(&input.pin_actual, "pin_actual").map_err(AppError::validation)?;
     let pin_nuevo = requerido(&input.pin_nuevo, "pin_nuevo").map_err(AppError::validation)?;
+    // El PIN actual sólo viaja por el camino con sesión (Handy → worker). En el primer arranque
+    // el setup ocurre ANTES del login y no hay ninguno que confirmar.
+    let pin_actual = input.pin_actual.clone().unwrap_or_default();
 
     if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
@@ -150,6 +156,9 @@ mod tests {
     impl LoginRepository for FakeLogin {
         async fn list_login_users(&self) -> AppResult<Vec<UserListItem>> {
             Ok(vec![])
+        }
+        async fn setup_pendiente(&self) -> AppResult<SetupPendiente> {
+            unimplemented!("no usado")
         }
         async fn get_today_punch_status(&self, _: &str) -> AppResult<PunchStatus> {
             unimplemented!("no usado")

@@ -128,7 +128,13 @@ export type ComandaBarraRow = { ID_Comanda: string, Fecha_Hora_Apertura: string,
 
 export type ComandaRow = { id_comanda: string, id_mesa: string, id_trabajador: string | null, id_reserva: string | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: number, estado: string, };
 
-export type CompleteInitialSetupInput = { id_usuario: string, pin_actual: string, pin_nuevo: string, email_nuevo: string, };
+export type CompleteInitialSetupInput = { id_usuario: string, 
+/**
+ * Sólo lo manda el camino que llega CON sesión (el Handy, vía worker). El setup del primer
+ * arranque ocurre ANTES del login: ahí no hay PIN que confirmar y el permiso es otro
+ * (`Requiere_Setup`), así que llega vacío.
+ */
+pin_actual?: string, pin_nuevo: string, email_nuevo: string, };
 
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).
@@ -638,6 +644,12 @@ export type SetPredeterminadoInput = { fecha_lunes: string, };
 export type SetProductoAlergenosInput = { id_producto: string, ids_alergenos: Array<string>, };
 
 export type SetTurnoPartidoInput = { id_usuario: string, turno_partido: boolean, fecha?: string, };
+
+/**
+ * ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir si la
+ * primera pantalla es la de elegir PIN o la de login.
+ */
+export type SetupPendiente = { pendiente: boolean, id_usuario?: string, nombre?: string, email?: string, };
 
 export type SigB64 = { sigB64: string, };
 

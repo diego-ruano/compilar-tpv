@@ -1784,6 +1784,7 @@ pub fn run() {
             printer_print_test,
             // auth / login
             commands::login::list_login_users,
+            commands::login::setup_pendiente,
             commands::login::login_user,
             commands::login::hash_password,
             commands::login::get_today_punch_status,

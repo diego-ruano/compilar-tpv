@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import {
     Check,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import {
     completeInitialSetup,
+    fetchSetupPendiente,
     uploadInitialSetupToCloud,
 } from "../../features/login/loginApi";
 import { useAuth } from "../../shared/stores/useAuth";
@@ -17,23 +18,67 @@ import { useMode } from "../../shared/stores/useMode";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
 
-export default function SetupInicial() {
+/**
+ * Elegir el PIN del primer arranque. Se llega aqui de dos maneras:
+ *
+ *  - SIN sesion, nada mas abrir la app recien instalada (lo normal): `App` la enseña en vez del
+ *    login y al terminar avisa por `onCompletado` para que se pase al login con el PIN nuevo.
+ *  - CON sesion, como red de seguridad: si alguien entra y su usuario sigue marcado, el login
+ *    manda a /setup y al terminar se sigue a la app.
+ */
+export default function SetupInicial({ onCompletado }: { onCompletado?: () => void }) {
     const navigate = useNavigate();
 
     const mode = useMode((s) => s.mode);
 
-    const idUsuario = useAuth((s) => s.idUsuario);
-    const nombre = useAuth((s) => s.nombre);
+    const idUsuarioSesion = useAuth((s) => s.idUsuario);
+    const nombreSesion = useAuth((s) => s.nombre);
     const emailPrev = useAuth((s) => s.email);
     const setSession = useAuth((s) => s.setSession);
     const role = useAuth((s) => s.role);
 
-    const [pinActual, setPinActual] = useState("");
+    // Sin sesion no hay de donde sacar el usuario: se pregunta al equipo quien tiene el setup
+    // pendiente (el admin que siembra la BD al crearse).
+    const [pendiente, setPendiente] = useState<{
+        idUsuario: string | null;
+        nombre: string | null;
+        email: string | null;
+    } | null>(null);
+
     const [pinNuevo, setPinNuevo] = useState("");
     const [pinNuevo2, setPinNuevo2] = useState("");
     const [email, setEmail] = useState(emailPrev ?? "");
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (idUsuarioSesion) return;
+
+        let vivo = true;
+        fetchSetupPendiente()
+            .then((r) => {
+                if (!vivo) return;
+                setPendiente({
+                    idUsuario: r.id_usuario,
+                    nombre: r.nombre,
+                    email: r.email,
+                });
+                // El email del seed (admin@local) es un relleno, no algo que confirmar: se deja el
+                // campo vacio para que se escriba el de verdad.
+                if (r.email && !r.email.endsWith("@local")) {
+                    setEmail((prev) => (prev ? prev : r.email!));
+                }
+            })
+            .catch((e) => {
+                console.error("No se pudo leer el estado del setup inicial:", e);
+            });
+        return () => {
+            vivo = false;
+        };
+    }, [idUsuarioSesion]);
+
+    const idUsuario = idUsuarioSesion ?? pendiente?.idUsuario ?? null;
+    const nombre = nombreSesion ?? pendiente?.nombre ?? null;
 
     if (mode === "handy") {
         return <Navigate to="/VentaRapida" replace />;
@@ -43,7 +88,6 @@ export default function SetupInicial() {
     const canSave =
         !saving &&
         !!idUsuario &&
-        pinActual.length >= 4 &&
         pinNuevo.length >= 4 &&
         pinNuevo === pinNuevo2 &&
         emailTrimmed.includes("@") &&
@@ -76,7 +120,6 @@ export default function SetupInicial() {
         try {
             await completeInitialSetup({
                 idUsuario,
-                pinActual,
                 pinNuevo,
                 emailNuevo: cleanEmail,
             });
@@ -94,16 +137,22 @@ export default function SetupInicial() {
                 console.warn("uploadInitialSetupToCloud falló (setup local OK):", e);
             }
 
-            setSession({
-                role: role!,
-                idUsuario,
-                idTrabajador: null,
-                nombre: nombre!,
-                requiresSetup: false,
-                email: cleanEmail,
-            });
+            if (role) {
+                setSession({
+                    role,
+                    idUsuario,
+                    idTrabajador: null,
+                    nombre: nombre ?? "",
+                    requiresSetup: false,
+                    email: cleanEmail,
+                });
 
-            navigate("/", { replace: true });
+                navigate("/", { replace: true });
+                return;
+            }
+
+            // Primer arranque: no se entra sin mas, se pasa por el login con el PIN elegido.
+            onCompletado?.();
         } catch (e: any) {
             const msg =
                 typeof e === "string"
@@ -115,7 +164,6 @@ export default function SetupInicial() {
             setError(msg);
         } finally {
             setSaving(false);
-            setPinActual("");
             setPinNuevo("");
             setPinNuevo2("");
         }
@@ -153,8 +201,8 @@ export default function SetupInicial() {
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
                             Hola, <span className="font-semibold text-fg">{nombre ?? "usuario"}</span>.
-                            Antes de empezar necesitamos proteger tu acceso y confirmar
-                            tu correo.
+                            Elige el PIN con el que vas a entrar y dinos tu correo. Despues
+                            iniciaras sesion con ese PIN.
                         </p>
 
                         <div className="mt-7 space-y-4">
@@ -210,37 +258,13 @@ export default function SetupInicial() {
                     </div>
 
                     <div className="mt-6 grid gap-5">
-                        <div>
-                            <label
-                                htmlFor="setup-pin-actual"
-                                className="text-sm font-semibold text-fg"
-                            >
-                                PIN actual
-                            </label>
-                            <Input
-                                id="setup-pin-actual"
-                                type="password"
-                                value={pinActual}
-                                onChange={(e) =>
-                                    setPinActual(
-                                        e.target.value.replace(/\D/g, "").slice(0, 6),
-                                    )
-                                }
-                                className="mt-2 h-12 px-4 text-base tracking-[0.3em]"
-                                placeholder="••••"
-                                inputMode="numeric"
-                                autoComplete="current-password"
-                                maxLength={6}
-                            />
-                        </div>
-
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label
                                     htmlFor="setup-pin-nuevo"
                                     className="text-sm font-semibold text-fg"
                                 >
-                                    PIN nuevo
+                                    Tu PIN
                                 </label>
                                 <Input
                                     id="setup-pin-nuevo"

@@ -81,9 +81,28 @@ pub struct SetTurnoPartidoInput {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CompleteInitialSetupInput {
     pub id_usuario: String,
-    pub pin_actual: String,
+    /// Sólo lo manda el camino que llega CON sesión (el Handy, vía worker). El setup del primer
+    /// arranque ocurre ANTES del login: ahí no hay PIN que confirmar y el permiso es otro
+    /// (`Requiere_Setup`), así que llega vacío.
+    #[serde(default)]
+    #[ts(optional)]
+    pub pin_actual: Option<String>,
     pub pin_nuevo: String,
     pub email_nuevo: String,
+}
+
+/// ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir si la
+/// primera pantalla es la de elegir PIN o la de login.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct SetupPendiente {
+    pub pendiente: bool,
+    #[ts(optional)]
+    pub id_usuario: Option<String>,
+    #[ts(optional)]
+    pub nombre: Option<String>,
+    #[ts(optional)]
+    pub email: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

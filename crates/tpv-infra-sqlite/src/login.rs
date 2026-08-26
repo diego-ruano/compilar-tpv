@@ -13,7 +13,7 @@ use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::login::LoginRepository;
-use tpv_contracts::login::{LoginOk, PunchParte, PunchStatus, UserListItem};
+use tpv_contracts::login::{LoginOk, PunchParte, PunchStatus, SetupPendiente, UserListItem};
 use tpv_domain::login::{
     hash_needs_upgrade, hash_pin, verify_pin, LoginUserRecord, SetupInfo,
 };
@@ -571,6 +571,49 @@ impl LoginRepository for SqliteLoginRepository {
         Ok(out)
     }
 
+    async fn setup_pendiente(&self) -> AppResult<SetupPendiente> {
+        let g = self.db.read().await;
+        let db = &g;
+
+        // El seed deja UN admin con Requiere_Setup = 1 y el flag se apaga al completarlo, así que
+        // esto es "equipo recién instalado". Se lee sin sesión: es lo que decide si la primera
+        // pantalla es la de elegir PIN o la de login.
+        let mut rows = db
+            .query(
+                r#"
+                SELECT ID_Usuario, Nombre, Email
+                FROM Usuarios
+                WHERE Requiere_Setup = 1 AND Estado = 'Activo'
+                ORDER BY ID_Usuario ASC
+                LIMIT 1;
+                "#,
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+
+        let Some(row) = rows.next().await.map_err(db_err)? else {
+            return Ok(SetupPendiente {
+                pendiente: false,
+                id_usuario: None,
+                nombre: None,
+                email: None,
+            });
+        };
+
+        let texto = |idx: i32| match row.get_value(idx) {
+            Ok(Value::Text(s)) => Some(s),
+            _ => None,
+        };
+
+        Ok(SetupPendiente {
+            pendiente: true,
+            id_usuario: texto(0),
+            nombre: texto(1),
+            email: texto(2),
+        })
+    }
+
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {
         let db = self.db.read().await;
         build_punch_status(&db, id_usuario, &today_ymd()).await
@@ -633,10 +676,14 @@ impl LoginRepository for SqliteLoginRepository {
         })
     }
 
+    /// `_pin_actual` no se usa aquí: el setup del primer arranque ocurre ANTES del login (no hay
+    /// PIN que confirmar, y el que hay es el del seed, que no es secreto). Quien autoriza es
+    /// `Requiere_Setup = 1`, que además se apaga al aplicarlo: la puerta se cierra tras el primer
+    /// uso. El adaptador HTTP sí lo manda, porque el worker lo exige por su cuenta.
     async fn complete_initial_setup(
         &self,
         id_usuario: &str,
-        pin_actual: &str,
+        _pin_actual: &str,
         pin_nuevo: &str,
         email_nuevo: &str,
     ) -> AppResult<()> {
@@ -648,8 +695,6 @@ impl LoginRepository for SqliteLoginRepository {
         if info.requiere_setup == 0 {
             return Err(AppError::conflict("Este usuario ya completó el setup inicial"));
         }
-
-        verify_pin(pin_actual, &info.password_hash).map_err(AppError::validation)?;
 
         if query_email_in_use(&db, email_nuevo, id_usuario).await? {
             return Err(AppError::conflict("Ese email ya está en uso"));

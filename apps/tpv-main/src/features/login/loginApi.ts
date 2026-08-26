@@ -22,6 +22,14 @@ export type LoginOk = {
     requiere_setup: number;
 };
 
+/** Estado del setup del primer arranque. Se consulta SIN sesion, al abrir la app. */
+export type SetupPendiente = {
+    pendiente: boolean;
+    id_usuario: string | null;
+    nombre: string | null;
+    email: string | null;
+};
+
 export type PunchParte = {
     parte: number;
     entrada: string | null;
@@ -137,6 +145,21 @@ export async function listLoginUsers(): Promise<DbUser[]> {
     return (rows ?? []).map(mapDbUser);
 }
 
+/**
+ * ¿Queda por elegir el PIN del primer arranque? Decide si la primera pantalla es la de setup o
+ * la de login, asi que se pregunta antes de tener sesion. En un Handy siempre es `false`: el
+ * setup es cosa de la Main.
+ */
+export async function fetchSetupPendiente(): Promise<SetupPendiente> {
+    const r = await invokeClient<any>("setup_pendiente");
+    return {
+        pendiente: !!r?.pendiente,
+        id_usuario: toNullableStr(r?.id_usuario),
+        nombre: toNullableStr(r?.nombre),
+        email: toNullableStr(r?.email),
+    };
+}
+
 export async function loginUser(params: {
     idUsuario: string;
     pin: string;
@@ -213,14 +236,12 @@ export async function uploadInitialSetupToCloud(params: {
 
 export async function completeInitialSetup(params: {
     idUsuario: string;
-    pinActual: string;
     pinNuevo: string;
     emailNuevo: string;
 }): Promise<string> {
     const data = await invokeClient<any>("complete_initial_setup", {
         args: {
             id_usuario: params.idUsuario,
-            pin_actual: String(params.pinActual ?? ""),
             pin_nuevo: String(params.pinNuevo ?? ""),
             email_nuevo: String(params.emailNuevo ?? ""),
         },

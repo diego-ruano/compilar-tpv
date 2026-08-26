@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::login::{LoginOk, PunchStatus, UserListItem};
+use tpv_contracts::login::{LoginOk, PunchStatus, SetupPendiente, UserListItem};
 
 use crate::error::AppResult;
 
@@ -15,6 +15,9 @@ use crate::error::AppResult;
 pub trait LoginRepository: Send + Sync {
     /* Lecturas */
     async fn list_login_users(&self) -> AppResult<Vec<UserListItem>>;
+    /// ¿Hay un usuario con el setup inicial pendiente? Lectura sin sesión: decide la primera
+    /// pantalla del arranque.
+    async fn setup_pendiente(&self) -> AppResult<SetupPendiente>;
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus>;
 
     /* Operaciones que verifican el PIN dentro del adaptador */
@@ -27,7 +30,9 @@ pub trait LoginRepository: Send + Sync {
         Ok(0)
     }
 
-    /// Verifica el PIN actual, comprueba el email y aplica el setup inicial (cambia PIN + email).
+    /// Comprueba el email y aplica el setup inicial (cambia PIN + email). El permiso es
+    /// `Requiere_Setup = 1`, que se apaga al aplicarlo: la operación se cierra sola tras el primer
+    /// uso. `pin_actual` sólo lo usa el adaptador HTTP (el worker sí lo exige).
     async fn complete_initial_setup(
         &self,
         id_usuario: &str,

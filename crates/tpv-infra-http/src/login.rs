@@ -10,7 +10,7 @@ use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
 use tpv_application::ports::login::LoginRepository;
-use tpv_contracts::login::{LoginOk, PunchStatus, UserListItem};
+use tpv_contracts::login::{LoginOk, PunchStatus, SetupPendiente, UserListItem};
 
 use crate::CloudClient;
 
@@ -28,6 +28,18 @@ impl HttpLoginRepository {
 impl LoginRepository for HttpLoginRepository {
     async fn list_login_users(&self) -> AppResult<Vec<UserListItem>> {
         self.client.get_json("/v1/login/users").await
+    }
+
+    /// El Handy nunca hace el setup inicial: es cosa de la Main, que es donde vive el admin del
+    /// negocio. Para el arranque del Handy la respuesta es siempre "no hay nada pendiente", y así
+    /// la primera pantalla es el login sin preguntar a la nube.
+    async fn setup_pendiente(&self) -> AppResult<SetupPendiente> {
+        Ok(SetupPendiente {
+            pendiente: false,
+            id_usuario: None,
+            nombre: None,
+            email: None,
+        })
     }
 
     async fn get_today_punch_status(&self, id_usuario: &str) -> AppResult<PunchStatus> {

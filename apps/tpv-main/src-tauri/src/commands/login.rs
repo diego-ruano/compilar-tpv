@@ -6,7 +6,7 @@ use tauri::State;
 use tpv_application::use_cases::login as uc;
 use tpv_contracts::login::{
     CompleteInitialSetupInput, LoginOk, LoginUserArgs, PunchInput, PunchStatus, PunchStatusArgs,
-    SetTurnoPartidoInput, UserListItem,
+    SetTurnoPartidoInput, SetupPendiente, UserListItem,
 };
 
 use crate::AppState;
@@ -22,6 +22,14 @@ pub fn hash_password(pin: String) -> Result<String, AppErrorDto> {
 pub async fn list_login_users(state: State<'_, AppState>) -> Result<Vec<UserListItem>, AppErrorDto> {
     let repo = state.login_repo().await?;
     Ok(uc::list_login_users(repo.as_ref()).await?)
+}
+
+/// ¿Queda por elegir el PIN del primer arranque? Lo pregunta la app ANTES del login para saber
+/// qué pantalla enseñar.
+#[tauri::command]
+pub async fn setup_pendiente(state: State<'_, AppState>) -> Result<SetupPendiente, AppErrorDto> {
+    let repo = state.login_repo().await?;
+    Ok(uc::setup_pendiente(repo.as_ref()).await?)
 }
 
 #[tauri::command]
