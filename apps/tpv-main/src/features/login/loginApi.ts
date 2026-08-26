@@ -25,9 +25,23 @@ export type LoginOk = {
 /** Estado del setup del primer arranque. Se consulta SIN sesion, al abrir la app. */
 export type SetupPendiente = {
     pendiente: boolean;
+    /**
+     * La BD local no tiene ni un usuario. En una instalacion nueva es imposible (el arranque
+     * siembra el admin), asi que significa que este equipo tiene licencia pero ha perdido su
+     * `data.db`: la primera pantalla es la de recuperacion, no la de elegir PIN.
+     */
+    requiere_recuperacion: boolean;
     id_usuario: string | null;
     nombre: string | null;
     email: string | null;
+};
+
+/** Lo que devuelve la recuperacion: que se restauro y desde que punto sigue el catch-up. */
+export type BootstrapResultado = {
+    seq: number;
+    filas_restauradas: number;
+    tablas_restauradas: string[];
+    tablas_desconocidas: string[];
 };
 
 export type PunchParte = {
@@ -154,9 +168,24 @@ export async function fetchSetupPendiente(): Promise<SetupPendiente> {
     const r = await invokeClient<any>("setup_pendiente");
     return {
         pendiente: !!r?.pendiente,
+        requiere_recuperacion: !!r?.requiere_recuperacion,
         id_usuario: toNullableStr(r?.id_usuario),
         nombre: toNullableStr(r?.nombre),
         email: toNullableStr(r?.email),
+    };
+}
+
+/**
+ * Reconstruye la BD local desde la nube. Lo hace Rust entero (descarga firmada + restauracion en
+ * una transaccion); aqui solo se dispara y se espera, que puede ser un rato largo.
+ */
+export async function recuperarDesdeNube(): Promise<BootstrapResultado> {
+    const r = await invokeClient<any>("sync_bootstrap_desde_nube");
+    return {
+        seq: Number(r?.seq ?? 0),
+        filas_restauradas: Number(r?.filas_restauradas ?? 0),
+        tablas_restauradas: Array.isArray(r?.tablas_restauradas) ? r.tablas_restauradas : [],
+        tablas_desconocidas: Array.isArray(r?.tablas_desconocidas) ? r.tablas_desconocidas : [],
     };
 }
 

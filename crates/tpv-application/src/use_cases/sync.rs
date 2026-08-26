@@ -1,8 +1,14 @@
 //! Casos de uso de **sincronización nube → Main**. Orquestación fina sobre `SyncRepository`.
 
-use tpv_contracts::sync::{AplicacionSync, ApplySyncChangesArgs, OutboxEntry, SyncHealth};
+use serde_json::json;
 
-use crate::error::AppResult;
+use tpv_contracts::sync::{
+    AplicacionSync, ApplySyncChangesArgs, BootstrapResultado, BootstrapSnapshot, OutboxEntry,
+    SyncHealth,
+};
+
+use crate::error::{AppError, AppResult};
+use crate::ports::licensing::PairingService;
 use crate::ports::sync::SyncRepository;
 
 /// Aplica un lote de cambios recibidos de la nube. Si viene vacío, solo devuelve el checkpoint.
@@ -60,6 +66,28 @@ pub async fn health(repo: &dyn SyncRepository) -> AppResult<SyncHealth> {
     repo.health().await
 }
 
+/// Reconstruye la BD local desde la nube (`/v1/sync/bootstrap`) y deja el checkpoint en el `seq`
+/// de la foto. Es la salida cuando la Main ha perdido su `data.db`: el catch-up no sirve para eso
+/// (ver el puerto `bootstrap_restaurar`).
+///
+/// La guardia que impide restaurar sobre escrituras locales sin subir vive en el adaptador, dentro
+/// de la misma transacción que borra: comprobarla aquí dejaría una ventana entre el permiso y el
+/// borrado por la que puede colarse una venta.
+pub async fn bootstrap_desde_nube(
+    nube: &dyn PairingService,
+    repo: &dyn SyncRepository,
+) -> AppResult<BootstrapResultado> {
+    let raw = nube
+        .tpv_server_post_json("tpv", "/v1/sync/bootstrap", json!({}))
+        .await?;
+
+    let snapshot: BootstrapSnapshot = serde_json::from_value(raw).map_err(|e| {
+        AppError::external(format!("respuesta de bootstrap ilegible: {e}"))
+    })?;
+
+    repo.bootstrap_restaurar(snapshot).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +132,12 @@ mod tests {
         }
         async fn health(&self) -> AppResult<SyncHealth> {
             panic!("no usado")
+        }
+        async fn bootstrap_restaurar(
+            &self,
+            _: tpv_contracts::sync::BootstrapSnapshot,
+        ) -> AppResult<tpv_contracts::sync::BootstrapResultado> {
+            panic!("no se debe llegar a restaurar en estas pruebas")
         }
     }
 

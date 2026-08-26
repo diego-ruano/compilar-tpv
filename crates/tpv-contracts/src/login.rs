@@ -91,12 +91,18 @@ pub struct CompleteInitialSetupInput {
     pub email_nuevo: String,
 }
 
-/// ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir si la
-/// primera pantalla es la de elegir PIN o la de login.
+/// ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir cuál es la
+/// primera pantalla: elegir PIN, recuperar los datos, o el login de siempre.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct SetupPendiente {
     pub pendiente: bool,
+    /// La BD local no tiene NI UN usuario. En una instalación nueva es imposible (el arranque
+    /// siembra el admin), así que sólo se llega aquí por la guardia de aprovisionamiento: el
+    /// dispositivo tiene licencia pero ha perdido su `data.db`. La primera pantalla es la de
+    /// recuperación, que reconstruye la BD desde la nube.
+    #[serde(default)]
+    pub requiere_recuperacion: bool,
     #[ts(optional)]
     pub id_usuario: Option<String>,
     #[ts(optional)]

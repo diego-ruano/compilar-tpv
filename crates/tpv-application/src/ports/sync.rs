@@ -6,7 +6,9 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::sync::{AplicacionSync, OutboxEntry, SyncChange, SyncHealth};
+use tpv_contracts::sync::{
+    AplicacionSync, BootstrapResultado, BootstrapSnapshot, OutboxEntry, SyncChange, SyncHealth,
+};
 
 use crate::error::AppResult;
 
@@ -51,4 +53,19 @@ pub trait SyncRepository: Send + Sync {
     /// Foto de salud de la sincronización (profundidad de outbox, checkpoint, ops en
     /// cuarentena/fallando) para el panel de Configuración → Conectividad (SYNC-14).
     async fn health(&self) -> AppResult<SyncHealth>;
+
+    /// **Reconstruye** la BD local a partir de un volcado de la nube: vacía las tablas de negocio
+    /// y las rellena con el estado recibido, dejando el checkpoint en el `seq` de la foto.
+    ///
+    /// No es "aplicar cambios": es reemplazar. Se usa cuando la Main ha perdido su `data.db` y el
+    /// catch-up no puede ayudar (`Sync_Changes` sólo guarda 7 días, y el estado de una tabla no es
+    /// la suma de sus cambios recientes). Todo en UNA transacción: o queda la BD entera restaurada
+    /// o queda como estaba, nunca a medias.
+    ///
+    /// Va por la conexión CRUDA, como el resto del aplicador: si pasara por la captura, la Main se
+    /// replicaría a la nube el volcado que acaba de recibir de ella.
+    async fn bootstrap_restaurar(
+        &self,
+        snapshot: BootstrapSnapshot,
+    ) -> AppResult<BootstrapResultado>;
 }

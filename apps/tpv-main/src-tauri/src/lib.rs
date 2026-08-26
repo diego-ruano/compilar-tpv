@@ -47,7 +47,7 @@ use tpv_infra_http::{
     CLOUD_API_BASE,
 };
 use tpv_contracts::errors::AppErrorDto;
-use tpv_infra_licensing::PairingAdapter;
+use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
     avisos::SqliteAvisosScanRepository,
     reconciliacion::SqliteReconciliacionRepository,
@@ -187,6 +187,19 @@ struct SetPrinterArgs {
 /* =========================================================
    Helpers básicos
 ========================================================= */
+
+/// ¿Este dispositivo ya está **aprovisionado** (licencia activada alguna vez)? La señal es
+/// `license_state.json` con `tenant_id`, que vive FUERA de `data.db` (igual que la clave del
+/// dispositivo, en el keyring). Es lo que permite distinguir una instalación nueva —donde hay que
+/// sembrar el admin y pedir el PIN— de una BD perdida, donde sembrarlo fabricaría una credencial
+/// falsa y la replicaría a la nube. Ver `tpv_infra_sqlite::connection::seed_admin_if_empty`.
+fn dispositivo_aprovisionado(app_data_dir: &Path) -> bool {
+    use tpv_application::ports::licensing::LicensingService;
+    matches!(
+        LicensingAdapter::new(app_data_dir.to_path_buf()).load_state(),
+        Ok(Some(st)) if !st.tenant_id.trim().is_empty()
+    )
+}
 
 fn config_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("device_config.json")
@@ -780,9 +793,12 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
     // (WAL), tablas de control creadas y admin sembrado. La captura de escrituras al outbox está
     // SIEMPRE activa (también offline): el outbox es el log de cambios local; se drena a la nube
     // cuando el modo es "online".
-    let db = tpv_infra_sqlite::connection::init_main_db(&app_data_dir)
-        .await
-        .map_err(String::from)?;
+    let db = tpv_infra_sqlite::connection::init_main_db(
+        &app_data_dir,
+        dispositivo_aprovisionado(&app_data_dir),
+    )
+    .await
+    .map_err(String::from)?;
 
     // Drenado inmediato: cada escritura local que confirma en el outbox emite este evento; el
     // WS (useMainSocket) lo escucha y drena la nube al instante (sin esperar al poll de seguridad).
@@ -1715,9 +1731,12 @@ pub fn run() {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
                 // está SIEMPRE activa (también offline); se drena en "online".
                 let db = tauri::async_runtime::block_on(async {
-                    tpv_infra_sqlite::connection::init_main_db(&app_data_dir)
-                        .await
-                        .expect("Error init_main_db")
+                    tpv_infra_sqlite::connection::init_main_db(
+                        &app_data_dir,
+                        dispositivo_aprovisionado(&app_data_dir),
+                    )
+                    .await
+                    .expect("Error init_main_db")
                 });
                 // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
                 let h = handle.clone();
@@ -1965,6 +1984,7 @@ pub fn run() {
             commands::sync::sync_liberar_encoladas,
             commands::sync::sync_purge_applied_ops,
             commands::sync::sync_health,
+            commands::sync::sync_bootstrap_desde_nube,
             // tareas periódicas de fondo (runner de jobs)
             commands::jobs::jobs_status,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)

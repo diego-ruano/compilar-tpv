@@ -3,10 +3,13 @@
 //! Aplican en el SQLite local las operaciones recibidas por el WebSocket o por el catch-up.
 //! Solo tienen sentido en la Main (modo TPV con BD local); en otro caso `sync_repo` falla.
 
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::sync as uc;
-use tpv_contracts::sync::{AplicacionSync, ApplySyncChangesArgs, OutboxEntry, SyncHealth};
+use tpv_contracts::sync::{
+    AplicacionSync, ApplySyncChangesArgs, BootstrapResultado, OutboxEntry, SyncHealth,
+};
+use tpv_infra_licensing::PairingAdapter;
 
 use crate::AppState;
 use tpv_contracts::errors::AppErrorDto;
@@ -90,4 +93,24 @@ pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), Ap
 pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::health(repo.as_ref()).await?)
+}
+
+/// Reconstruye la BD local desde la nube. Es la salida de una Main que ha perdido su `data.db`:
+/// la pantalla de recuperación (a la que lleva `setup_pendiente.requiere_recuperacion`) lo llama y
+/// después ya se puede iniciar sesión con las credenciales de siempre.
+///
+/// Lo hace Rust de punta a punta —descarga firmada + restauración— en vez de bajar el volcado al
+/// frontend y devolverlo: son las tablas enteras del negocio, y cruzarlas dos veces por el puente
+/// IPC sólo para reenviarlas es copiar megabytes a cambio de nada.
+#[tauri::command]
+pub async fn sync_bootstrap_desde_nube(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BootstrapResultado, AppErrorDto> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    let repo = state.sync_repo().await?;
+    Ok(uc::bootstrap_desde_nube(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
 }

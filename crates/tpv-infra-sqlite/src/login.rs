@@ -37,6 +37,20 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
 }
 
+/// ¿Hay AL MENOS un usuario en la BD? Ver `setup_pendiente`: cero usuarios no es un estado
+/// alcanzable en una instalación nueva, es la firma de una BD perdida.
+async fn hay_algun_usuario<C: Reader>(conn: &C) -> AppResult<bool> {
+    let mut rows = conn
+        .query("SELECT COUNT(*) FROM Usuarios;", ())
+        .await
+        .map_err(db_err)?;
+    let n = match rows.next().await.map_err(db_err)? {
+        Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+        None => 0,
+    };
+    Ok(n > 0)
+}
+
 fn today_ymd() -> String {
     Local::now().format("%Y-%m-%d").to_string()
 }
@@ -593,8 +607,15 @@ impl LoginRepository for SqliteLoginRepository {
             .map_err(db_err)?;
 
         let Some(row) = rows.next().await.map_err(db_err)? else {
+            // Sin admin pendiente hay dos mundos distintos: el normal (ya se hizo el setup) y el
+            // de una BD que ha perdido a TODOS sus usuarios. Lo segundo es imposible en una
+            // instalación nueva —el arranque siembra el admin— así que sólo ocurre cuando la
+            // guardia de aprovisionamiento se negó a sembrar: la BD se perdió y hay que
+            // reconstruirla desde la nube, no fabricar un admin nuevo.
+            let sin_usuarios = !hay_algun_usuario(db).await?;
             return Ok(SetupPendiente {
                 pendiente: false,
+                requiere_recuperacion: sin_usuarios,
                 id_usuario: None,
                 nombre: None,
                 email: None,
@@ -608,6 +629,7 @@ impl LoginRepository for SqliteLoginRepository {
 
         Ok(SetupPendiente {
             pendiente: true,
+            requiere_recuperacion: false,
             id_usuario: texto(0),
             nombre: texto(1),
             email: texto(2),

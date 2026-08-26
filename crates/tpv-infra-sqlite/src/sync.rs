@@ -18,7 +18,10 @@ use libsql::{Connection, Value};
 
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
-use tpv_contracts::sync::{AplicacionSync, OutboxEntry, SqlStatement, SyncChange, SyncHealth};
+use tpv_contracts::sync::{
+    AplicacionSync, BootstrapResultado, BootstrapSnapshot, OutboxEntry, SqlStatement, SyncChange,
+    SyncHealth,
+};
 
 use crate::db::Db;
 use crate::mapping::v_i64;
@@ -78,6 +81,40 @@ fn json_to_value(v: &serde_json::Value) -> Value {
         // arrays/objetos no deberían llegar como args; los guardamos como texto JSON.
         other => Value::Text(other.to_string()),
     }
+}
+
+/// Tope de parámetros (`?`) por sentencia al restaurar. El límite real de SQLite es mayor, pero el
+/// margen no compra nada aquí: lo que importa es no volver a una sentencia por fila.
+const MAX_PARAMS_POR_SENTENCIA: usize = 900;
+
+/// Nombres de tabla realmente presentes en la BD local. El volcado de la nube se filtra contra
+/// esto: una Main con una versión por detrás recibirá tablas que su esquema aún no tiene, y eso
+/// tiene que informarse, no reventar la recuperación.
+async fn tablas_locales(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'table';",
+            (),
+        )
+        .await
+        .map_err(db_err)?;
+    let mut out = std::collections::HashSet::new();
+    while let Some(row) = rows.next().await.map_err(db_err)? {
+        if let Ok(Value::Text(n)) = row.get_value(0) {
+            out.insert(n);
+        }
+    }
+    Ok(out)
+}
+
+/// ¿Es un identificador SQL simple? El volcado llega de la red, y sus nombres de tabla y de columna
+/// se interpolan en el SQL (no se pueden enlazar con `?`). Un nombre que no sea `[A-Za-z0-9_]` se
+/// descarta: no hay ningún caso legítimo en este esquema y sí una inyección si se deja pasar.
+fn identificador_simple(nombre: &str) -> bool {
+    !nombre.is_empty()
+        && nombre
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 async fn checkpoint(conn: &Connection) -> AppResult<i64> {
@@ -559,6 +596,168 @@ impl SyncRepository for SqliteSyncRepository {
             failing,
         })
     }
+
+    async fn bootstrap_restaurar(
+        &self,
+        snapshot: BootstrapSnapshot,
+    ) -> AppResult<BootstrapResultado> {
+        let w = self.db.write().await;
+        let conn = w.raw();
+
+        let locales = tablas_locales(conn).await?;
+
+        // Se decide TODO antes de tocar nada: qué tablas se restauran y cuáles no existen aquí.
+        let mut restaurables: Vec<&tpv_contracts::sync::BootstrapTabla> = Vec::new();
+        let mut desconocidas: Vec<String> = Vec::new();
+        for t in &snapshot.tablas {
+            if !identificador_simple(&t.nombre) || !locales.contains(&t.nombre) {
+                desconocidas.push(t.nombre.clone());
+                continue;
+            }
+            if t.columnas.iter().any(|c| !identificador_simple(c)) {
+                desconocidas.push(t.nombre.clone());
+                continue;
+            }
+            restaurables.push(t);
+        }
+
+        if restaurables.is_empty() {
+            return Err(AppError::validation(
+                "El volcado de la nube no trae ninguna tabla que esta versión reconozca",
+            ));
+        }
+
+        // `defer_foreign_keys` deja que el orden entre tablas dé igual: se comprueban las FK al
+        // COMMIT, cuando ya está todo dentro. Sin esto habría que ordenar 41 tablas por sus
+        // dependencias y mantener ese orden a mano en cada cambio de esquema.
+        conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
+            .await
+            .map_err(db_err)?;
+
+        let res: AppResult<i64> = async {
+            // Restaurar VACÍA las tablas: una operación local aún sin subir se perdería sin dejar
+            // rastro y sin que nadie lo supiera. Va DENTRO de la transacción a propósito —
+            // comprobarlo antes dejaría una ventana por la que puede colarse una venta entre el
+            // permiso y el borrado. En el camino real (una BD recién perdida, todavía sin
+            // escrituras) el outbox está vacío y esto no se nota.
+            let pendientes = {
+                let mut rows = conn
+                    .query("SELECT COUNT(*) FROM _Sync_Outbox;", ())
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                    None => 0,
+                }
+            };
+            if pendientes > 0 {
+                return Err(AppError::conflict(format!(
+                    "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar                      las borraría: espera a que se sincronicen antes de recuperar."
+                )));
+            }
+
+            for t in &restaurables {
+                conn.execute(&format!("DELETE FROM \"{}\";", t.nombre), ())
+                    .await
+                    .map_err(|e| {
+                        AppError::repository(format!("vaciando {}: {e}", t.nombre))
+                    })?;
+            }
+
+            let mut filas = 0i64;
+            for t in &restaurables {
+                if t.filas.is_empty() {
+                    continue;
+                }
+                let n_cols = t.columnas.len();
+                let cols = t
+                    .columnas
+                    .iter()
+                    .map(|c| format!("\"{c}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                // Una fila por `execute()` significaba reparsear el mismo INSERT decenas de miles
+                // de veces. Se agrupan en sentencias multi-fila, acotadas por el número de
+                // parámetros que SQLite acepta en una sentencia.
+                let por_lote = (MAX_PARAMS_POR_SENTENCIA / n_cols.max(1)).max(1);
+                let marcas_fila = format!("({})", vec!["?"; n_cols].join(", "));
+
+                for lote in t.filas.chunks(por_lote) {
+                    let mut args: Vec<Value> = Vec::with_capacity(lote.len() * n_cols);
+                    for fila in lote {
+                        if fila.len() != n_cols {
+                            return Err(AppError::validation(format!(
+                                "{}: fila con {} valores para {n_cols} columnas",
+                                t.nombre,
+                                fila.len(),
+                            )));
+                        }
+                        args.extend(fila.iter().map(json_to_value));
+                    }
+
+                    let valores = vec![marcas_fila.as_str(); lote.len()].join(", ");
+                    let sql = format!(
+                        "INSERT INTO \"{}\" ({cols}) VALUES {valores};",
+                        t.nombre
+                    );
+                    conn.execute(&sql, args).await.map_err(|e| {
+                        AppError::repository(format!("restaurando {}: {e}", t.nombre))
+                    })?;
+                    filas += lote.len() as i64;
+                }
+            }
+
+            // El andamiaje de sync se rehace desde cero: el checkpoint pasa a ser el `seq` de la
+            // foto y todo lo anterior (anti-ecos, fallos, cuarentenas) hablaba de una BD que ya no
+            // existe. Conservarlo haría que el catch-up saltase operaciones que esta BD nueva sí
+            // necesita.
+            conn.execute("DELETE FROM _Sync_Applied_Ops;", ())
+                .await
+                .map_err(db_err)?;
+            conn.execute("DELETE FROM _Sync_Failed;", ())
+                .await
+                .map_err(db_err)?;
+            conn.execute("DELETE FROM _Sync_Encoladas;", ())
+                .await
+                .map_err(db_err)?;
+            conn.execute(
+                "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1;",
+                vec![Value::Integer(snapshot.seq)],
+            )
+            .await
+            .map_err(db_err)?;
+
+            Ok(filas)
+        }
+        .await;
+
+        match res {
+            Ok(filas) => {
+                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+                tracing::info!(
+                    target: "tpv::sync",
+                    seq = snapshot.seq,
+                    filas,
+                    tablas = restaurables.len(),
+                    "BD local reconstruida desde la nube"
+                );
+                Ok(BootstrapResultado {
+                    seq: snapshot.seq,
+                    filas_restauradas: filas,
+                    tablas_restauradas: restaurables
+                        .iter()
+                        .map(|t| t.nombre.clone())
+                        .collect(),
+                    tablas_desconocidas: desconocidas,
+                })
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -760,5 +959,252 @@ mod tests_aplicadas {
         assert_eq!(r.aplicadas, vec!["op-2".to_string()]);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_bootstrap {
+    //! Reconstrucción de la BD local desde un volcado de la nube.
+    //!
+    //! Lo que se comprueba aquí no es "los INSERT funcionan", es lo que hace que esto sea seguro:
+    //! que reemplaza en vez de acumular, que el checkpoint queda donde dice la foto, que un
+    //! volcado a medias no deja la BD a medias, y que una tabla que esta versión no conoce se
+    //! informa en vez de tumbar la recuperación.
+
+    use super::*;
+    use crate::db::Db;
+    use libsql::Connection;
+    use serde_json::json;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{BootstrapSnapshot, BootstrapTabla};
+
+    fn uniq() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("tpv_boot_test_{}", uniq()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // `Db::open` aplica las migraciones reales, así que se prueba contra el esquema de verdad
+        // (`Zonas`) y no contra una tabla de juguete que podría no parecerse en nada.
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    fn tabla(nombre: &str, filas: Vec<Vec<serde_json::Value>>) -> BootstrapTabla {
+        BootstrapTabla {
+            nombre: nombre.to_string(),
+            columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+            filas,
+        }
+    }
+
+    async fn zonas(db: &Arc<Db>) -> Vec<String> {
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query("SELECT Nombre_Zona FROM Zonas ORDER BY Nombre_Zona;", ())
+            .await
+            .unwrap();
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.unwrap() {
+            if let Ok(Value::Text(n)) = row.get_value(0) {
+                out.push(n);
+            }
+        }
+        out
+    }
+
+    /// Restaurar REEMPLAZA. Una fila que ya estaba y no viene en la foto tiene que desaparecer: si
+    /// se acumulara, la BD "recuperada" sería la mezcla de dos momentos distintos.
+    #[tokio::test]
+    async fn restaurar_reemplaza_lo_que_habia() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('vieja', 'Terraza vieja');",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 42,
+                total_filas: 1,
+                tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(zonas(&db).await, vec!["Salon".to_string()]);
+        assert_eq!(r.filas_restauradas, 1);
+        assert_eq!(r.seq, 42);
+    }
+
+    /// El checkpoint queda EXACTAMENTE en el `seq` de la foto: es lo que hace que el catch-up
+    /// siga desde justo después, sin repetir lo que ya está ni saltarse lo que falta.
+    #[tokio::test]
+    async fn restaurar_deja_el_checkpoint_en_el_seq_de_la_foto() {
+        let (repo, _db, _dir) = repo_temporal().await;
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 777,
+            total_filas: 0,
+            tablas: vec![tabla("Zonas", vec![])],
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(repo.get_checkpoint().await.unwrap(), 777);
+    }
+
+    /// Un volcado que falla a mitad no puede dejar la BD a medias: o entra entera o no entra nada.
+    /// Aquí la segunda fila repite la clave primaria, así que el INSERT revienta después de que el
+    /// DELETE previo ya se haya ejecutado.
+    #[tokio::test]
+    async fn un_volcado_invalido_no_deja_la_bd_a_medias() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('previa', 'Barra');",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+
+        let err = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 9,
+                total_filas: 2,
+                tablas: vec![tabla(
+                    "Zonas",
+                    vec![
+                        vec![json!("dup"), json!("Uno")],
+                        vec![json!("dup"), json!("Dos")],
+                    ],
+                )],
+            })
+            .await;
+
+        assert!(err.is_err());
+        // Ni el DELETE ni los INSERT deben haber quedado: la fila de antes sigue ahí.
+        assert_eq!(zonas(&db).await, vec!["Barra".to_string()]);
+        assert_eq!(repo.get_checkpoint().await.unwrap(), 0);
+    }
+
+    /// Una nube más nueva manda tablas que esta versión aún no tiene. Recuperar debe seguir
+    /// funcionando con lo que sí conoce, y DECIR lo que se ha quedado fuera.
+    #[tokio::test]
+    async fn una_tabla_desconocida_se_informa_sin_romper_la_recuperacion() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        let r = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 5,
+                total_filas: 1,
+                tablas: vec![
+                    tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]]),
+                    tabla("Tabla_Del_Futuro", vec![vec![json!("x"), json!("y")]]),
+                ],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(zonas(&db).await, vec!["Salon".to_string()]);
+        assert_eq!(r.tablas_restauradas, vec!["Zonas".to_string()]);
+        assert_eq!(r.tablas_desconocidas, vec!["Tabla_Del_Futuro".to_string()]);
+    }
+
+    /// Los nombres del volcado se interpolan en el SQL (no se pueden enlazar con `?`), así que uno
+    /// que no sea un identificador simple se descarta en vez de acabar en una sentencia.
+    #[tokio::test]
+    async fn un_nombre_de_tabla_con_sintaxis_se_descarta() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        let r = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 1,
+                total_filas: 0,
+                tablas: vec![
+                    tabla("Zonas", vec![]),
+                    tabla("Zonas\"; DROP TABLE Zonas; --", vec![]),
+                ],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(r.tablas_restauradas, vec!["Zonas".to_string()]);
+        assert_eq!(r.tablas_desconocidas.len(), 1);
+        // La tabla sigue viva: la sentencia nunca llegó a construirse.
+        assert!(zonas(&db).await.is_empty());
+    }
+
+    /// El agrupado en sentencias multi-fila tiene que dar el mismo resultado que fila a fila,
+    /// incluido el caso que cruza el tope de parámetros por sentencia.
+    #[tokio::test]
+    async fn restaura_bien_por_encima_del_tope_de_parametros() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        let n = (MAX_PARAMS_POR_SENTENCIA / 2) + 7;
+        let filas: Vec<Vec<serde_json::Value>> = (0..n)
+            .map(|i| vec![json!(format!("z{i}")), json!(format!("Zona {i}"))])
+            .collect();
+
+        let r = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 3,
+                total_filas: n as i64,
+                tablas: vec![tabla("Zonas", filas)],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(r.filas_restauradas, n as i64);
+        assert_eq!(zonas(&db).await.len(), n);
+    }
+
+    /// La guardia que hace que esto no pueda comerse una venta: restaurar VACÍA las tablas, así que
+    /// una escritura local que todavía no ha llegado a la nube desaparecería sin dejar rastro.
+    #[tokio::test]
+    async fn no_restaura_si_quedan_escrituras_locales_sin_subir() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            conn.execute(
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('local', 'Sin subir');",
+                (),
+            )
+            .await
+            .unwrap();
+            conn.execute(
+                "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+                 VALUES ('op-1', 'test', '[]', 1);",
+                (),
+            )
+            .await
+            .unwrap();
+        }
+
+        let err = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 100,
+                total_filas: 0,
+                tablas: vec![tabla("Zonas", vec![])],
+            })
+            .await;
+
+        assert!(err.is_err(), "no puede restaurar con el outbox pendiente");
+        // Y no ha tocado nada: ni la fila local ni el checkpoint.
+        assert_eq!(zonas(&db).await, vec!["Sin subir".to_string()]);
+        assert_eq!(repo.get_checkpoint().await.unwrap(), 0);
     }
 }

@@ -21,7 +21,8 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Estado real de la conexión con la nube.
  *
- * - `pausada`: la palanca está en `off`. No se intenta nada (y se ve como tal).
+ * - `pausada`: no se intenta nada, y se ve como tal. Dos motivos posibles: la palanca en `off`, o
+ *   una BD local vacía a la espera de recuperarse (ver `datosPerdidos`).
  * - `sin_identidad`: todavía no hay licencia activada o identidad de dispositivo, así que no hay
  *   a dónde conectarse. No es un fallo: es un TPV recién instalado.
  * - `conectando`: pidiendo ticket / abriendo el socket.
@@ -45,6 +46,18 @@ export type PreferenciaSync = "auto" | "off";
 type EstadoSyncStore = {
 	preferencia: PreferenciaSync;
 	hidratada: boolean;
+	/**
+	 * La BD local está vacía y pendiente de recuperarse desde la nube. Mientras esté puesto, la
+	 * Main NO abre el socket.
+	 *
+	 * No es una preferencia ni un estado de la red: es que sincronizar contra una BD vacía sería
+	 * activamente dañino. El catch-up arrancaría en `Last_Seq = 0` y reproduciría días de
+	 * operaciones (UPDATEs, borrados, líneas de comanda) sobre tablas sin las filas a las que se
+	 * refieren; cada una fallaría cinco veces y acabaría en cuarentena, dejando el panel de salud
+	 * lleno de errores que no explican nada. Y no reconstruiría la BD igualmente: `Sync_Changes`
+	 * sólo guarda 7 días. Lo que reconstruye es el bootstrap, y hasta entonces esto espera.
+	 */
+	datosPerdidos: boolean;
 	estado: EstadoSync;
 	/** Texto diagnóstico del último cambio (motivo del rechazo, error de red…). Nunca se compara. */
 	detalle: string | null;
@@ -59,11 +72,14 @@ type EstadoSyncStore = {
 	marcar: (estado: EstadoSync, detalle?: string | null) => void;
 	/** Pide un intento de conexión inmediato (p. ej. al activar la licencia). */
 	reintentar: () => void;
+	/** Marca/desmarca que la BD local está a la espera de recuperarse (ver `datosPerdidos`). */
+	marcarDatosPerdidos: (perdidos: boolean) => void;
 };
 
 export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	preferencia: "auto",
 	hidratada: false,
+	datosPerdidos: false,
 	estado: "conectando",
 	detalle: null,
 	desde: Date.now(),
@@ -94,4 +110,12 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	},
 
 	reintentar: () => set((s) => ({ pulso: s.pulso + 1 })),
+
+	marcarDatosPerdidos: (perdidos) => {
+		if (get().datosPerdidos === perdidos) return;
+		set({ datosPerdidos: perdidos });
+		// Al recuperarse hay que conectar ya: la BD acaba de quedar al día y el catch-up debe
+		// seguir desde el checkpoint que dejó el bootstrap, no dentro de un backoff.
+		if (!perdidos) set((s) => ({ pulso: s.pulso + 1 }));
+	},
 }));

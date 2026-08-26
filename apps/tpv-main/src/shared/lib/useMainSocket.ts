@@ -164,6 +164,7 @@ async function signWsHello(
 export function useMainSocket() {
 	const preferencia = useEstadoSync((s) => s.preferencia);
 	const hidratada = useEstadoSync((s) => s.hidratada);
+	const datosPerdidos = useEstadoSync((s) => s.datosPerdidos);
 	const deviceMode = useMode((s) => s.mode);
 
 	useEffect(() => {
@@ -176,6 +177,13 @@ export function useMainSocket() {
 
 		if (preferencia === "off") {
 			marcar("pausada", "Sincronización desactivada en este dispositivo");
+			return;
+		}
+
+		// La BD local está vacía a la espera del bootstrap: conectar ahora dispararía un catch-up
+		// desde `Last_Seq = 0` contra tablas sin filas. Ver `datosPerdidos` en el store.
+		if (datosPerdidos) {
+			marcar("pausada", "Faltan los datos de este equipo: recupéralos antes de sincronizar");
 			return;
 		}
 
@@ -874,5 +882,5 @@ export function useMainSocket() {
 				ws = null;
 			}
 		};
-	}, [deviceMode, preferencia, hidratada]);
+	}, [deviceMode, preferencia, hidratada, datosPerdidos]);
 }

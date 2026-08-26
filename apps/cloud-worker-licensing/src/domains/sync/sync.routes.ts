@@ -107,3 +107,118 @@ syncRoutes.post("/changes", async (c) => {
 
 	return c.json({ ok: true, items, nextSince });
 });
+
+// ---------------------------------------------------------------------------
+// POST /v1/sync/bootstrap — reconstrucción completa de la BD de una Main
+// ---------------------------------------------------------------------------
+//
+// El catch-up (`/changes`) sirve para volver de un corte: reproduce las operaciones que la Main se
+// perdió. NO sirve para volver de perder la BD, y son cosas distintas. El estado de una tabla no es
+// la suma de sus cambios recientes, es la suma de TODOS, y `Sync_Changes` se purga a los 7 días
+// (SYNC-12). Una Main que arranca con `Last_Seq = 0` y una `data.db` vacía pediría un catch-up que
+// no puede reconstruir nada: los usuarios, los roles y el catálogo se crearon el primer día.
+//
+// Esto devuelve el ESTADO ACTUAL, no el log: un volcado de las tablas del tenant más el `Seq`
+// exacto en el que se tomó la foto, para que la Main deje ahí su checkpoint y siga por el catch-up
+// normal a partir de ese punto, sin huecos ni solapes.
+
+/** Tope de filas del volcado. Ver `bootstrap_demasiado_grande` más abajo. */
+const BOOTSTRAP_MAX_FILAS = 300_000;
+
+/**
+ * Tablas de control que NO forman parte del negocio y que la Main mantiene por su cuenta.
+ * `Sync_Changes`/`Applied_Operations`/`Sync_Main_Checkpoints` son el andamiaje de la replicación en
+ * la nube; el prefijo `_` cubre `_migrations`.
+ */
+const BOOTSTRAP_TABLAS_EXCLUIDAS = new Set([
+	"Sync_Changes",
+	"Applied_Operations",
+	"Sync_Main_Checkpoints",
+]);
+
+function esTablaDeNegocio(nombre: string): boolean {
+	if (!nombre) return false;
+	if (nombre.startsWith("_") || nombre.startsWith("sqlite_") || nombre.startsWith("libsql_")) {
+		return false;
+	}
+	return !BOOTSTRAP_TABLAS_EXCLUIDAS.has(nombre);
+}
+
+syncRoutes.post("/bootstrap", async (c) => {
+	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		const rsTablas = await db.execute({
+			sql: `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC;`,
+			args: [],
+		});
+		const tablas = rows(rsTablas)
+			.map((r: any) => String(r.name ?? r.NAME ?? ""))
+			.filter(esTablaDeNegocio);
+
+		// Guardia de tamaño ANTES de construir el volcado: un isolate de Workers tiene 128 MB, y
+		// quedarse sin memoria a mitad devolvería un error opaco en vez de una explicación. El conteo
+		// va fuera de la transacción de lectura a propósito: sólo decide si cabe, no es el dato.
+		const rsConteos = await db.batch(
+			tablas.map((t) => ({ sql: `SELECT COUNT(*) AS n FROM "${t}";`, args: [] })),
+			"read",
+		);
+		const totalFilas = rsConteos.reduce(
+			(acc, rs) => acc + Number((rs.rows?.[0] as any)?.n ?? 0),
+			0,
+		);
+		if (totalFilas > BOOTSTRAP_MAX_FILAS) {
+			return { demasiadoGrande: true as const, totalFilas };
+		}
+
+		// La foto entera en UNA transacción de lectura, incluido el `Seq`. Es lo que hace que el
+		// checkpoint sea exacto: leer el `Seq` aparte dejaría una ventana en la que una escritura
+		// entra en el volcado Y vuelve luego por el catch-up, que la reaplicaría contra una fila
+		// que ya está (PK duplicada → la op acaba en cuarentena y el panel de salud en rojo).
+		const lote = await db.batch(
+			[
+				...tablas.map((t) => ({ sql: `SELECT * FROM "${t}";`, args: [] })),
+				{ sql: `SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;`, args: [] },
+			],
+			"read",
+		);
+
+		const rsSeq = lote[lote.length - 1];
+		const seq = Number((rsSeq.rows?.[0] as any)?.seq ?? 0);
+
+		const volcado = tablas.map((nombre, i) => {
+			const rs = lote[i];
+			const columnas: string[] = rs.columns ?? [];
+			return {
+				nombre,
+				columnas,
+				// Filas posicionales (no objetos): con 41 tablas, repetir el nombre de cada columna
+				// en cada fila multiplicaría el tamaño de la respuesta sin añadir nada.
+				filas: (rs.rows ?? []).map((r: any) =>
+					Array.isArray(r) ? r : columnas.map((col) => r[col] ?? null),
+				),
+			};
+		});
+
+		return { demasiadoGrande: false as const, seq, tablas: volcado, totalFilas };
+	});
+
+	if (resultado.demasiadoGrande) {
+		return c.json(
+			{
+				error: "bootstrap_demasiado_grande",
+				totalFilas: resultado.totalFilas,
+				limite: BOOTSTRAP_MAX_FILAS,
+			},
+			413,
+		);
+	}
+
+	return c.json({
+		ok: true,
+		seq: resultado.seq,
+		totalFilas: resultado.totalFilas,
+		tablas: resultado.tablas,
+	});
+});

@@ -414,6 +414,7 @@ no sólo en dev.
 | Escrituras Handy | `lib/hub.ts` → `/internal/apply` | Cada dominio construye un comando y lo aplica vía DO |
 | Constructores de comandos | `domains/*/*.commands.ts` | Construyen la transacción SQL replicable con UUIDs deterministas |
 | Catch-up | `domains/sync/sync.routes.ts` | La Main pide lo perdido desde su `Last_Seq` al autenticarse |
+| Bootstrap | `domains/sync/sync.routes.ts` + `infra-sqlite/src/sync.rs` | Reconstruye una Main que ha perdido su `data.db` (ver abajo) |
 
 ### Reglas del sistema
 
@@ -475,6 +476,50 @@ no sólo en dev.
   `state.getWebSockets()`. Tampoco puede haber `setInterval`/`alarm` periódicos: mantendrían el DO
   despierto. Detalle completo y reglas en
   [docs/analisis/transversal/sync-tenanthub.md](docs/analisis/transversal/sync-tenanthub.md) §SYNC-16.
+
+### Perder la BD local: aprovisionamiento y bootstrap
+
+El catch-up sirve para volver de un **corte**; no sirve para volver de perder la **base de datos**,
+y son cosas distintas. El estado de una tabla no es la suma de sus cambios recientes, es la suma de
+**todos**, y `Sync_Changes` se purga a los 7 días. Una Main que arranca con `data.db` vacía y
+`Last_Seq = 0` pediría un catch-up que no puede reconstruir nada: los usuarios, los roles y el
+catálogo se crearon el primer día.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| Guardia del seed | `infra-sqlite/src/connection.rs::seed_admin_if_empty` | Con licencia activada, NO siembra el admin |
+| Señal de aprovisionado | `lib.rs::dispositivo_aprovisionado` | `license_state.json` con `tenant_id` |
+| Tercer estado del arranque | `infra-sqlite/src/login.rs::setup_pendiente` | `requiere_recuperacion` = cero usuarios |
+| Volcado | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado actual + `Seq` de la foto |
+| Restauración | `infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción |
+| Pantalla | `src/app/pages/RecuperarDatos.tsx` | Único sitio desde el que se dispara |
+
+- **"BD vacía" no es "instalación nueva", y confundirlas corrompe la nube.** El seed crea un admin
+  con el PIN público `1234` y `Requiere_Setup = 1`; al completar esa pantalla, el `UPDATE Usuarios`
+  sale por el outbox y **pisa en la nube la credencial del admin de verdad**, dejando fuera también
+  a las Handy. La señal que las distingue tiene que vivir **fuera de `data.db`** — es justo lo que
+  se ha perdido —: `license_state.json` y la clave del keyring sobreviven al borrado.
+- **Sin admin, la app no cae al login: entra en recuperación.** Cero usuarios es inalcanzable en una
+  instalación nueva, así que la propia BD lleva el estado y no hace falta ni una tabla ni un fichero
+  más. `requiere_recuperacion` gana a `pendiente`.
+- **Mientras falten los datos, el socket no se abre** (`datosPerdidos` en `useEstadoSync` →
+  `pausada`). Un catch-up desde `Last_Seq = 0` reproduciría días de operaciones sobre tablas sin las
+  filas a las que se refieren: cada una fallaría cinco veces y acabaría en cuarentena, llenando el
+  panel de salud de errores que no explican nada — y sin reconstruir nada igualmente.
+- **El `Seq` se lee en la misma transacción que el volcado.** Leerlo aparte deja una ventana en la
+  que una escritura entra en la foto **y** vuelve luego por el catch-up, que la reaplicaría contra
+  una fila que ya está (PK duplicada → cuarentena). Por eso el endpoint no pagina: una foto a trozos
+  no es una foto.
+- **Restaurar reemplaza, y por eso se niega si el outbox no está vacío.** Vaciar las tablas se
+  llevaría por delante una venta que aún no ha llegado a la nube. La comprobación va **dentro** de
+  la transacción: hacerla antes dejaría una ventana entre el permiso y el borrado.
+- **Lo que la nube no puede devolver: `DNI`, `IBAN` y `Numero_Seguridad_Social`.** Van cifrados con
+  una clave que nunca sale de la Main, así que el worker ni los escribe ni los guarda (TRAB-03).
+  Vuelven vacíos y la pantalla lo dice: es la única pérdida real, y se rellena a mano.
+- **Una tabla que esta versión no conoce se informa, no revienta.** Un TPV con una versión por
+  detrás debe poder recuperarse igual; lo que no entra sale en `tablas_desconocidas`.
+- **Los nombres de tabla y columna del volcado se interpolan en el SQL** (no se pueden enlazar con
+  `?`), así que se filtran contra `sqlite_master` y contra `[A-Za-z0-9_]` antes de construir nada.
 
 ---
 

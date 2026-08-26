@@ -82,3 +82,43 @@ pub struct SyncHealth {
     #[ts(type = "number")]
     pub failing: i64,
 }
+
+/* ===== Bootstrap: reconstrucción de la BD local desde la nube ===== */
+
+/// Volcado de UNA tabla del tenant. `filas` es posicional respecto a `columnas` (con 41 tablas,
+/// repetir el nombre de cada columna en cada fila multiplicaría el tamaño sin añadir nada).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct BootstrapTabla {
+    pub nombre: String,
+    pub columnas: Vec<String>,
+    #[ts(type = "Array<Array<unknown>>")]
+    pub filas: Vec<Vec<serde_json::Value>>,
+}
+
+/// Respuesta de `/v1/sync/bootstrap`: el estado actual del tenant y el `seq` EXACTO en el que se
+/// tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
+/// que el catch-up siga desde justo después sin huecos ni solapes.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct BootstrapSnapshot {
+    #[ts(type = "number")]
+    pub seq: i64,
+    #[ts(type = "number")]
+    pub total_filas: i64,
+    pub tablas: Vec<BootstrapTabla>,
+}
+
+/// Qué se restauró. `tablas_desconocidas` son las que la nube mandó y esta versión de la app no
+/// tiene en su esquema: se informan en vez de fallar (un TPV con una versión por detrás debe poder
+/// recuperarse igual), pero se dicen para que no pasen desapercibidas.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct BootstrapResultado {
+    #[ts(type = "number")]
+    pub seq: i64,
+    #[ts(type = "number")]
+    pub filas_restauradas: i64,
+    pub tablas_restauradas: Vec<String>,
+    pub tablas_desconocidas: Vec<String>,
+}

@@ -56,6 +56,26 @@ export type AsignacionRow = { ID_Asignacion: string, ID_Trabajador: string, Fech
 
 export type AsignacionUpdateInput = { id_asignacion: string, id_turno: string, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
+/**
+ * Qué se restauró. `tablas_desconocidas` son las que la nube mandó y esta versión de la app no
+ * tiene en su esquema: se informan en vez de fallar (un TPV con una versión por detrás debe poder
+ * recuperarse igual), pero se dicen para que no pasen desapercibidas.
+ */
+export type BootstrapResultado = { seq: number, filas_restauradas: number, tablas_restauradas: Array<string>, tablas_desconocidas: Array<string>, };
+
+/**
+ * Respuesta de `/v1/sync/bootstrap`: el estado actual del tenant y el `seq` EXACTO en el que se
+ * tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
+ * que el catch-up siga desde justo después sin huecos ni solapes.
+ */
+export type BootstrapSnapshot = { seq: number, total_filas: number, tablas: Array<BootstrapTabla>, };
+
+/**
+ * Volcado de UNA tabla del tenant. `filas` es posicional respecto a `columnas` (con 41 tablas,
+ * repetir el nombre de cada columna en cada fila multiplicaría el tamaño sin añadir nada).
+ */
+export type BootstrapTabla = { nombre: string, columnas: Array<string>, filas: Array<Array<unknown>>, };
+
 export type BusinessSettings = { business_name: string, logo_data_url: string | null, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, 
 /**
  * A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
@@ -646,10 +666,17 @@ export type SetProductoAlergenosInput = { id_producto: string, ids_alergenos: Ar
 export type SetTurnoPartidoInput = { id_usuario: string, turno_partido: boolean, fecha?: string, };
 
 /**
- * ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir si la
- * primera pantalla es la de elegir PIN o la de login.
+ * ¿Queda por hacer el setup inicial? Se consulta SIN sesión, al arrancar, para decidir cuál es la
+ * primera pantalla: elegir PIN, recuperar los datos, o el login de siempre.
  */
-export type SetupPendiente = { pendiente: boolean, id_usuario?: string, nombre?: string, email?: string, };
+export type SetupPendiente = { pendiente: boolean, 
+/**
+ * La BD local no tiene NI UN usuario. En una instalación nueva es imposible (el arranque
+ * siembra el admin), así que sólo se llega aquí por la guardia de aprovisionamiento: el
+ * dispositivo tiene licencia pero ha perdido su `data.db`. La primera pantalla es la de
+ * recuperación, que reconstruye la BD desde la nube.
+ */
+requiere_recuperacion: boolean, id_usuario?: string, nombre?: string, email?: string, };
 
 export type SigB64 = { sigB64: string, };
 

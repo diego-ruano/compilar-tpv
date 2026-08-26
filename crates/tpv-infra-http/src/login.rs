@@ -36,6 +36,8 @@ impl LoginRepository for HttpLoginRepository {
     async fn setup_pendiente(&self) -> AppResult<SetupPendiente> {
         Ok(SetupPendiente {
             pendiente: false,
+            // El Handy no tiene BD que perder: su recuperación es que la Main recupere la suya.
+            requiere_recuperacion: false,
             id_usuario: None,
             nombre: None,
             email: None,

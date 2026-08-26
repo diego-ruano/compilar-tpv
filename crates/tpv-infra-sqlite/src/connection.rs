@@ -83,9 +83,26 @@ async fn seed_contact_settings(conn: &Connection) -> AppResult<()> {
 
 /// Crea un usuario admin inicial (PIN `1234`, `Requiere_Setup`) **sólo** si la tabla
 /// `Usuarios` está vacía. Los roles ya los siembra la migración inicial (`0001`) con sus UUIDv7 fijos.
-async fn seed_admin_if_empty(conn: &Connection) -> AppResult<()> {
+///
+/// `aprovisionado` es la guardia: dice que este dispositivo YA tiene licencia activada, es decir
+/// que `Usuarios` vacía no significa "instalación nueva" sino "BD perdida" (borrada, corrupta,
+/// restaurada a medias). Sembrar ahí sería fabricar un admin con el PIN público del seed y, peor,
+/// habilitar la pantalla de setup: al completarla, el `UPDATE Usuarios` sale por el outbox y pisa
+/// en la nube la credencial buena del admin real. La señal vive FUERA de la BD (`license_state.json`
+/// + la clave del keyring), que es justo lo que sobrevive a perderla.
+async fn seed_admin_if_empty(conn: &Connection, aprovisionado: bool) -> AppResult<()> {
     let users_count = query_single_i64(conn, "SELECT COUNT(*) FROM Usuarios;").await?;
     if users_count > 0 {
+        return Ok(());
+    }
+
+    if aprovisionado {
+        // Sin admin, `setup_pendiente` devuelve `requiere_recuperacion` y la app entra en la
+        // pantalla de recuperación (bootstrap desde la nube) en vez de en la de primer arranque.
+        tracing::warn!(
+            target: "tpv::startup",
+            "BD sin usuarios en un dispositivo ya aprovisionado: no se siembra admin, hace falta recuperar desde la nube"
+        );
         return Ok(());
     }
 
@@ -165,7 +182,9 @@ async fn backup_if_migration_pending(db_path: &Path) -> AppResult<()> {
 
 /// Abre la BD local `data.db` dentro de `app_data_dir` (escritor único + pool de lectura, WAL),
 /// construye/actualiza el esquema aplicando las migraciones embebidas y siembra el admin inicial.
-pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
+///
+/// `aprovisionado` lo decide el shell (es quien conoce la licencia): ver [`seed_admin_if_empty`].
+pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult<Arc<Db>> {
     let db_path = app_data_dir.join("data.db");
     let db_path_str = db_path
         .to_str()
@@ -181,7 +200,7 @@ pub async fn init_main_db(app_data_dir: &Path) -> AppResult<Arc<Db>> {
     // El seed corre sobre la conexión de escritura (exclusiva) tras abrir.
     {
         let w = db.write().await;
-        seed_admin_if_empty(w.raw()).await?;
+        seed_admin_if_empty(w.raw(), aprovisionado).await?;
         seed_contact_settings(w.raw()).await?;
     }
 
