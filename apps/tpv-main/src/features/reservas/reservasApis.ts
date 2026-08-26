@@ -57,7 +57,8 @@ export type ReservaSaveInput = {
     nota?: string | null;
     estado?: string | null;
 
-    idMesa: string;
+    /** `null` = reserva apuntada sin mesa asignada todavia. */
+    idMesa: string | null;
 
     nombreCliente: string;
     telefono?: string | null;

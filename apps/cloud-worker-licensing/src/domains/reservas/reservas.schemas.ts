@@ -91,7 +91,7 @@ export const reservaSaveSchema = z
 		comensales: positiveInt("comensales"),
 		nota: z.any().optional().nullable(),
 		estado: z.any().optional().nullable(),
-		id_mesa: idField("id_mesa"),
+		id_mesa: z.any().optional().nullable(),
 		nombre_cliente: z.string().transform((s) => s.trim()),
 		telefono: z.any().optional().nullable(),
 		email: z.any().optional().nullable(),
@@ -141,7 +141,7 @@ export const reservaSaveSchema = z
 			comensales: v.comensales,
 			nota: cleanOrNull(v.nota),
 			estado,
-			id_mesa: v.id_mesa,
+			id_mesa: cleanOrNull(v.id_mesa),
 			nombre_cliente: v.nombre_cliente,
 			telefono: cleanOrNull(v.telefono),
 			email: cleanEmailOrNull(v.email),
@@ -156,6 +156,7 @@ export const mesQuerySchema = z.object({
 
 type NullableReservaFields =
 	| "id_reserva"
+	| "id_mesa"
 	| "turno"
 	| "nota"
 	| "estado"

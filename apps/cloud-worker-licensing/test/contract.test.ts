@@ -161,6 +161,8 @@ import casoResNuevo from "../../../tests/contract/casos/reservas/guardar_cliente
 import goldenResNuevo from "../../../tests/contract/golden/reservas/guardar_cliente_nuevo.json";
 import casoResExistente from "../../../tests/contract/casos/reservas/guardar_cliente_existente.json";
 import goldenResExistente from "../../../tests/contract/golden/reservas/guardar_cliente_existente.json";
+import casoResSinMesa from "../../../tests/contract/casos/reservas/guardar_sin_mesa.json";
+import goldenResSinMesa from "../../../tests/contract/golden/reservas/guardar_sin_mesa.json";
 import casoResEliminar from "../../../tests/contract/casos/reservas/eliminar.json";
 import goldenResEliminar from "../../../tests/contract/golden/reservas/eliminar.json";
 import casoVrCrearComanda from "../../../tests/contract/casos/venta_rapida/create_comanda_barra.json";
@@ -267,6 +269,7 @@ const CASOS = [
 	{ nombre: "proveedores_crear_producto", caso: casoProvCrearProd, golden: goldenProvCrearProd },
 	{ nombre: "reservas_guardar_cliente_nuevo", caso: casoResNuevo, golden: goldenResNuevo },
 	{ nombre: "reservas_guardar_cliente_existente", caso: casoResExistente, golden: goldenResExistente },
+	{ nombre: "reservas_guardar_sin_mesa", caso: casoResSinMesa, golden: goldenResSinMesa },
 	{ nombre: "reservas_eliminar", caso: casoResEliminar, golden: goldenResEliminar },
 	{ nombre: "vr_create_comanda_barra", caso: casoVrCrearComanda, golden: goldenVrCrearComanda },
 	{ nombre: "vr_add_linea", caso: casoVrAddLinea, golden: goldenVrAddLinea },

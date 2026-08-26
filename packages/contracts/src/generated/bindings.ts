@@ -597,7 +597,7 @@ export type ReservaMesaOut = { idReserva: string, clienteNombre: string, diaYMD:
 /**
  * Entrada de guardado de reserva (Local-First: sin op_id/outbox/remote_id).
  */
-export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa: string, nombre_cliente: string, telefono?: string, email?: string, notas_cliente?: string, };
+export type ReservaSaveInput = { id_reserva?: string, dia_ymd: string, hora: string, turno?: string, comensales: number, nota?: string, estado?: string, id_mesa?: string, nombre_cliente: string, telefono?: string, email?: string, notas_cliente?: string, };
 
 /**
  * Argumentos del rango mensual.

@@ -1,0 +1,23 @@
+{
+  "descripcion": "Alta de reserva SIN mesa asignada: se apunta la reserva y ya se decidirá dónde se sienta. Los dos lados tienen que dejar ID_Mesa a NULL (no cadena vacía, que sí casaría con el hueco de otra reserva sin mesa). El ID_Cliente lo generan ambos lados (distinto UUID) → excluido del snapshot.",
+  "comando": "reservas.guardar",
+  "seed": [],
+  "entrada": {
+    "id_reserva": "reserva-1",
+    "id_mesa": null,
+    "dia_ymd": "2026-02-01",
+    "hora": "20:30",
+    "turno": "cena",
+    "comensales": 2,
+    "nota": null,
+    "estado": "confirmada",
+    "nombre_cliente": "Ana",
+    "email": "ana@x.com",
+    "telefono": "600100200",
+    "notas_cliente": null
+  },
+  "snapshot": {
+    "Clientes": "SELECT Nombre, Telefono, Email, Notas FROM Clientes",
+    "Reservas": "SELECT ID_Reserva, ID_Mesa, Dia_YMD, Hora, Turno, Comensales, Nota, Estado FROM Reservas"
+  }
+}

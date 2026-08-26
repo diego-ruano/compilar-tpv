@@ -1,0 +1,22 @@
+{
+  "Clientes": [
+    {
+      "Email": "ana@x.com",
+      "Nombre": "Ana",
+      "Notas": null,
+      "Telefono": "600100200"
+    }
+  ],
+  "Reservas": [
+    {
+      "Comensales": 2,
+      "Dia_YMD": "2026-02-01",
+      "Estado": "confirmada",
+      "Hora": "20:30",
+      "ID_Mesa": null,
+      "ID_Reserva": "reserva-1",
+      "Nota": null,
+      "Turno": "cena"
+    }
+  ]
+}

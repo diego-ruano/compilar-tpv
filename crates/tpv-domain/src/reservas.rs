@@ -139,7 +139,7 @@ pub struct ClienteReserva {
 #[derive(Debug, Clone)]
 pub struct ReservaValidada {
     pub id: Option<String>,
-    pub id_mesa: String,
+    pub id_mesa: Option<String>,
     pub dia_ymd: String,
     pub hora: String,
     pub turno: String,
@@ -159,7 +159,7 @@ impl ReservaValidada {
         comensales: i64,
         nota: Option<String>,
         estado: Option<String>,
-        id_mesa: String,
+        id_mesa: Option<String>,
         nombre_cliente: String,
         telefono: Option<String>,
         email: Option<String>,
@@ -175,10 +175,8 @@ impl ReservaValidada {
         if comensales <= 0 {
             return Err("Comensales inválidos".into());
         }
-        let id_mesa = id_mesa.trim().to_string();
-        if id_mesa.is_empty() {
-            return Err("ID_Mesa inválido".into());
-        }
+        // Sin mesa es un estado válido: la reserva existe y ya se le asignará una.
+        let id_mesa = limpia(id_mesa);
 
         let id = id_reserva.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
         let estado = if id.is_none() {
@@ -261,8 +259,8 @@ mod tests {
         assert_eq!(normalize_turno(Some("otro".into()), "14:00"), "COMIDA");
     }
 
-    fn reserva_base(id: Option<String>, comensales: i64, mesa: &str, nombre: &str) -> Result<ReservaValidada, String> {
-        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.into(), nombre.into(), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
+    fn reserva_base(id: Option<String>, comensales: i64, mesa: Option<&str>, nombre: &str) -> Result<ReservaValidada, String> {
+        ReservaValidada::validar(id, "2026-07-22", "14:30", None, comensales, Some(" terraza ".into()), Some("CANCELADA".into()), mesa.map(str::to_string), nombre.into(), Some(" 600 ".into()), Some(" a@b.es ".into()), Some(" cliente habitual ".into()))
     }
 
     /// El email del cliente identifica de forma única (índice `ux_clientes_email` sobre
@@ -272,7 +270,7 @@ mod tests {
     fn email_del_cliente_se_normaliza_a_minusculas() {
         let r = ReservaValidada::validar(
             None, "2026-07-22", "14:30", None, 2, None, None,
-            "m1".into(), "Ana".into(), None, Some("  Juan@Mail.COM  ".into()), None,
+            Some("m1".into()), "Ana".into(), None, Some("  Juan@Mail.COM  ".into()), None,
         )
         .unwrap();
         assert_eq!(r.cliente.email.as_deref(), Some("juan@mail.com"));
@@ -283,7 +281,7 @@ mod tests {
         for valor in [None, Some("".to_string()), Some("   ".to_string())] {
             let r = ReservaValidada::validar(
                 None, "2026-07-22", "14:30", None, 2, None, None,
-                "m1".into(), "Ana".into(), None, valor, None,
+                Some("m1".into()), "Ana".into(), None, valor, None,
             )
             .unwrap();
             assert_eq!(r.cliente.email, None);
@@ -292,9 +290,9 @@ mod tests {
 
     #[test]
     fn reserva_nueva_normaliza_y_fuerza_estado_proxima() {
-        let r = reserva_base(None, 4, " m1 ", " Ana ").unwrap();
+        let r = reserva_base(None, 4, Some(" m1 "), " Ana ").unwrap();
         assert!(r.id.is_none());
-        assert_eq!(r.id_mesa, "m1");
+        assert_eq!(r.id_mesa.as_deref(), Some("m1"));
         assert_eq!(r.turno, "COMIDA");
         assert_eq!(r.estado, "PROXIMA");
         assert_eq!(r.nota.as_deref(), Some("terraza"));
@@ -304,16 +302,23 @@ mod tests {
 
     #[test]
     fn reserva_editada_conserva_estado_normalizado() {
-        let r = reserva_base(Some(" r1 ".into()), 2, "m1", "Ana").unwrap();
+        let r = reserva_base(Some(" r1 ".into()), 2, Some("m1"), "Ana").unwrap();
         assert_eq!(r.id.as_deref(), Some("r1"));
         assert_eq!(r.estado, "CANCELADA");
     }
 
     #[test]
-    fn reserva_rechaza_comensales_mesa_y_cliente_invalidos() {
-        assert!(reserva_base(None, 0, "m1", "Ana").is_err());
-        assert!(reserva_base(None, -1, "m1", "Ana").is_err());
-        assert!(reserva_base(None, 1, " ", "Ana").is_err());
-        assert!(reserva_base(None, 1, "m1", " ").is_err());
+    fn reserva_rechaza_comensales_y_cliente_invalidos() {
+        assert!(reserva_base(None, 0, Some("m1"), "Ana").is_err());
+        assert!(reserva_base(None, -1, Some("m1"), "Ana").is_err());
+        assert!(reserva_base(None, 1, Some("m1"), " ").is_err());
+    }
+
+    /// Apuntar la reserva y decidir la mesa después es un caso normal: una mesa en blanco es lo
+    /// mismo que no traerla, y ninguna de las dos cosas es un error.
+    #[test]
+    fn reserva_sin_mesa_es_valida() {
+        assert_eq!(reserva_base(None, 2, None, "Ana").unwrap().id_mesa, None);
+        assert_eq!(reserva_base(None, 2, Some("   "), "Ana").unwrap().id_mesa, None);
     }
 }

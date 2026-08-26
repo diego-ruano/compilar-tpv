@@ -150,7 +150,7 @@ mod tests {
             comensales: 2,
             nota: None,
             estado: None,
-            id_mesa: "m1".into(),
+            id_mesa: Some("m1".into()),
             nombre_cliente: "Ana".into(),
             telefono: None,
             email: None,

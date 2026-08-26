@@ -281,6 +281,7 @@ casos_de_contrato! {
     proveedores__crear_producto,
     reservas__guardar_cliente_nuevo,
     reservas__guardar_cliente_existente,
+    reservas__guardar_sin_mesa,
     reservas__eliminar,
     venta_rapida__create_comanda_barra,
     venta_rapida__add_linea,
@@ -568,7 +569,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             let repo = SqliteReservasRepository::new(db.clone());
             repo.guardar(ReservaValidada {
                 id: opt_str(&e["id_reserva"]),
-                id_mesa: s(&e["id_mesa"]),
+                id_mesa: opt_str(&e["id_mesa"]),
                 dia_ymd: s(&e["dia_ymd"]),
                 hora: s(&e["hora"]),
                 turno: s(&e["turno"]),

@@ -368,10 +368,13 @@ WHERE Email IS NOT NULL AND Email <> '';
 -- asignado. El gasto solo se atribuye/revierte cuando hay cliente real
 -- (comanda -> reserva -> cliente); si es NULL, no se acredita a nadie. La FK sigue
 -- vigente pero no enforce sobre NULL.
+-- ID_Mesa es NULL-able a proposito: se puede apuntar una reserva sin decidir todavia en que
+-- mesa se sienta. Una reserva sin mesa no sale en el plano (la meta filtra ID_Mesa IS NOT NULL)
+-- ni puede chocar con otra por el hueco: no ocupa nada hasta que se le asigna una.
 CREATE TABLE IF NOT EXISTS Reservas (
   ID_Reserva TEXT PRIMARY KEY,
   ID_Cliente TEXT,
-  ID_Mesa TEXT NOT NULL,
+  ID_Mesa TEXT,
   Dia_YMD TEXT NOT NULL,
   Hora TEXT NOT NULL,
   Turno TEXT NOT NULL,

@@ -252,23 +252,28 @@ impl ReservasRepository for SqliteReservasRepository {
             // Solo cuentan las reservas que OCUPAN la mesa (no CANCELADA/NO_SHOW/FINALIZADA). Se
             // excluye la propia reserva (edición). El FE ya avisa antes con los datos cargados;
             // esta comprobación es la autoritativa (cubre carreras y escrituras de otros clientes).
-            let solapa = select_one_i64(
-                conn,
-                "SELECT 1 FROM Reservas WHERE ID_Mesa = ?1 AND Dia_YMD = ?2 AND Hora = ?3 \
-                 AND Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA') AND ID_Reserva <> ?4 LIMIT 1;",
-                vec![
-                    Value::Text(r.id_mesa.clone()),
-                    Value::Text(r.dia_ymd.clone()),
-                    Value::Text(r.hora.clone()),
-                    Value::Text(id_reserva.clone()),
-                ],
-            )
-            .await?
-            .is_some();
-            if solapa {
-                return Err(AppError::conflict(
-                    "Ya existe una reserva en esa mesa para ese día y hora.",
-                ));
+            // Sin mesa no hay hueco que ocupar: una reserva sin asignar no choca con nadie
+            // (y con ID_Mesa NULL la comparación no casaría nunca, así que el salto es
+            // explícito en vez de depender de eso).
+            if let Some(ref id_mesa) = r.id_mesa {
+                let solapa = select_one_i64(
+                    conn,
+                    "SELECT 1 FROM Reservas WHERE ID_Mesa = ?1 AND Dia_YMD = ?2 AND Hora = ?3 \
+                     AND Estado NOT IN ('CANCELADA','NO_SHOW','FINALIZADA') AND ID_Reserva <> ?4 LIMIT 1;",
+                    vec![
+                        Value::Text(id_mesa.clone()),
+                        Value::Text(r.dia_ymd.clone()),
+                        Value::Text(r.hora.clone()),
+                        Value::Text(id_reserva.clone()),
+                    ],
+                )
+                .await?
+                .is_some();
+                if solapa {
+                    return Err(AppError::conflict(
+                        "Ya existe una reserva en esa mesa para ese día y hora.",
+                    ));
+                }
             }
 
             let id_cliente = upsert_cliente(conn, &r.cliente).await?;
@@ -286,7 +291,7 @@ impl ReservasRepository for SqliteReservasRepository {
                     r#"UPDATE Reservas SET ID_Cliente = ?1, ID_Mesa = ?2, Dia_YMD = ?3, Hora = ?4, Turno = ?5, Comensales = ?6, Nota = ?7, Estado = ?8 WHERE ID_Reserva = ?9;"#,
                     vec![
                         Value::Text(id_cliente),
-                        Value::Text(r.id_mesa.clone()),
+                        opt_text(r.id_mesa.clone()),
                         Value::Text(r.dia_ymd.clone()),
                         Value::Text(r.hora.clone()),
                         Value::Text(r.turno.clone()),
@@ -304,7 +309,7 @@ impl ReservasRepository for SqliteReservasRepository {
                     vec![
                         Value::Text(id_reserva.clone()),
                         Value::Text(id_cliente),
-                        Value::Text(r.id_mesa.clone()),
+                        opt_text(r.id_mesa.clone()),
                         Value::Text(r.dia_ymd.clone()),
                         Value::Text(r.hora.clone()),
                         Value::Text(r.turno.clone()),

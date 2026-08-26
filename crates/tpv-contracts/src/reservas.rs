@@ -83,7 +83,9 @@ pub struct ReservaSaveInput {
     #[ts(optional)]
     pub estado: Option<String>,
 
-    pub id_mesa: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub id_mesa: Option<String>,
     pub nombre_cliente: String,
     #[serde(default)]
     #[ts(optional)]

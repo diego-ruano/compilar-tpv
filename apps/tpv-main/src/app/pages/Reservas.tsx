@@ -468,15 +468,12 @@ export default function Reservas() {
     if (!form.comensales || form.comensales < 1) {
       return toast.info("Validación", "Los comensales son obligatorios.");
     }
-    if (!form.idZona) return toast.info("Validación", "Debes elegir un salón.");
-    if (!form.idMesa) return toast.info("Validación", "Debes seleccionar una mesa.");
-
     const turno: Turno = turnoPorHora(form.hora);
     const horaSql = normalizarHora(form.hora);
 
     // RES-02: se bloquea el doble booking del hueco EXACTO (misma mesa + día + hora), no todo el
     // turno: así una mesa puede reservarse varias veces en el mismo servicio a horas distintas.
-    const ocupada = reservasMes.some((r) => {
+    const ocupada = !form.idMesa ? false : reservasMes.some((r) => {
       if (!estadoBloqueaMesa(r.estado)) return false;
       if (r.diaYMD !== seleccionadoClave) return false;
       if (r.hora !== horaSql) return false;
@@ -508,7 +505,7 @@ export default function Reservas() {
         nota: notaTrim ? notaTrim : null,
         estado: estadoActual,
 
-        idMesa: form.idMesa,
+        idMesa: form.idMesa || null,
 
         nombreCliente: nombreTrim,
         telefono: telTrim || null,
@@ -761,10 +758,9 @@ export default function Reservas() {
 
                       <div>
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
-                          Salón *
+                          Salón
                         </label>
                         <select
-                          required
                           value={form.idZona || ""}
                           onChange={(e) => {
                             const idZona = e.target.value;
@@ -782,13 +778,13 @@ export default function Reservas() {
 
                       <div>
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
-                          Mesa *
+                          Mesa (opcional)
                         </label>
                         <div className="flex flex-col gap-2 xs:flex-row">
                           <input
                             readOnly
                             value={mesaSeleccionada ? mesaSeleccionada.nombre : ""}
-                            placeholder="Selecciona mesa"
+                            placeholder="Sin mesa asignada"
                             onClick={() => setMostrarMapaMesas(true)}
                             className="w-full cursor-pointer rounded-lg border border-border bg-surface-2 px-3 py-2 text-sm text-fg-muted outline-none"
                           />
@@ -800,11 +796,21 @@ export default function Reservas() {
                             <MapIcon className="size-4" aria-hidden />
                             VISUALIZAR
                           </button>
+
+                          {form.idMesa ? (
+                            <button
+                              type="button"
+                              onClick={() => setForm((p) => ({ ...p, idMesa: "" }))}
+                              className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center rounded-lg border border-border bg-surface px-3 py-2 text-xs font-extrabold tracking-widest text-fg-muted transition hover:bg-surface-2 xs:w-auto"
+                            >
+                              QUITAR
+                            </button>
+                          ) : null}
                         </div>
 
                         <div className="mt-1 text-[11px] text-fg-muted">
-                          Salón: <b>{zonaSeleccionada?.nombre ?? "-"}</b> · Turno:{" "}
-                          <b>{turnoLabel(turnoPorHora(form.hora))}</b>
+                          Salón: <b>{form.idMesa ? (zonaSeleccionada?.nombre ?? "-") : "sin mesa"}</b>{" "}
+                          · Turno: <b>{turnoLabel(turnoPorHora(form.hora))}</b>
                         </div>
                       </div>
                     </div>
@@ -900,7 +906,7 @@ export default function Reservas() {
 
                             <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
                               <Armchair className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                              {r.zonaNombre} · {r.mesaNombre}
+                              {r.idMesa ? `${r.zonaNombre} · ${r.mesaNombre}` : "Sin mesa"}
                             </span>
                           </div>
 
