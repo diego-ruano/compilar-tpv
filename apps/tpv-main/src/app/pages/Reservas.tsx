@@ -457,7 +457,6 @@ export default function Reservas() {
     e.preventDefault();
 
     if (!form.nombreCliente.trim()) return toast.info("Validación", "El nombre es obligatorio.");
-    if (!form.telefono.trim()) return toast.info("Validación", "El teléfono es obligatorio.");
 
     const emailTrim = form.email.trim();
     if (emailTrim && !emailValido(emailTrim)) {
@@ -696,10 +695,9 @@ export default function Reservas() {
 
                       <div>
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
-                          Teléfono *
+                          Teléfono (opcional)
                         </label>
                         <input
-                          required
                           value={form.telefono}
                           onChange={(e) => setForm((p) => ({ ...p, telefono: e.target.value }))}
                           className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
@@ -886,15 +884,19 @@ export default function Reservas() {
                               {r.comensales} comensales
                             </span>
 
-                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                              <Phone className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                              {r.telefono}
-                            </span>
+                            {r.telefono ? (
+                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                                <Phone className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                                {r.telefono}
+                              </span>
+                            ) : null}
 
-                            <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
-                              <Mail className="mr-1.5 size-4 text-fg-muted" aria-hidden />
-                              {r.email}
-                            </span>
+                            {r.email ? (
+                              <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
+                                <Mail className="mr-1.5 size-4 text-fg-muted" aria-hidden />
+                                {r.email}
+                              </span>
+                            ) : null}
 
                             <span className="inline-flex items-center rounded-full border border-border bg-surface-2 px-3 py-1 text-sm font-semibold text-fg">
                               <Armchair className="mr-1.5 size-4 text-fg-muted" aria-hidden />
