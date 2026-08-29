@@ -18,6 +18,10 @@ function reiniciar() {
 	useEstadoSync.setState({
 		preferencia: "auto",
 		hidratada: false,
+		datosPerdidos: false,
+		reconciliacionPendiente: false,
+		faseRecuperacion: "inactiva",
+		errorRecuperacion: null,
 		estado: "conectando",
 		detalle: null,
 		desde: Date.now(),
@@ -75,5 +79,16 @@ describe("useEstadoSync", () => {
 		s().reintentar();
 
 		expect(s().pulso).toBe(antes + 2);
+	});
+
+	it("una restauración no deja de estar bloqueada hasta finalizar la reconciliación", () => {
+		s().iniciarReconciliacion();
+		expect(s().datosPerdidos).toBe(false);
+		expect(s().reconciliacionPendiente).toBe(true);
+		expect(s().faseRecuperacion).toBe("esperando_conexion");
+
+		s().finalizarRecuperacion();
+		expect(s().reconciliacionPendiente).toBe(false);
+		expect(s().faseRecuperacion).toBe("completada");
 	});
 });

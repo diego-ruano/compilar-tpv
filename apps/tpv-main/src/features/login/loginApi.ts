@@ -4,6 +4,7 @@
 // Sustituye dualCall/op_id/outbox/afterRemoteOk. Conserva tipos, mappers y firmas.
 
 import { invokeClient } from "@tpv/client";
+import type { LocalBackupInfo, RecoveryStatus } from "@tpv/contracts";
 
 export type DbUser = {
     id_usuario: string;
@@ -181,6 +182,29 @@ export async function fetchSetupPendiente(): Promise<SetupPendiente> {
  */
 export async function recuperarDesdeNube(): Promise<BootstrapResultado> {
     const r = await invokeClient<any>("sync_bootstrap_desde_nube");
+    return {
+        seq: Number(r?.seq ?? 0),
+        filas_restauradas: Number(r?.filas_restauradas ?? 0),
+        tablas_restauradas: Array.isArray(r?.tablas_restauradas) ? r.tablas_restauradas : [],
+        tablas_desconocidas: Array.isArray(r?.tablas_desconocidas) ? r.tablas_desconocidas : [],
+    };
+}
+
+export async function fetchRecoveryStatus(): Promise<RecoveryStatus> {
+    return invokeClient<RecoveryStatus>("recovery_status");
+}
+
+export async function listarCopiasLocales(): Promise<LocalBackupInfo[]> {
+    return invokeClient<LocalBackupInfo[]>("recovery_list_backups");
+}
+
+export async function recuperarDesdeCopiaLocal(backupId: string): Promise<LocalBackupInfo> {
+    return invokeClient<LocalBackupInfo>("recovery_restore_backup", { backupId });
+}
+
+/** Sólo funciona tras el código explícito `tenant_db_not_provisioned` del servidor. */
+export async function inicializarTenantVacio(): Promise<BootstrapResultado> {
+    const r = await invokeClient<any>("sync_inicializar_tenant_vacio");
     return {
         seq: Number(r?.seq ?? 0),
         filas_restauradas: Number(r?.filas_restauradas ?? 0),

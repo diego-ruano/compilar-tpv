@@ -6,7 +6,7 @@ import { useAuth } from "../shared/stores/useAuth";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
-import { fetchSetupPendiente } from "../features/login/loginApi";
+import { fetchRecoveryStatus, fetchSetupPendiente } from "../features/login/loginApi";
 import Login from "./pages/Login";
 import SetupInicial from "./pages/SetUpInicial";
 import RecuperarDatos from "./pages/RecuperarDatos";
@@ -19,6 +19,7 @@ function AppInner() {
     const requiresSetup = useAuth((s) => s.requiresSetup);
     const location = useLocation();
     const marcarDatosPerdidos = useEstadoSync((s) => s.marcarDatosPerdidos);
+    const configurarRecuperacion = useEstadoSync((s) => s.configurarRecuperacion);
 
     // Auto-logout por inactividad (solo actúa con sesión iniciada).
     useInactivityLogout();
@@ -28,7 +29,8 @@ function AppInner() {
 
     // Primer arranque: elegir el PIN va ANTES del login. Antes se entraba con el PIN del seed y
     // se cambiaba después, o sea que había que teclear un PIN que no era de nadie. Es una lectura
-    // de la BD local (en un Handy responde que no sin salir a la red); si falla, login y ya.
+    // de la BD local (en un Handy responde que no sin salir a la red). Si la comprobación falla,
+    // se mantiene el acceso cerrado: mostrar el login sin conocer el estado de la BD sería inseguro.
     const [primeraPantalla, setPrimeraPantalla] = useState<
         "setup" | "recuperar" | "login" | null
     >(null);
@@ -36,25 +38,32 @@ function AppInner() {
         if (role) return;
 
         let vivo = true;
-        fetchSetupPendiente()
-            .then((r) => {
+        Promise.all([fetchSetupPendiente(), fetchRecoveryStatus()])
+            .then(([r, recovery]) => {
                 if (!vivo) return;
                 // El orden importa: la recuperación gana. Las dos son "no se puede entrar todavía",
                 // pero pedir un PIN nuevo sobre una BD perdida fabrica una credencial falsa y la
                 // replica a la nube (ver RecuperarDatos).
                 setPrimeraPantalla(
-                    r.requiere_recuperacion ? "recuperar" : r.pendiente ? "setup" : "login",
+                    r.requiere_recuperacion || recovery.state !== "ready"
+                        ? "recuperar"
+                        : r.pendiente
+                          ? "setup"
+                          : "login",
                 );
-                marcarDatosPerdidos(r.requiere_recuperacion);
+                configurarRecuperacion(recovery.state);
             })
             .catch((e) => {
                 console.error("No se pudo comprobar el setup inicial:", e);
-                if (vivo) setPrimeraPantalla("login");
+                if (vivo) {
+                    marcarDatosPerdidos(true);
+                    setPrimeraPantalla("recuperar");
+                }
             });
         return () => {
             vivo = false;
         };
-    }, [role]);
+    }, [role, configurarRecuperacion, marcarDatosPerdidos]);
 
     if (!role) {
         if (primeraPantalla === null) return null;
@@ -63,7 +72,11 @@ function AppInner() {
                 <RecuperarDatos
                     onRecuperado={() => {
                         marcarDatosPerdidos(false);
-                        setPrimeraPantalla("login");
+                        // Una base creada de cero trae el admin inicial con `Requiere_Setup=1`.
+                        // Se vuelve a preguntar en vez de obligar a entrar con el PIN público.
+                        void fetchSetupPendiente()
+                            .then((r) => setPrimeraPantalla(r.pendiente ? "setup" : "login"))
+                            .catch(() => setPrimeraPantalla("login"));
                     }}
                 />
             );

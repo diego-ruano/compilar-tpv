@@ -17,6 +17,16 @@
 
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import type { RecoveryState } from "@tpv/contracts";
+
+export type FaseRecuperacion =
+	| "inactiva"
+	| "esperando_conexion"
+	| "descargando"
+	| "subiendo"
+	| "verificando"
+	| "completada"
+	| "error";
 
 /**
  * Estado real de la conexión con la nube.
@@ -58,6 +68,9 @@ type EstadoSyncStore = {
 	 * sólo guarda 7 días. Lo que reconstruye es el bootstrap, y hasta entonces esto espera.
 	 */
 	datosPerdidos: boolean;
+	reconciliacionPendiente: boolean;
+	faseRecuperacion: FaseRecuperacion;
+	errorRecuperacion: string | null;
 	estado: EstadoSync;
 	/** Texto diagnóstico del último cambio (motivo del rechazo, error de red…). Nunca se compara. */
 	detalle: string | null;
@@ -74,12 +87,19 @@ type EstadoSyncStore = {
 	reintentar: () => void;
 	/** Marca/desmarca que la BD local está a la espera de recuperarse (ver `datosPerdidos`). */
 	marcarDatosPerdidos: (perdidos: boolean) => void;
+	configurarRecuperacion: (state: RecoveryState) => void;
+	iniciarReconciliacion: () => void;
+	marcarFaseRecuperacion: (fase: FaseRecuperacion, error?: string | null) => void;
+	finalizarRecuperacion: () => void;
 };
 
 export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 	preferencia: "auto",
 	hidratada: false,
 	datosPerdidos: false,
+	reconciliacionPendiente: false,
+	faseRecuperacion: "inactiva",
+	errorRecuperacion: null,
 	estado: "conectando",
 	detalle: null,
 	desde: Date.now(),
@@ -87,12 +107,24 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 
 	hidratar: async () => {
 		try {
-			const p = await invoke<PreferenciaSync | null>("get_connection_mode");
+			const [p, recovery] = await Promise.all([
+				invoke<PreferenciaSync | null>("get_connection_mode"),
+				invoke<{ state: RecoveryState }>("recovery_status"),
+			]);
 			// Cualquier cosa que no sea explícitamente `off` es `auto`: el valor ausente (nunca se
 			// tocó) y el legado ("offline"/"online", que Rust ya normaliza a `null`) conectan.
-			set({ preferencia: p === "off" ? "off" : "auto", hidratada: true });
+			set({
+				preferencia: p === "off" ? "off" : "auto",
+				hidratada: true,
+				datosPerdidos: recovery.state === "data_missing",
+				reconciliacionPendiente: recovery.state === "reconciliation_pending",
+				faseRecuperacion:
+					recovery.state === "reconciliation_pending" ? "esperando_conexion" : "inactiva",
+			});
 		} catch {
-			set({ hidratada: true });
+			// Fail-closed en una Main: si ni siquiera podemos saber si la BD está recuperándose, abrir
+			// el socket contra ella sería más peligroso que esperar. En Handy este flag no se usa.
+			set({ hidratada: true, datosPerdidos: true });
 		}
 	},
 
@@ -118,4 +150,33 @@ export const useEstadoSync = create<EstadoSyncStore>((set, get) => ({
 		// seguir desde el checkpoint que dejó el bootstrap, no dentro de un backoff.
 		if (!perdidos) set((s) => ({ pulso: s.pulso + 1 }));
 	},
+
+	configurarRecuperacion: (state) =>
+		set({
+			datosPerdidos: state === "data_missing",
+			reconciliacionPendiente: state === "reconciliation_pending",
+			faseRecuperacion:
+				state === "reconciliation_pending" ? "esperando_conexion" : "inactiva",
+			errorRecuperacion: null,
+		}),
+
+	iniciarReconciliacion: () =>
+		set((s) => ({
+			datosPerdidos: false,
+			reconciliacionPendiente: true,
+			faseRecuperacion: "esperando_conexion",
+			errorRecuperacion: null,
+			pulso: s.pulso + 1,
+		})),
+
+	marcarFaseRecuperacion: (fase, error = null) =>
+		set({ faseRecuperacion: fase, errorRecuperacion: error }),
+
+	finalizarRecuperacion: () =>
+		set({
+			datosPerdidos: false,
+			reconciliacionPendiente: false,
+			faseRecuperacion: "completada",
+			errorRecuperacion: null,
+		}),
 }));

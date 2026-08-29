@@ -213,8 +213,28 @@ app.onError((err, c) => {
 			status as any,
 		);
 	}
+	const message = String((err as any)?.message || err);
+	// Fallos de infraestructura por los que la pantalla de recuperación ofrece una acción distinta.
+	// Se clasifican aquí, en la frontera HTTP, para no duplicar catches en cada ruta que usa Turso.
+	if (message.includes("tenant_db_not_provisioned")) {
+		return c.json(
+			{ ok: false, code: "tenant_db_not_provisioned", error: "tenant_db_not_provisioned" },
+			404,
+		);
+	}
+	if (message.includes("migration_altered")) {
+		return c.json(
+			{
+				ok: false,
+				code: "tenant_migration_altered",
+				error: "migration_altered",
+				details: { message },
+			},
+			500,
+		);
+	}
 	return serverError(c.req.raw, "internal_error", {
-		message: String((err as any)?.message || err),
+		message,
 	});
 });
 

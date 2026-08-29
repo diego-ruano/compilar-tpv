@@ -30,6 +30,8 @@ export type WsAttachment = {
 	pubkeyB64: string | null;
 	/** Challenge pendiente. SYNC-07: se consume (a `null`) en el primer intento de verificación. */
 	challenge: { nonceB64: string; expiresAtMs: number } | null;
+	/** La Main ha restaurado una copia y todavía está reconciliándola. Bloquea las Handy. */
+	recovering?: boolean;
 };
 
 /* =========================================================
@@ -44,7 +46,10 @@ export type HelloSignedMsg = {
 	nonceB64: string;
 	sigB64: string;
 	role?: Role;
+	recovering?: boolean;
 };
+
+export type RecoveryReadyMsg = { type: "recovery_ready" };
 
 export type EventMsg = { type: "event"; name: string; payload?: any };
 
@@ -79,7 +84,13 @@ export type BulkApplyMsg = {
 	clientNow?: string;
 };
 
-export type AnyMsg = PingMsg | HelloSignedMsg | EventMsg | ApplyMsg | BulkApplyMsg;
+export type AnyMsg =
+	| PingMsg
+	| HelloSignedMsg
+	| RecoveryReadyMsg
+	| EventMsg
+	| ApplyMsg
+	| BulkApplyMsg;
 
 /* =========================================================
    3. Comando interno (SQL replicable)

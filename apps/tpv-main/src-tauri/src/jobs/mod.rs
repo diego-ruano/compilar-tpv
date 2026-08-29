@@ -63,8 +63,9 @@ const ESPERA_GATE: Duration = Duration::from_secs(60);
 const JITTER_TECHO: Duration = Duration::from_secs(5 * 60);
 
 /// Cuerpo de un job ya empaquetado. Se construye con [`tarea`].
-type Ejecutar =
-    Box<dyn Fn(AppHandle) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync>;
+type Ejecutar = Box<
+    dyn Fn(AppHandle) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send>> + Send + Sync,
+>;
 
 /// Envuelve una `async fn(AppHandle) -> Result<(), String>` como cuerpo de job.
 pub(crate) fn tarea<F, Fut>(f: F) -> Ejecutar
@@ -80,15 +81,15 @@ where
 pub(crate) enum Requiere {
     /// Cualquier modo, con o sin BD.
     Siempre,
-    /// Solo la Main (modo TPV) y con la BD local abierta.
-    MainConBd,
+    /// Main con datos sanos y sin una reconciliación de recuperación en curso.
+    MainOperativa,
 }
 
 impl Requiere {
     async fn cumplido(&self, app: &AppHandle) -> bool {
         match self {
             Requiere::Siempre => true,
-            Requiere::MainConBd => app.state::<AppState>().es_main_con_bd().await,
+            Requiere::MainOperativa => app.state::<AppState>().es_main_operativa().await,
         }
     }
 }

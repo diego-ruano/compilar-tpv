@@ -82,6 +82,7 @@ function prepararHub(hub: any) {
 	// `last_seen` va contra la BD central, que aquí no existe y tampoco es lo que se prueba.
 	hub.touchLastSeen = async () => {};
 	hub.isMainConnected = () => true;
+	hub.isMainReady = () => true;
 	// Las tablas de la cola las crea `encolar`, pero los tests que comprueban que NO se encoló nada
 	// necesitan poder leerlas igualmente.
 	hub.asegurarCola();
@@ -239,6 +240,40 @@ describe("SYNC-18 · protocolo del volcado por WebSocket", () => {
 
 			const status = await esperarMensaje(enviados, "main_status");
 			expect(status).toMatchObject({ online: true, volcando: true });
+		});
+	});
+
+	it("una Handy que entra durante una recuperación también queda congelada", async () => {
+		await enElHub("ws-status-recovery", async (hub: any) => {
+			prepararHub(hub);
+			hub.isMainRecovering = () => true;
+			const { ws, enviados } = socketFalso("handy");
+			hub.verifyHelloSigned = async () => ({ roleFinal: "handy", pubkeyB64: "x" });
+
+			await hub.webSocketMessage(
+				ws,
+				JSON.stringify({ type: "helloSigned", ts: Date.now(), nonceB64: "n", sigB64: "s" }),
+			);
+
+			const status = await esperarMensaje(enviados, "main_status");
+			expect(status).toMatchObject({ online: true, volcando: true });
+		});
+	});
+
+	it("sólo la Main puede declarar terminada su recuperación", async () => {
+		await enElHub("ws-recovery-ready", async (hub: any) => {
+			prepararHub(hub);
+			const main = socketFalso("tpv");
+			await hub.webSocketMessage(main.ws, JSON.stringify({ type: "recovery_ready" }));
+			expect(main.enviados).toContainEqual({ type: "recovery_ready_ack" });
+			expect(main.ws.deserializeAttachment().recovering).toBe(false);
+
+			const handy = socketFalso("handy");
+			await hub.webSocketMessage(handy.ws, JSON.stringify({ type: "recovery_ready" }));
+			expect(handy.enviados).toContainEqual({
+				type: "error",
+				error: "forbidden_not_tpv",
+			});
 		});
 	});
 

@@ -1,6 +1,6 @@
 # BUG — Un TPV sin datos puede quedarse sin ninguna salida
 
-**Estado:** abierto · **Detectado:** 2026-08-26 · **Gravedad:** alta (deja el equipo inutilizable)
+**Estado:** corregido en el MVP · **Detectado:** 2026-08-26 · **Gravedad:** alta
 **Introducido en:** `db4b5d8` (recuperación de la BD local desde la nube)
 
 ---
@@ -42,7 +42,9 @@ El `migration_altered` es solo el disparador que tocó. Cualquiera de estos deja
 - El volcado supera `BOOTSTRAP_MAX_FILAS` (413 `bootstrap_demasiado_grande`).
 - Cualquier error de SQL en el tenant.
 
-**Lo que falta:** una salida que no dependa de la nube. Un TPV tiene que poder abrir el bar.
+**Decisión del MVP:** la copia local evita depender de la nube para reconstruir el fichero, pero el
+TPV no vuelve a operar hasta reconciliarla con conexión. Trabajar offline sobre una copia antigua
+crearía dos historiales divergentes; el modo degradado capaz de resolverlos se aplaza.
 
 ### BUG-B · Editar `0001_inicial.sql` inutiliza el REST de un tenant ya aprovisionado (preexistente)
 
@@ -85,18 +87,17 @@ de envenenar el isolate hasta que se recicle.
 
 ---
 
-## 4. Direcciones de arreglo (sin decidir)
+## 4. Direcciones evaluadas y decisión
 
 **Para BUG-A** — hace falta una salida local. Opciones, de menos a más invasiva:
 
-1. **Recuperar desde el `.bak`.** Ya se hacen copias antes de migrar
-   (`connection.rs::backup_if_migration_pending`). Ofrecerlas en la pantalla de recuperación es la
-   única vía que funciona **sin red**, que es justo lo que falta.
-2. **Modo degradado explícito**: dejar sembrar el admin, pero marcando la BD como "no
+1. **Recuperar desde una copia local — elegida.** Se generan copias completas diariamente y se
+   pueden seleccionar sin red. Para desbloquear el login sí se exige conexión y reconciliación.
+2. **Modo degradado explícito — aplazado**: dejar sembrar el admin, pero marcando la BD como "no
    autoritativa" para que sus escrituras **no** salgan por el outbox hasta reconciliar. Resuelve el
    arranque sin reintroducir la corrupción de la nube, a cambio de un estado nuevo que mantener.
-3. **Mínimo imprescindible**: que la pantalla explique el error real y ofrezca reintentar, en vez de
-   un cartel muerto. No desbloquea, pero deja de mentir.
+3. **Diagnóstico y reintento — incluido**: la pantalla conserva el error real y reintenta la
+   reconciliación al recuperar la conexión.
 
 **Para BUG-B** — dos frentes:
 
@@ -113,3 +114,18 @@ de envenenar el isolate hasta que se recicle.
 cuerpo, y **descarta `details.message`** — que es donde el worker pone la causa. Por eso este fallo
 llega al TPV como un `internal_error` pelado y hubo que ir a `wrangler tail` para leer una línea que
 ya venía en la respuesta. Afecta a **cualquier** 500 del worker, no solo a este.
+
+---
+
+## 6. Solución implementada
+
+- Copia SQLite completa una vez al día mediante el runner de jobs; se conservan las siete últimas.
+- La pantalla permite restaurar una copia local validada o el snapshot actual de la nube.
+- Toda restauración queda bloqueada hasta completar `catch-up → outbox → catch-up` y comprobar
+  `outbox = 0` y `checkpoint >= high-water` de la nube. Las Handy quedan congeladas mientras tanto.
+- Empezar de cero sólo se ofrece tras `tenant_db_not_provisioned` explícito; nunca por timeout/500.
+- Los errores de migración, tamaño de bootstrap y copia corrupta tienen código propio, y el cliente
+  conserva `details.message` del worker.
+- En preproducción se puede seguir consolidando el esquema en `0001`, pero hay que resetear a la vez
+  `data.db` y los tenants Turso de desarrollo. Al publicar la primera versión, `0001` queda congelada
+  y los cambios posteriores se añaden como `0002`, `0003`, etc.

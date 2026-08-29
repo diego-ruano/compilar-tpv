@@ -416,6 +416,8 @@ export class TenantHub {
 		requestPayloadJson: string;
 		cloudPayloadJson: string;
 		clientNow?: string | null;
+		/** Sólo el outbox de la Main que está ejecutando la propia recuperación puede escribir. */
+		allowWhileRecovering?: boolean;
 	}): Promise<{ result: any; seq: number }> {
 		const {
 			tenantId,
@@ -457,6 +459,9 @@ export class TenantHub {
 		// WS-write de la propia Main (que cuenta como presente al estar conectada).
 		if (!this.isMainConnected()) {
 			throw new Error("main_offline");
+		}
+		if (!params.allowWhileRecovering && !this.isMainReady()) {
+			throw new Error("main_volcando");
 		}
 
 		// SYNC-18: y si la Main tiene atraso sin aplicar, la nube está a medio construir. Dejar
@@ -917,7 +922,10 @@ export class TenantHub {
 				// Cola vacía: no se reprograma nada y el DO puede volver a hibernar. Si veníamos de
 				// drenar, es el momento de soltar a las Handy.
 				if (huboTrabajo) {
-					this.broadcastAuthed({ type: "main_volcando", volcando: false });
+					this.broadcastAuthed({
+						type: "main_volcando",
+						volcando: this.isMainRecovering(),
+					});
 					this.emitSyncEvent("cola_volcado_fin", {});
 				}
 				return;
@@ -1226,6 +1234,24 @@ export class TenantHub {
 		return false;
 	}
 
+	/** Una Main en recuperación está conectada, pero aún no autoriza trabajo de las Handy. */
+	private isMainReady(except?: WebSocket): boolean {
+		for (const ws of this.state.getWebSockets()) {
+			if (except && ws === except) continue;
+			const a = this.att(ws);
+			if (a?.authed && a.role === "tpv" && !a.recovering) return true;
+		}
+		return false;
+	}
+
+	private isMainRecovering(): boolean {
+		for (const ws of this.state.getWebSockets()) {
+			const a = this.att(ws);
+			if (a?.authed && a.role === "tpv" && a.recovering) return true;
+		}
+		return false;
+	}
+
 	/** Nº de dispositivos autenticados ahora mismo (telemetría). */
 	private authedCount(): number {
 		let n = 0;
@@ -1530,6 +1556,7 @@ export class TenantHub {
 			authed: false,
 			pubkeyB64: pubkeyHint,
 			challenge: ch,
+			recovering: false,
 		});
 
 		// Reconexión con el mismo deviceId: se echa la sesión anterior. Se cierra DESPUÉS de aceptar
@@ -1624,6 +1651,7 @@ export class TenantHub {
 							authed: true,
 							pubkeyB64,
 							challenge: null,
+							recovering: roleFinal === "tpv" && Boolean(msg.recovering),
 						});
 
 						this.send(ws, {
@@ -1653,11 +1681,17 @@ export class TenantHub {
 							online: this.isMainConnected(),
 							// SYNC-18: una Handy que entra a mitad de un volcado tiene que bloquear
 							// igual que si no hubiera Main; con `online` a secas no se enteraría.
-							volcando: this.cuantasEnCola() > 0,
+							volcando: this.cuantasEnCola() > 0 || this.isMainRecovering(),
 						});
 
 						if (roleFinal === "tpv") {
 							this.broadcast({ type: "main_online", deviceId }, deviceId);
+							if (Boolean(msg.recovering)) {
+								this.broadcastAuthed(
+									{ type: "main_volcando", volcando: true },
+									deviceId,
+								);
+							}
 							this.emitSyncEvent("main_online", { device_id: deviceId });
 						}
 					} catch (e: any) {
@@ -1684,6 +1718,20 @@ export class TenantHub {
 		// Actividad real del dispositivo (ya no hay pings que la reflejen): refrescamos `last_seen`
 		// de forma throttleada y fire-and-forget.
 		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId));
+
+		if (msg.type === "recovery_ready") {
+			if (a.role !== "tpv") {
+				this.send(ws, { type: "error", error: "forbidden_not_tpv" });
+				return;
+			}
+			this.setAtt(ws, { ...a, recovering: false });
+			this.broadcastAuthed({
+				type: "main_volcando",
+				volcando: this.cuantasEnCola() > 0 || this.isMainRecovering(),
+			});
+			this.send(ws, { type: "recovery_ready_ack" });
+			return;
+		}
 
 		// Escritura de la Main por WS: se aplica al MISMO motor idempotente que
 		// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
@@ -1842,6 +1890,7 @@ export class TenantHub {
 							requestPayloadJson,
 							cloudPayloadJson,
 							clientNow,
+							allowWhileRecovering: true,
 						});
 						this.send(ws, {
 							type: "apply_ack",

@@ -2486,4 +2486,3 @@ mod tests_snapshot_de_la_linea {
         assert_eq!(despues, Value::Real(10.0), "las ventas nuevas sí usan el tipo nuevo");
     }
 }
-

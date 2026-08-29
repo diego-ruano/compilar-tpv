@@ -5,8 +5,8 @@
 pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
-pub mod email_config;
 pub mod cuentas;
+pub mod email_config;
 pub mod inventario;
 pub mod jobs;
 pub mod licensing;
@@ -16,6 +16,7 @@ pub mod notificaciones;
 pub mod pairing;
 pub mod pedidos_proveedor;
 pub mod proveedores;
+pub mod recovery;
 pub mod reservas;
 pub mod stats;
 pub mod sync;

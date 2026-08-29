@@ -39,6 +39,7 @@ import {
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { captureException } from "../observability/sentry";
+import { reconcileRestoredDatabase, type RecoveryPhase } from "./recoverySync";
 
 // SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
 // prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se resetea al autenticarse.
@@ -165,6 +166,7 @@ export function useMainSocket() {
 	const preferencia = useEstadoSync((s) => s.preferencia);
 	const hidratada = useEstadoSync((s) => s.hidratada);
 	const datosPerdidos = useEstadoSync((s) => s.datosPerdidos);
+	const reconciliacionPendiente = useEstadoSync((s) => s.reconciliacionPendiente);
 	const deviceMode = useMode((s) => s.mode);
 
 	useEffect(() => {
@@ -206,6 +208,7 @@ export function useMainSocket() {
 		// Estado del drenado del outbox (Main → nube).
 		let authed = false;
 		let draining = false;
+		let recoveryRunning = false;
 		let drainTimer: number | null = null;
 		const acks = new Map<
 			string,
@@ -216,12 +219,11 @@ export function useMainSocket() {
 		let ackVolcado: ((ok: boolean, error?: string) => void) | null = null;
 
 		// Aplica de forma serializada (FIFO) para no solapar transacciones en la misma conexión.
-		function enqueue(changes: ChangeArg[]) {
-			if (!changes.length) return;
-			chain = chain.then(async () => {
+		function enqueue(changes: ChangeArg[]): Promise<void> {
+			if (!changes.length) return Promise.resolve();
+			const task = chain.then(async () => {
 				if (cancelled) return;
-				try {
-					const r = await invoke<AplicacionSync>("sync_apply_changes", {
+				const r = await invoke<AplicacionSync>("sync_apply_changes", {
 						args: { changes },
 					});
 
@@ -263,14 +265,17 @@ export function useMainSocket() {
 							void useTicketSettings.getState().init();
 						}
 					}
-				} catch (e) {
+			});
+			// La cadena compartida siempre se recupera para que un fallo no mate el flujo vivo. El
+			// `task` devuelto conserva el rechazo y permite que la recuperación falle cerrada.
+			chain = task.catch((e) => {
 					// No es ruido de red: los cambios YA estaban descargados y no se han podido
 					// escribir en la BD local. Este dispositivo deja de converger hasta que se
 					// arregle, así que tiene que verse fuera de la consola de quien lo esté mirando.
 					console.warn("sync_apply_changes falló:", e);
 					captureException(e, { fase: "sync_apply_changes" });
-				}
 			});
+			return task;
 		}
 
 		// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
@@ -406,8 +411,14 @@ export function useMainSocket() {
 
 		// Drena el outbox local en orden: por cada op pendiente, la envía y, si la nube confirma
 		// (apply_ack ok), la marca como enviada. Si una falla/expira, para y reintenta más tarde.
-		async function drainOutbox(socket: WebSocket) {
-			if (draining || !authed || socket.readyState !== WebSocket.OPEN) return;
+		async function drainOutbox(socket: WebSocket, strict = false) {
+			while (strict && draining && !cancelled) {
+				await new Promise((resolve) => window.setTimeout(resolve, 50));
+			}
+			if (draining || !authed || socket.readyState !== WebSocket.OPEN) {
+				if (strict) throw new Error("La conexión con la nube no está disponible");
+				return;
+			}
 			draining = true;
 			try {
 				for (let i = 0; i < 1000 && !cancelled && authed; i++) {
@@ -423,6 +434,7 @@ export function useMainSocket() {
 						const { ok, error, seq, encolada } = await sendApply(socket, entry);
 						if (!ok) {
 							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
+							if (strict) throw new Error(error ?? "La nube no confirmó una operación local");
 							break;
 						}
 						// SYNC-18: encolada ≠ aplicada. Su fila se queda en el outbox hasta que el
@@ -455,6 +467,7 @@ export function useMainSocket() {
 				// un equipo online y ocioso. Ahora es el job `purga_sync` (jobs/registro.rs).
 			} catch (e) {
 				console.warn("drenado del outbox falló:", e);
+				if (strict) throw e;
 			} finally {
 				draining = false;
 			}
@@ -500,8 +513,10 @@ export function useMainSocket() {
 			await drainOutbox(socket);
 		}
 
-		async function catchUpThenLive() {
+		async function catchUpThenLive(strict = false): Promise<number> {
 			caughtUp = false;
+			let highWater = 0;
+			let failure: unknown = null;
 			try {
 				let since = 0;
 				try {
@@ -516,8 +531,9 @@ export function useMainSocket() {
 						since,
 					})) as any;
 					const items: any[] = Array.isArray(resp?.items) ? resp.items : [];
+					highWater = Number(resp?.highWater ?? resp?.high_water ?? highWater);
 					if (!items.length) break;
-					enqueue(items.map(toChange).filter(Boolean) as ChangeArg[]);
+					await enqueue(items.map(toChange).filter(Boolean) as ChangeArg[]);
 					const next = Number(resp?.nextSince ?? since);
 					if (next <= since) break;
 					since = next;
@@ -526,19 +542,28 @@ export function useMainSocket() {
 				// (Main mucho tiempo offline o Sync_Changes enorme). Reanuda al reconectar, pero lo
 				// hacemos VISIBLE para no cortar la convergencia en silencio.
 				if (page >= CATCHUP_MAX_PAGES && !cancelled) {
-					captureException(new Error("sync_catchup_cap_reached"), {
+					const capError = new Error("sync_catchup_cap_reached");
+					captureException(capError, {
 						pages: page,
 						lastSince: since,
 					});
+					if (strict) failure = capError;
 				}
 			} catch (e) {
 				console.warn("catch-up de sync falló:", e);
+				failure = e;
 			} finally {
 				// Aplica (en orden) lo recibido en vivo durante el catch-up y abre el flujo vivo.
 				const pending = buffer.splice(0).sort((a, b) => a.seq - b.seq);
 				caughtUp = true;
-				enqueue(pending);
+				try {
+					await enqueue(pending);
+				} catch (e) {
+					failure ??= e;
+				}
 			}
+			if (strict && failure) throw failure;
+			return highWater;
 		}
 
 		// SYNC-09: retardo de reconexión con backoff exponencial (se resetea a base en `hello_ok`).
@@ -716,6 +741,7 @@ export function useMainSocket() {
 									ts,
 									nonceB64: msg.nonceB64,
 									sigB64,
+									recovering: reconciliacionPendiente,
 								}),
 							);
 						}
@@ -731,6 +757,58 @@ export function useMainSocket() {
 					authed = true;
 					marcar("conectado");
 					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
+					if (reconciliacionPendiente) {
+						if (recoveryRunning) return;
+						recoveryRunning = true;
+						let recoveryQueueReleased = false;
+						const phaseToStore: Record<RecoveryPhase, "descargando" | "subiendo" | "verificando"> = {
+							downloading: "descargando",
+							uploading: "subiendo",
+							verifying: "verificando",
+						};
+						void reconcileRestoredDatabase({
+							catchUp: () => catchUpThenLive(true),
+							drainOutbox: async () => {
+								if (!recoveryQueueReleased) {
+									// Tras restaurar una copia no sabemos si una marca "encolada" sigue
+									// correspondiendo a trabajo vivo del DO. Se ofrece otra vez una sola vez;
+									// `Op_Id` hace que el reenvío sea idempotente.
+									await invoke("sync_liberar_encoladas", { antiguedadMs: 0 });
+									recoveryQueueReleased = true;
+								}
+								await drainOutbox(socket, true);
+							},
+							health: () => invoke("sync_health"),
+							complete: async (highWater) => {
+								await invoke("recovery_complete", { cloudHighWater: highWater });
+								if (socket.readyState === WebSocket.OPEN) {
+									socket.send(JSON.stringify({ type: "recovery_ready" }));
+								}
+							},
+							wait: () =>
+								new Promise((resolve) => window.setTimeout(resolve, 1000)),
+							onPhase: (phase) =>
+								useEstadoSync
+									.getState()
+									.marcarFaseRecuperacion(phaseToStore[phase]),
+						})
+							.then(() => useEstadoSync.getState().finalizarRecuperacion())
+							.catch((e) => {
+								const message = toAppError(e).message;
+								useEstadoSync.getState().marcarFaseRecuperacion("error", message);
+								captureException(e, { fase: "recovery_reconciliation" });
+								// Una conexión nueva rehace el ciclo completo. La marca persistente sigue puesta.
+								try {
+									socket.close();
+								} catch {
+									/* noop */
+								}
+							})
+							.finally(() => {
+								recoveryRunning = false;
+							});
+						return;
+					}
 					void catchUpThenLive();
 					void subirLoPendiente(socket);
 					// El drenado a R2 estuvo dos meses fallando en silencio (device-proof) y sólo se
@@ -882,5 +960,5 @@ export function useMainSocket() {
 				ws = null;
 			}
 		};
-	}, [deviceMode, preferencia, hidratada, datosPerdidos]);
+	}, [deviceMode, preferencia, hidratada, datosPerdidos, reconciliacionPendiente]);
 }

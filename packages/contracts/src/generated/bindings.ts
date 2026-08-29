@@ -232,7 +232,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt";
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
@@ -357,6 +357,11 @@ cantidad: number, precio_unitario: number,
  * Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
  */
 iva_percent?: number, };
+
+/**
+ * Copia local disponible. `id` es opaco para la UI y sólo puede proceder del listado.
+ */
+export type LocalBackupInfo = { id: string, created_at_ms: number, size_bytes: number, };
 
 export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre: string, apellido: string | null, rol: string, email: string, requiere_setup: number, };
 
@@ -610,6 +615,13 @@ export type PunchStatus = { fecha: string, turno_partido: number, partes: Array<
 export type PunchStatusArgs = { id_usuario: string, };
 
 export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: string, minutos_retraso: number, };
+
+/**
+ * Estado que decide si la aplicación puede abrir el login o debe permanecer bloqueada.
+ */
+export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending";
+
+export type RecoveryStatus = { state: RecoveryState, };
 
 /**
  * Entrada de borrado de reserva.

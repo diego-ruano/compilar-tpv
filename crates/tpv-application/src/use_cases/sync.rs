@@ -81,11 +81,22 @@ pub async fn bootstrap_desde_nube(
         .tpv_server_post_json("tpv", "/v1/sync/bootstrap", json!({}))
         .await?;
 
-    let snapshot: BootstrapSnapshot = serde_json::from_value(raw).map_err(|e| {
-        AppError::external(format!("respuesta de bootstrap ilegible: {e}"))
-    })?;
+    let snapshot: BootstrapSnapshot = serde_json::from_value(raw)
+        .map_err(|e| AppError::external(format!("respuesta de bootstrap ilegible: {e}")))?;
 
     repo.bootstrap_restaurar(snapshot).await
+}
+
+/// Crea una base vacía en la nube y la descarga. El endpoint del servidor sólo acepta la petición
+/// cuando el tenant NO tiene ya una base aprovisionada; por eso esta operación nunca es fallback
+/// automático de un error de red ni puede sobrescribir una nube existente.
+pub async fn inicializar_tenant_vacio(
+    nube: &dyn PairingService,
+    repo: &dyn SyncRepository,
+) -> AppResult<BootstrapResultado> {
+    nube.tpv_server_post_json("tpv", "/v1/sync/initialize-empty", json!({}))
+        .await?;
+    bootstrap_desde_nube(nube, repo).await
 }
 
 #[cfg(test)]
@@ -164,13 +175,21 @@ mod tests {
     async fn lote_no_vacio_se_delega_y_devuelve_checkpoint_nuevo() {
         let repo = FakeRepo::default();
         let change = tpv_contracts::sync::SyncChange {
-            op_id: "op-1".into(), seq: 99,
+            op_id: "op-1".into(),
+            seq: 99,
             statements: vec![tpv_contracts::sync::SqlStatement {
                 sql: "UPDATE Configuracion SET Valor=?1".into(),
                 args: vec![serde_json::json!("nuevo")],
             }],
         };
-        let r = apply_changes(&repo, ApplySyncChangesArgs { changes: vec![change] }).await.unwrap();
+        let r = apply_changes(
+            &repo,
+            ApplySyncChangesArgs {
+                changes: vec![change],
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(r.last_seq, 99);
         assert_eq!(r.aplicadas, vec!["op-1".to_string()]);
         assert_eq!(*repo.checkpoints.lock().unwrap(), 0);

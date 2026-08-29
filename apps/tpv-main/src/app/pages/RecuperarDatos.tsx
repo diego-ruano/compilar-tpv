@@ -1,66 +1,107 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { AppErrorDto, LocalBackupInfo } from "@tpv/contracts";
+import { toAppError } from "@tpv/client";
 import {
     AlertTriangle,
     CheckCircle2,
     CloudDownload,
     DatabaseBackup,
+    HardDriveDownload,
     Loader2,
     ShieldAlert,
 } from "lucide-react";
-import { recuperarDesdeNube, type BootstrapResultado } from "../../features/login/loginApi";
+import {
+    inicializarTenantVacio,
+    listarCopiasLocales,
+    recuperarDesdeCopiaLocal,
+    recuperarDesdeNube,
+    type BootstrapResultado,
+} from "../../features/login/loginApi";
+import { useEstadoSync } from "../../shared/stores/useEstadoSync";
 import { Badge, Button, Card } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
 
-/**
- * Recuperar la BD local desde la nube.
- *
- * Se llega aqui cuando `setup_pendiente` responde `requiere_recuperacion`: este equipo tiene
- * licencia activada pero su `data.db` no tiene ni un usuario. En una instalacion nueva eso es
- * imposible (el arranque siembra el admin), asi que la BD se ha perdido —borrada, corrupta,
- * restaurada a medias— y lo que hace falta NO es elegir un PIN nuevo.
- *
- * Esa distincion es el motivo de esta pantalla. Sembrar un admin aqui fabricaria una credencial
- * con el PIN publico del seed y, al completar el setup, la replicaria a la nube pisando la del
- * admin de verdad: perder la BD local pasaria a dejar sin entrar tambien a las Handy.
- */
-export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => void }) {
-    const [estado, setEstado] = useState<"listo" | "trabajando" | "hecho">("listo");
-    const [error, setError] = useState<string | null>(null);
-    const [resultado, setResultado] = useState<BootstrapResultado | null>(null);
+type Origen = "local" | "cloud" | "empty";
 
-    const recuperar = async () => {
-        setEstado("trabajando");
+function fechaCopia(ms: number): string {
+    return new Intl.DateTimeFormat("es-ES", {
+        dateStyle: "medium",
+        timeStyle: "short",
+    }).format(new Date(ms));
+}
+
+function textoFase(fase: string): string {
+    switch (fase) {
+        case "descargando":
+            return "Trayendo los cambios posteriores a la copia…";
+        case "subiendo":
+            return "Guardando en la nube los cambios locales pendientes…";
+        case "verificando":
+            return "Comprobando que ambas bases de datos coinciden…";
+        case "error":
+            return "Se reintentará cuando la conexión vuelva a estar disponible.";
+        default:
+            return "Esperando una conexión segura con la nube…";
+    }
+}
+
+/** Recuperación bloqueante: el login sólo aparece después de reconciliar la copia con la nube. */
+export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => void }) {
+    const [backups, setBackups] = useState<LocalBackupInfo[]>([]);
+    const [cargandoBackups, setCargandoBackups] = useState(true);
+    const [operacion, setOperacion] = useState<Origen | null>(null);
+    const [error, setError] = useState<AppErrorDto | null>(null);
+    const [resultado, setResultado] = useState<BootstrapResultado | null>(null);
+    const [origen, setOrigen] = useState<Origen | null>(null);
+
+    const reconciliacionPendiente = useEstadoSync((s) => s.reconciliacionPendiente);
+    const fase = useEstadoSync((s) => s.faseRecuperacion);
+    const errorReconciliacion = useEstadoSync((s) => s.errorRecuperacion);
+    const iniciarReconciliacion = useEstadoSync((s) => s.iniciarReconciliacion);
+
+    useEffect(() => {
+        let vivo = true;
+        listarCopiasLocales()
+            .then((items) => {
+                if (vivo) setBackups(items);
+            })
+            .catch((e) => {
+                if (vivo) setError(toAppError(e));
+            })
+            .finally(() => {
+                if (vivo) setCargandoBackups(false);
+            });
+        return () => {
+            vivo = false;
+        };
+    }, []);
+
+    async function ejecutar(origenNuevo: Origen, fn: () => Promise<unknown>) {
+        setOperacion(origenNuevo);
         setError(null);
         try {
-            const r = await recuperarDesdeNube();
-            setResultado(r);
-            setEstado("hecho");
-        } catch (e: any) {
-            setError(
-                typeof e === "string" ? e : e?.message ? String(e.message) : "No se pudo recuperar",
-            );
-            setEstado("listo");
+            const r = await fn();
+            if (origenNuevo !== "local") setResultado(r as BootstrapResultado);
+            setOrigen(origenNuevo);
+            // La restauración ya dejó la marca persistente en SQLite. Esto permite abrir el WS,
+            // pero mantiene esta pantalla hasta que el protocolo confirme la convergencia.
+            iniciarReconciliacion();
+        } catch (e) {
+            setError(toAppError(e));
+        } finally {
+            setOperacion(null);
         }
-    };
+    }
+
+    const trabajando = operacion !== null || reconciliacionPendiente;
+    const completada = fase === "completada";
+    const puedeCrearVacia = error?.code === "tenant_db_not_provisioned";
 
     return (
         <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-bg text-fg">
             <Titlebar />
-
             <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-4 sm:p-6 lg:p-10">
-                <div
-                    className="pointer-events-none absolute -left-24 -top-24 size-80 rounded-full bg-accent-soft blur-3xl"
-                    aria-hidden
-                />
-                <div
-                    className="pointer-events-none absolute -bottom-32 -right-16 size-96 rounded-full bg-accent-soft opacity-70 blur-3xl"
-                    aria-hidden
-                />
-
-                <Card
-                    padded={false}
-                    className="relative w-full max-w-2xl overflow-hidden rounded-3xl shadow-xl"
-                >
+                <Card padded={false} className="relative w-full max-w-2xl overflow-hidden rounded-3xl shadow-xl">
                     <section className="border-b border-border bg-surface-2 p-6 sm:p-8">
                         <div className="flex items-center justify-between gap-3">
                             <div className="grid size-14 place-items-center rounded-2xl bg-accent-soft text-accent">
@@ -68,102 +109,131 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                             </div>
                             <Badge tone="accent">Recuperación</Badge>
                         </div>
-
-                        <h1 className="mt-6 text-2xl font-bold tracking-tight text-fg sm:text-3xl">
-                            Faltan los datos de este TPV
+                        <h1 className="mt-6 text-2xl font-bold tracking-tight sm:text-3xl">
+                            Recuperar los datos de este TPV
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
-                            La licencia de este equipo está activa, pero su base de datos local está
-                            vacía. No es una instalación nueva: los datos siguen en la nube y se
-                            pueden traer de vuelta.
+                            Puedes usar una copia diaria de este ordenador o descargar el estado
+                            actual de la nube. Después se comprobarán ambos lados antes de permitir
+                            trabajar de nuevo.
                         </p>
                     </section>
 
-                    <section className="p-6 sm:p-8">
-                        {estado === "hecho" && resultado ? (
-                            <div className="grid gap-5">
+                    <section className="grid gap-5 p-6 sm:p-8">
+                        {completada ? (
+                            <>
                                 <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3">
                                     <CheckCircle2 className="size-5 shrink-0 text-success" aria-hidden />
                                     <div className="text-sm">
-                                        <p className="font-semibold text-fg">Datos restaurados</p>
+                                        <p className="font-semibold">Datos recuperados y sincronizados</p>
                                         <p className="mt-0.5 text-fg-muted">
-                                            {resultado.filas_restauradas.toLocaleString("es-ES")}{" "}
-                                            registros en {resultado.tablas_restauradas.length} tablas.
-                                            Ya puedes iniciar sesión con tu PIN de siempre.
+                                            La copia local y la nube ya están reconciliadas. Puedes
+                                            iniciar sesión con tu PIN habitual.
                                         </p>
                                     </div>
                                 </div>
 
-                                {/* El unico dato que la nube no puede devolver, dicho antes de que
-                                    alguien lo descubra por su cuenta al abrir una ficha. */}
-                                <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3">
-                                    <ShieldAlert className="size-5 shrink-0 text-warning" aria-hidden />
-                                    <div className="text-sm">
-                                        <p className="font-semibold text-fg">
-                                            Revisa las fichas del personal
-                                        </p>
-                                        <p className="mt-0.5 text-fg-muted">
-                                            El DNI, el IBAN y el número de la Seguridad Social se
-                                            guardan cifrados y nunca salen de este equipo, así que la
-                                            nube no los tenía. Habrá que volver a escribirlos.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {resultado.tablas_desconocidas.length > 0 && (
-                                    <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3">
-                                        <AlertTriangle className="size-5 shrink-0 text-warning" aria-hidden />
-                                        <div className="text-sm">
-                                            <p className="font-semibold text-fg">
-                                                Algunas tablas no se han restaurado
-                                            </p>
-                                            <p className="mt-0.5 text-fg-muted">
-                                                Esta versión del TPV no las conoce:{" "}
-                                                {resultado.tablas_desconocidas.join(", ")}. Actualiza
-                                                la aplicación y vuelve a recuperar.
-                                            </p>
-                                        </div>
+                                {origen === "cloud" && (
+                                    <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+                                        <ShieldAlert className="size-5 shrink-0 text-warning" aria-hidden />
+                                        <span className="text-fg-muted">
+                                            Revisa el DNI, IBAN y número de la Seguridad Social del
+                                            personal: están cifrados sólo en este equipo y no forman
+                                            parte de la copia de la nube.
+                                        </span>
                                     </div>
                                 )}
 
-                                <Button onClick={() => onRecuperado?.()}>
-                                    Ir al inicio de sesión
-                                </Button>
+                                {resultado && resultado.tablas_desconocidas.length > 0 && (
+                                    <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
+                                        <AlertTriangle className="size-5 shrink-0 text-warning" aria-hidden />
+                                        <span className="text-fg-muted">
+                                            Esta versión no reconoce: {resultado.tablas_desconocidas.join(", ")}.
+                                        </span>
+                                    </div>
+                                )}
+
+                                <Button onClick={() => onRecuperado?.()}>Ir al inicio de sesión</Button>
+                            </>
+                        ) : trabajando || fase === "error" ? (
+                            <div className="grid gap-4">
+                                <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-4">
+                                    <Loader2 className="size-5 shrink-0 animate-spin text-accent" aria-hidden />
+                                    <div className="text-sm">
+                                        <p className="font-semibold">Recuperación en curso</p>
+                                        <p className="mt-1 text-fg-muted">{textoFase(fase)}</p>
+                                    </div>
+                                </div>
+                                {errorReconciliacion && (
+                                    <div className="rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm text-fg">
+                                        {errorReconciliacion}
+                                    </div>
+                                )}
+                                <p className="text-center text-xs text-fg-muted">
+                                    No cierres la aplicación. Hace falta conexión a internet para terminar.
+                                </p>
                             </div>
                         ) : (
-                            <div className="grid gap-5">
-                                <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-fg-muted">
-                                    <CloudDownload className="size-5 shrink-0 text-accent" aria-hidden />
-                                    <span>
-                                        Se descargará el estado actual del negocio (productos, mesas,
-                                        clientes, personal y el histórico de ventas) y se reconstruirá
-                                        la base de datos de este equipo. Puede tardar un rato; no
-                                        cierres la aplicación.
-                                    </span>
+                            <>
+                                <div>
+                                    <h2 className="text-sm font-semibold">Copias de este ordenador</h2>
+                                    <div className="mt-3 grid gap-2">
+                                        {cargandoBackups ? (
+                                            <p className="text-sm text-fg-muted">Buscando copias…</p>
+                                        ) : backups.length === 0 ? (
+                                            <p className="rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg-muted">
+                                                Todavía no hay ninguna copia local disponible.
+                                            </p>
+                                        ) : (
+                                            backups.map((backup, index) => (
+                                                <Button
+                                                    key={backup.id}
+                                                    variant="secondary"
+                                                    disabled={operacion !== null}
+                                                    onClick={() =>
+                                                        void ejecutar("local", () => recuperarDesdeCopiaLocal(backup.id))
+                                                    }
+                                                >
+                                                    <HardDriveDownload className="size-4" aria-hidden />
+                                                    {index === 0 ? "Última copia" : "Copia"}: {fechaCopia(backup.created_at_ms)}
+                                                </Button>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+
+                                <div className="border-t border-border pt-5">
+                                    <Button
+                                        disabled={operacion !== null}
+                                        onClick={() => void ejecutar("cloud", recuperarDesdeNube)}
+                                    >
+                                        <CloudDownload className="size-4" aria-hidden />
+                                        Recuperar el estado actual de la nube
+                                    </Button>
                                 </div>
 
                                 {error && (
-                                    <div className="flex gap-3 rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm">
-                                        <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
-                                        <span className="text-fg">{error}</span>
+                                    <div className="grid gap-3 rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm">
+                                        <div className="flex gap-3">
+                                            <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
+                                            <span>{error.message}</span>
+                                        </div>
+                                        {puedeCrearVacia && (
+                                            <Button
+                                                variant="secondary"
+                                                onClick={() => void ejecutar("empty", inicializarTenantVacio)}
+                                            >
+                                                Crear una base de datos nueva y vacía
+                                            </Button>
+                                        )}
                                     </div>
                                 )}
 
-                                <Button onClick={recuperar} disabled={estado === "trabajando"}>
-                                    {estado === "trabajando" ? (
-                                        <>
-                                            <Loader2 className="size-4 animate-spin" aria-hidden />
-                                            Recuperando…
-                                        </>
-                                    ) : (
-                                        "Recuperar mis datos"
-                                    )}
-                                </Button>
-
                                 <p className="text-center text-xs text-fg-muted">
-                                    Hace falta conexión a internet.
+                                    Un error de conexión nunca se interpreta como “no hay datos”. La
+                                    opción de empezar de cero sólo aparece si el servidor lo confirma.
                                 </p>
-                            </div>
+                            </>
                         )}
                     </section>
                 </Card>

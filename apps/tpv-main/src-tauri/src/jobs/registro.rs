@@ -20,8 +20,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use tpv_application::use_cases::avisos as uc_avisos;
 use tpv_application::use_cases::cierre_caja as uc_cierre_caja;
-use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::licensing as uc_licensing;
+use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
 
@@ -64,6 +64,10 @@ const RECONCILIACION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 /// así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 
+/// Una instantánea coherente al día y las siete últimas: suficiente para errores humanos o del
+/// disco local sin convertir cada escritura del TPV en trabajo de backup.
+const BACKUP_LOCAL_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
 /// Cada cuánto se vuelve a preguntar al feed de actualizaciones. Un TPV puede pasar semanas
 /// encendido sin reiniciarse: sin este tick, una release nueva no se vería hasta el próximo
 /// arranque.
@@ -86,14 +90,16 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // Al arrancar, la pantalla de AppBoot ya pide el gate por su cuenta; este margen evita
             // duplicar esa llamada en los primeros segundos.
             retardo_inicial: Duration::from_secs(2 * 60),
-            requiere: Requiere::MainConBd,
+            // El gate de arranque ya valida la licencia. Durante una recuperación no se ejecuta
+            // este job porque sus avisos podrían escribir en una BD vacía antes del bootstrap.
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(licencia),
         },
         Job {
             nombre: "avisos",
             cada: Duration::from_secs(AVISOS_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(60),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(avisos),
         },
         Job {
@@ -102,14 +108,14 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // Pronto tras arrancar: si el bar cerró anoche sin hacer el arqueo, el aviso tiene que
             // estar ahí cuando abran, no una hora después.
             retardo_inicial: Duration::from_secs(120),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(caja_sin_cerrar),
         },
         Job {
             nombre: "stock_negativo",
             cada: Duration::from_secs(STOCK_NEGATIVO_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(90),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(stock_negativo),
         },
         Job {
@@ -125,7 +131,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             nombre: "purga_sync",
             cada: Duration::from_secs(PURGA_SYNC_INTERVAL_SECS),
             retardo_inicial: Duration::from_secs(5 * 60),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(purga_sync),
         },
         Job {
@@ -135,8 +141,16 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // siguiente en un equipo que se apaga cada noche (el motor mide el vencimiento en
             // reloj de pared, así que un TPV apagado 12 h lo ejecuta al encender).
             retardo_inicial: Duration::from_secs(10 * 60),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(reconciliacion),
+        },
+        Job {
+            nombre: "backup_local",
+            cada: Duration::from_secs(BACKUP_LOCAL_INTERVAL_SECS),
+            // La primera copia se hace pronto, pero fuera del camino crítico del arranque.
+            retardo_inicial: Duration::from_secs(5 * 60),
+            requiere: Requiere::MainOperativa,
+            ejecutar: tarea(backup_local),
         },
         Job {
             nombre: "cifrado_pii",
@@ -144,7 +158,7 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // Al minuto del arranque: da tiempo a que la activación haya guardado la DEK,
             // sin retrasar la conversión hasta el siguiente ciclo de 6 h.
             retardo_inicial: Duration::from_secs(60),
-            requiere: Requiere::MainConBd,
+            requiere: Requiere::MainOperativa,
             ejecutar: tarea(cifrado_pii),
         },
     ];
@@ -256,8 +270,12 @@ async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
     let repo = state.cierre_caja_repo().await?;
     let notifier = state.notifier().await?;
 
-    uc_cierre_caja::avisar_si_lleva_mucho_abierta(repo.as_ref(), notifier.as_ref(), CAJA_ABIERTA_HORAS)
-        .await?;
+    uc_cierre_caja::avisar_si_lleva_mucho_abierta(
+        repo.as_ref(),
+        notifier.as_ref(),
+        CAJA_ABIERTA_HORAS,
+    )
+    .await?;
     Ok(())
 }
 
@@ -281,6 +299,31 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
+    Ok(())
+}
+
+async fn backup_local(app: AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    let db = app
+        .state::<AppState>()
+        .db
+        .lock()
+        .await
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| "DB no inicializada".to_string())?;
+
+    if let Some(copia) = tpv_infra_sqlite::recovery::create_backup(&db, &dir).await? {
+        tracing::info!(
+            target: "tpv::jobs",
+            backup = %copia.id,
+            bytes = copia.size_bytes,
+            "copia local diaria creada"
+        );
+    }
     Ok(())
 }
 

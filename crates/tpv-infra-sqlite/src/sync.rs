@@ -92,10 +92,7 @@ const MAX_PARAMS_POR_SENTENCIA: usize = 900;
 /// tiene que informarse, no reventar la recuperación.
 async fn tablas_locales(conn: &Connection) -> AppResult<std::collections::HashSet<String>> {
     let mut rows = conn
-        .query(
-            "SELECT name FROM sqlite_master WHERE type = 'table';",
-            (),
-        )
+        .query("SELECT name FROM sqlite_master WHERE type = 'table';", ())
         .await
         .map_err(db_err)?;
     let mut out = std::collections::HashSet::new();
@@ -405,7 +402,10 @@ impl SyncRepository for SqliteSyncRepository {
         // borra filas seguras.
         let last_seq = checkpoint(conn).await?;
         purge_by_cursor(conn, last_seq).await?;
-        Ok(AplicacionSync { aplicadas, last_seq })
+        Ok(AplicacionSync {
+            aplicadas,
+            last_seq,
+        })
     }
 
     async fn get_checkpoint(&self) -> AppResult<i64> {
@@ -584,10 +584,16 @@ impl SyncRepository for SqliteSyncRepository {
 
         let outbox_pending = count(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
         let last_seq = checkpoint(conn).await?;
-        let quarantined =
-            count(conn, "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 1;").await?;
-        let failing =
-            count(conn, "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 0;").await?;
+        let quarantined = count(
+            conn,
+            "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 1;",
+        )
+        .await?;
+        let failing = count(
+            conn,
+            "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 0;",
+        )
+        .await?;
 
         Ok(SyncHealth {
             outbox_pending,
@@ -652,7 +658,7 @@ impl SyncRepository for SqliteSyncRepository {
             };
             if pendientes > 0 {
                 return Err(AppError::conflict(format!(
-                    "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar                      las borraría: espera a que se sincronicen antes de recuperar."
+                    "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
             }
 
@@ -728,6 +734,16 @@ impl SyncRepository for SqliteSyncRepository {
             .await
             .map_err(db_err)?;
 
+            // El snapshot es coherente en su `seq`, pero puede entrar una escritura nueva justo
+            // después de tomarlo. El login permanece bloqueado hasta que el WebSocket haga el
+            // ciclo catch-up → outbox → catch-up y confirme el high-water de la nube.
+            conn.execute(
+                "UPDATE _Recovery_State SET Reconciliation_Pending = 1 WHERE Id = 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+
             Ok(filas)
         }
         .await;
@@ -745,10 +761,7 @@ impl SyncRepository for SqliteSyncRepository {
                 Ok(BootstrapResultado {
                     seq: snapshot.seq,
                     filas_restauradas: filas,
-                    tablas_restauradas: restaurables
-                        .iter()
-                        .map(|t| t.nombre.clone())
-                        .collect(),
+                    tablas_restauradas: restaurables.iter().map(|t| t.nombre.clone()).collect(),
                     tablas_desconocidas: desconocidas,
                 })
             }
@@ -778,13 +791,19 @@ mod tests_encoladas {
     fn uniq() -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+        format!(
+            "{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
     }
 
     async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("tpv_sync_test_{}", uniq()));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap())
+            .await
+            .unwrap();
         (SqliteSyncRepository::new(db.clone()), db, dir)
     }
 
@@ -816,7 +835,9 @@ mod tests_encoladas {
         encolar_en_outbox(&db, "op-1").await;
         encolar_en_outbox(&db, "op-2").await;
 
-        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+        repo.outbox_mark_encolada(&["op-1".to_string()])
+            .await
+            .unwrap();
 
         // Ya no se ofrece para reenviar...
         assert_eq!(ids_pendientes(&repo).await, vec!["op-2".to_string()]);
@@ -838,7 +859,9 @@ mod tests_encoladas {
     async fn verla_volver_de_la_nube_es_lo_que_la_da_por_subida() {
         let (repo, db, _dir) = repo_temporal().await;
         encolar_en_outbox(&db, "op-1").await;
-        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+        repo.outbox_mark_encolada(&["op-1".to_string()])
+            .await
+            .unwrap();
 
         // El catch-up la devuelve: prueba de que allí está aplicada.
         repo.apply_changes(vec![SyncChange {
@@ -869,7 +892,9 @@ mod tests_encoladas {
         // apartada allí), se reenvía. Reenviar es inocuo: la nube es idempotente por `Op_Id`.
         let (repo, db, _dir) = repo_temporal().await;
         encolar_en_outbox(&db, "op-1").await;
-        repo.outbox_mark_encolada(&["op-1".to_string()]).await.unwrap();
+        repo.outbox_mark_encolada(&["op-1".to_string()])
+            .await
+            .unwrap();
         assert!(ids_pendientes(&repo).await.is_empty());
 
         // Todavía es reciente: no se toca.
@@ -908,7 +933,9 @@ mod tests_aplicadas {
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap())
+            .await
+            .unwrap();
         (SqliteSyncRepository::new(db.clone()), db, dir)
     }
 
@@ -929,7 +956,10 @@ mod tests_aplicadas {
         let lote = vec![cambio("op-1", 1), cambio("op-2", 2)];
 
         let primera = repo.apply_changes(lote.clone()).await.unwrap();
-        assert_eq!(primera.aplicadas, vec!["op-1".to_string(), "op-2".to_string()]);
+        assert_eq!(
+            primera.aplicadas,
+            vec!["op-1".to_string(), "op-2".to_string()]
+        );
         assert_eq!(primera.last_seq, 2);
 
         // Segunda vuelta con el MISMO lote: el checkpoint sigue avanzando, pero no se aplica nada.
@@ -981,7 +1011,11 @@ mod tests_bootstrap {
     fn uniq() -> String {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
+        format!(
+            "{}_{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        )
     }
 
     async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
@@ -989,7 +1023,9 @@ mod tests_bootstrap {
         std::fs::create_dir_all(&dir).unwrap();
         // `Db::open` aplica las migraciones reales, así que se prueba contra el esquema de verdad
         // (`Zonas`) y no contra una tabla de juguete que podría no parecerse en nada.
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap())
+            .await
+            .unwrap();
         (SqliteSyncRepository::new(db.clone()), db, dir)
     }
 

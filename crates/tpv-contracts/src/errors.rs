@@ -27,7 +27,10 @@ use ts_rs::TS;
 /// Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[ts(
+    export,
+    export_to = "../../../packages/contracts/src/generated/bindings.ts"
+)]
 pub enum ErrorCode {
     // ── Genéricos: CLASIFICAN el fallo, no lo identifican ──────────────────────
     /// Entrada inválida o regla de dominio incumplida. El detalle va en `message`.
@@ -62,6 +65,15 @@ pub enum ErrorCode {
     /// (CUENTA-06). La UI ramifica por él para ofrecer "reabrir el cierre" en vez de un mensaje
     /// genérico: sin código propio, el usuario sólo vería "no se puede" y no sabría por qué.
     PeriodoCerrado,
+    /// El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
+    /// permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
+    TenantDbNotProvisioned,
+    /// El volcado completo excede el límite seguro del Worker.
+    BootstrapTooLarge,
+    /// Una migración ya registrada cambió de contenido en el servidor.
+    TenantMigrationAltered,
+    /// El fichero elegido no es una copia SQLite íntegra y utilizable.
+    BackupCorrupt,
 }
 
 impl ErrorCode {
@@ -81,6 +93,14 @@ impl ErrorCode {
             ErrorCode::LicenseNotFound => "No hay una licencia activa",
             ErrorCode::InvalidPin => "PIN incorrecto",
             ErrorCode::PeriodoCerrado => "El periodo de caja está cerrado",
+            ErrorCode::TenantDbNotProvisioned => "No existe una base de datos en la nube",
+            ErrorCode::BootstrapTooLarge => {
+                "La copia de la nube es demasiado grande para restaurarla automáticamente"
+            }
+            ErrorCode::TenantMigrationAltered => {
+                "La versión de la base de datos de la nube es incompatible"
+            }
+            ErrorCode::BackupCorrupt => "La copia de seguridad local está dañada",
         }
     }
 
@@ -101,6 +121,10 @@ impl ErrorCode {
             ErrorCode::LicenseNotFound => "license_not_found",
             ErrorCode::InvalidPin => "invalid_pin",
             ErrorCode::PeriodoCerrado => "periodo_cerrado",
+            ErrorCode::TenantDbNotProvisioned => "tenant_db_not_provisioned",
+            ErrorCode::BootstrapTooLarge => "bootstrap_too_large",
+            ErrorCode::TenantMigrationAltered => "tenant_migration_altered",
+            ErrorCode::BackupCorrupt => "backup_corrupt",
         }
     }
 
@@ -128,6 +152,10 @@ impl ErrorCode {
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
             ErrorCode::PeriodoCerrado,
+            ErrorCode::TenantDbNotProvisioned,
+            ErrorCode::BootstrapTooLarge,
+            ErrorCode::TenantMigrationAltered,
+            ErrorCode::BackupCorrupt,
         ]
         .into_iter()
         .find(|c| c.wire() == s)
@@ -157,8 +185,13 @@ impl ErrorCode {
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
             "invalid_pin" => ErrorCode::InvalidPin,
+            "periodo_cerrado" => ErrorCode::PeriodoCerrado,
             "validation_error" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
+            "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,
+            "bootstrap_demasiado_grande" | "bootstrap_too_large" => ErrorCode::BootstrapTooLarge,
+            "migration_altered" | "tenant_migration_altered" => ErrorCode::TenantMigrationAltered,
+            "backup_corrupt" => ErrorCode::BackupCorrupt,
             _ => ErrorCode::External,
         }
     }
@@ -166,7 +199,10 @@ impl ErrorCode {
 
 /// Error tal y como lo recibe el frontend. Es el `Err` de **todos** los comandos Tauri.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
-#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[ts(
+    export,
+    export_to = "../../../packages/contracts/src/generated/bindings.ts"
+)]
 pub struct AppErrorDto {
     /// Código estable. Es lo único por lo que se debe ramificar.
     pub code: ErrorCode,
@@ -273,7 +309,10 @@ mod tests {
     #[test]
     fn cada_codigo_de_negocio_del_fixture_se_traduce_igual() {
         for caso in fixture().negocio {
-            let esperado = caso.code.clone().expect("los casos de negocio llevan `code`");
+            let esperado = caso
+                .code
+                .clone()
+                .expect("los casos de negocio llevan `code`");
             let obtenido = wire_de(ErrorCode::from_wire(&caso.wire));
             assert_eq!(
                 obtenido, esperado,
@@ -286,10 +325,14 @@ mod tests {
     #[test]
     fn la_busqueda_normaliza_espacios_y_mayusculas() {
         for caso in fixture().normalizacion {
-            let esperado = caso.code.clone().expect("los casos de normalización llevan `code`");
+            let esperado = caso
+                .code
+                .clone()
+                .expect("los casos de normalización llevan `code`");
             let obtenido = wire_de(ErrorCode::from_wire(&caso.wire));
             assert_eq!(
-                obtenido, esperado,
+                obtenido,
+                esperado,
                 "'{}' debería normalizarse a '{}' ({})",
                 caso.wire.escape_debug(),
                 esperado,
@@ -320,11 +363,7 @@ mod tests {
     #[test]
     fn todos_los_codigos_de_negocio_tienen_al_menos_un_string_que_los_produce() {
         let f = fixture();
-        let producidos: Vec<String> = f
-            .negocio
-            .iter()
-            .filter_map(|c| c.code.clone())
-            .collect();
+        let producidos: Vec<String> = f.negocio.iter().filter_map(|c| c.code.clone()).collect();
 
         for code in &f.codigos_de_negocio {
             assert!(
@@ -361,6 +400,11 @@ mod tests {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
+            ErrorCode::PeriodoCerrado,
+            ErrorCode::TenantDbNotProvisioned,
+            ErrorCode::BootstrapTooLarge,
+            ErrorCode::TenantMigrationAltered,
+            ErrorCode::BackupCorrupt,
         ];
 
         let f = fixture();
@@ -391,6 +435,11 @@ mod tests {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
+            ErrorCode::PeriodoCerrado,
+            ErrorCode::TenantDbNotProvisioned,
+            ErrorCode::BootstrapTooLarge,
+            ErrorCode::TenantMigrationAltered,
+            ErrorCode::BackupCorrupt,
         ];
 
         for code in todos {

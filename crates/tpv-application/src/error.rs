@@ -126,7 +126,10 @@ impl AppError {
     ///    es uno que este cliente todavía no conoce (worker más nuevo).
     /// 3. **`External`** con el status y el cuerpo, si no hay JSON del que sacar nada.
     ///
-    /// El `message` sale siempre de `error`: el texto es diagnóstico y se conserva tal cual.
+    /// El mensaje legible sale de `message` o `details.message` cuando existen. Muchos 500 del
+    /// Worker conservan el identificador de máquina en `error` y colocan el diagnóstico real en
+    /// `details`; perderlo aquí convertía errores accionables (migración alterada, Turso, etc.) en
+    /// un opaco "Error interno".
     pub fn from_api_body(status: u16, body: &str) -> Self {
         let json: Option<serde_json::Value> = serde_json::from_str(body).ok();
 
@@ -139,13 +142,26 @@ impl AppError {
         };
 
         let error = campo("error");
+        let details_message = json
+            .as_ref()
+            .and_then(|v| v.get("details"))
+            .and_then(|v| v.get("message"))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let message = campo("message")
+            .or(details_message)
+            .or_else(|| error.clone());
         let code = campo("code").and_then(|c| ErrorCode::from_code(&c));
 
-        match (code, error) {
-            (Some(code), Some(error)) => AppError::Coded(code, error),
-            (Some(code), None) => AppError::Coded(code, code.default_message().to_string()),
-            (None, Some(error)) => AppError::from_wire(error),
-            (None, None) => AppError::external(format!("http_{status}: {body}")),
+        match (code, error, message) {
+            (Some(code), _, Some(message)) => AppError::Coded(code, message),
+            (Some(code), _, None) => AppError::Coded(code, code.default_message().to_string()),
+            (None, Some(error), message) => {
+                AppError::Coded(ErrorCode::from_wire(&error), message.unwrap_or(error))
+            }
+            (None, None, _) => AppError::external(format!("http_{status}: {body}")),
         }
     }
 }
@@ -180,6 +196,14 @@ mod tests_respuesta_api {
         let body = r#"{"ok":false,"code":"validation","error":"id_mesa invalido"}"#;
         let err = AppError::from_api_body(400, body);
         assert_eq!(err.to_string(), "id_mesa invalido");
+    }
+
+    #[test]
+    fn conserva_el_detalle_legible_de_un_error_interno() {
+        let body = r#"{"ok":false,"code":"tenant_migration_altered","error":"internal_error","details":{"message":"migration_altered: 0001_inicial.sql"}}"#;
+        let err = AppError::from_api_body(500, body);
+        assert_eq!(err.code(), ErrorCode::TenantMigrationAltered);
+        assert_eq!(err.to_string(), "migration_altered: 0001_inicial.sql");
     }
 
     /// Compatibilidad hacia atrás: un worker anterior a ARCH-05 no manda `code`.
@@ -223,7 +247,14 @@ mod tests_respuesta_api {
     /// Un 502 de un proxy, un HTML de error, un cuerpo vacío: nada de eso es JSON.
     #[test]
     fn un_cuerpo_que_no_es_json_no_rompe_nada() {
-        for body in ["", "   ", "<html>502 Bad Gateway</html>", "null", "[]", "42"] {
+        for body in [
+            "",
+            "   ",
+            "<html>502 Bad Gateway</html>",
+            "null",
+            "[]",
+            "42",
+        ] {
             let err = AppError::from_api_body(502, body);
             assert_eq!(err.code(), ErrorCode::External, "body: {body:?}");
             assert!(
@@ -281,7 +312,6 @@ mod tests_respuesta_api {
     }
 }
 
-
 #[cfg(test)]
 mod tests_contrato {
     //! Mapeo `AppError` → `AppErrorDto` (ARCH-05).
@@ -297,7 +327,10 @@ mod tests_contrato {
     /// Una muestra de cada variante, con un detalle reconocible.
     fn todas() -> Vec<(AppError, ErrorCode)> {
         vec![
-            (AppError::validation("email inválido"), ErrorCode::Validation),
+            (
+                AppError::validation("email inválido"),
+                ErrorCode::Validation,
+            ),
             (AppError::not_found("mesa 7"), ErrorCode::NotFound),
             (AppError::conflict("comanda cerrada"), ErrorCode::Conflict),
             (AppError::repository("no such table"), ErrorCode::Repository),
@@ -325,8 +358,16 @@ mod tests_contrato {
         let dto: AppErrorDto = AppError::validation("El email no es válido").into();
 
         assert_eq!(dto.message, "El email no es válido");
-        assert!(!dto.message.contains("validación"), "no debe llevar prefijo: {}", dto.message);
-        assert!(!dto.message.contains(':'), "no debe llevar prefijo: {}", dto.message);
+        assert!(
+            !dto.message.contains("validación"),
+            "no debe llevar prefijo: {}",
+            dto.message
+        );
+        assert!(
+            !dto.message.contains(':'),
+            "no debe llevar prefijo: {}",
+            dto.message
+        );
     }
 
     /// El caso que obligaba a existir a `AppError::Raw`: el código del worker tiene que

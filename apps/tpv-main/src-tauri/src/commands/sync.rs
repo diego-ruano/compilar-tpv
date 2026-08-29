@@ -114,3 +114,18 @@ pub async fn sync_bootstrap_desde_nube(
     let repo = state.sync_repo().await?;
     Ok(uc::bootstrap_desde_nube(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
 }
+
+/// Inicialización destructiva sólo para el caso explícito `tenant_db_not_provisioned`. El servidor
+/// vuelve a comprobarlo antes de crear nada; una respuesta ambigua nunca llega a esta rama.
+#[tauri::command]
+pub async fn sync_inicializar_tenant_vacio(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<BootstrapResultado, AppErrorDto> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    let repo = state.sync_repo().await?;
+    Ok(uc::inicializar_tenant_vacio(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
+}

@@ -13,6 +13,9 @@ import type { Env } from "../../env";
 import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { getDb } from "../../server/db";
+import { getTenantDbRow } from "../../server/db/tenantDb";
+import { provisionTenantDatabase } from "../licensing/licensing.helpers";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -50,19 +53,27 @@ syncRoutes.post("/changes", async (c) => {
 	const since = Math.max(0, Number((body as any)?.since ?? 0) || 0);
 	const limit = Math.min(Math.max(1, Number((body as any)?.limit ?? 500) || 500), 1000);
 
-	const items = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
-		const rs = await db.execute({
-			sql: `
+	const snapshot = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		// Items y high-water en la misma transacción de lectura. La recuperación sólo desbloquea
+		// cuando el checkpoint local alcanza exactamente una foto conocida del final del log.
+		const [rs, rsHighWater] = await db.batch(
+			[
+				{
+					sql: `
 				SELECT Seq, Op_Id, Command_Name, Statements_Json, Device_Id, Created_At_Ms
 				FROM Sync_Changes
 				WHERE Seq > ?1
 				ORDER BY Seq ASC
 				LIMIT ?2;
 			`,
-			args: [since, limit],
-		});
+					args: [since, limit],
+				},
+				{ sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;", args: [] },
+			],
+			"read",
+		);
 
-		return rows(rs).map((r: any) => ({
+		const items = rows(rs).map((r: any) => ({
 			seq: Number(r.Seq ?? r.seq ?? 0),
 			opId: String(r.Op_Id ?? r.op_id ?? ""),
 			command: String(r.Command_Name ?? r.command_name ?? ""),
@@ -70,7 +81,10 @@ syncRoutes.post("/changes", async (c) => {
 			deviceId: r.Device_Id ? String(r.Device_Id) : null,
 			createdAtMs: Number(r.Created_At_Ms ?? r.created_at_ms ?? 0),
 		}));
+		const highWater = Number((rows(rsHighWater)[0] as any)?.seq ?? 0);
+		return { items, highWater };
 	});
+	const { items, highWater } = snapshot;
 
 	const nextSince = items.length ? items[items.length - 1].seq : since;
 
@@ -105,7 +119,7 @@ syncRoutes.post("/changes", async (c) => {
 		/* el registro del checkpoint es best-effort (solo alimenta la purga) */
 	}
 
-	return c.json({ ok: true, items, nextSince });
+	return c.json({ ok: true, items, nextSince, highWater });
 });
 
 // ---------------------------------------------------------------------------
@@ -207,6 +221,8 @@ syncRoutes.post("/bootstrap", async (c) => {
 	if (resultado.demasiadoGrande) {
 		return c.json(
 			{
+				ok: false,
+				code: "bootstrap_too_large",
 				error: "bootstrap_demasiado_grande",
 				totalFilas: resultado.totalFilas,
 				limite: BOOTSTRAP_MAX_FILAS,
@@ -221,4 +237,25 @@ syncRoutes.post("/bootstrap", async (c) => {
 		totalFilas: resultado.totalFilas,
 		tablas: resultado.tablas,
 	});
+});
+
+// POST /v1/sync/initialize-empty
+// Única salida válida cuando el propio servidor confirma que no existe base del tenant. La acción
+// es explícita desde la UI y jamás se usa como fallback de un timeout, un 500 o una migración rota.
+syncRoutes.post("/initialize-empty", async (c) => {
+	const tenantId = c.get("tenantId");
+	const okTpv = await isTpvDevice(c.env, tenantId, c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const central = getDb(c.env);
+	const existing = await getTenantDbRow(central, tenantId);
+	if (existing?.turso_url && existing?.turso_auth_token_enc && existing?.turso_db_name) {
+		return c.json(
+			{ ok: false, code: "conflict", error: "tenant_db_already_provisioned" },
+			409,
+		);
+	}
+
+	await provisionTenantDatabase(central, c.env, tenantId);
+	return c.json({ ok: true });
 });

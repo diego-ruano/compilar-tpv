@@ -9,7 +9,6 @@ mod printing;
 use base64::prelude::*;
 use image::{codecs::jpeg::JpegEncoder, imageops::FilterType, DynamicImage};
 use serde::{Deserialize, Serialize};
-use tpv_infra_sqlite::db::Db;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -18,50 +17,55 @@ use tauri::{AppHandle, Emitter, Manager, State};
 #[cfg(desktop)]
 use tauri_plugin_updater::UpdaterExt;
 use tokio::sync::Mutex;
+use tpv_infra_sqlite::db::Db;
 
 use tpv_application::use_cases::pairing as uc_pairing;
 
 use tpv_application::ports::licensing::PairingService;
 use tpv_application::ports::{
     avisos::AvisosScanRepository,
-    reconciliacion::ReconciliacionRepository,
     cierre_caja::CierreCajaRepository,
-    clientes::ClientesRepository, configuracion::ConfiguracionRepository,
-    cuentas::CuentasRepository, inventario::InventarioRepository, jobs::JobsStateRepository,
+    clientes::ClientesRepository,
+    configuracion::ConfiguracionRepository,
+    cuentas::CuentasRepository,
+    inventario::InventarioRepository,
+    jobs::JobsStateRepository,
     login::LoginRepository,
     mesas::MesasRepository,
     notificaciones::{NotificacionesRepository, Notifier},
     pedidos_proveedor::PedidoProveedorRepository,
-    proveedores::ProveedoresRepository, reservas::ReservasRepository,
-    stats::StatsRepository, stock_alertas::StockAlertasRepository, sync::SyncRepository,
+    proveedores::ProveedoresRepository,
+    reconciliacion::ReconciliacionRepository,
+    reservas::ReservasRepository,
+    stats::StatsRepository,
+    stock_alertas::StockAlertasRepository,
+    sync::SyncRepository,
     tareas::TareasRepository,
-    trabajadores::TrabajadoresRepository, venta_rapida::VentaRapidaRepository,
+    trabajadores::TrabajadoresRepository,
+    venta_rapida::VentaRapidaRepository,
 };
+use tpv_contracts::errors::AppErrorDto;
 use tpv_infra_http::{
-    cierre_caja::HttpCierreCajaRepository, clientes::HttpClientesRepository, configuracion::HttpConfiguracionRepository,
-    cuentas::HttpCuentasRepository, inventario::HttpInventarioRepository,
-    login::HttpLoginRepository, mesas::HttpMesasRepository,
+    cierre_caja::HttpCierreCajaRepository, clientes::HttpClientesRepository,
+    configuracion::HttpConfiguracionRepository, cuentas::HttpCuentasRepository,
+    inventario::HttpInventarioRepository, login::HttpLoginRepository, mesas::HttpMesasRepository,
     notificaciones::HttpNotificacionesRepository, proveedores::HttpProveedoresRepository,
     reservas::HttpReservasRepository, stats::HttpStatsRepository, tareas::HttpTareasRepository,
     trabajadores::HttpTrabajadoresRepository, venta_rapida::HttpVentaRapidaRepository, CloudClient,
     CLOUD_API_BASE,
 };
-use tpv_contracts::errors::AppErrorDto;
 use tpv_infra_licensing::{LicensingAdapter, PairingAdapter};
 use tpv_infra_sqlite::{
-    avisos::SqliteAvisosScanRepository,
-    reconciliacion::SqliteReconciliacionRepository,
-    cierre_caja::SqliteCierreCajaRepository,
+    avisos::SqliteAvisosScanRepository, cierre_caja::SqliteCierreCajaRepository,
     clientes::SqliteClientesRepository, configuracion::SqliteConfiguracionRepository,
     cuentas::SqliteCuentasRepository, inventario::SqliteInventarioRepository,
-    jobs::SqliteJobsStateRepository,
-    login::SqliteLoginRepository, mesas::SqliteMesasRepository,
+    jobs::SqliteJobsStateRepository, login::SqliteLoginRepository, mesas::SqliteMesasRepository,
     notificaciones::SqliteNotificacionesRepository,
     pedidos_proveedor::SqlitePedidoProveedorRepository, proveedores::SqliteProveedoresRepository,
-    reservas::SqliteReservasRepository, stats::SqliteStatsRepository,
-    stock_alertas::SqliteStockAlertasRepository, sync::SqliteSyncRepository,
-    tareas::SqliteTareasRepository, trabajadores::SqliteTrabajadoresRepository,
-    venta_rapida::SqliteVentaRapidaRepository,
+    reconciliacion::SqliteReconciliacionRepository, reservas::SqliteReservasRepository,
+    stats::SqliteStatsRepository, stock_alertas::SqliteStockAlertasRepository,
+    sync::SqliteSyncRepository, tareas::SqliteTareasRepository,
+    trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -268,8 +272,7 @@ const IMAGE_JPEG_QUALITY: u8 = 80;
 /// (sólo reduce, nunca amplía, preservando proporción) y recodifica a JPEG optimizado.
 /// Devuelve los bytes JPEG resultantes. Así una foto de 10 MB acaba en decenas de KB.
 fn process_image(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let img =
-        image::load_from_memory(bytes).map_err(|e| format!("Imagen no válida: {e}"))?;
+    let img = image::load_from_memory(bytes).map_err(|e| format!("Imagen no válida: {e}"))?;
 
     let resized = if img.width() > IMAGE_MAX_SIDE || img.height() > IMAGE_MAX_SIDE {
         img.resize(IMAGE_MAX_SIDE, IMAGE_MAX_SIDE, FilterType::Lanczos3)
@@ -334,12 +337,19 @@ fn is_safe_image_rel_path(rel: &str) -> bool {
     if parts.len() != 3 || parts[0] != "images" {
         return false;
     }
-    matches!(parts[1], "productos" | "categorias" | "proveedores" | "alergenos" | "logo")
-        && !parts[2].is_empty()
+    matches!(
+        parts[1],
+        "productos" | "categorias" | "proveedores" | "alergenos" | "logo"
+    ) && !parts[2].is_empty()
 }
 
 fn content_type_for(rel_path: &str) -> &'static str {
-    match rel_path.rsplit('.').next().map(|e| e.to_ascii_lowercase()).as_deref() {
+    match rel_path
+        .rsplit('.')
+        .next()
+        .map(|e| e.to_ascii_lowercase())
+        .as_deref()
+    {
         Some("png") => "image/png",
         Some("webp") => "image/webp",
         _ => "image/jpeg",
@@ -391,12 +401,21 @@ impl tpv_telemetry::IngestSigner for PairingTelemetrySigner {
 // ──────────────────────────────────────────────────────────────────────────────
 
 pub(crate) struct AppState {
-    db: Arc<Mutex<Option<Arc<Db>>>>,
+    pub(crate) db: Arc<Mutex<Option<Arc<Db>>>>,
     cloud: Arc<Mutex<Option<Arc<CloudClient>>>>,
     mode: Arc<Mutex<Option<DeviceMode>>>,
     /// Espejo SÍNCRONO del modo para el firmante de telemetría (que corre en otro hilo sin async).
     /// Se mantiene en paralelo con `mode` en cada cambio de modo.
     mode_sync: Arc<std::sync::RwLock<Option<DeviceMode>>>,
+}
+
+/// Conecta el callback local del outbox con el ciclo WebSocket. Se usa en los tres puntos donde
+/// puede nacer un `Db`: arranque, elección de modo y sustitución por una copia restaurada.
+pub(crate) fn configure_outbox_notifier(app: &AppHandle, db: &Arc<Db>) {
+    let h = app.clone();
+    db.set_outbox_notifier(move || {
+        let _ = h.emit("outbox:pending", ());
+    });
 }
 
 /// TRAB-03: construye el cifrador de campo con la DEK guardada en el almacén de secretos.
@@ -442,13 +461,10 @@ macro_rules! repo_accessor {
                     Ok(Arc::new(<$sqlite>::new(conn)) as Arc<dyn $trait>)
                 }
                 Some(DeviceMode::Handy) => {
-                    let client = self
-                        .cloud
-                        .lock()
-                        .await
-                        .as_ref()
-                        .cloned()
-                        .ok_or_else(|| "Cliente nube no inicializado (modo Handy)".to_string())?;
+                    let client =
+                        self.cloud.lock().await.as_ref().cloned().ok_or_else(|| {
+                            "Cliente nube no inicializado (modo Handy)".to_string()
+                        })?;
                     Ok(Arc::new(<$http>::new(client)) as Arc<dyn $trait>)
                 }
                 None => Err("Modo de dispositivo no seleccionado".to_string()),
@@ -528,7 +544,9 @@ impl AppState {
     // necesita el cifrador de campo inyectado (DNI/IBAN/nº SS). La rama Handy no lo lleva a
     // propósito: la clave vive SOLO en la Main, así que la Handy ni escribe ni lee esas
     // columnas (el worker las excluye de sus sentencias y de sus consultas).
-    pub(crate) async fn trabajadores_repo(&self) -> Result<Arc<dyn TrabajadoresRepository>, String> {
+    pub(crate) async fn trabajadores_repo(
+        &self,
+    ) -> Result<Arc<dyn TrabajadoresRepository>, String> {
         match *self.mode.lock().await {
             Some(DeviceMode::Tpv) => {
                 let conn = self
@@ -602,14 +620,26 @@ impl AppState {
             .as_ref()
             .cloned()
             .ok_or_else(|| "DB no inicializada (pedidos requieren modo Main)".to_string())?;
-        Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn)) as Arc<dyn PedidoProveedorRepository>)
+        Ok(Arc::new(SqlitePedidoProveedorRepository::new(conn))
+            as Arc<dyn PedidoProveedorRepository>)
     }
 
-    /// ¿Es esta la Main (modo TPV) con la BD local ya abierta? Es la condición que exige
-    /// `Requiere::MainConBd` del runner de jobs: antes de elegir modo, o en Handy, no hay nada que
-    /// escanear ni dónde persistir.
-    pub(crate) async fn es_main_con_bd(&self) -> bool {
-        *self.mode.lock().await == Some(DeviceMode::Tpv) && self.db.lock().await.is_some()
+    /// Condición de los jobs que leen o escriben negocio. Una BD vacía o recién restaurada existe,
+    /// pero no está disponible: ejecutarlos ahí podría fabricar outbox y bloquear el bootstrap.
+    pub(crate) async fn es_main_operativa(&self) -> bool {
+        if *self.mode.lock().await != Some(DeviceMode::Tpv) {
+            return false;
+        }
+        let db = self.db.lock().await.as_ref().cloned();
+        let Some(db) = db else {
+            return false;
+        };
+        matches!(
+            tpv_infra_sqlite::recovery::status(&db).await,
+            Ok(tpv_contracts::recovery::RecoveryStatus {
+                state: tpv_contracts::recovery::RecoveryState::Ready
+            })
+        )
     }
 
     /// Estado de los jobs periódicos (`_Jobs_State`). NO es mode-switched: es una tabla de control
@@ -630,37 +660,28 @@ impl AppState {
     pub(crate) async fn reconciliacion_repo(
         &self,
     ) -> Result<Arc<dyn ReconciliacionRepository>, String> {
-        let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "DB no inicializada (la reconciliación requiere modo Main)".to_string())?;
-        Ok(Arc::new(SqliteReconciliacionRepository::new(conn)) as Arc<dyn ReconciliacionRepository>)
+        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
+            "DB no inicializada (la reconciliación requiere modo Main)".to_string()
+        })?;
+        Ok(Arc::new(SqliteReconciliacionRepository::new(conn))
+            as Arc<dyn ReconciliacionRepository>)
     }
 
     pub(crate) async fn avisos_scan_repo(&self) -> Result<Arc<dyn AvisosScanRepository>, String> {
-        let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "DB no inicializada (escáner de avisos requiere modo Main)".to_string())?;
+        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
+            "DB no inicializada (escáner de avisos requiere modo Main)".to_string()
+        })?;
         Ok(Arc::new(SqliteAvisosScanRepository::new(conn)) as Arc<dyn AvisosScanRepository>)
     }
 
     /// Escáner de stock negativo (sobreventa): solo Main (SQLite). En Handy no hay BD local → error
     /// y el job lo salta por su `Requiere`.
-    pub(crate) async fn stock_alertas_repo(&self) -> Result<Arc<dyn StockAlertasRepository>, String> {
-        let conn = self
-            .db
-            .lock()
-            .await
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| "DB no inicializada (alertas de stock requieren modo Main)".to_string())?;
+    pub(crate) async fn stock_alertas_repo(
+        &self,
+    ) -> Result<Arc<dyn StockAlertasRepository>, String> {
+        let conn = self.db.lock().await.as_ref().cloned().ok_or_else(|| {
+            "DB no inicializada (alertas de stock requieren modo Main)".to_string()
+        })?;
         Ok(Arc::new(SqliteStockAlertasRepository::new(conn)) as Arc<dyn StockAlertasRepository>)
     }
 }
@@ -704,10 +725,7 @@ fn get_connection_mode(app: AppHandle) -> Result<Option<ConnectivityMode>, AppEr
 /// entera si la licencia no deja pasar. Duplicar la comprobación aquí solo añadía una llamada de
 /// red a un camino que no la necesita.
 #[tauri::command]
-fn set_connection_mode(
-    app: AppHandle,
-    args: SetConnectionModeArgs,
-) -> Result<String, AppErrorDto> {
+fn set_connection_mode(app: AppHandle, args: SetConnectionModeArgs) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -750,17 +768,15 @@ async fn set_device_mode(
     let device_id = uc_pairing::device_identity(&PairingAdapter::new(app_data_dir.clone()))
         .map(|d| d.device_id)
         .unwrap_or_else(|_| "unknown".to_string());
-    tpv_telemetry::set_device_context(
-        device_id,
-        signing_mode(Some(args.mode)).unwrap_or("unset"),
-    );
+    tpv_telemetry::set_device_context(device_id, signing_mode(Some(args.mode)).unwrap_or("unset"));
 
     // En modo Handy preparamos el cliente HTTP a la nube (no hace red, sólo lo deja listo)
     // para que el cambio de modo sea efectivo sin reiniciar la app.
     if args.mode == DeviceMode::Handy {
         let mut c = state.cloud.lock().await;
         if c.is_none() {
-            let client = CloudClient::new(CLOUD_API_BASE, app_data_dir.clone()).map_err(String::from)?;
+            let client =
+                CloudClient::new(CLOUD_API_BASE, app_data_dir.clone()).map_err(String::from)?;
             *c = Some(Arc::new(client));
         }
     }
@@ -802,12 +818,7 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 
     // Drenado inmediato: cada escritura local que confirma en el outbox emite este evento; el
     // WS (useMainSocket) lo escucha y drena la nube al instante (sin esperar al poll de seguridad).
-    {
-        let h = app.clone();
-        db.set_outbox_notifier(move || {
-            let _ = h.emit("outbox:pending", ());
-        });
-    }
+    configure_outbox_notifier(&app, &db);
 
     // TRAB-01: al arrancar el modo Main, cerrar automáticamente las jornadas que quedaron abiertas
     // de días anteriores (alguien fichó entrada y olvidó la salida). Best-effort: no debe impedir el
@@ -834,7 +845,10 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
 /// selector Main/Handy. La licencia local (modo Main) NO se toca: si se vuelve a elegir Main,
 /// el gate de licencia sigue resolviéndose con el estado guardado.
 #[tauri::command]
-async fn device_reset_mode(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
+async fn device_reset_mode(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -929,10 +943,7 @@ async fn save_image(app: AppHandle, args: SaveImageArgs) -> Result<String, AppEr
 /// una imagen y al reconectar el WebSocket) cubre el caso fresco, y el **job `imagenes`** del
 /// runner es la red de seguridad que recupera lo que quedó sin subir. La cola vive en un fichero
 /// de AppData, no en la BD, así que también aplica a Handy.
-pub(crate) async fn drenar_imagenes(
-    app: &AppHandle,
-    state: &AppState,
-) -> Result<String, String> {
+pub(crate) async fn drenar_imagenes(app: &AppHandle, state: &AppState) -> Result<String, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -971,7 +982,7 @@ pub(crate) async fn drenar_imagenes(
             Err(e) => {
                 tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %e, "no se pudo leer el fichero a subir");
                 continue;
-            },
+            }
         };
 
         let path = format!("/v1/images/{}", item.rel_path);
@@ -980,7 +991,7 @@ pub(crate) async fn drenar_imagenes(
             Ok(_) => {
                 tracing::debug!(target: "tpv::imagenes", ruta = %item.rel_path, "subida OK");
                 subidas += 1;
-            },
+            }
             Err(e) => {
                 let msg = format!("{e:?}");
                 tracing::warn!(target: "tpv::imagenes", ruta = %item.rel_path, error = %msg, "fallo subiendo imagen a R2");
@@ -995,7 +1006,10 @@ pub(crate) async fn drenar_imagenes(
 
     write_image_queue(&app_data_dir, &remaining)?;
     let resultado = match &ultimo_error {
-        Some(err) => format!("subidas={subidas} pendientes={} error={err}", remaining.len()),
+        Some(err) => format!(
+            "subidas={subidas} pendientes={} error={err}",
+            remaining.len()
+        ),
         None => format!("subidas={subidas} pendientes={}", remaining.len()),
     };
     tracing::debug!(target: "tpv::imagenes", %resultado, "fin del drenado");
@@ -1007,8 +1021,13 @@ pub(crate) async fn drenar_imagenes(
 }
 
 #[tauri::command]
-async fn images_drain_pending(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
-    drenar_imagenes(&app, &state).await.map_err(AppErrorDto::from)
+async fn images_drain_pending(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
+    drenar_imagenes(&app, &state)
+        .await
+        .map_err(AppErrorDto::from)
 }
 
 /// Borra una imagen: del disco local y (best-effort) del bucket R2. Se usa al reemplazar la
@@ -1101,7 +1120,10 @@ async fn images_ensure_local(
 /// Pensado para Mains que ya tenían imágenes antes de existir R2. Se protege con un marcador
 /// para no re-escanear en cada arranque. La subida real la hace `images_drain_pending`.
 #[tauri::command]
-async fn images_backfill(app: AppHandle, state: State<'_, AppState>) -> Result<String, AppErrorDto> {
+async fn images_backfill(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<String, AppErrorDto> {
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -1228,7 +1250,11 @@ fn printer_set_selected(app: AppHandle, args: SetPrinterArgs) -> Result<String, 
     // El campo antiguo se mantiene al día para `caja`: si alguien vuelve a una versión anterior,
     // su impresora sigue estando donde esa versión la busca.
     if destino == DESTINO_CAJA {
-        cfg.printer_name = if name.is_empty() { None } else { Some(name.to_string()) };
+        cfg.printer_name = if name.is_empty() {
+            None
+        } else {
+            Some(name.to_string())
+        };
     }
 
     save_config(&dir, &cfg)?;
@@ -1369,7 +1395,6 @@ fn ruta_dentro_de(dir: &std::path::Path, ruta: &str) -> Option<std::path::PathBu
     }
     Some(completa)
 }
-
 
 /// Abre el cajón portamonedas sin imprimir nada.
 ///
@@ -1631,7 +1656,12 @@ pub fn run() {
     // de minidump deben vivir todo el proceso (por eso son locales de `run`, que bloquea en `.run()`).
     let sentry_guard = tpv_telemetry::init_sentry(tpv_telemetry::SentryConfig {
         dsn: option_env!("TPV_SENTRY_DSN").map(|s| s.to_string()),
-        environment: if cfg!(debug_assertions) { "dev" } else { "prod" }.to_string(),
+        environment: if cfg!(debug_assertions) {
+            "dev"
+        } else {
+            "prod"
+        }
+        .to_string(),
         release: Some(env!("CARGO_PKG_VERSION").to_string()),
     });
     // Minidumps (crashes nativos) sólo con DSN real, para no lanzar el proceso crash-handler en vano.
@@ -1699,7 +1729,8 @@ pub fn run() {
                     signer: Some(signer),
                 };
                 if let Err(e) = tpv_telemetry::init(tcfg) {
-                    eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}"); // sin `tracing` todavía: es lo que está fallando
+                    eprintln!("[telemetry] init falló (se continúa sin telemetría): {e}");
+                    // sin `tracing` todavía: es lo que está fallando
                 }
                 // Etiqueta el contexto de correlación cuanto antes con la identidad REAL del
                 // dispositivo (id estable derivado de su clave, disponible desde el primer arranque).
@@ -1739,10 +1770,7 @@ pub fn run() {
                     .expect("Error init_main_db")
                 });
                 // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
-                let h = handle.clone();
-                db.set_outbox_notifier(move || {
-                    let _ = h.emit("outbox:pending", ());
-                });
+                configure_outbox_notifier(handle, &db);
                 Some(db)
             } else {
                 None
@@ -1810,6 +1838,11 @@ pub fn run() {
             commands::login::punch,
             commands::login::complete_initial_setup,
             commands::login::set_turno_partido_hoy,
+            // recuperación local
+            commands::recovery::recovery_status,
+            commands::recovery::recovery_list_backups,
+            commands::recovery::recovery_restore_backup,
+            commands::recovery::recovery_complete,
             // mesass
             commands::mesas::save_layout,
             commands::mesas::load_layout,
@@ -1985,6 +2018,7 @@ pub fn run() {
             commands::sync::sync_purge_applied_ops,
             commands::sync::sync_health,
             commands::sync::sync_bootstrap_desde_nube,
+            commands::sync::sync_inicializar_tenant_vacio,
             // tareas periódicas de fondo (runner de jobs)
             commands::jobs::jobs_status,
             // configuración (migrado a arquitectura hexagonal — commands/configuracion.rs)
@@ -2049,7 +2083,10 @@ mod tests_impresora_por_destino {
         // seleccionada" en mitad de un servicio, después de una actualización.
         let cfg = config(&[], Some("EPSON DE SIEMPRE"));
 
-        assert_eq!(impresora_de(&cfg, "caja").as_deref(), Some("EPSON DE SIEMPRE"));
+        assert_eq!(
+            impresora_de(&cfg, "caja").as_deref(),
+            Some("EPSON DE SIEMPRE")
+        );
     }
 
     #[test]
@@ -2098,7 +2135,10 @@ mod tests_ruta_del_logo {
         let dir = temporal();
         let r = ruta_dentro_de(&dir, "images/logo.png").expect("debería resolver");
 
-        assert!(r.ends_with("images/logo.png") || r.ends_with("images\\logo.png"), "{r:?}");
+        assert!(
+            r.ends_with("images/logo.png") || r.ends_with("images\\logo.png"),
+            "{r:?}"
+        );
     }
 
     #[test]
@@ -2131,7 +2171,11 @@ mod tests_ruta_del_logo {
             ingenua.starts_with(dir),
             "si esto dejara de ser cierto, la comprobación de antes valdría"
         );
-        assert_eq!(ruta_dentro_de(dir, "../../secreto.png"), None, "la de ahora sí lo para");
+        assert_eq!(
+            ruta_dentro_de(dir, "../../secreto.png"),
+            None,
+            "la de ahora sí lo para"
+        );
     }
 
     #[test]

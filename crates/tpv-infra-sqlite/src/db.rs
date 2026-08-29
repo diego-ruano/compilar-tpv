@@ -624,6 +624,14 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
             First_Failed_At_Ms INTEGER NOT NULL,
             Last_Failed_At_Ms INTEGER NOT NULL
         );
+        -- Estado local y persistente del protocolo de recuperación. Vive dentro de la BD para que
+        -- restaurar el fichero y marcarlo como "todavía bloqueado" pueda hacerse antes de abrirlo
+        -- al resto de la aplicación, sin una ventana de login accidental tras un reinicio.
+        CREATE TABLE IF NOT EXISTS _Recovery_State (
+            Id INTEGER PRIMARY KEY CHECK (Id = 1),
+            Reconciliation_Pending INTEGER NOT NULL DEFAULT 0
+        );
+        INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0);
         "#,
     )
     .await
@@ -666,9 +674,13 @@ mod tests {
     #[test]
     fn rewrite_now_literals_resuelve_formas_canonicas() {
         // Tras reescribir, no debe quedar ninguna fuente de tiempo sin resolver.
-        let sql = "INSERT INTO T (a,b) VALUES (datetime('now','localtime'), date('now','localtime'));";
+        let sql =
+            "INSERT INTO T (a,b) VALUES (datetime('now','localtime'), date('now','localtime'));";
         let out = rewrite_now_literals(sql);
-        assert!(!out.contains("'now'"), "las formas canónicas deben quedar resueltas: {out}");
+        assert!(
+            !out.contains("'now'"),
+            "las formas canónicas deben quedar resueltas: {out}"
+        );
         assert!(uncovered_time_source(&out).is_none());
     }
 
@@ -678,12 +690,20 @@ mod tests {
         assert!(uncovered_time_source("SET x = datetime('now','localtime')").is_none());
         assert!(uncovered_time_source("SET x = date('now','localtime')").is_none());
         // Literales de texto normales no son 'now'.
-        assert!(uncovered_time_source("Estado = 'Abierta', T = datetime('now','localtime')").is_none());
+        assert!(
+            uncovered_time_source("Estado = 'Abierta', T = datetime('now','localtime')").is_none()
+        );
         // julianday/strftime sobre PARÁMETROS (no 'now') son deterministas → permitidos.
-        assert!(uncovered_time_source("CAST(julianday(date(?2)) - julianday(date(?1)) AS INTEGER)").is_none());
+        assert!(uncovered_time_source(
+            "CAST(julianday(date(?2)) - julianday(date(?1)) AS INTEGER)"
+        )
+        .is_none());
 
         // Prohibidas (divergirían al replicar).
-        assert_eq!(uncovered_time_source("VALUES (datetime('now'))"), Some("'now'"));
+        assert_eq!(
+            uncovered_time_source("VALUES (datetime('now'))"),
+            Some("'now'")
+        );
         assert_eq!(
             uncovered_time_source("datetime('now','localtime','-2 days')"),
             Some("'now'"),
@@ -691,7 +711,10 @@ mod tests {
         );
         assert_eq!(uncovered_time_source("strftime('%H','now')"), Some("'now'"));
         assert_eq!(uncovered_time_source("julianday('now')"), Some("'now'"));
-        assert_eq!(uncovered_time_source("SET T = CURRENT_TIMESTAMP"), Some("CURRENT_TIMESTAMP"));
+        assert_eq!(
+            uncovered_time_source("SET T = CURRENT_TIMESTAMP"),
+            Some("CURRENT_TIMESTAMP")
+        );
     }
 
     fn collect_commands_ts(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -802,11 +825,17 @@ mod tests {
     fn worker_value_steps_solo_usan_formas_evaluables() {
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../apps/cloud-worker-licensing/src/domains");
-        assert!(base.exists(), "No se encontró {base:?}. ¿Cambió el layout del worker?");
+        assert!(
+            base.exists(),
+            "No se encontró {base:?}. ¿Cambió el layout del worker?"
+        );
 
         let mut files = Vec::new();
         collect_commands_ts(&base, &mut files);
-        assert!(!files.is_empty(), "No se encontró ningún *.commands.ts bajo {base:?}.");
+        assert!(
+            !files.is_empty(),
+            "No se encontró ningún *.commands.ts bajo {base:?}."
+        );
 
         // Sanidad del mirror: las 3 formas válidas y algunas inválidas.
         assert!(value_step_evaluable("SELECT ?1;"));
