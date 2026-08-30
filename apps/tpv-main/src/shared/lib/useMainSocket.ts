@@ -209,6 +209,10 @@ export function useMainSocket() {
 		let authed = false;
 		let draining = false;
 		let recoveryRunning = false;
+		// La reconciliación agotó sus intentos: se deja de reconectar sola hasta que el usuario lo
+		// pida. Sin esto, una causa que no es la red (la nube rechaza siempre la misma operación,
+		// el tenant está roto) gira para siempre diciendo que espera conexión.
+		let recuperacionBloqueada = false;
 		let drainTimer: number | null = null;
 		const acks = new Map<
 			string,
@@ -434,7 +438,14 @@ export function useMainSocket() {
 						const { ok, error, seq, encolada } = await sendApply(socket, entry);
 						if (!ok) {
 							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
-							if (strict) throw new Error(error ?? "La nube no confirmó una operación local");
+							if (strict) {
+								// Con el op_id delante: reintentar en bucle una operación que la nube
+								// rechaza siempre no lo arregla, y sin el identificador no hay por dónde
+								// empezar a mirar.
+								throw new Error(
+									`La nube rechazó una operación local (${entry.op_id}): ${error ?? "sin detalle"}`,
+								);
+							}
 							break;
 						}
 						// SYNC-18: encolada ≠ aplicada. Su fila se queda en el outbox hasta que el
@@ -531,7 +542,20 @@ export function useMainSocket() {
 						since,
 					})) as any;
 					const items: any[] = Array.isArray(resp?.items) ? resp.items : [];
-					highWater = Number(resp?.highWater ?? resp?.high_water ?? highWater);
+					const hw = resp?.highWater ?? resp?.high_water;
+					if (hw == null) {
+						// Un worker anterior a este contrato no manda el final del log. En modo estricto
+						// eso NO es "cero": dar por bueno un high-water inventado degrada la verificación
+						// a "el outbox está vacío" y desbloquearía el login sin haber comprobado nada.
+						if (strict) {
+							failure ??= new Error(
+								"El servidor no informa del punto de sincronización; actualiza la nube antes de recuperar",
+							);
+							break;
+						}
+					} else {
+						highWater = Number(hw);
+					}
 					if (!items.length) break;
 					await enqueue(items.map(toChange).filter(Boolean) as ChangeArg[]);
 					const next = Number(resp?.nextSince ?? since);
@@ -573,7 +597,7 @@ export function useMainSocket() {
 		 * arreglan reintentando deprisa (sin identidad, rechazo del worker).
 		 */
 		const scheduleReconnect = (esperaFija?: number) => {
-			if (cancelled || retryTimer) return;
+			if (cancelled || retryTimer || recuperacionBloqueada) return;
 			let delay: number;
 			if (esperaFija != null) {
 				delay = esperaFija + Math.random() * 1000;
@@ -592,6 +616,12 @@ export function useMainSocket() {
 		// venza un backoff que puede ir por 30 s, con el socket ya muerto. La Handy ya lo hacía.
 		const reconnectNowIfNeeded = (forzar = false) => {
 			if (cancelled || opening) return;
+			// Una recuperación bloqueada sólo se reanuda a petición del usuario (`pulso`), no porque
+			// vuelva la red o la ventana recupere el foco: lo que falla no es la conexión.
+			if (recuperacionBloqueada) {
+				if (!forzar) return;
+				recuperacionBloqueada = false;
+			}
 			if (ws && ws.readyState === WebSocket.CONNECTING) return;
 			// Sano = socket abierto Y autenticado (un WS abierto sin `hello_ok` no sirve de nada).
 			if (ws?.readyState === WebSocket.OPEN && authed) return;
@@ -759,6 +789,20 @@ export function useMainSocket() {
 					reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
 					if (reconciliacionPendiente) {
 						if (recoveryRunning) return;
+						// Bloqueada: la reconciliación agotó sus intentos y ahora hace falta una decisión
+						// (reintentar, otra copia, la nube). Hasta que llegue, no se toca nada.
+						if (useEstadoSync.getState().faseRecuperacion === "bloqueada") {
+							recuperacionBloqueada = true;
+							// Se cierra en vez de quedarse conectada sin hacer nada: así el `pulso` de
+							// "reintentar" encuentra el socket caído y abre uno limpio, y las Handy ven
+							// `main_offline` (que es la verdad) en vez de una Main presente y muda.
+							try {
+								socket.close();
+							} catch {
+								/* noop */
+							}
+							return;
+						}
 						recoveryRunning = true;
 						let recoveryQueueReleased = false;
 						const phaseToStore: Record<RecoveryPhase, "descargando" | "subiendo" | "verificando"> = {
@@ -795,8 +839,13 @@ export function useMainSocket() {
 							.then(() => useEstadoSync.getState().finalizarRecuperacion())
 							.catch((e) => {
 								const message = toAppError(e).message;
-								useEstadoSync.getState().marcarFaseRecuperacion("error", message);
+								useEstadoSync.getState().marcarFalloRecuperacion(message);
 								captureException(e, { fase: "recovery_reconciliation" });
+								// Tras varios ciclos seguidos fallidos la causa ya no es la red: se deja de
+								// reintentar y la pantalla vuelve a ofrecer las alternativas.
+								if (useEstadoSync.getState().faseRecuperacion === "bloqueada") {
+									recuperacionBloqueada = true;
+								}
 								// Una conexión nueva rehace el ciclo completo. La marca persistente sigue puesta.
 								try {
 									socket.close();
@@ -895,6 +944,10 @@ export function useMainSocket() {
 				authed = false;
 				// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
 				caughtUp = false;
+				if (recuperacionBloqueada) {
+					marcar("pausada", "Recuperación detenida: hace falta decidir cómo continuar");
+					return;
+				}
 				marcar("reintentando", "Se perdió la conexión con la nube");
 				scheduleReconnect();
 			};

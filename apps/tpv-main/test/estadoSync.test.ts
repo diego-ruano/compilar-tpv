@@ -11,7 +11,10 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 
-import { useEstadoSync } from "../src/shared/stores/useEstadoSync";
+import {
+	MAX_FALLOS_RECUPERACION,
+	useEstadoSync,
+} from "../src/shared/stores/useEstadoSync";
 
 /** El store es un singleton de módulo: cada test parte del mismo sitio. */
 function reiniciar() {
@@ -22,6 +25,7 @@ function reiniciar() {
 		reconciliacionPendiente: false,
 		faseRecuperacion: "inactiva",
 		errorRecuperacion: null,
+		fallosRecuperacion: 0,
 		estado: "conectando",
 		detalle: null,
 		desde: Date.now(),
@@ -90,5 +94,34 @@ describe("useEstadoSync", () => {
 		s().finalizarRecuperacion();
 		expect(s().reconciliacionPendiente).toBe(false);
 		expect(s().faseRecuperacion).toBe("completada");
+	});
+
+	it("deja de reintentar sola tras varios ciclos fallidos seguidos", () => {
+		s().iniciarReconciliacion();
+
+		for (let i = 1; i < MAX_FALLOS_RECUPERACION; i++) {
+			s().marcarFalloRecuperacion("sin conexión");
+			expect(s().faseRecuperacion).toBe("error");
+		}
+		s().marcarFalloRecuperacion("la nube rechazó una operación local");
+
+		// Bloqueada: la pantalla vuelve a ofrecer las alternativas en vez de girar en el vacío.
+		expect(s().faseRecuperacion).toBe("bloqueada");
+		expect(s().errorRecuperacion).toBe("la nube rechazó una operación local");
+		// Y sigue sin poder entrarse: el bloqueo del login no depende de esto.
+		expect(s().reconciliacionPendiente).toBe(true);
+	});
+
+	it("reintentar borra el bloqueo y pide conexión inmediata", () => {
+		s().iniciarReconciliacion();
+		for (let i = 0; i < MAX_FALLOS_RECUPERACION; i++) s().marcarFalloRecuperacion("x");
+		const antes = s().pulso;
+
+		s().reintentarRecuperacion();
+
+		expect(s().faseRecuperacion).toBe("esperando_conexion");
+		expect(s().fallosRecuperacion).toBe(0);
+		expect(s().errorRecuperacion).toBeNull();
+		expect(s().pulso).toBe(antes + 1);
 	});
 });

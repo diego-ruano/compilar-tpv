@@ -324,6 +324,12 @@ async fn backup_local(app: AppHandle) -> Result<(), String> {
             "copia local diaria creada"
         );
     }
+
+    // Recolección de los restos que deja una restauración (`pre-restore-*`, `failed-restore-*`,
+    // temporales). No entran en la retención de siete porque no son copias diarias, y sin esto
+    // cada intento de recuperación dejaba una BD entera en AppData para siempre. Aquí es el sitio:
+    // el job sólo corre con la Main ya operativa, o sea con la restauración terminada.
+    tpv_infra_sqlite::recovery::purge_restore_leftovers(&dir)?;
     Ok(())
 }
 

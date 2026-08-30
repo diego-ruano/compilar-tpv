@@ -183,10 +183,12 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
         .to_string();
 
     {
-        // `VACUUM INTO` toma una instantánea consistente. El escritor único impide que una
-        // operación local se confirme a mitad del proceso; las lecturas pueden seguir trabajando.
-        let w = db.write().await;
-        w.raw()
+        // `VACUUM INTO` abre su propia transacción de LECTURA, así que en WAL produce una
+        // instantánea coherente sin excluir al escritor. Va por el pool de lectura a propósito:
+        // tomando el `WriteGuard` se bloquearían los cobros durante toda la copia, y este job
+        // vence por reloj de pared, así que puede caer en plena cena.
+        let r = db.read().await;
+        r.conn()
             .execute("VACUUM INTO ?1;", vec![Value::Text(tmp_str)])
             .await
             .map_err(db_err)?;
@@ -201,7 +203,11 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
     let mut backups = list_backups(app_data_dir)?;
     for vieja in backups.iter().skip(BACKUPS_A_CONSERVAR) {
         // Los ids proceden exclusivamente de `list_backups`, que sólo admite nuestro patrón.
-        std::fs::remove_file(dir.join(&vieja.id)).map_err(db_err)?;
+        // Un borrado fallido (fichero en uso por un antivirus) NO invalida la copia recién hecha:
+        // devolver `Err` marcaría el job como fallido y su backoff crearía otra copia enseguida.
+        if let Err(e) = std::fs::remove_file(dir.join(&vieja.id)) {
+            tracing::warn!(target: "tpv::recovery", copia = %vieja.id, error = %e, "no se pudo purgar una copia antigua");
+        }
     }
     backups.truncate(BACKUPS_A_CONSERVAR);
 
@@ -236,6 +242,134 @@ fn discard_sidecars(path: &Path) {
     }
 }
 
+/// Vacía `_Sync_Failed` en la copia que se va a instalar.
+///
+/// Una cuarentena (`Quarantined = 1`) no se borra nunca: es la constancia de que una operación de
+/// la nube se rindió tras cinco intentos, y `recovery_complete` exige que no haya ninguna. Sin
+/// esto, una cuarentena vieja viaja dentro de las siete copias diarias y deja **cualquier**
+/// restauración local imposible de completar, en silencio y para siempre. Lo que registra esa
+/// tabla son intentos contra un estado de la BD que estamos reemplazando, así que aquí no dice
+/// nada; el volcado desde la nube la vacía por la misma razón (ver `sync.rs::bootstrap_restaurar`).
+/// Las que no llegaron a cuarentena vuelven a ofrecerse en el catch-up con el contador a cero.
+async fn limpiar_registro_de_fallos(db: &Db) -> AppResult<()> {
+    let w = db.write().await;
+    w.raw()
+        .execute("DELETE FROM _Sync_Failed;", ())
+        .await
+        .map_err(db_err)?;
+    Ok(())
+}
+
+/// Guardia de toda restauración: reemplazar el fichero se lleva por delante el outbox actual.
+///
+/// El camino real (una BD recién perdida) tiene el outbox vacío y no lo nota. Lo que para es el
+/// accidente: llegar a la pantalla de recuperación con una BD sana —hoy basta un fallo de arranque
+/// inesperado— y restaurar encima una copia de ayer, perdiendo las ventas que aún no habían
+/// subido. Es la misma comprobación que ya hacía el volcado desde la nube.
+///
+/// Se exceptúa una BD que ya está bloqueada en reconciliación: no está vendiendo, y negarle la
+/// única alternativa que le queda (otra copia, o la nube) sería dejarla en un callejón sin salida.
+pub async fn asegurar_reemplazo_seguro(db: &Db) -> AppResult<()> {
+    let r = db.read().await;
+    let conn = r.conn();
+    let pendiente = scalar_i64(
+        conn,
+        "SELECT Reconciliation_Pending FROM _Recovery_State WHERE Id = 1;",
+    )
+    .await?
+        != 0;
+    if pendiente {
+        return Ok(());
+    }
+    let outbox = scalar_i64(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
+    if outbox > 0 {
+        return Err(AppError::conflict(format!(
+            "Hay {outbox} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
+        )));
+    }
+    Ok(())
+}
+
+/// Ficheros que deja por el camino una restauración: la BD anterior (`pre-restore-*`), la copia
+/// que no se pudo abrir (`failed-restore-*`) y los temporales a medio preparar.
+///
+/// No llevan el prefijo de las copias diarias, así que la retención de siete no los ve y cada
+/// intento acumulaba una BD entera en AppData. Se conservan los dos más recientes de cada familia:
+/// son la marcha atrás manual si alguien restaura la copia equivocada.
+pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
+    const FAMILIAS_A_CONSERVAR: usize = 2;
+    const TMP_ANTIGUEDAD_MS: i64 = 60 * 60 * 1000;
+
+    let dir = app_data_dir.join(BACKUP_DIR);
+    if dir.exists() {
+        for familia in ["pre-restore-", "failed-restore-"] {
+            // El nombre lleva el instante justo detrás del prefijo; los sidecars (`-wal`/`-shm`)
+            // comparten instante con su `.db` y se van con él, no por separado.
+            let mut sellos: Vec<i64> = Vec::new();
+            let mut ficheros: Vec<(i64, PathBuf)> = Vec::new();
+            for entry in std::fs::read_dir(&dir).map_err(db_err)?.flatten() {
+                let path = entry.path();
+                let Some(nombre) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                let Some(resto) = nombre.strip_prefix(familia) else {
+                    continue;
+                };
+                let digitos: String = resto.chars().take_while(char::is_ascii_digit).collect();
+                let Ok(sello) = digitos.parse::<i64>() else {
+                    continue;
+                };
+                sellos.push(sello);
+                ficheros.push((sello, path));
+            }
+            sellos.sort_unstable();
+            sellos.dedup();
+            let conservados: std::collections::HashSet<i64> = sellos
+                .iter()
+                .rev()
+                .take(FAMILIAS_A_CONSERVAR)
+                .copied()
+                .collect();
+            for (sello, path) in ficheros {
+                if conservados.contains(&sello) {
+                    continue;
+                }
+                if let Err(e) = std::fs::remove_file(&path) {
+                    tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un resto de restauración");
+                }
+            }
+        }
+    }
+
+    // Los `data.restore.*.tmp` viven en la raíz de AppData porque el intercambio es un `rename`
+    // dentro del mismo volumen. Sólo se borran los viejos: uno recién escrito puede ser el de una
+    // restauración en curso.
+    let ahora = now_ms();
+    for entry in std::fs::read_dir(app_data_dir).map_err(db_err)?.flatten() {
+        let path = entry.path();
+        let Some(nombre) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !nombre.starts_with("data.restore.") {
+            continue;
+        }
+        let sello: i64 = nombre
+            .trim_start_matches("data.restore.")
+            .chars()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .parse()
+            .unwrap_or(ahora);
+        if ahora.saturating_sub(sello) < TMP_ANTIGUEDAD_MS {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&path) {
+            tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de restauración");
+        }
+    }
+    Ok(())
+}
+
 /// Copia y valida el respaldo en un fichero temporal independiente. Además lo marca pendiente de
 /// reconciliación ANTES del intercambio, para que ni un crash entre pasos pueda abrir el login.
 pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf> {
@@ -253,6 +387,7 @@ pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf
             .await
             .map_err(|e| corrupta(format!("No se puede preparar la copia: {e}")))?;
         mark_reconciliation_pending(&db).await?;
+        limpiar_registro_de_fallos(&db).await?;
         {
             let w = db.write().await;
             let _ = w.raw().query("PRAGMA wal_checkpoint(TRUNCATE);", ()).await;
@@ -351,6 +486,7 @@ pub fn discard_prepared(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Writer;
 
     fn test_dir(nombre: &str) -> PathBuf {
         use std::sync::atomic::{AtomicU64, Ordering};
@@ -426,6 +562,130 @@ mod tests {
 
         drop(restored);
         drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    async fn cuenta(db: &Db, sql: &str) -> i64 {
+        let r = db.read().await;
+        scalar_i64(r.conn(), sql).await.unwrap()
+    }
+
+    async fn registrar_cuarentena(db: &Db) {
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO _Sync_Failed (Op_Id, Seq, Statements_Json, Attempts, Quarantined,                  Last_Error, First_Failed_At_Ms, Last_Failed_At_Ms)                  VALUES ('op-vieja', 7, '[]', 5, 1, 'no such table', 1, 1);",
+                (),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn una_cuarentena_vieja_no_viaja_dentro_de_la_copia_restaurada() {
+        // Si viajara, `recovery_complete` (que exige cuarentena = 0) no podría desbloquear NUNCA,
+        // y esa fila no se borra sola en ningún sitio.
+        let dir = test_dir("cuarentena");
+        let db = db_operativa(&dir).await;
+        registrar_cuarentena(&db).await;
+
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+        let origen = dir.join(BACKUP_DIR).join(&backup.id);
+        let copia_sucia = Db::open(origen.to_str().unwrap()).await.unwrap();
+        assert_eq!(
+            cuenta(&copia_sucia, "SELECT COUNT(*) FROM _Sync_Failed;").await,
+            1,
+            "la copia refleja el estado del momento, cuarentena incluida"
+        );
+        drop(copia_sucia);
+
+        let prepared = prepare_restore(&dir, &backup.id).await.unwrap();
+        let lista = Db::open(prepared.to_str().unwrap()).await.unwrap();
+        assert_eq!(
+            cuenta(&lista, "SELECT COUNT(*) FROM _Sync_Failed;").await,
+            0
+        );
+
+        drop(lista);
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn no_se_restaura_encima_de_operaciones_sin_subir() {
+        let dir = test_dir("outbox");
+        let db = db_operativa(&dir).await;
+        {
+            // Una escritura normal (por `execute`, no `raw`) se captura en el outbox.
+            let w = db.write().await;
+            w.execute(
+                "UPDATE Usuarios SET Nombre = 'Venta de hoy' WHERE ID_Usuario = ?1;",
+                vec![Value::Text(crate::util::ADMIN_USUARIO_ID.to_string())],
+            )
+            .await
+            .unwrap();
+        }
+        assert!(cuenta(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await > 0);
+
+        let err = asegurar_reemplazo_seguro(&db).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict);
+
+        // ...salvo si esa BD ya está bloqueada en reconciliación: entonces no está vendiendo y
+        // negarle otra copia la dejaría sin ninguna salida.
+        mark_reconciliation_pending(&db).await.unwrap();
+        asegurar_reemplazo_seguro(&db).await.unwrap();
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn los_restos_de_una_restauracion_no_se_acumulan() {
+        let dir = test_dir("restos");
+        let backups = dir.join(BACKUP_DIR);
+        std::fs::create_dir_all(&backups).unwrap();
+        for sello in [10, 20, 30] {
+            std::fs::write(backups.join(format!("pre-restore-{sello}.db")), b"x").unwrap();
+            std::fs::write(backups.join(format!("pre-restore-{sello}-wal")), b"x").unwrap();
+        }
+        std::fs::write(backups.join("failed-restore-5.db"), b"x").unwrap();
+        // Una copia diaria de verdad: la retención de siete es la suya, aquí no se toca.
+        std::fs::write(
+            backups.join(format!("{BACKUP_PREFIX}99{BACKUP_SUFFIX}")),
+            b"x",
+        )
+        .unwrap();
+        // Un temporal recién escrito (una restauración en curso) y otro antiguo.
+        std::fs::write(dir.join(format!("data.restore.{}.tmp", now_ms())), b"x").unwrap();
+        std::fs::write(dir.join("data.restore.1.tmp"), b"x").unwrap();
+
+        purge_restore_leftovers(&dir).unwrap();
+
+        assert!(backups.join("pre-restore-30.db").exists());
+        assert!(backups.join("pre-restore-20.db").exists());
+        assert!(
+            !backups.join("pre-restore-10.db").exists(),
+            "sobra el tercero"
+        );
+        assert!(
+            !backups.join("pre-restore-10-wal").exists(),
+            "el sidecar se va con su base"
+        );
+        assert!(backups.join("failed-restore-5.db").exists());
+        assert!(backups
+            .join(format!("{BACKUP_PREFIX}99{BACKUP_SUFFIX}"))
+            .exists());
+        assert!(!dir.join("data.restore.1.tmp").exists());
+        assert_eq!(
+            std::fs::read_dir(&dir)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("data.restore."))
+                .count(),
+            1,
+            "el temporal reciente puede ser el de una restauración en curso"
+        );
+
         let _ = std::fs::remove_dir_all(dir);
     }
 

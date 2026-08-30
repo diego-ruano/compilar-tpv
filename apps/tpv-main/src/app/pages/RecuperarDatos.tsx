@@ -40,6 +40,8 @@ function textoFase(fase: string): string {
             return "Comprobando que ambas bases de datos coinciden…";
         case "error":
             return "Se reintentará cuando la conexión vuelva a estar disponible.";
+        case "bloqueada":
+            return "La reconciliación no ha podido terminar por sí sola.";
         default:
             return "Esperando una conexión segura con la nube…";
     }
@@ -58,6 +60,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const fase = useEstadoSync((s) => s.faseRecuperacion);
     const errorReconciliacion = useEstadoSync((s) => s.errorRecuperacion);
     const iniciarReconciliacion = useEstadoSync((s) => s.iniciarReconciliacion);
+    const reintentarRecuperacion = useEstadoSync((s) => s.reintentarRecuperacion);
 
     useEffect(() => {
         let vivo = true;
@@ -93,7 +96,11 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
         }
     }
 
-    const trabajando = operacion !== null || reconciliacionPendiente;
+    // Bloqueada = la reconciliación agotó sus reintentos. Se sale del modo "en curso" a propósito:
+    // lo que hace falta ahora es una decisión (reintentar, otra copia, la nube), y esas opciones
+    // viven en la pantalla de elección.
+    const bloqueada = fase === "bloqueada";
+    const trabajando = operacion !== null || (reconciliacionPendiente && !bloqueada);
     const completada = fase === "completada";
     const puedeCrearVacia = error?.code === "tenant_db_not_provisioned";
 
@@ -175,6 +182,34 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                             </div>
                         ) : (
                             <>
+                                {bloqueada && (
+                                    <div className="grid gap-3 rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm">
+                                        <div className="flex gap-3">
+                                            <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
+                                            <div>
+                                                <p className="font-semibold">
+                                                    La recuperación no ha podido completarse
+                                                </p>
+                                                <p className="mt-0.5 text-fg-muted">
+                                                    {errorReconciliacion ??
+                                                        "La nube no confirmó que ambos lados coincidan."}
+                                                </p>
+                                            </div>
+                                        </div>
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => reintentarRecuperacion()}
+                                        >
+                                            Reintentar la sincronización
+                                        </Button>
+                                        <p className="text-xs text-fg-muted">
+                                            Si vuelve a fallar, prueba con otra copia o con el estado de
+                                            la nube. Los datos de esta base que aún no habían subido se
+                                            perderían al reemplazarla.
+                                        </p>
+                                    </div>
+                                )}
+
                                 <div>
                                     <h2 className="text-sm font-semibold">Copias de este ordenador</h2>
                                     <div className="mt-3 grid gap-2">

@@ -48,6 +48,13 @@ pub async fn recovery_restore_backup(
         .into_iter()
         .find(|b| b.id == backup_id)
         .ok_or_else(|| AppError::not_found("La copia local seleccionada ya no existe"))?;
+
+    // Antes de preparar nada: reemplazar el fichero se lleva por delante el outbox actual. Es la
+    // misma guardia que el volcado desde la nube (ver `asegurar_reemplazo_seguro`).
+    if let Some(actual) = state.db.lock().await.as_ref().cloned() {
+        tpv_infra_sqlite::recovery::asegurar_reemplazo_seguro(&actual).await?;
+    }
+
     let prepared = tpv_infra_sqlite::recovery::prepare_restore(&dir, &backup_id).await?;
 
     let mut guard = state.db.lock().await;
@@ -105,6 +112,11 @@ pub async fn recovery_restore_backup(
         Ok(restored) => {
             crate::configure_outbox_notifier(&app, &restored);
             *guard = Some(restored);
+            // Best-effort: la BD anterior y los temporales no entran en la retención de las copias
+            // diarias, así que cada intento dejaría otra base entera en AppData.
+            if let Err(e) = tpv_infra_sqlite::recovery::purge_restore_leftovers(&dir) {
+                tracing::warn!(target: "tpv::recovery", error = %e, "no se pudieron purgar los restos de restauraciones anteriores");
+            }
             Ok(selected)
         }
         Err(restore_error) => {

@@ -494,6 +494,10 @@ catálogo se crearon el primer día.
 | Tercer estado del arranque | `infra-sqlite/src/login.rs::setup_pendiente` | `requiere_recuperacion` = cero usuarios |
 | Volcado | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado actual + `Seq` de la foto |
 | Restauración | `infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción |
+| Copias locales | `infra-sqlite/src/recovery.rs` + job `backup_local` | `VACUUM INTO` diario, se guardan las 7 últimas |
+| Bloqueo del login | `_Recovery_State.Reconciliation_Pending` (en la propia `data.db`) | Restaurado ≠ utilizable |
+| Reconciliación | `shared/lib/recoverySync.ts` + `useMainSocket` | catch-up → outbox → catch-up, hasta converger |
+| Desbloqueo | `commands/recovery.rs::recovery_complete` | Última barrera: outbox 0, checkpoint ≥ high-water |
 | Pantalla | `src/app/pages/RecuperarDatos.tsx` | Único sitio desde el que se dispara |
 
 - **"BD vacía" no es "instalación nueva", y confundirlas corrompe la nube.** El seed crea un admin
@@ -514,7 +518,35 @@ catálogo se crearon el primer día.
   no es una foto.
 - **Restaurar reemplaza, y por eso se niega si el outbox no está vacío.** Vaciar las tablas se
   llevaría por delante una venta que aún no ha llegado a la nube. La comprobación va **dentro** de
-  la transacción: hacerla antes dejaría una ventana entre el permiso y el borrado.
+  la transacción: hacerla antes dejaría una ventana entre el permiso y el borrado. La hacen los dos
+  caminos (`bootstrap_restaurar` y `recovery::asegurar_reemplazo_seguro`), con una excepción: una BD
+  que **ya** está bloqueada en reconciliación no está vendiendo, y negarle la única alternativa que
+  le queda sería devolverla al callejón sin salida que esta pantalla existe para evitar.
+- **La nube no es la única salida, pero sí la única forma de volver a operar.** Hay copias locales
+  diarias para reconstruir el fichero sin red; el login, en cambio, no se abre hasta reconciliar.
+  Trabajar sobre una copia antigua crearía dos historiales divergentes, y resolverlos es un modo
+  degradado que no existe. Consecuencia asumida: **sin internet, una Main que perdió su `data.db`
+  no vende.** Y las copias viven en el mismo disco que protegen: cubren un borrado o una corrupción,
+  no una máquina muerta.
+- **La copia se toma por el pool de LECTURA.** `VACUUM INTO` abre su propia transacción de lectura,
+  así que en WAL la instantánea es coherente sin excluir al escritor. Tomando el `WriteGuard` se
+  bloquearían los cobros durante toda la copia — y el job vence por reloj de pared, o sea que puede
+  caer en plena cena.
+- **Una copia se restaura limpia de `_Sync_Failed`.** Una cuarentena no se borra en ningún sitio, y
+  `recovery_complete` exige que no haya ninguna: si viajara dentro de la copia, ninguna restauración
+  de ese equipo podría completarse jamás. Lo que esa tabla registra son intentos contra un estado de
+  la BD que se está reemplazando, así que allí no dice nada (el volcado la vacía por lo mismo).
+- **Los restos de una restauración se recogen.** `pre-restore-*`, `failed-restore-*` y los
+  temporales no llevan el prefijo de las copias diarias, así que la retención de siete no los ve.
+  Se conservan los dos más recientes de cada familia (la marcha atrás manual) y el job diario purga
+  el resto.
+- **Reintentar sin límite sólo vale si la causa es la red.** Tras cinco ciclos seguidos fallidos la
+  reconciliación se declara `bloqueada`: se deja de reconectar sola y la pantalla vuelve a ofrecer
+  las alternativas. Sin eso, una nube que rechaza siempre la misma operación local deja el TPV
+  girando para siempre bajo un mensaje que habla de la conexión.
+- **El high-water ausente no es cero.** Si `/v1/sync/changes` no informa del final del log (worker
+  antiguo), la verificación se degradaría a "el outbox está vacío" y desbloquearía el login sin
+  haber comprobado nada. Se falla cerrado.
 - **Lo que la nube no puede devolver: `DNI`, `IBAN` y `Numero_Seguridad_Social`.** Van cifrados con
   una clave que nunca sale de la Main, así que el worker ni los escribe ni los guarda (TRAB-03).
   Vuelven vacíos y la pantalla lo dice: es la única pérdida real, y se rellena a mano.

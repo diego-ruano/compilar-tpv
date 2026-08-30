@@ -129,3 +129,30 @@ ya venía en la respuesta. Afecta a **cualquier** 500 del worker, no solo a este
 - En preproducción se puede seguir consolidando el esquema en `0001`, pero hay que resetear a la vez
   `data.db` y los tenants Turso de desarrollo. Al publicar la primera versión, `0001` queda congelada
   y los cambios posteriores se añaden como `0002`, `0003`, etc.
+
+### 6.1 Repaso posterior (2026-08-30)
+
+Una revisión de la implementación encontró siete cosas, ya corregidas:
+
+1. **Cuarentena heredada.** `_Sync_Failed` no se purga nunca y `recovery_complete` exige cuarentena
+   cero, así que una fila vieja viajaba en las siete copias y dejaba **cualquier** restauración
+   local imposible de completar, en silencio. Ahora `prepare_restore` la vacía, como ya hacía el
+   volcado desde la nube.
+2. **Restaurar encima de una BD sana.** El camino local no tenía la guardia de outbox que sí tenía
+   el de la nube, y desde `db4b5d8` un fallo de arranque cualquiera lleva a esta pantalla. Se añade
+   `asegurar_reemplazo_seguro`, con la excepción de una BD ya bloqueada en reconciliación (a la que
+   negarle la alternativa la dejaría sin salida; el volcado se relaja igual).
+3. **Bucle infinito ante una operación envenenada.** Un `apply_ack` en fallo abortaba el ciclo y se
+   reintentaba para siempre bajo "se reintentará cuando vuelva la conexión". Ahora el error dice qué
+   operación es, y tras cinco ciclos seguidos la recuperación queda `bloqueada`: deja de reconectar
+   sola y la pantalla vuelve a ofrecer copia / nube / reintentar.
+4. **`highWater` ausente.** Se daba por `0`, lo que degradaba la verificación a "outbox vacío". Se
+   falla cerrado.
+5. **Restos acumulados.** `pre-restore-*`, `failed-restore-*` y los temporales no entraban en la
+   retención: cada intento dejaba una BD entera en AppData. Se conservan los dos más recientes de
+   cada familia y el job diario purga el resto (y un borrado fallido ya no marca el job como roto).
+6. **`VACUUM INTO` bloqueaba los cobros.** Se tomaba el `WriteGuard`, con vencimiento a reloj de
+   pared: podía caer en plena cena. Va por el pool de lectura, que en WAL da la misma instantánea
+   coherente sin excluir al escritor.
+7. **Documentación.** CLAUDE.md §9 no describía el subsistema nuevo (`_Recovery_State`, copias
+   locales, job `backup_local`, desbloqueo).

@@ -646,6 +646,24 @@ impl SyncRepository for SqliteSyncRepository {
             // comprobarlo antes dejaría una ventana por la que puede colarse una venta entre el
             // permiso y el borrado. En el camino real (una BD recién perdida, todavía sin
             // escrituras) el outbox está vacío y esto no se nota.
+            //
+            // La excepción: una BD que YA está bloqueada en reconciliación (viene de una
+            // restauración anterior que no consiguió converger) no está vendiendo, y su outbox es
+            // el de la copia, no el de un servicio en curso. Negarle también este camino la dejaría
+            // sin ninguna salida, que es justo el callejón que esta pantalla existe para evitar.
+            let reconciliando = {
+                let mut rows = conn
+                    .query(
+                        "SELECT Reconciliation_Pending FROM _Recovery_State WHERE Id = 1;",
+                        (),
+                    )
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0) != 0,
+                    None => false,
+                }
+            };
             let pendientes = {
                 let mut rows = conn
                     .query("SELECT COUNT(*) FROM _Sync_Outbox;", ())
@@ -656,7 +674,7 @@ impl SyncRepository for SqliteSyncRepository {
                     None => 0,
                 }
             };
-            if pendientes > 0 {
+            if pendientes > 0 && !reconciliando {
                 return Err(AppError::conflict(format!(
                     "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
