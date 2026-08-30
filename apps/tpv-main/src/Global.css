@@ -33,24 +33,24 @@
    ========================================================================= */
 :root {
     /* Fondos */
-    --bg: #f6f7f9;        /* fondo general de la app */
+    --bg: #f3f8ff;        /* azul muy claro para el fondo general */
     --surface: #ffffff;   /* tarjetas / paneles */
-    --surface-2: #f1f5f9; /* hover suave / inputs */
-    --surface-3: #e9edf3; /* hover más marcado / zonas hundidas */
+    --surface-2: #eaf3ff; /* hover suave / inputs */
+    --surface-3: #dceaff; /* hover más marcado / zonas hundidas */
 
     /* Bordes */
-    --border: rgba(15, 23, 42, 0.08);
-    --border-strong: rgba(15, 23, 42, 0.16);
+    --border: rgba(43, 129, 212, 0.12);
+    --border-strong: rgba(15, 44, 86, 0.22);
 
     /* Texto */
     --fg: #1e2128;        /* texto principal */
     --fg-muted: #5b6573;  /* texto secundario */
     --fg-subtle: #8a93a2; /* texto terciario / placeholders */
 
-    /* Acento (violeta/índigo) */
-    --accent: #6d5cd8;
-    --accent-hover: #5b4bc6;
-    --accent-soft: rgba(109, 92, 216, 0.12); /* fondos suaves de acento */
+    /* Acento azul corporativo */
+    --accent: #016ffc;
+    --accent-hover: #2b81d4;
+    --accent-soft: rgba(1, 111, 252, 0.12); /* fondos suaves de acento */
     --accent-fg: #ffffff;
 
     /* Semáforos */
@@ -65,7 +65,7 @@
     --warning-soft: rgba(245, 158, 11, 0.14);
 
     /* Foco */
-    --ring: rgba(109, 92, 216, 0.45);
+    --ring: rgba(1, 111, 252, 0.45);
 
     /* Sombra (suave en claro) */
     --shadow-color: rgba(15, 23, 42, 0.08);
@@ -87,10 +87,10 @@
     --fg-muted: #a3abb8;
     --fg-subtle: #6f7886;
 
-    /* Acento (violeta eléctrico con algo más de brillo) */
-    --accent: #7c6cf0;
-    --accent-hover: #8d7ff5;
-    --accent-soft: rgba(124, 108, 240, 0.18);
+    /* Acento azul corporativo */
+    --accent: #2b81d4;
+    --accent-hover: #016ffc;
+    --accent-soft: rgba(43, 129, 212, 0.18);
     --accent-fg: #ffffff;
 
     /* Semáforos */
@@ -105,7 +105,7 @@
     --warning-soft: rgba(247, 185, 85, 0.18);
 
     /* Foco (glow más visible) */
-    --ring: rgba(124, 108, 240, 0.55);
+    --ring: rgba(43, 129, 212, 0.55);
 
     /* Sombra casi nula en oscuro (nos apoyamos en bordes/ring) */
     --shadow-color: rgba(0, 0, 0, 0.45);
@@ -153,10 +153,10 @@
    bg-blanco, text-negro, bg-gris, text-morado, etc.). No usar en código nuevo.
    ========================================================================= */
 @theme {
-    --color-gris: #f1f5f9;
+    --color-gris: #eaf3ff;
     --color-blanco: #ffffff;
     --color-negro: #313131;
-    --color-morado: #745cd8;
+    --color-morado: #016ffc;
     --color-verde: #0fc066;
     --color-rojo: #ff3838;
     --color-azul: #007bff;

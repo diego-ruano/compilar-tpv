@@ -19,7 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import NavBarItem from "./NavBarItem";
-import Logo from "../../assets/img/logo-morado-cuadrado.png";
+import Logo from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useAuth } from "../../shared/stores/useAuth";
 import { useNoLeidasCount } from "../../features/notificaciones/notificacionesQueries";
 import { cn } from "../../shared/lib/cn";
@@ -160,7 +160,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
           src={Logo}
           alt="logo"
           className={cn(
-            "h-8 rounded-lg object-contain transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+            "h-8 rounded-full object-contain transition-[width,opacity,transform] duration-200 ease-out motion-reduce:transition-none",
             open ? "w-8 opacity-100 translate-x-0" : "w-0 opacity-0 -translate-x-2",
           )}
         />

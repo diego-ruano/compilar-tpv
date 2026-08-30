@@ -45,7 +45,7 @@ import UpdateBanner from "../shared/ui/UpdateBanner";
 import { Badge, Button, Card, Input } from "../shared/ui";
 import Titlebar from "./layoutComponent/Titlebar";
 
-import LogoAltaria from "../assets/img/logo.png";
+import LogoAltaria from "../assets/img/logo-altaria-azul-transparente.png";
 
 /* =========================
    Pairing helpers
@@ -138,7 +138,7 @@ function BlockedScreen({
                 <div className="mt-5 flex gap-3">
                     <button
                         onClick={onRetry}
-                        className="flex-1 rounded-xl bg-indigo-600 text-white py-3 font-semibold hover:bg-indigo-700"
+                        className="flex-1 rounded-xl bg-[#016FFC] text-white py-3 font-semibold hover:bg-[#2B81D4]"
                     >
                         Reintentar comprobación
                     </button>
@@ -217,7 +217,7 @@ function HandyWaitingMain({
     return (
         <div className="relative min-h-full w-full bg-slate-100 flex items-center justify-center p-6">
             <div className="w-full max-w-md rounded-2xl bg-white shadow-sm border border-slate-200 p-6 text-center">
-                <div className="mx-auto mb-4 size-12 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin" />
+                <div className="mx-auto mb-4 size-12 rounded-full border-4 border-slate-200 border-t-[#016FFC] animate-spin" />
                 <h1 className="text-xl font-semibold text-slate-900">
                     {volcando
                         ? "Haciendo copia de seguridad"
@@ -237,7 +237,7 @@ function HandyWaitingMain({
                     <button
                         type="button"
                         onClick={onRetry}
-                        className="w-full rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+                        className="w-full rounded-xl bg-[#016FFC] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#2B81D4]"
                     >
                         Reintentar conexión
                     </button>

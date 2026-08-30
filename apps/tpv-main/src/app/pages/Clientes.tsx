@@ -66,14 +66,14 @@ const RANKINGS: { key: FiltroRanking; label: string }[] = [
 
 // Colores suaves deterministas para los avatares (claro/oscuro).
 const AVATAR_PALETTE = [
-  "bg-violet-500/15 text-violet-500",
+  "bg-[#2B81D4]/15 text-[#2B81D4]",
   "bg-sky-500/15 text-sky-500",
   "bg-emerald-500/15 text-emerald-500",
   "bg-amber-500/15 text-amber-500",
   "bg-rose-500/15 text-rose-500",
   "bg-cyan-500/15 text-cyan-500",
-  "bg-fuchsia-500/15 text-fuchsia-500",
-  "bg-indigo-500/15 text-indigo-500",
+  "bg-[#0F2C56]/15 text-[#0F2C56]",
+  "bg-[#016FFC]/15 text-[#016FFC]",
 ];
 
 function avatarColor(seed: string): string {

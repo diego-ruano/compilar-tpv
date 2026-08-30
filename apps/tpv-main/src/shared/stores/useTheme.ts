@@ -9,7 +9,7 @@ const STORAGE_KEY = "tpv:theme";
 // Colores de fondo por tema en RGBA (0-255), espejo de --bg en Global.css.
 // En Windows el canal alpha se ignora; ambos son opacos.
 const BG_DARK: [number, number, number, number] = [14, 15, 19, 255]; // #0e0f13
-const BG_LIGHT: [number, number, number, number] = [246, 247, 249, 255]; // #f6f7f9
+const BG_LIGHT: [number, number, number, number] = [243, 248, 255, 255]; // #f3f8ff
 
 /**
  * Fija el color de fondo NATIVO del WebView2 (no del DOM). Ese color es el que
@@ -55,7 +55,7 @@ function applyThemeClass(theme: Theme) {
     // Mantiene sincronizado el fondo inline que fija el script anti-FOUC de
     // index.html, para que un cambio de tema en caliente no deje al <html>
     // con un color de fondo obsoleto detrás del body.
-    root.style.backgroundColor = dark ? "#0e0f13" : "#f6f7f9";
+    root.style.backgroundColor = dark ? "#0e0f13" : "#f3f8ff";
     root.style.colorScheme = dark ? "dark" : "light";
     applyNativeBackground(dark);
 }

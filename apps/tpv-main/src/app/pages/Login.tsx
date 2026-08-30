@@ -16,7 +16,7 @@ import {
     Store,
     Lightbulb,
 } from "lucide-react";
-import LogoAltaria from "../../assets/img/logo.png";
+import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useNavigate } from "react-router-dom";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
@@ -42,14 +42,14 @@ function cn(...classes: Array<string | false | undefined | null>) {
 // Paleta de colores suaves para los avatares (determinista por usuario).
 // Funcionan bien tanto en claro como en oscuro (tinte translúcido).
 const AVATAR_PALETTE = [
-    "bg-violet-500/15 text-violet-500",
+    "bg-[#2B81D4]/15 text-[#2B81D4]",
     "bg-sky-500/15 text-sky-500",
     "bg-emerald-500/15 text-emerald-500",
     "bg-amber-500/15 text-amber-500",
     "bg-rose-500/15 text-rose-500",
     "bg-cyan-500/15 text-cyan-500",
-    "bg-fuchsia-500/15 text-fuchsia-500",
-    "bg-indigo-500/15 text-indigo-500",
+    "bg-[#0F2C56]/15 text-[#0F2C56]",
+    "bg-[#016FFC]/15 text-[#016FFC]",
 ];
 
 function avatarColor(seed: string): string {
