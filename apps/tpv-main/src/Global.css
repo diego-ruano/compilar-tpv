@@ -320,3 +320,106 @@ body {
         animation: none;
     }
 }
+
+/* =========================================================================
+   Sistema visual común para modales
+
+   Se aplica por estructura para cubrir tanto ModalShell como las modales
+   históricas sin modificar su JSX ni su comportamiento.
+   ========================================================================= */
+:root {
+    --modal-width: 42rem;
+    --modal-max-height: calc(100dvh - 2rem);
+    --modal-control-height: 2.5rem;
+    --modal-field-gap: 0.875rem;
+    --modal-font-size: 0.875rem;
+}
+
+/* Panel principal: misma medida, borde y comportamiento de desbordamiento. */
+.fixed.inset-0 > [class~="bg-surface"],
+.fixed.inset-0 > :where([role="dialog"], [aria-modal="true"]) > [class~="bg-surface"],
+[role="dialog"].fixed.inset-0 > [class~="bg-surface"],
+[aria-modal="true"].fixed.inset-0 > [class~="bg-surface"] {
+    width: min(var(--modal-width), calc(100vw - 2rem)) !important;
+    max-width: var(--modal-width) !important;
+    max-height: var(--modal-max-height) !important;
+    overflow: hidden;
+    border-radius: 1rem !important;
+    font-size: var(--modal-font-size);
+}
+
+/* Las modales que son ellas mismas el panel conservan el scroll dentro del viewport. */
+[role="dialog"].fixed.inset-0,
+[aria-modal="true"].fixed.inset-0 {
+    max-height: 100dvh;
+    overscroll-behavior: contain;
+}
+
+/* Tipografía coherente sin alterar títulos ni iconos. */
+.fixed.inset-0 :where(p, label, input, select, textarea) {
+    font-size: var(--modal-font-size) !important;
+    line-height: 1.25rem;
+}
+.fixed.inset-0 :where(h2, h3) {
+    font-size: 1.125rem !important;
+    line-height: 1.5rem;
+}
+
+/* Controles de formulario uniformes. */
+.fixed.inset-0 :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+    select
+) {
+    box-sizing: border-box;
+    height: var(--modal-control-height) !important;
+    min-height: var(--modal-control-height);
+    padding-inline: 0.75rem !important;
+    border-radius: 0.75rem !important;
+}
+.fixed.inset-0 textarea {
+    box-sizing: border-box;
+    min-height: 6rem;
+    padding: 0.625rem 0.75rem !important;
+    border-radius: 0.75rem !important;
+    resize: vertical;
+}
+
+/* Ritmo vertical común para formularios y grupos que usan utilidades space-y. */
+.fixed.inset-0 form,
+.fixed.inset-0 fieldset {
+    row-gap: var(--modal-field-gap) !important;
+}
+.fixed.inset-0 :where(
+    [class~="space-y-1"],
+    [class~="space-y-2"],
+    [class~="space-y-3"],
+    [class~="space-y-4"],
+    [class~="space-y-5"],
+    [class~="space-y-6"]
+) > :not([hidden]) ~ :not([hidden]) {
+    margin-top: var(--modal-field-gap) !important;
+    margin-bottom: 0 !important;
+}
+
+/* El contenido largo desplaza dentro de la modal, nunca fuera de la pantalla. */
+.fixed.inset-0 :where(
+    [class~="overflow-y-auto"],
+    [class~="overflow-auto"]
+) {
+    min-height: 0;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+@media (max-width: 639px) {
+    :root {
+        --modal-max-height: calc(100dvh - 1rem);
+    }
+
+    .fixed.inset-0 > [class~="bg-surface"],
+    .fixed.inset-0 > :where([role="dialog"], [aria-modal="true"]) > [class~="bg-surface"],
+    [role="dialog"].fixed.inset-0 > [class~="bg-surface"],
+    [aria-modal="true"].fixed.inset-0 > [class~="bg-surface"] {
+        width: calc(100vw - 1rem) !important;
+    }
+}
