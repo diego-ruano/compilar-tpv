@@ -1,7 +1,7 @@
 // src/app/layoutComponent/Titlebar.tsx
 import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import LogoAltaria from "../../assets/img/logo.png";
+import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { IconButton, ThemeToggle } from "../../shared/ui";

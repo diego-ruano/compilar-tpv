@@ -190,7 +190,7 @@ export default function ReservasStats({ range }: { range: StatsRange }) {
 
     // ✅ Donut franjas (AHORA IGUAL: texto siempre visible + total en centro)
     const franjasOptions: ApexOptions = useMemo(() => {
-        const colors = ["#0ea5e9", "#10b981", "#f59e0b", "#a78bfa"];
+        const colors = ["#016FFC", "#10b981", "#f59e0b", "#2B81D4"];
         const total = franjaValues.reduce((a, b) => a + Number(b || 0), 0);
 
         return {

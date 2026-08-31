@@ -64,9 +64,9 @@ export default function UpdateBanner() {
     }
 
     return (
-        <div className="fixed bottom-3 right-3 z-[1000] w-full max-w-sm rounded-2xl border border-indigo-200 bg-white p-4 shadow-lg">
+        <div className="fixed bottom-3 right-3 z-[1000] w-full max-w-sm rounded-2xl border border-[#2B81D4] bg-white p-4 shadow-lg">
             <div className="flex items-start gap-3">
-                <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-indigo-100 text-indigo-700">
+                <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-[#016FFC]/10 text-[#0F2C56]">
                     ↑
                 </div>
                 <div className="min-w-0 flex-1">
@@ -97,7 +97,7 @@ export default function UpdateBanner() {
                             type="button"
                             onClick={handleInstall}
                             disabled={installing}
-                            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                            className="rounded-xl bg-[#016FFC] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[#2B81D4] disabled:opacity-50"
                         >
                             {installing ? "Actualizando…" : "Actualizar y reiniciar"}
                         </button>
