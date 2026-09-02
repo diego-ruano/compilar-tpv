@@ -823,18 +823,8 @@ mod tests_encoladas {
     use tpv_application::ports::sync::SyncRepository;
     use tpv_contracts::sync::{SqlStatement, SyncChange};
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!(
-            "{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        )
-    }
-
     async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_sync_test_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("sync");
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(dir.join("data.db").to_str().unwrap())
             .await
@@ -959,15 +949,7 @@ mod tests_aplicadas {
     use tpv_contracts::sync::{SqlStatement, SyncChange};
 
     async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-        let dir = std::env::temp_dir().join(format!(
-            "tpv_aplicadas_test_{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_temp::dir_temporal("aplicadas");
         let db = Db::open(dir.join("data.db").to_str().unwrap())
             .await
             .unwrap();
@@ -1043,18 +1025,8 @@ mod tests_bootstrap {
     use tpv_application::ports::sync::SyncRepository;
     use tpv_contracts::sync::{BootstrapSnapshot, BootstrapTabla};
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!(
-            "{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        )
-    }
-
     async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_boot_test_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("bootstrap");
         std::fs::create_dir_all(&dir).unwrap();
         // `Db::open` aplica las migraciones reales, así que se prueba contra el esquema de verdad
         // (`Zonas`) y no contra una tabla de juguete que podría no parecerse en nada.

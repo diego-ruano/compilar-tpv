@@ -817,14 +817,8 @@ mod tests_borrado_de_producto {
     use libsql::Connection;
     use tpv_application::ports::inventario::InventarioRepository;
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_borrado_producto_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("borrado_producto");
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
         (db, dir)

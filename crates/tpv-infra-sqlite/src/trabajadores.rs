@@ -1084,18 +1084,8 @@ mod tests_cifrado {
         }
     }
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!(
-            "{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        )
-    }
-
     async fn abrir_db() -> (Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_pii_test_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("pii");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.db");
         let db = Db::open(path.to_str().unwrap()).await.unwrap();

@@ -30,16 +30,10 @@ pub fn contract_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/contract")
 }
 
-fn uniq() -> String {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
-}
-
 /// BD libsql nueva en un directorio temporal propio. Cada test tiene la suya: abrir muchas en un
 /// mismo test dispara un crash nativo intermitente en Windows (`STATUS_ACCESS_VIOLATION`).
 pub async fn db_temporal() -> (Arc<Db>, PathBuf) {
-    let dir = std::env::temp_dir().join(format!("tpv_contract_{}", uniq()));
+    let dir = crate::test_temp::dir_temporal("contract");
     std::fs::create_dir_all(&dir).unwrap();
     let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
     (db, dir)

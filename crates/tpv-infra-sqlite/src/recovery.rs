@@ -637,13 +637,7 @@ mod tests {
     use crate::db::Writer;
 
     fn test_dir(nombre: &str) -> PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        std::env::temp_dir().join(format!(
-            "tpv_recovery_{nombre}_{}_{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::Relaxed)
-        ))
+        crate::test_temp::dir_temporal(&format!("recovery_{nombre}"))
     }
 
     async fn db_operativa(dir: &Path) -> std::sync::Arc<Db> {

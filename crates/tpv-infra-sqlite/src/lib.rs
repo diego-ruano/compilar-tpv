@@ -11,6 +11,11 @@
 //   · escritura → el EFECTO de un comando (las filas que deja) es el mismo en los dos lados.
 //   · lectura   → el VALOR DEVUELTO por una consulta es el mismo, y en el mismo orden.
 // Ver `contract_tests.rs`, `contract_read_tests.rs` y `tests/contract/README.md`.
+// Raíz común de los directorios temporales de los tests (y purga de los que dejó la ejecución
+// anterior). Ver `test_temp.rs`.
+#[cfg(test)]
+mod test_temp;
+
 #[cfg(test)]
 mod contract_comun;
 #[cfg(test)]

@@ -420,15 +420,7 @@ mod tests_lecturas_no_escriben {
     use crate::db::{Db, Reader};
 
     async fn abrir_db() -> (Arc<Db>, std::path::PathBuf) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-        let dir = std::env::temp_dir().join(format!(
-            "tpv_cfg_test_{}_{}",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::test_temp::dir_temporal("configuracion");
         let path = dir.join("data.db");
         let db = Db::open(path.to_str().unwrap()).await.unwrap();
         (db, dir)

@@ -279,17 +279,10 @@ mod tests {
 
     // Unicidad garantizada entre tests en paralelo: contador atómico + PID. (No usar el reloj:
     // en Windows su resolución es baja y dos tests simultáneos colisionarían de directorio.)
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("{}_{}", std::process::id(), n)
-    }
-
     /// Abre una BD libsql local en un fichero temporal. Devuelve la `Database` (hay que mantenerla
     /// viva mientras se use la `Connection`) + la conexión + el directorio (para limpiar).
     async fn open_temp() -> (libsql::Database, Connection, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_mig_test_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("migraciones");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.db");
         let database = Builder::new_local(path.to_str().unwrap())

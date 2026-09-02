@@ -208,7 +208,28 @@ pnpm tauri build                   # empaqueta la app
 cargo build                        # compila todo el Cargo workspace (crates + src-tauri)
 cargo check -p tpv-domain          # comprueba una crate concreta
 cargo test  -p tpv-contracts       # dispara la exportación ts-rs de los DTOs
+
+cargo nextest run                  # ⬅ los tests de Rust van POR AQUÍ (ver abajo)
+cargo install cargo-nextest --locked   # si no lo tienes
 ```
+
+### Los tests de Rust se corren con `cargo nextest`
+
+`cargo test` mete los 224 tests en **un solo proceso**, y libsql 0.3.5 tiene un crash nativo al
+abrir una base de datos que salta en torno al **1 %** de las aperturas
+(`STATUS_ACCESS_VIOLATION`). En un proceso compartido eso mata la tanda entera: no dice en qué
+test fue ni deja veredicto de los otros 223. Con la suite completa pasaba **una de cada tres
+ejecuciones**, que es lo mismo que no tener suite.
+
+`cargo nextest run` corre cada test en su propio proceso, así que ese fallo aborta un test y los
+demás siguen. La configuración (`.config/nextest.toml`) añade **dos reintentos**, que es lo que
+convierte ese 1 % en un `FLAKY` visible en vez de un rojo. Los reintentos no tapan nada nuestro:
+una aserción que falla, falla igual las tres veces.
+
+El arreglo de verdad es **subir libsql** (0.3.5 es de 2024, la serie actual es la 0.9). Mientras
+tanto, esto mantiene el suite usable. Los directorios temporales de los tests cuelgan todos de
+`%TEMP%/tpv_tests` y se purgan al empezar la tanda siguiente (ver `test_temp.rs`): antes se
+quedaban en `%TEMP%` para siempre y se habían acumulado 18.000 carpetas y 4 GB.
 
 ---
 

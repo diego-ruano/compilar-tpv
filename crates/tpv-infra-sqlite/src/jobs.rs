@@ -125,18 +125,11 @@ mod tests {
 
     // Unicidad entre tests en paralelo: contador atómico + PID, igual que en `migrations.rs`.
     // (No usar el reloj: en Windows su resolución es baja y dos tests simultáneos colisionarían.)
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        format!("{}_{}", std::process::id(), n)
-    }
-
     /// BD local en un fichero temporal, abierta como en producción (`Db::open` aplica migraciones
     /// y crea las tablas de control, `_Jobs_State` incluida). Devuelve también el directorio para
     /// poder limpiarlo al final del test.
     async fn db_temp() -> (std::sync::Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_jobs_test_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("jobs");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("data.db");
         let db = Db::open(path.to_str().unwrap())

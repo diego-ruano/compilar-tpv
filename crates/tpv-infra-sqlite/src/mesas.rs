@@ -2292,14 +2292,8 @@ mod tests_numero_ticket {
     use super::*;
     use crate::db::Db;
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_numero_ticket_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("numero_ticket");
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
         (db, dir)
@@ -2350,7 +2344,7 @@ mod tests_numero_ticket {
     async fn el_contador_sobrevive_a_cerrar_la_aplicacion() {
         // Vive en la BD, no en memoria: apagar el TPV por la noche no puede reiniciar la
         // numeración del día siguiente.
-        let dir = std::env::temp_dir().join(format!("tpv_contador_persistente_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("contador_persistente");
         std::fs::create_dir_all(&dir).unwrap();
         let ruta = dir.join("data.db").to_str().unwrap().to_string();
 
@@ -2404,14 +2398,8 @@ mod tests_snapshot_de_la_linea {
     use crate::db::Db;
     use libsql::Connection;
 
-    fn uniq() -> String {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        format!("{}_{}", std::process::id(), COUNTER.fetch_add(1, Ordering::Relaxed))
-    }
-
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("tpv_iva_linea_{}", uniq()));
+        let dir = crate::test_temp::dir_temporal("iva_linea");
         std::fs::create_dir_all(&dir).unwrap();
         let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
         (db, dir)

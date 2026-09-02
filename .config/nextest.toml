@@ -1,0 +1,32 @@
+# Configuración de cargo-nextest (runner de los tests de Rust).
+#
+# Por qué nextest y no `cargo test`: nextest corre CADA test en su propio proceso. Con `cargo test`
+# los 224 comparten uno, y el crash nativo de libsql (ver abajo) se llevaba por delante la tanda
+# entera: el proceso moría con STATUS_ACCESS_VIOLATION, sin decir en qué test ni dejar veredicto de
+# los demás. Aislado, ese mismo fallo aborta un test y los otros 223 siguen dando su respuesta.
+#
+# Los reintentos NO están para tapar tests inestables nuestros: un fallo de aserción es
+# determinista y se reintentará igual de rojo. Están para el crash nativo de libsql 0.3.5 al abrir
+# una base de datos, que aparece en torno al 1 % de las aperturas y no depende del test. Nextest
+# marca esos casos como FLAKY, así que siguen viéndose en la salida en vez de desaparecer.
+#
+# El arreglo de verdad es subir libsql (0.3.5 es de 2024). Mientras tanto, esto mantiene el suite
+# utilizable como red en vez de como ruido.
+
+# `tpv-contracts` queda FUERA de nextest, y no es una preferencia: sus 236 "tests" no comprueban
+# nada, son el generador de tipos de ts-rs. Los 236 escriben en el MISMO `bindings.ts` y ts-rs
+# acumula los tipos DENTRO del proceso y vuelca el fichero entero al final. Con un proceso por test
+# cada uno trunca el fichero y escribe sólo el suyo: el último gana y `bindings.ts` se queda con
+# UN tipo (comprobado: pasó de 900 líneas a 3, con los 236 en verde). Serializarlos no arregla
+# nada, porque el problema no es la concurrencia sino que cada proceso empieza de cero.
+#
+# Se generan como siempre, en un solo proceso: `pnpm generate-types` (o `cargo test -p tpv-contracts`).
+[profile.default]
+retries = 2
+default-filter = 'not package(tpv-contracts)'
+
+# En CI conviene ver cuántos han sido flaky sin que el runner se pare en el primero.
+[profile.ci]
+retries = 2
+fail-fast = false
+default-filter = 'not package(tpv-contracts)'
