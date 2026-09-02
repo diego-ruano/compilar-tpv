@@ -155,6 +155,13 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                             actual de la nube. Después se comprobarán ambos lados antes de permitir
                             trabajar de nuevo.
                         </p>
+                        {/* Se dice ANTES de elegir, no al fallar: con una copia local la gente da
+                            por hecho que no hace falta red, y la comprobación contra la nube (que
+                            es lo que desbloquea el login) sí la necesita. */}
+                        <p className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg">
+                            Hace falta conexión a internet para completar la recuperación, también
+                            si eliges una copia de este ordenador.
+                        </p>
                     </section>
 
                     <section className="grid gap-5 p-6 sm:p-8">
