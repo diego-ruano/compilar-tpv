@@ -854,6 +854,142 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Prepara un directorio con una `data.db` de contenido reconocible y su copia lista.
+    /// Estas dos funciones sólo mueven ficheros, así que el contenido puede ser texto: lo que se
+    /// comprueba es QUÉ fichero acaba en cada sitio, no que SQLite lo entienda.
+    fn escenario_de_intercambio(nombre: &str) -> (PathBuf, PathBuf) {
+        let dir = test_dir(nombre);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.db"), b"la de antes").unwrap();
+        let preparada = dir.join("data.restore.1.tmp");
+        std::fs::write(&preparada, b"la restaurada").unwrap();
+        (dir, preparada)
+    }
+
+    fn contenido(p: &Path) -> String {
+        String::from_utf8(std::fs::read(p).unwrap()).unwrap()
+    }
+
+    fn familia(dir: &Path, prefijo: &str) -> Vec<PathBuf> {
+        std::fs::read_dir(dir.join(BACKUP_DIR))
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with(prefijo))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn el_intercambio_instala_la_copia_y_guarda_la_anterior() {
+        let (dir, preparada) = escenario_de_intercambio("instalar");
+
+        let instalada = install_prepared(&dir, &preparada).unwrap();
+
+        assert_eq!(contenido(&dir.join("data.db")), "la restaurada");
+        assert!(!preparada.exists(), "la preparada se mueve, no se copia");
+        let previa = instalada.previous.expect("la anterior se guarda");
+        assert_eq!(
+            contenido(&previa),
+            "la de antes",
+            "es la red de rollback: no puede perderse"
+        );
+        assert_eq!(familia(&dir, "pre-restore-").len(), 1);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn el_wal_de_la_base_anterior_no_se_queda_junto_a_la_nueva() {
+        // Si se quedara, SQLite intentaría aplicar un WAL que pertenece a OTRO fichero sobre la
+        // base recién restaurada. Se apartan antes de instalar, no después.
+        let (dir, preparada) = escenario_de_intercambio("sidecars");
+        std::fs::write(dir.join("data.db-wal"), b"wal viejo").unwrap();
+        std::fs::write(dir.join("data.db-shm"), b"shm viejo").unwrap();
+
+        install_prepared(&dir, &preparada).unwrap();
+
+        assert!(!dir.join("data.db-wal").exists());
+        assert!(!dir.join("data.db-shm").exists());
+        assert_eq!(
+            familia(&dir, "pre-restore-").len(),
+            3,
+            "la base anterior y sus dos sidecars quedan archivados"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn sin_base_previa_no_hay_nada_que_apartar() {
+        // El camino real de una BD borrada: no existe `data.db`, así que no hay rollback posible
+        // y `previous` viene vacío. Instalar tiene que funcionar igual.
+        let dir = test_dir("sin_previa");
+        std::fs::create_dir_all(&dir).unwrap();
+        let preparada = dir.join("data.restore.1.tmp");
+        std::fs::write(&preparada, b"la restaurada").unwrap();
+
+        let instalada = install_prepared(&dir, &preparada).unwrap();
+
+        assert!(instalada.previous.is_none());
+        assert_eq!(contenido(&dir.join("data.db")), "la restaurada");
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn si_la_copia_no_abre_se_deshace_el_intercambio() {
+        // Lo que hace `recovery_restore_backup` cuando `init_main_db` falla sobre la copia ya
+        // instalada: la base de antes vuelve a su sitio y la que no sirvió queda apartada para
+        // poder mirarla, no borrada.
+        let (dir, preparada) = escenario_de_intercambio("rollback");
+        let instalada = install_prepared(&dir, &preparada).unwrap();
+        // `init_main_db` pudo dejar sidecars antes de descubrir que la copia no era utilizable.
+        std::fs::write(dir.join("data.db-wal"), b"wal de la fallida").unwrap();
+
+        rollback_install(&dir, instalada).unwrap();
+
+        assert_eq!(
+            contenido(&dir.join("data.db")),
+            "la de antes",
+            "el equipo se queda como estaba"
+        );
+        assert!(!dir.join("data.db-wal").exists());
+        let fallidas = familia(&dir, "failed-restore-");
+        assert_eq!(fallidas.len(), 2, "la copia fallida y su sidecar");
+        assert!(fallidas.iter().any(|p| contenido(p) == "la restaurada"));
+        assert!(
+            familia(&dir, "pre-restore-").is_empty(),
+            "la anterior ya no está archivada: ha vuelto a su sitio"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn deshacer_sin_base_previa_deja_el_equipo_sin_base() {
+        // Restaurar sobre una BD ya perdida y que la copia tampoco abra: no hay a dónde volver.
+        // Lo importante es que no falle, porque el arranque siguiente tiene que poder entrar en
+        // recuperación en vez de quedarse a medias.
+        let dir = test_dir("rollback_sin_previa");
+        std::fs::create_dir_all(&dir).unwrap();
+        let preparada = dir.join("data.restore.1.tmp");
+        std::fs::write(&preparada, b"la restaurada").unwrap();
+        let instalada = install_prepared(&dir, &preparada).unwrap();
+
+        rollback_install(&dir, instalada).unwrap();
+
+        assert!(!dir.join("data.db").exists());
+        assert_eq!(familia(&dir, "failed-restore-").len(), 1);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn una_copia_sale_del_equipo_y_vuelve() {
         // El caso real: el disco muere, se instala en otro equipo y lo único que queda es el USB.
