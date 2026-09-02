@@ -308,7 +308,7 @@ async fn apply_one(conn: &Connection, ch: &SyncChange) -> AppResult<()> {
 
     match res {
         Ok(()) => match conn.execute_batch("COMMIT;").await {
-            Ok(()) => Ok(()),
+            Ok(_) => Ok(()),
             Err(e) => {
                 // Con `defer_foreign_keys`, las violaciones de FK saltan AQUÍ (en el COMMIT), no
                 // en la sentencia. Volcamos el op_id + sus sentencias para identificar qué fila
@@ -491,7 +491,7 @@ impl SyncRepository for SqliteSyncRepository {
         .await;
 
         match res {
-            Ok(()) => conn.execute_batch("COMMIT;").await.map_err(db_err),
+            Ok(()) => conn.execute_batch("COMMIT;").await.map(|_| ()).map_err(db_err),
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;").await;
                 Err(e)
@@ -523,7 +523,7 @@ impl SyncRepository for SqliteSyncRepository {
         .await;
 
         match res {
-            Ok(()) => conn.execute_batch("COMMIT;").await.map_err(db_err),
+            Ok(()) => conn.execute_batch("COMMIT;").await.map(|_| ()).map_err(db_err),
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;").await;
                 Err(e)

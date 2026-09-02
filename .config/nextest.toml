@@ -6,12 +6,14 @@
 # los demás. Aislado, ese mismo fallo aborta un test y los otros 223 siguen dando su respuesta.
 #
 # Los reintentos NO están para tapar tests inestables nuestros: un fallo de aserción es
-# determinista y se reintentará igual de rojo. Están para el crash nativo de libsql 0.3.5 al abrir
-# una base de datos, que aparece en torno al 1 % de las aperturas y no depende del test. Nextest
-# marca esos casos como FLAKY, así que siguen viéndose en la salida en vez de desaparecer.
+# determinista y se reintentará igual de rojo. Están para un crash nativo de libsql al CREAR bases
+# de datos, que no depende del test y que **no se arregla actualizando**: se comprobó subiendo de
+# 0.3.5 a 0.9.30 y sigue igual (el código que lo provoca no ha cambiado en dos años). Nextest los
+# marca como FLAKY, así que siguen viéndose en la salida en vez de desaparecer.
 #
-# El arreglo de verdad es subir libsql (0.3.5 es de 2024). Mientras tanto, esto mantiene el suite
-# utilizable como red en vez de como ruido.
+# Lo que dispara el fallo es crear MUCHAS bases en un proceso, que es justo lo que hace un suite y
+# no lo que hace el TPV. Medido: 200 creaciones seguidas revientan ~la mitad de las veces; una sola
+# creación, 0 de 100; y una base con 6.000 sentencias encima, 0 de 10.
 
 # `tpv-contracts` queda FUERA de nextest, y no es una preferencia: sus 236 "tests" no comprueban
 # nada, son el generador de tipos de ts-rs. Los 236 escriben en el MISMO `bindings.ts` y ts-rs

@@ -44,7 +44,10 @@ serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
 # ── DB ──
-libsql = "0.3"
+# Sólo `core`: leemos un fichero SQLite local. Las features por defecto arrastran replication,
+# remote, hrana y tls (tonic, hyper, tower…) para hablar con un servidor Turso, que en la Main no
+# se usa nunca — el que habla con la nube es el worker.
+libsql = { version = "0.9.30", default-features = false, features = ["core"] }
 
 # ── HTTP ──
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

@@ -27,7 +27,7 @@ tauri-plugin-dialog = "2.6"
 tokio = { version = "1", features = ["full"] }
 
 # ───────────── DB ─────────────
-libsql = "0.3"
+libsql = { workspace = true }
 
 # ───────────── Serde ─────────────
 serde = { version = "1", features = ["derive"] }

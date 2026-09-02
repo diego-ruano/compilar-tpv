@@ -466,7 +466,9 @@ impl<'a> Writer for WriteGuard<'a> {
             match batch_kind(&sql) {
                 BatchKind::Begin => {
                     *self.tx_buf.lock().await = Some(Vec::new());
-                    self.conn.execute_batch(&sql).await
+                    // libsql 0.9 devuelve `BatchRows` (las filas de cada sentencia del lote). Aquí
+                    // no interesan: `execute_batch` se usa para DDL y control de transacción.
+                    self.conn.execute_batch(&sql).await.map(|_| ())
                 }
                 BatchKind::Commit => {
                     let buffered = self.tx_buf.lock().await.take();
@@ -482,7 +484,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     }
                     match pre {
                         Ok(()) => {
-                            let r = self.conn.execute_batch(&sql).await;
+                            let r = self.conn.execute_batch(&sql).await.map(|_| ());
                             // Solo tras confirmar el COMMIT y si hubo escrituras: drenar la nube ya.
                             if r.is_ok() && had_writes {
                                 self.fire_outbox_notify();
@@ -498,9 +500,9 @@ impl<'a> Writer for WriteGuard<'a> {
                 }
                 BatchKind::Rollback => {
                     *self.tx_buf.lock().await = None;
-                    self.conn.execute_batch(&sql).await
+                    self.conn.execute_batch(&sql).await.map(|_| ())
                 }
-                BatchKind::Other => self.conn.execute_batch(&sql).await,
+                BatchKind::Other => self.conn.execute_batch(&sql).await.map(|_| ()),
             }
         }
     }

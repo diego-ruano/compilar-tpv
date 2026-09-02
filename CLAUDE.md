@@ -215,19 +215,21 @@ cargo install cargo-nextest --locked   # si no lo tienes
 
 ### Los tests de Rust se corren con `cargo nextest`
 
-`cargo test` mete los 224 tests en **un solo proceso**, y libsql 0.3.5 tiene un crash nativo al
-abrir una base de datos que salta en torno al **1 %** de las aperturas
-(`STATUS_ACCESS_VIOLATION`). En un proceso compartido eso mata la tanda entera: no dice en qué
-test fue ni deja veredicto de los otros 223. Con la suite completa pasaba **una de cada tres
-ejecuciones**, que es lo mismo que no tener suite.
+`cargo test` mete los 224 tests en **un solo proceso**, y libsql tiene un crash nativo
+(`STATUS_ACCESS_VIOLATION`) al crear bases de datos. En un proceso compartido eso mata la tanda
+entera: no dice en qué test fue ni deja veredicto de los otros 223. Con la suite completa pasaba
+**una de cada tres ejecuciones**, que es lo mismo que no tener suite.
 
 `cargo nextest run` corre cada test en su propio proceso, así que ese fallo aborta un test y los
 demás siguen. La configuración (`.config/nextest.toml`) añade **dos reintentos**, que es lo que
 convierte ese 1 % en un `FLAKY` visible en vez de un rojo. Los reintentos no tapan nada nuestro:
 una aserción que falla, falla igual las tres veces.
 
-El arreglo de verdad es **subir libsql** (0.3.5 es de 2024, la serie actual es la 0.9). Mientras
-tanto, esto mantiene el suite usable. Los directorios temporales de los tests cuelgan todos de
+**Subir la versión no lo arregla**: se comprobó pasando de 0.3.5 a 0.9.30 y el fallo sigue igual
+(el `Connection` de libsql, con su cierre por `Arc::get_mut`, es idéntico en las dos). Lo que lo
+dispara es crear **muchas** bases en un proceso —200 seguidas revientan la mitad de las veces—,
+que es lo que hace un suite y no lo que hace el TPV: una sola creación aguantó 100 de 100, y una
+base con 6.000 sentencias encima, 10 de 10. Los directorios temporales de los tests cuelgan todos de
 `%TEMP%/tpv_tests` y se purgan al empezar la tanda siguiente (ver `test_temp.rs`): antes se
 quedaban en `%TEMP%` para siempre y se habían acumulado 18.000 carpetas y 4 GB.
 
