@@ -204,5 +204,15 @@ pub async fn init_main_db(app_data_dir: &Path, aprovisionado: bool) -> AppResult
         seed_contact_settings(w.raw()).await?;
     }
 
+    // Una base sin usuarios (datos perdidos) o restaurada y aún sin reconciliar no puede admitir
+    // escrituras de negocio: acabarían en `_Sync_Outbox`, que con la BD en recuperación no se
+    // puede drenar —el socket está parado— ni ignorar —bloquea la restauración—. Va aquí, al
+    // abrir, porque es el único punto por el que pasan los tres caminos: arranque, elección de
+    // modo y sustitución por una copia restaurada.
+    let estado = crate::recovery::status(&db).await?;
+    db.bloquear_escrituras_de_negocio(
+        estado.state != tpv_contracts::recovery::RecoveryState::Ready,
+    );
+
     Ok(db)
 }

@@ -664,6 +664,19 @@ impl SyncRepository for SqliteSyncRepository {
                     None => false,
                 }
             };
+            // Una base SIN USUARIOS tampoco está vendiendo —no se puede iniciar sesión—, así que
+            // lo que tenga en el outbox no es una venta: lo escribió algo que no debería haber
+            // escrito. Ver la misma excepción, con su porqué, en `recovery::asegurar_reemplazo_seguro`.
+            let sin_usuarios = {
+                let mut rows = conn
+                    .query("SELECT COUNT(*) FROM Usuarios;", ())
+                    .await
+                    .map_err(db_err)?;
+                match rows.next().await.map_err(db_err)? {
+                    Some(r) => v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0) == 0,
+                    None => true,
+                }
+            };
             let pendientes = {
                 let mut rows = conn
                     .query("SELECT COUNT(*) FROM _Sync_Outbox;", ())
@@ -674,7 +687,7 @@ impl SyncRepository for SqliteSyncRepository {
                     None => 0,
                 }
             };
-            if pendientes > 0 && !reconciliando {
+            if pendientes > 0 && !reconciliando && !sin_usuarios {
                 return Err(AppError::conflict(format!(
                     "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
@@ -769,6 +782,10 @@ impl SyncRepository for SqliteSyncRepository {
         match res {
             Ok(filas) => {
                 conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+                // La base queda restaurada pero pendiente de reconciliar: hasta que converja no
+                // admite escrituras de negocio (aquí no se reabre el `Db`, así que el cerrojo no
+                // lo recalcula nadie más).
+                self.db.bloquear_escrituras_de_negocio(true);
                 tracing::info!(
                     target: "tpv::sync",
                     seq = snapshot.seq,
@@ -1233,6 +1250,15 @@ mod tests_bootstrap {
         {
             let w = db.write().await;
             let conn: &Connection = w.raw();
+            // Un usuario: es lo que distingue una BD que ESTÁ operando —y cuyo outbox puede
+            // contener una venta— de una que perdió sus datos, donde ni se puede iniciar sesión.
+            // La guardia sólo protege a la primera (ver el test siguiente).
+            conn.execute(
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)                  SELECT 'u1', ID_Rol, 'ana@bar.example', 'x', 'Ana' FROM Roles LIMIT 1;",
+                (),
+            )
+            .await
+            .unwrap();
             conn.execute(
                 "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('local', 'Sin subir');",
                 (),
@@ -1260,5 +1286,42 @@ mod tests_bootstrap {
         // Y no ha tocado nada: ni la fila local ni el checkpoint.
         assert_eq!(zonas(&db).await, vec!["Sin subir".to_string()]);
         assert_eq!(repo.get_checkpoint().await.unwrap(), 0);
+    }
+
+    /// La otra cara: sin usuarios, ese mismo outbox NO puede cerrar la única salida.
+    ///
+    /// En una BD sin usuarios no se puede iniciar sesión, así que lo que tenga pendiente no es una
+    /// venta: lo escribió algo que no debería haber escrito (el aviso de actualización lo hacía).
+    /// Negarle la restauración por eso deja el equipo inservible para siempre, porque el socket no
+    /// se abre mientras faltan los datos y esa operación no se puede subir jamás.
+    #[tokio::test]
+    async fn una_bd_sin_usuarios_restaura_aunque_le_quede_outbox() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-huerfana', 'test', '[]', 1);",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 100,
+                total_filas: 1,
+                tablas: vec![tabla(
+                    "Zonas",
+                    vec![vec![json!("z1"), json!("Terraza")]],
+                )],
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(r.filas_restauradas, 1);
+        assert_eq!(zonas(&db).await, vec!["Terraza".to_string()]);
+        assert_eq!(repo.get_checkpoint().await.unwrap(), 100);
     }
 }

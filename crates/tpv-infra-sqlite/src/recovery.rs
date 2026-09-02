@@ -93,6 +93,8 @@ pub async fn mark_reconciliation_pending(db: &Db) -> AppResult<()> {
         )
         .await
         .map_err(db_err)?;
+    drop(w);
+    db.bloquear_escrituras_de_negocio(true);
     Ok(())
 }
 
@@ -105,6 +107,9 @@ pub async fn complete_reconciliation(db: &Db) -> AppResult<()> {
         )
         .await
         .map_err(db_err)?;
+    drop(w);
+    // El equipo vuelve a operar: se reabre el paso a las escrituras de negocio.
+    db.bloquear_escrituras_de_negocio(false);
     Ok(())
 }
 
@@ -389,6 +394,14 @@ pub async fn asegurar_reemplazo_seguro(db: &Db) -> AppResult<()> {
     .await?
         != 0;
     if pendiente {
+        return Ok(());
+    }
+    // Y una base SIN USUARIOS tampoco está vendiendo: no se puede iniciar sesión, así que ninguna
+    // operación suya puede ser una venta. Si tiene algo en el outbox, lo escribió algo que no
+    // debería haber escrito (es lo que motivó el cerrojo de `db.rs`), y dejar que eso bloquee la
+    // única salida cambia un dato que no existe por un equipo inservible. También es lo que
+    // rescata a los equipos que ya se quedaron atascados antes de que el cerrojo existiera.
+    if scalar_i64(conn, "SELECT COUNT(*) FROM Usuarios;").await? == 0 {
         return Ok(());
     }
     let outbox = scalar_i64(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
@@ -870,6 +883,86 @@ mod tests {
         let prepared = prepare_restore(&dir, &vuelta.id).await.unwrap();
         assert!(prepared.is_file());
         discard_prepared(&prepared);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn una_bd_en_recuperacion_no_admite_escrituras_de_negocio() {
+        let dir = test_dir("cerrojo");
+        let db = db_operativa(&dir).await;
+        let escribir_negocio = |texto: &'static str| {
+            let db = db.clone();
+            async move {
+                let w = db.write().await;
+                w.execute(
+                    "UPDATE Usuarios SET Nombre = ?1 WHERE ID_Usuario = ?2;",
+                    vec![
+                        Value::Text(texto.to_string()),
+                        Value::Text(crate::util::ADMIN_USUARIO_ID.to_string()),
+                    ],
+                )
+                .await
+            }
+        };
+
+        // Operativa: la escritura entra y se captura, como siempre.
+        escribir_negocio("antes").await.unwrap();
+        let outbox = cuenta(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await;
+        assert!(outbox > 0);
+
+        mark_reconciliation_pending(&db).await.unwrap();
+        assert!(db.escrituras_de_negocio_bloqueadas());
+
+        // En recuperación, no. Esto es exactamente lo que hacía el aviso de "actualización
+        // disponible", y esa única fila dejaba el equipo sin poder restaurar.
+        assert!(escribir_negocio("durante").await.is_err());
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await,
+            outbox,
+            "una escritura rechazada no deja rastro en el outbox"
+        );
+
+        // La maquinaria de la recuperación va por `raw()` y sigue pasando.
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute("UPDATE _Sync_State SET Last_Seq = 7 WHERE Id = 1;", ())
+                .await
+                .unwrap();
+        }
+        assert_eq!(cuenta(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, outbox);
+
+        // Y al terminar, el equipo vuelve a escribir.
+        complete_reconciliation(&db).await.unwrap();
+        assert!(!db.escrituras_de_negocio_bloqueadas());
+        escribir_negocio("despues").await.unwrap();
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn una_bd_sin_usuarios_no_queda_bloqueada_por_su_propio_outbox() {
+        // El equipo que ya se atascó antes de existir el cerrojo: sin usuarios no se puede iniciar
+        // sesión, así que esa operación no es una venta y no puede cerrar la única salida.
+        let dir = test_dir("sin_usuarios");
+        let db = db_operativa(&dir).await;
+        {
+            let w = db.write().await;
+            w.raw().execute("DELETE FROM Usuarios;", ()).await.unwrap();
+            w.raw()
+                .execute(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) VALUES ('op-huerfana', 'main', '[]', 1);",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+        assert!(cuenta(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await > 0);
+
+        asegurar_reemplazo_seguro(&db).await.unwrap();
 
         drop(db);
         let _ = std::fs::remove_dir_all(dir);

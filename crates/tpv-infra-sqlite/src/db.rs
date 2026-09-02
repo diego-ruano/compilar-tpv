@@ -19,6 +19,7 @@
 //! genéricos y los cuerpos de los métodos apenas cambian.
 
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use libsql::{Builder, Connection, Database, Error as LibsqlError, Rows, Value};
@@ -335,6 +336,9 @@ type OutboxNotify = Arc<OnceLock<Box<dyn Fn() + Send + Sync>>>;
 /// Implementa `Writer` (y `Reader`): los repos lo usan igual que la antigua `Connection`.
 pub struct WriteGuard<'a> {
     conn: &'a Arc<Connection>,
+    /// Cerrojo de las escrituras de NEGOCIO mientras la base no está operativa (ver
+    /// [`Db::bloquear_escrituras_de_negocio`]). No afecta a `raw()`.
+    bloqueadas: &'a AtomicBool,
     /// Buffer de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK). Es LOCAL a este
     /// guard (solo hay uno vivo), así que no hay estado global compartido ni carreras.
     tx_buf: Mutex<Option<Vec<SqlStatement>>>,
@@ -399,6 +403,20 @@ impl<'a> Writer for WriteGuard<'a> {
             // Sentencias que no capturamos (no son escritura replicable): directas.
             if !is_write_sql(sql) {
                 return self.conn.execute(sql, values).await;
+            }
+
+            // Base a medio recuperar: ninguna escritura de negocio puede entrar. Toda escritura
+            // que pase por aquí acaba en `_Sync_Outbox`, y con la BD en recuperación el outbox no
+            // se puede drenar (el socket está parado) NI se puede ignorar (bloquea la
+            // restauración). Una sola operación aquí deja el equipo sin ninguna salida.
+            //
+            // Se rechaza en vez de dejarla pasar en silencio: quien escriba tiene que enterarse.
+            // La maquinaria de la recuperación no se ve afectada porque va toda por `raw()`.
+            if self.bloqueadas.load(Ordering::Relaxed) {
+                return Err(LibsqlError::Misuse(
+                    "Este equipo está recuperando sus datos: no admite escrituras todavía."
+                        .to_string(),
+                ));
             }
 
             let mut buf = self.tx_buf.lock().await;
@@ -499,6 +517,9 @@ pub struct Db {
     /// Notificador del outbox (lo inyecta el shell con `set_outbox_notifier`). Compartido (Arc)
     /// con cada `WriteGuard` para dispararlo tras confirmar una operación.
     outbox_notify: OutboxNotify,
+    /// Escrituras de negocio bloqueadas: la base no está en condiciones de generar operaciones
+    /// nuevas (le faltan los datos, o está restaurada y aún sin reconciliar).
+    escrituras_bloqueadas: AtomicBool,
     /// Mantiene viva la `Database` mientras existan conexiones derivadas.
     _database: Database,
 }
@@ -540,6 +561,9 @@ impl Db {
             },
             reads: Arc::new(ReadPool::new(read_conns)),
             outbox_notify: Arc::new(OnceLock::new()),
+            // Por defecto abierta: lo decide quien conoce el estado de recuperación
+            // (`connection::init_main_db`), no el constructor genérico.
+            escrituras_bloqueadas: AtomicBool::new(false),
             _database: database,
         }))
     }
@@ -549,6 +573,25 @@ impl Db {
     /// instante. Idempotente: una segunda llamada se ignora.
     pub fn set_outbox_notifier(&self, cb: impl Fn() + Send + Sync + 'static) {
         let _ = self.outbox_notify.set(Box::new(cb));
+    }
+
+    /// Cierra (o reabre) el paso a las escrituras de NEGOCIO —las que se capturan en el outbox—
+    /// mientras la base no está operativa: sin usuarios (datos perdidos) o restaurada y todavía sin
+    /// reconciliar.
+    ///
+    /// Existe porque la regla "durante una recuperación no se escribe" vivía sólo en el gating de
+    /// los jobs (`Requiere::MainOperativa`), y cualquier comando se la saltaba: bastó una
+    /// notificación de "actualización disponible" para dejar un equipo sin poder restaurar. Aquí
+    /// pasa **toda** escritura replicable, así que la regla deja de depender de que alguien se
+    /// acuerde de aplicarla.
+    ///
+    /// No afecta a `WriteGuard::raw()`: las tablas de control y la propia restauración van por ahí.
+    pub fn bloquear_escrituras_de_negocio(&self, bloqueadas: bool) {
+        self.escrituras_bloqueadas.store(bloqueadas, Ordering::Relaxed);
+    }
+
+    pub fn escrituras_de_negocio_bloqueadas(&self) -> bool {
+        self.escrituras_bloqueadas.load(Ordering::Relaxed)
     }
 
     /// Presta una conexión de solo-lectura del pool (espera si están todas en uso).
@@ -572,6 +615,7 @@ impl Db {
         }
         WriteGuard {
             conn: &self.write.conn,
+            bloqueadas: &self.escrituras_bloqueadas,
             tx_buf: Mutex::new(None),
             outbox_notify: self.outbox_notify.clone(),
             _lock: lock,

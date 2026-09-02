@@ -541,6 +541,24 @@ catálogo se crearon el primer día.
   `commands/recovery.rs`: **todo lo que hay en ese camino tiene que tolerar `state.db == None`** —
   y `recovery_status` desempata por modo, porque no tener base es "normal" en una Handy y es
   "faltan los datos" en una Main.
+- **Mientras la base no está operativa, ninguna escritura de negocio puede entrar.** El cerrojo
+  vive en `db.rs` (`Db::bloquear_escrituras_de_negocio`, que `WriteGuard::execute` consulta y
+  `raw()` ignora) y lo pone `connection::init_main_db` al abrir, según el estado de recuperación.
+  Existe porque la regla ya estaba escrita pero sólo la aplicaba el gating de los jobs
+  (`Requiere::MainOperativa`), y **cualquier comando se la saltaba**: bastó el aviso de
+  "actualización disponible" —que emite una notificación, o sea una escritura replicable— para
+  dejar un equipo sin poder restaurar. El razonamiento es circular y no tiene salida: la escritura
+  entra en `_Sync_Outbox`, el outbox bloquea la restauración, y el socket que lo drenaría está
+  parado justo porque faltan los datos. Consecuencia al añadir cualquier escritura que pueda correr
+  sin sesión iniciada: no hace falta acordarse de nada, pero si te devuelve "este equipo está
+  recuperando sus datos", **eso es el cerrojo y está bien**; lo que hay que revisar es por qué esa
+  escritura corre durante una recuperación.
+- **Una base sin usuarios no puede quedar bloqueada por su propio outbox.** La guardia que se niega
+  a restaurar con operaciones sin subir hace dos excepciones, y por el mismo motivo: ni una BD en
+  reconciliación ni una BD sin usuarios están vendiendo —en la segunda no se puede ni iniciar
+  sesión—, así que lo que tengan en el outbox no es una venta. Cerrarles la única salida cambia un
+  dato que no existe por un equipo inservible. Es además lo que rescata a los equipos que ya se
+  atascaron antes de existir el cerrojo.
 - **El volcado de la nube sí necesita dónde escribir, y por eso aparta el fichero ilegible.**
   `asegurar_base_para_recuperar` mueve la `data.db` que no se pudo abrir a `backups/ilegible-*` y
   crea una vacía en su sitio. **Sólo actúa si no hay `Db`**: con una base abierta esto sería un
