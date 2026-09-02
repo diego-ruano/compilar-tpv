@@ -1568,6 +1568,18 @@ async fn notify_update_available(app: &AppHandle, version: &str) {
     use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
     let state = app.state::<AppState>();
+
+    // Con la Main a medio recuperar, esta notificación es una escritura de negocio: entra en
+    // `_Sync_Outbox`... y el outbox es justo lo que bloquea la restauración, que es la única
+    // salida. Como el socket está parado mientras faltan los datos, esa operación no se puede
+    // subir NUNCA: el equipo se queda sin poder restaurar ni con conexión.
+    //
+    // El aviso no se pierde: el banner y el evento `update:available` son de UI y siguen saliendo,
+    // y el próximo chequeo (al reabrir, o a las 6 h) lo emitirá con el equipo ya operativo.
+    if !state.es_main_operativa().await {
+        return;
+    }
+
     if let Ok(notifier) = state.notifier().await {
         let _ = notifier
             .emitir(NuevaNotificacion {
