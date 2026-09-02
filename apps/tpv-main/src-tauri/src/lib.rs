@@ -1761,17 +1761,36 @@ pub fn run() {
             let db_opt: Option<Arc<Db>> = if mode == Some(DeviceMode::Tpv) {
                 // `Db`: escritor único serializado + pool de lectura (WAL). La captura al outbox
                 // está SIEMPRE activa (también offline); se drena en "online".
-                let db = tauri::async_runtime::block_on(async {
+                let abierta = tauri::async_runtime::block_on(async {
                     tpv_infra_sqlite::connection::init_main_db(
                         &app_data_dir,
                         dispositivo_aprovisionado(&app_data_dir),
                     )
                     .await
-                    .expect("Error init_main_db")
                 });
-                // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
-                configure_outbox_notifier(handle, &db);
-                Some(db)
+
+                match abierta {
+                    Ok(db) => {
+                        // Drenado inmediato (ver init_main): el outbox avisa al WS al confirmar una escritura.
+                        configure_outbox_notifier(handle, &db);
+                        Some(db)
+                    }
+                    // Una `data.db` corrupta o ilegible NO puede tumbar el arranque. Con un panic
+                    // aquí la app no llega a abrir ninguna ventana, y entonces la pantalla de
+                    // recuperación —donde están las copias locales y el volcado de la nube— es
+                    // inalcanzable: el equipo queda inservible justo en el caso para el que se
+                    // guardan las copias. Se arranca sin base; los comandos de arranque fallan, el
+                    // frontend lo lee como datos perdidos y entra en recuperación, que funciona
+                    // sin `Db` (listar copias y restaurar sólo tocan ficheros).
+                    Err(e) => {
+                        tracing::error!(
+                            target: "tpv::startup",
+                            error = %e,
+                            "no se pudo abrir la base local; se arranca en modo recuperación"
+                        );
+                        None
+                    }
+                }
             } else {
                 None
             };
@@ -1841,6 +1860,9 @@ pub fn run() {
             // recuperación local
             commands::recovery::recovery_status,
             commands::recovery::recovery_list_backups,
+            commands::recovery::recovery_create_backup,
+            commands::recovery::recovery_export_backup,
+            commands::recovery::recovery_import_backup,
             commands::recovery::recovery_restore_backup,
             commands::recovery::recovery_complete,
             // mesass

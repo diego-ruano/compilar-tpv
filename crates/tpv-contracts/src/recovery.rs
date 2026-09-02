@@ -37,4 +37,7 @@ pub struct LocalBackupInfo {
     pub created_at_ms: i64,
     #[ts(type = "number")]
     pub size_bytes: i64,
+    /// La ha traído una persona desde fuera del equipo (un USB). La retención de las copias
+    /// diarias no la alcanza, y la pantalla la distingue: su fecha no dice nada de este disco.
+    pub importada: bool,
 }

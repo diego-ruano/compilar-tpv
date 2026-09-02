@@ -16,8 +16,18 @@ use crate::db::Db;
 
 const BACKUP_DIR: &str = "backups";
 const BACKUP_PREFIX: &str = "data-";
+/// Copias traídas de fuera (un USB, una carpeta de red). Llevan prefijo propio porque la
+/// retención de las diarias NO debe alcanzarlas: las ha puesto ahí una persona a mano.
+const IMPORT_PREFIX: &str = "import-";
 const BACKUP_SUFFIX: &str = ".db";
 const BACKUPS_A_CONSERVAR: usize = 7;
+/// Copia que deja el paso de migraciones (`data.db.bak.<ms>`, ver `connection.rs`). Vive en la
+/// raíz de AppData, no en `backups/`, así que la retención de las diarias nunca la vio.
+const MIGRACION_PREFIX: &str = "data.db.bak.";
+const MIGRACIONES_A_CONSERVAR: usize = 2;
+/// Base que no se pudo ni abrir y se apartó para poder reconstruir en su sitio. No se lista como
+/// copia restaurable: si SQLite no la abre, ofrecerla sería ofrecer el problema.
+const ILEGIBLE_PREFIX: &str = "ilegible-";
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
@@ -100,16 +110,17 @@ pub async fn complete_reconciliation(db: &Db) -> AppResult<()> {
 
 fn parse_backup(path: &Path) -> Option<LocalBackupInfo> {
     let id = path.file_name()?.to_str()?.to_string();
-    let stamp = id
-        .strip_prefix(BACKUP_PREFIX)?
-        .strip_suffix(BACKUP_SUFFIX)?
-        .parse::<i64>()
-        .ok()?;
+    let (importada, resto) = match id.strip_prefix(BACKUP_PREFIX) {
+        Some(r) => (false, r),
+        None => (true, id.strip_prefix(IMPORT_PREFIX)?),
+    };
+    let stamp = resto.strip_suffix(BACKUP_SUFFIX)?.parse::<i64>().ok()?;
     let size_bytes = std::fs::metadata(path).ok()?.len().min(i64::MAX as u64) as i64;
     Some(LocalBackupInfo {
         id,
         created_at_ms: stamp,
         size_bytes,
+        importada,
     })
 }
 
@@ -200,8 +211,13 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
     }
     std::fs::rename(&tmp, &final_path).map_err(db_err)?;
 
-    let mut backups = list_backups(app_data_dir)?;
-    for vieja in backups.iter().skip(BACKUPS_A_CONSERVAR) {
+    // La retención es la de las copias DIARIAS. Una importada la ha traído alguien a mano tras
+    // perder el equipo: que caduque por antigüedad sería tirar justo lo que vino a salvar.
+    let diarias = list_backups(app_data_dir)?
+        .into_iter()
+        .filter(|b| !b.importada)
+        .collect::<Vec<_>>();
+    for vieja in diarias.iter().skip(BACKUPS_A_CONSERVAR) {
         // Los ids proceden exclusivamente de `list_backups`, que sólo admite nuestro patrón.
         // Un borrado fallido (fichero en uso por un antivirus) NO invalida la copia recién hecha:
         // devolver `Err` marcaría el job como fallido y su backoff crearía otra copia enseguida.
@@ -209,7 +225,6 @@ pub async fn create_backup(db: &Db, app_data_dir: &Path) -> AppResult<Option<Loc
             tracing::warn!(target: "tpv::recovery", copia = %vieja.id, error = %e, "no se pudo purgar una copia antigua");
         }
     }
-    backups.truncate(BACKUPS_A_CONSERVAR);
 
     parse_backup(&final_path)
         .map(Some)
@@ -228,6 +243,101 @@ fn resolve_backup(app_data_dir: &Path, id: &str) -> AppResult<PathBuf> {
         ));
     }
     Ok(path)
+}
+
+/// Aparta una `data.db` que no se ha podido abrir, para poder crear una vacía en su sitio.
+///
+/// No la borra. Que SQLite no la abra no significa que no quede nada dentro: es lo único que queda
+/// de las ventas que no llegaran a subir, y un técnico puede rescatar parte con otras herramientas.
+///
+/// Devuelve `None` si no había fichero (no es un error: es el caso de la base borrada).
+pub fn archivar_base_ilegible(app_data_dir: &Path) -> AppResult<Option<PathBuf>> {
+    let data = app_data_dir.join("data.db");
+    if !data.exists() {
+        return Ok(None);
+    }
+
+    let dir = app_data_dir.join(BACKUP_DIR);
+    std::fs::create_dir_all(&dir).map_err(db_err)?;
+    let sello = now_ms();
+    let destino = dir.join(format!("{ILEGIBLE_PREFIX}{sello}{BACKUP_SUFFIX}"));
+    std::fs::rename(&data, &destino).map_err(db_err)?;
+
+    // Los sidecars se van con ella: un WAL huérfano de la base anterior no puede quedarse al lado
+    // de la que vamos a crear, o SQLite intentaría aplicarlo sobre un fichero que no es el suyo.
+    for suffix in ["-wal", "-shm"] {
+        let sidecar = app_data_dir.join(format!("data.db{suffix}"));
+        if sidecar.exists() {
+            let _ = std::fs::rename(
+                sidecar,
+                dir.join(format!("{ILEGIBLE_PREFIX}{sello}{suffix}")),
+            );
+        }
+    }
+
+    Ok(Some(destino))
+}
+
+/// Copia un respaldo a una ruta de fuera del equipo (un USB, una carpeta de red).
+///
+/// Es la ÚNICA forma de sacar del equipo el `DNI`, el `IBAN` y el `Numero_Seguridad_Social` del
+/// personal: van cifrados con una clave que nunca sube a la nube (TRAB-03), así que el volcado del
+/// worker no los trae. Sin una copia fuera del disco, un disco muerto se los lleva para siempre.
+pub async fn export_backup(app_data_dir: &Path, id: &str, destino: &Path) -> AppResult<()> {
+    let source = resolve_backup(app_data_dir, id)?;
+    // Validar ANTES de copiar: exportar una copia ilegible es peor que no exportar nada, porque
+    // parece un respaldo y no lo es hasta el día que hace falta.
+    validate_backup(&source).await?;
+
+    if let Some(parent) = destino.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(db_err)?;
+        }
+    }
+    std::fs::copy(&source, destino).map_err(db_err)?;
+    Ok(())
+}
+
+/// Trae al almacén local una copia que estaba fuera, para poder restaurarla como cualquier otra.
+///
+/// Se valida igual que las nuestras, pero eso comprueba que sea una base sana **de este esquema**,
+/// no que sea de este mismo negocio: hoy la BD no lleva ninguna marca del tenant con la que
+/// distinguirlo. La pantalla lo advierte. El daño de equivocarse queda acotado a este equipo —
+/// restaurar no llena el outbox, así que nada de eso se replica— y se deshace recuperando de la
+/// nube.
+pub async fn import_backup(app_data_dir: &Path, origen: &Path) -> AppResult<LocalBackupInfo> {
+    if !origen.is_file() {
+        return Err(AppError::not_found("El archivo seleccionado ya no existe"));
+    }
+    validate_backup(origen).await?;
+
+    let dir = app_data_dir.join(BACKUP_DIR);
+    std::fs::create_dir_all(&dir).map_err(db_err)?;
+
+    // Si el nombre es el de una copia nuestra se conserva su instante original: la fecha es lo
+    // único por lo que se elige una copia, y sellarla con la hora de la importación convertiría
+    // "la de anteayer" en "la de ahora mismo".
+    let stamp = origen
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| {
+            n.strip_prefix(BACKUP_PREFIX)
+                .or_else(|| n.strip_prefix(IMPORT_PREFIX))
+        })
+        .and_then(|r| r.strip_suffix(BACKUP_SUFFIX))
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or_else(now_ms);
+
+    let final_path = dir.join(format!("{IMPORT_PREFIX}{stamp}{BACKUP_SUFFIX}"));
+    let tmp = dir.join(format!(".import-{}.tmp", now_ms()));
+    std::fs::copy(origen, &tmp).map_err(db_err)?;
+    if let Err(e) = std::fs::rename(&tmp, &final_path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(db_err(e));
+    }
+
+    parse_backup(&final_path)
+        .ok_or_else(|| AppError::internal("La copia importada no se pudo catalogar"))
 }
 
 fn sidecar(path: &Path, suffix: &str) -> PathBuf {
@@ -302,7 +412,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
 
     let dir = app_data_dir.join(BACKUP_DIR);
     if dir.exists() {
-        for familia in ["pre-restore-", "failed-restore-"] {
+        for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX] {
             // El nombre lleva el instante justo detrás del prefijo; los sidecars (`-wal`/`-shm`)
             // comparten instante con su `.db` y se van con él, no por separado.
             let mut sellos: Vec<i64> = Vec::new();
@@ -367,6 +477,31 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
             tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar un temporal de restauración");
         }
     }
+
+    // Copias previas a una migración (`data.db.bak.<ms>`). Son la marcha atrás de una
+    // actualización con esquema nuevo, así que se conservan las dos últimas; sin esto cada
+    // actualización dejaba una base de datos entera en AppData, para siempre.
+    let mut migraciones: Vec<(i64, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(app_data_dir).map_err(db_err)?.flatten() {
+        let path = entry.path();
+        let Some(nombre) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let Some(resto) = nombre.strip_prefix(MIGRACION_PREFIX) else {
+            continue;
+        };
+        let Ok(sello) = resto.parse::<i64>() else {
+            continue;
+        };
+        migraciones.push((sello, path));
+    }
+    migraciones.sort_unstable_by_key(|(sello, _)| std::cmp::Reverse(*sello));
+    for (_, path) in migraciones.into_iter().skip(MIGRACIONES_A_CONSERVAR) {
+        if let Err(e) = std::fs::remove_file(&path) {
+            tracing::warn!(target: "tpv::recovery", ruta = ?path, error = %e, "no se pudo purgar una copia de migración");
+        }
+    }
+
     Ok(())
 }
 
@@ -658,6 +793,11 @@ mod tests {
         // Un temporal recién escrito (una restauración en curso) y otro antiguo.
         std::fs::write(dir.join(format!("data.restore.{}.tmp", now_ms())), b"x").unwrap();
         std::fs::write(dir.join("data.restore.1.tmp"), b"x").unwrap();
+        // Copias previas a una migración: se conservan las dos últimas (la marcha atrás de la
+        // última actualización), no las de todas las versiones por las que ha pasado el equipo.
+        for sello in [1, 2, 3] {
+            std::fs::write(dir.join(format!("data.db.bak.{sello}")), b"x").unwrap();
+        }
 
         purge_restore_leftovers(&dir).unwrap();
 
@@ -676,6 +816,12 @@ mod tests {
             .join(format!("{BACKUP_PREFIX}99{BACKUP_SUFFIX}"))
             .exists());
         assert!(!dir.join("data.restore.1.tmp").exists());
+        assert!(dir.join("data.db.bak.3").exists());
+        assert!(dir.join("data.db.bak.2").exists());
+        assert!(
+            !dir.join("data.db.bak.1").exists(),
+            "la tercera copia de migración más reciente ya no hace de red"
+        );
         assert_eq!(
             std::fs::read_dir(&dir)
                 .unwrap()
@@ -698,6 +844,118 @@ mod tests {
 
         let err = validate_backup(&path).await.unwrap_err();
         assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn una_copia_sale_del_equipo_y_vuelve() {
+        // El caso real: el disco muere, se instala en otro equipo y lo único que queda es el USB.
+        let dir = test_dir("exportar");
+        let db = db_operativa(&dir).await;
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+
+        let fuera = dir.join("usb").join("copia-del-bar.db");
+        export_backup(&dir, &backup.id, &fuera).await.unwrap();
+        assert!(fuera.is_file(), "la carpeta destino se crea si no existía");
+
+        std::fs::remove_file(dir.join(BACKUP_DIR).join(&backup.id)).unwrap();
+        assert!(list_backups(&dir).unwrap().is_empty());
+
+        let vuelta = import_backup(&dir, &fuera).await.unwrap();
+        assert!(vuelta.importada);
+        let lista = list_backups(&dir).unwrap();
+        assert_eq!(lista.len(), 1);
+        assert!(lista[0].importada);
+        // Y se puede restaurar como cualquier otra: es el mismo camino, no una segunda vía.
+        let prepared = prepare_restore(&dir, &vuelta.id).await.unwrap();
+        assert!(prepared.is_file());
+        discard_prepared(&prepared);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn una_base_ilegible_se_aparta_en_vez_de_borrarse() {
+        let dir = test_dir("ilegible");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("data.db"), b"paginas rotas").unwrap();
+        std::fs::write(dir.join("data.db-wal"), b"wal").unwrap();
+
+        let apartada = archivar_base_ilegible(&dir).unwrap().unwrap();
+        assert!(apartada.is_file());
+        assert!(
+            !dir.join("data.db").exists(),
+            "deja el sitio libre para la base nueva"
+        );
+        assert!(
+            !dir.join("data.db-wal").exists(),
+            "un WAL huérfano no puede quedarse al lado de la base nueva"
+        );
+        assert_eq!(
+            std::fs::read(&apartada).unwrap(),
+            b"paginas rotas",
+            "no se borra: es lo único que queda de lo que no llegó a subir"
+        );
+        assert!(
+            list_backups(&dir).unwrap().is_empty(),
+            "no se ofrece como copia: si SQLite no la abre, no es una salida"
+        );
+
+        // Sin fichero no hay nada que apartar, y eso no es un error: es la base borrada.
+        assert!(archivar_base_ilegible(&dir).unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn no_se_importa_cualquier_fichero() {
+        let dir = test_dir("importar_basura");
+        std::fs::create_dir_all(&dir).unwrap();
+        let basura = dir.join("fotos.db");
+        std::fs::write(&basura, b"esto no es una base de datos").unwrap();
+
+        let err = import_backup(&dir, &basura).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::BackupCorrupt);
+        assert!(list_backups(&dir).unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test]
+    async fn la_retencion_diaria_no_se_lleva_una_copia_importada() {
+        // Una importada la ha traído una persona tras perder el equipo. Si contase para la
+        // retención de siete, la siguiente copia diaria tiraría justo lo que vino a salvar.
+        let dir = test_dir("retencion_importada");
+        let db = db_operativa(&dir).await;
+        let backups = dir.join(BACKUP_DIR);
+        std::fs::create_dir_all(&backups).unwrap();
+        std::fs::write(
+            backups.join(format!("{IMPORT_PREFIX}1{BACKUP_SUFFIX}")),
+            b"traida a mano",
+        )
+        .unwrap();
+        for stamp in 1..=7 {
+            std::fs::write(
+                backups.join(format!("{BACKUP_PREFIX}{stamp}{BACKUP_SUFFIX}")),
+                b"antigua",
+            )
+            .unwrap();
+        }
+
+        create_backup(&db, &dir).await.unwrap().unwrap();
+
+        let lista = list_backups(&dir).unwrap();
+        assert!(
+            lista.iter().any(|b| b.importada && b.created_at_ms == 1),
+            "la importada más vieja sigue ahí"
+        );
+        assert_eq!(
+            lista.iter().filter(|b| !b.importada).count(),
+            BACKUPS_A_CONSERVAR
+        );
+
+        drop(db);
         let _ = std::fs::remove_dir_all(dir);
     }
 

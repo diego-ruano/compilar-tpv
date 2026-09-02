@@ -1,16 +1,19 @@
 import { useEffect, useState } from "react";
 import type { AppErrorDto, LocalBackupInfo } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
     AlertTriangle,
     CheckCircle2,
     CloudDownload,
     DatabaseBackup,
+    FolderOpen,
     HardDriveDownload,
     Loader2,
     ShieldAlert,
 } from "lucide-react";
 import {
+    importarCopiaLocal,
     inicializarTenantVacio,
     listarCopiasLocales,
     recuperarDesdeCopiaLocal,
@@ -78,6 +81,34 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
             vivo = false;
         };
     }, []);
+
+    /**
+     * Copia guardada fuera del equipo (un USB). Es la única salida cuando el disco ha muerto: las
+     * copias diarias viven en el mismo disco que protegen, y la nube no guarda la PII del personal.
+     * Se importa al almacén local y se restaura por el MISMO camino que las demás, con sus mismas
+     * guardias, en vez de abrir una segunda vía de restauración.
+     */
+    async function restaurarDesdeArchivo() {
+        let elegido: string | string[] | null = null;
+        try {
+            elegido = await open({
+                multiple: false,
+                directory: false,
+                title: "Elige una copia de seguridad",
+                filters: [{ name: "Copia de seguridad", extensions: ["db"] }],
+            });
+        } catch (e) {
+            setError(toAppError(e));
+            return;
+        }
+        if (typeof elegido !== "string") return;
+
+        const ruta = elegido;
+        await ejecutar("local", async () => {
+            const copia = await importarCopiaLocal(ruta);
+            return recuperarDesdeCopiaLocal(copia.id);
+        });
+    }
 
     async function ejecutar(origenNuevo: Origen, fn: () => Promise<unknown>) {
         setOperacion(origenNuevo);
@@ -230,10 +261,28 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                                     }
                                                 >
                                                     <HardDriveDownload className="size-4" aria-hidden />
-                                                    {index === 0 ? "Última copia" : "Copia"}: {fechaCopia(backup.created_at_ms)}
+                                                    {backup.importada
+                                                        ? "Copia importada"
+                                                        : index === 0
+                                                          ? "Última copia"
+                                                          : "Copia"}
+                                                    : {fechaCopia(backup.created_at_ms)}
                                                 </Button>
                                             ))
                                         )}
+
+                                        <Button
+                                            variant="secondary"
+                                            disabled={operacion !== null}
+                                            onClick={() => void restaurarDesdeArchivo()}
+                                        >
+                                            <FolderOpen className="size-4" aria-hidden />
+                                            Restaurar desde un archivo…
+                                        </Button>
+                                        <p className="text-xs text-fg-muted">
+                                            Para una copia guardada en un USB o en una carpeta de red.
+                                            Tiene que ser una copia de <strong>este mismo TPV</strong>.
+                                        </p>
                                     </div>
                                 </div>
 

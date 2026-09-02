@@ -202,6 +202,25 @@ export async function recuperarDesdeCopiaLocal(backupId: string): Promise<LocalB
     return invokeClient<LocalBackupInfo>("recovery_restore_backup", { backupId });
 }
 
+/** Copia manual, ahora mismo. La diaria la hace el job de fondo. */
+export async function crearCopiaLocal(): Promise<LocalBackupInfo> {
+    return invokeClient<LocalBackupInfo>("recovery_create_backup");
+}
+
+/**
+ * Guarda una copia fuera del equipo. Es lo único que salva el DNI, el IBAN y el nº de la
+ * Seguridad Social del personal: van cifrados con una clave que no sube a la nube, así que la
+ * recuperación desde la nube no puede devolverlos.
+ */
+export async function exportarCopiaLocal(backupId: string, destino: string): Promise<void> {
+    await invokeClient<void>("recovery_export_backup", { backupId, destino });
+}
+
+/** Trae una copia de un USB al almacén local. No restaura: la deja lista para restaurarla. */
+export async function importarCopiaLocal(origen: string): Promise<LocalBackupInfo> {
+    return invokeClient<LocalBackupInfo>("recovery_import_backup", { origen });
+}
+
 /** Sólo funciona tras el código explícito `tenant_db_not_provisioned` del servidor. */
 export async function inicializarTenantVacio(): Promise<BootstrapResultado> {
     const r = await invokeClient<any>("sync_inicializar_tenant_vacio");

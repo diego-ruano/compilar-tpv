@@ -111,6 +111,9 @@ pub async fn sync_bootstrap_desde_nube(
         .path()
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    // Puede no haber base: si la local era ilegible, el arranque siguió sin ella para poder llegar
+    // hasta la pantalla de recuperación. El volcado necesita dónde escribir.
+    crate::commands::recovery::asegurar_base_para_recuperar(&app, &state).await?;
     let repo = state.sync_repo().await?;
     Ok(uc::bootstrap_desde_nube(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
 }
@@ -126,6 +129,7 @@ pub async fn sync_inicializar_tenant_vacio(
         .path()
         .app_data_dir()
         .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+    crate::commands::recovery::asegurar_base_para_recuperar(&app, &state).await?;
     let repo = state.sync_repo().await?;
     Ok(uc::inicializar_tenant_vacio(&PairingAdapter::new(app_data_dir), repo.as_ref()).await?)
 }

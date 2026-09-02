@@ -209,7 +209,8 @@ migración publicada, el arranque falla a propósito).
 ### Seguridad
 
 - **Escritorio**: antes de migrar, la app hace **copia automática** de `data.db` →
-  `data.db.bak.<timestamp>` en AppData (red de seguridad; migrar es irreversible).
+  `data.db.bak.<timestamp>` en AppData (red de seguridad; migrar es irreversible). Se conservan
+  las dos últimas: el job `backup_local` purga el resto.
 - **Turso**: las migraciones de tenant se aplican automáticamente por dos vías:
   1. Al **provisionar** (activación de licencia, `applyTenantSchemaOnce`).
   2. Por el **guard de migración** (`ensureTenantMigrated` en `server/db/tenantDb.ts`), que se

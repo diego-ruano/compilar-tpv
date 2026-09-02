@@ -495,6 +495,9 @@ catálogo se crearon el primer día.
 | Volcado | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado actual + `Seq` de la foto |
 | Restauración | `infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción |
 | Copias locales | `infra-sqlite/src/recovery.rs` + job `backup_local` | `VACUUM INTO` diario, se guardan las 7 últimas |
+| Copia manual y fuera del equipo | `commands/recovery.rs::recovery_create_backup` · `…_export_backup` · `…_import_backup` | Una copia ahora, sacarla a un USB, traerla de vuelta |
+| Panel de copias | `features/configuracion/sections/Conectividad.tsx` | Verlas y sacarlas **antes** de necesitarlas (ahí no se restaura) |
+| Base que no abre | `lib.rs::run` (arranque sin `Db`) + `commands/recovery.rs::asegurar_base_para_recuperar` | Arrancar igual y apartar el fichero ilegible para reconstruir |
 | Bloqueo del login | `_Recovery_State.Reconciliation_Pending` (en la propia `data.db`) | Restaurado ≠ utilizable |
 | Reconciliación | `shared/lib/recoverySync.ts` + `useMainSocket` | catch-up → outbox → catch-up, hasta converger |
 | Desbloqueo | `commands/recovery.rs::recovery_complete` | Última barrera: outbox 0, checkpoint ≥ high-water |
@@ -526,8 +529,31 @@ catálogo se crearon el primer día.
   diarias para reconstruir el fichero sin red; el login, en cambio, no se abre hasta reconciliar.
   Trabajar sobre una copia antigua crearía dos historiales divergentes, y resolverlos es un modo
   degradado que no existe. Consecuencia asumida: **sin internet, una Main que perdió su `data.db`
-  no vende.** Y las copias viven en el mismo disco que protegen: cubren un borrado o una corrupción,
-  no una máquina muerta.
+  no vende.** Y las copias diarias viven en el mismo disco que protegen: cubren un borrado o una
+  corrupción, no una máquina muerta. Para eso hay que **sacar una fuera** (Configuración →
+  Conectividad → «Guardar fuera…»), que es además la única forma de salvar la PII del personal: va
+  cifrada con una clave que no sube a la nube, así que el volcado no puede devolverla (TRAB-03).
+- **Una `data.db` ilegible no puede impedir el arranque.** Si `init_main_db` falla, el `setup()` de
+  Tauri **no** puede reventar: sin ventana no hay pantalla de recuperación, y entonces las copias
+  quedan inalcanzables justo en el caso para el que se guardan. Se arranca **sin base**: los
+  comandos del arranque fallan, el frontend lo lee como datos perdidos y entra en recuperación, que
+  funciona sin `Db` porque listar, importar y restaurar sólo tocan ficheros. Consecuencia al tocar
+  `commands/recovery.rs`: **todo lo que hay en ese camino tiene que tolerar `state.db == None`** —
+  y `recovery_status` desempata por modo, porque no tener base es "normal" en una Handy y es
+  "faltan los datos" en una Main.
+- **El volcado de la nube sí necesita dónde escribir, y por eso aparta el fichero ilegible.**
+  `asegurar_base_para_recuperar` mueve la `data.db` que no se pudo abrir a `backups/ilegible-*` y
+  crea una vacía en su sitio. **Sólo actúa si no hay `Db`**: con una base abierta esto sería un
+  borrado disfrazado, y quién puede reemplazar datos utilizables lo decide `bootstrap_restaurar`
+  dentro de su transacción y con su guardia de outbox. No se borra —aunque SQLite no la abra, es lo
+  único que queda de lo que no llegó a subir— y no se lista como copia restaurable, porque ofrecer
+  una base que no abre es ofrecer el problema.
+- **Una copia importada no caduca.** La retención de siete es la de las **diarias**; la que alguien
+  ha traído de un USB tras perder el equipo no puede desaparecer porque hayan pasado siete días, así
+  que lleva prefijo propio (`import-`) y la purga no la mira. Lo que la validación **no** comprueba
+  es que sea de este mismo negocio: la BD no lleva ninguna marca del tenant con la que distinguirlo.
+  La pantalla lo advierte, el daño queda en local (restaurar no llena el outbox, así que nada de eso
+  se replica) y se deshace recuperando de la nube.
 - **La copia se toma por el pool de LECTURA.** `VACUUM INTO` abre su propia transacción de lectura,
   así que en WAL la instantánea es coherente sin excluir al escritor. Tomando el `WriteGuard` se
   bloquearían los cobros durante toda la copia — y el job vence por reloj de pared, o sea que puede
@@ -539,7 +565,9 @@ catálogo se crearon el primer día.
 - **Los restos de una restauración se recogen.** `pre-restore-*`, `failed-restore-*` y los
   temporales no llevan el prefijo de las copias diarias, así que la retención de siete no los ve.
   Se conservan los dos más recientes de cada familia (la marcha atrás manual) y el job diario purga
-  el resto.
+  el resto. Las copias previas a una migración (`data.db.bak.*`, en la raíz de AppData) van por la
+  misma regla y por el mismo motivo: son la marcha atrás de la **última** actualización, no de todas
+  las versiones por las que ha pasado el equipo.
 - **Reintentar sin límite sólo vale si la causa es la red.** Tras cinco ciclos seguidos fallidos la
   reconciliación se declara `bloqueada`: se deja de reconectar sola y la pantalla vuelve a ofrecer
   las alternativas. Sin eso, una nube que rechaza siempre la misma operación local deja el TPV

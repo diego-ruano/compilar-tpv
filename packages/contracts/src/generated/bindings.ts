@@ -361,7 +361,12 @@ iva_percent?: number, };
 /**
  * Copia local disponible. `id` es opaco para la UI y sólo puede proceder del listado.
  */
-export type LocalBackupInfo = { id: string, created_at_ms: number, size_bytes: number, };
+export type LocalBackupInfo = { id: string, created_at_ms: number, size_bytes: number, 
+/**
+ * La ha traído una persona desde fuera del equipo (un USB). La retención de las copias
+ * diarias no la alcanza, y la pantalla la distingue: su fecha no dice nada de este disco.
+ */
+importada: boolean, };
 
 export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre: string, apellido: string | null, rol: string, email: string, requiere_setup: number, };
 
