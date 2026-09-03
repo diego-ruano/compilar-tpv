@@ -363,8 +363,7 @@ function CopiasSeguridad({ darkMode }: { darkMode: boolean }) {
 				<div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-xs text-fg">
 					Estas copias viven en el mismo disco que protegen: cubren un borrado o una
 					corrupción, no una avería del disco ni un robo. Guarda una fuera del equipo
-					de vez en cuando — el DNI, el IBAN y el nº de la Seguridad Social del personal
-					<strong> sólo</strong> están aquí, la nube no los guarda.
+					de vez en cuando.
 				</div>
 
 				{err && (

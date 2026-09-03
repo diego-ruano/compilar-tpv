@@ -10,7 +10,6 @@ import {
     FolderOpen,
     HardDriveDownload,
     Loader2,
-    ShieldAlert,
 } from "lucide-react";
 import {
     importarCopiaLocal,
@@ -57,7 +56,6 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const [operacion, setOperacion] = useState<Origen | null>(null);
     const [error, setError] = useState<AppErrorDto | null>(null);
     const [resultado, setResultado] = useState<BootstrapResultado | null>(null);
-    const [origen, setOrigen] = useState<Origen | null>(null);
 
     const reconciliacionPendiente = useEstadoSync((s) => s.reconciliacionPendiente);
     const fase = useEstadoSync((s) => s.faseRecuperacion);
@@ -116,7 +114,6 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
         try {
             const r = await fn();
             if (origenNuevo !== "local") setResultado(r as BootstrapResultado);
-            setOrigen(origenNuevo);
             // La restauración ya dejó la marca persistente en SQLite. Esto permite abrir el WS,
             // pero mantiene esta pantalla hasta que el protocolo confirme la convergencia.
             iniciarReconciliacion();
@@ -178,16 +175,12 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                     </div>
                                 </div>
 
-                                {origen === "cloud" && (
-                                    <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">
-                                        <ShieldAlert className="size-5 shrink-0 text-warning" aria-hidden />
-                                        <span className="text-fg-muted">
-                                            Revisa el DNI, IBAN y número de la Seguridad Social del
-                                            personal: están cifrados sólo en este equipo y no forman
-                                            parte de la copia de la nube.
-                                        </span>
-                                    </div>
-                                )}
+                {/* Aquí hubo un aviso de que el DNI, el IBAN y el nº de la Seguridad Social del
+                    personal no volvían de la nube. Era falso: se cifran ANTES de construir la
+                    sentencia, así que el outbox replica el texto cifrado, el volcado lo devuelve
+                    (`SELECT *`, sin filtrar) y la DEK sigue estando (keyring local y, si el equipo
+                    es nuevo, reentregada al activar la licencia). Pedía rellenar a mano datos que
+                    ya estaban. No lo vuelvas a añadir sin cambiar antes la replicación. */}
 
                                 {resultado && resultado.tablas_desconocidas.length > 0 && (
                                     <div className="flex gap-3 rounded-2xl border border-border bg-surface px-4 py-3 text-sm">

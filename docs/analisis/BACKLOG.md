@@ -1,8 +1,212 @@
 # Backlog de hallazgos aplazados (resolver más adelante)
 
-> Hallazgos analizados y **conscientemente pospuestos** (no son bugs de cálculo pendientes, sino
-> tareas de infra de tests o que dependen de decisiones/otros dominios). Se retoman en una iteración
-> posterior. Cada uno sigue documentado en detalle en su ficha de dominio.
+> Dos cosas distintas en un mismo fichero:
+>
+> 1. **[Auditoría previa al piloto (2026-09-02)](#auditoría-previa-al-piloto-2026-09-02)** — hallazgos
+>    **nuevos y sin decidir**, de un repaso completo hecho justo antes de probar en un bar real. No
+>    están pospuestos: están esperando decisión.
+> 2. **El resto del fichero** — hallazgos analizados y **conscientemente pospuestos**, cada uno con su
+>    porqué y su fecha. Esos ya tienen decisión tomada.
+
+---
+
+## Auditoría previa al piloto (2026-09-02)
+
+> **Contexto:** repaso completo del repo (crates, frontend, worker, esquema, CI, docs) con una
+> pregunta concreta: *¿qué falta para meter esto en un bar de verdad?* Lo que salió **no** es
+> deuda de ingeniería —esa parte está bien cubierta: 491 tests de Rust, 174 del worker, harness de
+> contrato al 100 % en lecturas, anti-drift de migraciones, scrubbing de PII en telemetría—. Es
+> cumplimiento legal, control interno del dinero, y el salto de "funciona" a "se instala y alguien
+> lo mantiene".
+>
+> Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
+>
+> **Orden sugerido.** Antes de entrar en un bar: CUENTA-07, SEC-01, SYNC-19. Antes de cobrar por
+> ello: FISCAL-01, FISCAL-02, LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato: TEST-01, OPS-02.
+
+| ID | Sev | Hallazgo | Estado |
+|----|-----|----------|--------|
+| FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | Sin empezar |
+| FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | Sin empezar |
+| CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | Sin empezar |
+| SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | Sin empezar |
+| SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | Sin empezar |
+| DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
+| VENTA-01 | 🟠 | **No existen descuentos, invitaciones, propinas ni devoluciones.** | Sin empezar |
+| LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
+| INFRA-02 | 🟡 | **El instalador no va firmado (Authenticode).** | Aceptado a sabiendas |
+| INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
+| OPS-01 | 🟠 | **Cero documentación de usuario y cero onboarding.** | Sin empezar |
+| OPS-02 | 🟡 | **«Contacta con soporte» sin canal ni forma de exportar un diagnóstico.** | Sin empezar |
+| TEST-01 | 🟡 | **43k líneas de frontend sin un solo test de componente ni E2E.** | Sin empezar |
+| SEC-02 | 🔵 | **`LICENSE_STORE_KEY` es un secreto global sin rotación ni custodia.** | Sin empezar |
+| INFRA-04 | 🔵 | **No hay linter en ningún lenguaje** (ni ESLint, ni clippy, ni fmt). | Baja prioridad |
+
+### FISCAL-01 🔴 · Veri*factu / RD 1007/2023
+
+Grep en todo el repo: cero referencias a Verifactu, TicketBAI o AEAT. Y
+[`0001_inicial.sql:541`](../../packages/database/migrations/0001_inicial.sql#L541) dice que la tabla
+`Facturas` se retiró por no usarse.
+
+Un TPV que emite facturas simplificadas en España es un **SIF** (Sistema Informático de Facturación).
+Del lado del software eso implica registros de facturación **encadenados por huella/hash**,
+**inalterables**, con **QR** y la mención correspondiente, más una **declaración responsable del
+productor**. ⚠️ **Los plazos concretos hay que confirmarlos con un asesor** — pero el fondo no
+depende de la fecha.
+
+**Por qué va el primero pese a ser el más caro:** es estructural. Registros inmutables y encadenados
+se diseñan al principio. Montarlos encima de un esquema donde los cobros se borran (CUENTA-07) es
+rehacer el módulo de ventas, y hacerlo con clientes dentro cuesta otro orden de magnitud.
+
+### FISCAL-02 🟠 · Factura completa con NIF del cliente
+
+`Business_Settings` guarda el CIF **del negocio** y nada más. No hay forma de emitir una factura con
+los datos fiscales del **cliente**, que es lo que pide cualquier comida de empresa. Encaja con
+FISCAL-01 y conviene diseñarlos juntos, no uno detrás de otro.
+
+### CUENTA-07 🔴 · Anular un cobro borra la fila
+
+[`cuentas.rs:491`](../../crates/tpv-infra-sqlite/src/cuentas.rs#L491) hace `DELETE`. El propio test lo
+dice: *"la fila desaparece"*. `Comandas.Estado` sólo admite `'Abierta'|'Pagada'` — no existe
+`'ANULADA'`. No hay tabla de auditoría de dinero (de stock sí: `Movimientos_Stock`).
+
+**El agujero:** el cierre de caja calcula `esperado = fondo + cobros en efectivo`
+([`cierre_caja.rs:78`](../../crates/tpv-domain/src/cierre_caja.rs#L78)). Si alguien cobra 40 € en
+efectivo, se los queda y anula el cobro, **el esperado baja 40 € y el arqueo cuadra perfecto**. El
+único control de caja que tiene el diseño es ciego justo ante la forma más común de sisa en un bar.
+
+**Arreglo:** soft-delete (`Estado='ANULADA'` + quién, cuándo y motivo), `esperado` sobre cobros no
+anulados, y las anulaciones como línea aparte del arqueo. Es además exactamente lo que FISCAL-01 va
+a exigir, así que se hace **una vez** y sirve para las dos cosas.
+
+### SEC-01 🟠 · Los permisos son sólo de UI
+
+[`App.tsx:107`](../../apps/tpv-main/src/app/App.tsx#L107) bloquea la ruta `/cuentas` a los no
+Administrador y la NavBar esconde entradas. Pero **ningún comando Tauri comprueba el rol** —
+verificado sobre todo `src-tauri/src/commands/`. La regla vive donde el usuario está sentado.
+
+Es el multiplicador de CUENTA-07: no basta con dejar rastro de una anulación si cualquiera puede
+provocarla. El gate debe estar en el caso de uso, no en el router.
+
+### SYNC-19 🟠 · El bootstrap caduca por filas
+
+[`sync.routes.ts:139`](../../apps/cloud-worker-licensing/src/domains/sync/sync.routes.ts#L139):
+`BOOTSTRAP_MAX_FILAS = 300_000`. Un bar con ~200 tickets/día genera del orden de 3-4k filas/día
+sumando `Detalle_Comanda`, `Pagos`, `Pago_Detalles`, `Lote_Consumos` y `Movimientos_Stock`. Eso son
+**unos 3 meses** hasta cruzar el tope.
+
+**Lo que lo hace grave es cuándo falla:** un 413 justo en el momento en que el cliente ha perdido su
+`data.db`, y CLAUDE.md define la nube como *"la única forma de volver a operar"*. Encima
+`BootstrapTooLarge` existe en [`errors.rs:125`](../../crates/tpv-contracts/src/errors.rs#L125) pero
+**no se usa en ninguna parte del frontend**: el usuario vería un error genérico.
+
+**Pendiente de decidir:** paginar el volcado (rompe la foto coherente en una transacción, que es lo
+que hoy garantiza el `Seq` exacto — hay que pensarlo), o volcar sólo a partir de una fecha de corte,
+o atacar la causa por DB-14. Como mínimo, mientras tanto: mensaje explícito en la pantalla de
+recuperación y un aviso proactivo al acercarse al tope.
+
+### DB-14 🟡 · Sin retención ni archivado
+
+Nada purga `Comandas`, `Detalle_Comanda`, `Pagos`, `Movimientos_Stock` ni `Notificaciones` (las
+notificaciones sólo se borran de una en una). `purga_sync` limpia el andamiaje de replicación, no los
+datos de negocio. Esto es lo que alimenta SYNC-19, y además engorda las 7 copias diarias de
+`VACUUM INTO`, que son copias **completas**.
+
+Ojo al resolverlo: archivar ventas choca de frente con FISCAL-01 (los registros de facturación no se
+pueden borrar). Lo que se archive tiene que ser lo que **no** sea registro fiscal.
+
+### VENTA-01 🟠 · Faltan descuentos, invitaciones, propinas y devoluciones
+
+Verificado por grep: cero apariciones en sentido de venta. Los precios salen del catálogo y no son
+editables por línea. Hoy la única forma de invitar una ronda es **borrar líneas**, que destruye el
+registro — y volverá a chocar con FISCAL-01.
+
+Un bar pide descuento e invitación la primera semana. La devolución/abono, en cuanto alguien pague
+de más.
+
+### LEGAL-01 🟠 · RGPD
+
+Guardas datos de clientes (nombre, teléfono, email, notas) y PII de personal, y los replicas a tu
+nube: eres **encargado del tratamiento**. Falta el contrato de encargado, la política de privacidad,
+el ejercicio de derechos (exportar/borrar un cliente) y la política de retención.
+
+Y ojo al matiz que se aclaró el 2026-09-02 (ver TRAB-03 en CLAUDE.md): el cifrado de la PII del
+personal **no** la pone fuera de tu alcance. El texto cifrado está en Turso y la DEK en el
+control-plane; tienes las dos mitades. Eso hay que declararlo, no esconderlo.
+
+### INFRA-02 🟡 · Instalador sin firmar — *aceptado a sabiendas*
+
+[`tauri.conf.json`](../../apps/tpv-main/src-tauri/tauri.conf.json) empaqueta NSIS sin certificado
+Authenticode. La firma ed25519 del updater protege las **actualizaciones**, no la primera
+instalación.
+
+**Decisión (2026-09-02): se acepta de momento** — cuesta dinero y en las pruebas reales SmartScreen
+avisa pero deja instalar por «Más información → Ejecutar de todas formas», y la app funciona.
+Pendiente de comprar cuando haya ingresos. Azure Trusted Signing (~10 $/mes) evita el token hardware
+de un certificado EV.
+
+### INFRA-03 🟡 · Imágenes por `r2.dev` — *decidido: dominio propio*
+
+El Handy carga cada imagen de `pub-6814….r2.dev`
+([`imageUrl.ts:31`](../../apps/tpv-main/src/shared/lib/imageUrl.ts#L31)). Cloudflare documenta esas
+URLs como limitadas y no destinadas a producción. **Decisión (2026-09-02): pasar a un subdominio
+propio.** Al hacerlo hay que tocar **tres** sitios, no uno:
+
+1. `CDN_IMAGES_BASE` en `imageUrl.ts`.
+2. `csp` **y** `devCsp` en `tauri.conf.json` (`img-src`) — si sólo se toca una, funciona en dev y
+   falla en el build.
+3. `docs/android/COMPILAR_ANDROID.md`, que documenta ese host.
+
+De paso: `R2_PUBLIC_BASE_URL` en
+[`wrangler.json:60`](../../apps/cloud-worker-licensing/wrangler.json#L60) apunta a un bucket
+**distinto** y **no la lee nadie** en todo `src/`. Config muerta: borrarla o cablearla.
+
+### OPS-01 🟠 · Sin documentación de usuario
+
+Sin manual, sin onboarding, sin ayuda en la app, sin README en la raíz del repo. Instalas en un bar y
+la formación eres tú, por teléfono, cada vez.
+
+### OPS-02 🟡 · Soporte sin canal ni diagnóstico exportable
+
+[`Conectividad.tsx:244`](../../apps/tpv-main/src/features/configuracion/sections/Conectividad.tsx#L244)
+dice *"contacta con soporte"* sin definir cuál. Y hay telemetría muy buena (Sentry + Axiom +
+scrubbing + fichero local rotado) pero **ningún botón** para sacar un paquete de diagnóstico — que es
+justo lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
+
+### TEST-01 🟡 · Sin E2E ni tests de componente
+
+Rust 491, worker 174, frontend 83 — pero los 83 son **lógica pura**, y el razonamiento de
+[`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible. El
+problema es lo que queda fuera: los tres ficheros más grandes del repo son el flujo de venta
+(`Cuentas.tsx` 2127, `VentaRapida.tsx` 2019, `MesaComandaModal.tsx` 1591) y no los toca ningún test.
+
+**No hace falta cubrirlos.** Hace falta **uno** que recorra la app real: abrir mesa → añadir líneas →
+cobrar → imprimir → cerrar caja. Hoy la única garantía de ese camino es haberlo probado a mano.
+
+### SEC-02 🔵 · `LICENSE_STORE_KEY` es global
+
+Cifra en reposo las DEK de **todos** los tenants (`tenants.field_dek`). Perderla deja la PII de
+todo el mundo irrecuperable; filtrarla la expone toda. No hay rotación ni custodia documentadas.
+Riesgo bajo hoy (un tenant), crece con cada cliente.
+
+### INFRA-04 🔵 · Sin linter — *baja prioridad*
+
+No hay ESLint/Biome/Prettier, ni `cargo clippy`, ni `cargo fmt --check` en CI. `pnpm lint` es
+`tsc --noEmit` en tres packages y **la app ni siquiera entra**.
+
+**Decisión (2026-09-02): no es prioridad.** Anotado el matiz por si se retoma: de estos, el único que
+aporta señal *nueva* es **clippy**, que no es un formateador — avisa de cosas que compilan y están
+mal (un `await` dentro de un lock, un `clone()` en un bucle caliente, un `match` que se traga un
+`Err`). ESLint y fmt, con `tsc` estricto ya en verde, son sobre todo estética.
+
+---
+
+## Hallazgos conscientemente pospuestos
+
+> Estos ya tienen decisión tomada: se analizaron, se entendió el riesgo y se decidió esperar. Cada
+> uno lleva su fecha y su porqué. **Revalidados el 2026-09-02** contra el código: los cuatro siguen
+> vigentes (FABLE-B: `serverError` sigue serializando `details`; FABLE-E: el device-proof sigue sin
+> nonce, sólo la ventana de ±2 min).
 
 | ID | Sev | Motivo del aplazamiento | Ficha |
 |----|-----|-------------------------|-------|
@@ -11,16 +215,12 @@
 | FABLE-E | 🔵 | **Nonce anti-repetición en el device-proof.** La firma ya cubre el cuerpo (hecho el 2026-08-15), pero no lleva número de serie: dentro de la ventana de 2 min una petición firmada podría **reproducirse tal cual**. **Decisión: aplazado.** Para reproducirla hay que haber capturado el tráfico (va por TLS) y las escrituras son idempotentes por `Op_Id`, así que repetir una no duplica nada. **Lo que hace falta cuando se retome:** un almacén de nonces vistos, compartido — los isolates del worker no comparten memoria, así que un `Set` en RAM no vale. Opciones: **KV** (barato, pero eventualmente consistente: un replay en otro colo podría no ver el nonce todavía → mal encaje), **Durable Object** (consistente de verdad, ya existe `TenantHub`, pero mete un salto por petición) o una **tabla en Turso** con TTL (un INSERT por petición). Yo iría al DO si algún día pesa. | [auditoria-fable.md](../../auditoria-fable.md) |
 | FABLE-B | 🟠 | **Fuga de stack traces al cliente.** `serverError(req, code, details)` serializa `details` en el cuerpo JSON, y varios handlers de pairing le pasan `{ message, name, stack }` del `Error` ([response.ts:48-63](../../apps/cloud-worker-licensing/src/server/utils/response.ts#L48-L63)). Cualquiera que llame a la API recibe la traza y el texto crudo del motor de Turso. **Decisión (2026-08-14): aplazado**, no hay clientes en producción todavía. **Cuando se haga, el cambio es en tres partes y hay que hacer las tres:** (1) `serverError` deja de serializar `details` y devuelve `{ ok, error, trace_id }`; (2) en cada `catch`, `console.error(trace_id, e?.stack)` + `Sentry.captureException` — hoy solo 9 ficheros loguean, así que sin esto **sí** se perdería información al quitar el `details`; (3) opcional pero recomendable, seguir devolviendo `details` cuando `env.ENVIRONMENT !== "prod"` (requiere añadir `ENVIRONMENT` a los `vars` de `wrangler.json`, hoy ausente). El stack se sigue viendo en `wrangler tail`, Sentry y Axiom. La forma de la respuesta ya la fijó el catálogo de códigos (`{ ok, code, error }`): lo que queda aquí es **dejar de serializar `details`**. | [auditoria-fable.md](../../auditoria-fable.md) |
 
-**Nota (actualizada 2026-08-24):** los **dos** harness de contrato ya están y **sin pendientes**. El
-de escritura cerró los `-parity` (MESA-11, VR-05, INV-07, RES-07, TAR-04, PROV-07, CONF-06); el de
-**lectura** cerró **CLI-05** y, de paso, sacó **ocho** divergencias reales que la revisión a mano de
-agosto no había visto —entre ellas dos consultas de la Handy que devolvían **siempre vacío** por
-coercionar a número un id que es TEXT (`trabajadores.idByUsuario` e `inventario.alergenosProducto`)—,
-todas corregidas— y destapó **STAT-07**: el módulo de estadísticas del worker era una implementación
-parcial de la de la Main, ya portada. Las lecturas quedan al **100 %, sin exclusiones**. Lo excluido
-del harness de escritura se revisó a mano el 22-23/08 y escondía un fallo, **TRAB-08**, ya corregido.
-Ver
-[00-indice.md](00-indice.md#nota-importante-sobre-el-recuento).
+> **Los dos harness de contrato están terminados y sin pendientes** (escritura y lectura, esta al
+> 100 % sin exclusiones). Cerraron CLI-05 y los `-parity`, y al ejecutarse sacaron trece divergencias
+> reales, todas corregidas. El detalle vive donde toca —
+> [tests/contract/README.md](../../tests/contract/README.md) y
+> [00-indice.md](00-indice.md#nota-importante-sobre-el-recuento)— y no en este backlog, que es de
+> cosas **pendientes**.
 
 ---
 
@@ -37,28 +237,10 @@ Ver
    elimina la duplicación, pero convierte cada divergencia futura en un **test rojo**. Máximo retorno
    por esfuerzo; sin cambio de arquitectura.
 
-   > **Estado (2026-08-24): montados los dos.** Ver
+   > **Terminado (2026-08-24), los dos.** 66 casos sobre 63 comandos y 65 sobre las 61 lecturas, CI
+   > corre las cuatro suites, y `scripts/check-contract-coverage.mjs` avisa de lo que se quede sin
+   > caso. Cómo funciona y por qué cada uno compara lo que compara (efecto vs. valor+orden), en
    > [tests/contract/README.md](../../tests/contract/README.md).
-   >
-   > - **Escritura — se compara el EFECTO, no el texto SQL.** Los dos lados escribieron su SQL por
-   >   separado, así que el texto difiere aunque el resultado sea idéntico → compararlo daría falsos
-   >   positivos. El golden es el **estado resultante** (las filas que deja el comando). Los
-   >   snapshots omiten columnas no deterministas (UUID generado, `Fecha_Hora`); la comparación es
-   >   por **multiconjunto**, porque el orden en que queden las filas no es parte del contrato.
-   > - **Lectura — se compara el VALOR DEVUELTO, y en orden.** Ahí el orden **sí** es el contrato:
-   >   una lectura es una lista que se pinta en la pantalla, y dos implementaciones que devuelvan lo
-   >   mismo desordenado no son equivalentes. El punto de comparación es el DTO, que es literalmente
-   >   el mismo struct en el que `tpv-infra-http` deserializa la respuesta del worker.
-   > - **Canónico = Rust** (escritor único y dueño del DTO): bendice el golden; el worker se
-   >   conforma o sale rojo.
-   > - **Montado ya:** `tests/contract/` y `tests/contract/lecturas/` (fixtures + goldens), el lado
-   >   Rust (`contract_tests.rs` y `contract_read_tests.rs`) y el del worker sobre **vitest**
-   >   (`test/contract.test.ts` y `test/contractLectura.test.ts`, que corren en workerd con el
-   >   TenantHub real y el esquema de las migraciones). CI ya corre las cuatro suites.
-   > - **Cubierto:** 66 casos sobre 63 comandos y 65 casos sobre las 61 lecturas (**el 100 % de
-   >   éstas, sin exclusiones**). Añadir un dominio = un brazo de despacho en cada lado + sus fixtures.
-   > - **Lo que falta se ve solo:** `scripts/check-contract-coverage.mjs` avisa en CI (sin romperlo)
-   >   de cada comando y cada lectura del worker que no tenga caso ni exclusión documentada.
 2. **SQL en una única fuente compartida — medio.** Extraer los **textos SQL** a un activo neutro
    (ficheros `.sql` con nombres, o un JSON de sentencias con placeholders) consumido por Rust
    (`include_str!`) y TS (`import`). La mayoría de divergencias reales son en el texto del SQL y las

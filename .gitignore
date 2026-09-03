@@ -23,6 +23,13 @@ dist-ssr/
 # ── Tauri (generado) ──
 apps/tpv-main/src-tauri/gen/schemas/
 
+# ── WebView2 «fixed runtime» (descargado, ~444 MB) ──
+# El runtime que se empaqueta con el instalador cuando no se quiere depender del WebView2 del
+# sistema (ver docs/COMPATIBILIDAD_WINDOWS_7.md). Es un artefacto que se BAJA de Microsoft, no
+# código nuestro: versionarlo mete casi medio giga en el historial para siempre, y un `git add -A`
+# distraído basta para hacerlo. Se obtiene del Evergreen Standalone Installer del canal que toque.
+apps/tpv-main/src-tauri/webview2-fixed-runtime/
+
 # ── Claves de firma del updater (¡SECRETO! nunca versionar la privada) ──
 apps/tpv-main/src-tauri/.tauri/
 

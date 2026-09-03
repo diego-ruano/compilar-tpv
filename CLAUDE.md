@@ -307,11 +307,21 @@ la lógica/SQL vive en `crates/*`.
 - **PII del personal cifrada (TRAB-03).** `DNI`, `IBAN` y `Numero_Seguridad_Social` se guardan
   cifrados (AES-256-GCM **determinista**, para que el `UNIQUE` del esquema siga detectando
   duplicados). El cifrado ocurre en `tpv-infra-sqlite::trabajadores` **antes** de construir la
-  sentencia, así que el outbox replica ya el texto cifrado y el sync no se entera. La clave (DEK)
-  la genera el worker al aprovisionar, viaja en la respuesta de `/v1/license/activate` y vive en
-  el `secret_store` de la Main — **nunca en la BD que protege**. Consecuencia de diseño: la Handy
-  no tiene la clave, así que el worker **ni escribe ni devuelve** esas tres columnas y su UI las
-  oculta; se rellenan desde la Main. Detalle en `crates/tpv-infra-licensing/src/field_crypto.rs`.
+  sentencia, así que el outbox replica ya el texto cifrado y el sync no se entera. Consecuencia de
+  diseño: la Handy no tiene la clave, así que los comandos del worker **ni escriben ni devuelven**
+  esas tres columnas y su UI las oculta; se rellenan desde la Main. Detalle en
+  `crates/tpv-infra-licensing/src/field_crypto.rs`.
+  - **Qué protege exactamente, y qué no.** El cifrado saca la PII del alcance de quien lea la BD
+    del tenant en Turso —que es el escenario realista— pero **no** la pone fuera del alcance del
+    proveedor. La DEK la genera el worker al aprovisionar y **persiste en el control-plane**
+    (`tenants.field_dek`, cifrada en reposo con `LICENSE_STORE_KEY`); `/v1/license/activate` la
+    reentrega en cada activación (`getOrCreateTenantFieldDek` devuelve la existente, no una nueva).
+    O sea que el proveedor tiene a la vez el texto cifrado (Turso) y la clave (control-plane).
+    Decirlo importa para el papeleo de RGPD: eres encargado del tratamiento **con** acceso efectivo
+    a esos datos, no un mero custodio de bytes opacos.
+  - **Que la DEK persista arriba es lo que hace recuperable la PII**, incluso en un equipo nuevo.
+    El precio es que `LICENSE_STORE_KEY` es un secreto **global**: perderlo deja las DEK de todos
+    los tenants indescifrables y la PII irrecuperable en todas partes.
 - **Al tocar un `*.schemas.ts` del worker**: cada schema con contrapartida en Rust lleva al final un
   drift-guard (`Assert<SameKeys<z.infer<typeof xSchema>, XInput>>`, ver `src/lib/typeGuards.ts`). Si
   añades un campo al zod, añádelo también al DTO de Rust (o al revés): el guard compara las claves en
@@ -554,8 +564,7 @@ catálogo se crearon el primer día.
   degradado que no existe. Consecuencia asumida: **sin internet, una Main que perdió su `data.db`
   no vende.** Y las copias diarias viven en el mismo disco que protegen: cubren un borrado o una
   corrupción, no una máquina muerta. Para eso hay que **sacar una fuera** (Configuración →
-  Conectividad → «Guardar fuera…»), que es además la única forma de salvar la PII del personal: va
-  cifrada con una clave que no sube a la nube, así que el volcado no puede devolverla (TRAB-03).
+  Conectividad → «Guardar fuera…»).
 - **Una `data.db` ilegible no puede impedir el arranque.** Si `init_main_db` falla, el `setup()` de
   Tauri **no** puede reventar: sin ventana no hay pantalla de recuperación, y entonces las copias
   quedan inalcanzables justo en el caso para el que se guardan. Se arranca **sin base**: los
@@ -616,9 +625,18 @@ catálogo se crearon el primer día.
 - **El high-water ausente no es cero.** Si `/v1/sync/changes` no informa del final del log (worker
   antiguo), la verificación se degradaría a "el outbox está vacío" y desbloquearía el login sin
   haber comprobado nada. Se falla cerrado.
-- **Lo que la nube no puede devolver: `DNI`, `IBAN` y `Numero_Seguridad_Social`.** Van cifrados con
-  una clave que nunca sale de la Main, así que el worker ni los escribe ni los guarda (TRAB-03).
-  Vuelven vacíos y la pantalla lo dice: es la única pérdida real, y se rellena a mano.
+- **La PII del personal SÍ vuelve, y conviene saber por qué.** `DNI`, `IBAN` y
+  `Numero_Seguridad_Social` se cifran antes de construir la sentencia, así que lo que sale por el
+  outbox —y lo que acaba en Turso— es el **texto cifrado**, no un hueco (lo fija el test
+  `el_outbox_replica_texto_cifrado_no_el_dni_en_claro`). `/v1/sync/bootstrap` hace `SELECT *` de
+  cada tabla de negocio y `bootstrap_restaurar` reinserta las columnas que traiga el volcado tal
+  cual: ninguno de los dos filtra nada. Y la DEK sobrevive por partida doble (`secret_store` local
+  y `tenants.field_dek` en el control-plane, reentregada al activar), así que la Main que restaura
+  puede descifrar. Lo que **no** vuelve es cualquier fila que nunca llegara a subir.
+  > Esto estuvo documentado al revés hasta 2026-09-02 (CLAUDE.md, la pantalla de recuperación y
+  > `loginApi.ts` decían que esas tres columnas se perdían). Si algún día se quiere que sea verdad
+  > —que el volcado no pueda devolverlas— **no basta con avisar en la pantalla**: hay que dejar de
+  > replicar esas columnas, y eso exige decidir antes qué pasa con la unicidad y con la Handy.
 - **Una tabla que esta versión no conoce se informa, no revienta.** Un TPV con una versión por
   detrás debe poder recuperarse igual; lo que no entra sale en `tablas_desconocidas`.
 - **Los nombres de tabla y columna del volcado se interpolan en el SQL** (no se pueden enlazar con

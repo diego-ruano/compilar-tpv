@@ -124,6 +124,8 @@ de `stats` se portaron al worker.
 
 ## Dónde está el resto
 
+- **Qué falta para el piloto en un bar real** (auditoría 2026-09-02: fiscal, control de caja,
+  permisos, operación): [BACKLOG.md §Auditoría previa al piloto](BACKLOG.md#auditoría-previa-al-piloto-2026-09-02).
 - **Aplazados con motivo** (incluida la deuda transversal): [BACKLOG.md](BACKLOG.md).
 - **Seguridad de red / superficie de ataque:** [auditoria-fable.md](../../auditoria-fable.md).
 - **Sistema de licencias propio:** [PLAN_LICENCIAS_PROPIAS.md](../PLAN_LICENCIAS_PROPIAS.md).

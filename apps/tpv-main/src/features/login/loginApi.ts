@@ -208,9 +208,12 @@ export async function crearCopiaLocal(): Promise<LocalBackupInfo> {
 }
 
 /**
- * Guarda una copia fuera del equipo. Es lo único que salva el DNI, el IBAN y el nº de la
- * Seguridad Social del personal: van cifrados con una clave que no sube a la nube, así que la
- * recuperación desde la nube no puede devolverlos.
+ * Guarda una copia fuera del equipo. Cubre lo que las copias diarias no cubren: viven en el mismo
+ * disco que protegen, así que valen para un borrado o una corrupción, no para una máquina muerta.
+ *
+ * (Aquí ponía que era «lo único que salva» el DNI, el IBAN y el nº de la Seguridad Social del
+ * personal. Era falso: esas columnas se cifran antes de construir la sentencia, viajan cifradas
+ * por el outbox y el volcado de la nube las devuelve. Ver TRAB-03 en CLAUDE.md.)
  */
 export async function exportarCopiaLocal(backupId: string, destino: string): Promise<void> {
     await invokeClient<void>("recovery_export_backup", { backupId, destino });
