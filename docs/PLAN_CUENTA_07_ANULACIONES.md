@@ -58,7 +58,7 @@ la tabla de eventos habrá dos fuentes para la misma cifra y divergirán. El arq
 
 ---
 
-## 4. DECISIÓN PENDIENTE — qué pasa con las líneas al anular
+## 4. DECIDIDO (2026-09-04) — Opción A: las líneas vuelven a estar pendientes
 
 Hay que elegir antes de escribir código. Las tres opciones dejan el mismo rastro de auditoría; se
 diferencian en la experiencia de uso.
@@ -94,10 +94,19 @@ para rehacer el cobro hay que volver a añadirlas.
 - ❌ El pago anulado queda sin detalle: no se puede reimprimir ni saber qué se cobró. La auditoría
   queda coja justo en lo que más importa.
 
-**Recomendación: A.** Es la que da la auditoría completa, la que menos esquema toca y la que mejor se
-comporta. Su único coste es aceptar el cambio de comportamiento, y ese cambio es a mejor.
+**Elegida: A** (decisión del responsable, 2026-09-04). Da la auditoría completa, es la que menos
+esquema toca y la que mejor se comporta. Se acepta el cambio de comportamiento — si el cobro fue un
+error, la consumición sigue estando en la mesa, que es lo razonable.
 
-> El resto del plan asume la **Opción A**. Si se elige otra, cambian §6.4 y §7.
+**Caso límite aceptado a sabiendas:** si el producto se borró del catálogo entre la venta y la
+anulación, sus líneas vuelven a la mesa pero **no se pueden volver a añadir** (`add_linea_comanda`
+necesita el producto). Se pueden quitar y se puede cobrar lo que hay. Es raro —implica borrar del
+catálogo algo vendido y luego anular ese cobro— y la salida existe, así que no se le pone más
+maquinaria.
+
+⚠️ **Consecuencia que hace falta para que A funcione: ver §6.5.2.** Conservar `Pago_Detalles`
+convierte esas líneas en «cobradas» a ojos de media aplicación. Sin tocar eso, vuelven a la mesa
+**congeladas**: visibles y sin poder quitarlas.
 
 ---
 
@@ -240,7 +249,13 @@ Además, `crear_pago` gana su `INSERT` en `Movimientos_Caja` con `Tipo='COBRO'`,
 ### 6.5 Las lecturas — el trabajo de verdad
 
 **Aquí está el riesgo real del cambio.** Al dejar de borrar la fila, toda consulta que sume, cuente o
-liste pagos empieza a ver los anulados. Hay que revisarlas **una por una**:
+liste pagos empieza a ver los anulados. Hay que revisarlas **una por una**.
+
+Y son **dos superficies distintas**, no una: las que leen `Pagos` (aquí abajo, 36) y las que deciden
+si una línea está cobrada mirando `Pago_Detalles` (§6.5.2, otras 27). **En total unos 63 sitios**, y
+es de largo la mayor parte del trabajo de este plan.
+
+**Las que leen `Pagos`:**
 
 - **19 sitios en Rust** — `cierre_caja.rs` (4), `cuentas.rs` (4, uno es el propio borrado),
   `reconciliacion.rs` (2), `stats.rs` (8), `venta_rapida.rs` (1).
@@ -293,6 +308,39 @@ El aviso falso induce a la acción que rompe el dato.
 > que entrar en el fichero igualmente, se aplica una sola regla y a cambio se conserva la
 > trazabilidad por lote del ticket anulado.
 
+#### 6.5.2 «Línea cobrada» — la otra mitad, y es más grande que la de `Pagos`
+
+La lista de §6.5 son las consultas que leen `Pagos`. Pero **una línea no se considera cobrada
+mirando `Pagos`, sino mirando `Pago_Detalles`**: el patrón repartido por todo el código es
+`LEFT JOIN Pago_Detalles … WHERE pd.ID_Detalle IS NULL` o `NOT EXISTS (SELECT 1 FROM Pago_Detalles …)`.
+Son sitios **distintos** de los anteriores:
+
+- **18 en Rust** — `mesas.rs` (11), `venta_rapida.rs` (5), `cuentas.rs` (2)
+- **9 en el worker** — `mesas.queries.ts`, `mesas.commands.ts`, `venta_rapida.*`, `cuentas.commands.ts`
+
+```bash
+grep -rn "Pago_Detalles" crates/tpv-infra-sqlite/src/*.rs | grep -iE "not exists|left join"
+grep -rn "Pago_Detalles" apps/cloud-worker-licensing/src --include=*.ts | grep -iE "not exists|left join"
+```
+
+**La regla, en todos:** de `«tiene fila en Pago_Detalles»` a
+`«tiene fila en Pago_Detalles ligada a un Pago con Estado='ACTIVO'»`.
+
+Dos merecen mención aparte, porque son **guardias de escritura**, no lecturas:
+
+| Función | Qué pasa si se olvida |
+|---|---|
+| `remove_one_pending_detalle` ([mesas.rs:1823](../crates/tpv-infra-sqlite/src/mesas.rs#L1823)) | Se niega a quitar una línea devuelta: *"está cobrada"* |
+| `delete_detalle` ([mesas.rs:1869](../crates/tpv-infra-sqlite/src/mesas.rs#L1869)) | Lo mismo, borrando una línea concreta |
+
+**Sin estas dos, la Opción A no funciona**: las 3 cañas y las 2 tapas vuelven a la mesa y el camarero
+no puede ni quitarlas. Visibles y congeladas — peor que el comportamiento de hoy.
+
+> **Detalle de UI a comprobar al implementar:** `remove_one_pending_detalle` busca por
+> `ID_Producto`. Si el producto se borró del catálogo, la línea lo tiene a `NULL` y **NULL no casa
+> con nada en SQL**, así que ese camino no la encuentra. `delete_detalle` (por `ID_Detalle`) sí
+> funciona. Cuál use la pantalla decide si el camarero puede quitar esas líneas o no.
+
 ### 6.6 Worker — paridad obligatoria
 
 - `cuentas.commands.ts`: `deletePago` → `anularPago`, con los mismos pasos y el UUID determinista.
@@ -330,6 +378,9 @@ El aviso falso induce a la acción que rompe el dato.
 - `Clientes.Total_Gastado` baja una vez y no cae por debajo de 0
 - `ventas_efectivo_desde` **ignora** los anulados ← *el test que prueba que el agujero está tapado*
 - las líneas del pago anulado vuelven a contar como pendientes (Opción A)
+- **una línea devuelta se puede quitar** (`delete_detalle` y `remove_one_pending_detalle`) ← §6.5.2,
+  el test que impide entregar las líneas congeladas
+- **una línea de un pago ACTIVO sigue sin poder quitarse** — la guardia no se puede aflojar de más
 - la comanda se reabre igual que antes
 - `Movimientos_Caja` recibe una fila por cobro y otra por anulación
 - **el outbox captura todo**: el `UPDATE` de `Pagos` y el `INSERT` de `Movimientos_Caja` (si esto
@@ -373,11 +424,13 @@ descuadrado.** Ese es el criterio de aceptación del plan entero.
 2. Esquema (§5) + reset de bases de desarrollo.
 3. Dominio y caso de uso (§6.1-6.3).
 4. Persistencia (§6.4) con sus tests.
-5. **Las 36 lecturas** (§6.5). Sin prisa: es donde están los bugs.
+5. **Las ~63 consultas**: las 36 de `Pagos` (§6.5) y las 27 de `Pago_Detalles` (§6.5.2). Sin prisa:
+   es donde están los bugs. Las dos guardias de escritura de §6.5.2 van primero — sin ellas, lo que
+   se entrega está peor que lo que había.
 6. Worker y contrato (§6.6).
 7. Frontend (§6.7).
 
-Estimación: 2-3 días de trabajo concentrado. El paso 5 es la mitad.
+Estimación: **3-4 días** de trabajo concentrado. El paso 5 es claramente más de la mitad.
 
 ---
 
