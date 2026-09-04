@@ -100,10 +100,16 @@ sumando `Detalle_Comanda`, `Pagos`, `Pago_Detalles`, `Lote_Consumos` y `Movimien
 `BootstrapTooLarge` existe en [`errors.rs:125`](../../crates/tpv-contracts/src/errors.rs#L125) pero
 **no se usa en ninguna parte del frontend**: el usuario vería un error genérico.
 
-**Pendiente de decidir:** paginar el volcado (rompe la foto coherente en una transacción, que es lo
-que hoy garantiza el `Seq` exacto — hay que pensarlo), o volcar sólo a partir de una fecha de corte,
-o atacar la causa por DB-14. Como mínimo, mientras tanto: mensaje explícito en la pantalla de
-recuperación y un aviso proactivo al acercarse al tope.
+**Diseño resuelto e investigado** (2026-09-04): recuperación en dos fases —lo imprescindible de
+golpe, el histórico en segundo plano— en
+[PLAN_SYNC_19_RECUPERACION_COMPLETA.md](../PLAN_SYNC_19_RECUPERACION_COMPLETA.md). Sin decisiones
+pendientes: se puede implementar entero sin medir nada.
+
+> ⚠️ **Trozo suelto que NO depende del plan y se puede hacer en cualquier hueco: manejar
+> `BootstrapTooLarge` en el frontend.** El código de error ya existe y no lo usa nadie, así que hoy,
+> el día que un cliente pierde su `data.db` y el volcado no cabe, ve **un error genérico**. Que diga
+> qué ha pasado y ofrezca la copia local. Es pequeño, no toca el worker ni el esquema, y quita el
+> peor síntoma del problema mientras el plan grande espera turno.
 
 ### DB-14 🟡 · Sin retención ni archivado
 
