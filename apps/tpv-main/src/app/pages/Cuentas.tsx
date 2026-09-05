@@ -57,7 +57,7 @@ import {
     useUpdateGasto,
     useDeleteGasto,
     useUpdatePago,
-    useDeletePago,
+    useAnularPago,
 } from "../../features/cuentas/cuentasQueries";
 import { CUENTAS_PAGE_SIZE } from "../../features/cuentas/cuentasApis";
 
@@ -174,7 +174,47 @@ function mapEntradaUI(r: any): Entrada {
         metodo:
             String(r?.metodo ?? "Efectivo") === "Tarjeta" ? "Tarjeta" : "Efectivo",
         importe: Number(r?.importe ?? 0),
+        anulado: Boolean(r?.anulado),
+        anuladoEn: r?.anuladoEn ?? null,
+        anuladoPor: r?.anuladoPor ?? null,
+        motivoAnulacion: r?.motivoAnulacion ?? null,
     };
+}
+
+/** Añade el tachado a las clases de una celda cuando el cobro está anulado. */
+function tachadoSi(anulado: boolean, clases: string): string {
+    return anulado ? `${clases} line-through opacity-60` : clases;
+}
+
+/**
+ * El sello de un cobro anulado: quién, cuándo y por qué (CUENTA-07).
+ *
+ * Va debajo de la fila y no en un tooltip a propósito. Ésta es la pantalla en la que alguien busca
+ * por qué falta dinero de la caja, y lo que se está mirando es precisamente la lista de cobros que
+ * alguien deshizo: esconder el motivo detrás de un hover es esconderlo.
+ */
+function SelloAnulado({ entrada }: { entrada: Entrada }) {
+    if (!entrada.anulado) return null;
+
+    const quien = (entrada.anuladoPor ?? "").trim();
+    const cuando = (entrada.anuladoEn ?? "").slice(0, 16);
+    const motivo = (entrada.motivoAnulacion ?? "").trim();
+
+    return (
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span className="rounded-lg border border-danger/30 bg-danger-soft px-2 py-0.5 font-bold uppercase tracking-wide text-danger">
+                Anulado
+            </span>
+            <span className="text-fg-muted">
+                {[quien, cuando].filter(Boolean).join(" · ") || "sin firma"}
+            </span>
+            {motivo ? (
+                <span className="min-w-0 truncate text-fg-muted" title={motivo}>
+                    «{motivo}»
+                </span>
+            ) : null}
+        </div>
+    );
 }
 
 function mapSalidaUI(
@@ -245,7 +285,7 @@ export default function Cuentas() {
     const updateGasto = useUpdateGasto();
     const deleteGasto = useDeleteGasto();
     const updatePago = useUpdatePago();
-    const deletePago = useDeletePago();
+    const anularPago = useAnularPago();
 
     const proveedores: ProveedorMini[] = useMemo(
         () => proveedoresQuery.data ?? [],
@@ -290,6 +330,9 @@ export default function Cuentas() {
     >(null);
     const [confirmando, setConfirmando] = useState(false);
     const [confirmError, setConfirmError] = useState<string | null>(null);
+    /// Motivo de la anulación (CUENTA-07). Obligatorio: quién y cuándo los pone el sistema, el
+    /// porqué sólo puede ponerlo quien anula.
+    const [motivoAnulacion, setMotivoAnulacion] = useState("");
 
     const [openAddGasto, setOpenAddGasto] = useState(false);
     const [gFecha, setGFecha] = useState(() => todayYMD());
@@ -391,8 +434,11 @@ export default function Cuentas() {
     const balance = totalEntradas - totalSalidas;
 
     // Controles de paginación: hay "siguiente" si aún quedan filas por debajo del total del resumen.
+    // Los anulados salen en la lista pero NO cuentan en `countEntradas` (no son ventas), así que
+    // la paginación tiene que sumar los dos o la última página se quedaría corta.
     const hasNextEntradas =
-        pageEntradas * CUENTAS_PAGE_SIZE < (resumen?.countEntradas ?? 0);
+        pageEntradas * CUENTAS_PAGE_SIZE <
+        (resumen?.countEntradas ?? 0) + (resumen?.countAnuladas ?? 0);
     const hasNextSalidas =
         pageSalidas * CUENTAS_PAGE_SIZE < (resumen?.countSalidas ?? 0);
 
@@ -505,6 +551,7 @@ export default function Cuentas() {
                     metodoPago: t.metodo_pago || null,
                     origen: t.origen || null,
                     esCopia: true,
+                    esAnulado: t.anulado,
                 },
             });
         } catch (err) {
@@ -554,6 +601,7 @@ export default function Cuentas() {
 
     const borrarPago = (e: Entrada) => {
         setConfirmError(null);
+        setMotivoAnulacion("");
         setConfirmAccion({ tipo: "entrada", entrada: e });
     };
 
@@ -567,13 +615,16 @@ export default function Cuentas() {
             if (confirmAccion.tipo === "gasto") {
                 await deleteGasto.mutateAsync(confirmAccion.gasto.id);
             } else {
-                await deletePago.mutateAsync(confirmAccion.entrada.id);
+                await anularPago.mutateAsync({
+                    idPago: confirmAccion.entrada.id,
+                    motivo: motivoAnulacion,
+                });
             }
 
             setConfirmAccion(null);
         } catch (e: any) {
-            console.error("Error borrando:", e);
-            setConfirmError(String(e?.message ?? "Error borrando"));
+            console.error("Error en la operación de caja:", e);
+            setConfirmError(toAppError(e).message);
         } finally {
             setConfirmando(false);
         }
@@ -651,8 +702,11 @@ export default function Cuentas() {
             ]);
             const entradasFull = entradasRaw.map(mapEntradaUI);
             const salidasFull = salidasRaw.map((r) => mapSalidaUI(r, proveedoresMap));
+            // Un cobro anulado no es una venta: no suma (CUENTA-07). Sale en el listado igual, y
+            // marcado, porque este PDF es el documento con el que se cuadra la caja y una salida
+            // de dinero que no aparece es exactamente lo que no se puede explicar después.
             const totalEntradasPdf = entradasFull.reduce(
-                (a, e) => a + (Number(e.importe) || 0),
+                (a, e) => a + (e.anulado ? 0 : Number(e.importe) || 0),
                 0,
             );
             const totalSalidasPdf = salidasFull.reduce(
@@ -802,7 +856,7 @@ export default function Cuentas() {
                     ctx = writeRow(ctx, [
                         { text: e.fechaHora, x: M },
                         { text: e.cliente, x: M + 140 },
-                        { text: e.metodo, x: M + 380 },
+                        { text: e.anulado ? `${e.metodo} · ANULADO` : e.metodo, x: M + 380 },
                         {
                             text: formatMoney(e.importe),
                             x: M + 460,
@@ -897,7 +951,7 @@ export default function Cuentas() {
             const salidasHoyF = salidasHoy ?? [];
 
             const totalEntradasHoy = entradasHoyF.reduce(
-                (acc: number, e: any) => acc + (Number(e.importe) || 0),
+                (acc: number, e: any) => acc + (e?.anulado ? 0 : Number(e.importe) || 0),
                 0,
             );
             const totalSalidasHoy = salidasHoyF.reduce(
@@ -1048,7 +1102,12 @@ export default function Cuentas() {
                     ctx = writeRow(ctx, [
                         { text: String(e.fechaHora ?? ""), x: M },
                         { text: String(e.cliente ?? ""), x: M + 140 },
-                        { text: String(e.metodo ?? ""), x: M + 380 },
+                        {
+                            text: e.anulado
+                                ? `${String(e.metodo ?? "")} · ANULADO`
+                                : String(e.metodo ?? ""),
+                            x: M + 380,
+                        },
                         {
                             text: formatMoney(Number(e.importe ?? 0)),
                             x: M + 460,
@@ -1156,6 +1215,15 @@ export default function Cuentas() {
                     <div className="flex flex-wrap items-center gap-2">
                         <Badge>Entradas: {euro(totalEntradas)}</Badge>
                         <Badge>Salidas: {euro(totalSalidas)}</Badge>
+                        {/* Sólo aparece si ha habido alguna: un contador a cero todos los días
+                            deja de leerse, y éste es el número por el que hay que preguntar. */}
+                        {(resumen?.countAnuladas ?? 0) > 0 ? (
+                            <Badge>
+                                <span className="text-danger">
+                                    Anulados: {resumen?.countAnuladas} · {euro(resumen?.totalAnulado ?? 0)}
+                                </span>
+                            </Badge>
+                        ) : null}
                         <Badge>
                             Balance:{" "}
                             <span className={balance >= 0 ? "text-success" : "text-danger"}>
@@ -1241,13 +1309,14 @@ export default function Cuentas() {
                                                     <div className="sm:hidden flex items-start justify-between gap-3">
                                                         <div className="min-w-0">
                                                             <div className="text-xs text-fg-muted">{e.fechaHora}</div>
-                                                            <div className="font-semibold text-fg truncate">
+                                                            <div className={tachadoSi(e.anulado, "font-semibold text-fg truncate")}>
                                                                 {e.cliente}
                                                             </div>
                                                             <div className="text-xs text-fg-muted">{e.metodo}</div>
+                                                            <SelloAnulado entrada={e} />
                                                         </div>
                                                         <div className="flex flex-col items-end gap-2">
-                                                            <div className="font-extrabold text-fg">
+                                                            <div className={tachadoSi(e.anulado, "font-extrabold text-fg")}>
                                                                 {euro(e.importe)}
                                                             </div>
                                                             <div className="flex gap-2">
@@ -1257,27 +1326,36 @@ export default function Cuentas() {
                                                                 >
                                                                     <Printer className="size-4" aria-hidden />
                                                                 </MiniIconButton>
-                                                                <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                    <Pencil className="size-4" aria-hidden />
-                                                                </MiniIconButton>
-                                                                <MiniIconButton
-                                                                    title="Borrar"
-                                                                    variant="danger"
-                                                                    onClick={() => borrarPago(e)}
-                                                                >
-                                                                    <Trash2 className="size-4" aria-hidden />
-                                                                </MiniIconButton>
+                                                                {e.anulado ? null : (
+                                                                    <>
+                                                                        <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
+                                                                            <Pencil className="size-4" aria-hidden />
+                                                                        </MiniIconButton>
+                                                                        <MiniIconButton
+                                                                            title="Anular"
+                                                                            variant="danger"
+                                                                            onClick={() => borrarPago(e)}
+                                                                        >
+                                                                            <Trash2 className="size-4" aria-hidden />
+                                                                        </MiniIconButton>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     </div>
 
                                                     <div className="hidden sm:grid grid-cols-12 gap-2 px-4 py-3 text-sm hover:bg-surface-2">
-                                                        <div className="col-span-3">{e.fechaHora}</div>
-                                                        <div className="col-span-4 min-w-0">
-                                                            <div className="font-medium truncate">{e.cliente}</div>
-                                                            <div className="text-xs text-fg-muted">{e.metodo}</div>
+                                                        <div className={tachadoSi(e.anulado, "col-span-3")}>
+                                                            {e.fechaHora}
                                                         </div>
-                                                        <div className="col-span-2 font-semibold">
+                                                        <div className="col-span-4 min-w-0">
+                                                            <div className={tachadoSi(e.anulado, "font-medium truncate")}>
+                                                                {e.cliente}
+                                                            </div>
+                                                            <div className="text-xs text-fg-muted">{e.metodo}</div>
+                                                            <SelloAnulado entrada={e} />
+                                                        </div>
+                                                        <div className={tachadoSi(e.anulado, "col-span-2 font-semibold")}>
                                                             {euro(e.importe)}
                                                         </div>
                                                         <div className="col-span-3 flex justify-end gap-2">
@@ -1287,16 +1365,20 @@ export default function Cuentas() {
                                                             >
                                                                 <Printer className="size-4" aria-hidden />
                                                             </MiniIconButton>
-                                                            <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
-                                                                <Pencil className="size-4" aria-hidden />
-                                                            </MiniIconButton>
-                                                            <MiniIconButton
-                                                                title="Borrar"
-                                                                variant="danger"
-                                                                onClick={() => borrarPago(e)}
-                                                            >
-                                                                <Trash2 className="size-4" aria-hidden />
-                                                            </MiniIconButton>
+                                                            {e.anulado ? null : (
+                                                                <>
+                                                                    <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
+                                                                        <Pencil className="size-4" aria-hidden />
+                                                                    </MiniIconButton>
+                                                                    <MiniIconButton
+                                                                        title="Anular"
+                                                                        variant="danger"
+                                                                        onClick={() => borrarPago(e)}
+                                                                    >
+                                                                        <Trash2 className="size-4" aria-hidden />
+                                                                    </MiniIconButton>
+                                                                </>
+                                                            )}
                                                         </div>
                                                     </div>
                                                 </div>
@@ -2010,12 +2092,12 @@ export default function Cuentas() {
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <h3 className="text-lg font-semibold text-fg">
-                                    {confirmAccion.tipo === "gasto" ? "Borrar gasto" : "Borrar entrada"}
+                                    {confirmAccion.tipo === "gasto" ? "Borrar gasto" : "Anular cobro"}
                                 </h3>
                                 <p className="text-sm text-fg-muted">
                                     {confirmAccion.tipo === "gasto"
                                         ? "Esto eliminará el gasto de la base de datos."
-                                        : "Esto eliminará también sus relaciones de pago."}
+                                        : "El cobro no se borra: queda registrado como anulado con tu nombre, la hora y el motivo. Sus artículos vuelven a la comanda como pendientes de cobro."}
                                 </p>
                             </div>
 
@@ -2074,6 +2156,23 @@ export default function Cuentas() {
                             )}
                         </div>
 
+                        {confirmAccion.tipo === "entrada" ? (
+                            <label className="mt-4 block">
+                                <span className="text-sm font-semibold text-fg">
+                                    Motivo de la anulación
+                                </span>
+                                <input
+                                    type="text"
+                                    autoFocus
+                                    value={motivoAnulacion}
+                                    onChange={(ev) => setMotivoAnulacion(ev.target.value)}
+                                    placeholder="Cobro duplicado, error de importe…"
+                                    disabled={confirmando}
+                                    className="mt-1 h-10 w-full rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-primary"
+                                />
+                            </label>
+                        ) : null}
+
                         {confirmError ? (
                             <div className="mt-3 rounded-2xl border border-danger/30 bg-danger-soft px-4 py-2 text-sm text-danger">
                                 {confirmError}
@@ -2096,15 +2195,27 @@ export default function Cuentas() {
 
                             <button
                                 type="button"
-                                disabled={confirmando}
+                                disabled={
+                                    confirmando ||
+                                    (confirmAccion.tipo === "entrada" && !motivoAnulacion.trim())
+                                }
                                 onClick={confirmarBorrado}
                                 className={[
                                     "h-10 px-5 rounded-xl border border-danger bg-danger text-sm font-bold text-white shadow-sm",
                                     "hover:opacity-90 active:scale-[0.97]",
-                                    confirmando ? "opacity-60 cursor-not-allowed" : "",
+                                    confirmando ||
+                                    (confirmAccion.tipo === "entrada" && !motivoAnulacion.trim())
+                                        ? "opacity-60 cursor-not-allowed"
+                                        : "",
                                 ].join(" ")}
                             >
-                                {confirmando ? "Borrando..." : "Sí, borrar"}
+                                {confirmAccion.tipo === "gasto"
+                                    ? confirmando
+                                        ? "Borrando..."
+                                        : "Sí, borrar"
+                                    : confirmando
+                                      ? "Anulando..."
+                                      : "Sí, anular"}
                             </button>
                         </div>
                     </div>

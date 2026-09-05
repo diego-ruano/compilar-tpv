@@ -49,6 +49,7 @@ mod fixtures {
             metodo_pago: None,
             origen: None,
             es_copia: false,
+            es_anulado: false,
             items,
         }
     }
@@ -271,6 +272,21 @@ mod tests_identidad_del_ticket {
         let bytes = build_ticket(&p, None);
 
         assert!(contiene(&bytes, "T-000042"));
+        assert!(contiene(&bytes, "COPIA"));
+    }
+
+    #[test]
+    fn la_copia_de_un_cobro_anulado_lo_dice_en_el_papel() {
+        // Un ticket anulado se puede reimprimir —es la prueba de qué contenía— pero un papel que
+        // no lo diga circularía como un cobro válido. Y sigue siendo una copia: las dos marcas
+        // responden a preguntas distintas.
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("T-000042".into());
+        p.es_copia = true;
+        p.es_anulado = true;
+        let bytes = build_ticket(&p, None);
+
+        assert!(contiene(&bytes, "ANULADO"));
         assert!(contiene(&bytes, "COPIA"));
     }
 

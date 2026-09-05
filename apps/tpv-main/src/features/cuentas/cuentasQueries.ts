@@ -7,9 +7,9 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+    cuentasAnularPago,
     cuentasCreateGasto,
     cuentasDeleteGasto,
-    cuentasDeletePago,
     cuentasGetEntradas,
     cuentasGetResumen,
     cuentasGetSalidas,
@@ -143,10 +143,10 @@ export function useUpdatePago() {
     });
 }
 
-export function useDeletePago() {
+export function useAnularPago() {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: cuentasDeletePago,
+        mutationFn: cuentasAnularPago,
         onSuccess: (ok) => {
             if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },

@@ -16,6 +16,12 @@ export type Entrada = {
     cliente: string;
     metodo: "Tarjeta" | "Efectivo";
     importe: number;
+    /** CUENTA-07: un cobro anulado NO se borra. Sale en la lista, marcado. */
+    anulado: boolean;
+    anuladoEn?: string | null;
+    /** Nombre de quien anuló (lo resuelve el backend; la fila sólo guarda el id). */
+    anuladoPor?: string | null;
+    motivoAnulacion?: string | null;
 };
 
 export type Salida = {
@@ -39,6 +45,9 @@ export type ResumenCaja = {
     totalTarjeta: number;
     countEntradas: number;
     countSalidas: number;
+    /** Anulaciones del rango. NO entran en los totales de arriba (CUENTA-07). */
+    countAnuladas: number;
+    totalAnulado: number;
 };
 
 /** Tamaño de página por defecto de los listados de caja (CUENTA-05). */
@@ -113,6 +122,10 @@ function mapEntrada(r: any): Entrada {
         cliente: toStr(r?.cliente ?? r?.Cliente ?? "—"),
         metodo: metodoRaw === "Tarjeta" ? "Tarjeta" : "Efectivo",
         importe: toNum(r?.importe ?? r?.Importe_Total ?? r?.importe_total, 0),
+        anulado: toStr(r?.estado ?? r?.Estado, "ACTIVO") === "ANULADO",
+        anuladoEn: toIdOrNull(r?.anuladoEn ?? r?.anulado_en),
+        anuladoPor: toIdOrNull(r?.anuladoPor ?? r?.anulado_por),
+        motivoAnulacion: toIdOrNull(r?.motivoAnulacion ?? r?.motivo_anulacion),
     };
 }
 
@@ -206,6 +219,8 @@ export async function cuentasGetResumen(params: {
         totalTarjeta: toNum(r?.total_tarjeta ?? r?.totalTarjeta, 0),
         countEntradas: toNum(r?.count_entradas ?? r?.countEntradas, 0),
         countSalidas: toNum(r?.count_salidas ?? r?.countSalidas, 0),
+        countAnuladas: toNum(r?.count_anuladas ?? r?.countAnuladas, 0),
+        totalAnulado: toNum(r?.total_anulado ?? r?.totalAnulado, 0),
     };
 }
 
@@ -281,9 +296,18 @@ export async function cuentasUpdatePago(payload: {
     return typeof r === "boolean" ? r : true;
 }
 
-export async function cuentasDeletePago(idPago: string): Promise<boolean> {
-    const r = await invokeClient<any>("cuentas_delete_pago", {
-        args: { id_pago: idPago },
+/**
+ * Anula un cobro (CUENTA-07). Antes lo borraba, y ése era el agujero: el arqueo bajaba el esperado
+ * exactamente lo mismo que faltaba en el cajón y el descuadre salía cero.
+ *
+ * El motivo es obligatorio; quién anula NO se manda —lo pone la sesión del backend (SEC-01)—.
+ */
+export async function cuentasAnularPago(payload: {
+    idPago: string;
+    motivo: string;
+}): Promise<boolean> {
+    const r = await invokeClient<any>("cuentas_anular_pago", {
+        args: { id_pago: payload.idPago, motivo: cleanString(payload.motivo) },
     });
     return typeof r === "boolean" ? r : true;
 }

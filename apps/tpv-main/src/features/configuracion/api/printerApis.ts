@@ -73,16 +73,19 @@ export type PrintTicketPayload = {
     origen?: string | null;
     /** Reimpresión: mismo número, marcado como COPIA. */
     es_copia?: boolean;
+    /** El cobro está anulado (CUENTA-07): el papel lo dice. */
+    es_anulado?: boolean;
 
     items: PrintTicketLine[];
 };
 
-/** Lo que distingue un ticket de venta de una precuenta o de una copia. */
+/** Lo que distingue un ticket de venta de una precuenta, de una copia o de un cobro anulado. */
 export type DatosDelTicket = {
     numeroTicket?: string | null;
     metodoPago?: string | null;
     origen?: string | null;
     esCopia?: boolean;
+    esAnulado?: boolean;
 };
 
 /** Item simple (por defecto una unidad); `buildTicketPayload` agrupa los iguales. */
@@ -229,6 +232,7 @@ export function buildTicketPayload(
         metodo_pago: datos?.metodoPago ?? null,
         origen: datos?.origen ?? null,
         es_copia: datos?.esCopia ?? false,
+        es_anulado: datos?.esAnulado ?? false,
 
         items: Array.from(map.values()),
     };

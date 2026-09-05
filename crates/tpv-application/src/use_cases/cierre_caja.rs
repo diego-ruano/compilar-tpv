@@ -251,3 +251,115 @@ pub async fn avisar_si_lleva_mucho_abierta(
 
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests_gate_del_periodo {
+    //! El gate que impide tocar un apunte de un cierre ya hecho.
+    //!
+    //! Vale para editar un cobro, para borrar un gasto y —desde CUENTA-07— para **anular un
+    //! cobro**: anular un cobro de anoche después de haber cuadrado la caja de anoche cambia un
+    //! arqueo que ya está firmado. Por eso `anular_pago` no escribe su propio gate: reutiliza éste
+    //! (dos definiciones de «periodo cerrado» son una que acaba llegando tarde).
+
+    use super::*;
+    use crate::ports::cierre_caja::ApunteCaja;
+    use async_trait::async_trait;
+
+    /// Un repositorio que sólo sabe una cosa: dónde está el corte. Es lo único que mira el gate.
+    struct SoloElCorte(Option<String>);
+
+    #[async_trait]
+    impl CierreCajaRepository for SoloElCorte {
+        async fn corte_vigente(&self) -> AppResult<Option<String>> {
+            Ok(self.0.clone())
+        }
+        async fn ultimo_cierre(&self) -> AppResult<Option<CierreDto>> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn ventas_efectivo_desde(&self, _d: Option<&str>) -> AppResult<f64> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn anulaciones_desde(&self, _d: Option<&str>) -> AppResult<(i64, f64)> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn comandas_abiertas(&self) -> AppResult<i64> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn crear(&self, _c: CierreNuevo) -> AppResult<()> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn listar(&self, _l: i64) -> AppResult<Vec<CierreResumenDto>> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn detalle(&self, _id: &str) -> AppResult<Option<CierreDto>> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn reabrir(&self, _id: &str, _u: Option<&str>) -> AppResult<bool> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn fecha_apunte(&self, _t: ApunteCaja, _id: &str) -> AppResult<Option<String>> {
+            unimplemented!("el gate no lo usa")
+        }
+        async fn horas_periodo_abierto(&self) -> AppResult<i64> {
+            unimplemented!("el gate no lo usa")
+        }
+    }
+
+    fn corte(v: Option<&str>) -> SoloElCorte {
+        SoloElCorte(v.map(str::to_string))
+    }
+
+    #[tokio::test]
+    async fn un_cobro_de_un_periodo_ya_cerrado_no_se_toca() {
+        let repo = corte(Some("2026-05-10 23:00:00"));
+        let e = exigir_periodo_abierto(&repo, "2026-05-10 21:30:00")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code(), ErrorCode::PeriodoCerrado);
+    }
+
+    #[tokio::test]
+    async fn el_cobro_del_propio_corte_tambien_esta_dentro() {
+        // El límite es «anterior **o igual**»: el cobro que se hizo en el segundo del cierre entró
+        // en ese arqueo.
+        let repo = corte(Some("2026-05-10 23:00:00"));
+        assert!(exigir_periodo_abierto(&repo, "2026-05-10 23:00:00")
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn un_cobro_posterior_al_corte_si_se_puede_anular() {
+        let repo = corte(Some("2026-05-10 23:00:00"));
+        assert!(exigir_periodo_abierto(&repo, "2026-05-11 01:15:00")
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn tras_reabrir_el_cierre_el_apunte_vuelve_a_ser_tocable() {
+        // Reabrir no borra el cierre: le pone `Reabierto_En`, y entonces deja de ser el corte
+        // vigente. Con el corte anterior (o ninguno), el mismo apunte pasa.
+        let repo = corte(None);
+        assert!(exigir_periodo_abierto(&repo, "2026-05-10 21:30:00")
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn un_gasto_del_dia_del_cierre_cuenta_como_dentro() {
+        // Un gasto guarda 'YYYY-MM-DD' sin hora. Comparar los textos tal cual dejaría
+        // '2026-05-10' por debajo de '2026-05-10 23:00:00' y el gasto se colaría como editable.
+        let repo = corte(Some("2026-05-10 23:00:00"));
+        assert!(exigir_periodo_abierto(&repo, "2026-05-10").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn un_apunte_sin_fecha_no_lo_decide_este_gate() {
+        // Si el apunte no existe, `fecha_apunte` devuelve `None` y aquí no llega nada. Una cadena
+        // vacía es el mismo caso: decidirlo aquí sería adelantarse al comando, que ya devuelve
+        // `false` cuando no encuentra la fila.
+        let repo = corte(Some("2026-05-10 23:00:00"));
+        assert!(exigir_periodo_abierto(&repo, "   ").await.is_ok());
+    }
+}

@@ -119,6 +119,10 @@ pub struct PrintTicketPayload {
     /// papeles iguales no parezcan dos ventas.
     #[serde(default)]
     pub es_copia: bool,
+    /// El cobro está anulado (CUENTA-07). Reimprimirlo sigue permitido —es la prueba de qué
+    /// contenía— pero el papel tiene que decirlo: sin la marca circularía como un cobro válido.
+    #[serde(default)]
+    pub es_anulado: bool,
 
     #[serde(default)]
     pub items: Vec<PrintTicketLine>,
@@ -641,17 +645,29 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         text_line(&mut out, &line_two("Pago", m, cols));
     }
 
-    // Los dos avisos que evitan confundir un papel con otro.
+    // Los avisos que evitan confundir un papel con otro.
     if p.numero_ticket.as_deref().map(str::trim).unwrap_or("").is_empty() {
         esc_align(&mut out, 1);
         text_wrap(&mut out, "NO ES UN TICKET DE VENTA", cols);
         esc_align(&mut out, 0);
-    } else if p.es_copia {
-        esc_align(&mut out, 1);
-        esc_bold(&mut out, true);
-        text_line(&mut out, "COPIA");
-        esc_bold(&mut out, false);
-        esc_align(&mut out, 0);
+    } else {
+        // ANULADO va antes que COPIA y no la sustituye: son dos cosas distintas y las dos
+        // importan. Que el papel sea una copia explica por qué hay dos iguales; que el cobro
+        // esté anulado es lo que impide que se cuente como una venta.
+        if p.es_anulado {
+            esc_align(&mut out, 1);
+            esc_bold(&mut out, true);
+            text_line(&mut out, "*** ANULADO ***");
+            esc_bold(&mut out, false);
+            esc_align(&mut out, 0);
+        }
+        if p.es_copia {
+            esc_align(&mut out, 1);
+            esc_bold(&mut out, true);
+            text_line(&mut out, "COPIA");
+            esc_bold(&mut out, false);
+            esc_align(&mut out, 0);
+        }
     }
 
     sep(&mut out, cols);

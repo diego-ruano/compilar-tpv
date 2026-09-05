@@ -204,6 +204,19 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 </label>
                             ) : null}
 
+                            {prep.anulaciones > 0 ? (
+                                <Aviso>
+                                    Se {prep.anulaciones === 1 ? "ha anulado" : "han anulado"}{" "}
+                                    <strong>
+                                        {prep.anulaciones}{" "}
+                                        {prep.anulaciones === 1 ? "cobro" : "cobros"} por{" "}
+                                        {euro(prep.anulaciones_importe)}
+                                    </strong>{" "}
+                                    en este periodo. No están contados arriba —un cobro anulado no es una
+                                    venta—, así que si ese dinero salió del cajón, el recuento lo dirá.
+                                </Aviso>
+                            ) : null}
+
                             {prep.comandas_abiertas > 0 ? (
                                 <Aviso>
                                     Hay {prep.comandas_abiertas}{" "}
