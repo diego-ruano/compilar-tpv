@@ -21,7 +21,7 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido.** Antes de entrar en un bar: SYNC-19 (SEC-01 y CUENTA-07 ✅ hechos). Antes de cobrar por
+> **Orden sugerido.** Antes de entrar en un bar: nada pendiente (SEC-01, CUENTA-07 y SYNC-19 ✅ hechos). Antes de cobrar por
 > ello: FISCAL-01, FISCAL-02, LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato: TEST-01, OPS-02.
 
 | ID | Sev | Hallazgo | Estado |
@@ -30,7 +30,7 @@
 | FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | Sin empezar |
 | CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | ✅ Hecho (2026-09-05) |
 | SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | ✅ Hecho (2026-09-05) |
-| SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | Sin empezar |
+| SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | ✅ Hecho (2026-09-05) |
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
 | VENTA-01 | 🟠 | **No existen descuentos, invitaciones, propinas ni devoluciones.** | Sin empezar |
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
@@ -95,28 +95,35 @@ dónde llega la garantía: [permisos-y-sesion.md](transversal/permisos-y-sesion.
 Esto es lo que hace que **CUENTA-07** valga para algo: su `Anulado_Por` ya puede ser un dato
 establecido por el backend y no uno que le hayan contado.
 
-### SYNC-19 🟠 · El bootstrap caduca por filas
+### SYNC-19 ✅ · El rescate desde la nube ya no caduca (2026-09-05)
 
-[`sync.routes.ts:139`](../../apps/cloud-worker-licensing/src/domains/sync/sync.routes.ts#L139):
-`BOOTSTRAP_MAX_FILAS = 300_000`. Un bar con ~200 tickets/día genera del orden de 3-4k filas/día
-sumando `Detalle_Comanda`, `Pagos`, `Pago_Detalles`, `Lote_Consumos` y `Movimientos_Stock`. Eso son
-**unos 3 meses** hasta cruzar el tope.
+**Lo que había.** `BOOTSTRAP_MAX_FILAS = 300_000`, y un bar con ~200 tickets/día genera 3-4k
+filas/día sumando `Detalle_Comanda`, `Pagos`, `Pago_Detalles`, `Lote_Consumos` y
+`Movimientos_Stock`: **unos 3 meses** hasta cruzar el tope. Lo grave era cuándo fallaba — un 413
+justo el día que el cliente ha perdido su `data.db`, siendo la nube *"la única forma de volver a
+operar"* — y que `BootstrapTooLarge` existía sin que lo mirase nadie, así que se veía un error
+genérico.
 
-**Lo que lo hace grave es cuándo falla:** un 413 justo en el momento en que el cliente ha perdido su
-`data.db`, y CLAUDE.md define la nube como *"la única forma de volver a operar"*. Encima
-`BootstrapTooLarge` existe en [`errors.rs:125`](../../crates/tpv-contracts/src/errors.rs#L125) pero
-**no se usa en ninguna parte del frontend**: el usuario vería un error genérico.
+**Lo que hay.** Recuperación en dos fases: `/v1/sync/bootstrap` trae los maestros enteros y 30 días
+de lo transaccional (estirados hasta cubrir el periodo de caja abierto), y `/v1/sync/historico`
+rellena el resto en segundo plano con el bar ya vendiendo. Diseño y reglas en
+[CLAUDE.md §9](../../CLAUDE.md), *"La recuperación va en dos fases"*. El tope se queda como guardia
+de la fase 1, que es donde tiene sentido: ahí ya no lo hace crecer el histórico.
 
-**Diseño resuelto e investigado** (2026-09-04): recuperación en dos fases —lo imprescindible de
-golpe, el histórico en segundo plano— en
-[PLAN_SYNC_19_RECUPERACION_COMPLETA.md](../PLAN_SYNC_19_RECUPERACION_COMPLETA.md). Sin decisiones
-pendientes: se puede implementar entero sin medir nada.
+**Cuatro cosas que el plan no había visto** y que se encontraron al implementarlo, por si sirven de
+aviso para el siguiente:
 
-> ⚠️ **Trozo suelto que NO depende del plan y se puede hacer en cualquier hueco: manejar
-> `BootstrapTooLarge` en el frontend.** El código de error ya existe y no lo usa nadie, así que hoy,
-> el día que un cliente pierde su `data.db` y el volcado no cabe, ve **un error genérico**. Que diga
-> qué ha pasado y ofrezca la copia local. Es pequeño, no toca el worker ni el esquema, y quita el
-> peor síntoma del problema mientras el plan grande espera turno.
+1. La ventana no puede ser por fila. Un pago de hace cinco días de una comanda de hace cuarenta
+   entra sin su comanda, y esa FK se comprueba al COMMIT: aborta la restauración entera.
+2. "Lo que sigue vivo entra entero" hacía falta generalizarlo más allá del último cierre de caja
+   (comandas abiertas, notificaciones activas, pedidos en borrador, fichajes sin cerrar).
+3. `Movimientos_Caja` no estaba en ninguna de las dos listas: el plan es del 04-09 y CUENTA-07 se
+   cerró el 05-09.
+4. `_Backfill_Historico` es tabla de control local (prefijo `_`), así que no toca el esquema
+   compartido ni ninguno de los cinco sitios de una migración.
+
+**Lo que sigue abierto** es DB-14, que es la otra mitad: esto hace que recuperar no tenga techo, la
+retención hace que la base no crezca sin freno.
 
 ### DB-14 🟡 · Sin retención ni archivado
 

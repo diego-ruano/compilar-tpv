@@ -15,9 +15,12 @@
 
 ## 0. Antes de nada: por qué este documento existe
 
-Hoy hay decisiones de arquitectura **bloqueadas por falta de un solo número**. El ejemplo vivo es
-[SYNC-19](analisis/BACKLOG.md): el rescate desde la nube revienta a las 300.000 filas y no sabemos si
-eso son tres meses o dos años, porque **nadie ha contado nunca cuántas filas al día genera un bar**.
+Hoy hay decisiones de arquitectura que se toman a ojo **por falta de un solo número**. El ejemplo
+vivo era [SYNC-19](analisis/BACKLOG.md): el rescate desde la nube reventaba a las 300.000 filas y no
+sabíamos si eso eran tres meses o dos años, porque **nadie ha contado nunca cuántas filas al día
+genera un bar**. Se resolvió sin medir —partiéndolo en dos fases, para que el tamaño deje de
+importar—, pero lo que sigue sin saberse es exactamente lo mismo, y lo siguiente que dependa de ese
+número puede no tener una salida tan limpia.
 
 La regla al leer esto: no se trata de montar un observatorio. Se trata de salir del piloto con una
 docena de números que hoy no tenemos.
@@ -45,8 +48,10 @@ docena de números que hoy no tenemos.
 
 ## 2. Crecimiento de datos — el bloque que desbloquea decisiones
 
-**El más importante y el que nadie ha medido.** De aquí salen SYNC-19 (ventana de recuperación),
-DB-14 (retención) y el dimensionado del plan de Turso.
+**El más importante y el que nadie ha medido.** De aquí salen el afinado de la ventana de
+recuperación (SYNC-19: hoy 30 días elegidos a ojo, y si el volumen resulta pequeño se puede subir —o
+bajarlo todo de una vez y quitar la fase 2 entera), DB-14 (retención) y el dimensionado del plan de
+Turso.
 
 ### 2.1 Fotografía semanal por tabla
 
@@ -85,7 +90,7 @@ GROUP BY 1 ORDER BY 1 DESC LIMIT 30;
 
 | Número | Para qué decide |
 |---|---|
-| Filas/día **totales** sumando todas las tablas de negocio | Cuántos meses hasta las 300.000 → SYNC-19 |
+| Filas/día **totales** sumando todas las tablas de negocio | Cuánto histórico cabe en la ventana de recuperación → SYNC-19 |
 | Líneas por comanda (media y P95) | Multiplicador para estimar cualquier volumen |
 | Tickets/día en día flojo, día normal y fin de semana | El pico, que es lo que dimensiona |
 | Crecimiento de `data.db` en MB/mes | Espacio en disco y tamaño de las 7 copias diarias |
@@ -96,7 +101,7 @@ GROUP BY 1 ORDER BY 1 DESC LIMIT 30;
 
 ### 2.3 Tamaño real del volcado
 
-Lo que decide si la fase 1 de [PLAN_SYNC_19](PLAN_SYNC_19_RECUPERACION_COMPLETA.md) cabe holgada:
+Lo que decide si la fase 1 de la recuperación (SYNC-19, [CLAUDE.md §9](../CLAUDE.md)) cabe holgada:
 
 ```bash
 curl -X POST https://tpv-api.altarialights.workers.dev/v1/sync/bootstrap \
@@ -245,7 +250,7 @@ del DO y las reconexiones.
   necesitarlo.
 
 **Mes 1**
-- Filas/día estabilizadas → proyección a 300.000 (**decide SYNC-19**).
+- Filas/día estabilizadas → cuántos días de histórico caben de golpe (**afina la ventana de SYNC-19**).
 - Coste real en Cloudflare y Turso desglosado → extrapolación a 10 y 50 clientes.
 - Multiplicador de filas escritas por operación (§4).
 - ¿Hiberna el DO? (§3.2).
@@ -254,7 +259,7 @@ del DO y las reconexiones.
 **Trimestre**
 - Repetir con estacionalidad distinta.
 - Revisar planes contratados contra el uso real.
-- Recalcular cuándo se cruza el tope de bootstrap.
+- Recalcular si la ventana de recuperación sigue siendo la adecuada.
 
 ---
 
@@ -273,7 +278,7 @@ medirlo todo.
 
 | Necesita | Para decidir |
 |---|---|
-| Filas/día totales | Afinar la ventana de [PLAN_SYNC_19](PLAN_SYNC_19_RECUPERACION_COMPLETA.md) (hoy fijada en 7 días, que **no** bloquea la implementación): subirla si sale barato, o bajarlo todo de una vez y quitar la fase 2 |
+| Filas/día totales | Afinar la ventana de la recuperación (SYNC-19, hoy 30 días en `bootstrap.ventana.ts`): subirla si sale barato, o bajarlo todo de una vez y quitar la fase 2 |
 | Crecimiento de `data.db` | DB-14: si hace falta retención y con qué corte |
 | Multiplicador de filas escritas | Plan de Turso y precio por cliente |
 | Duración del DO | Si SYNC-16 cumple su función o hay que perseguir lo que lo despierta |

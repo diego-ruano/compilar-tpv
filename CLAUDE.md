@@ -525,8 +525,12 @@ catálogo se crearon el primer día.
 | Guardia del seed | `infra-sqlite/src/connection.rs::seed_admin_if_empty` | Con licencia activada, NO siembra el admin |
 | Señal de aprovisionado | `lib.rs::dispositivo_aprovisionado` | `license_state.json` con `tenant_id` |
 | Tercer estado del arranque | `infra-sqlite/src/login.rs::setup_pendiente` | `requiere_recuperacion` = cero usuarios |
-| Volcado | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado actual + `Seq` de la foto |
-| Restauración | `infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción |
+| Volcado (fase 1) | `domains/sync/sync.routes.ts` → `/v1/sync/bootstrap` | Estado **acotado** + `Seq` de la foto |
+| Qué entra en la fase 1 | `domains/sync/bootstrap.ventana.ts` | La clasificación maestro/transaccional y la ventana |
+| Histórico (fase 2) | `sync.routes.ts` → `/v1/sync/historico` | Paginado por `rowid`, sin transacción |
+| Cola del backfill | `_Backfill_Historico` (creada en `infra-sqlite/src/db.rs`) | Progreso reanudable, tabla local |
+| Motor del backfill | `jobs/registro.rs::backfill_historico` + `use_cases/sync.rs::backfill_paso` | Unas páginas cada 5 min |
+| Restauración | `infra-sqlite/src/sync.rs::bootstrap_restaurar` | Reemplaza en una transacción y siembra la cola |
 | Copias locales | `infra-sqlite/src/recovery.rs` + job `backup_local` | `VACUUM INTO` diario, se guardan las 7 últimas |
 | Copia manual y fuera del equipo | `commands/recovery.rs::recovery_create_backup` · `…_export_backup` · `…_import_backup` | Una copia ahora, sacarla a un USB, traerla de vuelta |
 | Panel de copias | `features/configuracion/sections/Conectividad.tsx` | Verlas y sacarlas **antes** de necesitarlas (ahí no se restaura) |
@@ -641,6 +645,65 @@ catálogo se crearon el primer día.
   detrás debe poder recuperarse igual; lo que no entra sale en `tablas_desconocidas`.
 - **Los nombres de tabla y columna del volcado se interpolan en el SQL** (no se pueden enlazar con
   `?`), así que se filtran contra `sqlite_master` y contra `[A-Za-z0-9_]` antes de construir nada.
+
+#### La recuperación va en dos fases, y sólo la primera hace esperar (SYNC-19)
+
+El volcado se construye entero en memoria y un isolate de Workers tiene 128 MB, así que traerlo
+todo de golpe tenía un tope: pasadas 300.000 filas —unos tres meses de uso— el endpoint respondía
+413 y el equipo **no podía recuperarse**, que es lo único que este producto ofrece como salida. El
+arreglo no fue subir el tope, fue partir el problema:
+
+- **Fase 1** (`/v1/sync/bootstrap`): lo imprescindible para volver a vender. Una petición, una
+  transacción de lectura, `Seq` exacto. Al terminar, la reconciliación desbloquea el login.
+- **Fase 2** (`/v1/sync/historico`): el resto del histórico, paginado y en segundo plano, con el bar
+  ya vendiendo. Son datos que ya no cambian, así que no necesitan foto coherente: ni transacción, ni
+  baton, ni snapshot a R2. Y la reanudabilidad sale gratis de la paginación.
+
+Reglas al tocarlo:
+
+- **La clasificación vive en un solo sitio**, `bootstrap.ventana.ts`, y el worker le dice a la Main
+  qué tablas vienen recortadas (`parcial`) y **en qué orden** rellenarlas. Duplicar esa lista en
+  Rust sería tener dos fuentes para la misma decisión.
+- **Los maestros van enteros; los transaccionales, 30 días** (`VENTANA_DIAS`). La ventana es un
+  parámetro: cambiarla es cambiar ese número. Se eligió corta porque el resto llega solo y no tiene
+  sentido hacer esperar al bar por datos que no necesita para abrir la persiana.
+- **La ventana se estira hasta cubrir el periodo de caja abierto.** El arqueo suma los cobros en
+  efectivo *desde el último cierre* (§12), así que un bar que lleve 40 días sin cerrar caja —pasa:
+  el aviso es una notificación, no una acción— perdería diez días de cobros y su primer arqueo tras
+  recuperar saldría descuadrado por un dinero que sí está en el cajón.
+- **Lo que sigue vivo entra entero, caiga donde caiga.** Es la misma regla del último cierre,
+  generalizada: una comanda abierta, una notificación **activa**, un pedido en borrador, un fichaje
+  sin cerrar. El caso silencioso es la notificación: si la Main no la ve, el índice único de dedupe
+  tampoco, así que la vuelve a emitir y el duplicado acaba en cuarentena al replicar.
+- **La unidad es la comanda, no la fila.** Filtrar cada tabla por su propia fecha metería un pago de
+  hace cinco días sin la comanda de hace cuarenta a la que pertenece, y `Pagos.ID_Comanda` es una FK
+  que se comprueba al COMMIT: eso no pierde una fila, **aborta la restauración entera**. Una comanda
+  entra con todo lo suyo —líneas, pagos, detalles del pago, consumos— o no entra.
+- **Una tabla de negocio sin clasificar se trata como maestra** y viaja entera. Es fallar del lado
+  bueno: traer de más se nota en un volcado un poco más gordo, perderla en silencio se descubre el
+  día de la avería. Hay un test que compara la clasificación contra el esquema real de todos modos.
+- **La fase 2 pagina por `rowid`, no por clave primaria.** Era lo intuitivo y no vale: seis de esas
+  tablas tienen PK compuesta, y paginar por tuplas obligaría a mantener a mano un mapa
+  tabla→columnas. El `rowid` es una sola columna, existe en todas y es total.
+- **`INSERT OR IGNORE`, siempre.** La fase 2 nunca pisa una fila que ya esté: lo que está en local
+  llegó por el catch-up y es más nuevo que esta foto del histórico. Y como la fase 2 re-descarga a
+  propósito la ventana que ya trajo la fase 1 —para no tener que empezar por donde acabó la otra—,
+  sin `IGNORE` la primera página de cada tabla reventaría por clave duplicada.
+- ⚠️ **Las escrituras del backfill van por `WriteGuard::raw()`.** Por `execute()` se capturarían en
+  `_Sync_Outbox` y el equipo devolvería a la nube, fila a fila y facturado como escrituras en Turso,
+  el histórico entero que acaba de bajarse de ella. Para no cambiar nada.
+- **El cursor avanza en la misma transacción que inserta.** Una página que falla se repite entera, y
+  apagar el TPV a media descarga no pierde nada.
+- **La reconciliación (§10) se calla mientras el backfill esté incompleto.** Compara columnas de
+  tablas *maestras* —que vienen completas y correctas— contra sumas de tablas *transaccionales* que
+  están a medias, así que sacaría descuadrados prácticamente todos los lotes y todos los clientes
+  con historial. No corrompe nada (el job sólo lee), pero un aluvión de avisos falsos justo después
+  de una avería enseña al usuario a ignorar precisamente la alarma que no debe ignorar.
+- **El backfill no compite con el desbloqueo del login**: su job es `Requiere::MainOperativa`, que
+  ya excluye una reconciliación en curso.
+- **Y se dice que está pasando.** Conectividad enseña el progreso mientras lo haya, y Estadísticas
+  avisa de que un total de rango largo todavía puede crecer: un número que sube solo sin explicación
+  se lee como que el programa suma mal.
 
 ---
 
