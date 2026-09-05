@@ -144,17 +144,21 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(None)
     }
 
-    /// El estado lo decide la Main. Una Handy tiene las escrituras de caja vetadas por el worker
-    /// (`soloLaMainEscribeCaja`), así que preguntar por el estado sólo serviría para dejarle creer
-    /// que puede anular: devolver `None` la manda por el camino de "ese pago no está aquí".
+    /// No hay endpoint para esto, y devuelve `ACTIVO` **a propósito**.
+    ///
+    /// Lo que hace este método es dejar que el caso de uso siga adelante hasta la escritura, que es
+    /// donde el worker dice que no (`caja_solo_en_main`). Devolver `None` sería más "honesto" y
+    /// mucho peor: el caso de uso lo leería como «ese cobro no existe» y el botón no haría nada,
+    /// sin error y sin explicación. Que la Handy no anula ya lo sabe la pantalla —la lista trae el
+    /// estado de cada cobro— y lo vuelve a decir el servidor, que es donde la regla vale.
     async fn estado_pago(&self, _id_pago: &str) -> AppResult<Option<String>> {
-        Ok(None)
+        Ok(Some(tpv_domain::cuentas::ESTADO_ACTIVO.to_string()))
     }
 
-    /// Anular es cosa de la Main. El worker rechaza igual esta escritura desde una Handy; esto es
-    /// la primera de las dos barreras, y la que evita el viaje.
+    /// Anular es cosa de la Main; el worker rechaza esta escritura desde una Handy. Se manda
+    /// igualmente para que el "no" venga de donde el usuario no manda.
     async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool> {
-        let body = json!({ "motivo": args.motivo });
+        let body = json!({ "id_usuario": args.id_usuario, "motivo": args.motivo });
         let id_pago = args.id_pago;
         let _: JsonValue = self
             .client

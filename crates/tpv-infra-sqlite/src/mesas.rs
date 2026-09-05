@@ -1501,14 +1501,12 @@ impl MesasRepository for SqliteMesasRepository {
         let g = self.db.write().await;
         let db = &g;
 
+        // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07):
+        // `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, así que borrarla se llevaría por delante
+        // la fila del cobro anulado — que es justo la prueba que ese cambio conserva.
         let paid = select_one_i64(
             db,
-            r#"
-            SELECT 1
-            FROM Detalle_Comanda dc
-            JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
-            WHERE dc.ID_Comanda = ?1 LIMIT 1;
-            "#,
+            "SELECT 1 FROM Pagos WHERE ID_Comanda = ?1 LIMIT 1;",
             vec![Value::Text(id_comanda.to_string())],
         )
         .await?
