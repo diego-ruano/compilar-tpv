@@ -407,6 +407,37 @@ pub(crate) struct AppState {
     /// Espejo SÍNCRONO del modo para el firmante de telemetría (que corre en otro hilo sin async).
     /// Se mantiene en paralelo con `mode` en cada cambio de modo.
     mode_sync: Arc<std::sync::RwLock<Option<DeviceMode>>>,
+    /// SEC-01: quién ha iniciado sesión, **según el backend**. `None` mientras no se haya pasado
+    /// por `login_user`. No se persiste: al arrancar se pide PIN, y está bien así.
+    sesion: Arc<Mutex<Option<Sesion>>>,
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Sesión (SEC-01)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Quién está usando la app, establecido por `login_user` con lo que devuelve el repositorio
+/// (SQLite en la Main, worker en la Handy). **Nunca a partir de un argumento del frontend**:
+/// quien puede invocar un comando puede escribir lo que quiera en sus args, así que un rol que
+/// llega por ahí no es una comprobación, es una sugerencia.
+#[derive(Clone, Debug)]
+pub(crate) struct Sesion {
+    pub id_usuario: String,
+    /// Lo consumirá `Anulado_Por` cuando llegue CUENTA-07; hoy nadie lo lee.
+    #[allow(dead_code)]
+    pub id_trabajador: Option<String>,
+    pub rol: String,
+    /// Diagnóstico: desde cuándo está abierta la sesión que autorizó algo.
+    #[allow(dead_code)]
+    pub iniciada_en: i64,
+}
+
+/// El rol privilegiado. Está aquí y no repartido por los comandos para que renombrarlo sea un
+/// sitio, no una docena.
+pub(crate) const ADMIN: &str = "Administrador";
+
+pub(crate) fn permiso_denegado(detalle: impl Into<String>) -> AppErrorDto {
+    AppErrorDto::new(tpv_contracts::errors::ErrorCode::PermisoDenegado, detalle)
 }
 
 /// Conecta el callback local del outbox con el ciclo WebSocket. Se usa en los tres puntos donde
@@ -474,6 +505,63 @@ macro_rules! repo_accessor {
 }
 
 impl AppState {
+    /* ── El gate (SEC-01) ─────────────────────────────────────────────────────────────────
+       Dos helpers, no una comprobación copiada en cada comando. Devuelven la sesión porque
+       quien pregunta "¿puede?" casi siempre necesita después "¿quién?": ese `id_usuario` es
+       el que va al caso de uso, en vez del que mande el frontend. */
+
+    /// La sesión actual, o `permiso_denegado` si no hay ninguna. Para lo que escribe algo
+    /// **atribuible** pero que hace cualquiera (abrir el cajón para dar cambio).
+    pub(crate) async fn sesion(&self) -> Result<Sesion, AppErrorDto> {
+        self.sesion
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| permiso_denegado("Inicia sesión para hacer esto"))
+    }
+
+    /// La sesión actual si su rol está entre los permitidos; si no, error.
+    pub(crate) async fn exigir_rol(&self, permitidos: &[&str]) -> Result<Sesion, AppErrorDto> {
+        let s = self.sesion().await?;
+        if permitidos.iter().any(|r| *r == s.rol) {
+            Ok(s)
+        } else {
+            Err(permiso_denegado(format!(
+                "Esta acción es de {}",
+                permitidos.join(" o ")
+            )))
+        }
+    }
+
+    /// Como `exigir_rol`, pero **sin sesión deja pasar**.
+    ///
+    /// Es para los comandos que se alcanzan desde las pantallas ANTERIORES al login —el
+    /// selector de modo, la activación de licencia— y también desde Configuración con la app
+    /// ya abierta. Exigir sesión a secas dejaría un equipo recién instalado sin poder
+    /// arrancar jamás (no hay con quién iniciarla); no comprobar nada dejaría que un camarero
+    /// desvinculase el equipo escribiendo la URL. Esto cierra el segundo camino sin tocar el
+    /// primero.
+    pub(crate) async fn exigir_rol_si_hay_sesion(
+        &self,
+        permitidos: &[&str],
+    ) -> Result<(), AppErrorDto> {
+        if self.sesion.lock().await.is_none() {
+            return Ok(());
+        }
+        self.exigir_rol(permitidos).await.map(|_| ())
+    }
+
+    /// Establece la sesión. Sólo la llama `login_user`.
+    pub(crate) async fn iniciar_sesion(&self, s: Sesion) {
+        *self.sesion.lock().await = Some(s);
+    }
+
+    /// La limpia. La llama el comando `logout` — y con él el cierre por inactividad y el
+    /// arranque del frontend, que barre una sesión que hubiera quedado colgada tras un F5.
+    pub(crate) async fn cerrar_sesion(&self) {
+        *self.sesion.lock().await = None;
+    }
+
     repo_accessor!(
         clientes_repo,
         ClientesRepository,
@@ -1822,6 +1910,8 @@ pub fn run() {
                 cloud: Arc::new(Mutex::new(cloud_opt)),
                 mode: Arc::new(Mutex::new(mode)),
                 mode_sync,
+                // Se arranca SIN sesión: la app siempre pide PIN al abrirse.
+                sesion: Arc::new(Mutex::new(None)),
             });
 
             // Tareas periódicas de fondo (licencia, avisos, actualizaciones): las declara
@@ -1864,6 +1954,7 @@ pub fn run() {
             commands::login::list_login_users,
             commands::login::setup_pendiente,
             commands::login::login_user,
+            commands::login::logout,
             commands::login::hash_password,
             commands::login::get_today_punch_status,
             commands::login::punch,

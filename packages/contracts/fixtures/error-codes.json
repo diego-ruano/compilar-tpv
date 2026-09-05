@@ -20,7 +20,8 @@
     { "wire": "tenant_db_not_provisioned", "code": "tenant_db_not_provisioned", "porque": "el servidor confirma que el tenant no tiene base de datos y permite ofrecer una inicialización vacía" },
     { "wire": "bootstrap_demasiado_grande", "code": "bootstrap_too_large", "porque": "el volcado completo excede el límite seguro del worker" },
     { "wire": "migration_altered", "code": "tenant_migration_altered", "porque": "una migración ya aplicada cambió de contenido" },
-    { "wire": "backup_corrupt", "code": "backup_corrupt", "porque": "la copia local no supera la validación SQLite" }
+    { "wire": "backup_corrupt", "code": "backup_corrupt", "porque": "la copia local no supera la validación SQLite" },
+    { "wire": "permiso_denegado", "code": "permiso_denegado", "porque": "SEC-01: sin sesión o con un rol que no basta. Hoy sólo lo emite Rust, pero el string es el mismo por si el worker llega a rechazar por rol de usuario" }
   ],
 
   "normalizacion": [
@@ -61,6 +62,7 @@
     "tenant_db_not_provisioned",
     "bootstrap_too_large",
     "tenant_migration_altered",
-    "backup_corrupt"
+    "backup_corrupt",
+    "permiso_denegado"
   ]
 }

@@ -232,7 +232,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado";
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 

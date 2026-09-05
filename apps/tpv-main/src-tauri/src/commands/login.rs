@@ -9,7 +9,7 @@ use tpv_contracts::login::{
     SetTurnoPartidoInput, SetupPendiente, UserListItem,
 };
 
-use crate::AppState;
+use crate::{AppState, Sesion};
 use tpv_contracts::errors::AppErrorDto;
 
 /// Hash de un PIN. Síncrono y sin estado (lo usa también el arranque en main.rs).
@@ -32,6 +32,11 @@ pub async fn setup_pendiente(state: State<'_, AppState>) -> Result<SetupPendient
     Ok(uc::setup_pendiente(repo.as_ref()).await?)
 }
 
+/// Valida el PIN y **establece la sesión del backend** (SEC-01).
+///
+/// El rol que se guarda es el que devuelve el repositorio —SQLite en la Main, el worker en la
+/// Handy—, nunca uno que venga en `args`: es todo el sentido del gate. Los dos modos pasan por
+/// aquí, así que un comando gateado funciona igual en la Handy que en la Main.
 #[tauri::command]
 pub async fn login_user(
     state: State<'_, AppState>,
@@ -39,7 +44,33 @@ pub async fn login_user(
 ) -> Result<LoginOk, AppErrorDto> {
     let repo = state.login_repo().await?;
     let notifier = state.notifier().await.ok();
-    Ok(uc::login_user(repo.as_ref(), notifier.as_deref(), args).await?)
+    let ok = uc::login_user(repo.as_ref(), notifier.as_deref(), args).await?;
+
+    state
+        .iniciar_sesion(Sesion {
+            id_usuario: ok.id_usuario.clone(),
+            id_trabajador: ok.id_trabajador.clone(),
+            rol: ok.rol.clone(),
+            iniciada_en: chrono::Utc::now().timestamp_millis(),
+        })
+        .await;
+
+    Ok(ok)
+}
+
+/// Cierra la sesión del backend.
+///
+/// Lo llaman `useAuth.logout()` (y con él el cierre por inactividad) y el arranque del
+/// frontend. Esto último no es cosmético: si el webview se recarga (F5), el store de Zustand se
+/// vacía y la UI vuelve al login, pero la sesión de aquí seguiría puesta — quedaría una sesión
+/// de administrador viva detrás de una pantalla de login.
+///
+/// No falla nunca ni exige haber iniciado sesión: cerrar lo que ya está cerrado es un no-op, y
+/// un error aquí sólo serviría para que el frontend no se atreviera a llamarlo.
+#[tauri::command]
+pub async fn logout(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
+    state.cerrar_sesion().await;
+    Ok(())
 }
 
 #[tauri::command]

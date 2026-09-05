@@ -43,6 +43,7 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	migration_altered: "tenant_migration_altered",
 	tenant_migration_altered: "tenant_migration_altered",
 	backup_corrupt: "backup_corrupt",
+	permiso_denegado: "permiso_denegado",
 	validation_error: "validation",
 	not_found: "not_found",
 };

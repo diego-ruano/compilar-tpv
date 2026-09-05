@@ -74,6 +74,10 @@ pub enum ErrorCode {
     TenantMigrationAltered,
     /// El fichero elegido no es una copia SQLite íntegra y utilizable.
     BackupCorrupt,
+    /// Quien ha invocado el comando no tiene sesión, o su rol no basta para lo que pide
+    /// (SEC-01). La UI ramifica por él para llevar al login en vez de enseñar un fallo
+    /// genérico: "no puedes" y "ha fallado" piden cosas distintas de quien está delante.
+    PermisoDenegado,
 }
 
 impl ErrorCode {
@@ -101,6 +105,7 @@ impl ErrorCode {
                 "La versión de la base de datos de la nube es incompatible"
             }
             ErrorCode::BackupCorrupt => "La copia de seguridad local está dañada",
+            ErrorCode::PermisoDenegado => "No tienes permiso para hacer esto",
         }
     }
 
@@ -125,6 +130,7 @@ impl ErrorCode {
             ErrorCode::BootstrapTooLarge => "bootstrap_too_large",
             ErrorCode::TenantMigrationAltered => "tenant_migration_altered",
             ErrorCode::BackupCorrupt => "backup_corrupt",
+            ErrorCode::PermisoDenegado => "permiso_denegado",
         }
     }
 
@@ -156,6 +162,7 @@ impl ErrorCode {
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,
             ErrorCode::BackupCorrupt,
+            ErrorCode::PermisoDenegado,
         ]
         .into_iter()
         .find(|c| c.wire() == s)
@@ -192,6 +199,7 @@ impl ErrorCode {
             "bootstrap_demasiado_grande" | "bootstrap_too_large" => ErrorCode::BootstrapTooLarge,
             "migration_altered" | "tenant_migration_altered" => ErrorCode::TenantMigrationAltered,
             "backup_corrupt" => ErrorCode::BackupCorrupt,
+            "permiso_denegado" => ErrorCode::PermisoDenegado,
             _ => ErrorCode::External,
         }
     }
@@ -405,6 +413,7 @@ mod tests {
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,
             ErrorCode::BackupCorrupt,
+            ErrorCode::PermisoDenegado,
         ];
 
         let f = fixture();
@@ -440,6 +449,7 @@ mod tests {
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,
             ErrorCode::BackupCorrupt,
+            ErrorCode::PermisoDenegado,
         ];
 
         for code in todos {
