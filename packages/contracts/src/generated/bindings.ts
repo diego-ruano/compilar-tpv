@@ -7,6 +7,17 @@ export type AlergenoInvDto = { ID_Alergeno: string, Nombre: string, Nombre_Image
 export type AlergenoMiniDto = { ID_Alergeno: string, Nombre: string, Ruta_Imagen: string | null, };
 
 /**
+ * Anular un cobro (CUENTA-07). **No lleva `id_usuario`**: quién anula sale de la sesión del
+ * backend (SEC-01). Una anulación firmada con el nombre que le pase la pantalla es una auditoría
+ * que da confianza sin merecerla.
+ */
+export type AnularPagoInput = { id_pago: string, 
+/**
+ * Obligatorio. Quién y cuándo los pone el sistema; el porqué sólo puede ponerlo quien anula.
+ */
+motivo?: string, };
+
+/**
  * Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).
  */
 export type ApiSignedHeaders = { authorization: string, xDeviceTs: string, xDeviceSig: string, };
@@ -209,8 +220,6 @@ page_size?: number, };
 
 export type DeleteGastoInput = { id_gasto: string, };
 
-export type DeletePagoInput = { id_pago: string, };
-
 /**
  * Una moneda o billete del recuento.
  */
@@ -224,8 +233,21 @@ export type DeviceSignB64Args = { payload: string, };
 
 /**
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+ *
+ * Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
+ * descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo
+ * que no hacen es contar en los totales de cabecera (ver `ResumenCajaDto`).
  */
-export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, };
+export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, 
+/**
+ * `ACTIVO` o `ANULADO`.
+ */
+estado: string, anulado_en?: string, 
+/**
+ * Nombre de quien anuló, resuelto al leer (la fila sólo guarda el id). Es el dato por el que
+ * se pregunta cuando falta dinero, así que no puede quedarse en un UUID.
+ */
+anulado_por?: string, motivo_anulacion?: string, };
 
 export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: string, notas?: string, lineas: Array<LineaEmailInput>, };
 
@@ -542,7 +564,13 @@ comandas_abiertas: number,
 /**
  * A partir de cuánto descuadre hay que escribir un motivo.
  */
-umbral_descuadre: number, };
+umbral_descuadre: number, 
+/**
+ * Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los
+ * cobros activos, como siempre): es una línea informativa. Y es justo el dato que no existía
+ * antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
+ */
+anulaciones: number, anulaciones_importe: number, };
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
@@ -659,7 +687,13 @@ export type ReservasStatsResponse = { total_reservas: number, cancelaciones: num
  * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
  * rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
  */
-export type ResumenCajaDto = { total_entradas: number, total_salidas: number, total_efectivo: number, total_tarjeta: number, count_entradas: number, count_salidas: number, };
+export type ResumenCajaDto = { total_entradas: number, total_salidas: number, total_efectivo: number, total_tarjeta: number, count_entradas: number, count_salidas: number, 
+/**
+ * Cobros anulados del rango. **No entran en los totales de arriba** y por eso viajan aparte:
+ * un cobro anulado no es una venta, pero cuántos hay y por cuánto importe es exactamente el
+ * dato que no existía y que hace visible la sisa (CUENTA-07).
+ */
+count_anuladas: number, total_anulado: number, };
 
 export type RolRow = { ID_Rol: string, Nombre_Rol: string, };
 
@@ -771,7 +805,12 @@ numero_ticket: string, metodo_pago: string,
 /**
  * `Mesa 5` / `Barra`.
  */
-origen: string, lineas: Array<LineaTicketDto>, };
+origen: string, lineas: Array<LineaTicketDto>, 
+/**
+ * El cobro está anulado: la copia sale marcada como tal. Reimprimirlo sigue permitido —es la
+ * prueba de qué contenía— pero un papel que no lo diga circularía como un cobro válido.
+ */
+anulado: boolean, };
 
 export type TicketSettings = { show_logo: boolean, show_business_name: boolean, show_address: boolean, show_phone: boolean, show_cif: boolean, show_date_time: boolean, show_line_items: boolean, show_base_and_iva: boolean, show_total: boolean, show_footer_message: boolean, paper_width_mm: number, 
 /**

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value as JsonValue};
 
 use tpv_application::error::AppResult;
-use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
+use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
 use tpv_contracts::cuentas::{EntradaDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto};
 use tpv_domain::cuentas::{GastoData, PagoData};
 
@@ -75,7 +75,12 @@ impl CuentasRepository for HttpCuentasRepository {
         self.client.get_query("/v1/cuentas/resumen", &params).await
     }
 
-    async fn crear_gasto(&self, id: Option<String>, gasto: GastoData) -> AppResult<bool> {
+    async fn crear_gasto(
+        &self,
+        id: Option<String>,
+        gasto: GastoData,
+        _id_usuario: Option<&str>,
+    ) -> AppResult<bool> {
         let id_gasto = id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let body = json!({
             "id_gasto": id_gasto,
@@ -104,7 +109,7 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(true)
     }
 
-    async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool> {
+    async fn eliminar_gasto(&self, id_gasto: &str, _id_usuario: Option<&str>) -> AppResult<bool> {
         let _: JsonValue = self
             .client
             .delete_json(&format!("/v1/cuentas/gastos/{id_gasto}"))
@@ -139,10 +144,21 @@ impl CuentasRepository for HttpCuentasRepository {
         Ok(None)
     }
 
-    async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
+    /// El estado lo decide la Main. Una Handy tiene las escrituras de caja vetadas por el worker
+    /// (`soloLaMainEscribeCaja`), así que preguntar por el estado sólo serviría para dejarle creer
+    /// que puede anular: devolver `None` la manda por el camino de "ese pago no está aquí".
+    async fn estado_pago(&self, _id_pago: &str) -> AppResult<Option<String>> {
+        Ok(None)
+    }
+
+    /// Anular es cosa de la Main. El worker rechaza igual esta escritura desde una Handy; esto es
+    /// la primera de las dos barreras, y la que evita el viaje.
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool> {
+        let body = json!({ "motivo": args.motivo });
+        let id_pago = args.id_pago;
         let _: JsonValue = self
             .client
-            .delete_json(&format!("/v1/cuentas/pagos/{id_pago}"))
+            .post_json(&format!("/v1/cuentas/pagos/{id_pago}/anular"), &body)
             .await?;
         Ok(true)
     }

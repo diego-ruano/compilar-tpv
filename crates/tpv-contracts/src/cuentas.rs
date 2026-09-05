@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 /// Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
+///
+/// Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
+/// descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo
+/// que no hacen es contar en los totales de cabecera (ver `ResumenCajaDto`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct EntradaDto {
@@ -13,6 +17,16 @@ pub struct EntradaDto {
     pub cliente: String,
     pub metodo: String,
     pub importe: f64,
+    /// `ACTIVO` o `ANULADO`.
+    pub estado: String,
+    #[ts(optional)]
+    pub anulado_en: Option<String>,
+    /// Nombre de quien anuló, resuelto al leer (la fila sólo guarda el id). Es el dato por el que
+    /// se pregunta cuando falta dinero, así que no puede quedarse en un UUID.
+    #[ts(optional)]
+    pub anulado_por: Option<String>,
+    #[ts(optional)]
+    pub motivo_anulacion: Option<String>,
 }
 
 /// Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
@@ -43,6 +57,9 @@ pub struct TicketReimpresionDto {
     /// `Mesa 5` / `Barra`.
     pub origen: String,
     pub lineas: Vec<LineaTicketDto>,
+    /// El cobro está anulado: la copia sale marcada como tal. Reimprimirlo sigue permitido —es la
+    /// prueba de qué contenía— pero un papel que no lo diga circularía como un cobro válido.
+    pub anulado: bool,
 }
 
 /// Fila de salidas (gastos).
@@ -95,6 +112,12 @@ pub struct ResumenCajaDto {
     pub count_entradas: i64,
     #[ts(type = "number")]
     pub count_salidas: i64,
+    /// Cobros anulados del rango. **No entran en los totales de arriba** y por eso viajan aparte:
+    /// un cobro anulado no es una venta, pero cuántos hay y por cuánto importe es exactamente el
+    /// dato que no existía y que hace visible la sisa (CUENTA-07).
+    #[ts(type = "number")]
+    pub count_anuladas: i64,
+    pub total_anulado: f64,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -140,8 +163,15 @@ pub struct UpdatePagoInput {
     pub importe: f64,
 }
 
+/// Anular un cobro (CUENTA-07). **No lleva `id_usuario`**: quién anula sale de la sesión del
+/// backend (SEC-01). Una anulación firmada con el nombre que le pase la pantalla es una auditoría
+/// que da confianza sin merecerla.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct DeletePagoInput {
+pub struct AnularPagoInput {
     pub id_pago: String,
+    /// Obligatorio. Quién y cuándo los pone el sistema; el porqué sólo puede ponerlo quien anula.
+    #[serde(default)]
+    #[ts(optional)]
+    pub motivo: Option<String>,
 }

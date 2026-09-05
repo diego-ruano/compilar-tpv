@@ -2050,7 +2050,7 @@ pub fn run() {
             commands::cuentas::cuentas_update_gasto,
             commands::cuentas::cuentas_delete_gasto,
             commands::cuentas::cuentas_update_pago,
-            commands::cuentas::cuentas_delete_pago,
+            commands::cuentas::cuentas_anular_pago,
             commands::cierre_caja::cierre_preparar,
             commands::cierre_caja::cierre_confirmar,
             commands::cierre_caja::cierre_listar,

@@ -78,6 +78,12 @@ pub struct PreparacionCierreDto {
     pub comandas_abiertas: i64,
     /// A partir de cuánto descuadre hay que escribir un motivo.
     pub umbral_descuadre: f64,
+    /// Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los
+    /// cobros activos, como siempre): es una línea informativa. Y es justo el dato que no existía
+    /// antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
+    #[ts(type = "number")]
+    pub anulaciones: i64,
+    pub anulaciones_importe: f64,
 }
 
 /* =========================================================

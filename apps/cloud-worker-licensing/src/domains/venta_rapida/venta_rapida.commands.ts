@@ -182,7 +182,7 @@ export function removeLastUnpaidLinea(input: RemoveLastLineaInput): BuiltCommand
 							WHERE ID_Detalle = (
 								SELECT dc.ID_Detalle
 								FROM Detalle_Comanda dc
-								LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+								LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 								WHERE dc.ID_Comanda = ?1
 									AND dc.ID_Producto = ?2
 									AND pd.ID_Detalle IS NULL
@@ -214,7 +214,7 @@ export function deleteLineaIfUnpaid(input: DeleteLineaInput): BuiltCommand {
 							WHERE ID_Detalle = ?1
 								AND ID_Comanda = ?2
 								AND NOT EXISTS (
-									SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = ?1
+									SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = ?1
 								);
 						`,
 						args: [input.id_detalle, input.id_comanda],
@@ -301,7 +301,7 @@ export function cobrarFraccionado(
 				WHERE dc.ID_Comanda = ?2
 					AND dc.ID_Detalle = ?3
 					AND NOT EXISTS (
-						SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+						SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 					);
 			`,
 			args: [plan.id_pago, input.id_comanda, det],
@@ -385,7 +385,7 @@ export function cobrarFraccionado(
 				AND NOT EXISTS (
 					SELECT 1
 					FROM Detalle_Comanda dc
-					LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+					LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 					WHERE dc.ID_Comanda = ?1
 						AND pd.ID_Detalle IS NULL
 				);

@@ -2,6 +2,7 @@
 
 import type { ApplyCommand } from "../../lib/hub";
 import type {
+	AnularPagoInput,
 	CreateGastoInput,
 	UpdateGastoInput,
 	UpdatePagoInput,
@@ -134,12 +135,22 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 	};
 }
 
-// Borra un pago revirtiendo por completo el cobro (CUENTA-01): devuelve stock (Lote_Consumos),
-// resta el gasto del cliente y reabre la comanda si quedan detalles pendientes. Paridad con
-// `SqliteCuentasRepository::eliminar_pago`. Todo en una transacción del DO.
-export function deletePago(idPago: string): BuiltCommand {
+// Anula un pago SIN borrarlo (CUENTA-07): devuelve el stock (por lote y suelto), resta el gasto
+// del cliente, marca la fila de `Pagos` y deja el movimiento en `Movimientos_Caja`. Las líneas y
+// sus `Pago_Detalles` se **conservan** (Opción A): son lo que permite reimprimir el ticket anulado,
+// y lo que devuelve las consumiciones a la mesa como pendientes — «cobrada» pasa a leerse por la
+// vista `v_lineas_cobradas`, que sólo mira pagos activos. Paridad con
+// `SqliteCuentasRepository::anular_pago`. Todo en una transacción del DO.
+export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand {
+	const motivo = (input.motivo ?? "").trim();
+	const idUsuario = input.id_usuario;
 	const steps = [
-		// 1) Devolver el stock consumido por los detalles del pago y borrar esos Lote_Consumos.
+		// El id del movimiento de caja se genera ANTES del INSERT, nunca dentro de la sentencia:
+		// una TEXT PRIMARY KEY calculada en SQL se re-evaluaría al replicar y la nube y la Main
+		// acabarían con dos filas distintas para el mismo hecho.
+		idStep(null),
+		// 1) Devolver el stock consumido por los detalles del pago. La traza (`Lote_Consumos`) se
+		//    CONSERVA: ya no es ella la que impide el doble abono, sino el `Estado` del pago.
 		{
 			kind: "execute",
 			sql: `
@@ -155,17 +166,12 @@ export function deletePago(idPago: string): BuiltCommand {
 				    FROM Lote_Consumos lc
 				    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
 				    WHERE pd.ID_Pago = ?1
-				);
+				)
+				  AND (SELECT COALESCE(Estado,'ACTIVO') FROM Pagos WHERE ID_Pago = ?1) = 'ACTIVO';
 			`,
 			args: [idPago],
 		},
-		{
-			kind: "execute",
-			sql: "DELETE FROM Lote_Consumos WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);",
-			args: [idPago],
-		},
-		// 1-bis) Y devolver el stock SUELTO que consumió el pago (lo que los lotes no cubrieron,
-		//    VR-04). Mismo trato que los lotes: se suma de vuelta y se borra la traza.
+		// 1-bis) Y el stock SUELTO que consumió el pago (lo que los lotes no cubrieron, VR-04).
 		{
 			kind: "execute",
 			sql: `
@@ -181,13 +187,9 @@ export function deletePago(idPago: string): BuiltCommand {
 				    FROM Suelto_Consumos sc
 				    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
 				    WHERE pd.ID_Pago = ?1
-				);
+				)
+				  AND (SELECT COALESCE(Estado,'ACTIVO') FROM Pagos WHERE ID_Pago = ?1) = 'ACTIVO';
 			`,
-			args: [idPago],
-		},
-		{
-			kind: "execute",
-			sql: "DELETE FROM Suelto_Consumos WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);",
 			args: [idPago],
 		},
 		// 2) Restar el gasto del cliente ligado a la comanda del pago (sin bajar de 0).
@@ -196,7 +198,7 @@ export function deletePago(idPago: string): BuiltCommand {
 			sql: `
 				UPDATE Clientes
 				SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - (
-				    SELECT IFNULL(p.Importe_Total,0) FROM Pagos p WHERE p.ID_Pago = ?1
+				    SELECT ROUND(IFNULL(p.Importe_Total,0), 2) FROM Pagos p WHERE p.ID_Pago = ?1
 				))
 				WHERE ID_Cliente = (
 				    SELECT r.ID_Cliente
@@ -204,34 +206,42 @@ export function deletePago(idPago: string): BuiltCommand {
 				    JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 				    JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
 				    WHERE p.ID_Pago = ?1
+				      AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 				);
 			`,
 			args: [idPago],
 		},
-		// 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado: moverlas a
-		//    otra comanda crearia un ticket fantasma y permitiria cobrarlas una segunda vez. El
-		//    TenantHub ejecuta el batch con `defer_foreign_keys`, por lo que Pago_Detalles puede
-		//    borrarse en el paso siguiente sin dejar referencias al confirmar.
+		// 3) El movimiento en el historial de caja. Va ANTES de marcar el pago porque lee su
+		//    importe y su método de la fila todavía activa.
 		{
 			kind: "execute",
 			sql: `
-				DELETE FROM Detalle_Comanda
-				WHERE ID_Detalle IN (
-				    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
-				);
+				INSERT INTO Movimientos_Caja (
+				  ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Usuario, Importe, Metodo_Pago, Motivo
+				)
+				SELECT ?2, datetime('now','localtime'), 'ANULACION', p.ID_Pago, ?3,
+				       ABS(ROUND(IFNULL(p.Importe_Total,0), 2)), NULLIF(COALESCE(p.Metodo_Pago,''),''), ?4
+				FROM Pagos p
+				WHERE p.ID_Pago = ?1 AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';
 			`,
-			args: [idPago],
+			args: [idPago, REF_ID, idUsuario, motivo],
 		},
-		// 5) Liberar los detalles del pago (deben quedar sin Pago_Detalle para contar como pendientes).
+		// 4) Marcar el pago. El `Estado <> 'ANULADO'` deja el UPDATE idempotente, y es el guardia
+		//    que impide abonar el stock dos veces.
 		{
 			kind: "execute",
-			sql: "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
-			args: [idPago],
+			sql: `
+				UPDATE Pagos
+				SET Estado = 'ANULADO',
+				    Anulado_En = datetime('now','localtime'),
+				    Anulado_Por = ?2,
+				    Motivo_Anulacion = ?3
+				WHERE ID_Pago = ?1 AND COALESCE(Estado,'ACTIVO') <> 'ANULADO';
+			`,
+			args: [idPago, idUsuario, motivo],
 		},
-		// 6) Recalcular la comanda original. Solo se reabre si conserva otras lineas pendientes y
-		//    no existe otra comanda abierta para la mesa.
-		//    Se ejecuta con `Pagos` aún presente (para resolver la comanda) pero con los
-		//    Pago_Detalles ya borrados (para que los detalles liberados cuenten como pendientes).
+		// 5) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las cubría
+		//    ya no está activo—, así que se reabre si no hay otra comanda abierta para la mesa.
 		{
 			kind: "execute",
 			sql: `
@@ -240,7 +250,7 @@ export function deletePago(idPago: string): BuiltCommand {
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				        LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
 				      )
 				       AND NOT EXISTS (
@@ -254,7 +264,7 @@ export function deletePago(idPago: string): BuiltCommand {
 				      WHEN ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1)
 				       AND EXISTS (
 				        SELECT 1 FROM Detalle_Comanda dc
-				        LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				        LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				        WHERE dc.ID_Comanda = Comandas.ID_Comanda AND pd.ID_Detalle IS NULL
 				      )
 				       AND NOT EXISTS (
@@ -272,16 +282,10 @@ export function deletePago(idPago: string): BuiltCommand {
 			`,
 			args: [idPago],
 		},
-		// 7) Borrar el pago.
-		{
-			kind: "execute",
-			sql: "DELETE FROM Pagos WHERE ID_Pago = ?1;",
-			args: [idPago],
-		},
 	];
 	return {
-		commandName: "cuentas_delete_pago",
+		commandName: "cuentas_anular_pago",
 		command: { type: "tenantDb.transaction", payload: { steps } },
-		cloudPayload: { id_pago: idPago },
+		cloudPayload: { id_pago: idPago, id_usuario: idUsuario, motivo },
 	};
 }

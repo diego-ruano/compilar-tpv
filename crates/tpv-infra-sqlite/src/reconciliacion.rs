@@ -38,8 +38,17 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 /// El disponible que DEBERÍA tener cada lote según su historial.
 ///
 /// `SUM(movimientos) - SUM(consumos)`: el alta y los ajustes suman (o restan) y cada línea de
-/// comanda cobrada resta lo suyo. Al anular un pago, la fila de `Lote_Consumos` se borra, así que
-/// la resta desaparece sola y no hace falta modelar devoluciones aparte.
+/// comanda cobrada resta lo suyo.
+///
+/// ⚠️ **Un consumo deja de contar cuando TODOS los pagos que cubrían su línea están anulados.**
+/// Antes esto no hacía falta porque anular borraba la fila de `Lote_Consumos` y la resta
+/// desaparecía sola. Desde CUENTA-07 el pago se conserva y la traza también —es lo que da
+/// trazabilidad por lote al ticket anulado—, así que sin este filtro el stock habría vuelto al
+/// lote pero la resta seguiría contando: «faltan N unidades», cada día, para siempre.
+///
+/// La condición se escribe «tiene un pago activo **o** no tiene ninguno» y no simplemente «tiene un
+/// pago activo» porque los dos extremos son consumos vigentes: uno que nunca llegó a ligarse a un
+/// cobro sigue habiendo salido del lote, y una línea anulada y vuelta a cobrar también.
 const SQL_LOTES: &str = r#"
     SELECT id_lote, codigo_lote, producto, guardado, calculado
     FROM (
@@ -52,7 +61,17 @@ const SQL_LOTES: &str = r#"
                 SELECT SUM(m.Delta) FROM Movimientos_Stock m WHERE m.ID_Lote = l.ID_Lote
             ), 0)
             - COALESCE((
-                SELECT SUM(c.Cantidad) FROM Lote_Consumos c WHERE c.ID_Lote = l.ID_Lote
+                SELECT SUM(c.Cantidad)
+                FROM Lote_Consumos c
+                WHERE c.ID_Lote = l.ID_Lote
+                  AND (
+                    EXISTS (
+                      SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = c.ID_Detalle
+                    )
+                    OR NOT EXISTS (
+                      SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = c.ID_Detalle
+                    )
+                  )
             ), 0)                         AS calculado
         FROM Lotes_Producto l
         LEFT JOIN Productos p ON p.ID_Producto = l.ID_Producto
@@ -62,9 +81,12 @@ const SQL_LOTES: &str = r#"
     LIMIT ?2;
 "#;
 
-/// El gasto que DEBERÍA tener cada cliente: la suma de los pagos de las comandas que cuelgan de
-/// sus reservas, que es exactamente el camino por el que se acredita al cobrar
+/// El gasto que DEBERÍA tener cada cliente: la suma de los pagos **activos** de las comandas que
+/// cuelgan de sus reservas, que es exactamente el camino por el que se acredita al cobrar
 /// (`sumar_gasto_cliente_por_comanda`). Redondeado a 2 decimales, como los incrementos.
+///
+/// El filtro por estado es obligatorio: al anular se decrementa `Total_Gastado`, así que una suma
+/// que siguiera incluyendo el pago anulado sacaría al cliente como descuadrado para siempre.
 const SQL_CLIENTES: &str = r#"
     SELECT id_cliente, nombre, guardado, calculado
     FROM (
@@ -78,6 +100,7 @@ const SQL_CLIENTES: &str = r#"
                 JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
                 JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
                 WHERE r.ID_Cliente = c.ID_Cliente
+                  AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
             ), 0), 2)                  AS calculado
         FROM Clientes c
     )
@@ -86,8 +109,13 @@ const SQL_CLIENTES: &str = r#"
     LIMIT ?2;
 "#;
 
-/// El gasto de UN cliente, por el mismo camino que `SQL_CLIENTES`: los pagos de las comandas
-/// que cuelgan de sus reservas.
+/// El gasto de UN cliente, por el mismo camino que `SQL_CLIENTES`: los pagos ACTIVOS de las
+/// comandas que cuelgan de sus reservas.
+///
+/// ⚠️ Ésta es la única de las tres que **escribe** (`recalcular_gasto` hace `UPDATE Clientes` por
+/// `execute`, así que además sale por el outbox a la nube). Sin el filtro por estado, un usuario
+/// que viera el aviso de descuadre y pulsara «recalcular» grabaría un total que incluye el pago
+/// anulado: el aviso falso induciría a la acción que corrompe el dato, en local y en la nube.
 const SQL_GASTO_DE_UNO: &str = r#"
     SELECT ROUND(COALESCE((
         SELECT SUM(pg.Importe_Total)
@@ -95,6 +123,7 @@ const SQL_GASTO_DE_UNO: &str = r#"
         JOIN Comandas co ON co.ID_Comanda = pg.ID_Comanda
         JOIN Reservas r  ON r.ID_Reserva  = co.ID_Reserva
         WHERE r.ID_Cliente = c.ID_Cliente
+          AND COALESCE(pg.Estado,'ACTIVO') = 'ACTIVO'
     ), 0), 2)
     FROM Clientes c
     WHERE c.ID_Cliente = ?1
@@ -341,5 +370,110 @@ mod tests {
 
         let repo = SqliteReconciliacionRepository::new(db);
         assert_eq!(repo.recalcular_gasto("fantasma").await.unwrap(), None);
+    }
+
+    /* ── Anulaciones (CUENTA-07) ───────────────────────────────────────────────────────── */
+
+    /// Estado tras anular un cobro: el stock ha vuelto al lote, el gasto del cliente se ha
+    /// decrementado, y **la traza del consumo y el pago siguen ahí** (ya no se borran). Es
+    /// exactamente el estado en el que la reconciliación empezaría a mentir si no filtrara.
+    const VENTA_ANULADA: &[&str] = &[
+        "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona', 'Salon');",
+        "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+           VALUES ('mesa', 'zona', '1', 4, 0, 0, 'rect', 10, 10);",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 0);",
+        "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales)
+           VALUES ('res', 'cli', 'mesa', '2026-01-02', '13:00', 'COMIDA', 2);",
+        "INSERT INTO Comandas (ID_Comanda, ID_Mesa, ID_Reserva, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'mesa', 'res', 'MESA', '2026-01-02 13:00:00', 'Abierta');",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det', 'com', 'prod', 3, 2.5);",
+        // El stock volvió al lote al anular, pero la traza del consumo se conserva.
+        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det', 'lote', 3);",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion)
+           VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 7.5, 'TOTAL', 'ANULADO', '2026-01-02 15:00:00', 'u1', 'error de cobro');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+    ];
+
+    #[tokio::test]
+    async fn tras_anular_el_lote_no_sale_como_descuadrado() {
+        // Sin el filtro: el stock ya volvió (10) pero la resta del consumo seguiría contando (7),
+        // así que el lote saldría descuadrado en cada pasada del job. Cada día. Para siempre.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        let out = repo.lotes_descuadrados(0.001).await.unwrap();
+
+        assert!(out.is_empty(), "un consumo de un cobro anulado no resta: {out:?}");
+    }
+
+    #[tokio::test]
+    async fn tras_anular_el_cliente_no_sale_como_descuadrado() {
+        // Al anular se decrementa `Total_Gastado`; si la suma siguiera incluyendo el pago anulado,
+        // el cliente aparecería descuadrado para siempre.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        let out = repo.clientes_descuadrados(0.005).await.unwrap();
+
+        assert!(out.is_empty(), "el pago anulado no cuenta como gasto: {out:?}");
+    }
+
+    #[tokio::test]
+    async fn recalcular_el_gasto_escribe_el_total_sin_el_pago_anulado() {
+        // ⚠️ El test que impide corromper el dato Y replicarlo. `recalcular_gasto` es la única de
+        // las tres consultas que ESCRIBE, y por `execute`, así que sale por el outbox a la nube.
+        // Sin el filtro, un usuario que viera el aviso de descuadre y pulsara «recalcular»
+        // grabaría un total que incluye el cobro anulado: el aviso falso induce a la acción que
+        // rompe el dato, en local y arriba.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+        // Y un cobro que SÍ vale, para que el test distinga "filtra bien" de "devuelve 0".
+        sembrar(
+            &db,
+            &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                 VALUES ('pago-ok', 'com', '2026-01-03 14:00:00', 'Efectivo', 12.0, 'TOTAL');"],
+        )
+        .await;
+
+        let repo = SqliteReconciliacionRepository::new(db.clone());
+        assert_eq!(repo.recalcular_gasto("cli").await.unwrap(), Some(12.0));
+        assert_eq!(
+            escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
+            12.0,
+            "los 7,50 del cobro anulado no pueden acabar en la ficha del cliente"
+        );
+    }
+
+    #[tokio::test]
+    async fn una_linea_anulada_y_vuelta_a_cobrar_si_resta_del_lote() {
+        // El otro extremo del filtro. Si la condición fuera «no tiene ningún pago anulado», este
+        // consumo —que sigue vigente, porque el segundo cobro volvió a descontarlo— dejaría de
+        // contar y el lote saldría descuadrado al revés: «sobran 3».
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+        sembrar(
+            &db,
+            &[
+                "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago2', 'com', '2026-01-02 16:00:00', 'Efectivo', 7.5, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago2', 'det');",
+            ],
+        )
+        .await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        let out = repo.lotes_descuadrados(0.001).await.unwrap();
+
+        assert!(out.is_empty(), "10 de alta - 3 consumidos = 7: {out:?}");
     }
 }

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
+	AnularPagoInput as ContractAnularPagoInput,
 	CreateGastoInput as ContractCreateGastoInput,
 	UpdateGastoInput as ContractUpdateGastoInput,
 	UpdatePagoInput as ContractUpdatePagoInput,
@@ -36,6 +37,19 @@ export const updatePagoSchema = z.object({
 	fecha_hora: z.string().transform(clean).refine(Boolean, "fecha_hora required"),
 	metodo: z.string().transform((v) => (v.trim() === "Tarjeta" ? "Tarjeta" : "Efectivo")),
 	importe: money,
+});
+
+// Anular un cobro (CUENTA-07). El motivo es OBLIGATORIO: quién y cuándo los pone el sistema, el
+// porqué sólo puede ponerlo quien anula.
+//
+// `id_usuario` viaja en el cuerpo aquí y NO en el input de Tauri, y no es una incoherencia: en la
+// Main la sesión la conoce el backend (SEC-01) y aceptarla de la pantalla sería dejar firmar con el
+// nombre de otro; el worker, en cambio, no tiene sesión de usuario —sólo tenant y dispositivo—, así
+// que su cliente tiene que decírselo. Lo que impide el abuso aquí es otra cosa: esta ruta está
+// vetada a todo lo que no sea la Main (`soloLaMainEscribeCaja`).
+export const anularPagoSchema = z.object({
+	id_usuario: idStr,
+	motivo: z.string().transform(clean).refine(Boolean, "motivo required"),
 });
 
 export const rangoSchema = z.object({
@@ -77,6 +91,11 @@ export type UpdateGastoInput = Omit<
 
 export type UpdatePagoInput = Omit<ContractUpdatePagoInput, "id_pago">;
 
+export type AnularPagoInput = Omit<ContractAnularPagoInput, "id_pago" | "motivo"> & {
+	id_usuario: string;
+	motivo: string;
+};
+
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
 // Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y
 // las del DTO coinciden. Si en Rust se añade, quita o renombra un campo, este módulo
@@ -84,3 +103,4 @@ export type UpdatePagoInput = Omit<ContractUpdatePagoInput, "id_pago">;
 type _GCreateGasto = Assert<SameKeys<z.infer<typeof createGastoSchema>, CreateGastoInput>>;
 type _GUpdateGasto = Assert<SameKeys<z.infer<typeof updateGastoSchema>, UpdateGastoInput>>;
 type _GUpdatePago = Assert<SameKeys<z.infer<typeof updatePagoSchema>, UpdatePagoInput>>;
+type _GAnularPago = Assert<SameKeys<z.infer<typeof anularPagoSchema>, AnularPagoInput>>;

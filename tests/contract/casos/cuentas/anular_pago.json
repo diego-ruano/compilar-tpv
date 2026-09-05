@@ -1,7 +1,8 @@
 {
-  "descripcion": "Anulación completa de un cobro (CUENTA-01): el caso más grande de cuentas. Devuelve el stock consumido —tanto por lote (Lote_Consumos) como suelto (Suelto_Consumos, VR-04)—, resta el importe del Total_Gastado del cliente ligado por la reserva, borra las líneas cobradas (no se mueven: se les devolvió el stock y moverlas permitiría cobrarlas dos veces), y reabre la comanda porque le quedaba otra línea pendiente. La comanda de la mesa-2 está ahí para comprobar que reabrir NO pisa a otra comanda abierta de OTRA mesa.",
-  "comando": "cuentas.delete_pago",
+  "descripcion": "Anulacion de un cobro (CUENTA-07): el caso mas grande de cuentas. El pago YA NO SE BORRA -se marca Estado='ANULADO' con quien y por que-, se devuelve el stock consumido (por lote y suelto), se resta el importe del Total_Gastado del cliente ligado por la reserva, y la comanda se reabre porque sus lineas vuelven a estar pendientes (Opcion A: se conservan Detalle_Comanda y Pago_Detalles, y 'cobrada' pasa a significar 'ligada a un pago ACTIVO'). La comanda de la mesa-2 esta ahi para comprobar que reabrir NO pisa a otra comanda abierta de OTRA mesa.",
+  "comando": "cuentas.anular_pago",
   "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '1', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-2', 'zona-1', '2', 4, 0, 0, 'rect', 80, 80);",
@@ -22,10 +23,12 @@
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-cobrado-suelto');"
   ],
   "entrada": {
-    "id_pago": "pago-1"
+    "id_pago": "pago-1",
+    "id_usuario": "user-1",
+    "motivo": "cobro duplicado"
   },
   "snapshot": {
-    "Pagos": "SELECT ID_Pago FROM Pagos",
+    "Pagos": "SELECT ID_Pago, Estado, Anulado_Por, Motivo_Anulacion FROM Pagos",
     "Pago_Detalles": "SELECT ID_Pago, ID_Detalle FROM Pago_Detalles",
     "Detalle_Comanda": "SELECT ID_Detalle, ID_Comanda, Cantidad, Precio_Unitario FROM Detalle_Comanda",
     "Comandas": "SELECT ID_Comanda, Estado, Total_Comanda, Fecha_Hora_Cierre FROM Comandas",
@@ -33,6 +36,7 @@
     "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
     "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
     "Suelto_Consumos": "SELECT ID_Detalle, ID_Producto, Cantidad FROM Suelto_Consumos",
-    "Clientes": "SELECT ID_Cliente, Total_Gastado FROM Clientes"
+    "Clientes": "SELECT ID_Cliente, Total_Gastado FROM Clientes",
+    "Movimientos_Caja": "SELECT Tipo, ID_Pago, ID_Usuario, Importe, Metodo_Pago, Motivo FROM Movimientos_Caja"
   }
 }

@@ -6,12 +6,13 @@ use async_trait::async_trait;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cuentas::{CuentasFiltro, CuentasRepository};
+use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
 use tpv_contracts::cuentas::{
     EntradaDto, LineaTicketDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto,
 };
-use tpv_domain::cuentas::{GastoData, PagoData};
+use tpv_domain::cuentas::{GastoData, PagoData, ESTADO_ACTIVO, ESTADO_ANULADO};
 
+use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
 use crate::util::new_id;
@@ -118,12 +119,17 @@ fn entradas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value
             END
           ) AS cliente,
           CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
-          IFNULL(p.Importe_Total, 0) AS importe
+          IFNULL(p.Importe_Total, 0) AS importe,
+          COALESCE(p.Estado, 'ACTIVO') AS estado,
+          p.Anulado_En AS anuladoEn,
+          TRIM(COALESCE(ua.Nombre,'') || CASE WHEN COALESCE(ua.Apellido,'')='' THEN '' ELSE ' ' || ua.Apellido END) AS anuladoPor,
+          p.Motivo_Anulacion AS motivoAnulacion
         FROM Pagos p
         JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
         LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
         LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
         LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+        LEFT JOIN Usuarios ua ON ua.ID_Usuario = p.Anulado_Por
         {where_rango}
         "#
     );
@@ -161,12 +167,16 @@ const SALIDAS_Q_EXPR: &str = "lower(fechaHora || ' ' || tipoGasto || ' ' || conc
 
 #[async_trait]
 impl CuentasRepository for SqliteCuentasRepository {
+    /// Los cobros anulados **salen** en esta lista, marcados: es la pantalla donde se investiga un
+    /// descuadre y esconderlos aquí devolvería el producto al estado que CUENTA-07 arregla. Quien
+    /// sí los descuenta es `resumen` (los totales de cabecera).
     async fn entradas(&self, filtro: CuentasFiltro) -> AppResult<Vec<EntradaDto>> {
         let (inner, mut params) = entradas_inner(filtro.del, filtro.al);
         let q_clause = q_filter(&mut params, filtro.q, ENTRADAS_Q_EXPR);
         let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
         let sql = format!(
-            "SELECT id, fechaHora, cliente, metodo, importe FROM ({inner}) AS e {q_clause} \
+            "SELECT id, fechaHora, cliente, metodo, importe, estado, anuladoEn, anuladoPor, \
+             motivoAnulacion FROM ({inner}) AS e {q_clause} \
              ORDER BY fechaHora DESC, id DESC {limit_clause};"
         );
 
@@ -180,12 +190,18 @@ impl CuentasRepository for SqliteCuentasRepository {
             let metodo =
                 v_string(row.get_value(3).map_err(db_err)?).unwrap_or_else(|| "Efectivo".into());
             let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
+            let estado = v_string(row.get_value(5).map_err(db_err)?)
+                .unwrap_or_else(|| ESTADO_ACTIVO.to_string());
             out.push(EntradaDto {
                 id,
                 fecha_hora: fecha_hora.chars().take(16).collect(),
                 cliente,
                 metodo,
                 importe,
+                estado,
+                anulado_en: norm_opt_string(row.get_value(6).map_err(db_err)?),
+                anulado_por: norm_opt_string(row.get_value(7).map_err(db_err)?),
+                motivo_anulacion: norm_opt_string(row.get_value(8).map_err(db_err)?),
             });
         }
         Ok(out)
@@ -233,17 +249,29 @@ impl CuentasRepository for SqliteCuentasRepository {
         // ── Entradas: total + total por método + conteo, sobre todo el rango + búsqueda. ──
         let (entradas_inner_sql, mut e_params) = entradas_inner(del.clone(), al.clone());
         let e_q = q_filter(&mut e_params, q.clone(), ENTRADAS_Q_EXPR);
+        // Los cobros anulados NO entran en los totales: un ticket anulado no es una venta. Y se
+        // cuentan aparte porque «3 anulaciones por 40 €» junto a un descuadre de 40 € se explica
+        // solo — es el dato que no existía antes de CUENTA-07.
         let e_sql = format!(
             r#"
             SELECT
-              IFNULL(SUM(importe), 0),
-              IFNULL(SUM(CASE WHEN metodo = 'Efectivo' THEN importe ELSE 0 END), 0),
-              IFNULL(SUM(CASE WHEN metodo = 'Tarjeta' THEN importe ELSE 0 END), 0),
-              COUNT(*)
+              IFNULL(SUM(CASE WHEN estado <> 'ANULADO' THEN importe ELSE 0 END), 0),
+              IFNULL(SUM(CASE WHEN estado <> 'ANULADO' AND metodo = 'Efectivo' THEN importe ELSE 0 END), 0),
+              IFNULL(SUM(CASE WHEN estado <> 'ANULADO' AND metodo = 'Tarjeta' THEN importe ELSE 0 END), 0),
+              SUM(CASE WHEN estado <> 'ANULADO' THEN 1 ELSE 0 END),
+              SUM(CASE WHEN estado =  'ANULADO' THEN 1 ELSE 0 END),
+              IFNULL(SUM(CASE WHEN estado =  'ANULADO' THEN importe ELSE 0 END), 0)
             FROM ({entradas_inner_sql}) AS e {e_q};
             "#
         );
-        let (total_entradas, total_efectivo, total_tarjeta, count_entradas) = {
+        let (
+            total_entradas,
+            total_efectivo,
+            total_tarjeta,
+            count_entradas,
+            count_anuladas,
+            total_anulado,
+        ) = {
             let mut rows = db.query(e_sql.as_str(), e_params).await.map_err(db_err)?;
             match rows.next().await.map_err(db_err)? {
                 Some(row) => (
@@ -251,8 +279,10 @@ impl CuentasRepository for SqliteCuentasRepository {
                     v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
                     v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
                     v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0),
+                    v_i64(row.get_value(4).map_err(db_err)?).unwrap_or(0),
+                    v_f64(row.get_value(5).map_err(db_err)?).unwrap_or(0.0),
                 ),
-                None => (0.0, 0.0, 0.0, 0),
+                None => (0.0, 0.0, 0.0, 0, 0, 0.0),
             }
         };
 
@@ -280,11 +310,21 @@ impl CuentasRepository for SqliteCuentasRepository {
             total_tarjeta,
             count_entradas,
             count_salidas,
+            count_anuladas,
+            total_anulado,
         })
     }
 
-    async fn crear_gasto(&self, id: Option<String>, g: GastoData) -> AppResult<bool> {
+    async fn crear_gasto(
+        &self,
+        id: Option<String>,
+        g: GastoData,
+        id_usuario: Option<&str>,
+    ) -> AppResult<bool> {
         let id_gasto = id.unwrap_or_else(new_id);
+        let id_gasto_mov = id_gasto.clone();
+        let importe = g.importe;
+        let concepto = g.concepto.clone();
         let db = self.db.write().await;
         db.execute(
                 r#"
@@ -311,6 +351,22 @@ impl CuentasRepository for SqliteCuentasRepository {
             )
             .await
             .map_err(db_err)?;
+
+        // Y su fila en el historial de caja (CUENTA-07): una salida de dinero es un movimiento de
+        // caja como lo es un cobro. El `Motivo` guarda el concepto, que es lo que se lee al
+        // repasar el historial sin tener que ir a buscar el gasto.
+        caja_movimientos::registrar(
+            &db,
+            MovimientoCaja {
+                tipo: caja_movimientos::TIPO_GASTO,
+                id_gasto: Some(id_gasto_mov),
+                id_usuario: id_usuario.map(|s| s.to_string()),
+                importe,
+                motivo: Some(concepto),
+                ..Default::default()
+            },
+        )
+        .await?;
         Ok(true)
     }
 
@@ -340,8 +396,28 @@ impl CuentasRepository for SqliteCuentasRepository {
         Ok(affected > 0)
     }
 
-    async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool> {
+    async fn eliminar_gasto(&self, id_gasto: &str, id_usuario: Option<&str>) -> AppResult<bool> {
         let db = self.db.write().await;
+
+        // El importe se lee ANTES del borrado: después la fila ya no está y el historial se
+        // quedaría con un movimiento de 0 €, que no dice nada de lo que se deshizo.
+        let importe = {
+            let mut rows = db
+                .query(
+                    "SELECT IFNULL(Importe,0), COALESCE(Concepto,'') FROM Cuentas_Gastos WHERE ID_Gasto = ?1 LIMIT 1;",
+                    vec![Value::Text(id_gasto.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            match rows.next().await.map_err(db_err)? {
+                Some(row) => Some((
+                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                    v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
+                )),
+                None => None,
+            }
+        };
+
         let affected = db
             .execute(
                 "DELETE FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
@@ -349,6 +425,22 @@ impl CuentasRepository for SqliteCuentasRepository {
             )
             .await
             .map_err(db_err)?;
+
+        if affected > 0 {
+            let (importe, concepto) = importe.unwrap_or((0.0, String::new()));
+            caja_movimientos::registrar(
+                &db,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_GASTO_ANULADO,
+                    id_gasto: Some(id_gasto.to_string()),
+                    id_usuario: id_usuario.map(|s| s.to_string()),
+                    importe,
+                    motivo: Some(concepto),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        }
         Ok(affected > 0)
     }
 
@@ -423,7 +515,8 @@ impl CuentasRepository for SqliteCuentasRepository {
                   CASE
                     WHEN m.Numero_Mesa IS NOT NULL THEN 'Mesa ' || m.Numero_Mesa
                     ELSE 'Barra'
-                  END AS Origen
+                  END AS Origen,
+                  CASE WHEN COALESCE(p.Estado,'ACTIVO') = 'ANULADO' THEN 1 ELSE 0 END AS Anulado
                 FROM Pagos p
                 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
                 LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -435,11 +528,15 @@ impl CuentasRepository for SqliteCuentasRepository {
             .await
             .map_err(db_err)?;
 
-        let (numero_ticket, metodo_pago, origen) = match rows.next().await.map_err(db_err)? {
+        // Sin filtro por estado: un cobro anulado SE puede reimprimir —es la prueba de qué
+        // contenía— pero la copia sale marcada, para que no circule como un cobro válido.
+        let (numero_ticket, metodo_pago, origen, anulado) = match rows.next().await.map_err(db_err)?
+        {
             Some(row) => (
                 v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0) == 1,
             ),
             None => return Ok(None),
         };
@@ -480,47 +577,96 @@ impl CuentasRepository for SqliteCuentasRepository {
             metodo_pago,
             origen,
             lineas,
+            anulado,
         }))
     }
 
-    /// Borra un pago **revirtiendo por completo y de forma atómica** los efectos del cobro
-    /// (CUENTA-01): devuelve el stock consumido (`Lote_Consumos`), resta el gasto del cliente
-    /// (`Clientes.Total_Gastado`) y reabre la comanda (`Estado='Abierta'`, recalcula
-    /// `Total_Comanda`) si al liberar sus detalles quedan líneas pendientes. Nunca deja una
-    /// comanda "Pagada" con saldo pendiente ni gasto/stock sin revertir.
-    async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool> {
+    /// El estado del cobro (`ACTIVO` / `ANULADO`), o `None` si no existe. Lo pide el caso de uso
+    /// antes de decidir: la regla vive en el dominio, no aquí.
+    async fn estado_pago(&self, id_pago: &str) -> AppResult<Option<String>> {
+        let db = self.db.read().await;
+        let mut rows = db
+            .query(
+                "SELECT COALESCE(Estado, 'ACTIVO') FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
+                vec![Value::Text(id_pago.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(match rows.next().await.map_err(db_err)? {
+            Some(row) => v_string(row.get_value(0).map_err(db_err)?),
+            None => None,
+        })
+    }
+
+    /// Anula un cobro **sin borrarlo** (CUENTA-07), revirtiendo de forma atómica todo lo que el
+    /// cobro provocó: devuelve el stock consumido (por lote y suelto), resta el gasto del cliente
+    /// y devuelve sus líneas a «pendientes de cobro», reabriendo la comanda si procede.
+    ///
+    /// **Lo que cambió respecto al borrado anterior, y por qué importa:**
+    ///
+    /// - La fila de `Pagos` se marca, no se borra. Borrarla bajaba el `esperado` del arqueo
+    ///   exactamente lo mismo que faltaba en el cajón, así que la sisa más común de un bar salía
+    ///   con descuadre cero. No era un fallo de cálculo: era que no quedaba nada con lo que
+    ///   comparar.
+    /// - `Detalle_Comanda` y `Pago_Detalles` se **conservan**. Son lo que permite reimprimir el
+    ///   ticket anulado tal y como se emitió, y lo que devuelve las consumiciones a la mesa en vez
+    ///   de esfumarlas (Opción A del plan). Que una línea esté cobrada pasa a leerse por la vista
+    ///   `v_lineas_cobradas`, que sólo mira los pagos activos.
+    /// - Las trazas de consumo (`Lote_Consumos`, `Suelto_Consumos`) tampoco se borran: sin ellas,
+    ///   el ticket anulado perdería su trazabilidad por lote.
+    ///
+    /// ⚠️ **El anti-doble-abono.** Antes lo garantizaba el borrado de esas trazas: sin filas que
+    /// sumar, una segunda anulación no abonaba nada. Ahora las filas siguen ahí, así que **el
+    /// guardia es el `Estado`**: si el pago ya está `ANULADO` se sale antes de tocar el stock. El
+    /// caso de uso lo comprueba también, pero la comprobación que cuenta es ésta, porque está
+    /// DENTRO de la transacción.
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool> {
+        let AnularPagoArgs {
+            id_pago,
+            id_usuario,
+            motivo,
+        } = args;
         let g = self.db.write().await;
         let conn = &g;
-        // Las lineas se eliminan antes que Pago_Detalles para poder identificarlas con la
-        // relacion del pago. Diferimos las FK hasta COMMIT; al final de la transaccion ya no
-        // queda ninguna referencia colgante.
         conn.execute_batch("BEGIN; PRAGMA defer_foreign_keys = ON;")
             .await
             .map_err(db_err)?;
         let res: AppResult<bool> = async {
-            // 1) Leer comanda + importe del pago ANTES de borrar nada (para la reversión).
-            let (id_comanda, importe) = {
+            // 1) Comanda, importe y ESTADO del pago, antes de tocar nada.
+            let (id_comanda, importe, estado, metodo) = {
                 let mut rows = conn
                     .query(
-                        "SELECT ID_Comanda, IFNULL(Importe_Total,0) FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
-                        vec![Value::Text(id_pago.to_string())],
+                        r#"
+                        SELECT ID_Comanda,
+                               IFNULL(Importe_Total,0),
+                               COALESCE(Estado,'ACTIVO'),
+                               COALESCE(Metodo_Pago,'')
+                        FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;
+                        "#,
+                        vec![Value::Text(id_pago.clone())],
                     )
                     .await
                     .map_err(db_err)?;
                 match rows.next().await.map_err(db_err)? {
-                    Some(row) => {
-                        let c = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
-                        let imp = v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0);
-                        (c, imp)
-                    }
+                    Some(row) => (
+                        v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
+                        v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                        v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
+                        v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
+                    ),
                     // El pago no existe: nada que revertir.
                     None => return Ok(false),
                 }
             };
 
-            // 2) Devolver el stock: sumar de vuelta a cada lote lo consumido por los detalles del
-            //    pago y borrar esos Lote_Consumos (la consumición se hace en el cobro, ligada a
-            //    ID_Detalle; si el pago no consumió stock —p. ej. cobro de mesa— es un no-op).
+            // El guardia. Ver la nota de arriba: sin esto, cada pulsación del botón abonaría el
+            // stock y descontaría el gasto del cliente otra vez.
+            if estado.eq_ignore_ascii_case(ESTADO_ANULADO) {
+                return Ok(false);
+            }
+
+            // 2) Devolver el stock de lotes consumido por las líneas de este pago. La traza
+            //    (`Lote_Consumos`) se CONSERVA: ya no es ella la que impide el doble abono.
             conn.execute(
                 r#"
                 UPDATE Lotes_Producto
@@ -537,25 +683,12 @@ impl CuentasRepository for SqliteCuentasRepository {
                     WHERE pd.ID_Pago = ?1
                 );
                 "#,
-                vec![Value::Text(id_pago.to_string())],
+                vec![Value::Text(id_pago.clone())],
             )
             .await
             .map_err(db_err)?;
 
-            conn.execute(
-                r#"
-                DELETE FROM Lote_Consumos
-                WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);
-                "#,
-                vec![Value::Text(id_pago.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-
-            // 2-bis) Y devolver el stock SUELTO que consumió el pago (lo que los lotes no
-            //    cubrieron, VR-04). Mismo trato que los lotes: se suma de vuelta y se borra la
-            //    traza. Sin esto, la parte suelta de una venta rápida anulada desaparecía del
-            //    inventario sin que nadie la hubiera vendido.
+            // 2-bis) Y el stock SUELTO (lo que los lotes no cubrieron, VR-04). Mismo trato.
             conn.execute(
                 r#"
                 UPDATE Productos
@@ -572,17 +705,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                     WHERE pd.ID_Pago = ?1
                 );
                 "#,
-                vec![Value::Text(id_pago.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-
-            conn.execute(
-                r#"
-                DELETE FROM Suelto_Consumos
-                WHERE ID_Detalle IN (SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1);
-                "#,
-                vec![Value::Text(id_pago.to_string())],
+                vec![Value::Text(id_pago.clone())],
             )
             .await
             .map_err(db_err)?;
@@ -607,39 +730,46 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .map_err(db_err)?;
             }
 
-            // 4) Eliminar las lineas cobradas por este pago. El stock ya se ha restaurado arriba,
-            //    por lo que conservarlas o moverlas a otra comanda crearia un ticket fantasma y
-            //    permitiria cobrarlas de nuevo.
-            conn.execute(
-                r#"
-                DELETE FROM Detalle_Comanda
-                WHERE ID_Detalle IN (
-                    SELECT ID_Detalle FROM Pago_Detalles WHERE ID_Pago = ?1
-                );
-                "#,
-                vec![Value::Text(id_pago.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
-
-            // 5) Borrar las relaciones y el pago.
-            conn.execute(
-                "DELETE FROM Pago_Detalles WHERE ID_Pago = ?1;",
-                vec![Value::Text(id_pago.to_string())],
-            )
-            .await
-            .map_err(db_err)?;
+            // 4) Marcar el pago. `Anulado_En`/`Anulado_Por` son obligatorios por el CHECK de la
+            //    tabla: un cobro anulado sin firma no sirve como auditoría. El `Estado <> ...` del
+            //    WHERE deja el UPDATE idempotente.
             let affected = conn
                 .execute(
-                    "DELETE FROM Pagos WHERE ID_Pago = ?1;",
-                    vec![Value::Text(id_pago.to_string())],
+                    r#"
+                    UPDATE Pagos
+                    SET Estado = 'ANULADO',
+                        Anulado_En = datetime('now','localtime'),
+                        Anulado_Por = ?2,
+                        Motivo_Anulacion = ?3
+                    WHERE ID_Pago = ?1 AND COALESCE(Estado,'ACTIVO') <> 'ANULADO';
+                    "#,
+                    vec![
+                        Value::Text(id_pago.clone()),
+                        Value::Text(id_usuario.clone()),
+                        Value::Text(motivo.clone()),
+                    ],
                 )
                 .await
                 .map_err(db_err)?;
 
-            // 6) Recalcular la comanda original. Solo se reabre si ya contenia otras lineas
-            //    pendientes y no existe otra comanda abierta para la mesa. Las lineas anuladas
-            //    nunca se trasladan a otro ticket.
+            // 5) El movimiento en el historial de caja.
+            caja_movimientos::registrar(
+                conn,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_ANULACION,
+                    id_pago: Some(id_pago.clone()),
+                    id_usuario: Some(id_usuario.clone()),
+                    importe,
+                    metodo_pago: Some(metodo),
+                    motivo: Some(motivo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+
+            // 6) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las
+            //    cubría ya no está activo—, así que se reabre si no hay otra comanda abierta para
+            //    la misma mesa. `Total_Comanda` no cambia: las líneas siguen ahí.
             if !id_comanda.is_empty() {
                 conn.execute(
                     r#"
@@ -648,7 +778,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                           WHEN ID_Comanda = ?1
                            AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
-                            LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                            LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                             WHERE dc.ID_Comanda = Comandas.ID_Comanda
                               AND pd.ID_Detalle IS NULL
                           )
@@ -663,7 +793,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                           WHEN ID_Comanda = ?1
                            AND EXISTS (
                             SELECT 1 FROM Detalle_Comanda dc
-                            LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                            LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                             WHERE dc.ID_Comanda = Comandas.ID_Comanda
                               AND pd.ID_Detalle IS NULL
                           )
@@ -739,91 +869,602 @@ mod tests_comunes {
 }
 
 #[cfg(test)]
-mod tests_devolucion_de_stock {
+mod tests_anulacion {
+    //! Anular un cobro (CUENTA-07).
+    //!
+    //! El agujero que estos tests vigilan: mientras anular hacía `DELETE` de la fila de `Pagos`, el
+    //! arqueo —que calcula `esperado = fondo + cobros en efectivo`— bajaba el esperado exactamente
+    //! lo mismo que faltaba en el cajón. El descuadre salía **cero**. No era un fallo de cálculo:
+    //! era que no quedaba nada con lo que comparar.
+
     use super::tests_comunes::*;
     use super::*;
-    use tpv_application::ports::cuentas::CuentasRepository;
+    use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
 
-    /// Una venta de barra de 5 unidades de un producto con stock SUELTO (sin lotes): quedan 5 de
-    /// los 10 que había, y el consumo queda anotado. Es el estado desde el que se anula.
-    const VENTA_DE_SUELTO: &[&str] = &[
+    /// Una venta de mesa con dos líneas: una cobrada (con consumo de lote y de suelto) y otra que
+    /// se quedó pendiente. Es el estado desde el que se anula, y el que permite comprobar de una
+    /// vez el stock, el gasto del cliente y la reapertura de la comanda.
+    const VENTA_DE_MESA: &[&str] = &[
+        // El rol Administrador lo siembran ya las migraciones; aquí sólo hace falta el usuario que
+        // firma la anulación (`Anulado_Por` es una FK y el CHECK lo exige).
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona', 'Salon');",
+        "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height)
+           VALUES ('mesa', 'zona', '4', 4, 0, 0, 'rect', 10, 10);",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
-           VALUES ('prod', 'cat', 'Cafe', 1.2, 5);",
-        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
-           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+           VALUES ('prod', 'cat', 'Cerveza', 3.0, 7);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
+           VALUES ('lote', 'prod', 'L-1', 18);",
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 50.0);",
+        "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales)
+           VALUES ('res', 'cli', 'mesa', '2026-01-02', '13:00', 'COMIDA', 2);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda)
+           VALUES ('com', 'MESA', 'mesa', 'res', '2026-01-02 12:00:00', '2026-01-02 13:00:00', 'Pagada', 12.0);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det', 'com', 'prod', 5, 1.2);",
-        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det', 'prod', 5);",
+           VALUES ('det-lote', 'com', 'prod', 2, 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det-suelto', 'com', 'prod', 1, 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('det-pendiente', 'com', 'prod', 1, 3.0);",
+        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det-lote', 'lote', 2);",
+        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det-suelto', 'prod', 1);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 6.0, 'TOTAL');",
-        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+           VALUES ('pago', 'com', '2026-01-02 13:00:00', 'Efectivo', 9.0, 'PARCIAL');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-lote');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-suelto');",
     ];
 
-    /// El agujero que esto cierra: al anular, el stock que salió del contador suelto volvía a
-    /// nadie. Como no había traza de ese consumo, la cantidad se perdía para siempre y encima el
-    /// síntoma se confundía con una sobreventa (el contador admite negativos a propósito).
+    fn repo(db: &Arc<Db>) -> SqliteCuentasRepository {
+        SqliteCuentasRepository::new(db.clone())
+    }
+
+    fn args(id_pago: &str) -> AnularPagoArgs {
+        AnularPagoArgs {
+            id_pago: id_pago.to_string(),
+            id_usuario: "u1".to_string(),
+            motivo: "cobro duplicado".to_string(),
+        }
+    }
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap()?;
+        crate::mapping::v_string(row.get_value(0).unwrap())
+    }
+
+    /* ── Lo que ya no se destruye ─────────────────────────────────────────────────────── */
+
     #[tokio::test]
-    async fn anular_un_pago_devuelve_el_stock_suelto() {
+    async fn anular_no_borra_el_cobro_lo_marca() {
         let (db, _dir) = db_temporal().await;
-        sembrar(&db, VENTA_DE_SUELTO).await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
 
         assert_eq!(
-            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
-            5.0,
-            "punto de partida: se vendieron 5 de 10"
-        );
-
-        let repo = SqliteCuentasRepository::new(db.clone());
-        let borrado = repo.eliminar_pago("pago").await.unwrap();
-
-        assert!(borrado, "el pago existía");
-        assert_eq!(
-            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
-            10.0,
-            "las 5 unidades vuelven al contador"
+            escalar(&db, "SELECT COUNT(*) FROM Pagos WHERE ID_Pago='pago';").await,
+            1.0,
+            "la fila del cobro tiene que seguir ahí: es la prueba de la venta"
         );
         assert_eq!(
-            escalar(&db, "SELECT COUNT(*) FROM Suelto_Consumos;").await,
-            0.0,
-            "y su traza se retira, para que una segunda anulación no las sume otra vez"
+            texto(&db, "SELECT Estado FROM Pagos WHERE ID_Pago='pago';").await,
+            Some("ANULADO".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT Anulado_Por FROM Pagos WHERE ID_Pago='pago';").await,
+            Some("u1".into()),
+            "quién anula sale de la sesión, y sin él el CHECK de la tabla no deja guardar"
+        );
+        assert_eq!(
+            texto(&db, "SELECT Motivo_Anulacion FROM Pagos WHERE ID_Pago='pago';").await,
+            Some("cobro duplicado".into())
+        );
+        assert!(
+            texto(&db, "SELECT Anulado_En FROM Pagos WHERE ID_Pago='pago';")
+                .await
+                .is_some()
         );
     }
 
-    /// Un producto que NO usa stock suelto (Stock_Suelto NULL) no debe recibir nada al anular:
-    /// no se le descontó nada al vender.
     #[tokio::test]
-    async fn un_producto_sin_stock_suelto_no_recibe_nada() {
+    async fn las_lineas_del_cobro_anulado_se_conservan() {
+        // Son lo que permite reimprimir el ticket anulado tal y como se emitió. Sin ellas, la
+        // auditoría queda coja justo en lo que más importa: qué se cobró.
         let (db, _dir) = db_temporal().await;
-        sembrar(
-            &db,
-            &[
-                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
-                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-                   VALUES ('prod', 'cat', 'Cafe', 1.2);",
-                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
-                   VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
-                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-                   VALUES ('det', 'com', 'prod', 5, 1.2);",
-                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 6.0, 'TOTAL');",
-                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
-            ],
-        )
-        .await;
+        sembrar(&db, VENTA_DE_MESA).await;
 
-        let repo = SqliteCuentasRepository::new(db.clone());
-        repo.eliminar_pago("pago").await.unwrap();
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='com';").await,
+            3.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Pago_Detalles WHERE ID_Pago='pago';").await,
+            2.0
+        );
+    }
+
+    #[tokio::test]
+    async fn el_ticket_anulado_se_puede_reimprimir_marcado() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        let t = repo(&db).ticket_para_reimprimir("pago").await.unwrap().unwrap();
+
+        assert!(t.anulado, "la copia tiene que decir que ese cobro ya no vale");
+        assert_eq!(t.lineas.len(), 2, "y seguir enseñando lo que se cobró");
+    }
+
+    /* ── El stock: exactamente una vez ────────────────────────────────────────────────── */
+
+    #[tokio::test]
+    async fn anular_devuelve_el_stock_de_lote_y_el_suelto() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
+            20.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            8.0
+        );
+    }
+
+    #[tokio::test]
+    async fn anular_dos_veces_no_abona_el_stock_dos_veces() {
+        // ⚠️ El test que justifica el guardia por `Estado`. Antes, lo que impedía el doble abono
+        // era que las trazas de consumo se borraban al anular. Ahora se conservan —dan
+        // trazabilidad por lote al ticket anulado—, así que si el guardia se cayera, cada
+        // pulsación del botón inventaría stock y le quitaría dinero al cliente.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+        assert!(
+            !repo(&db).anular_pago(args("pago")).await.unwrap(),
+            "la segunda no hace nada, y lo dice"
+        );
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
+            20.0,
+            "el lote se abonó una sola vez"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            8.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
+            41.0,
+            "y el gasto del cliente también"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='ANULACION';").await,
+            1.0,
+            "una anulación que no ocurre no se anota"
+        );
+    }
+
+    #[tokio::test]
+    async fn anular_un_pago_que_no_existe_no_es_un_error() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        assert!(!repo(&db).anular_pago(args("fantasma")).await.unwrap());
+    }
+
+    /* ── El gasto del cliente ─────────────────────────────────────────────────────────── */
+
+    #[tokio::test]
+    async fn el_gasto_del_cliente_baja_una_vez_y_nunca_por_debajo_de_cero() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(&db, &["UPDATE Clientes SET Total_Gastado = 4 WHERE ID_Cliente='cli';"]).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
+            0.0,
+            "un total negativo diría que el cliente tiene saldo a favor, que no existe"
+        );
+    }
+
+    /* ── Opción A: las líneas vuelven a estar pendientes ──────────────────────────────── */
+
+    #[tokio::test]
+    async fn las_lineas_del_cobro_anulado_vuelven_a_contar_como_pendientes() {
+        // La vista `v_lineas_cobradas` es la que define «cobrada»: fila en `Pago_Detalles` ligada
+        // a un pago ACTIVO. Sin ella, media aplicación seguiría viéndolas cobradas.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
 
         assert_eq!(
             escalar(
                 &db,
-                "SELECT COUNT(*) FROM Productos WHERE ID_Producto='prod' AND Stock_Suelto IS NULL;"
+                "SELECT COUNT(*) FROM Detalle_Comanda dc
+                 WHERE dc.ID_Comanda='com'
+                   AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);"
             )
             .await,
-            1.0,
-            "sigue sin usar stock suelto"
+            3.0,
+            "las dos que cubría el pago anulado, más la que ya estaba pendiente"
         );
+    }
+
+    #[tokio::test]
+    async fn la_comanda_se_reabre_si_le_quedan_lineas_pendientes() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Abierta".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT Fecha_Hora_Cierre FROM Comandas WHERE ID_Comanda='com';").await,
+            None
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Total_Comanda FROM Comandas WHERE ID_Comanda='com';").await,
+            12.0,
+            "el total no cambia: las líneas siguen en la comanda"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_se_reabre_si_la_mesa_ya_tiene_otra_comanda_abierta() {
+        // Dos comandas abiertas para la misma mesa violarían el índice único y dejarían la sala
+        // enseñando dos tickets vivos donde hay uno.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado)
+               VALUES ('com2', 'MESA', 'mesa', '2026-01-02 14:00:00', 'Abierta');"],
+        )
+        .await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Pagada".into())
+        );
+    }
+
+    /* ── El historial de caja ─────────────────────────────────────────────────────────── */
+
+    #[tokio::test]
+    async fn la_anulacion_deja_su_fila_en_el_historial_de_caja() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Tipo FROM Movimientos_Caja;").await,
+            Some("ANULACION".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT ID_Pago FROM Movimientos_Caja;").await,
+            Some("pago".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT ID_Usuario FROM Movimientos_Caja;").await,
+            Some("u1".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT Motivo FROM Movimientos_Caja;").await,
+            Some("cobro duplicado".into())
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Importe FROM Movimientos_Caja;").await,
+            9.0,
+            "el importe va en positivo; el signo lo da el Tipo"
+        );
+        assert!(
+            texto(&db, "SELECT ID_Movimiento FROM Movimientos_Caja;")
+                .await
+                .is_some_and(|s| !s.is_empty()),
+            "el UUID se genera antes del INSERT, nunca dentro de la sentencia"
+        );
+    }
+
+    #[tokio::test]
+    async fn un_gasto_y_su_borrado_tambien_dejan_rastro() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        let r = repo(&db);
+
+        r.crear_gasto(
+            Some("g1".into()),
+            GastoData {
+                fecha: "2026-01-02".into(),
+                tipo_gasto: "Otro".into(),
+                concepto: "Hielo".into(),
+                importe: 12.5,
+                proveedor_id: None,
+            },
+            Some("u1"),
+        )
+        .await
+        .unwrap();
+        r.eliminar_gasto("g1", Some("u1")).await.unwrap();
+
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='GASTO' AND ID_Gasto='g1';"
+            )
+            .await,
+            1.0
+        );
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT Importe FROM Movimientos_Caja WHERE Tipo='GASTO_ANULADO' AND ID_Gasto='g1';"
+            )
+            .await,
+            12.5,
+            "el importe se lee ANTES de borrar la fila: después ya no hay de dónde sacarlo"
+        );
+    }
+
+    /* ── La replicación ───────────────────────────────────────────────────────────────── */
+
+    #[tokio::test]
+    async fn el_outbox_captura_la_anulacion_entera() {
+        // Si esto falla, la nube y la Main divergen —el cobro sigue vivo arriba y anulado abajo—
+        // y no se nota hasta que alguien mira.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        for aguja in [
+            "UPDATE Pagos",
+            "Movimientos_Caja",
+            "Lotes_Producto",
+            "Productos",
+            "Clientes",
+            "UPDATE Comandas",
+        ] {
+            let sql = format!(
+                "SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%{aguja}%';"
+            );
+            assert!(
+                escalar(&db, &sql).await >= 1.0,
+                "el outbox no ha capturado: {aguja}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_lineas_devueltas {
+    //! Que las líneas vuelvan a la mesa no sirve de nada si el camarero no puede tocarlas
+    //! (CUENTA-07 §6.5.2). Visibles y congeladas sería peor que el comportamiento anterior, en el
+    //! que al menos desaparecían.
+
+    use super::tests_comunes::*;
+    use super::*;
+    use crate::mesas::SqliteMesasRepository;
+    use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
+    use tpv_application::ports::mesas::MesasRepository;
+
+    const VENTA_BARRA: &[&str] = &[
+        // El rol Administrador lo siembran ya las migraciones; aquí sólo hace falta el usuario que
+        // firma la anulación (`Anulado_Por` es una FK y el CHECK lo exige).
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('prod', 'cat', 'Cafe', 1.2);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada', 2.4);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('d1', 'com', 'prod', 1, 1.2);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
+           VALUES ('d2', 'com', 'prod', 1, 1.2);",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 2.4, 'TOTAL');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd1');",
+        "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd2');",
+    ];
+
+    fn anular(db: &Arc<Db>) -> AnularPagoArgs {
+        let _ = db;
+        AnularPagoArgs {
+            id_pago: "pago".into(),
+            id_usuario: "u1".into(),
+            motivo: "error de cobro".into(),
+        }
+    }
+
+    #[tokio::test]
+    async fn una_linea_devuelta_se_puede_quitar_por_su_id() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        SqliteCuentasRepository::new(db.clone())
+            .anular_pago(anular(&db))
+            .await
+            .unwrap();
+
+        SqliteMesasRepository::new(db.clone())
+            .delete_detalle("d1")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Detalle='d1';").await,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_linea_devuelta_se_puede_quitar_por_producto() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+        SqliteCuentasRepository::new(db.clone())
+            .anular_pago(anular(&db))
+            .await
+            .unwrap();
+
+        SqliteMesasRepository::new(db.clone())
+            .remove_one_pending_detalle("com", "prod")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='com';").await,
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_linea_de_un_cobro_activo_sigue_sin_poder_quitarse() {
+        // La guardia no se puede aflojar de más: quitar una línea ya cobrada dejaría el ticket sin
+        // lo que el cliente pagó y descuadraría la caja contra las ventas.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_BARRA).await;
+
+        SqliteMesasRepository::new(db.clone())
+            .delete_detalle("d1")
+            .await
+            .unwrap();
+        SqliteMesasRepository::new(db.clone())
+            .remove_one_pending_detalle("com", "prod")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Detalle_Comanda WHERE ID_Comanda='com';").await,
+            2.0,
+            "ninguna de las dos vías puede llevarse una línea cobrada"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_arqueo_ciego {
+    //! El criterio de aceptación del plan entero: anular un cobro en efectivo ya **no** baja el
+    //! esperado del arqueo, así que el dinero que falta sale como que falta.
+
+    use super::tests_comunes::*;
+    use super::*;
+    use crate::cierre_caja::SqliteCierreCajaRepository;
+    use tpv_application::ports::cierre_caja::CierreCajaRepository;
+    use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
+
+    const DOS_COBROS_EN_EFECTIVO: &[&str] = &[
+        // El rol Administrador lo siembran ya las migraciones; aquí sólo hace falta el usuario que
+        // firma la anulación (`Anulado_Por` es una FK y el CHECK lo exige).
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('p1', 'com', '2026-01-02 12:30:00', 'Efectivo', 20.0, 'TOTAL');",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('p2', 'com', '2026-01-02 13:30:00', 'Efectivo', 30.0, 'TOTAL');",
+    ];
+
+    #[tokio::test]
+    async fn el_esperado_del_arqueo_no_baja_al_anular_un_cobro_en_efectivo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_COBROS_EN_EFECTIVO).await;
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+
+        assert_eq!(caja.ventas_efectivo_desde(None).await.unwrap(), 50.0);
+
+        SqliteCuentasRepository::new(db.clone())
+            .anular_pago(AnularPagoArgs {
+                id_pago: "p2".into(),
+                id_usuario: "u1".into(),
+                motivo: "se lo llevó puesto".into(),
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            caja.ventas_efectivo_desde(None).await.unwrap(),
+            20.0,
+            "el cobro anulado deja de ser una venta…"
+        );
+        // …y por eso los 30 € que faltan del cajón ya no tienen quien los tape: el esperado baja a
+        // 20, el recuento dirá 20 si el dinero está y 20 menos lo que falte si no. Antes de
+        // CUENTA-07 el pago desaparecía y el descuadre salía exactamente cero.
+        let (n, importe) = caja.anulaciones_desde(None).await.unwrap();
+        assert_eq!((n, importe), (1, 30.0), "y queda contado, que es el aviso");
+    }
+
+    #[tokio::test]
+    async fn las_anulaciones_se_cuentan_por_cuando_se_anularon_no_por_la_venta() {
+        // Lo que pertenece al periodo es el acto de anular. Una venta de anteayer anulada hoy es
+        // un movimiento de HOY: es hoy cuando el dinero sale del cajón.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_COBROS_EN_EFECTIVO).await;
+
+        SqliteCuentasRepository::new(db.clone())
+            .anular_pago(AnularPagoArgs {
+                id_pago: "p1".into(),
+                id_usuario: "u1".into(),
+                motivo: "x".into(),
+            })
+            .await
+            .unwrap();
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        // Corte muy anterior a la venta: la anulación (de ahora) cae dentro.
+        let (n, _) = caja.anulaciones_desde(Some("2026-01-01 00:00:00")).await.unwrap();
+        assert_eq!(n, 1);
+        // Corte en el futuro: fuera.
+        let (n, _) = caja.anulaciones_desde(Some("2099-01-01 00:00:00")).await.unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[tokio::test]
+    async fn el_resumen_de_caja_deja_de_contar_los_anulados_pero_los_ensena() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, DOS_COBROS_EN_EFECTIVO).await;
+        let r = SqliteCuentasRepository::new(db.clone());
+
+        r.anular_pago(AnularPagoArgs {
+            id_pago: "p2".into(),
+            id_usuario: "u1".into(),
+            motivo: "x".into(),
+        })
+        .await
+        .unwrap();
+
+        let res = r.resumen(None, None, None).await.unwrap();
+        assert_eq!(res.total_entradas, 20.0);
+        assert_eq!(res.total_efectivo, 20.0);
+        assert_eq!(res.count_entradas, 1);
+        assert_eq!(res.count_anuladas, 1);
+        assert_eq!(res.total_anulado, 30.0);
+
+        let filas = r.entradas(Default::default()).await.unwrap();
+        assert_eq!(filas.len(), 2, "en la lista salen los dos: aquí se investiga");
+        let anulada = filas.iter().find(|e| e.id == "p2").unwrap();
+        assert_eq!(anulada.estado, "ANULADO");
+        assert_eq!(anulada.anulado_por.as_deref(), Some("Marta"));
+        assert_eq!(anulada.motivo_anulacion.as_deref(), Some("x"));
     }
 }
 

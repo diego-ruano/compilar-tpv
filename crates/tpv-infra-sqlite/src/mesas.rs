@@ -1064,7 +1064,7 @@ impl MesasRepository for SqliteMesasRepository {
                   COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
                   D.IVA_Percent,
                   CASE WHEN EXISTS (
-                    SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
+                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado
                 FROM Detalle_Comanda D
                 LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
@@ -1434,7 +1434,7 @@ impl MesasRepository for SqliteMesasRepository {
               (
                 SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
                 FROM Detalle_Comanda dc
-                LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
               ) AS Total_Pendiente,
               (
@@ -1446,7 +1446,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 JOIN Productos p ON p.ID_Producto = dc.ID_Producto
                 JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = c.ID_Comanda
                   AND pd.ID_Detalle IS NULL
                   AND COALESCE(cat.Pasa_Cocina, 0) = 1
@@ -1455,7 +1455,7 @@ impl MesasRepository for SqliteMesasRepository {
               (
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
-                LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
               ) AS Pendientes_Pago
             FROM Comandas c
@@ -1506,7 +1506,7 @@ impl MesasRepository for SqliteMesasRepository {
             r#"
             SELECT 1
             FROM Detalle_Comanda dc
-            JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+            JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
             WHERE dc.ID_Comanda = ?1 LIMIT 1;
             "#,
             vec![Value::Text(id_comanda.to_string())],
@@ -1565,13 +1565,13 @@ impl MesasRepository for SqliteMesasRepository {
                   (
                     SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
                     FROM Detalle_Comanda dc
-                    LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
                   ) AS Total_Pendiente,
                   (
                     SELECT COUNT(*)
                     FROM Detalle_Comanda dc
-                    LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
                   ) AS Pendientes_Pago,
                   (
@@ -1579,7 +1579,7 @@ impl MesasRepository for SqliteMesasRepository {
                     FROM Detalle_Comanda dc
                     JOIN Productos p ON p.ID_Producto = dc.ID_Producto
                     JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-                    LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = c.ID_Comanda
                       AND pd.ID_Detalle IS NULL
                       AND COALESCE(cat.Pasa_Cocina, 0) = 1
@@ -1820,7 +1820,7 @@ impl MesasRepository for SqliteMesasRepository {
                   FROM Detalle_Comanda dc
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
-                    AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                    AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
                   ORDER BY dc.ID_Detalle DESC LIMIT 1
                 );
                 "#,
@@ -1866,7 +1866,7 @@ impl MesasRepository for SqliteMesasRepository {
                 DELETE FROM Detalle_Comanda
                 WHERE ID_Detalle = ?1
                   AND NOT EXISTS (
-                    SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
                   );
                 "#,
                 vec![Value::Text(id_detalle.to_string())],
@@ -1904,7 +1904,7 @@ impl MesasRepository for SqliteMesasRepository {
             SET Notas = ?2
             WHERE ID_Detalle = ?1
               AND NOT EXISTS (
-                SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
               );
             "#,
             vec![
@@ -1939,7 +1939,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
                 in_sql
             );
@@ -1959,7 +1959,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
                 in_sql
             );
@@ -2054,7 +2054,7 @@ impl MesasRepository for SqliteMesasRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?2
                   AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
                 in_sql2
             );
@@ -2097,7 +2097,7 @@ impl MesasRepository for SqliteMesasRepository {
                 r#"
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
-                LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL;
                 "#,
                 vec![Value::Text(data.id_comanda.clone())],
@@ -2157,7 +2157,7 @@ impl MesasRepository for SqliteMesasRepository {
                   p.Nombre AS Nombre_Producto, dc.Notas,
                   COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
                   CASE WHEN EXISTS (
-                    SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado
                 FROM Detalle_Comanda dc
                 JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda

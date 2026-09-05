@@ -279,7 +279,10 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let lim = limit.unwrap_or(60).clamp(1, 200);
 
         let pending_expr = clamp_pending_sql(
-            "COALESCE(c.Total_Comanda,0) - COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda), 0)",
+            // Sólo los cobros ACTIVOS descuentan del pendiente (CUENTA-07): si un cobro anulado
+            // siguiera restando, el ticket parecería pagado y sus líneas —que han vuelto a estar
+            // pendientes— no se podrían volver a cobrar.
+            "COALESCE(c.Total_Comanda,0) - COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)",
         );
 
         let where_clause = if include_pagadas {
@@ -312,7 +315,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = c.ID_Comanda
-                  AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
               ),0) AS Pendientes_Pago
             FROM Comandas c
             WHERE c.Canal = ?2
@@ -362,7 +365,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   dc.Notas,
                   dc.Estado_Cocina,
                   CASE WHEN EXISTS (
-                    SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
                   ) THEN 1 ELSE 0 END AS Pagado,
                   COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
                   dc.IVA_Percent
@@ -482,7 +485,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   COALESCE(dc.Cantidad,1) AS Cantidad,
                   COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
                   COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
-                  CASE WHEN EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+                  CASE WHEN EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
                        THEN 1 ELSE 0 END AS Pagado,
                   dc.Notas,
                   dc.IVA_Percent
@@ -661,7 +664,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 WHERE ID_Detalle = (
                   SELECT dc.ID_Detalle
                   FROM Detalle_Comanda dc
-                  LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                  LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                   WHERE dc.ID_Comanda = ?1
                     AND dc.ID_Producto = ?2
                     AND pd.ID_Detalle IS NULL
@@ -706,7 +709,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 WHERE ID_Detalle = ?1
                   AND ID_Comanda = ?2
                   AND NOT EXISTS (
-                    SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = ?1
+                    SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = ?1
                   );
                 "#,
                 vec![Value::Text(id_detalle.to_string()), Value::Text(id_comanda.to_string())],
@@ -802,7 +805,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN ({})
-                  AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                  AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                 "#,
                 placeholders
             );
@@ -840,7 +843,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                             WHERE dc.ID_Comanda = ?1
                               AND dc.ID_Detalle IN ({})
                               AND NOT EXISTS (
-                                SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+                                SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
                               )
                             ORDER BY dc.ID_Detalle;
                             "#,
@@ -912,7 +915,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     FROM Detalle_Comanda dc
                     WHERE dc.ID_Comanda = ?2
                       AND dc.ID_Detalle = ?3
-                      AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle);
+                      AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle);
                     "#,
                     vec![
                         Value::Text(id_pago_final.clone()),
@@ -1037,7 +1040,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     r#"
                     SELECT COUNT(*)
                     FROM Detalle_Comanda dc
-                    LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+                    LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = ?1
                       AND pd.ID_Detalle IS NULL;
                     "#,
@@ -1181,16 +1184,13 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<bool> = async {
+            // Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07). Y no es una
+            // sutileza: `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, así que borrar la comanda
+            // se llevaría por delante la fila del cobro anulado — que es justo la prueba que este
+            // cambio existe para conservar. Por eso se mira `Pagos` y no las líneas cobradas.
             let mut rows = db
                 .query(
-                    r#"
-                    SELECT EXISTS(
-                      SELECT 1
-                      FROM Detalle_Comanda dc
-                      JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-                      WHERE dc.ID_Comanda = ?1
-                    ) AS HasPaid;
-                    "#,
+                    "SELECT EXISTS(SELECT 1 FROM Pagos WHERE ID_Comanda = ?1) AS HasPaid;",
                     vec![Value::Text(id_comanda.to_string())],
                 )
                 .await
@@ -1203,7 +1203,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
             if has_paid == 1 {
                 return Err(AppError::conflict(
-                    "La comanda tiene líneas pagadas y no se puede borrar",
+                    "La comanda tiene cobros registrados y no se puede borrar",
                 ));
             }
 

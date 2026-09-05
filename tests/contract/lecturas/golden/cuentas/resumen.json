@@ -1,6 +1,8 @@
 {
+  "count_anuladas": 1,
   "count_entradas": 3,
   "count_salidas": 1,
+  "total_anulado": 40.0,
   "total_efectivo": 15.25,
   "total_entradas": 35.75,
   "total_salidas": 150.0,

@@ -30,15 +30,18 @@ function rows(rs: any): any[] {
 	});
 }
 
+// Solo los cobros ACTIVOS descuentan del pendiente (CUENTA-07): si un cobro anulado siguiera
+// restando, el ticket pareceria pagado y sus lineas -que han vuelto a estar pendientes- no se
+// podrian volver a cobrar.
 const PENDING_EXPR = `
 	CASE
 		WHEN (
 			COALESCE(c.Total_Comanda,0)
-			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda), 0)
+			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)
 		) < 0 THEN 0
 		ELSE (
 			COALESCE(c.Total_Comanda,0)
-			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda), 0)
+			- COALESCE((SELECT SUM(p.Importe_Total) FROM Pagos p WHERE p.ID_Comanda = c.ID_Comanda AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'), 0)
 		)
 	END
 `;
@@ -175,7 +178,7 @@ export async function listComandas(
 					SELECT COUNT(*)
 					FROM Detalle_Comanda dc
 					WHERE dc.ID_Comanda = c.ID_Comanda
-						AND NOT EXISTS (SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle)
+						AND NOT EXISTS (SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle)
 				),0) AS Pendientes_Pago
 			FROM Comandas c
 			WHERE c.Canal = ?2
@@ -207,7 +210,7 @@ export async function lineas(
 				dc.Notas AS Notas,
 				dc.Estado_Cocina AS Estado_Cocina,
 				CASE WHEN EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				COALESCE(dc.Nombre_Producto, p.Nombre, 'Producto') AS Nombre,
 				dc.IVA_Percent AS IVA_Percent
@@ -272,7 +275,7 @@ export async function detallesVerTicket(
 				COALESCE(dc.Precio_Unitario,0) AS Precio_Unitario,
 				COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
 				CASE WHEN EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado,
 				dc.Notas AS Notas,
 				dc.IVA_Percent AS IVA_Percent
@@ -392,7 +395,7 @@ export async function cobrarPlan(
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (${placeholders})
 				AND NOT EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args: detalleArgs,
@@ -412,7 +415,7 @@ export async function cobrarPlan(
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (${placeholders})
 				AND NOT EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				)
 			ORDER BY dc.ID_Detalle;
 		`,
@@ -472,16 +475,13 @@ export async function restarStockPlan(
 	return { ok: true, allocations, suelto };
 }
 
+// Basta con que la comanda tenga UN cobro, activo o anulado (CUENTA-07). Y no es una sutileza:
+// `Pagos.ID_Comanda` va con `ON DELETE CASCADE`, asi que borrar la comanda se llevaria por delante
+// la fila del cobro anulado -que es justo la prueba que ese cambio existe para conservar. Por eso
+// se mira `Pagos` y no las lineas cobradas. Paridad con `delete_comanda_if_safe` de la Main.
 export async function hasPaidLines(db: Client, idComanda: string): Promise<boolean> {
 	const rs = await db.execute({
-		sql: `
-			SELECT EXISTS(
-				SELECT 1
-				FROM Detalle_Comanda dc
-				JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
-				WHERE dc.ID_Comanda = ?1
-			) AS has_paid;
-		`,
+		sql: "SELECT EXISTS(SELECT 1 FROM Pagos WHERE ID_Comanda = ?1) AS has_paid;",
 		args: [idComanda],
 	});
 	return Number(rows(rs)[0]?.has_paid ?? 0) === 1;

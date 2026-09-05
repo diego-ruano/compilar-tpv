@@ -672,6 +672,13 @@ CREATE TABLE IF NOT EXISTS Fichaje_Dia (
    9. Pagos
 ========================================================= */
 -- Importe_Total >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
+-- Estado: un cobro anulado NO se borra (CUENTA-07). Borrarlo bajaba el esperado del arqueo
+-- exactamente lo mismo que faltaba en el cajon, asi que la sisa mas comun del sector salia con
+-- descuadre cero: los numeros eran correctos y no habia nada contra lo que compararlos.
+-- Anulado_En/Anulado_Por son obligatorios cuando el pago esta anulado, y prohibidos cuando no:
+-- una anulacion sin firma no es una auditoria. Motivo_Anulacion NO entra en el CHECK a proposito
+-- (obligarlo por esquema convertiria un olvido en un error de base de datos, que no se puede
+-- explicar); lo exige el caso de uso, que si puede dar un mensaje decente.
 CREATE TABLE IF NOT EXISTS Pagos (
   ID_Pago TEXT PRIMARY KEY,
   ID_Comanda TEXT NOT NULL,
@@ -682,9 +689,16 @@ CREATE TABLE IF NOT EXISTS Pagos (
   ID_Usuario_Cobrador TEXT,
   ID_Trabajador_Cobrador TEXT,
   Numero_Ticket TEXT,
+  Estado TEXT NOT NULL DEFAULT 'ACTIVO',
+  Anulado_En TEXT,
+  Anulado_Por TEXT,
+  Motivo_Anulacion TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario_Cobrador) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
-  FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL
+  FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
+  FOREIGN KEY (Anulado_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
+  CHECK (Estado IN ('ACTIVO','ANULADO')),
+  CHECK ((Estado = 'ANULADO') = (Anulado_En IS NOT NULL AND Anulado_Por IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pagos_fecha
@@ -696,18 +710,52 @@ ON Pagos(ID_Comanda, Fecha_Hora);
 CREATE INDEX IF NOT EXISTS idx_pagos_trab_cobrador_fecha
 ON Pagos(ID_Trabajador_Cobrador, Fecha_Hora);
 
+-- Todas las lecturas de caja filtran por Estado desde CUENTA-07 (el arqueo, las estadisticas, el
+-- pendiente de una comanda), y casi todas acotan ademas por fecha.
+CREATE INDEX IF NOT EXISTS idx_pagos_estado_fecha
+ON Pagos(Estado, Fecha_Hora);
+
+-- ON DELETE CASCADE en ID_Detalle desde CUENTA-07. Antes no hacia falta: una linea cobrada no se
+-- borraba nunca, y al anular se borraban las dos filas a la vez. Ahora anular devuelve la linea a
+-- la comanda, asi que el camarero puede quitarla despues -y si la FK lo impidiera, la linea
+-- quedaria congelada en la mesa, que es peor que el comportamiento que este cambio arregla.
+--
+-- No se pierde auditoria: lo que prueba la anulacion es la fila de Pagos (importe, quien, cuando y
+-- por que), que sobrevive. Una fila de Pago_Detalles cuya linea ya no existe no seria una prueba
+-- sino un puntero colgante: la reimpresion une con Detalle_Comanda, asi que esa linea desaparece
+-- del papel igual, conservemos el enlace o no.
+--
+-- Y lo que protege a un cobro ACTIVO no es esta FK: son las guardias de las funciones que borran
+-- lineas, que se niegan a tocar una linea cubierta por un pago activo (`v_lineas_cobradas`).
 CREATE TABLE IF NOT EXISTS Pago_Detalles (
   ID_Pago TEXT NOT NULL,
   ID_Detalle TEXT NOT NULL,
   PRIMARY KEY (ID_Pago, ID_Detalle),
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago),
-  FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle)
+  FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE
 );
 
 -- La PK (ID_Pago, ID_Detalle) no cubre las busquedas por ID_Detalle (que pago
 -- cobro esta linea), necesarias al anular/revertir un pago.
 CREATE INDEX IF NOT EXISTS idx_pago_detalles_detalle
 ON Pago_Detalles(ID_Detalle);
+
+-- Que una linea este COBRADA no es "tiene fila en Pago_Detalles": es "tiene fila en Pago_Detalles
+-- ligada a un pago ACTIVO" (CUENTA-07). La diferencia aparece al anular: como el pago ya no se
+-- borra, sus Pago_Detalles siguen ahi -y son justo lo que permite reimprimir el ticket tal como se
+-- emitio-, pero las lineas vuelven a estar pendientes de cobro.
+--
+-- Va en una vista y no repetido en cada consulta porque el predicado esta en ~27 sitios entre Rust
+-- y el worker: escrito 27 veces, la proxima consulta que alguien anada se olvidara del filtro y el
+-- sintoma sera una mesa con lineas congeladas o un pendiente descuadrado, no un error. Las
+-- ESCRITURAS siguen yendo contra Pago_Detalles; esta vista es solo para leer.
+-- (Comentario fuera del CREATE VIEW: el snapshot anti-drift colapsa cada sentencia a una linea y
+--  un `--` dentro se comeria el resto.)
+CREATE VIEW IF NOT EXISTS v_lineas_cobradas AS
+SELECT pd.ID_Pago AS ID_Pago, pd.ID_Detalle AS ID_Detalle
+FROM Pago_Detalles pd
+JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+WHERE p.Estado = 'ACTIVO';
 
 -- Correlativo del ticket impreso (Pagos.Numero_Ticket). Sin el, un papel no se puede atar a su
 -- cobro: ni para una devolucion, ni para cuadrar un arqueo, ni para el cliente que vuelve a
@@ -737,6 +785,43 @@ CREATE TABLE IF NOT EXISTS Aperturas_Cajon (
 
 CREATE INDEX IF NOT EXISTS idx_aperturas_cajon_fecha
 ON Aperturas_Cajon(Fecha);
+
+-- Historial de caja (CUENTA-07). Calcado en forma a Movimientos_Stock, que ya hace esto mismo para
+-- el inventario: una fila por hecho, sin borrar nunca.
+--
+-- Es para INVESTIGAR, no para calcular. Pagos sigue siendo la unica fuente de verdad del dinero y
+-- el arqueo sigue derivando de ahi: en cuanto alguien sume el esperado desde esta tabla habra dos
+-- fuentes para la misma cifra y divergiran.
+--
+-- ID_Movimiento es TEXT PRIMARY KEY, asi que el UUID se genera ANTES del INSERT (paso kind:"value"
+-- en el worker, new_id() en Rust) y nunca por DEFAULT ni trigger: si no, nube y Main acaban con
+-- filas distintas para el mismo hecho (CLAUDE.md 9, "IDs deterministas").
+--
+-- ON DELETE SET NULL en las referencias aunque ya no borremos pagos: un movimiento es un hecho
+-- historico y no puede desaparecer porque desaparezca aquello a lo que apunta.
+--
+-- Importe SIEMPRE en positivo; el signo lo da el Tipo. Mezclar signos en una columna que alguien
+-- va a sumar es pedir un error. Ampliar Tipo (devoluciones de VENTA-01, Veri*factu) es tocar solo
+-- el CHECK.
+CREATE TABLE IF NOT EXISTS Movimientos_Caja (
+  ID_Movimiento TEXT PRIMARY KEY,
+  Fecha_Hora TEXT NOT NULL,
+  Tipo TEXT NOT NULL,
+  ID_Pago TEXT,
+  ID_Gasto TEXT,
+  ID_Usuario TEXT,
+  ID_Trabajador TEXT,
+  Importe REAL NOT NULL DEFAULT 0,
+  Metodo_Pago TEXT,
+  Motivo TEXT,
+  FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE SET NULL,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
+  FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
+  CHECK (Tipo IN ('COBRO','ANULACION','GASTO','GASTO_ANULADO'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_movcaja_fecha
+ON Movimientos_Caja(Fecha_Hora);
 
 /* =========================================================
    10. Idempotencia / Atomicidad (tabla de la NUBE)

@@ -45,6 +45,9 @@ pub mod migrations;
 // `Reader`/`Writer` de `db.rs`.
 pub mod auth;
 pub mod avisos;
+// El historial de caja (`Movimientos_Caja`, CUENTA-07): lo escriben el cobro, el gasto y la
+// anulación, así que la sentencia vive en un sitio y no copiada en cada uno.
+pub mod caja_movimientos;
 pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;

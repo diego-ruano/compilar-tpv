@@ -44,6 +44,13 @@ pub trait CierreCajaRepository: Send + Sync {
     /// tiempos, que es lo que pasa en el primer cierre.
     async fn ventas_efectivo_desde(&self, desde: Option<&str>) -> AppResult<f64>;
 
+    /// Anulaciones del periodo (cuántas y por cuánto), contadas por la fecha en que se anularon.
+    ///
+    /// **No entra en el cálculo del arqueo**: el esperado sigue saliendo de los cobros activos, y
+    /// sumar desde dos sitios distintos la misma cifra es cómo empiezan a divergir. Es una línea
+    /// informativa — y es justamente el dato que no existía antes de CUENTA-07.
+    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, f64)>;
+
     /// Cuántas comandas siguen abiertas. No impide cerrar: sólo se avisa.
     async fn comandas_abiertas(&self) -> AppResult<i64>;
 

@@ -98,7 +98,8 @@ export async function mesas(
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end};`,
+		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';`,
 	);
 	const top = await one(
 		db,
@@ -108,6 +109,7 @@ export async function mesas(
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 		 GROUP BY m.ID_Mesa
 		 ORDER BY comandas DESC, m.Numero_Mesa ASC
 		 LIMIT 1;`,
@@ -118,6 +120,7 @@ export async function mesas(
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const topRs = await db.execute(
@@ -127,6 +130,7 @@ export async function mesas(
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 		 JOIN Zonas z ON z.ID_Zona = m.ID_Zona
 		 WHERE p.Fecha_Hora >= ${start} AND p.Fecha_Hora < ${end}
+		   AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 		 GROUP BY m.ID_Mesa
 		 ORDER BY total DESC LIMIT 10;`,
 	);
@@ -178,9 +182,12 @@ export async function productos(
 		WITH
 		rng AS (SELECT ${start} AS start_dt, ${end} AS end_dt),
 		paid_det AS (
+			-- Solo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, asi que sus
+			-- lineas no pueden aparecer en "lo mas vendido" ni sumar en el historico.
 			SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
 			FROM Pago_Detalles pd
 			JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+			WHERE COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 			GROUP BY pd.ID_Detalle
 		)`;
 
@@ -510,6 +517,7 @@ export async function trabajadores(
 		JOIN Roles r ON r.ID_Rol = u.ID_Rol
 		WHERE datetime(p.Fecha_Hora) >= rng.start_dt
 			AND datetime(p.Fecha_Hora) <  rng.end_dt
+			AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 			AND p.ID_Trabajador_Cobrador IS NOT NULL
 			AND r.Nombre_Rol = 'Camarero'
 		GROUP BY p.ID_Trabajador_Cobrador;
@@ -525,6 +533,7 @@ export async function trabajadores(
 			SELECT ID_Comanda, COALESCE(Importe_Total,0) AS imp
 			FROM Pagos, rng
 			WHERE datetime(Fecha_Hora) >= rng.start_dt AND datetime(Fecha_Hora) < rng.end_dt
+			  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
 		),
 		comanda_trab AS (
 			SELECT ID_Comanda, ID_Trabajador FROM Comandas WHERE ID_Trabajador IS NOT NULL
@@ -744,6 +753,7 @@ export async function clientes(
 			WHERE c.ID_Reserva IS NOT NULL
 				AND r.ID_Cliente IS NOT NULL
 				AND p.Fecha_Hora IS NOT NULL
+				AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 		 ),
 		 cust_range AS (
 			SELECT DISTINCT id_cliente FROM allp, rng

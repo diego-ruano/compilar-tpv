@@ -76,6 +76,10 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Preparar un cierre"))
     }
 
+    async fn anulaciones_desde(&self, _desde: Option<&str>) -> AppResult<(i64, f64)> {
+        Err(solo_main("Preparar un cierre"))
+    }
+
     async fn crear(&self, _cierre: CierreNuevo) -> AppResult<()> {
         Err(solo_main("Cerrar la caja"))
     }

@@ -201,7 +201,7 @@ export async function lineas(
 				COALESCE(cat.Pasa_Cocina, 0) AS Pasa_Cocina,
 				D.IVA_Percent AS IVA_Percent,
 				CASE WHEN EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = D.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = D.ID_Detalle
 				) THEN 1 ELSE 0 END AS Pagado
 			FROM Detalle_Comanda D
 			LEFT JOIN Productos P ON P.ID_Producto = D.ID_Producto
@@ -222,13 +222,13 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 			(
 				SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
 				FROM Detalle_Comanda dc
-				LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
 			) AS total_pendiente,
 			(
 				SELECT COUNT(*)
 				FROM Detalle_Comanda dc
-				LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
 			) AS pendientes_pago,
 			(
@@ -236,7 +236,7 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 				FROM Detalle_Comanda dc
 				JOIN Productos p ON p.ID_Producto = dc.ID_Producto
 				JOIN Categorias_Producto cat ON cat.ID_Categoria = p.ID_Categoria
-				LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				WHERE dc.ID_Comanda = c.ID_Comanda
 					AND pd.ID_Detalle IS NULL
 					AND COALESCE(cat.Pasa_Cocina, 0) = 1
@@ -431,7 +431,7 @@ export async function cobrarDetallesPlan(
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (${placeholders})
 				AND NOT EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args,
@@ -446,7 +446,7 @@ export async function cobrarDetallesPlan(
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (${placeholders})
 				AND NOT EXISTS (
-					SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+					SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 				);
 		`,
 		args,
@@ -509,7 +509,7 @@ export async function kitchenList(db: Client): Promise<KitchenRow[]> {
 			dc.Notas AS Notas,
 			COALESCE(dc.Estado_Cocina,'PENDIENTE') AS Estado_Cocina,
 			CASE WHEN EXISTS (
-				SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+				SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 			) THEN 1 ELSE 0 END AS Pagado
 		FROM Detalle_Comanda dc
 		JOIN Comandas c ON c.ID_Comanda = dc.ID_Comanda

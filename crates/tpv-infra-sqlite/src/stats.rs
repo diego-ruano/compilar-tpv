@@ -191,7 +191,8 @@ impl SqliteStatsRepository {
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
-            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end};
+            WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';
             "#,
             start = start_expr,
             end = end_expr
@@ -224,6 +225,7 @@ impl SqliteStatsRepository {
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
             GROUP BY m.ID_Mesa
             ORDER BY comandas DESC, m.Numero_Mesa ASC
             LIMIT 1;
@@ -250,6 +252,7 @@ impl SqliteStatsRepository {
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
             GROUP BY b
             ORDER BY b ASC;
             "#,
@@ -284,6 +287,7 @@ impl SqliteStatsRepository {
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
             JOIN Zonas z ON z.ID_Zona = m.ID_Zona
             WHERE p.Fecha_Hora >= {start} AND p.Fecha_Hora < {end}
+              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
             GROUP BY m.ID_Mesa
             ORDER BY total DESC
             LIMIT 10;
@@ -358,9 +362,12 @@ impl SqliteStatsRepository {
             WITH
             rng AS (SELECT {start} AS start_dt, {end} AS end_dt),
             paid_det AS (
+              -- Sólo pagos ACTIVOS (CUENTA-07): un ticket anulado no es una venta, así que sus
+              -- líneas no pueden aparecer en «lo más vendido» ni sumar en el histórico.
               SELECT pd.ID_Detalle AS ID_Detalle, MIN(p.Fecha_Hora) AS paid_at
               FROM Pago_Detalles pd
               JOIN Pagos p ON p.ID_Pago = pd.ID_Pago
+              WHERE COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
               GROUP BY pd.ID_Detalle
             )
             "#,
@@ -1000,6 +1007,7 @@ impl SqliteStatsRepository {
             JOIN Roles r ON r.ID_Rol = u.ID_Rol
             WHERE datetime(p.Fecha_Hora) >= rng.start_dt
               AND datetime(p.Fecha_Hora) <  rng.end_dt
+              AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
               AND p.ID_Trabajador_Cobrador IS NOT NULL
               AND r.Nombre_Rol = 'Camarero'
             GROUP BY p.ID_Trabajador_Cobrador;
@@ -1028,6 +1036,7 @@ impl SqliteStatsRepository {
               FROM Pagos, rng
               WHERE datetime(Fecha_Hora) >= rng.start_dt
                 AND datetime(Fecha_Hora) <  rng.end_dt
+                AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
             ),
             comanda_trab AS (
               SELECT ID_Comanda, ID_Trabajador
@@ -1394,6 +1403,7 @@ impl SqliteStatsRepository {
                   WHERE c.ID_Reserva IS NOT NULL
                     AND r.ID_Cliente IS NOT NULL
                     AND p.Fecha_Hora IS NOT NULL
+                    AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
                 ),
                 cust_range AS (
                   SELECT DISTINCT id_cliente

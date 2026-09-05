@@ -304,7 +304,7 @@ casos_de_contrato! {
     cuentas__update_gasto,
     cuentas__delete_gasto,
     cuentas__update_pago,
-    cuentas__delete_pago,
+    cuentas__anular_pago,
     notificaciones__crear,
     notificaciones__crear_dedupe,
     notificaciones__marcar_leida,
@@ -658,7 +658,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "cuentas.create_gasto" => {
             let repo = SqliteCuentasRepository::new(db.clone());
-            repo.crear_gasto(opt_str(&e["id_gasto"]), gasto_del_caso(e))
+            repo.crear_gasto(opt_str(&e["id_gasto"]), gasto_del_caso(e), None)
                 .await
                 .expect("crear gasto");
         }
@@ -670,7 +670,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "cuentas.delete_gasto" => {
             let repo = SqliteCuentasRepository::new(db.clone());
-            repo.eliminar_gasto(&s(&e["id_gasto"])).await.expect("eliminar gasto");
+            repo.eliminar_gasto(&s(&e["id_gasto"]), None).await.expect("eliminar gasto");
         }
         "cuentas.update_pago" => {
             let repo = SqliteCuentasRepository::new(db.clone());
@@ -692,9 +692,17 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             .await
             .expect("actualizar pago");
         }
-        "cuentas.delete_pago" => {
+        "cuentas.anular_pago" => {
             let repo = SqliteCuentasRepository::new(db.clone());
-            repo.eliminar_pago(&s(&e["id_pago"])).await.expect("eliminar pago");
+            // Quién anula y por qué llegan del caso porque en el TPV llegan de la sesión: el
+            // fixture hace de sesión para que los dos lados escriban la misma firma.
+            repo.anular_pago(tpv_application::ports::cuentas::AnularPagoArgs {
+                id_pago: s(&e["id_pago"]),
+                id_usuario: s(&e["id_usuario"]),
+                motivo: s(&e["motivo"]),
+            })
+            .await
+            .expect("anular pago");
         }
         "notificaciones.crear" => {
             let repo = SqliteNotificacionesRepository::new(db.clone());

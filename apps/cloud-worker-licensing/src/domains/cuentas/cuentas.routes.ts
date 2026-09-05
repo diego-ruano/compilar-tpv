@@ -140,12 +140,16 @@ cuentasRoutes.put("/pagos/:id", async (c) => {
 	return c.json({ ok: true });
 });
 
-cuentasRoutes.delete("/pagos/:id", async (c) => {
+// POST y no DELETE: anular ya no borra nada (CUENTA-07). Marca el cobro, deja quién y por qué, y
+// devuelve sus líneas a la comanda. Un `DELETE` diría lo contrario de lo que hace.
+cuentasRoutes.post("/pagos/:id/anular", async (c) => {
 	const veto = await soloLaMainEscribeCaja(c);
 	if (veto) return veto;
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_pago invalido");
-	await apply(c, cmd.deletePago(id));
+	const p = await parseBody(c, S.anularPagoSchema);
+	if (!p.ok) return p.res;
+	await apply(c, cmd.anularPago(id, p.data));
 	return c.json({ ok: true });
 });
 

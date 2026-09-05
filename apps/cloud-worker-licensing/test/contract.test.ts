@@ -19,9 +19,9 @@ import { enElHub } from "./helpers/hub";
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
 import {
+	anularPago,
 	createGasto,
 	deleteGasto,
-	deletePago,
 	updateGasto,
 	updatePago,
 } from "../src/domains/cuentas/cuentas.commands";
@@ -205,8 +205,8 @@ import casoCuentasDeleteGasto from "../../../tests/contract/casos/cuentas/delete
 import goldenCuentasDeleteGasto from "../../../tests/contract/golden/cuentas/delete_gasto.json";
 import casoCuentasUpdatePago from "../../../tests/contract/casos/cuentas/update_pago.json";
 import goldenCuentasUpdatePago from "../../../tests/contract/golden/cuentas/update_pago.json";
-import casoCuentasDeletePago from "../../../tests/contract/casos/cuentas/delete_pago.json";
-import goldenCuentasDeletePago from "../../../tests/contract/golden/cuentas/delete_pago.json";
+import casoCuentasAnularPago from "../../../tests/contract/casos/cuentas/anular_pago.json";
+import goldenCuentasAnularPago from "../../../tests/contract/golden/cuentas/anular_pago.json";
 import casoMesaSetReserva from "../../../tests/contract/casos/mesas/set_reserva_estado.json";
 import goldenMesaSetReserva from "../../../tests/contract/golden/mesas/set_reserva_estado.json";
 import casoNotifCrear from "../../../tests/contract/casos/notificaciones/crear.json";
@@ -291,7 +291,7 @@ const CASOS = [
 	{ nombre: "cuentas_update_gasto", caso: casoCuentasUpdateGasto, golden: goldenCuentasUpdateGasto },
 	{ nombre: "cuentas_delete_gasto", caso: casoCuentasDeleteGasto, golden: goldenCuentasDeleteGasto },
 	{ nombre: "cuentas_update_pago", caso: casoCuentasUpdatePago, golden: goldenCuentasUpdatePago },
-	{ nombre: "cuentas_delete_pago", caso: casoCuentasDeletePago, golden: goldenCuentasDeletePago },
+	{ nombre: "cuentas_anular_pago", caso: casoCuentasAnularPago, golden: goldenCuentasAnularPago },
 	{ nombre: "mesas_set_reserva_estado", caso: casoMesaSetReserva, golden: goldenMesaSetReserva },
 	{ nombre: "notificaciones_crear", caso: casoNotifCrear, golden: goldenNotifCrear },
 	{ nombre: "notificaciones_crear_dedupe", caso: casoNotifCrearDedupe, golden: goldenNotifCrearDedupe },
@@ -666,8 +666,15 @@ async function aplicarComando(hub: any, sql: any, db: any, caso: any): Promise<v
 			);
 			return;
 		}
-		case "cuentas.delete_pago": {
-			aplicar(hub, sql, deletePago(caso.entrada.id_pago));
+		case "cuentas.anular_pago": {
+			aplicar(
+				hub,
+				sql,
+				anularPago(caso.entrada.id_pago, {
+					id_usuario: caso.entrada.id_usuario,
+					motivo: caso.entrada.motivo,
+				}),
+			);
 			return;
 		}
 		case "notificaciones.crear": {

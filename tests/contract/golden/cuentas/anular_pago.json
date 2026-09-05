@@ -1,0 +1,96 @@
+{
+  "Clientes": [
+    {
+      "ID_Cliente": "cli-1",
+      "Total_Gastado": 41.0
+    }
+  ],
+  "Comandas": [
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-1",
+      "Total_Comanda": 12.0
+    },
+    {
+      "Estado": "Abierta",
+      "Fecha_Hora_Cierre": null,
+      "ID_Comanda": "comanda-otra",
+      "Total_Comanda": 0.0
+    }
+  ],
+  "Detalle_Comanda": [
+    {
+      "Cantidad": 2.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-cobrado-lote",
+      "Precio_Unitario": 3.0
+    },
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-cobrado-suelto",
+      "Precio_Unitario": 3.0
+    },
+    {
+      "Cantidad": 1.0,
+      "ID_Comanda": "comanda-1",
+      "ID_Detalle": "det-pendiente",
+      "Precio_Unitario": 3.0
+    }
+  ],
+  "Lote_Consumos": [
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Lote": "lote-1"
+    }
+  ],
+  "Lotes_Producto": [
+    {
+      "ID_Lote": "lote-1",
+      "Stock_Disponible": 20.0
+    }
+  ],
+  "Movimientos_Caja": [
+    {
+      "ID_Pago": "pago-1",
+      "ID_Usuario": "user-1",
+      "Importe": 9.0,
+      "Metodo_Pago": "Efectivo",
+      "Motivo": "cobro duplicado",
+      "Tipo": "ANULACION"
+    }
+  ],
+  "Pago_Detalles": [
+    {
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "ID_Detalle": "det-cobrado-suelto",
+      "ID_Pago": "pago-1"
+    }
+  ],
+  "Pagos": [
+    {
+      "Anulado_Por": "user-1",
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-1",
+      "Motivo_Anulacion": "cobro duplicado"
+    }
+  ],
+  "Productos": [
+    {
+      "ID_Producto": "prod-1",
+      "Stock_Suelto": 8.0
+    }
+  ],
+  "Suelto_Consumos": [
+    {
+      "Cantidad": 1.0,
+      "ID_Detalle": "det-cobrado-suelto",
+      "ID_Producto": "prod-1"
+    }
+  ]
+}

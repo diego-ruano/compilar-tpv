@@ -36,6 +36,10 @@ pub async fn preparar(
 
     let ventas_efectivo = repo.ventas_efectivo_desde(desde.as_deref()).await?;
     let comandas_abiertas = repo.comandas_abiertas().await?;
+    // Informativo, fuera del cálculo (CUENTA-07): el esperado sigue saliendo de los cobros
+    // activos. Lo que aporta es contexto — un descuadre de 40 € con "3 anulaciones por 40 €" al
+    // lado deja de ser un misterio.
+    let (anulaciones, anulaciones_importe) = repo.anulaciones_desde(desde.as_deref()).await?;
 
     Ok(PreparacionCierreDto {
         es_primer_cierre: ultimo.is_none(),
@@ -49,6 +53,8 @@ pub async fn preparar(
         } else {
             UMBRAL_DESCUADRE_POR_DEFECTO
         },
+        anulaciones,
+        anulaciones_importe,
     })
 }
 

@@ -79,12 +79,17 @@ const entradasInner = (whereRango: string) => `
 			END
 		) AS cliente,
 		CASE WHEN p.Metodo_Pago = 'Tarjeta' THEN 'Tarjeta' ELSE 'Efectivo' END AS metodo,
-		IFNULL(p.Importe_Total, 0) AS importe
+		IFNULL(p.Importe_Total, 0) AS importe,
+		COALESCE(p.Estado, 'ACTIVO') AS estado,
+		p.Anulado_En AS anulado_en,
+		NULLIF(TRIM(COALESCE(ua.Nombre,'') || CASE WHEN COALESCE(ua.Apellido,'')='' THEN '' ELSE ' ' || ua.Apellido END), '') AS anulado_por,
+		p.Motivo_Anulacion AS motivo_anulacion
 	FROM Pagos p
 	JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 	LEFT JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
 	LEFT JOIN Reservas r ON r.ID_Reserva = c.ID_Reserva
 	LEFT JOIN Clientes cl ON cl.ID_Cliente = r.ID_Cliente
+	LEFT JOIN Usuarios ua ON ua.ID_Usuario = p.Anulado_Por
 	${whereRango}
 `;
 
@@ -118,9 +123,12 @@ export async function entradas(
 ): Promise<EntradaDto[]> {
 	const { whereSql, args } = rangoWhere(del, al, "p.Fecha_Hora");
 	const { qClause, limitClause } = applyFilters(args, q, ENTRADAS_Q_EXPR, page, pageSize);
+	// Sin filtro por estado: los cobros anulados SALEN, marcados (CUENTA-07). Es la pantalla
+	// donde se investiga un descuadre; quien no los cuenta es `resumen`.
 	const rs = await db.execute({
 		sql: `
-			SELECT id, fecha_hora, cliente, metodo, importe
+			SELECT id, fecha_hora, cliente, metodo, importe, estado, anulado_en, anulado_por,
+			       motivo_anulacion
 			FROM (${entradasInner(whereSql)}) AS e
 			${qClause}
 			ORDER BY fecha_hora DESC, id DESC
@@ -164,13 +172,17 @@ export async function resumen(
 ): Promise<ResumenCajaDto> {
 	const eRango = rangoWhere(del, al, "p.Fecha_Hora");
 	const { qClause: eQ } = applyFilters(eRango.args, q, ENTRADAS_Q_EXPR, null, null);
+	// Los anulados no cuentan en los totales (un ticket anulado no es una venta) y se cuentan
+	// aparte, que es el dato que hace visible la sisa (CUENTA-07).
 	const eRs = await db.execute({
 		sql: `
 			SELECT
-				IFNULL(SUM(importe), 0) AS te,
-				IFNULL(SUM(CASE WHEN metodo = 'Efectivo' THEN importe ELSE 0 END), 0) AS ef,
-				IFNULL(SUM(CASE WHEN metodo = 'Tarjeta' THEN importe ELSE 0 END), 0) AS ta,
-				COUNT(*) AS ce
+				IFNULL(SUM(CASE WHEN estado <> 'ANULADO' THEN importe ELSE 0 END), 0) AS te,
+				IFNULL(SUM(CASE WHEN estado <> 'ANULADO' AND metodo = 'Efectivo' THEN importe ELSE 0 END), 0) AS ef,
+				IFNULL(SUM(CASE WHEN estado <> 'ANULADO' AND metodo = 'Tarjeta' THEN importe ELSE 0 END), 0) AS ta,
+				SUM(CASE WHEN estado <> 'ANULADO' THEN 1 ELSE 0 END) AS ce,
+				SUM(CASE WHEN estado =  'ANULADO' THEN 1 ELSE 0 END) AS ca,
+				IFNULL(SUM(CASE WHEN estado =  'ANULADO' THEN importe ELSE 0 END), 0) AS tan
 			FROM (${entradasInner(eRango.whereSql)}) AS e
 			${eQ};
 		`,
@@ -197,6 +209,8 @@ export async function resumen(
 		total_tarjeta: Number(e.ta ?? 0),
 		count_entradas: Number(e.ce ?? 0),
 		count_salidas: Number(s.cs ?? 0),
+		count_anuladas: Number(e.ca ?? 0),
+		total_anulado: Number(e.tan ?? 0),
 	};
 }
 

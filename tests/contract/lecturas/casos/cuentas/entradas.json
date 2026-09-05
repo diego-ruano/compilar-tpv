@@ -1,7 +1,8 @@
 {
-  "descripcion": "Listado de ingresos de caja sin filtros: el orden (Fecha_Hora DESC, id DESC) y la columna 'cliente' calculada, que es un CASE anidado sobre mesa y cliente. Hay un cobro de la mesa BARRA (sale 'Take away'), uno de mesa con cliente por reserva ('Mesa 7 / Ana Gomez'), uno de mesa sin reserva ('Mesa 7') y uno de comanda sin mesa ('Venta'). Dos comparten Fecha_Hora para que el desempate por id se vea.",
+  "descripcion": "Listado de ingresos de caja sin filtros: el orden (Fecha_Hora DESC, id DESC) y la columna 'cliente' calculada, que es un CASE anidado sobre mesa y cliente. Hay un cobro de la mesa BARRA (sale 'Take away'), uno de mesa con cliente por reserva ('Mesa 7 / Ana Gomez'), uno de mesa sin reserva ('Mesa 7') y uno de comanda sin mesa ('Venta'). Dos comparten Fecha_Hora para que el desempate por id se vea. Y un quinto cobro ANULADO (CUENTA-07): sale en la lista igual que los demas -aqui es donde se investiga un descuadre- pero marcado, con quien lo anulo resuelto a nombre y apellido y con su motivo.",
   "lectura": "cuentas.entradas",
   "seed": [
+    "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Apellido) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta', 'Ruiz');",
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-barra', 'zona-1', 'BARRA', 1, 0, 0, 'rect', 40, 40);",
@@ -14,7 +15,14 @@
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-a', 'com-mesa-cli', '2026-05-10 13:05:30', 'Efectivo', 24.5, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-b', 'com-mesa-sin', '2026-05-11 13:05:30', 'Tarjeta', 10.0, 'total');",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-c', 'com-barra', '2026-05-12 20:00:00', 'Bizum', 7.25, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-d', 'com-suelta', '2026-05-12 20:00:00', 'Efectivo', 3.0, 'total');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-d', 'com-suelta', '2026-05-12 20:00:00', 'Efectivo', 3.0, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion) VALUES ('pago-e', 'com-suelta', '2026-05-09 10:00:00', 'Efectivo', 40.0, 'total', 'ANULADO', '2026-05-14 09:00:00', 'user-1', 'se lo llevo puesto');"
   ],
-  "entrada": { "del": null, "al": null, "q": null, "page": null, "page_size": null }
+  "entrada": {
+    "del": null,
+    "al": null,
+    "q": null,
+    "page": null,
+    "page_size": null
+  }
 }

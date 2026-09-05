@@ -7,6 +7,17 @@ use tpv_domain::cuentas::{GastoData, PagoData};
 
 use crate::error::AppResult;
 
+/// Lo que hace falta para anular un cobro, ya validado.
+///
+/// `id_usuario` **no** es opcional por capricho: el `CHECK` de `Pagos` exige que un cobro anulado
+/// diga quién lo anuló, y ese quién sale de la sesión del backend (SEC-01), nunca de la entrada.
+#[derive(Debug, Clone)]
+pub struct AnularPagoArgs {
+    pub id_pago: String,
+    pub id_usuario: String,
+    pub motivo: String,
+}
+
 /// Filtros de listado de caja: rango, búsqueda de texto y paginación (`page`/`page_size` en `None`
 /// => sin paginar, para exportaciones como el PDF).
 #[derive(Debug, Clone, Default)]
@@ -31,16 +42,33 @@ pub trait CuentasRepository: Send + Sync {
     ) -> AppResult<ResumenCajaDto>;
 
     /// Crea/upserta un gasto (id `None` => se genera UUIDv7). Devuelve `true`.
-    async fn crear_gasto(&self, id: Option<String>, gasto: GastoData) -> AppResult<bool>;
+    ///
+    /// `id_usuario` es quién lo registra, y sale de la sesión del backend (SEC-01): va al
+    /// historial de caja, no a la fila del gasto.
+    async fn crear_gasto(
+        &self,
+        id: Option<String>,
+        gasto: GastoData,
+        id_usuario: Option<&str>,
+    ) -> AppResult<bool>;
     /// Actualiza un gasto existente. `true` si afectó fila.
     async fn actualizar_gasto(&self, id_gasto: &str, gasto: GastoData) -> AppResult<bool>;
-    /// Elimina un gasto. `true` si borró fila.
-    async fn eliminar_gasto(&self, id_gasto: &str) -> AppResult<bool>;
+    /// Elimina un gasto. `true` si borró fila. `id_usuario`, como en `crear_gasto`.
+    async fn eliminar_gasto(&self, id_gasto: &str, id_usuario: Option<&str>) -> AppResult<bool>;
 
     /// Actualiza un pago (cobro). `true` si afectó fila.
     async fn actualizar_pago(&self, id_pago: &str, pago: PagoData) -> AppResult<bool>;
-    /// Elimina un pago (y sus detalles). `true` si borró fila.
-    async fn eliminar_pago(&self, id_pago: &str) -> AppResult<bool>;
+
+    /// El estado de un cobro (`ACTIVO` / `ANULADO`), o `None` si no existe.
+    ///
+    /// Va aparte de `anular_pago` porque quien decide es el dominio (`puede_anularse`) y el caso
+    /// de uso necesita el estado ANTES de pedir el cambio: el repositorio no puede quedarse con la
+    /// regla o volvería a haber dos.
+    async fn estado_pago(&self, id_pago: &str) -> AppResult<Option<String>>;
+
+    /// Anula un cobro **sin borrarlo** (CUENTA-07): revierte stock y gasto del cliente, marca el
+    /// pago y deja el movimiento en `Movimientos_Caja`. `true` si el pago existía.
+    async fn anular_pago(&self, args: AnularPagoArgs) -> AppResult<bool>;
 
     /// Anota que alguien abrió el cajón SIN una venta detrás (para dar cambio, para cuadrar).
     /// No lo impide —el camarero lo necesita—: lo deja registrado, que es la única pista real

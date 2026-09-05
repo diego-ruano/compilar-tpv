@@ -13,7 +13,7 @@ use tpv_application::ports::cierre_caja::ApunteCaja;
 use tpv_application::use_cases::cierre_caja as cierre_uc;
 use tpv_application::use_cases::cuentas as uc;
 use tpv_contracts::cuentas::{
-    CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
+    AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, EntradaDto,
     ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
 use crate::{AppState, ADMIN};
@@ -54,9 +54,10 @@ pub async fn cuentas_create_gasto(
     state: State<'_, AppState>,
     args: CreateGastoInput,
 ) -> Result<bool, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    // Quién registra el gasto sale de la sesión: va al historial de caja (CUENTA-07).
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
-    Ok(uc::create_gasto(repo.as_ref(), args).await?)
+    Ok(uc::create_gasto(repo.as_ref(), Some(&sesion.id_usuario), args).await?)
 }
 
 /// Gate del cierre de caja (CUENTA-06): un cobro o un gasto de un periodo ya cerrado no se toca.
@@ -96,10 +97,10 @@ pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
 ) -> Result<bool, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
     let repo = state.cuentas_repo().await?;
-    Ok(uc::delete_gasto(repo.as_ref(), args).await?)
+    Ok(uc::delete_gasto(repo.as_ref(), Some(&sesion.id_usuario), args).await?)
 }
 
 #[tauri::command]
@@ -113,15 +114,21 @@ pub async fn cuentas_update_pago(
     Ok(uc::update_pago(repo.as_ref(), args).await?)
 }
 
+/// Anula un cobro (CUENTA-07). Antes lo borraba, y ése era el agujero: el arqueo calcula
+/// `esperado = fondo + cobros en efectivo`, así que borrar la fila de una venta en efectivo bajaba
+/// el esperado exactamente lo mismo que faltaba en el cajón y el descuadre salía cero.
+///
+/// Quién anula sale de la **sesión** (SEC-01) y nunca del input: una anulación firmada con el
+/// nombre que le pase la pantalla es una auditoría que da confianza sin merecerla.
 #[tauri::command]
-pub async fn cuentas_delete_pago(
+pub async fn cuentas_anular_pago(
     state: State<'_, AppState>,
-    args: DeletePagoInput,
+    args: AnularPagoInput,
 ) -> Result<bool, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
     let repo = state.cuentas_repo().await?;
-    Ok(uc::delete_pago(repo.as_ref(), args).await?)
+    Ok(uc::anular_pago(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 /// Devuelve un ticket ya cobrado para volver a imprimirlo: mismo número, mismos tipos de IVA y las

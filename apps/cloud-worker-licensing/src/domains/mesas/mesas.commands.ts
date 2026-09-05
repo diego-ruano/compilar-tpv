@@ -494,7 +494,7 @@ export function removeOnePendingDetalle(idComanda: string, idProducto: string): 
 								WHERE dc.ID_Comanda = ?1
 									AND dc.ID_Producto = ?2
 									AND NOT EXISTS (
-										SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+										SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 									)
 								ORDER BY dc.ID_Detalle DESC LIMIT 1
 							);
@@ -517,7 +517,7 @@ export function deleteDetalle(idDetalle: string, idComanda: string | null): Buil
 				DELETE FROM Detalle_Comanda
 				WHERE ID_Detalle = ?1
 					AND NOT EXISTS (
-						SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+						SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
 					);
 			`,
 			args: [idDetalle],
@@ -542,7 +542,7 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 					SET Notas = ?2
 					WHERE ID_Detalle = ?1
 						AND NOT EXISTS (
-							SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
+							SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = Detalle_Comanda.ID_Detalle
 						);
 				`,
 				args: [idDetalle, nota],
@@ -649,7 +649,7 @@ export function cobrarDetalles(
 							WHERE dc.ID_Comanda = ?2
 								AND dc.ID_Detalle IN (${placeholders})
 								AND NOT EXISTS (
-									SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = dc.ID_Detalle
+									SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = dc.ID_Detalle
 								);
 						`,
 						args: [REF_ID_PAGO, input.id_comanda, ...input.detalle_ids],
@@ -671,7 +671,7 @@ export function cobrarDetalles(
 								AND NOT EXISTS (
 									SELECT 1
 									FROM Detalle_Comanda dc
-									LEFT JOIN Pago_Detalles pd ON pd.ID_Detalle = dc.ID_Detalle
+									LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 									WHERE dc.ID_Comanda = ?1 AND pd.ID_Detalle IS NULL
 								);
 						`,

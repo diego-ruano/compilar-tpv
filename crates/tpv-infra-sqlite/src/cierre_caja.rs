@@ -126,7 +126,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 WITH inicio AS (
                   SELECT COALESCE(
                     (SELECT MAX(Fecha_Hora) FROM Cierres_Caja WHERE Reabierto_En IS NULL),
-                    (SELECT MIN(Fecha_Hora) FROM Pagos)
+                    (SELECT MIN(Fecha_Hora) FROM Pagos WHERE COALESCE(Estado,'ACTIVO') = 'ACTIVO')
                   ) AS desde
                 )
                 SELECT CASE
@@ -167,12 +167,19 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         // El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta' cuenta
         // como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el lado
         // seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
+        //
+        // ⚠️ El `Estado = 'ACTIVO'` es LA consulta de CUENTA-07. Antes anular borraba la fila, así
+        // que el esperado bajaba exactamente lo mismo que faltaba en el cajón y el descuadre salía
+        // cero: el único control de caja del producto era ciego ante la forma más común de sisa.
+        // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
+        // sale como que falta.
         let (sql, params) = match desde {
             Some(d) => (
                 r#"
                 SELECT ROUND(COALESCE(SUM(Importe_Total),0),2)
                 FROM Pagos
                 WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
                   AND datetime(Fecha_Hora) > datetime(?1);
                 "#,
                 vec![Value::Text(d.to_string())],
@@ -181,7 +188,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 r#"
                 SELECT ROUND(COALESCE(SUM(Importe_Total),0),2)
                 FROM Pagos
-                WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta';
+                WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO';
                 "#,
                 vec![],
             ),
@@ -191,6 +199,45 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         Ok(match rows.next().await.map_err(db_err)? {
             Some(r) => v_f64(r.get_value(0).map_err(db_err)?).unwrap_or(0.0),
             None => 0.0,
+        })
+    }
+
+    /// Cuántas anulaciones ha habido en el periodo y por cuánto importe. **Informativo**: no entra
+    /// en el cálculo del arqueo, que sigue derivando de los cobros activos. Es el dato que no
+    /// existía y que hace visible la sisa: un descuadre de 40 € junto a "3 anulaciones por 40 €"
+    /// se explica solo.
+    ///
+    /// Se cuenta por `Anulado_En` y no por `Fecha_Hora`: lo que pertenece a este periodo es el
+    /// acto de anular, no la venta original —que puede ser de anteayer.
+    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, f64)> {
+        let db = self.db.read().await;
+        let (sql, params) = match desde {
+            Some(d) => (
+                r#"
+                SELECT COUNT(*), ROUND(COALESCE(SUM(Importe_Total),0),2)
+                FROM Pagos
+                WHERE COALESCE(Estado,'ACTIVO') = 'ANULADO'
+                  AND Anulado_En IS NOT NULL
+                  AND datetime(Anulado_En) > datetime(?1);
+                "#,
+                vec![Value::Text(d.to_string())],
+            ),
+            None => (
+                r#"
+                SELECT COUNT(*), ROUND(COALESCE(SUM(Importe_Total),0),2)
+                FROM Pagos
+                WHERE COALESCE(Estado,'ACTIVO') = 'ANULADO';
+                "#,
+                vec![],
+            ),
+        };
+        let mut rows = db.query(sql, params).await.map_err(db_err)?;
+        Ok(match rows.next().await.map_err(db_err)? {
+            Some(r) => (
+                v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
+                v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+            ),
+            None => (0, 0.0),
         })
     }
 
