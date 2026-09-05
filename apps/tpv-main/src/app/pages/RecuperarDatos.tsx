@@ -131,6 +131,10 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const trabajando = operacion !== null || (reconciliacionPendiente && !bloqueada);
     const completada = fase === "completada";
     const puedeCrearVacia = error?.code === "tenant_db_not_provisioned";
+    // El volcado de la nube tiene un tope de filas, y este es el único momento en que alguien lo
+    // descubre: el día que ha perdido su base. Un "ha fallado" genérico deja al dueño sin saber
+    // que la salida está justo encima, en la lista de copias de este ordenador.
+    const volcadoDemasiadoGrande = error?.code === "bootstrap_too_large";
 
     return (
         <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-bg text-fg">
@@ -300,7 +304,11 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                     <div className="grid gap-3 rounded-2xl border border-danger bg-danger-soft px-4 py-3 text-sm">
                                         <div className="flex gap-3">
                                             <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
-                                            <span>{error.message}</span>
+                                            <span>
+                                                {volcadoDemasiadoGrande
+                                                    ? "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, actualiza el TPV a la última versión antes de reintentarlo."
+                                                    : error.message}
+                                            </span>
                                         </div>
                                         {puedeCrearVacia && (
                                             <Button
