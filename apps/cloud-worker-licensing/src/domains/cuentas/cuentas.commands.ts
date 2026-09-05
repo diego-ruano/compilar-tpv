@@ -38,6 +38,9 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 	};
 	const steps = [
 		idStep(cloudPayload.id_gasto),
+		// Los dos ids se generan ANTES de sus INSERT, nunca dentro del SQL: una `TEXT PRIMARY KEY`
+		// calculada en la sentencia se re-evaluaría al replicar (CLAUDE.md §9).
+		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [crypto.randomUUID()] },
 		{
 			kind: "execute",
 			sql: `
@@ -58,6 +61,20 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 				cloudPayload.tipo_gasto,
 				cloudPayload.proveedor_id,
 			],
+		},
+		// Su fila en el historial de caja (CUENTA-07). Paridad con
+		// `SqliteCuentasRepository::crear_gasto`: una salida de dinero es un movimiento como lo es
+		// un cobro. `ID_Usuario` va nulo porque aquí no hay sesión de usuario —solo tenant y
+		// dispositivo—; en la Main lo pone el backend.
+		{
+			kind: "execute",
+			sql: `
+				INSERT INTO Movimientos_Caja (
+				  ID_Movimiento, Fecha_Hora, Tipo, ID_Gasto, Importe, Motivo
+				)
+				VALUES (?1, datetime('now','localtime'), 'GASTO', ?2, ABS(?3), ?4);
+			`,
+			args: [{ $ref: "mov" }, REF_ID, cloudPayload.importe, cloudPayload.concepto],
 		},
 	];
 	return {
@@ -94,15 +111,32 @@ export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltComm
 }
 
 export function deleteGasto(idGasto: string): BuiltCommand {
+	const steps = [
+		{ kind: "value", saveAs: "mov", sql: "SELECT ?1;", args: [crypto.randomUUID()] },
+		// El movimiento se anota ANTES del borrado: después la fila ya no está y el historial se
+		// quedaría con un importe de 0, que no dice nada de lo que se deshizo.
+		{
+			kind: "execute",
+			sql: `
+				INSERT INTO Movimientos_Caja (
+				  ID_Movimiento, Fecha_Hora, Tipo, ID_Gasto, Importe, Motivo
+				)
+				SELECT ?2, datetime('now','localtime'), 'GASTO_ANULADO', g.ID_Gasto,
+				       ABS(IFNULL(g.Importe,0)), NULLIF(COALESCE(g.Concepto,''),'')
+				FROM Cuentas_Gastos g
+				WHERE g.ID_Gasto = ?1;
+			`,
+			args: [idGasto, { $ref: "mov" }],
+		},
+		{
+			kind: "execute",
+			sql: "DELETE FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
+			args: [idGasto],
+		},
+	];
 	return {
 		commandName: "cuentas_delete_gasto",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: "DELETE FROM Cuentas_Gastos WHERE ID_Gasto = ?1;",
-				args: [idGasto],
-			},
-		},
+		command: { type: "tenantDb.transaction", payload: { steps } },
 		cloudPayload: { id_gasto: idGasto },
 	};
 }

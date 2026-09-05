@@ -13,6 +13,7 @@
     "proveedor_id": "prov-1"
   },
   "snapshot": {
-    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor FROM Cuentas_Gastos"
+    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor FROM Cuentas_Gastos",
+    "Movimientos_Caja": "SELECT Tipo, ID_Gasto, ID_Usuario, Importe, Motivo FROM Movimientos_Caja"
   }
 }

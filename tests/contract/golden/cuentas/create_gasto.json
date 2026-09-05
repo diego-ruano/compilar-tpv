@@ -8,5 +8,14 @@
       "Importe": 42.75,
       "Tipo_Gasto": "Suministros"
     }
+  ],
+  "Movimientos_Caja": [
+    {
+      "ID_Gasto": "gasto-nuevo-1",
+      "ID_Usuario": null,
+      "Importe": 42.75,
+      "Motivo": "Cajas de servilletas",
+      "Tipo": "GASTO"
+    }
   ]
 }
