@@ -204,9 +204,9 @@ Movimientos_Stock · Fichajes · Fichaje_Dia · Aperturas_Cajon · Cuentas_Gasto
 
 ### 4.1 La fase 2 no puede pisar lo que trajo el catch-up
 
-El caso: la fase 1 deja `Last_Seq = S`. Después alguien **anula un pago antiguo** (justo lo que
-habilita [CUENTA-07](PLAN_CUENTA_07_ANULACIONES.md)). El catch-up trae ese `UPDATE`, pero la fila aún
-no existe en local → falla → cuarentena. Y luego la fase 2 inserta la versión **vieja**, sin la
+El caso: la fase 1 deja `Last_Seq = S`. Después alguien **anula un pago antiguo** (que desde
+CUENTA-07 es un `UPDATE` sobre la fila, no un borrado — CLAUDE.md §13). El catch-up trae ese
+`UPDATE`, pero la fila aún no existe en local → falla → cuarentena. Y luego la fase 2 inserta la versión **vieja**, sin la
 anulación. Resultado: un dato incorrecto que nadie ve.
 
 **Solución: `INSERT OR IGNORE`.** La fase 2 nunca pisa una fila existente, porque lo que ya está es

@@ -704,7 +704,7 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
 | Comandos Tauri | `src-tauri/src/lib.rs` | `printer_print_ticket`, `printer_ticket_cols`, `printer_open_drawer` |
 | Vista previa | `src/shared/ticket/TicketPaper.tsx` | Espejo del generador (mismo truncado, mismo desglose) |
 | Payload | `src/features/configuracion/api/printerApis.ts` | `buildTicketPayload` agrupa líneas por `nombre__precio__iva` |
-| Reimpresión | `src/app/pages/Cuentas.tsx` | Copia marcada (`es_copia`), no genera número nuevo |
+| Reimpresión | `src/app/pages/Cuentas.tsx` | Copia marcada (`es_copia`, y `es_anulado` si el cobro lo está), no genera número nuevo |
 
 ### Reglas
 
@@ -782,8 +782,9 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
   noche. Si mañana se reabre el periodo y se corrige un cobro, el arqueo de ayer no puede cambiar
   solo: dejaría de explicar por qué faltaban 20 €.
 - **Sólo se cuadra el efectivo, y sólo con ventas.** De esta caja no se paga a proveedores ni a
-  nómina, así que `esperado = fondo + cobros en efectivo`. El hueco que eso deja —sacar dinero para
-  otra cosa sale como que falta— **se tapa diciéndolo en la pantalla**, no con código.
+  nómina, así que `esperado = fondo + cobros **activos** en efectivo` (CUENTA-07, §13). El hueco que
+  eso deja —sacar dinero para otra cosa sale como que falta— **se tapa diciéndolo en la pantalla**,
+  no con código. Y las anulaciones del periodo se enseñan al lado, sin entrar en el cálculo.
 - **Cerrar bloquea el periodo; reabrir deja rastro.** El bloqueo no tiene columna: se deduce
   comparando la fecha del apunte con el último cierre no reabierto, que es un estado menos que
   mantener sincronizado. El gate vive en los comandos, no en la UI, y la fecha se lee de la BD y no
@@ -801,7 +802,81 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
 
 ---
 
-## 13. Permisos y sesión (SEC-01)
+## 13. Anular un cobro (CUENTA-07)
+
+Un cobro anulado **no se borra**. Diseño y porqués abajo; el plan que lo introdujo ya no existe.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| La regla | `crates/tpv-domain/src/cuentas.rs::puede_anularse` | Ya anulado / falta motivo. Sin BD: aquí están los tests |
+| Persistencia | `crates/tpv-infra-sqlite/src/cuentas.rs::anular_pago` | Revierte stock y gasto, marca el pago, reabre la comanda |
+| «Línea cobrada» | vista `v_lineas_cobradas` (`0001_inicial.sql`) | Fila en `Pago_Detalles` **ligada a un pago ACTIVO** |
+| Historial | `crates/tpv-infra-sqlite/src/caja_movimientos.rs` → `Movimientos_Caja` | Una fila por hecho: cobro, anulación, gasto |
+| Comando | `commands/cuentas.rs::cuentas_anular_pago` | Administrador + gate de periodo; firma con la sesión |
+| Pantalla | `src/app/pages/Cuentas.tsx` | Lista los anulados marcados; pide el motivo |
+| Worker | `domains/cuentas/cuentas.commands.ts::anularPago` | Paridad; vetado a la Handy |
+
+### Reglas
+
+- **El agujero que esto cierra.** El arqueo calcula `esperado = fondo + cobros en efectivo`, así que
+  borrar la fila de una venta en efectivo bajaba el esperado **exactamente lo mismo** que faltaba en
+  el cajón: el descuadre salía cero. Los números eran correctos; lo que no había era nada con lo que
+  compararlos. Consecuencia: **`ventas_efectivo_desde` filtra por `Estado='ACTIVO'`, y ese filtro es
+  el plan entero**. Si alguien lo quita, el producto vuelve a ser ciego y ningún test de aritmética
+  se entera.
+- **Las líneas vuelven a la comanda, no se esfuman.** Se conservan `Detalle_Comanda` y
+  `Pago_Detalles`: son lo que permite reimprimir el ticket anulado tal como se emitió, y si el cobro
+  fue un error las consumiciones siguen en la mesa, que es lo que espera el camarero. El precio es
+  que **«cobrada» deja de ser «tiene fila en `Pago_Detalles`»**.
+- **Ese predicado vive en una vista, no repetido.** `v_lineas_cobradas` es `Pago_Detalles` unida a
+  los pagos activos, y **toda lectura que pregunte si una línea está cobrada va por ella** (las
+  escrituras siguen yendo contra la tabla). Estaba en ~27 sitios entre Rust y el worker: escrito 27
+  veces, la próxima consulta que alguien añada se olvidaría del filtro, y el síntoma sería una mesa
+  con líneas congeladas o un pendiente descuadrado, no un error.
+- **El guardia anti-doble-abono es el `Estado`, y está dentro de la transacción.** Antes lo
+  garantizaba el borrado de `Lote_Consumos`/`Suelto_Consumos`: sin filas que sumar, una segunda
+  anulación no abonaba nada. Ahora esas trazas se conservan, así que lo único que impide abonar el
+  stock dos veces —y descontar el gasto del cliente dos veces— es que `anular_pago` salga antes si
+  el pago ya está `ANULADO`. Es el punto donde más fácil es meter un bug silencioso.
+- **La reconciliación cuenta un consumo salvo que TODOS los pagos de su línea estén anulados.** No
+  «si tiene un pago activo»: un consumo que nunca llegó a ligarse a un cobro sigue habiendo salido
+  del lote, y una línea anulada y vuelta a cobrar también. Y de las tres consultas,
+  `recalcular_gasto` **escribe** (por `execute`, así que sale por el outbox): sin el filtro, el aviso
+  falso de descuadre inducía a pulsar «recalcular» y grabar un total que incluye el cobro anulado,
+  en local y en la nube.
+- **`Pago_Detalles.ID_Detalle` va con `ON DELETE CASCADE`.** Una línea devuelta a la mesa tiene que
+  poder quitarse; si la FK lo impidiera quedaría visible y congelada, que es peor que el
+  comportamiento que esto arregla. No se pierde auditoría: lo que prueba la anulación es la fila de
+  `Pagos`, y un `Pago_Detalles` cuya línea ya no existe no es una prueba sino un puntero colgante
+  (la reimpresión une con `Detalle_Comanda`). Lo que protege a un cobro **activo** no es la FK: son
+  las guardias de `delete_detalle` y `remove_one_pending_detalle`.
+- **Borrar una comanda se niega si tiene CUALQUIER cobro, activo o anulado.** `Pagos.ID_Comanda` va
+  con cascade, así que borrarla se llevaría por delante justo la fila que este cambio conserva.
+- **Un cobro anulado queda congelado.** No se edita: cambiarle la fecha movería la anulación de
+  periodo de caja a posteriori, que es lo que el rastro existe para impedir. Y no se «desanula»:
+  para eso se vuelve a cobrar.
+- **El motivo es obligatorio, siempre.** Quién y cuándo los pone el sistema; el porqué sólo puede
+  ponerlo quien anula. Sin umbral a propósito: la sisa que esto caza son importes pequeños
+  repetidos, justo los que un umbral dejaría pasar sin explicación. Lo valida el caso de uso y no un
+  `CHECK`, que convertiría un olvido en un error de base de datos que no se puede explicar.
+- **`Movimientos_Caja` es para investigar, no para calcular.** `Pagos` sigue siendo la única fuente
+  de verdad del dinero y el arqueo sigue derivando de ahí. En cuanto alguien sume el esperado desde
+  esa tabla habrá dos fuentes para la misma cifra y divergirán. Su `ID_Movimiento` se genera **antes**
+  del INSERT (§9, «IDs deterministas»), y su `Importe` va siempre en positivo: el signo lo da el
+  `Tipo`. Ampliarlo (devoluciones de VENTA-01, Veri*factu) es tocar el `CHECK`.
+- **Los anulados se ven, pero no cuentan.** Salen en la lista de Cuentas y en los PDF —es donde se
+  investiga un descuadre, y esconderlos ahí sería devolver el producto al estado que esto arregla—
+  pero no suman en los totales, ni en las estadísticas, ni en el pendiente de una comanda. El arqueo
+  los enseña como línea informativa: «3 anulaciones por 40 €» junto a un descuadre de 40 € se explica
+  solo.
+- **La copia de un ticket anulado sale marcada `*** ANULADO ***`**, además de COPIA. Reimprimirlo
+  sigue permitido —es la prueba de qué contenía— pero un papel que no lo diga circularía como un
+  cobro válido.
+- **Anular es de la Main.** El worker lo veta como el resto de escrituras de caja
+  (`soloLaMainEscribeCaja`), y la ruta es `POST /v1/cuentas/pagos/:id/anular`: un `DELETE` diría lo
+  contrario de lo que hace.
+
+## 14. Permisos y sesión (SEC-01)
 
 Quién puede hacer qué. **SEC-01**; qué está gateado, qué no y hasta dónde llega la garantía en
 [docs/analisis/transversal/permisos-y-sesion.md](docs/analisis/transversal/permisos-y-sesion.md),
@@ -821,8 +896,8 @@ que cierra también el modelo de amenaza de LIC-04.
 - **El rol sale del repositorio, nunca de los args.** Quien puede invocar un comando puede escribir
   lo que quiera en su entrada, así que un rol que llega por ahí no es una comprobación: es una
   sugerencia. Lo mismo vale para el usuario que se **registra** en una fila (quién cerró la caja,
-  quién abrió el cajón): sale de la sesión, y por eso `ConfirmarCierreInput`, `CierreIdInput` y
-  `AbrirCajonArgs` ya no llevan `id_usuario`. Una auditoría firmada con el nombre que le pasen da
+  quién abrió el cajón, quién anuló un cobro): sale de la sesión, y por eso `ConfirmarCierreInput`,
+  `CierreIdInput`, `AbrirCajonArgs` y `AnularPagoInput` ya no llevan `id_usuario`. Una auditoría firmada con el nombre que le pasen da
   confianza sin merecerla, que es peor que no tener ninguna.
 - **La lista de comandos gateados es corta a propósito.** Gatear "añadir una línea a la comanda"
   convierte el TPV en inservible en hora punta, y un gate que estorba acaba en que todo el mundo
@@ -854,7 +929,7 @@ que cierra también el modelo de amenaza de LIC-04.
 
 ---
 
-## 14. Notas del generador de tickets
+## 15. Notas del generador de tickets
 
 Los tests del generador están en `src-tauri/src/printing/tests.rs`, e incluyen un mini-intérprete
 ESC/POS: separa texto de comandos y **falla si encuentra un byte que no es ninguna de las dos

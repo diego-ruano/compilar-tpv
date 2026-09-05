@@ -102,7 +102,7 @@ el PIN del encargado — que es exactamente el permiso que se quería quitar.
 
 | Área | Comandos |
 |---|---|
-| Cuentas (sección entera, lecturas incluidas) | `cuentas_get_entradas` · `cuentas_get_salidas` · `cuentas_get_resumen` · `cuentas_create_gasto` · `cuentas_update_gasto` · `cuentas_delete_gasto` · `cuentas_update_pago` · `cuentas_delete_pago` · `cuentas_ticket_para_reimprimir` |
+| Cuentas (sección entera, lecturas incluidas) | `cuentas_get_entradas` · `cuentas_get_salidas` · `cuentas_get_resumen` · `cuentas_create_gasto` · `cuentas_update_gasto` · `cuentas_delete_gasto` · `cuentas_update_pago` · `cuentas_anular_pago` · `cuentas_ticket_para_reimprimir` |
 | Cierre de caja | `cierre_preparar` · `cierre_confirmar` · `cierre_listar` · `cierre_detalle` · `cierre_reabrir` |
 | Personal | `trabajadores_create` · `trabajadores_update` · `trabajadores_get_detail` |
 | Configuración | `config_patch_business_settings` · `config_patch_ticket_settings` · `config_patch_contact_settings` |

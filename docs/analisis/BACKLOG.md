@@ -21,14 +21,14 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido.** Antes de entrar en un bar: CUENTA-07 y SYNC-19 (SEC-01 ✅ hecho). Antes de cobrar por
+> **Orden sugerido.** Antes de entrar en un bar: SYNC-19 (SEC-01 y CUENTA-07 ✅ hechos). Antes de cobrar por
 > ello: FISCAL-01, FISCAL-02, LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato: TEST-01, OPS-02.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
 | FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | Sin empezar |
 | FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | Sin empezar |
-| CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | Sin empezar |
+| CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | ✅ Hecho (2026-09-05) |
 | SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | ✅ Hecho (2026-09-05) |
 | SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | Sin empezar |
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
@@ -55,8 +55,9 @@ productor**. ⚠️ **Los plazos concretos hay que confirmarlos con un asesor** 
 depende de la fecha.
 
 **Por qué va el primero pese a ser el más caro:** es estructural. Registros inmutables y encadenados
-se diseñan al principio. Montarlos encima de un esquema donde los cobros se borran (CUENTA-07) es
-rehacer el módulo de ventas, y hacerlo con clientes dentro cuesta otro orden de magnitud.
+se diseñan al principio. La mitad del terreno ya está desbrozada — desde CUENTA-07 los cobros no se
+borran y existe `Movimientos_Caja`, que es la tabla que después llevará el encadenamiento por
+hash —, pero el resto sigue siendo trabajo de diseño con el reglamento delante.
 
 ### FISCAL-02 🟠 · Factura completa con NIF del cliente
 
@@ -64,20 +65,21 @@ rehacer el módulo de ventas, y hacerlo con clientes dentro cuesta otro orden de
 los datos fiscales del **cliente**, que es lo que pide cualquier comida de empresa. Encaja con
 FISCAL-01 y conviene diseñarlos juntos, no uno detrás de otro.
 
-### CUENTA-07 🔴 · Anular un cobro borra la fila
+### CUENTA-07 ✅ · Anular un cobro borraba la fila (resuelto 2026-09-05)
 
-[`cuentas.rs:491`](../../crates/tpv-infra-sqlite/src/cuentas.rs#L491) hace `DELETE`. El propio test lo
-dice: *"la fila desaparece"*. `Comandas.Estado` sólo admite `'Abierta'|'Pagada'` — no existe
-`'ANULADA'`. No hay tabla de auditoría de dinero (de stock sí: `Movimientos_Stock`).
+Anular hacía `DELETE`. Y como el cierre de caja calcula `esperado = fondo + cobros en efectivo`, si
+alguien cobraba 40 € en efectivo, se los quedaba y anulaba el cobro, **el esperado bajaba 40 € y el
+arqueo cuadraba perfecto**. El único control de caja del producto era ciego justo ante la forma más
+común de sisa en un bar. No era un fallo de cálculo: era que no quedaba nada con lo que comparar.
 
-**El agujero:** el cierre de caja calcula `esperado = fondo + cobros en efectivo`
-([`cierre_caja.rs:78`](../../crates/tpv-domain/src/cierre_caja.rs#L78)). Si alguien cobra 40 € en
-efectivo, se los queda y anula el cobro, **el esperado baja 40 € y el arqueo cuadra perfecto**. El
-único control de caja que tiene el diseño es ciego justo ante la forma más común de sisa en un bar.
-
-**Arreglo:** soft-delete (`Estado='ANULADA'` + quién, cuándo y motivo), `esperado` sobre cobros no
-anulados, y las anulaciones como línea aparte del arqueo. Es además exactamente lo que FISCAL-01 va
-a exigir, así que se hace **una vez** y sirve para las dos cosas.
+**Resuelto.** `Pagos` gana `Estado`, `Anulado_En`, `Anulado_Por` y `Motivo_Anulacion`; el motivo es
+obligatorio y quién anula sale de la sesión del backend (SEC-01). Se conservan también las líneas
+del cobro —lo que permite reimprimir el ticket anulado y devuelve las consumiciones a la mesa como
+pendientes—, así que «línea cobrada» pasa a significar «ligada a un pago ACTIVO»: eso vive en la
+vista `v_lineas_cobradas` y no repetido en las ~27 consultas que hacían esa pregunta. `esperado` y
+las estadísticas cuentan sólo cobros activos, y el arqueo enseña las anulaciones del periodo como
+línea informativa. `Movimientos_Caja` recoge el historial (cobro, anulación, gasto). Las reglas y
+sus porqués están en [CLAUDE.md §13](../../CLAUDE.md).
 
 ### SEC-01 ✅ · Los permisos eran sólo de UI (resuelto 2026-09-05)
 
