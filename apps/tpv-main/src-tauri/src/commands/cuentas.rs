@@ -1,4 +1,11 @@
 //! Comandos Tauri de cuentas/caja (capa fina hexagonal).
+//!
+//! SEC-01: **toda la sección es de administrador**, lecturas incluidas. No es una ampliación
+//! del gate por gusto: `PLAN_CIERRE_CAJA.md` §8 ya lo decidió ("el gate por rol en la ruta del
+//! frontend y, sobre todo, en los comandos Tauri"), y hasta ahora sólo existía la mitad de UI.
+//! El libro de caja dice cuánto se factura y cuánto se gasta; esconderlo del menú no es
+//! esconderlo. En los que además tocan un apunte, el rol va ANTES del gate de periodo: no hay
+//! por qué consultar la BD por alguien que de todos modos no puede cambiar nada.
 
 use tauri::State;
 
@@ -9,7 +16,7 @@ use tpv_contracts::cuentas::{
     CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, DeletePagoInput, EntradaDto,
     ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
 };
-use crate::AppState;
+use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
 
 #[tauri::command]
@@ -17,6 +24,7 @@ pub async fn cuentas_get_entradas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<Vec<EntradaDto>, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_entradas(repo.as_ref(), args).await?)
 }
@@ -26,6 +34,7 @@ pub async fn cuentas_get_salidas(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<Vec<SalidaDto>, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_salidas(repo.as_ref(), args).await?)
 }
@@ -35,6 +44,7 @@ pub async fn cuentas_get_resumen(
     state: State<'_, AppState>,
     args: CuentasRangoArgs,
 ) -> Result<ResumenCajaDto, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
@@ -44,6 +54,7 @@ pub async fn cuentas_create_gasto(
     state: State<'_, AppState>,
     args: CreateGastoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::create_gasto(repo.as_ref(), args).await?)
 }
@@ -74,6 +85,7 @@ pub async fn cuentas_update_gasto(
     state: State<'_, AppState>,
     args: UpdateGastoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_gasto(repo.as_ref(), args).await?)
@@ -84,6 +96,7 @@ pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_gasto(repo.as_ref(), args).await?)
@@ -94,6 +107,7 @@ pub async fn cuentas_update_pago(
     state: State<'_, AppState>,
     args: UpdatePagoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::update_pago(repo.as_ref(), args).await?)
@@ -104,6 +118,7 @@ pub async fn cuentas_delete_pago(
     state: State<'_, AppState>,
     args: DeletePagoInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::delete_pago(repo.as_ref(), args).await?)
@@ -117,6 +132,7 @@ pub async fn cuentas_ticket_para_reimprimir(
     state: State<'_, AppState>,
     id_pago: String,
 ) -> Result<Option<TicketReimpresionDto>, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.cuentas_repo().await?;
     Ok(uc::ticket_para_reimprimir(repo.as_ref(), &id_pago).await?)
 }

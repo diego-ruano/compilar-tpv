@@ -274,17 +274,15 @@ describe("comandos de impresora", () => {
 		expect(invocaciones[0].args).toEqual({ args: { destino: "caja" } });
 	});
 
-	it("abrir el cajón a mano dice quién lo abre", async () => {
-		// Es el dato por el que se pregunta cuando falta dinero en el arqueo.
-		await printerOpenDrawer("u1");
+	// SEC-01: quién abre el cajón es el dato por el que se pregunta cuando falta dinero, así que
+	// ya no lo manda la pantalla — lo pone la sesión del backend. Que aquí no viaje ningún
+	// usuario es justo lo que hay que sostener: si volviera a mandarse, la fila de auditoría
+	// registraría de nuevo el nombre que le dijeran.
+	it("abrir el cajón a mano no manda quién lo abre", async () => {
+		await printerOpenDrawer();
 		expect(invocaciones[0]).toEqual({
 			cmd: "printer_open_drawer",
-			args: { args: { id_usuario: "u1" } },
+			args: undefined,
 		});
-	});
-
-	it("sin usuario identificado se abre igual y se anota sin nombre", async () => {
-		await printerOpenDrawer();
-		expect(invocaciones[0].args).toEqual({ args: { id_usuario: null } });
 	});
 });

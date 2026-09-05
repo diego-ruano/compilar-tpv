@@ -107,7 +107,7 @@ usuario_nombre?: string, fondo_inicial: number, ventas_efectivo: number, esperad
  */
 reabierto_en?: string, reabierto_por?: string, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, };
 
-export type CierreIdInput = { id_cierre: string, id_usuario?: string, };
+export type CierreIdInput = { id_cierre: string, };
 
 export type CierreListarArgs = { limite?: bigint, };
 
@@ -166,7 +166,7 @@ export type ConfirmarCierreInput = {
  * Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
  * ignora, para que nadie pueda reescribir el punto de partida a posteriori.
  */
-fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, id_usuario?: string, };
+fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, };
 
 export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
 

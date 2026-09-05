@@ -1,5 +1,11 @@
 //! Comandos Tauri de trabajadores / horarios (capa fina hexagonal).
 //! Local-First: sin op_id ni outbox. Mismos nombres de invoke que el monolito previo.
+//!
+//! SEC-01: el alta, la edición y **la lectura de la ficha** exigen Administrador. La ficha entra
+//! en la lista porque es la única que devuelve la PII cifrada del personal (DNI, IBAN, nº SS), y
+//! su ruta (`/Trabajadores/editar/:id`) no tiene candado: basta escribirla. El listado, los
+//! turnos y los horarios NO se gatean — todos los roles tienen Trabajadores en su menú para ver
+//! su cuadrante.
 
 use tauri::State;
 
@@ -10,7 +16,7 @@ use tpv_contracts::trabajadores::{
     TrabajadorDetailArgs, TrabajadorDetailRow, TrabajadorIdByUsuarioArgs, TrabajadorRow,
     TrabajadorUpdateInput, TurnoRow,
 };
-use crate::AppState;
+use crate::{AppState, ADMIN};
 use tpv_contracts::errors::AppErrorDto;
 
 /* Lecturas */
@@ -34,6 +40,7 @@ pub async fn trabajadores_get_detail(
     state: State<'_, AppState>,
     args: TrabajadorDetailArgs,
 ) -> Result<Option<TrabajadorDetailRow>, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::get_detail(repo.as_ref(), args).await?)
 }
@@ -69,6 +76,7 @@ pub async fn trabajadores_create(
     state: State<'_, AppState>,
     args: TrabajadorCreateInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::create_trabajador(repo.as_ref(), args).await?)
 }
@@ -78,6 +86,7 @@ pub async fn trabajadores_update(
     state: State<'_, AppState>,
     args: TrabajadorUpdateInput,
 ) -> Result<bool, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
     let repo = state.trabajadores_repo().await?;
     Ok(uc::update_trabajador(repo.as_ref(), args).await?)
 }

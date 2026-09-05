@@ -105,18 +105,12 @@ pub struct ConfirmarCierreInput {
     #[serde(default)]
     #[ts(optional)]
     pub motivo: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_usuario: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CierreIdInput {
     pub id_cierre: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_usuario: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

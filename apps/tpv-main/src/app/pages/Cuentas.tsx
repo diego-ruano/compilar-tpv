@@ -47,7 +47,6 @@ import {
     cierreReabrir,
     type CierreResumenDto,
 } from "../../features/cuentas/cierreApis";
-import { useAuth } from "../../shared/stores/useAuth";
 import DenomsGrid from "../../features/cuentas/DenomsGrid";
 import {
     useCuentasEntradas,
@@ -205,7 +204,6 @@ function mapSalidaUI(
 }
 
 export default function Cuentas() {
-    const { idUsuario } = useAuth();
     const [busqueda, setBusqueda] = useState("");
     const [del, setDel] = useState(() => todayYMD());
     const [al, setAl] = useState(() => todayYMD());
@@ -358,7 +356,7 @@ export default function Cuentas() {
     // acto deliberado y con nombre, no en impedirlo.
     const reabrirCierre = async (idCierre: string) => {
         try {
-            await cierreReabrir(idCierre, idUsuario);
+            await cierreReabrir(idCierre);
             await recargarCierres();
             entradasQuery.refetch();
             salidasQuery.refetch();
@@ -1988,7 +1986,6 @@ export default function Cuentas() {
             <CierreCajaModal
                 open={openCierre}
                 onClose={() => setOpenCierre(false)}
-                idUsuario={idUsuario}
                 onCerrado={() => {
                     // Un cierre cambia lo que se puede editar (bloquea su periodo) y estrena el
                     // historico, asi que se recarga todo lo que cuelga de el.

@@ -60,9 +60,14 @@ pub async fn preparar(
 ///
 /// Las ventas también se recalculan aquí, no se reciben: son la mitad del esperado, y aceptarlas de
 /// fuera sería dejar que la pantalla decidiera cuánto debería haber en el cajón.
+///
+/// `id_usuario` es un parámetro y no un campo del input **a propósito** (SEC-01): quien firma
+/// el arqueo lo pone la sesión del backend, así que no puede llegar por el mismo camino que los
+/// datos que sí escribe la pantalla.
 pub async fn confirmar(
     repo: &dyn CierreCajaRepository,
     id_cierre: String,
+    id_usuario: Option<&str>,
     input: ConfirmarCierreInput,
     umbral_descuadre: f64,
 ) -> AppResult<CierreDto> {
@@ -98,7 +103,7 @@ pub async fn confirmar(
 
     repo.crear(CierreNuevo {
         id_cierre: id_cierre.clone(),
-        id_usuario: input.id_usuario.clone(),
+        id_usuario: id_usuario.map(str::to_string),
         fondo_inicial: calculo.fondo_inicial,
         ventas_efectivo: calculo.ventas_efectivo,
         esperado: calculo.esperado,

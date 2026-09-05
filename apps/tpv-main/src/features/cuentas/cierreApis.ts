@@ -48,12 +48,18 @@ export function cierrePreparar(): Promise<PreparacionCierreDto> {
     return invokeClient<PreparacionCierreDto>("cierre_preparar");
 }
 
+/**
+ * Cierra el periodo de caja.
+ *
+ * SEC-01: **quién cierra no se manda**. Lo pone la sesión del backend, porque un arqueo firmado
+ * con el nombre que le pase la pantalla es una auditoría que da confianza sin merecerla. Lo
+ * mismo vale para `cierreReabrir`.
+ */
 export function cierreConfirmar(payload: {
     fondoInicial?: number | null;
     contado: Array<{ valor: number; unidades: number }>;
     dejado: Array<{ valor: number; unidades: number }>;
     motivo?: string | null;
-    idUsuario?: string | null;
 }): Promise<CierreDto> {
     return invokeClient<CierreDto>("cierre_confirmar", {
         args: {
@@ -61,7 +67,6 @@ export function cierreConfirmar(payload: {
             contado: payload.contado,
             dejado: payload.dejado,
             motivo: payload.motivo?.trim() ? payload.motivo.trim() : null,
-            id_usuario: payload.idUsuario ?? null,
         },
     });
 }
@@ -76,12 +81,9 @@ export function cierreDetalle(idCierre: string): Promise<CierreDto> {
     return invokeClient<CierreDto>("cierre_detalle", { idCierre });
 }
 
-export function cierreReabrir(
-    idCierre: string,
-    idUsuario?: string | null,
-): Promise<boolean> {
+export function cierreReabrir(idCierre: string): Promise<boolean> {
     return invokeClient<boolean>("cierre_reabrir", {
-        args: { id_cierre: idCierre, id_usuario: idUsuario ?? null },
+        args: { id_cierre: idCierre },
     });
 }
 

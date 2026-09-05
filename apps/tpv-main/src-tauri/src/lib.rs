@@ -142,13 +142,6 @@ struct SetDeviceModeArgs {
     mode: DeviceMode,
 }
 
-/// Quién abre el cajón a mano (para el registro). Ausente = no identificado.
-#[derive(Debug, Clone, Deserialize)]
-struct AbrirCajonArgs {
-    #[serde(default)]
-    id_usuario: Option<String>,
-}
-
 /// Destino de impresión (`caja` | `cocina`). Ausente = `caja`.
 #[derive(Debug, Clone, Deserialize)]
 struct DestinoArgs {
@@ -937,6 +930,12 @@ async fn device_reset_mode(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<String, AppErrorDto> {
+    // SEC-01: con la app abierta esto es de administrador (se llega por Configuración →
+    // Dispositivo, cuya ruta no tiene candado). Sin sesión pasa, porque el otro camino que lleva
+    // aquí es el botón "volver al selector de modo" de las pantallas de arranque, donde todavía
+    // no hay con quién iniciar sesión.
+    state.exigir_rol_si_hay_sesion(&[ADMIN]).await?;
+
     let app_data_dir = app
         .path()
         .app_data_dir()
@@ -1490,16 +1489,19 @@ fn ruta_dentro_de(dir: &std::path::Path, ruta: &str) -> Option<std::path::PathBu
 /// se pide permiso de administrador. Lo que sí se hace es **dejarlo anotado** con quién y cuándo:
 /// una apertura sin venta detrás es la única por la que alguien pregunta cuando falta dinero.
 ///
+/// SEC-01: por eso pide `sesion()` —basta estar identificado, da igual el rol— y el `id_usuario`
+/// sale de ahí, no de los args. Una fila de auditoría firmada con el nombre que le pase la
+/// pantalla no registra quién abrió el cajón; registra quién dijo alguien que lo abrió.
+///
 /// El registro es best-effort a propósito: si la BD fallara, el cajón se abre igual. Bloquear el
 /// cambio de un cliente porque no se pudo escribir una fila de auditoría sería peor que la falta
-/// de esa fila.
+/// de esa fila. El gate NO es best-effort: sin sesión no se abre.
 #[tauri::command]
 async fn printer_open_drawer(
     app: AppHandle,
     state: State<'_, AppState>,
-    args: Option<AbrirCajonArgs>,
 ) -> Result<String, AppErrorDto> {
-    let id_usuario = args.and_then(|a| a.id_usuario);
+    let id_usuario = Some(state.sesion().await?.id_usuario);
 
     if let Ok(repo) = state.cuentas_repo().await {
         if let Err(e) =

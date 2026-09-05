@@ -38,12 +38,11 @@ import {
 type Props = {
     open: boolean;
     onClose: () => void;
-    idUsuario?: string | null;
     /** Se llama cuando el cierre se guarda, para que la pantalla recargue lo que dependa de él. */
     onCerrado?: (cierre: CierreDto) => void;
 };
 
-export default function CierreCajaModal({ open, onClose, idUsuario, onCerrado }: Props) {
+export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const denoms = DEFAULT_DENOMS;
 
     const [prep, setPrep] = useState<PreparacionCierreDto | null>(null);
@@ -124,7 +123,6 @@ export default function CierreCajaModal({ open, onClose, idUsuario, onCerrado }:
                 contado: aDenominaciones(denoms, contado),
                 dejado: aDenominaciones(denoms, dejado),
                 motivo: motivo,
-                idUsuario: idUsuario ?? null,
             });
             onCerrado?.(cierre);
             onClose();

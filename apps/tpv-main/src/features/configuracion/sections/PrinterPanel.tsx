@@ -9,7 +9,6 @@ import { useToast } from "../../../shared/toast";
 import { cn } from "../utils";
 import { Panel } from "../ui/Panel";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
-import { useAuth } from "../../../shared/stores/useAuth";
 import {
     printerGetSelected,
     printerList,
@@ -67,7 +66,6 @@ export function PrinterPanel() {
     );
 
     // Quién lo abre: la apertura manual se anota a su nombre.
-    const idUsuario = useAuth((s) => s.idUsuario);
 
     /**
      * Abre el cajón sin imprimir. Sirve para comprobar que el cable RJ11 está bien puesto — que es
@@ -75,7 +73,7 @@ export function PrinterPanel() {
      */
     const abrirCajon = useCallback(async () => {
         try {
-            await printerOpenDrawer(idUsuario ?? null);
+            await printerOpenDrawer();
             toast.success("Cajón", "Orden de apertura enviada.");
         } catch (e) {
             console.error("printerOpenDrawer error:", e);
@@ -84,7 +82,7 @@ export function PrinterPanel() {
                 typeof e === "string" ? e : "No se pudo abrir el cajón.",
             );
         }
-    }, [toast, idUsuario]);
+    }, [toast]);
 
     const imprimirPrueba = useCallback(async () => {
         if (!selected) return;

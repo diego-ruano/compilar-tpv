@@ -10,12 +10,14 @@
 use std::path::PathBuf;
 
 use serde_json::json;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::pairing as uc_pairing;
 use tpv_contracts::email_config::EnviarPedidoEmailInput;
 use tpv_infra_licensing::PairingAdapter;
 use tpv_contracts::errors::AppErrorDto;
+
+use crate::{AppState, ADMIN};
 
 /* ── Helpers ─────────────────────────────────────────────────────────── */
 
@@ -27,11 +29,17 @@ fn app_data(app: &AppHandle) -> Result<PathBuf, String> {
 
 /* ── Comando ─────────────────────────────────────────────────────────── */
 
+/// SEC-01: exige Administrador. Mandar un pedido compromete dinero con un proveedor y sale
+/// firmado con el correo del negocio; «Proveedores y Pedidos» ya era una sección suya en el
+/// menú, y esto es el candado que le faltaba detrás.
 #[tauri::command]
 pub async fn email_enviar_pedido(
     app: AppHandle,
+    state: State<'_, AppState>,
     args: EnviarPedidoEmailInput,
 ) -> Result<(), AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+
     let app_data_dir = app_data(&app)?;
     let svc = PairingAdapter::new(app_data_dir);
 

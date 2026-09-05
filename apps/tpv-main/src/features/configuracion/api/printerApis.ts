@@ -135,11 +135,13 @@ export async function printerSetSelected(
  * Queda registrado con quién y cuándo: una apertura sin venta detrás es la única por la que
  * alguien pregunta cuando falta dinero. No pide permiso de administrador — el camarero lo
  * necesita, y poner fricción ahí acaba en que todos conocen el PIN del encargado.
+ *
+ * SEC-01: **quién abre no se manda**. Sí hace falta haber iniciado sesión, y el nombre que se
+ * anota lo pone el backend: una fila de auditoría firmada con lo que diga la pantalla registra
+ * quién dijo alguien que abrió el cajón, no quién lo abrió.
  */
-export async function printerOpenDrawer(idUsuario?: string | null): Promise<void> {
-    await invokeClient<string>("printer_open_drawer", {
-        args: { id_usuario: idUsuario ?? null },
-    });
+export async function printerOpenDrawer(): Promise<void> {
+    await invokeClient<string>("printer_open_drawer");
 }
 
 export async function printerPrintTest(name?: string): Promise<void> {
