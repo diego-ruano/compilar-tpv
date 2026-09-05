@@ -139,10 +139,11 @@ tienen caso están excluidos con motivo en [`cobertura.json`](cobertura.json). P
   `kitchen_set_line_state`, `set_reserva_estado`, **`save_layout`** (el caso grande: intercambio de
   nombres entre zonas, zona borrada con mesa libre, zona que sobrevive porque su mesa tiene comanda,
   y zona/mesa nuevas).
-- **Cuentas / caja** (CUENTA-01/02/03) — completo: `create_gasto`, `update_gasto`, `delete_gasto`,
-  `update_pago` (con el recálculo del importe desde las líneas cobradas) y `delete_pago`, la
-  anulación completa de un cobro: devuelve stock por lote y suelto, resta el gasto del cliente,
-  borra las líneas cobradas y reabre la comanda si le quedaban pendientes.
+- **Cuentas / caja** (CUENTA-01/02/03/07) — completo: `create_gasto`, `update_gasto`,
+  `delete_gasto`, `update_pago` (con el recálculo del importe desde las líneas cobradas) y
+  `anular_pago`, el caso grande: devuelve stock por lote y suelto, resta el gasto del cliente,
+  marca el pago sin borrarlo —con quién y por qué—, deja su fila en `Movimientos_Caja` y reabre la
+  comanda porque sus líneas, que se conservan, vuelven a estar pendientes.
 - **Notificaciones** — completo: `crear` (y el caso de dedupe, que NO crea una segunda),
   `marcar_leida`, `marcar_leidas_batch`, `resolver_por_clave` y la papelera —`descartar`,
   `restaurar` y `eliminar`, el único que borra de verdad y cuyo caso comprueba que los recibos de

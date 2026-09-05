@@ -150,7 +150,7 @@ No hay columna «bloqueado» en `Pagos` ni en `Cuentas_Gastos`: se deduce. Una f
 su fecha es **anterior al último cierre no reabierto**. Es una sola consulta y no hay estado que
 mantener sincronizado, que es el tipo de campo que siempre acaba mintiendo.
 
-El gate va en el **caso de uso**, no en la UI: `cuentas_update_pago`, `cuentas_delete_pago`,
+El gate va en el **caso de uso**, no en la UI: `cuentas_update_pago`, `cuentas_anular_pago`,
 `cuentas_update_gasto` y `cuentas_delete_gasto` comprueban antes de tocar nada y devuelven
 `ErrorCode` propio (`periodo_cerrado`) para que el frontend pueda ofrecer «reabrir» en vez de un
 mensaje genérico. Añadir ese código al catálogo cerrado está justificado: **se ramifica** por él.
