@@ -1,0 +1,47 @@
+// SYNC-19 · Progreso del backfill del histórico (la fase 2 de una recuperación).
+//
+// Tras perder la `data.db`, la nube devuelve lo imprescindible para volver a vender —los maestros
+// enteros y 30 días de lo transaccional— y un job de fondo va trayendo el resto. Mientras eso
+// corre hay dos sitios que tienen que saberlo:
+//
+//   · Configuración → Conectividad, para que se vea que hay trabajo en curso y no parezca colgado.
+//   · Estadísticas, porque un total de rango largo va a CRECER SOLO durante un rato, y un número
+//     que cambia sin explicación se lee como un error de cálculo, no como una descarga a medias.
+//
+// Vive en `shared/` y no co-locado en una feature justamente porque lo miran las dos.
+
+import { useQuery } from "@tanstack/react-query";
+import { invokeClient } from "@tpv/client";
+import type { BackfillEstado } from "@tpv/contracts";
+
+export const backfillKeys = {
+	estado: ["sync", "backfill"] as const,
+};
+
+/** Cada cuánto se repregunta MIENTRAS hay backfill. El job trae páginas cada 5 min. */
+const REFRESCO_MS = 20_000;
+
+/**
+ * Estado del backfill. En un equipo que nunca ha perdido su base devuelve todo a cero y **deja de
+ * repreguntar**: `refetchInterval` se apaga en cuanto no queda nada pendiente, así que esto no es
+ * un poll permanente en el 99,99 % de las instalaciones — sólo mientras de verdad hay algo que ver.
+ */
+export function useBackfillHistorico() {
+	return useQuery({
+		queryKey: backfillKeys.estado,
+		queryFn: () => invokeClient<BackfillEstado>("sync_backfill_estado"),
+		refetchInterval: (q) => (q.state.data?.tablas_pendientes ? REFRESCO_MS : false),
+		// El comando falla en Handy (no hay BD local) y mientras la base no está abierta. No es una
+		// condición de error que haya que enseñar: es "aquí no aplica".
+		retry: false,
+	});
+}
+
+/**
+ * ¿Hay histórico todavía bajando? Es la pregunta que hacen las pantallas; el resto de campos sólo
+ * los usa el panel de diagnóstico.
+ */
+export function useHistoricoIncompleto(): boolean {
+	const { data } = useBackfillHistorico();
+	return (data?.tablas_pendientes ?? 0) > 0;
+}

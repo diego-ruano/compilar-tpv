@@ -18,6 +18,7 @@ import {
 	type EstadoSync,
 } from "../../../shared/stores/useEstadoSync";
 import { useMode } from "../../../shared/stores/useMode";
+import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
 
 /**
  * SYNC-17: cómo se cuenta cada estado. Ya no hay nada que elegir aquí —la Main se conecta sola—,
@@ -259,6 +260,7 @@ const JOB_ETIQUETA: Record<string, string> = {
 	reconciliacion: "Reconciliación con la nube",
 	cifrado_pii: "Cifrado de los datos del personal",
 	caja_sin_cerrar: "Aviso de caja sin cerrar",
+	backfill_historico: "Descarga del histórico pendiente",
 };
 
 function cadaTexto(secs: number): string {
@@ -511,6 +513,60 @@ function TareasFondo({ darkMode }: { darkMode: boolean }) {
 	);
 }
 
+/**
+ * SYNC-19 · Progreso de la fase 2 de una recuperación.
+ *
+ * Sólo aparece cuando de verdad hay histórico bajando. En un equipo que nunca ha perdido su base
+ * este panel no existe, y ese es el punto: no es un indicador permanente, es la explicación de por
+ * qué durante unas horas los totales de rango largo van creciendo.
+ */
+function HistoricoPendiente({ darkMode }: { darkMode: boolean }) {
+	const { data } = useBackfillHistorico();
+	if (!data || data.tablas_pendientes === 0) return null;
+
+	const total = data.tablas_pendientes + data.tablas_completadas;
+	const pct = total > 0 ? Math.round((data.tablas_completadas / total) * 100) : 0;
+
+	return (
+		<Panel
+			title="Descargando el histórico"
+			subtitle="Se está completando lo que no cabía en la recuperación. Puedes seguir trabajando."
+		>
+			<div className="grid gap-3">
+				<div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
+					<div
+						className="h-full rounded-full bg-accent transition-[width] duration-500"
+						style={{ width: `${pct}%` }}
+					/>
+				</div>
+				<div
+					className={cn(
+						"flex flex-wrap items-center justify-between gap-2 text-xs",
+						darkMode ? "text-fg-muted" : "text-fg-muted",
+					)}
+				>
+					<span>
+						{data.tablas_completadas} de {total} apartados · {pct} %
+					</span>
+					<span className="tabular-nums">
+						{data.filas_traidas.toLocaleString("es-ES")} registros traídos
+						{data.tabla_actual ? ` · ahora: ${data.tabla_actual}` : ""}
+					</span>
+				</div>
+
+				{/* Se dice para que un histórico que tarda no se confunda con uno que no avanza. El
+				    job reintenta solo, con espera creciente, así que no hay nada que pulsar. */}
+				{data.ultimo_error && (
+					<div className="rounded-xl border border-warning/40 bg-warning/10 p-3 text-[11px] text-warning">
+						El último intento falló ({data.ultimo_error}). Se reintenta solo en cuanto
+						vuelva la conexión.
+					</div>
+				)}
+			</div>
+		</Panel>
+	);
+}
+
 export function Conectividad({ darkMode }: { darkMode: boolean }) {
 	const deviceMode = useMode((s) => s.mode);
 
@@ -522,6 +578,9 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 			{/* SYNC-14: salud de la sincronización. Se muestra siempre en la Main: la cola de subida
 			    importa sobre todo cuando NO hay conexión, que es justo cuando antes se ocultaba. */}
 			{deviceMode === "tpv" && <SaludSync darkMode={darkMode} />}
+
+			{/* SYNC-19: sólo se pinta si hay una recuperación completándose de fondo. */}
+			{deviceMode === "tpv" && <HistoricoPendiente darkMode={darkMode} />}
 
 			{/* Runner de jobs: corre haya conexión o no (licencia con gracia, avisos), así que solo
 			    depende de que esta sea la Main. */}

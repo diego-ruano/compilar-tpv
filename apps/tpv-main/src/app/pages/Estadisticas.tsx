@@ -1,6 +1,8 @@
 // src/pages/Estadisticas.tsx
 import React, { useMemo, useState } from "react";
-import { BarChart3 } from "lucide-react";
+import { BarChart3, CloudDownload } from "lucide-react";
+
+import { useBackfillHistorico } from "../../shared/lib/backfillQueries";
 
 // ✅ Ajusta estas rutas a tu estructura real
 import MesasStats from "../../features/estadisticas/MesasStats";
@@ -38,6 +40,36 @@ const RANGE_OPTIONS: Array<{ key: StatsRange; label: string }> = [
 // mini cn para no depender de otros módulos
 function cn(...classes: Array<string | false | null | undefined>) {
     return classes.filter(Boolean).join(" ");
+}
+
+/**
+ * SYNC-19 · Estas cifras pueden estar incompletas, y hay que decirlo.
+ *
+ * Tras recuperar el equipo, el histórico anterior a la ventana llega en segundo plano. Mientras
+ * eso pasa, un total de "Año" —o de "Mes", si la recuperación fue hace poco— va a crecer solo cada
+ * pocos minutos. Sin este aviso, lo que ve el dueño es un número que cambia sin motivo, y eso no se
+ * lee como "todavía está descargando": se lee como que el programa suma mal.
+ *
+ * No bloquea nada. La alternativa —deshabilitar los rangos largos— deja media pantalla inútil justo
+ * después de una avería, que es cuando más falta hace mirar cómo va el negocio.
+ */
+function AvisoHistoricoIncompleto() {
+    const { data } = useBackfillHistorico();
+    if (!data || data.tablas_pendientes === 0) return null;
+
+    const total = data.tablas_pendientes + data.tablas_completadas;
+    const pct = total > 0 ? Math.round((data.tablas_completadas / total) * 100) : 0;
+
+    return (
+        <div className="flex items-start gap-3 rounded-2xl border border-warning/40 bg-warning/10 px-4 py-3 text-sm">
+            <CloudDownload className="mt-0.5 size-5 shrink-0 text-warning" aria-hidden />
+            <p className="text-fg">
+                <span className="font-semibold">Todavía se está descargando el histórico ({pct} %).</span>{" "}
+                Los totales de periodos largos pueden seguir subiendo hasta que termine. Lo reciente
+                ya está completo.
+            </p>
+        </div>
+    );
 }
 
 export default function Estadisticas() {
@@ -121,6 +153,8 @@ export default function Estadisticas() {
                     </div>
                 </div>
             </div>
+
+            <AvisoHistoricoIncompleto />
 
             {/* Contenido */}
             <div className="min-h-0 flex-1 overflow-y-auto pr-1">
