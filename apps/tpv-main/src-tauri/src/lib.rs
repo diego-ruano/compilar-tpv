@@ -2144,6 +2144,7 @@ pub fn run() {
             commands::sync::sync_liberar_encoladas,
             commands::sync::sync_purge_applied_ops,
             commands::sync::sync_health,
+            commands::sync::sync_backfill_estado,
             commands::sync::sync_bootstrap_desde_nube,
             commands::sync::sync_inicializar_tenant_vacio,
             // tareas periódicas de fondo (runner de jobs)

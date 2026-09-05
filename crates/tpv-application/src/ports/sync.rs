@@ -7,7 +7,8 @@
 use async_trait::async_trait;
 
 use tpv_contracts::sync::{
-    AplicacionSync, BootstrapResultado, BootstrapSnapshot, OutboxEntry, SyncChange, SyncHealth,
+    AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
+    OutboxEntry, SyncChange, SyncHealth,
 };
 
 use crate::error::AppResult;
@@ -68,4 +69,30 @@ pub trait SyncRepository: Send + Sync {
         &self,
         snapshot: BootstrapSnapshot,
     ) -> AppResult<BootstrapResultado>;
+
+    /* ===== SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera ===== */
+
+    /// La siguiente tabla a rellenar (la primera sin completar, en orden de padres primero) y el
+    /// cursor por el que se quedó. `None` = no hay backfill pendiente.
+    async fn backfill_siguiente(&self) -> AppResult<Option<(String, i64)>>;
+
+    /// Aplica una página del histórico y avanza el cursor **en la misma transacción**. Devuelve
+    /// cuántas filas se procesaron.
+    ///
+    /// Dos cosas que no son negociables aquí, y que si se pierden no dan error sino datos malos:
+    ///
+    /// - **`INSERT OR IGNORE`**: lo que ya está en local llegó por el catch-up y es más nuevo que
+    ///   esta foto del histórico. Además la fase 2 re-descarga a propósito la ventana que ya trajo
+    ///   la fase 1, así que sin `IGNORE` la primera página de cada tabla reventaría por PK.
+    /// - **Por la conexión CRUDA**: por `execute()` cada fila del histórico se capturaría en
+    ///   `_Sync_Outbox` y el equipo devolvería a la nube, operación a operación y facturado como
+    ///   escrituras en Turso, el histórico entero que acaba de bajarse de ella.
+    async fn backfill_aplicar_pagina(&self, pagina: HistoricoPagina) -> AppResult<i64>;
+
+    /// Deja constancia de por qué falló el último intento sobre una tabla. No mueve el cursor: lo
+    /// que estaba a medias se repite, que es lo correcto siendo idempotente.
+    async fn backfill_marcar_error(&self, tabla: &str, error: &str) -> AppResult<()>;
+
+    /// Progreso del backfill, para el panel de Conectividad y el aviso de las estadísticas.
+    async fn backfill_estado(&self) -> AppResult<BackfillEstado>;
 }

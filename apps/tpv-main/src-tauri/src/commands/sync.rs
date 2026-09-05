@@ -7,7 +7,8 @@ use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::sync as uc;
 use tpv_contracts::sync::{
-    AplicacionSync, ApplySyncChangesArgs, BootstrapResultado, OutboxEntry, SyncHealth,
+    AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, OutboxEntry,
+    SyncHealth,
 };
 use tpv_infra_licensing::PairingAdapter;
 
@@ -93,6 +94,18 @@ pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), Ap
 pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppErrorDto> {
     let repo = state.sync_repo().await?;
     Ok(uc::health(repo.as_ref()).await?)
+}
+
+/// SYNC-19: progreso del backfill del histórico (fase 2). Lo pinta el panel de Conectividad y lo
+/// mira Estadísticas para avisar de que un total de rango largo todavía puede crecer.
+///
+/// Es sólo lectura de una tabla de control local: en un equipo que nunca ha perdido su base
+/// devuelve todo a cero, que es lo que hace que quien lo consulte no tenga que preguntar antes si
+/// hay recuperación en curso.
+#[tauri::command]
+pub async fn sync_backfill_estado(state: State<'_, AppState>) -> Result<BackfillEstado, AppErrorDto> {
+    let repo = state.sync_repo().await?;
+    Ok(uc::backfill_estado(repo.as_ref()).await?)
 }
 
 /// Reconstruye la BD local desde la nube. Es la salida de una Main que ha perdido su `data.db`:

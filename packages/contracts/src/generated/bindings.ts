@@ -68,6 +68,33 @@ export type AsignacionRow = { ID_Asignacion: string, ID_Trabajador: string, Fech
 export type AsignacionUpdateInput = { id_asignacion: string, id_turno: string, area: string, hora_inicio?: string, hora_fin?: string, notas?: string, };
 
 /**
+ * Estado del backfill del histórico, para el panel de Conectividad y para el aviso de las
+ * estadísticas (mientras corre, un total de rango largo crece solo y parece un error de cálculo).
+ */
+export type BackfillEstado = { 
+/**
+ * Cuántas tablas quedan por completar. Cero = no hay backfill en curso.
+ */
+tablas_pendientes: number, 
+/**
+ * Cuántas ha completado ya.
+ */
+tablas_completadas: number, 
+/**
+ * Filas traídas hasta ahora. Es el único número que se mueve mientras una tabla grande baja,
+ * así que es lo que hace que la barra no parezca colgada.
+ */
+filas_traidas: number, 
+/**
+ * La tabla que se está rellenando ahora mismo (la primera sin completar), si queda alguna.
+ */
+tabla_actual?: string, 
+/**
+ * Último error del job, si el anterior intento falló. Diagnóstico, no ramificación.
+ */
+ultimo_error?: string, };
+
+/**
  * Qué se restauró. `tablas_desconocidas` son las que la nube mandó y esta versión de la app no
  * tiene en su esquema: se informan en vez de fallar (un TPV con una versión por detrás debe poder
  * recuperarse igual), pero se dicen para que no pasen desapercibidas.
@@ -79,13 +106,27 @@ export type BootstrapResultado = { seq: number, filas_restauradas: number, tabla
  * tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
  * que el catch-up siga desde justo después sin huecos ni solapes.
  */
-export type BootstrapSnapshot = { seq: number, total_filas: number, tablas: Array<BootstrapTabla>, };
+export type BootstrapSnapshot = { seq: number, total_filas: number, tablas: Array<BootstrapTabla>, 
+/**
+ * SYNC-19: las tablas a rellenar en la fase 2, **en orden de padres primero**. El orden lo
+ * decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
+ * así que una hija insertada antes que su padre no tiene dónde apoyarse.
+ */
+backfill: Array<string>, };
 
 /**
  * Volcado de UNA tabla del tenant. `filas` es posicional respecto a `columnas` (con 41 tablas,
  * repetir el nombre de cada columna en cada fila multiplicaría el tamaño sin añadir nada).
  */
-export type BootstrapTabla = { nombre: string, columnas: Array<string>, filas: Array<Array<unknown>>, };
+export type BootstrapTabla = { nombre: string, columnas: Array<string>, filas: Array<Array<unknown>>, 
+/**
+ * SYNC-19: lo que viene está recortado por la ventana de la fase 1, así que esta tabla queda
+ * pendiente de backfill. Lo decide el worker, que es donde vive la clasificación.
+ *
+ * `#[serde(default)]` porque un worker anterior a SYNC-19 no lo manda: ahí el volcado ya venía
+ * entero y no hay nada que rellenar después.
+ */
+parcial: boolean, };
 
 export type BusinessSettings = { business_name: string, logo_data_url: string | null, direccion: string, telefono: string, cif: string, mensaje_footer: string, iva_percent: number, 
 /**
@@ -265,6 +306,16 @@ export type HandySetTokenArgs = { token: string, tenant_id: string, };
  * vive en el keyring (lo guarda el pairing); el frontend lo necesita para el query string.
  */
 export type HandyWsAuth = { token: string, tenantId: string, };
+
+/**
+ * Una página de `/v1/sync/historico`. `filas` es posicional respecto a `columnas`, igual que en
+ * el volcado; el cursor viaja aparte y **no** es una columna más.
+ */
+export type HistoricoPagina = { tabla: string, columnas: Array<string>, filas: Array<Array<unknown>>, 
+/**
+ * `None` = esta tabla está completa. Cualquier otra cosa es "sigue pidiendo desde aquí".
+ */
+siguiente_cursor: number | null, };
 
 export type HorariosSemanaArgs = { fecha_lunes: string, };
 

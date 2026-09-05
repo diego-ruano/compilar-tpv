@@ -19,8 +19,8 @@ use libsql::{Connection, Value};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_contracts::sync::{
-    AplicacionSync, BootstrapResultado, BootstrapSnapshot, OutboxEntry, SqlStatement, SyncChange,
-    SyncHealth,
+    AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
+    OutboxEntry, SqlStatement, SyncChange, SyncHealth,
 };
 
 use crate::db::Db;
@@ -775,6 +775,41 @@ impl SyncRepository for SqliteSyncRepository {
             .await
             .map_err(db_err)?;
 
+            // SYNC-19 · siembra de la fase 2. El volcado que acaba de entrar viene recortado por
+            // una ventana; lo que quedó fuera lo irá trayendo el job `backfill_historico`. La cola
+            // se siembra DENTRO de la misma transacción que restaura: si se hiciera después y algo
+            // fallara en medio, quedaría una base a medias sin nada que la complete, y nadie se
+            // enteraría hasta buscar un ticket de hace meses.
+            //
+            // Se rehace desde cero (`DELETE` antes) por lo mismo que el resto del andamiaje: un
+            // progreso anterior hablaba de una base que ya no existe.
+            conn.execute("DELETE FROM _Backfill_Historico;", ())
+                .await
+                .map_err(db_err)?;
+            // El orden lo manda el worker (padres primero). Si viniera vacío —worker anterior a
+            // SYNC-19— se cae al orden en que llegaron las tablas marcadas `parcial`, que es lo
+            // único que hay; y si ninguna lo está, no hay fase 2 y esto no siembra nada.
+            let orden_backfill: Vec<String> = if snapshot.backfill.is_empty() {
+                restaurables
+                    .iter()
+                    .filter(|t| t.parcial)
+                    .map(|t| t.nombre.clone())
+                    .collect()
+            } else {
+                snapshot.backfill.clone()
+            };
+            for (i, nombre) in orden_backfill.iter().enumerate() {
+                if !identificador_simple(nombre) {
+                    continue;
+                }
+                conn.execute(
+                    "INSERT OR REPLACE INTO _Backfill_Historico (Tabla, Orden) VALUES (?1, ?2);",
+                    vec![Value::Text(nombre.clone()), Value::Integer(i as i64)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+
             Ok(filas)
         }
         .await;
@@ -805,6 +840,224 @@ impl SyncRepository for SqliteSyncRepository {
                 Err(e)
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async fn backfill_siguiente(&self) -> AppResult<Option<(String, i64)>> {
+        let r = self.db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT Tabla, Cursor FROM _Backfill_Historico \
+                 WHERE Completada = 0 ORDER BY Orden ASC, Tabla ASC LIMIT 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => {
+                let tabla = match row.get_value(0).map_err(db_err)? {
+                    Value::Text(t) => t,
+                    _ => return Ok(None),
+                };
+                let cursor = v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0);
+                Ok(Some((tabla, cursor)))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn backfill_aplicar_pagina(&self, pagina: HistoricoPagina) -> AppResult<i64> {
+        if !identificador_simple(&pagina.tabla) {
+            return Err(AppError::validation(format!(
+                "nombre de tabla inaceptable en el histórico: {}",
+                pagina.tabla
+            )));
+        }
+        if pagina.columnas.iter().any(|c| !identificador_simple(c)) {
+            return Err(AppError::validation(format!(
+                "{}: el histórico trae un nombre de columna inaceptable",
+                pagina.tabla
+            )));
+        }
+
+        let w = self.db.write().await;
+        let conn = w.raw();
+
+        // Un worker más nuevo puede listar una tabla que esta versión todavía no tiene. Se da por
+        // completada en vez de fallar: si no, el backfill se atascaría en ella para siempre y
+        // ninguna de las siguientes llegaría a bajarse. Misma regla que en el bootstrap.
+        if !tablas_locales(conn).await?.contains(&pagina.tabla) {
+            conn.execute(
+                "UPDATE _Backfill_Historico \
+                 SET Completada = 1, Ultimo_Error = 'esta versión no conoce la tabla', \
+                     Ultimo_Intento_Ms = ?2 \
+                 WHERE Tabla = ?1;",
+                vec![Value::Text(pagina.tabla.clone()), Value::Integer(now_ms())],
+            )
+            .await
+            .map_err(db_err)?;
+            return Ok(0);
+        }
+
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+
+        let res: AppResult<i64> = async {
+            let n_cols = pagina.columnas.len();
+            let mut insertadas = 0i64;
+
+            if n_cols > 0 && !pagina.filas.is_empty() {
+                let cols = pagina
+                    .columnas
+                    .iter()
+                    .map(|c| format!("\"{c}\""))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let marcas_fila = format!("({})", vec!["?"; n_cols].join(", "));
+                let por_lote = (MAX_PARAMS_POR_SENTENCIA / n_cols.max(1)).max(1);
+
+                for lote in pagina.filas.chunks(por_lote) {
+                    let mut args: Vec<Value> = Vec::with_capacity(lote.len() * n_cols);
+                    for fila in lote {
+                        if fila.len() != n_cols {
+                            return Err(AppError::validation(format!(
+                                "{}: fila con {} valores para {n_cols} columnas",
+                                pagina.tabla,
+                                fila.len(),
+                            )));
+                        }
+                        args.extend(fila.iter().map(json_to_value));
+                    }
+                    let valores = vec![marcas_fila.as_str(); lote.len()].join(", ");
+                    // `INSERT OR IGNORE` y no `INSERT`: la fase 2 NUNCA pisa una fila que ya esté.
+                    // Lo que ya está llegó por el catch-up y por tanto es más nuevo que esta foto
+                    // del histórico. Y la fase 2 re-descarga a propósito la ventana que ya trajo la
+                    // fase 1: sin `IGNORE`, la primera página de cada tabla reventaría por PK.
+                    let sql = format!(
+                        "INSERT OR IGNORE INTO \"{}\" ({cols}) VALUES {valores};",
+                        pagina.tabla
+                    );
+                    conn.execute(&sql, args).await.map_err(|e| {
+                        AppError::repository(format!("histórico {}: {e}", pagina.tabla))
+                    })?;
+                    insertadas += lote.len() as i64;
+                }
+            }
+
+            // El cursor avanza en la MISMA transacción que inserta. Si la página falla, el cursor
+            // no se mueve y el siguiente intento la repite: reanudable por construcción.
+            let (cursor, completada) = match pagina.siguiente_cursor {
+                Some(c) => (c, 0i64),
+                None => (0i64, 1i64),
+            };
+            conn.execute(
+                "UPDATE _Backfill_Historico \
+                 SET Cursor = CASE WHEN ?3 = 1 THEN Cursor ELSE ?2 END, \
+                     Filas_Traidas = Filas_Traidas + ?4, \
+                     Completada = ?3, \
+                     Ultimo_Intento_Ms = ?5, \
+                     Ultimo_Error = NULL \
+                 WHERE Tabla = ?1;",
+                vec![
+                    Value::Text(pagina.tabla.clone()),
+                    Value::Integer(cursor),
+                    Value::Integer(completada),
+                    Value::Integer(insertadas),
+                    Value::Integer(now_ms()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            Ok(insertadas)
+        }
+        .await;
+
+        match res {
+            Ok(n) => {
+                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(n)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+
+    async fn backfill_marcar_error(&self, tabla: &str, error: &str) -> AppResult<()> {
+        let w = self.db.write().await;
+        w.raw()
+            .execute(
+                "UPDATE _Backfill_Historico SET Ultimo_Error = ?2, Ultimo_Intento_Ms = ?3 \
+                 WHERE Tabla = ?1;",
+                vec![
+                    Value::Text(tabla.to_string()),
+                    Value::Text(error.chars().take(500).collect::<String>()),
+                    Value::Integer(now_ms()),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn backfill_estado(&self) -> AppResult<BackfillEstado> {
+        let r = self.db.read().await;
+        let conn = r.conn();
+
+        let mut rows = conn
+            .query(
+                "SELECT \
+                   COALESCE(SUM(CASE WHEN Completada = 0 THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(CASE WHEN Completada = 1 THEN 1 ELSE 0 END), 0), \
+                   COALESCE(SUM(Filas_Traidas), 0) \
+                 FROM _Backfill_Historico;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let (pendientes, completadas, filas) = match rows.next().await.map_err(db_err)? {
+            Some(row) => (
+                v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(0),
+                v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
+                v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0),
+            ),
+            None => (0, 0, 0),
+        };
+
+        let mut rows = conn
+            .query(
+                "SELECT Tabla, Ultimo_Error FROM _Backfill_Historico \
+                 WHERE Completada = 0 ORDER BY Orden ASC, Tabla ASC LIMIT 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        let (tabla_actual, ultimo_error) = match rows.next().await.map_err(db_err)? {
+            Some(row) => (
+                match row.get_value(0).map_err(db_err)? {
+                    Value::Text(t) => Some(t),
+                    _ => None,
+                },
+                match row.get_value(1).map_err(db_err)? {
+                    Value::Text(e) => Some(e),
+                    _ => None,
+                },
+            ),
+            None => (None, None),
+        };
+
+        Ok(BackfillEstado {
+            tablas_pendientes: pendientes,
+            tablas_completadas: completadas,
+            filas_traidas: filas,
+            tabla_actual,
+            ultimo_error,
+        })
     }
 }
 
@@ -1041,6 +1294,7 @@ mod tests_bootstrap {
             nombre: nombre.to_string(),
             columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
             filas,
+            parcial: false,
         }
     }
 
@@ -1081,6 +1335,7 @@ mod tests_bootstrap {
                 seq: 42,
                 total_filas: 1,
                 tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]])],
+                backfill: vec![],
             })
             .await
             .unwrap();
@@ -1099,6 +1354,7 @@ mod tests_bootstrap {
             seq: 777,
             total_filas: 0,
             tablas: vec![tabla("Zonas", vec![])],
+            backfill: vec![],
         })
         .await
         .unwrap();
@@ -1134,6 +1390,7 @@ mod tests_bootstrap {
                         vec![json!("dup"), json!("Dos")],
                     ],
                 )],
+                backfill: vec![],
             })
             .await;
 
@@ -1157,6 +1414,7 @@ mod tests_bootstrap {
                     tabla("Zonas", vec![vec![json!("z1"), json!("Salon")]]),
                     tabla("Tabla_Del_Futuro", vec![vec![json!("x"), json!("y")]]),
                 ],
+                backfill: vec![],
             })
             .await
             .unwrap();
@@ -1180,6 +1438,7 @@ mod tests_bootstrap {
                     tabla("Zonas", vec![]),
                     tabla("Zonas\"; DROP TABLE Zonas; --", vec![]),
                 ],
+                backfill: vec![],
             })
             .await
             .unwrap();
@@ -1206,6 +1465,7 @@ mod tests_bootstrap {
                 seq: 3,
                 total_filas: n as i64,
                 tablas: vec![tabla("Zonas", filas)],
+                backfill: vec![],
             })
             .await
             .unwrap();
@@ -1251,6 +1511,7 @@ mod tests_bootstrap {
                 seq: 100,
                 total_filas: 0,
                 tablas: vec![tabla("Zonas", vec![])],
+                backfill: vec![],
             })
             .await;
 
@@ -1288,6 +1549,7 @@ mod tests_bootstrap {
                     "Zonas",
                     vec![vec![json!("z1"), json!("Terraza")]],
                 )],
+                backfill: vec![],
             })
             .await
             .unwrap();
@@ -1295,5 +1557,370 @@ mod tests_bootstrap {
         assert_eq!(r.filas_restauradas, 1);
         assert_eq!(zonas(&db).await, vec!["Terraza".to_string()]);
         assert_eq!(repo.get_checkpoint().await.unwrap(), 100);
+    }
+}
+
+#[cfg(test)]
+mod tests_backfill {
+    //! SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera.
+    //!
+    //! Los dos fallos que este módulo existe para impedir no se ven mirando la app:
+    //!
+    //! - si la fase 2 pisara una fila que ya está, machacaría con una versión vieja del histórico
+    //!   lo que el catch-up acaba de traer al día;
+    //! - si sus escrituras pasaran por la captura del outbox, el equipo devolvería a la nube —fila
+    //!   a fila, y facturado como escrituras en Turso— el histórico entero que acaba de bajarse de
+    //!   ella, para no cambiar absolutamente nada.
+    //!
+    //! Ninguno de los dos da un error. El primero da un dato incorrecto que nadie mira y el segundo
+    //! da una factura.
+
+    use super::*;
+    use crate::db::Db;
+    use serde_json::json;
+    use tpv_application::ports::sync::SyncRepository;
+    use tpv_contracts::sync::{BootstrapSnapshot, BootstrapTabla, HistoricoPagina};
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("backfill");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap())
+            .await
+            .unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    /// Deja el equipo como tras una recuperación: restaurado y con `Zonas` pendiente de backfill.
+    async fn tras_recuperar(repo: &SqliteSyncRepository) {
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 10,
+            total_filas: 0,
+            tablas: vec![BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![],
+                parcial: true,
+            }],
+            backfill: vec!["Zonas".into()],
+        })
+        .await
+        .unwrap();
+    }
+
+    fn pagina(filas: Vec<Vec<serde_json::Value>>, siguiente: Option<i64>) -> HistoricoPagina {
+        HistoricoPagina {
+            tabla: "Zonas".into(),
+            columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+            filas,
+            siguiente_cursor: siguiente,
+        }
+    }
+
+    async fn contar(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.conn().query(sql, ()).await.unwrap();
+        match rows.next().await.unwrap() {
+            Some(row) => v_i64(row.get_value(0).unwrap()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    async fn nombre_zona(db: &Arc<Db>, id: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT Nombre_Zona FROM Zonas WHERE ID_Zona = ?1;",
+                vec![Value::Text(id.to_string())],
+            )
+            .await
+            .unwrap();
+        match rows.next().await.unwrap() {
+            Some(row) => match row.get_value(0).unwrap() {
+                Value::Text(n) => Some(n),
+                _ => None,
+            },
+            None => None,
+        }
+    }
+
+    /// El bootstrap siembra la cola con lo que el worker marcó recortado, y en SU orden.
+    #[tokio::test]
+    async fn restaurar_siembra_la_cola_del_backfill() {
+        let (repo, _db, dir) = repo_temporal().await;
+
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 1,
+            total_filas: 0,
+            tablas: vec![
+                BootstrapTabla {
+                    nombre: "Zonas".into(),
+                    columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                    filas: vec![],
+                    parcial: false,
+                },
+                BootstrapTabla {
+                    nombre: "Comandas".into(),
+                    columnas: vec!["ID_Comanda".into()],
+                    filas: vec![],
+                    parcial: true,
+                },
+            ],
+            // Padres primero: es lo único que hace viable la fase 2, porque cada página es su
+            // propia transacción y `defer_foreign_keys` no cubre entre transacciones.
+            backfill: vec!["Comandas".into(), "Detalle_Comanda".into()],
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Comandas".to_string(), 0)),
+            "la primera del orden que dio el worker, no la primera alfabéticamente"
+        );
+
+        let e = repo.backfill_estado().await.unwrap();
+        assert_eq!(e.tablas_pendientes, 2);
+        assert_eq!(e.tablas_completadas, 0);
+        // `Zonas` vino entera: no tiene nada que rellenar y no entra en la cola.
+        assert_eq!(e.tabla_actual.as_deref(), Some("Comandas"));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// §4.1 del plan. La fase 2 NUNCA pisa una fila que ya esté: lo que está en local llegó por el
+    /// catch-up y es más nuevo que esta foto del histórico.
+    #[tokio::test]
+    async fn una_pagina_no_pisa_lo_que_ya_esta() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Nombre nuevo');",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+
+        repo.backfill_aplicar_pagina(pagina(
+            vec![
+                vec![json!("z1"), json!("Nombre VIEJO del historico")],
+                vec![json!("z2"), json!("Terraza")],
+            ],
+            None,
+        ))
+        .await
+        .unwrap();
+
+        assert_eq!(
+            nombre_zona(&db, "z1").await.as_deref(),
+            Some("Nombre nuevo"),
+            "la versión que ya estaba manda"
+        );
+        assert_eq!(
+            nombre_zona(&db, "z2").await.as_deref(),
+            Some("Terraza"),
+            "y la que no estaba sí entra"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// §4.2 del plan, y el más caro de los dos si se rompe.
+    #[tokio::test]
+    async fn el_backfill_no_deja_nada_en_el_outbox() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
+
+        repo.backfill_aplicar_pagina(pagina(
+            vec![
+                vec![json!("z1"), json!("Terraza")],
+                vec![json!("z2"), json!("Salon")],
+            ],
+            None,
+        ))
+        .await
+        .unwrap();
+
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 2);
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await,
+            0,
+            "el histórico que baja de la nube NO puede volver a subir a la nube"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// El cursor avanza mientras haya páginas, y la tabla se cierra con la que no trae cursor.
+    #[tokio::test]
+    async fn el_cursor_avanza_y_la_tabla_se_completa() {
+        let (repo, _db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        repo.backfill_aplicar_pagina(pagina(vec![vec![json!("z1"), json!("A")]], Some(50)))
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Zonas".to_string(), 50))
+        );
+
+        repo.backfill_aplicar_pagina(pagina(vec![vec![json!("z2"), json!("B")]], None))
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            None,
+            "sin cursor siguiente, la tabla está completa"
+        );
+
+        let e = repo.backfill_estado().await.unwrap();
+        assert_eq!(e.tablas_pendientes, 0);
+        assert_eq!(e.tablas_completadas, 1);
+        assert_eq!(e.filas_traidas, 2);
+        assert_eq!(e.tabla_actual, None);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Repetir una página no cambia nada. Es lo que el motor de jobs exige de cualquier cuerpo, y
+    /// aquí es además lo que permite reanudar tras un apagón sin llevar más contabilidad.
+    #[tokio::test]
+    async fn repetir_una_pagina_es_un_no_op() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        let p = || pagina(vec![vec![json!("z1"), json!("Terraza")]], Some(7));
+        repo.backfill_aplicar_pagina(p()).await.unwrap();
+        repo.backfill_aplicar_pagina(p()).await.unwrap();
+
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Zonas".to_string(), 7))
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una página que falla no mueve el cursor: el siguiente intento la repite entera. Si el cursor
+    /// avanzara igualmente, ese trozo del histórico se perdería para siempre y en silencio.
+    #[tokio::test]
+    async fn una_pagina_que_falla_no_mueve_el_cursor() {
+        let (repo, db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        let mala = HistoricoPagina {
+            tabla: "Zonas".into(),
+            columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+            // Una fila con menos valores que columnas: el volcado viene de la red y puede llegar mal.
+            filas: vec![vec![json!("z1")]],
+            siguiente_cursor: Some(99),
+        };
+
+        assert!(repo.backfill_aplicar_pagina(mala).await.is_err());
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 0);
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Zonas".to_string(), 0)),
+            "el cursor se queda donde estaba"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una tabla que esta versión no conoce se salta. Si fallara, el backfill se quedaría atascado
+    /// en ella para siempre y ninguna de las siguientes llegaría a bajarse.
+    #[tokio::test]
+    async fn una_tabla_desconocida_se_salta_en_vez_de_atascar_la_cola() {
+        let (repo, _db, dir) = repo_temporal().await;
+
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 1,
+            total_filas: 0,
+            tablas: vec![BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![],
+                parcial: true,
+            }],
+            backfill: vec!["Tabla_Del_Futuro".into(), "Zonas".into()],
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Tabla_Del_Futuro".to_string(), 0))
+        );
+
+        repo.backfill_aplicar_pagina(HistoricoPagina {
+            tabla: "Tabla_Del_Futuro".into(),
+            columnas: vec![],
+            filas: vec![],
+            siguiente_cursor: None,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            repo.backfill_siguiente().await.unwrap(),
+            Some(("Zonas".to_string(), 0)),
+            "la cola sigue avanzando"
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Los nombres de tabla y de columna se interpolan en el SQL (no se pueden enlazar con `?`) y
+    /// llegan de la red, así que se filtran antes de construir nada.
+    #[tokio::test]
+    async fn un_nombre_inaceptable_se_rechaza() {
+        let (repo, _db, dir) = repo_temporal().await;
+        tras_recuperar(&repo).await;
+
+        assert!(repo
+            .backfill_aplicar_pagina(HistoricoPagina {
+                tabla: "Zonas; DROP TABLE Pagos".into(),
+                columnas: vec!["ID_Zona".into()],
+                filas: vec![],
+                siguiente_cursor: None,
+            })
+            .await
+            .is_err());
+
+        assert!(repo
+            .backfill_aplicar_pagina(HistoricoPagina {
+                tabla: "Zonas".into(),
+                columnas: vec!["ID_Zona\") --".into()],
+                filas: vec![vec![json!("z1")]],
+                siguiente_cursor: None,
+            })
+            .await
+            .is_err());
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Un equipo que nunca ha perdido su base no tiene cola, y preguntarlo tiene que ser barato y
+    /// no exigir saber antes si hay una recuperación en curso.
+    #[tokio::test]
+    async fn sin_recuperacion_no_hay_backfill() {
+        let (repo, _db, dir) = repo_temporal().await;
+
+        assert_eq!(repo.backfill_siguiente().await.unwrap(), None);
+        let e = repo.backfill_estado().await.unwrap();
+        assert_eq!(e.tablas_pendientes, 0);
+        assert_eq!(e.tablas_completadas, 0);
+        assert_eq!(e.filas_traidas, 0);
+
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

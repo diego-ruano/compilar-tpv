@@ -678,6 +678,29 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
             Reconciliation_Pending INTEGER NOT NULL DEFAULT 0
         );
         INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0);
+        -- SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera.
+        --
+        -- La siembra `bootstrap_restaurar` (una fila por tabla que el worker marcó `parcial`) y la
+        -- va avanzando el job `backfill_historico`. Con esto el backfill es reanudable por
+        -- construcción: apagar el TPV a media descarga no pierde nada, y volver a pedir una página
+        -- ya aplicada es inocuo (`INSERT OR IGNORE`).
+        --
+        -- `Orden` conserva el que dio el worker: padres primero. Cada página es su propia
+        -- transacción, así que `defer_foreign_keys` no cubre a una hija insertada antes que su
+        -- padre; sin este orden la fase 2 fallaría fila a fila y no terminaría nunca.
+        --
+        -- Es tabla de control LOCAL (prefijo `_`, como el resto del andamiaje): no está en las
+        -- migraciones, no existe en la nube y no viaja. ⚠️ Sus escrituras van por
+        -- `WriteGuard::raw()`, o cada página del backfill se replicaría a la nube de vuelta.
+        CREATE TABLE IF NOT EXISTS _Backfill_Historico (
+            Tabla TEXT PRIMARY KEY,
+            Orden INTEGER NOT NULL DEFAULT 0,
+            Cursor INTEGER NOT NULL DEFAULT 0,
+            Filas_Traidas INTEGER NOT NULL DEFAULT 0,
+            Completada INTEGER NOT NULL DEFAULT 0,
+            Ultimo_Intento_Ms INTEGER,
+            Ultimo_Error TEXT
+        );
         "#,
     )
     .await

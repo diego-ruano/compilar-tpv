@@ -94,6 +94,13 @@ pub struct BootstrapTabla {
     pub columnas: Vec<String>,
     #[ts(type = "Array<Array<unknown>>")]
     pub filas: Vec<Vec<serde_json::Value>>,
+    /// SYNC-19: lo que viene está recortado por la ventana de la fase 1, así que esta tabla queda
+    /// pendiente de backfill. Lo decide el worker, que es donde vive la clasificación.
+    ///
+    /// `#[serde(default)]` porque un worker anterior a SYNC-19 no lo manda: ahí el volcado ya venía
+    /// entero y no hay nada que rellenar después.
+    #[serde(default)]
+    pub parcial: bool,
 }
 
 /// Respuesta de `/v1/sync/bootstrap`: el estado actual del tenant y el `seq` EXACTO en el que se
@@ -107,6 +114,50 @@ pub struct BootstrapSnapshot {
     #[ts(type = "number")]
     pub total_filas: i64,
     pub tablas: Vec<BootstrapTabla>,
+    /// SYNC-19: las tablas a rellenar en la fase 2, **en orden de padres primero**. El orden lo
+    /// decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
+    /// así que una hija insertada antes que su padre no tiene dónde apoyarse.
+    #[serde(default)]
+    pub backfill: Vec<String>,
+}
+
+/* ===== Fase 2 (SYNC-19): el histórico que la ventana dejó fuera ===== */
+
+/// Una página de `/v1/sync/historico`. `filas` es posicional respecto a `columnas`, igual que en
+/// el volcado; el cursor viaja aparte y **no** es una columna más.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct HistoricoPagina {
+    pub tabla: String,
+    pub columnas: Vec<String>,
+    #[ts(type = "Array<Array<unknown>>")]
+    pub filas: Vec<Vec<serde_json::Value>>,
+    /// `None` = esta tabla está completa. Cualquier otra cosa es "sigue pidiendo desde aquí".
+    #[ts(type = "number | null")]
+    pub siguiente_cursor: Option<i64>,
+}
+
+/// Estado del backfill del histórico, para el panel de Conectividad y para el aviso de las
+/// estadísticas (mientras corre, un total de rango largo crece solo y parece un error de cálculo).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct BackfillEstado {
+    /// Cuántas tablas quedan por completar. Cero = no hay backfill en curso.
+    #[ts(type = "number")]
+    pub tablas_pendientes: i64,
+    /// Cuántas ha completado ya.
+    #[ts(type = "number")]
+    pub tablas_completadas: i64,
+    /// Filas traídas hasta ahora. Es el único número que se mueve mientras una tabla grande baja,
+    /// así que es lo que hace que la barra no parezca colgada.
+    #[ts(type = "number")]
+    pub filas_traidas: i64,
+    /// La tabla que se está rellenando ahora mismo (la primera sin completar), si queda alguna.
+    #[ts(optional)]
+    pub tabla_actual: Option<String>,
+    /// Último error del job, si el anterior intento falló. Diagnóstico, no ramificación.
+    #[ts(optional)]
+    pub ultimo_error: Option<String>,
 }
 
 /// Qué se restauró. `tablas_desconocidas` son las que la nube mandó y esta versión de la app no

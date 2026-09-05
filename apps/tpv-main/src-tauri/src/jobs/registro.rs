@@ -24,6 +24,7 @@ use tpv_application::use_cases::licensing as uc_licensing;
 use tpv_application::use_cases::reconciliacion as uc_reconciliacion;
 use tpv_application::use_cases::stock_alertas as uc_stock_alertas;
 use tpv_application::use_cases::sync as uc_sync;
+use tpv_infra_licensing::PairingAdapter;
 
 use super::{tarea, Job, Requiere};
 use crate::AppState;
@@ -63,6 +64,14 @@ const RECONCILIACION_INTERVAL_SECS: u64 = 24 * 60 * 60;
 /// Cada cuánto se poda `_Sync_Applied_Ops`. Los registros solo son purgables tras un TTL de 72 h,
 /// así que una pasada al día va sobrada.
 const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
+/// Cada cuánto se traen unas páginas del histórico pendiente (SYNC-19, fase 2).
+///
+/// Cinco minutos por ~10.000 filas es el ritmo que hace converger un histórico de tres meses en
+/// unas horas SIN que se note: ni en el equipo, que puede estar en hora punta, ni en las lecturas
+/// facturadas de Turso. En el 99,99 % de los vencimientos no hay nada que hacer y el job es una
+/// lectura de una tabla vacía.
+const BACKFILL_INTERVAL_SECS: u64 = 5 * 60;
 
 /// Una instantánea coherente al día y las siete últimas: suficiente para errores humanos o del
 /// disco local sin convertir cada escritura del TPV en trabajo de backup.
@@ -153,6 +162,19 @@ pub(crate) fn catalogo() -> Vec<Job> {
             ejecutar: tarea(backup_local),
         },
         Job {
+            nombre: "backfill_historico",
+            cada: Duration::from_secs(BACKFILL_INTERVAL_SECS),
+            // Después de la reconciliación: si el equipo acaba de recuperarse, lo primero es
+            // desbloquear el login. `MainOperativa` ya garantiza que no corre durante eso, pero el
+            // margen evita competir por el ancho de banda con el catch-up del arranque.
+            retardo_inicial: Duration::from_secs(3 * 60),
+            // `MainOperativa` es justo lo que hace falta y no una casualidad: mientras la
+            // reconciliación de la recuperación está pendiente este job NO corre, así que no compite
+            // con la fase 1 ni retrasa el desbloqueo del login.
+            requiere: Requiere::MainOperativa,
+            ejecutar: tarea(backfill_historico),
+        },
+        Job {
             nombre: "cifrado_pii",
             cada: Duration::from_secs(CIFRADO_PII_INTERVAL_SECS),
             // Al minuto del arranque: da tiempo a que la activación haya guardado la DEK,
@@ -213,6 +235,27 @@ async fn licencia(app: AppHandle) -> Result<(), String> {
 /// Idempotente: recalcular dos veces da lo mismo, y los avisos llevan `clave_dedupe`.
 async fn reconciliacion(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+
+    // SYNC-19: con el histórico a medias, esto no informa: MIENTE. Los dos valores "guardados"
+    // (`Stock_Disponible`, `Total_Gastado`) son columnas de tablas MAESTRAS, que la fase 1 restaura
+    // completas y correctas; los dos "calculados" salen de tablas transaccionales, que durante el
+    // backfill están sin la mitad de sus filas. Resultado: prácticamente todos los lotes y todos
+    // los clientes con historial saldrían descuadrados.
+    //
+    // No corrompe nada —el job sólo lee— y el daño es peor que eso: un aluvión de notificaciones
+    // falsas justo después de una recuperación enseña al usuario a ignorar precisamente la alarma
+    // que no debe ignorar. Al terminar el backfill el job vuelve solo en su siguiente vencimiento,
+    // y ESA primera pasada sí es informativa, porque compara sobre datos completos.
+    let sync = state.sync_repo().await?;
+    let backfill = uc_sync::backfill_estado(sync.as_ref()).await?;
+    if backfill.tablas_pendientes > 0 {
+        log::info!(
+            "reconciliacion: saltada, el histórico todavía se está descargando ({} tablas pendientes)",
+            backfill.tablas_pendientes
+        );
+        return Ok(());
+    }
+
     let repo = state.reconciliacion_repo().await?;
     let notifier = state.notifier().await?;
 
@@ -299,6 +342,38 @@ async fn imagenes(app: AppHandle) -> Result<(), String> {
 async fn purga_sync(app: AppHandle) -> Result<(), String> {
     let repo = app.state::<AppState>().sync_repo().await?;
     uc_sync::purge_applied_ops(repo.as_ref()).await?;
+    Ok(())
+}
+
+/// SYNC-19 · fase 2: trae unas páginas del histórico que la ventana del bootstrap dejó fuera.
+///
+/// La recuperación desde la nube ya no baja el histórico entero —no cabía, y ese era el techo que
+/// hacía que un equipo con tres meses de uso no pudiera rescatarse—: baja lo imprescindible para
+/// volver a vender y deja el resto anotado en `_Backfill_Historico`. Esto es lo que lo va trayendo,
+/// con el bar ya trabajando.
+///
+/// Un equipo que nunca ha perdido su base no tiene nada anotado, así que aquí el job es una lectura
+/// de una tabla vacía y se acabó.
+async fn backfill_historico(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.sync_repo().await?;
+
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let filas = uc_sync::backfill_paso(&PairingAdapter::new(dir), repo.as_ref()).await?;
+    if filas > 0 {
+        let estado = uc_sync::backfill_estado(repo.as_ref()).await?;
+        tracing::info!(
+            target: "tpv::jobs",
+            filas,
+            pendientes = estado.tablas_pendientes,
+            completadas = estado.tablas_completadas,
+            "histórico: página(s) traída(s)"
+        );
+    }
     Ok(())
 }
 

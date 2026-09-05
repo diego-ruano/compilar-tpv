@@ -3,8 +3,8 @@
 use serde_json::json;
 
 use tpv_contracts::sync::{
-    AplicacionSync, ApplySyncChangesArgs, BootstrapResultado, BootstrapSnapshot, OutboxEntry,
-    SyncHealth,
+    AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
+    HistoricoPagina, OutboxEntry, SyncHealth,
 };
 
 use crate::error::{AppError, AppResult};
@@ -87,6 +87,82 @@ pub async fn bootstrap_desde_nube(
     repo.bootstrap_restaurar(snapshot).await
 }
 
+/* ===== SYNC-19 · fase 2: el histórico, en segundo plano ===== */
+
+/// Filas por página. El servidor tiene su propio techo (más bajo manda); esto es lo que se pide.
+pub const BACKFILL_FILAS_POR_PAGINA: i64 = 1_000;
+
+/// Páginas por vencimiento del job. Con el intervalo del job son ~10.000 filas cada cinco minutos:
+/// un histórico de tres meses converge en unas horas sin que nadie lo note ni en el equipo ni en la
+/// factura de Turso.
+///
+/// **No es el bucle entero a propósito.** El motor de jobs tiene que conservar el control: un
+/// backfill que se lleva el equipo por delante durante media hora lo hace en hora punta, y eso es
+/// peor que tardar.
+pub const BACKFILL_PAGINAS_POR_TICK: usize = 10;
+
+/// Progreso del backfill del histórico.
+pub async fn backfill_estado(repo: &dyn SyncRepository) -> AppResult<BackfillEstado> {
+    repo.backfill_estado().await
+}
+
+/// Un vencimiento del job: trae unas cuantas páginas del histórico y las aplica.
+///
+/// Idempotente, como exige el motor: repetir una página no cambia nada (`INSERT OR IGNORE` en la
+/// persistencia) y el cursor sólo avanza cuando la página entra de verdad.
+///
+/// Devuelve cuántas filas se procesaron. Cero significa que no queda backfill pendiente, que es el
+/// caso normal de un equipo que nunca ha perdido su base: una lectura y se acabó.
+pub async fn backfill_paso(
+    nube: &dyn PairingService,
+    repo: &dyn SyncRepository,
+) -> AppResult<i64> {
+    let mut total = 0i64;
+
+    for _ in 0..BACKFILL_PAGINAS_POR_TICK {
+        let Some((tabla, cursor)) = repo.backfill_siguiente().await? else {
+            break;
+        };
+
+        let raw = match nube
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/sync/historico",
+                json!({ "tabla": tabla, "cursor": cursor, "limite": BACKFILL_FILAS_POR_PAGINA }),
+            )
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                // Se anota en la tabla (para que salga en el panel) y se propaga, que es lo que
+                // activa el backoff del motor. Tragarse el error dejaría un backfill parado en
+                // silencio, y su síntoma —un histórico que nunca termina de llegar— no se distingue
+                // de "todavía va".
+                let _ = repo.backfill_marcar_error(&tabla, &e.to_string()).await;
+                return Err(e);
+            }
+        };
+
+        let pagina: HistoricoPagina = serde_json::from_value(raw).map_err(|e| {
+            AppError::external(format!("página de histórico ilegible ({tabla}): {e}"))
+        })?;
+
+        // Un worker antiguo (sin `/historico`) no puede llegar aquí: respondería 404 y el error de
+        // arriba se lo habría llevado. Lo que sí puede pasar es que conteste otra tabla; aplicarla
+        // avanzaría el cursor de una que no se ha pedido.
+        if pagina.tabla != tabla {
+            return Err(AppError::external(format!(
+                "el servidor contestó con la tabla {} para una petición de {tabla}",
+                pagina.tabla
+            )));
+        }
+
+        total += repo.backfill_aplicar_pagina(pagina).await?;
+    }
+
+    Ok(total)
+}
+
 /// Crea una base vacía en la nube y la descarga. El endpoint del servidor sólo acepta la petición
 /// cuando el tenant NO tiene ya una base aprovisionada; por eso esta operación nunca es fallback
 /// automático de un error de red ni puede sobrescribir una nube existente.
@@ -149,6 +225,18 @@ mod tests {
             _: tpv_contracts::sync::BootstrapSnapshot,
         ) -> AppResult<tpv_contracts::sync::BootstrapResultado> {
             panic!("no se debe llegar a restaurar en estas pruebas")
+        }
+        async fn backfill_siguiente(&self) -> AppResult<Option<(String, i64)>> {
+            Ok(None)
+        }
+        async fn backfill_aplicar_pagina(&self, _: HistoricoPagina) -> AppResult<i64> {
+            panic!("no usado")
+        }
+        async fn backfill_marcar_error(&self, _: &str, _: &str) -> AppResult<()> {
+            Ok(())
+        }
+        async fn backfill_estado(&self) -> AppResult<BackfillEstado> {
+            panic!("no usado")
         }
     }
 
