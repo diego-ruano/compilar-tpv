@@ -1,0 +1,30 @@
+// shared/lib/permisos.ts
+//
+// Los roles, en un solo sitio, y qué hace la UI cuando el backend dice que no (SEC-01).
+//
+// El candado de verdad vive en los comandos Tauri: es el único que no se esquiva escribiendo
+// una URL o abriendo las DevTools. Lo de aquí es la otra mitad del trato — que la interfaz no
+// ofrezca lo que no corresponde— más un mensaje entendible para cuando aun así se llega.
+//
+// Que el nombre del rol estuviera escrito a mano en cinco pantallas era el motivo de que la
+// NavBar, la ruta y el backend pudieran discrepar sin que nadie se enterase.
+
+import { esError } from "@tpv/client";
+
+/** El rol privilegiado. Espejo de `ADMIN` en `apps/tpv-main/src-tauri/src/lib.rs`. */
+export const ROL_ADMIN = "Administrador";
+
+export function esAdmin(role: string | null | undefined): boolean {
+    return role === ROL_ADMIN;
+}
+
+/**
+ * ¿El backend ha rechazado esto por permisos?
+ *
+ * Se ramifica por el código, nunca por el texto (ARCH-05). Sirve para enseñar "no tienes
+ * permiso" en vez del "no se pudieron cargar los datos" genérico, que es el mensaje que hace
+ * que alguien reintente diez veces algo que nunca va a funcionar.
+ */
+export function esPermisoDenegado(e: unknown): boolean {
+    return esError(e, "permiso_denegado");
+}

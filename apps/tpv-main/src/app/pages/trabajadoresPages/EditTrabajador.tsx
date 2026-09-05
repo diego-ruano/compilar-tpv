@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { UserCog, ArrowLeft, KeyRound, IdCard, FileText, Save } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
+import { esPermisoDenegado } from "../../../shared/lib/permisos";
 import { useMode } from "../../../shared/stores/useMode";
 
 type Rol = {
@@ -105,6 +106,13 @@ async function getTrabajadorDetailLocal(idTrabajador: string): Promise<Trabajado
 }
 
 function getErrorMessage(e: unknown) {
+  // SEC-01 primero, y por CÓDIGO: es el único caso en el que reintentar no sirve de nada, así
+  // que confundirlo con "no se pudieron cargar los datos" deja a alguien dándole a recargar.
+  // La ruta ya rebota a quien no es administrador; esto cubre lo que llegue por otro camino.
+  if (esPermisoDenegado(e)) {
+    return "La ficha de un trabajador es sólo del administrador";
+  }
+
   const msg = String((e as any)?.message ?? e ?? "").toLowerCase();
 
   if (msg.includes("email_already_exists") || msg.includes("usuarios.email") || msg.includes("email")) {

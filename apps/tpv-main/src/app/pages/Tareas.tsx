@@ -15,6 +15,7 @@ import {
   useVaciarPapelera,
 } from "../../features/tareas/tareasQueries";
 import { useAuth } from "../../shared/stores/useAuth";
+import { esAdmin } from "../../shared/lib/permisos";
 import { ListChecks, Plus, X, Trash2, RotateCcw } from "lucide-react";
 
 type TareaUI = {
@@ -161,7 +162,7 @@ function Modal({
 
 export default function Tareas() {
   const { role, idTrabajador } = useAuth();
-  const isAdmin = role === "Administrador";
+  const isAdmin = esAdmin(role);
 
   // Lecturas cacheadas (TanStack Query). El admin necesita trabajadores + tareas de admin;
   // el no-admin sólo sus tareas. Cada query se habilita según el rol.

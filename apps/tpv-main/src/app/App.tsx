@@ -5,6 +5,7 @@ import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../shared/stores/useAuth";
 import { useEstadoSync } from "../shared/stores/useEstadoSync";
 import { useInactivityLogout } from "../shared/lib/useInactivityLogout";
+import { esAdmin } from "../shared/lib/permisos";
 import { useNotificacionesToast } from "../features/notificaciones/useNotificacionesToast";
 import { fetchRecoveryStatus, fetchSetupPendiente } from "../features/login/loginApi";
 import Login from "./pages/Login";
@@ -100,11 +101,21 @@ function AppInner() {
         return <Navigate to="/Comandas" replace />;
     }
 
-    // Cuentas es solo del administrador (CUENTA-06). El menu ya no la enseña a los demas, pero un
-    // menu no es un permiso: sin esto bastaria con escribir la URL. El candado de verdad para lo que
-    // se ESCRIBE vive mas abajo -en los comandos y, para la Handy, en el worker-; esto solo evita
-    // que la pantalla se abra.
-    if (role && role !== "Administrador" && path === "/cuentas") {
+    // Rutas de administrador. El menu ya no las enseña a los demas, pero un menu no es un
+    // permiso: sin esto bastaria con escribir la URL. El candado de verdad vive en los comandos
+    // Tauri (SEC-01) y, para la Handy, en el worker; esto solo evita que la pantalla se abra —y
+    // que quien llegue a ella la vea entera rota a base de "permiso denegado".
+    //
+    // Cuentas ya estaba (CUENTA-06). Configuracion y las fichas de trabajador se añaden con
+    // SEC-01: sus comandos pasaron a exigir rol, asi que dejarlas abiertas era ofrecer una
+    // pantalla que no funciona. La ficha ademas es la unica que devuelve la PII del personal.
+    const RUTAS_DE_ADMIN = [
+        "/cuentas",
+        "/configuracion",
+        "/trabajadores/nuevo-trabajador",
+        "/trabajadores/editar",
+    ];
+    if (role && !esAdmin(role) && RUTAS_DE_ADMIN.some((r) => path.startsWith(r))) {
         return <Navigate to="/" replace />;
     }
 

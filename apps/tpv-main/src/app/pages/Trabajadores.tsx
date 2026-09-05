@@ -20,6 +20,7 @@ import {
 
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../shared/stores/useAuth";
+import { esAdmin } from "../../shared/lib/permisos";
 import { useToast } from "../../shared/toast";
 
 // PDF
@@ -327,7 +328,7 @@ async function generarHorarioPDFPorEmpleado(args: {
 ========================= */
 function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
   const auth = useAuth();
-  const isAdmin = auth.role === "Administrador";
+  const isAdmin = esAdmin(auth.role);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -1125,7 +1126,7 @@ function Trabajadores() {
   const navigate = useNavigate();
   const location = useLocation();
   const auth = useAuth();
-  const isAdmin = auth.role === "Administrador";
+  const isAdmin = esAdmin(auth.role);
   const toast = useToast();
 
   // Lista de trabajadores vía TanStack Query (caché). Las mutaciones de horarios y el

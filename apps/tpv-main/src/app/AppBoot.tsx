@@ -549,6 +549,19 @@ export default function AppBoot({ router }: { router: any }) {
     // La capa antigua dualCall/cloudSync fue eliminada. La sync activa corre en
     // useMainSocket / useHandySocket (montados al inicio del componente, ver §9 en CLAUDE.md).
 
+    // SEC-01: barrer la sesión del backend al arrancar el webview.
+    //
+    // Hace falta porque las dos sesiones no mueren juntas. Si alguien recarga (F5), el store de
+    // Zustand se vacía y la UI vuelve al login, pero `AppState::sesion` sigue puesta: quedaría
+    // una sesión de administrador viva detrás de una pantalla que pide PIN. Aquí no hay nada
+    // que perder —al arrancar SIEMPRE se pide PIN, no hay sesión persistente que respetar—, así
+    // que cerrar es lo correcto aunque no venga de un F5.
+    useEffect(() => {
+        void invokeClient("logout").catch((e: unknown) => {
+            console.warn("[AppBoot] no se pudo limpiar la sesión del backend:", e);
+        });
+    }, []);
+
     useEffect(() => {
         (async () => {
             try {
