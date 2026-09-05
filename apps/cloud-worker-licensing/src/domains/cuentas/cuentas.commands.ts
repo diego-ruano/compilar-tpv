@@ -72,7 +72,10 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 				INSERT INTO Movimientos_Caja (
 				  ID_Movimiento, Fecha_Hora, Tipo, ID_Gasto, Importe, Motivo
 				)
-				VALUES (?1, datetime('now','localtime'), 'GASTO', ?2, ABS(?3), ?4);
+				SELECT ?1, datetime('now','localtime'), 'GASTO', ?2, ABS(?3), ?4
+				WHERE NOT EXISTS (
+				  SELECT 1 FROM Movimientos_Caja mc WHERE mc.Tipo = 'GASTO' AND mc.ID_Gasto = ?2
+				);
 			`,
 			args: [{ $ref: "mov" }, REF_ID, cloudPayload.importe, cloudPayload.concepto],
 		},
@@ -124,7 +127,11 @@ export function deleteGasto(idGasto: string): BuiltCommand {
 				SELECT ?2, datetime('now','localtime'), 'GASTO_ANULADO', g.ID_Gasto,
 				       ABS(IFNULL(g.Importe,0)), NULLIF(COALESCE(g.Concepto,''),'')
 				FROM Cuentas_Gastos g
-				WHERE g.ID_Gasto = ?1;
+				WHERE g.ID_Gasto = ?1
+				  AND NOT EXISTS (
+				    SELECT 1 FROM Movimientos_Caja mc
+				    WHERE mc.Tipo = 'GASTO_ANULADO' AND mc.ID_Gasto = ?1
+				  );
 			`,
 			args: [idGasto, { $ref: "mov" }],
 		},
@@ -256,7 +263,11 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				SELECT ?2, datetime('now','localtime'), 'ANULACION', p.ID_Pago, ?3,
 				       ABS(ROUND(IFNULL(p.Importe_Total,0), 2)), NULLIF(COALESCE(p.Metodo_Pago,''),''), ?4
 				FROM Pagos p
-				WHERE p.ID_Pago = ?1 AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO';
+				WHERE p.ID_Pago = ?1 AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
+				  AND NOT EXISTS (
+				    SELECT 1 FROM Movimientos_Caja mc
+				    WHERE mc.Tipo = 'ANULACION' AND mc.ID_Pago = ?1
+				  );
 			`,
 			args: [idPago, REF_ID, idUsuario, motivo],
 		},

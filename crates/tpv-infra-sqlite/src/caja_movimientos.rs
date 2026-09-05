@@ -52,6 +52,11 @@ fn texto(v: Option<String>) -> Value {
 /// El `ID_Movimiento` se genera **aquí, antes** de la sentencia, y nunca por DEFAULT ni trigger:
 /// una `TEXT PRIMARY KEY` calculada dentro del SQL se re-evaluaría al replicar y la nube y la Main
 /// acabarían con dos filas distintas para el mismo hecho (CLAUDE.md §9, «IDs deterministas»).
+///
+/// **Idempotente por (`Tipo`, apunte).** Los cobros y los gastos se guardan con `ON CONFLICT DO
+/// UPDATE` para que un reintento del cliente no duplique la venta; sin el `WHERE NOT EXISTS` de
+/// abajo, ese mismo reintento sí duplicaría su movimiento —cada uno con un `ID_Movimiento` nuevo,
+/// así que ninguna clave los frenaría— y el historial contaría dos cobros donde hubo uno.
 pub async fn registrar<C: Writer>(db: &C, m: MovimientoCaja) -> AppResult<()> {
     db.execute(
         r#"
@@ -59,7 +64,13 @@ pub async fn registrar<C: Writer>(db: &C, m: MovimientoCaja) -> AppResult<()> {
           ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Gasto, ID_Usuario, ID_Trabajador,
           Importe, Metodo_Pago, Motivo
         )
-        VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);
+        SELECT ?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+        WHERE NOT EXISTS (
+          SELECT 1 FROM Movimientos_Caja mc
+          WHERE mc.Tipo = ?2
+            AND (?3 IS NOT NULL OR ?4 IS NOT NULL)
+            AND ((?3 IS NOT NULL AND mc.ID_Pago = ?3) OR (?4 IS NOT NULL AND mc.ID_Gasto = ?4))
+        );
         "#,
         vec![
             Value::Text(new_id()),

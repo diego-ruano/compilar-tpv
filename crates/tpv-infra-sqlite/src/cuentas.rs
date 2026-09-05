@@ -880,6 +880,7 @@ mod tests_anulacion {
     use super::tests_comunes::*;
     use super::*;
     use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
+    use tpv_application::ports::mesas::MesasRepository;
 
     /// Una venta de mesa con dos líneas: una cobrada (con consumo de lote y de suelto) y otra que
     /// se quedó pendiente. Es el estado desde el que se anula, y el que permite comprobar de una
@@ -1182,6 +1183,79 @@ mod tests_anulacion {
                 .await
                 .is_some_and(|s| !s.is_empty()),
             "el UUID se genera antes del INSERT, nunca dentro de la sentencia"
+        );
+    }
+
+    #[tokio::test]
+    async fn el_historial_recoge_una_fila_por_cobro_y_otra_por_anulacion() {
+        // El par completo. Sin la fila del cobro, el historial sólo tendría cosas deshechas y no
+        // habría contra qué leerlas.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+
+        // El cobro se anota por su camino real (`cobrar_detalles`), no a mano: lo que se vigila
+        // aquí es que ese camino lo haga, no que la tabla admita filas.
+        crate::mesas::SqliteMesasRepository::new(db.clone())
+            .cobrar_detalles(tpv_domain::mesas::CobroDetalles {
+                id_comanda: "com".into(),
+                detalle_ids: vec!["det-pendiente".into()],
+                metodo: "Efectivo".into(),
+                tipo: "PARCIAL".into(),
+                id_usuario: Some("u1".into()),
+            })
+            .await
+            .unwrap();
+
+        repo(&db).anular_pago(args("pago")).await.unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='COBRO';").await,
+            1.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='ANULACION';").await,
+            1.0
+        );
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Movimientos_Caja mc JOIN Pagos p ON p.ID_Pago = mc.ID_Pago;"
+            )
+            .await,
+            2.0,
+            "cada movimiento tiene que apuntar a su cobro"
+        );
+    }
+
+    #[tokio::test]
+    async fn guardar_dos_veces_el_mismo_apunte_no_duplica_su_movimiento() {
+        // `crear_gasto` es un upsert por `ID_Gasto`, para que un reintento no duplique el gasto.
+        // El movimiento sigue la misma regla: si no, el historial contaría dos salidas de dinero
+        // donde hubo una — y con dos `ID_Movimiento` distintos, así que ninguna clave las
+        // frenaría. La misma guardia protege al cobro, cuyo INSERT también es un upsert.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        let r = repo(&db);
+
+        for importe in [12.5, 13.0] {
+            r.crear_gasto(
+                Some("g1".into()),
+                GastoData {
+                    fecha: "2026-01-02".into(),
+                    tipo_gasto: "Otro".into(),
+                    concepto: "Hielo".into(),
+                    importe,
+                    proveedor_id: None,
+                },
+                Some("u1"),
+            )
+            .await
+            .unwrap();
+        }
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE ID_Gasto='g1';").await,
+            1.0
         );
     }
 

@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use chrono::{Local, NaiveDate, NaiveTime, TimeZone};
 use libsql::Value;
 
+use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 
 use tpv_application::error::{AppError, AppResult};
@@ -1295,6 +1296,7 @@ impl MesasRepository for SqliteMesasRepository {
             // para que una reimpresion saque el mismo papel.
             let numero_ticket = siguiente_numero_ticket(db).await?;
             let id_pago = new_id();
+            let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
                 db,
                 r#"
@@ -1346,6 +1348,24 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             }
+
+            // El cobro en el historial de caja (CUENTA-07). Va dentro de la transacción del
+            // cobro: si esto fallara, lo que NO puede quedar es la venta registrada y el
+            // movimiento no. El trabajador sólo se anota si el propio pago pudo guardarlo (si
+            // `ok` es falso, esa columna no existe en este esquema y el valor no significa nada).
+            caja_movimientos::registrar(
+                db,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_COBRO,
+                    id_pago: Some(id_pago.clone()),
+                    id_usuario: data.id_usuario_cobrador.clone(),
+                    id_trabajador: if ok { trabajador_mov } else { None },
+                    importe: importe_total,
+                    metodo_pago: Some(data.metodo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
 
             // MESA-12: enlazamos el pago con exactamente las líneas recién insertadas por sus
             // ID_Detalle (recogidos en `charged`), en vez de correlacionar por un valor técnico
@@ -1970,6 +1990,7 @@ impl MesasRepository for SqliteMesasRepository {
             // para que una reimpresion saque el mismo papel.
             let numero_ticket = siguiente_numero_ticket(db).await?;
             let id_pago = new_id();
+            let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
                 db,
                 r#"
@@ -2023,6 +2044,23 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             }
+
+            // El cobro en el historial de caja (CUENTA-07). A diferencia del gasto del cliente
+            // de aquí abajo, esto NO es best-effort: un cobro cuyo movimiento no se anota es
+            // justo el que después no se puede investigar.
+            caja_movimientos::registrar(
+                db,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_COBRO,
+                    id_pago: Some(id_pago.clone()),
+                    id_usuario: data.id_usuario.clone(),
+                    id_trabajador: if ok { trabajador_mov } else { None },
+                    importe: total,
+                    metodo_pago: Some(data.metodo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
 
             if let Err(e) = sumar_gasto_cliente_por_comanda(db, &data.id_comanda, total).await {
                 // MESA-06: best-effort — el pago commitea igualmente (Total_Gastado es

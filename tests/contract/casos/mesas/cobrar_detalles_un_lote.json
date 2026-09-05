@@ -14,13 +14,16 @@
     "id_comanda": "comanda-1",
     "metodo": "TARJETA",
     "tipo": "TOTAL",
-    "detalle_ids": ["detalle-1"]
+    "detalle_ids": [
+      "detalle-1"
+    ]
   },
   "snapshot": {
     "Pagos": "SELECT ID_Comanda, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador, ID_Trabajador_Cobrador FROM Pagos",
     "Pago_Detalles": "SELECT ID_Detalle FROM Pago_Detalles",
     "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Stock_Disponible FROM Lotes_Producto",
     "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
-    "Comandas": "SELECT ID_Comanda, Estado, Total_Comanda FROM Comandas"
+    "Comandas": "SELECT ID_Comanda, Estado, Total_Comanda FROM Comandas",
+    "Movimientos_Caja": "SELECT mc.Tipo AS Tipo, CASE WHEN p.ID_Pago IS NULL THEN 0 ELSE 1 END AS Apunta_A_Un_Pago, mc.ID_Usuario AS ID_Usuario, mc.ID_Trabajador AS ID_Trabajador, mc.Importe AS Importe, mc.Metodo_Pago AS Metodo_Pago FROM Movimientos_Caja mc LEFT JOIN Pagos p ON p.ID_Pago = mc.ID_Pago"
   }
 }

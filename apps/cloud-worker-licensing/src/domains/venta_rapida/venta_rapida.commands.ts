@@ -291,6 +291,38 @@ export function cobrarFraccionado(
 		],
 	});
 
+	// El cobro en el historial de caja (CUENTA-07). El `WHERE NOT EXISTS` importa aquí más que en
+	// ningún sitio: el INSERT de arriba es un upsert justamente porque el cliente puede reintentar
+	// el mismo cobro, y sin él ese reintento dejaría dos movimientos para una sola venta.
+	steps.push({
+		kind: "value",
+		saveAs: "id_mov",
+		sql: "SELECT ?1;",
+		args: [crypto.randomUUID()],
+	});
+	steps.push({
+		kind: "execute",
+		sql: `
+			INSERT INTO Movimientos_Caja (
+				ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Usuario, ID_Trabajador,
+				Importe, Metodo_Pago
+			)
+			SELECT ?1, datetime('now','localtime'), 'COBRO', ?2, ?3, ?4, ABS(?5), ?6
+			WHERE NOT EXISTS (
+				SELECT 1 FROM Movimientos_Caja mc
+				WHERE mc.Tipo = 'COBRO' AND mc.ID_Pago = ?2
+			);
+		`,
+		args: [
+			{ $ref: "id_mov" },
+			plan.id_pago,
+			plan.id_usuario_cobrador,
+			plan.id_trabajador_cobrador,
+			plan.importe_total,
+			input.metodo,
+		],
+	});
+
 	for (const det of input.detalles) {
 		steps.push({
 			kind: "execute",

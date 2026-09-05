@@ -625,6 +625,37 @@ export function cobrarDetalles(
 							plan.id_trabajador,
 						],
 					},
+					// El cobro en el historial de caja (CUENTA-07). Paridad con
+					// `SqliteMesasRepository::cobrar_detalles`. El id del movimiento se genera
+					// ANTES del INSERT, como el del pago.
+					{
+						kind: "value",
+						saveAs: "id_mov",
+						sql: "SELECT ?1;",
+						args: [crypto.randomUUID()],
+					},
+					{
+						kind: "execute",
+						sql: `
+						INSERT INTO Movimientos_Caja (
+								ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Usuario, ID_Trabajador,
+								Importe, Metodo_Pago
+							)
+							SELECT ?1, datetime('now','localtime'), 'COBRO', ?2, ?3, ?4, ABS(?5), ?6
+							WHERE NOT EXISTS (
+								SELECT 1 FROM Movimientos_Caja mc
+								WHERE mc.Tipo = 'COBRO' AND mc.ID_Pago = ?2
+							);
+						`,
+						args: [
+							{ $ref: "id_mov" },
+							REF_ID_PAGO,
+							input.id_usuario,
+							plan.id_trabajador,
+							plan.total,
+							input.metodo,
+						],
+					},
 					{
 						kind: "execute",
 						sql: `

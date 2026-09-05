@@ -23,6 +23,16 @@
       "Stock_Disponible": 2.0
     }
   ],
+  "Movimientos_Caja": [
+    {
+      "Apunta_A_Un_Pago": 1,
+      "ID_Trabajador": null,
+      "ID_Usuario": null,
+      "Importe": 16.0,
+      "Metodo_Pago": "TARJETA",
+      "Tipo": "COBRO"
+    }
+  ],
   "Pago_Detalles": [
     {
       "ID_Detalle": "detalle-1"

@@ -14,6 +14,7 @@ use tpv_contracts::venta_rapida::{
 };
 use tpv_domain::venta_rapida::CobroFraccionado;
 
+use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
 use crate::util::{new_id, CANAL_BARRA};
@@ -877,6 +878,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             // producto sin lotes y sin stock suelto configurado se vende sin descontar (no
             // inventariado). El exceso ya no aborta el cobro.
 
+            // Se clonan para poder anotarlos también en el historial de caja: los originales se
+            // consumen al construir los parámetros de aquí abajo.
+            let usuario_mov = id_usuario.clone();
+            let trabajador_mov = id_trabajador_cobrador.clone();
+
             db.execute(
                 r#"
                 INSERT INTO Pagos (
@@ -899,13 +905,28 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(data.id_comanda.clone()),
                     Value::Text(data.metodo.clone()),
                     Value::Real(importe_total_db),
-                    id_usuario.map(Value::Text).unwrap_or(Value::Null),
-                    id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
+                    usuario_mov.clone().map(Value::Text).unwrap_or(Value::Null),
+                    trabajador_mov.clone().map(Value::Text).unwrap_or(Value::Null),
                     Value::Text(numero_ticket.clone()),
                 ],
             )
             .await
             .map_err(db_err)?;
+
+            // El cobro en el historial de caja (CUENTA-07), dentro de la misma transacción.
+            caja_movimientos::registrar(
+                db,
+                MovimientoCaja {
+                    tipo: caja_movimientos::TIPO_COBRO,
+                    id_pago: Some(id_pago_final.clone()),
+                    id_usuario: usuario_mov,
+                    id_trabajador: trabajador_mov,
+                    importe: importe_total_db,
+                    metodo_pago: Some(data.metodo.clone()),
+                    ..Default::default()
+                },
+            )
+            .await?;
 
             for det in &detalles {
                 db.execute(
