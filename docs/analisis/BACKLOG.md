@@ -21,7 +21,7 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido.** Antes de entrar en un bar: CUENTA-07, SEC-01, SYNC-19. Antes de cobrar por
+> **Orden sugerido.** Antes de entrar en un bar: CUENTA-07 y SYNC-19 (SEC-01 ✅ hecho). Antes de cobrar por
 > ello: FISCAL-01, FISCAL-02, LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato: TEST-01, OPS-02.
 
 | ID | Sev | Hallazgo | Estado |
@@ -29,7 +29,7 @@
 | FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | Sin empezar |
 | FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | Sin empezar |
 | CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | Sin empezar |
-| SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | Sin empezar |
+| SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | ✅ Hecho (2026-09-05) |
 | SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | Sin empezar |
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
 | VENTA-01 | 🟠 | **No existen descuentos, invitaciones, propinas ni devoluciones.** | Sin empezar |
@@ -79,14 +79,19 @@ efectivo, se los queda y anula el cobro, **el esperado baja 40 € y el arqueo c
 anulados, y las anulaciones como línea aparte del arqueo. Es además exactamente lo que FISCAL-01 va
 a exigir, así que se hace **una vez** y sirve para las dos cosas.
 
-### SEC-01 🟠 · Los permisos son sólo de UI
+### SEC-01 ✅ · Los permisos eran sólo de UI (resuelto 2026-09-05)
 
-[`App.tsx:107`](../../apps/tpv-main/src/app/App.tsx#L107) bloquea la ruta `/cuentas` a los no
-Administrador y la NavBar esconde entradas. Pero **ningún comando Tauri comprueba el rol** —
-verificado sobre todo `src-tauri/src/commands/`. La regla vive donde el usuario está sentado.
+`App.tsx` bloqueaba la ruta `/cuentas` y la NavBar escondía entradas, pero **ningún comando Tauri
+comprobaba el rol**: la regla vivía donde el usuario está sentado.
 
-Es el multiplicador de CUENTA-07: no basta con dejar rastro de una anulación si cualquiera puede
-provocarla. El gate debe estar en el caso de uso, no en el router.
+**Resuelto.** `AppState` guarda ahora una sesión que establece `login_user` con el rol que devuelve
+el repositorio, y los comandos que importan la exigen. Además, el usuario que queda registrado en
+una fila (quién cerró la caja, quién abrió el cajón) lo pone el backend: `ConfirmarCierreInput`,
+`CierreIdInput` y `AbrirCajonArgs` perdieron su `id_usuario`. Qué está gateado, qué no, y hasta
+dónde llega la garantía: [permisos-y-sesion.md](transversal/permisos-y-sesion.md).
+
+Esto es lo que hace que **CUENTA-07** valga para algo: su `Anulado_Por` ya puede ser un dato
+establecido por el backend y no uno que le hayan contado.
 
 ### SYNC-19 🟠 · El bootstrap caduca por filas
 
@@ -358,9 +363,11 @@ probar la **app** completa contra staging.
 | ID | Sev | Qué falta | Notas |
 |----|-----|-----------|-------|
 | LIC-02 | 🔵 | Sin **certificate pinning** del host de la API. | Prácticamente *moot* con LIC-01 resuelto: la firma pineada es más robusta que el pinning de transporte. Un MITM ya no puede falsificar el estado de licencia. |
-| LIC-04 | 🔵 | Documentar el **modelo de amenaza** del gate (corre en cliente → evadible en última instancia). | Tarea de documentación. |
 
 > **LIC-03** verificado como **no explotable** en pairing (todos los caminos firmados validan `ts` a
 > 2 min; `fetch-token` con nonce de un solo uso). **LIC-05** (SMTP al keyring) quedó **moot**: DB-04
-> eliminó el SMTP propio (correo por worker). **LIC-04** es documentar el modelo de amenaza del gate.
+> eliminó el SMTP propio (correo por worker). **LIC-04** ✅ cerrado con SEC-01 (2026-09-05): el
+> modelo de amenaza del gate está escrito en
+> [permisos-y-sesion.md](transversal/permisos-y-sesion.md) §1, junto al de los permisos por rol —
+> que es el mismo problema visto dos veces.
 

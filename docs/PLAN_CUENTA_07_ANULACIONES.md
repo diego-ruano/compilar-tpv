@@ -216,8 +216,10 @@ Dos reglas:
 - Valida el motivo si se decide obligatorio. **Recomendación: obligatorio a partir de un importe**,
   reutilizando la idea de `Umbral_Descuadre` de `Business_Settings` — anular un café no debería pedir
   redacción, anular 200 € sí. Si se prefiere simple: obligatorio siempre, o nunca.
-- El `id_usuario` **no llega del frontend**: sale de la sesión del backend. Eso es
-  [PLAN_SEC_01_ROLES.md](PLAN_SEC_01_ROLES.md) y es **prerrequisito** — ver §9.
+- El `id_usuario` **no llega del frontend**: sale de la sesión del backend. Eso ya está hecho
+  (SEC-01, 2026-09-05): el comando resuelve `state.exigir_rol(&[ADMIN])` y pasa el `id_usuario` de
+  la `Sesion` que devuelve. Ver [permisos-y-sesion.md](analisis/transversal/permisos-y-sesion.md),
+  y `cierre_confirmar` como patrón ya escrito.
 
 ### 6.3 Puerto — `tpv-application/src/ports/cuentas.rs`
 
@@ -417,10 +419,12 @@ descuadrado.** Ese es el criterio de aceptación del plan entero.
 
 ## 9. Orden y dependencias
 
-1. **Antes que nada: [PLAN_SEC_01_ROLES.md](PLAN_SEC_01_ROLES.md).** `Anulado_Por` tiene que salir de
-   una sesión que el backend conozca. Si sale de un argumento del frontend, cualquiera puede firmar
-   la anulación con el nombre de otro y la auditoría no vale para nada — que es justo lo que este
-   plan viene a arreglar.
+1. ~~Antes que nada: SEC-01.~~ **✅ Hecho (2026-09-05).** `Anulado_Por` tenía que salir de una
+   sesión que el backend conozca —si sale de un argumento del frontend, cualquiera puede firmar la
+   anulación con el nombre de otro y la auditoría no vale para nada—, y esa sesión ya existe:
+   `AppState::sesion` + `exigir_rol`, descritos en
+   [permisos-y-sesion.md](analisis/transversal/permisos-y-sesion.md). Los cuatro comandos de dinero
+   de `commands/cuentas.rs` ya exigen Administrador, así que `anular_pago` nace gateado.
 2. Esquema (§5) + reset de bases de desarrollo.
 3. Dominio y caso de uso (§6.1-6.3).
 4. Persistencia (§6.4) con sus tests.

@@ -720,7 +720,9 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
 - **El cajón se abre con la impresora.** El pulso va dentro del propio flujo del ticket (`ESC p`) o
   suelto (`DLE DC4`, que la impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se
   registra en `Aperturas_Cajon` (migración 0006) — un cajón que se abre sin venta es el descuadre que
-  hay que poder investigar.
+  hay que poder investigar. Abrirlo no pide rol (el camarero lo necesita para dar cambio) pero sí
+  **estar identificado**, y el nombre que se anota lo pone la sesión: con SEC-01, `printer_open_drawer`
+  ya no acepta un `id_usuario` de la entrada.
 - **El logo es de un bit.** `rasterizar_logo` reduce al ancho del papel (múltiplo de 8 dots),
   difumina con Floyd–Steinberg y emite `GS v 0`. La transparencia se compone sobre blanco antes de
   nada (un PNG de fondo transparente salía como un rectángulo negro). Si la imagen no se puede leer
@@ -785,15 +787,74 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
 - **Cerrar bloquea el periodo; reabrir deja rastro.** El bloqueo no tiene columna: se deduce
   comparando la fecha del apunte con el último cierre no reabierto, que es un estado menos que
   mantener sincronizado. El gate vive en los comandos, no en la UI, y la fecha se lee de la BD y no
-  de la entrada: en un borrado sólo llega el id.
+  de la entrada: en un borrado sólo llega el id. **Y el rastro tampoco se acepta de la entrada**
+  (SEC-01): quién cierra y quién reabre sale de la sesión del backend, así que `ConfirmarCierreInput`
+  y `CierreIdInput` ya no llevan `id_usuario` — un arqueo firmado con el nombre que le pase la
+  pantalla es una auditoría que da confianza sin merecerla.
 - **El papel es un documento interno.** No gasta número de ticket (dejaría huecos en la serie de
   ventas), no lleva desglose de IVA y no abre el cajón, que ya está abierto.
 - **La Handy mira, no toca.** Sus escrituras de caja se rechazan dos veces —adaptador HTTP y worker
   (`soloLaMainEscribeCaja`)—, porque una regla que sólo vive en el cliente es una sugerencia.
+- **Cuentas entera es del administrador, lecturas incluidas** (SEC-01, cerrando lo que
+  `PLAN_CIERRE_CAJA.md` §8 ya había decidido). El libro de caja dice cuánto se factura y cuánto se
+  gasta: esconderlo del menú no es esconderlo.
 
 ---
 
-## 13. Notas del generador de tickets
+## 13. Permisos y sesión (SEC-01)
+
+Quién puede hacer qué. **SEC-01**; qué está gateado, qué no y hasta dónde llega la garantía en
+[docs/analisis/transversal/permisos-y-sesion.md](docs/analisis/transversal/permisos-y-sesion.md),
+que cierra también el modelo de amenaza de LIC-04.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| La sesión | `lib.rs` (`Sesion`, `AppState::sesion`) | `Option<Sesion>` en memoria; la pone `login_user`, la quita `logout` |
+| El gate | `lib.rs` (`sesion` · `exigir_rol` · `exigir_rol_si_hay_sesion`) | Tres helpers, no una comprobación copiada en cada comando |
+| El rol | `lib.rs::ADMIN` y `shared/lib/permisos.ts::ROL_ADMIN` | Un sitio por lado |
+| Código de error | `tpv-contracts::errors::ErrorCode::PermisoDenegado` | La UI ramifica por él para decir "no puedes" en vez de "ha fallado" |
+| Cierre en el frontend | `shared/stores/useAuth.ts` + `app/AppBoot.tsx` | Las dos sesiones se cierran juntas |
+| El guardián | `lib.rs::tests_exenciones_del_gate` | Vigila que nadie gatee lo que no puede gatearse |
+
+### Reglas
+
+- **El rol sale del repositorio, nunca de los args.** Quien puede invocar un comando puede escribir
+  lo que quiera en su entrada, así que un rol que llega por ahí no es una comprobación: es una
+  sugerencia. Lo mismo vale para el usuario que se **registra** en una fila (quién cerró la caja,
+  quién abrió el cajón): sale de la sesión, y por eso `ConfirmarCierreInput`, `CierreIdInput` y
+  `AbrirCajonArgs` ya no llevan `id_usuario`. Una auditoría firmada con el nombre que le pasen da
+  confianza sin merecerla, que es peor que no tener ninguna.
+- **La lista de comandos gateados es corta a propósito.** Gatear "añadir una línea a la comanda"
+  convierte el TPV en inservible en hora punta, y un gate que estorba acaba en que todo el mundo
+  conoce el PIN del encargado — que es justo el permiso que se quería quitar. Antes de añadir uno,
+  la pregunta no es "¿esto es delicado?" sino "¿esto lo hace alguien a mitad de servicio?".
+- ⚠️ **`commands/recovery.rs` NO puede exigir sesión, nunca.** Esa pantalla existe para el caso de
+  **cero usuarios**: un equipo que perdió su `data.db` no tiene con quién iniciar sesión, y
+  ponerle el gate cierra su única salida — en silencio, porque en un equipo sano no se nota. Es la
+  hermana de la regla que ya estaba escrita en §9: *todo lo que hay en ese camino tiene que tolerar
+  `state.db == None`*. Añádele: **y `sesion == None`**. Lo vigila un test que lee el propio fuente.
+- **Lo que se alcanza antes del login no puede exigir sesión, y no todo se ve a simple vista.** Las
+  pantallas de arranque (selector de modo, activación de licencia, emparejamiento del Handy) se
+  pintan **en lugar** del router, así que ahí no hay login que superar: `license_activate`,
+  `set_device_mode` y `license_clear_state` están exentos. Para lo que se alcanza por los **dos**
+  caminos está `exigir_rol_si_hay_sesion` (sin sesión pasa, con sesión exige el rol), que es lo que
+  usa `device_reset_mode`.
+- **El proxy genérico se gatea por ruta y fallando cerrado.** `tpv_server_post_json` firma lo que le
+  den: por él viajan el emparejamiento de un Handy (sin sesión) y la administración de dispositivos
+  de Configuración. Todo `/v1/pair/…` y `/v1/device/…` exige Administrador salvo `claim` y
+  `fetch-token`. Va por **prefijo y no por lista blanca** para que una ruta de administración nueva
+  quede cubierta sola.
+- **La UI sigue escondiendo lo que no toca.** El gate del backend es la red, no el sustituto de una
+  interfaz que no ofrece lo que no corresponde. Al gatear un comando hay que mirar si su pantalla
+  tiene candado de ruta: sin él, quien escriba la URL ve una pantalla entera rota a base de "permiso
+  denegado" en vez de un "esto no es tuyo".
+- **Esto no es una frontera criptográfica y no pretende serlo.** Quien tiene la máquina puede
+  invocar comandos por el IPC. Cubre a un camarero con el TPV delante, no a un atacante; lo que de
+  verdad importa lo valida además el worker, que corre donde el usuario no manda.
+
+---
+
+## 14. Notas del generador de tickets
 
 Los tests del generador están en `src-tauri/src/printing/tests.rs`, e incluyen un mini-intérprete
 ESC/POS: separa texto de comandos y **falla si encuentra un byte que no es ninguna de las dos
