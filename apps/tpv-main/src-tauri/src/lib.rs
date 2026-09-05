@@ -2328,3 +2328,228 @@ mod tests_ruta_del_logo {
         assert!(ruta_dentro_de(&dir, "./images/logo.png").is_some());
     }
 }
+
+#[cfg(test)]
+mod tests_sesion_y_permisos {
+    //! El gate por rol (SEC-01).
+    //!
+    //! Los comandos no se pueden instanciar sin una app de Tauri, pero la decisión no vive en
+    //! ellos: vive en estos tres métodos de `AppState`, que sí son puros respecto a Tauri. Lo
+    //! que se prueba aquí es lo que un comando gateado hereda al llamarlos.
+
+    use super::*;
+
+    fn estado() -> AppState {
+        AppState {
+            db: Arc::new(Mutex::new(None)),
+            cloud: Arc::new(Mutex::new(None)),
+            mode: Arc::new(Mutex::new(Some(DeviceMode::Tpv))),
+            mode_sync: Arc::new(std::sync::RwLock::new(Some(DeviceMode::Tpv))),
+            sesion: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn sesion_de(rol: &str) -> Sesion {
+        Sesion {
+            id_usuario: "u-1".into(),
+            id_trabajador: Some("t-1".into()),
+            rol: rol.into(),
+            iniciada_en: 1_700_000_000_000,
+        }
+    }
+
+    /// Sin sesión no se pasa, y el error tiene que llegar con el código por el que ramifica el
+    /// frontend: con un `internal` genérico, la UI no podría distinguir "no puedes" de "ha
+    /// fallado" y ofrecería reintentar donde no hay nada que reintentar.
+    #[tokio::test]
+    async fn sin_sesion_se_deniega_con_su_codigo() {
+        let st = estado();
+
+        let e = st.sesion().await.unwrap_err();
+        assert_eq!(e.code, tpv_contracts::errors::ErrorCode::PermisoDenegado);
+
+        let e = st.exigir_rol(&[ADMIN]).await.unwrap_err();
+        assert_eq!(e.code, tpv_contracts::errors::ErrorCode::PermisoDenegado);
+    }
+
+    /// El caso que motiva el plan entero: identificarse no es autorizarse.
+    #[tokio::test]
+    async fn un_rol_que_no_toca_no_pasa_aunque_haya_sesion() {
+        let st = estado();
+
+        for rol in ["Camarero", "Cocinero", "Limpieza"] {
+            st.iniciar_sesion(sesion_de(rol)).await;
+
+            // Está identificado: lo atribuible sí lo puede hacer (abrir el cajón para dar cambio).
+            assert!(st.sesion().await.is_ok(), "{rol} debería estar identificado");
+
+            let e = st.exigir_rol(&[ADMIN]).await.unwrap_err();
+            assert_eq!(
+                e.code,
+                tpv_contracts::errors::ErrorCode::PermisoDenegado,
+                "{rol} no debería pasar el gate de administrador"
+            );
+        }
+    }
+
+    /// El rol se compara EXACTO. Aceptar "administrador" o " Administrador " sería aceptar
+    /// cualquier fila de `Roles` que alguien escribiera de otra manera.
+    #[tokio::test]
+    async fn el_rol_se_compara_exacto() {
+        let st = estado();
+
+        for parecido in [
+            "administrador",
+            "ADMINISTRADOR",
+            " Administrador",
+            "Administrador ",
+        ] {
+            st.iniciar_sesion(sesion_de(parecido)).await;
+            assert!(
+                st.exigir_rol(&[ADMIN]).await.is_err(),
+                "{parecido:?} no es el rol Administrador"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn con_el_rol_correcto_pasa_y_dice_quien_es() {
+        let st = estado();
+        st.iniciar_sesion(sesion_de(ADMIN)).await;
+
+        let s = st.exigir_rol(&[ADMIN]).await.expect("un admin debe pasar");
+
+        // Lo que devuelve el gate es lo que acaba en la fila: el `id_usuario` de la sesión y no
+        // uno que haya llegado en los args. Es todo el sentido de SEC-01.
+        assert_eq!(s.id_usuario, "u-1");
+        assert_eq!(s.rol, ADMIN);
+    }
+
+    /// Cerrar sesión no es cosmético: es lo que impide que la siguiente persona herede el
+    /// permiso de la anterior cuando el TPV se queda desatendido.
+    #[tokio::test]
+    async fn cerrar_sesion_devuelve_el_gate_a_cero() {
+        let st = estado();
+        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        assert!(st.exigir_rol(&[ADMIN]).await.is_ok());
+
+        st.cerrar_sesion().await;
+
+        assert!(st.sesion().await.is_err());
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+    }
+
+    /// Cerrar dos veces (el cierre por inactividad y el arranque del webview pueden solaparse)
+    /// no puede fallar ni resucitar nada.
+    #[tokio::test]
+    async fn cerrar_sesion_es_idempotente() {
+        let st = estado();
+        st.cerrar_sesion().await;
+        st.cerrar_sesion().await;
+        assert!(st.sesion().await.is_err());
+    }
+
+    /// Iniciar sesión reemplaza: si dos logins seguidos acumularan, el segundo usuario operaría
+    /// con el permiso del primero.
+    #[tokio::test]
+    async fn iniciar_sesion_reemplaza_a_la_anterior() {
+        let st = estado();
+        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        st.iniciar_sesion(sesion_de("Camarero")).await;
+
+        assert_eq!(st.sesion().await.unwrap().rol, "Camarero");
+        assert!(st.exigir_rol(&[ADMIN]).await.is_err());
+    }
+
+    /* ── `exigir_rol_si_hay_sesion`: el gate de las pantallas de arranque ──────────────────── */
+
+    /// Sin sesión pasa, y esto NO es un descuido. A `device_reset_mode` se llega también desde el
+    /// selector de modo y desde la pantalla de activación, que se pintan en lugar del router: ahí
+    /// no hay con quién iniciar sesión, y un gate duro dejaría un equipo recién instalado sin
+    /// poder activarse jamás.
+    #[tokio::test]
+    async fn sin_sesion_el_gate_blando_deja_pasar() {
+        let st = estado();
+        assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_ok());
+    }
+
+    /// Y con sesión sí manda, que es lo que cierra el camino de Configuración → Dispositivo.
+    #[tokio::test]
+    async fn con_sesion_el_gate_blando_exige_el_rol() {
+        let st = estado();
+
+        st.iniciar_sesion(sesion_de("Camarero")).await;
+        assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_err());
+
+        st.iniciar_sesion(sesion_de(ADMIN)).await;
+        assert!(st.exigir_rol_si_hay_sesion(&[ADMIN]).await.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod tests_exenciones_del_gate {
+    //! Los comandos que NUNCA pueden exigir sesión (SEC-01).
+    //!
+    //! Esto no se prueba ejecutándolos: haría falta una app de Tauri entera y, sobre todo, el
+    //! fallo que hay que impedir no es que devuelvan mal — es que **alguien les añada un gate**
+    //! el día que amplíe la lista mirando el fichero de al lado. Así que lo que se vigila es el
+    //! propio fuente.
+    //!
+    //! El caso grave es `recovery.rs`. Esa pantalla existe precisamente para el escenario de
+    //! CERO USUARIOS: un equipo que ha perdido su `data.db` no tiene con quién iniciar sesión.
+    //! Ponerle el gate cierra la única salida que le queda —el callejón sin salida que documenta
+    //! `docs/BUG_RECUPERACION_BLOQUEADA.md`— y encima lo hace en silencio, porque en un equipo
+    //! sano no se nota. Es la hermana exacta de la regla que ya estaba escrita: *todo lo que hay
+    //! en ese camino tiene que tolerar `state.db == None`*. Añádele: **y `sesion == None`**.
+
+    /// Ficheros cuyos comandos se alcanzan sin sesión, y por qué.
+    const EXENTOS: &[(&str, &str, &str)] = &[(
+        "commands/recovery.rs",
+        include_str!("commands/recovery.rs"),
+        "la recuperación existe para el caso de cero usuarios: no hay con quién iniciar sesión",
+    )];
+
+    /// Marcas de que alguien ha metido el gate donde no puede estar.
+    const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];
+
+    #[test]
+    fn los_comandos_de_recuperacion_no_pueden_exigir_sesion() {
+        for (fichero, fuente, porque) in EXENTOS {
+            for senal in SENALES_DE_GATE {
+                assert!(
+                    !fuente.contains(senal),
+                    "{fichero} usa `{senal}`, y no puede: {porque}.\n\
+                     Si de verdad hiciera falta, lo que habría que cambiar es el plan de \
+                     recuperación, no este test."
+                );
+            }
+        }
+    }
+
+    /// El login no puede pedir sesión: sería circular. Se comprueba aparte de `EXENTOS` porque
+    /// `commands/login.rs` **sí** toca la sesión (la establece y la cierra), así que la señal no
+    /// puede ser "menciona la sesión" sino "la exige".
+    #[test]
+    fn el_login_no_puede_exigir_lo_que_todavia_no_existe() {
+        let fuente = include_str!("commands/login.rs");
+        assert!(
+            !fuente.contains("exigir_rol"),
+            "los comandos de login no pueden exigir rol: son el camino por el que se obtiene"
+        );
+    }
+
+    /// Y al revés: `login_user` tiene que dejar la sesión puesta, o todos los comandos gateados
+    /// dejarían de funcionar — también en la Handy, que pasa por este mismo comando.
+    #[test]
+    fn login_user_deja_la_sesion_puesta_y_logout_la_quita() {
+        let fuente = include_str!("commands/login.rs");
+        assert!(
+            fuente.contains("iniciar_sesion"),
+            "`login_user` debe establecer la sesión: sin eso el gate no deja pasar a nadie"
+        );
+        assert!(
+            fuente.contains("cerrar_sesion"),
+            "debe existir el comando `logout` que la limpia"
+        );
+    }
+}
