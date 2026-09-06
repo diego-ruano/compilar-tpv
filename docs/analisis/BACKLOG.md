@@ -199,14 +199,17 @@ El diagnóstico seguía siendo bueno: los 83 tests del frontend son **lógica pu
 de [`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible.
 Lo que quedaba fuera era el flujo de venta, que son los tres ficheros más grandes del repo.
 
-Hay ahora **cuatro** recorridos sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO, 22 pasos
-en ~50 s— que estrenan el equipo como un cliente real:
+Hay ahora **cinco** recorridos sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO, 26 pasos
+en ~60 s— que estrenan el equipo como un cliente real:
 
 1. **El camino del dinero**: activa una licencia de verdad contra el worker, elige PIN, ficha
    entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja con descuadre 0.
 2. **Copias de seguridad**: guarda una copia con la nube al día, le machaca la `data.db`, comprueba
-   que la app arranca igual, restaura y espera a que la reconciliación abra el login.
-3. **La licencia deja de valer**: anulada, desanulada, caducada y renovada.
+   que la app arranca igual, rechaza una copia inservible, restaura la buena y espera a que la
+   reconciliación abra el login.
+3. **Volver sólo con la nube**: el volcado de SYNC-19, sin copia local. Aquí apareció que ese
+   camino **nunca había funcionado** (`totalFilas` contra `total_filas`).
+4. **La licencia deja de valer**: anulada, desanulada, caducada y renovada.
 
 Se lanzan a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no van a CI porque
 emiten licencias reales con el token de administración. Detalle y trampas en

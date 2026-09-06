@@ -57,17 +57,18 @@ App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-ap
 ## 0-bis. Antes de tagear: pasar los E2E (TEST-01)
 
 CI corre los tests de Rust, del worker y el anti-drift del esquema, pero **ninguno arranca la
-aplicación**. Los cuatro recorridos que sí la arrancan van a mano, porque emiten licencias reales
+aplicación**. Los cinco recorridos que sí la arrancan van a mano, porque emiten licencias reales
 con el token de administración y eso no se mete en CI.
 
 ```bash
 pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
-pnpm --filter @tpv/main test:e2e      # ~50 s: 23 pasos en cuatro recorridos
+pnpm --filter @tpv/main test:e2e      # ~60 s: 26 pasos en cinco recorridos
 ```
 
 Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro y arqueo con descuadre 0), las
 **copias de seguridad** (copia → se machaca la `data.db` → se rechaza una copia inservible →
-recuperación → reconciliación → login) y **la licencia** (anulada, desanulada, caducada, renovada).
+recuperación → reconciliación → login), **volver sólo con la nube** (el volcado de SYNC-19, sin
+copia local) y **la licencia** (anulada, desanulada, caducada, renovada).
 
 Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y `ADMIN_API_TOKEN` en
 el `.env` de la raíz. Las licencias las emite y revoca la propia tanda.

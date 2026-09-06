@@ -44,6 +44,8 @@ type Receta = {
     equipo: "nuevo" | "el de antes" | "el de antes, roto";
     nube: boolean;
     licencia: Licencia;
+    /** Deja además una copia inservible entre las buenas. Sólo la quiere el tramo que la prueba. */
+    copiaMala?: boolean;
 };
 
 /**
@@ -62,7 +64,13 @@ const LICENCIAS: Licencia[] = ["venta", "copias", "licencia"];
 const RECETAS: Record<string, Receta> = {
     "venta.e2e.ts": { equipo: "nuevo", nube: false, licencia: "venta" },
     "copias-1-copia.e2e.ts": { equipo: "nuevo", nube: true, licencia: "copias" },
-    "copias-2-recuperar.e2e.ts": { equipo: "el de antes, roto", nube: true, licencia: "copias" },
+    "copias-2-recuperar.e2e.ts": {
+        equipo: "el de antes, roto",
+        nube: true,
+        licencia: "copias",
+        copiaMala: true,
+    },
+    "copias-3-nube.e2e.ts": { equipo: "el de antes, roto", nube: true, licencia: "copias" },
     "licencia.e2e.ts": { equipo: "nuevo", nube: false, licencia: "licencia" },
 };
 
@@ -93,6 +101,7 @@ export const config: WebdriverIO.Config = {
         "./specs/venta.e2e.ts",
         "./specs/copias-1-copia.e2e.ts",
         "./specs/copias-2-recuperar.e2e.ts",
+        "./specs/copias-3-nube.e2e.ts",
         "./specs/licencia.e2e.ts",
     ],
 
@@ -241,9 +250,7 @@ export const config: WebdriverIO.Config = {
             limpiarDatosE2E(r.nube);
         } else if (r.equipo === "el de antes, roto") {
             romperBaseDeDatos();
-            // Y una copia inservible entre las buenas: el recorrido comprueba que la pantalla la
-            // rechaza sin dejar el equipo peor y deja elegir otra.
-            plantarCopiaCorrupta();
+            if (r.copiaMala) plantarCopiaCorrupta();
         }
 
         process.env.TPV_E2E_LICENCIA =

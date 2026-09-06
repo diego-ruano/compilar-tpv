@@ -1016,7 +1016,7 @@ cosas**, que es la única forma de comprobar el trabajo de impresión sin una im
 
 ## 16. Los E2E sobre la app compilada (TEST-01)
 
-**Cuatro** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
+**Cinco** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
 IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
 componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
 sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda unos 15 segundos.
@@ -1033,13 +1033,20 @@ lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → **cier
 La última cifra es la que lo justifica entero: si algo se rompe entre la interfaz y SQLite, deja de
 cuadrar.
 
-**Las copias de seguridad** (4+5 pasos, en dos ficheros): con la nube encendida se estrena el
+**Las copias de seguridad** (4+5+3 pasos, en tres ficheros): con la nube encendida se estrena el
 equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca
 la `data.db`** → la app arranca igual y ofrece recuperar → se restaura la copia → la reconciliación
 converge y el login se abre. Por el camino se le ofrece primero una copia **inservible**, que la
 pantalla tiene que rechazar diciendo por qué y dejando elegir otra. Va en dos ficheros porque en
 medio hay que apagar la aplicación: en Windows la base no se reemplaza con SQLite teniéndola
 abierta, y reiniciar es además lo que pasa de verdad.
+
+Y un tercer tramo rompe la base **otra vez** para probar el otro botón de esa pantalla:
+**«Recuperar el estado actual de la nube»**, que es el que de verdad importa —la copia local sólo
+existe si el disco sigue vivo; el día del robo o del disco muerto ese botón es lo único que hay—.
+Ahí encontró que el volcado **nunca había funcionado**: el worker mandaba `totalFilas` y Rust
+esperaba `total_filas`, así que serde fallaba entero. Once días roto sin que nadie lo supiera,
+porque estaba probado por piezas y nunca de punta a punta.
 
 Lo que NO sube a E2E de las copias, y por qué —para no volver a intentarlo—:
 
@@ -1067,6 +1074,7 @@ esperar meses de calendario.
 |---|---|---|
 | El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, carta, venta, cobro y arqueo |
 | Copias de seguridad | `e2e/specs/copias-1-copia.e2e.ts` · `copias-2-recuperar.e2e.ts` | Copia, avería, restauración y reconciliación |
+| Volver sólo con la nube | `e2e/specs/copias-3-nube.e2e.ts` | El volcado de SYNC-19, sin copia local |
 | La licencia deja de valer | `e2e/specs/licencia.e2e.ts` | Anulada, desanulada, caducada y renovada |
 | Arranque compartido | `e2e/helpers/arranque.ts` | Modo, activación, PIN y login |
 | Licencias de la tanda | `e2e/helpers/licencias.ts` | Emitir, revocar, desrevocar, acortar |
