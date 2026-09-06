@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "tpv-e2e",
+  "identifier": "com.altarialights.tpv.e2e",
+  "app": {
+    "windows": [
+      {
+        "title": "tpv (E2E)",
+        "width": 1440,
+        "height": 900,
+        "decorations": false,
+        "label": "main",
+        "backgroundColor": "#f3f8ff"
+      }
+    ]
+  },
+  "bundle": {
+    "active": false,
+    "createUpdaterArtifacts": false
+  }
+}

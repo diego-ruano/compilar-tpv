@@ -1,0 +1,161 @@
+// Rutas, identidad y estado limpio del build de E2E.
+//
+// Todo lo delicado de este fichero sale de un único hecho: el AppData de Tauri es
+// `dirs::data_dir().join(identifier)` y el identifier se fija AL COMPILAR. O sea que lo único que
+// separa los datos de este test de los datos de trabajo del equipo es que el binario que se lanza
+// sea el compilado con `tauri.e2e.conf.json`. Por eso aquí no se confía en la ruta: se abre el
+// ejecutable y se comprueba qué identificador lleva dentro antes de dejar que nadie lo arranque
+// o borre una carpeta.
+
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** El identificador del build de E2E (`src-tauri/tauri.e2e.conf.json`). */
+export const APP_ID_E2E = "com.altarialights.tpv.e2e";
+
+/** El de producción. Que aparezca en el binario significa que ese binario NO es el de E2E. */
+const APP_ID_PROD = "com.altarialights.tpv";
+
+const AQUI = path.dirname(fileURLToPath(import.meta.url));
+
+/** `apps/tpv-main/e2e` */
+export const DIR_E2E = path.resolve(AQUI, "..");
+
+/** Raíz del monorepo. */
+export const RAIZ = path.resolve(DIR_E2E, "..", "..", "..");
+
+/**
+ * El ejecutable que arranca el test.
+ *
+ * NO es `target/release/tpv.exe`: `tauri build --no-bundle` no renombra el binario, así que el
+ * build de E2E y el de producción escriben en esa misma ruta y el último gana. Sería cuestión de
+ * tiempo que alguien compilase la app de verdad y luego lanzara el test contra sus propios datos.
+ * `construir.mjs` deja aquí una copia verificada.
+ */
+export const BINARIO = path.join(RAIZ, "target", "e2e", "tpv-e2e.exe");
+
+/**
+ * Carpeta de datos del build de E2E.
+ *
+ * ⚠️ Se deriva de `%APPDATA%`, pero Tauri la resuelve por `SHGetKnownFolderPath`, que no mira esa
+ * variable. En un equipo normal coinciden; que coincidan de verdad lo demuestra el propio test,
+ * que exige ver aparecer aquí la `data.db` tras el primer arranque.
+ */
+export function dirDatosE2E(): string {
+    const roaming = process.env.APPDATA;
+    if (!roaming) {
+        throw new Error("Sin %APPDATA%: este test sólo corre en Windows.");
+    }
+    return path.join(roaming, APP_ID_E2E);
+}
+
+/**
+ * Comprueba que un ejecutable es el build de E2E leyendo el identificador que lleva embebido.
+ * Lanza si no lo es. Es la única barrera real entre el test y la `data.db` del equipo.
+ */
+export function exigirBinarioE2E(exe: string): void {
+    if (!fs.existsSync(exe)) {
+        throw new Error(
+            `No existe el binario de E2E (${exe}).\n` +
+                "Compílalo antes:  pnpm --filter @tpv/main build:e2e",
+        );
+    }
+
+    // El identificador va dentro del binario sin terminador, pegado a lo que venga detrás
+    // (`…tpv.e2emaindefault-src…`), así que no se puede recortar como si fuera una cadena suelta.
+    // Se pregunta por presencia; el de producción es este mismo prefijo SIN `.e2e` detrás.
+    const texto = fs.readFileSync(exe).toString("latin1");
+
+    if (!texto.includes(APP_ID_E2E)) {
+        throw new Error(
+            `${exe} no lleva dentro el identificador de E2E (${APP_ID_E2E}).\n` +
+                "Ese binario escribiría en el AppData de producción. Recompila con:\n" +
+                "  pnpm --filter @tpv/main build:e2e",
+        );
+    }
+
+    if (new RegExp(`${APP_ID_PROD.replace(/\./g, "\\.")}(?!\\.e2e)`).test(texto)) {
+        throw new Error(
+            `${exe} lleva dentro el identificador de PRODUCCIÓN (${APP_ID_PROD}).\n` +
+                "Es el binario real, no el de E2E: arrancarlo machacaría los datos del equipo.",
+        );
+    }
+}
+
+/**
+ * Deja el equipo del test como recién instalado: borra la carpeta de datos y lo deja **sin nube**.
+ *
+ * Se niega a borrar si la ruta no termina en `.e2e`: sin esa comprobación, un identificador mal
+ * escrito convierte esta función en un borrado de los datos de trabajo.
+ *
+ * Lo de la nube no es un atajo, es la diferencia entre un test y una moneda al aire. Borrar el
+ * AppData NO deja un equipo nuevo: la licencia de pruebas es siempre la misma, o sea el mismo
+ * tenant, así que al conectar el WebSocket la Main se trae por catch-up todo lo que dejaron las
+ * ejecuciones anteriores —el fichaje abierto de ayer, la zona con el mismo nombre, las ventas que
+ * ya se cobraron—. El primer síntoma fue un fichaje que la app rechazaba con "tienes un fichaje
+ * abierto" en unas ejecuciones sí y en otras no, según ganase la carrera el catch-up o la pantalla.
+ *
+ * `connectivity: "off"` es la palanca de emergencia de SYNC-17 (ver CLAUDE.md §9), no una puerta
+ * de atrás del test: apaga sólo el WebSocket. La activación de licencia sigue saliendo a internet
+ * —que es lo que el recorrido quiere probar— y el outbox sigue capturando en local. Lo que queda
+ * fuera es la replicación, que este recorrido no mira (el plan la deja fuera junto con el Handy).
+ */
+export function limpiarDatosE2E(): string {
+    const dir = dirDatosE2E();
+
+    if (!dir.endsWith(".e2e")) {
+        throw new Error(
+            `Me niego a borrar ${dir}: no termina en ".e2e", así que no es la carpeta del test.`,
+        );
+    }
+
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    // `set_device_mode` hace load → modificar → save, así que respeta lo que ya haya aquí.
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+        path.join(dir, "device_config.json"),
+        JSON.stringify({ connectivity: "off" }, null, 2),
+        "utf8",
+    );
+
+    return dir;
+}
+
+/**
+ * La clave de licencia de pruebas. Vive en el `.env` de la raíz (gitignoreado), no en el repo.
+ * Sin ella el test no puede hacer nada, así que se falla aquí y con el motivo, en vez de dejar
+ * que reviente más adelante en un selector que no aparece.
+ */
+export function licenciaDePruebas(): string {
+    const clave = (process.env.TPV_E2E_LICENSE_KEY ?? "").trim();
+    if (!clave) {
+        throw new Error(
+            "Falta TPV_E2E_LICENSE_KEY.\n" +
+                "Emite una licencia de pruebas y guárdala en el .env de la raíz:\n" +
+                '  pnpm license:issue -- --term 12 --email <tu-correo> --name "E2E TEST-01"\n' +
+                "  TPV_E2E_LICENSE_KEY=TPV-...-...-...-...",
+        );
+    }
+    return clave;
+}
+
+/** Carga el `.env` de la raíz sin dependencias (mismo formato que `scripts/tpv-license.mjs`). */
+export function cargarDotEnv(): void {
+    let txt: string;
+    try {
+        txt = fs.readFileSync(path.join(RAIZ, ".env"), "utf8");
+    } catch {
+        return;
+    }
+    for (const linea of txt.split(/\r?\n/)) {
+        const l = linea.trim();
+        if (!l || l.startsWith("#")) continue;
+        const eq = l.indexOf("=");
+        if (eq === -1) continue;
+        const clave = l.slice(0, eq).trim();
+        const valor = l.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+        if (clave && process.env[clave] === undefined) process.env[clave] = valor;
+    }
+}
