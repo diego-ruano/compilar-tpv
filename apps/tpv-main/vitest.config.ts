@@ -12,6 +12,11 @@
 // (`store.getState()`). Qué NO: hooks con sockets, timers e `invoke` (useMainSocket y compañía).
 // De esos, lo que merece prueba es su POLÍTICA, y para eso primero hay que sacarla a una función
 // pura — igual que se hizo en Rust con `proxima_espera` del runner de jobs.
+//
+// ⚠️ Si añades un test de componente: aquí `act()` NO vacía de forma síncrona. Testing Library
+// carga `react` por CommonJS y el grafo de Vite resuelve otra instancia del mismo 19.2.7, así que
+// `render()` vuelve con el contenedor vacío. React pinta igual, pero de forma asíncrona: hay que
+// esperar al primer pintado. El porqué y el patrón, en la cabecera de `test/react/shared-ui.test.tsx`.
 
 import { defineConfig } from "vitest/config";
 
