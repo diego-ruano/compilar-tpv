@@ -18,11 +18,12 @@ import { $, $$, browser, expect } from "@wdio/globals";
 import { fitTransform } from "../../src/features/mesasComponents/geometry.js";
 import type { Salon } from "../../src/features/mesasComponents/types.js";
 import {
-    APP_ID_E2E,
-    cargarDotEnv,
-    dirDatosE2E,
-    licenciaDePruebas,
-} from "../helpers/entorno.js";
+    activarLicencia,
+    elegirModoTpv,
+    elegirPin,
+    ficharYEntrar,
+} from "../helpers/arranque.js";
+import { APP_ID_E2E, cargarDotEnv, dirDatosE2E } from "../helpers/entorno.js";
 import {
     conTexto,
     escribir,
@@ -42,7 +43,6 @@ cargarDotEnv();
    exactamente lo cobrado.                                                     */
 const NEGOCIO = "Bar E2E TEST-01";
 const PIN = "4321"; // distinto del 1234 del seed: así el login prueba el PIN elegido, no el sembrado
-const EMAIL = "e2e@altarialights.test";
 const ZONA = "Salón E2E";
 const MESA = "M1";
 const CATEGORIA = "Bebidas E2E";
@@ -62,9 +62,9 @@ describe("El camino del dinero", () => {
     });
 
     it("2 · se configura como TPV y activa la licencia contra el worker real", async () => {
-        await pulsar("Configurar como TPV");
+        await elegirModoTpv();
 
-        // La comprobación que sostiene el plan entero: elegir modo TPV es lo que abre la base, y
+        // La comprobación que sostiene el montaje entero: elegir modo TPV es lo que abre la base, y
         // esa base tiene que nacer en la carpeta del identificador de E2E. Si apareciera en la de
         // producción, este test estaría vendiendo contra los datos de trabajo del equipo.
         const dir = dirDatosE2E();
@@ -74,70 +74,15 @@ describe("El camino del dinero", () => {
             timeoutMsg: `No apareció data.db en ${dir}`,
         });
 
-        await $("#activation-license-key").waitForDisplayed({ timeout: 30_000 });
-        await escribir("#activation-license-key", licenciaDePruebas());
-        await escribir("#activation-legal-name", "E2E TEST-01 S.L.");
-        await escribir("#activation-business-name", NEGOCIO);
-        await escribir("#activation-email", EMAIL);
-        await escribir("#activation-phone", "+34600000000");
-        await escribir("#activation-country", "España");
-
-        await pulsar("Activar TPV");
-
-        // Activar sale a internet. Si falla, el mensaje de la propia pantalla es lo que distingue
-        // "no hay red" de "la app está mal", así que se rescata para el informe.
-        const setup = conTexto("h1", "Termina de preparar tu cuenta");
-        await setup.waitForDisplayed({ timeout: 120_000 }).catch(async (e) => {
-            const error = await $("pre[role='alert']");
-            const detalle = (await error.isExisting()) ? await error.getText() : "(sin mensaje)";
-            throw new Error(`La activación no llegó a la pantalla de setup.\nLa app dijo: ${detalle}`, {
-                cause: e,
-            });
-        });
+        await activarLicencia(NEGOCIO);
     });
 
     it("3 · elige el PIN del primer arranque", async () => {
-        await escribir("#setup-pin-nuevo", PIN);
-        await escribir("#setup-pin-confirmacion", PIN);
-        await escribir("#setup-email", EMAIL);
-
-        await pulsar("Guardar y continuar");
-
-        // Guardar el PIN sube también el setup a la nube (para que la Handy pueda entrar con datos
-        // reales), y con un tenant recién aprovisionado eso tarda. La app ya está configurada
-        // cuando termina; lo que se espera aquí es a que la pantalla pase al login.
-        await conTexto("h2", "PIN de acceso").waitForDisplayed({ timeout: 180_000 });
+        await elegirPin(PIN);
     });
 
     it("4 · ficha entrada e inicia sesión con ese PIN", async () => {
-        // El usuario que siembra la base: "Admin TPV", Administrador.
-        await pulsar("Admin TPV");
-
-        // Fichar entrada es obligatorio antes de entrar (y consume el PIN, que se vuelve a teclear).
-        await tecleaPin();
-        await pulsar("Fichar entrada");
-
-        // Hay que esperar a que el fichaje responda: al terminar borra el PIN, y teclear antes deja
-        // los dígitos escritos a medias sin que nada lo diga. Que la entrada quedó registrada se ve
-        // en que el botón pasa a ofrecer la salida. Si en vez de eso sale un aviso, se recoge: el
-        // aviso desaparece solo a los pocos segundos, y sin él el fallo sólo dice "no apareció un
-        // botón", que es la consecuencia y no el motivo.
-        const fichaje = await browser.waitUntil(
-            async () => {
-                if (await conTexto("button", "Fichar salida").isExisting()) return "ok";
-                const avisos = await $$('//div[@role="status"]').map((t) => t.getText());
-                const malo = avisos.find((t) => /error|no se pudo|pin/i.test(t));
-                return malo ?? false;
-            },
-            { timeout: 30_000, timeoutMsg: "El fichaje de entrada no quedó registrado" },
-        );
-        if (fichaje !== "ok") throw new Error(`El fichaje de entrada falló: ${fichaje}`);
-
-        await tecleaPin();
-        await pulsar("Entrar");
-
-        // Dentro: el menú lateral sólo existe con sesión.
-        await $('a[href="/Inventario"]').waitForDisplayed({ timeout: 60_000 });
+        await ficharYEntrar(PIN);
     });
 
     it("5a · crea una categoría y un producto con precio, IVA y stock", async () => {
@@ -337,33 +282,6 @@ describe("El camino del dinero", () => {
 
 /* ── Gestos que no son un `click` en un selector ─────────────────────────── */
 
-/**
- * Teclea el PIN en el teclado numérico del login, comprobando cada tecla.
- *
- * Se comprueba porque no hacerlo salía carísimo: una pulsación que no entra deja el PIN a medias y
- * lo que falla después es otra cosa —el botón de fichar sigue apagado, o el fichaje contesta que
- * el PIN no es—, así que el informe habla de cualquier cosa menos de la tecla que se perdió. El
- * display se pone en modo visible para poder leer lo tecleado, que es la única forma de saberlo.
- */
-async function tecleaPin(): Promise<void> {
-    const ojo = $('//button[@aria-label="Mostrar PIN"]');
-    if (await ojo.isExisting()) await ojo.click();
-
-    const leerPin = async () =>
-        (await $$('//span[contains(@class,"tabular-nums")]').map((s) => s.getText())).join("");
-
-    for (const digito of PIN) {
-        const antes = await leerPin();
-        await pulsarXPath(
-            `//button[normalize-space(text())="${digito}"]`,
-            `tecla ${digito} del PIN`,
-        );
-        await browser.waitUntil(async () => (await leerPin()) === antes + digito, {
-            timeout: 10_000,
-            timeoutMsg: `La tecla ${digito} no entró: el PIN sigue en "${antes}"`,
-        });
-    }
-}
 
 /**
  * Abre la mesa creada por el test.

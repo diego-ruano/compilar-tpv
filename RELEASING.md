@@ -54,28 +54,30 @@ App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-ap
 
 ---
 
-## 0-bis. Antes de tagear: pasar el E2E del camino del dinero (TEST-01)
+## 0-bis. Antes de tagear: pasar los E2E (TEST-01)
 
 CI corre los tests de Rust, del worker y el anti-drift del esquema, pero **ninguno arranca la
-aplicación**. El único que recorre la costura React → IPC → Rust → SQLite es este, y **hay que
-lanzarlo a mano**, porque la licencia se ata al primer dispositivo que la activa y un runner de CI
-es una máquina nueva cada vez (automatizarlo sería emitir y revocar una licencia por ejecución, con
-el token de administración metido en CI).
+aplicación**. Los cuatro recorridos que sí la arrancan van a mano, porque emiten licencias reales
+con el token de administración y eso no se mete en CI.
 
 ```bash
 pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
-pnpm --filter @tpv/main test:e2e      # ~15 s: 9 pasos, del primer arranque al arqueo
+pnpm --filter @tpv/main test:e2e      # ~50 s: 22 pasos en cuatro recorridos
 ```
 
-Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y una licencia de
-pruebas en el `.env` de la raíz como `TPV_E2E_LICENSE_KEY` (se emite con
-`pnpm license:issue -- --term 12 --email <tu-correo> --name "E2E TEST-01"`).
+Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro y arqueo con descuadre 0), las
+**copias de seguridad** (copia → se machaca la `data.db` → recuperación → reconciliación → login) y
+**la licencia** (anulada, desanulada, caducada y renovada).
 
-**Si sale rojo, no tagees.** El último paso cierra caja y comprueba que el descuadre es 0: si algo
-se ha roto entre la interfaz y SQLite, ese número deja de cuadrar. Un fallo deja una captura en
-`apps/tpv-main/e2e/fallos/`. Ojo a la excepción legítima: el paso 2 sale a internet contra
-`tpv-api`, así que un fallo ahí puede ser la red y no el código — el mensaje del test distingue una
-cosa de la otra.
+Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y `ADMIN_API_TOKEN` en
+el `.env` de la raíz. Las licencias las emite y revoca la propia tanda.
+
+⚠️ **Cada tanda crea tres bases Turso** (una por licencia) que no se borran solas. Conviene pasar
+la escoba de vez en cuando por las licencias `E2E …` que salen en `pnpm license:list`.
+
+**Si sale rojo, no tagees.** Un fallo deja una captura en `apps/tpv-main/e2e/fallos/`. Ojo a la
+excepción legítima: la activación sale a internet contra `tpv-api`, así que un fallo ahí puede ser
+la red y no el código — el mensaje del test distingue una cosa de la otra.
 
 Detalle del montaje y sus trampas en [CLAUDE.md §16](CLAUDE.md).
 

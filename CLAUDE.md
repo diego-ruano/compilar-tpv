@@ -1014,10 +1014,10 @@ cosas**, que es la única forma de comprobar el trabajo de impresión sin una im
 
 ---
 
-## 16. El E2E del camino del dinero (TEST-01)
+## 16. Los E2E sobre la app compilada (TEST-01)
 
-**Un** recorrido sobre la app **compilada** que prueba la costura que no mira nadie: React → IPC de
-Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
+**Cuatro** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
+IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
 componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
 sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda unos 15 segundos.
 
@@ -1027,16 +1027,33 @@ pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo v
 pnpm --filter @tpv/main test:e2e             # el recorrido
 ```
 
-Los nueve pasos: arranque en equipo nuevo → modo TPV → **activar una licencia de verdad** contra
-`tpv-api` → elegir PIN → fichar entrada e iniciar sesión → categoría y producto con precio, IVA y
-lote → zona y mesa → dos líneas en la mesa → **cobro en efectivo exacto** → **cierre de caja con
-descuadre 0**. La última cifra es la que justifica el test entero: si algo se rompe entre la
-interfaz y SQLite, deja de cuadrar.
+**El camino del dinero** (9 pasos): equipo nuevo → modo TPV → **activar una licencia de verdad**
+contra `tpv-api` → elegir PIN → fichar entrada y entrar → categoría y producto con precio, IVA y
+lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → **cierre de caja con descuadre 0**.
+La última cifra es la que lo justifica entero: si algo se rompe entre la interfaz y SQLite, deja de
+cuadrar.
+
+**Las copias de seguridad** (4+4 pasos, en dos ficheros): con la nube encendida se estrena el
+equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca
+la `data.db`** → la app arranca igual y ofrece recuperar → se restaura la copia → la reconciliación
+converge y el login se abre. Va en dos ficheros porque en medio hay que apagar la aplicación: en
+Windows la base no se reemplaza con SQLite teniéndola abierta, y reiniciar es además lo que pasa de
+verdad.
+
+**La licencia deja de valer** (5 pasos): se anula → el TPV deja de trabajar y vuelve a pedir la
+licencia → se desanula y la misma clave vuelve a activar, sin perder los datos → se caduca → sale la
+pantalla de bloqueo → se renueva y el propio botón de reintentar la desbloquea. Los dos estados se
+provocan por el API de administración; sin `shorten` no había forma de ensayar una caducidad sin
+esperar meses de calendario.
 
 | Pieza | Archivo | Rol |
 |---|---|---|
-| El recorrido | `e2e/specs/venta.e2e.ts` | Los nueve pasos, en orden |
-| Arranque y aislamiento | `e2e/helpers/entorno.ts` | Verifica el binario, borra el AppData, apaga la nube |
+| El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, carta, venta, cobro y arqueo |
+| Copias de seguridad | `e2e/specs/copias-1-copia.e2e.ts` · `copias-2-recuperar.e2e.ts` | Copia, avería, restauración y reconciliación |
+| La licencia deja de valer | `e2e/specs/licencia.e2e.ts` | Anulada, desanulada, caducada y renovada |
+| Arranque compartido | `e2e/helpers/arranque.ts` | Modo, activación, PIN y login |
+| Licencias de la tanda | `e2e/helpers/licencias.ts` | Emitir, revocar, desrevocar, acortar |
+| Aislamiento del equipo | `e2e/helpers/entorno.ts` | Verifica el binario, prepara el AppData, rompe la base |
 | Gestos | `e2e/helpers/ui.ts` | Pulsar, escribir y leer por IPC lo que la pantalla no enseña |
 | Configuración | `e2e/wdio.conf.ts` | Servicio, tiempos y captura de pantalla al fallar |
 | Build aislado | `e2e/construir.ts` + `src-tauri/tauri.e2e.conf.json` | Identificador propio, copia verificada |
@@ -1077,10 +1094,22 @@ interfaz y SQLite, deja de cuadrar.
   El test escribe `connectivity: "off"` (la palanca de SYNC-17, §9) en `device_config.json`: apaga
   **sólo** el WebSocket, así que la activación de licencia sigue saliendo a internet, que es lo que
   se quiere probar. La replicación queda fuera, como el Handy y la recuperación.
-- **La licencia es real y sale a internet.** Se emite a mano y vive en el `.env` de la raíz como
-  `TPV_E2E_LICENSE_KEY`, nunca en el repo; si falta, el test lo dice en vez de fallar de forma
-  opaca. Un fallo en el paso 2 puede ser la red y no el código: el mensaje del test recoge lo que
-  dijo la pantalla para distinguirlos.
+- **Cada recorrido estrena su licencia, y por tanto su tenant.** Se emiten al empezar la tanda y se
+  revocan al terminar. Se probó con una licencia fija guardada en el `.env` y no aguanta: activar
+  graba en el tenant el hash de `0001_inicial.sql`, así que en cuanto esa migración cambia —cosa
+  permitida mientras no haya clientes— el tenant viejo deja de migrar y la activación falla con
+  `migration_altered`. Emitir por tanda hace los recorridos herméticos y deja el `.env` con una sola
+  cosa dentro: `ADMIN_API_TOKEN`. El precio es una base Turso por licencia, que no se borra sola.
+- **La licencia es real y sale a internet.** Un fallo en la activación puede ser la red y no el
+  código: el mensaje del test recoge lo que dijo la pantalla para distinguirlos.
+- **Cada recorrido declara qué equipo necesita**, en las recetas de `wdio.conf.ts`, y se lo prepara
+  `beforeSession`. No todos quieren lo mismo: el segundo tramo de copias necesita justo lo contrario
+  de una limpieza —el equipo que dejó el tramo anterior, con la base rota—, y borrar por defecto se
+  lo llevaría por delante.
+- ⚠️ **Un recorrido no importa a otro.** Importar un fichero de recorrido lo EJECUTA: sus `describe`
+  se registran en quien lo importa. El segundo tramo de copias acabó corriendo los pasos del primero
+  contra un equipo ya estrenado, y el síntoma —"no aparece la pantalla de primer inicio"— no se
+  parecía en nada a la causa. Lo que se comparte vive en `helpers/`.
 - **No va a CI, y no es pereza.** La licencia se ata al `main_device_id` del primer equipo que la
   activa, y esa identidad vive en el keyring de la máquina. Un runner es una máquina nueva cada vez,
   así que la segunda ejecución chocaría con el flujo de cambio de dispositivo, **que pide un OTP por

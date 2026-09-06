@@ -130,24 +130,24 @@ export function exigirBinarioAlDia(): void {
 }
 
 /**
- * Deja el equipo del test como recién instalado: borra la carpeta de datos y lo deja **sin nube**.
+ * Deja el equipo del test como recién instalado, con la nube encendida o apagada según pida el
+ * recorrido (ver las recetas de `wdio.conf.ts`).
  *
  * Se niega a borrar si la ruta no termina en `.e2e`: sin esa comprobación, un identificador mal
  * escrito convierte esta función en un borrado de los datos de trabajo.
  *
- * Lo de la nube no es un atajo, es la diferencia entre un test y una moneda al aire. Borrar el
- * AppData NO deja un equipo nuevo: la licencia de pruebas es siempre la misma, o sea el mismo
- * tenant, así que al conectar el WebSocket la Main se trae por catch-up todo lo que dejaron las
- * ejecuciones anteriores —el fichaje abierto de ayer, la zona con el mismo nombre, las ventas que
- * ya se cobraron—. El primer síntoma fue un fichaje que la app rechazaba con "tienes un fichaje
- * abierto" en unas ejecuciones sí y en otras no, según ganase la carrera el catch-up o la pantalla.
+ * Lo de poder apagar la nube no es un atajo. Un AppData borrado sobre un tenant que ya tiene
+ * historia NO es un equipo nuevo: al conectar el WebSocket, la Main se trae por catch-up lo que
+ * dejaron las tandas anteriores —el fichaje abierto de ayer, la zona con el mismo nombre—. El
+ * primer síntoma fue un fichaje que la app rechazaba con "tienes un fichaje abierto" unas veces sí
+ * y otras no, según quién ganara la carrera. Los recorridos que sí necesitan la nube lo resuelven
+ * por el otro lado: estrenando también el tenant, con una licencia recién emitida.
  *
  * `connectivity: "off"` es la palanca de emergencia de SYNC-17 (ver CLAUDE.md §9), no una puerta
  * de atrás del test: apaga sólo el WebSocket. La activación de licencia sigue saliendo a internet
- * —que es lo que el recorrido quiere probar— y el outbox sigue capturando en local. Lo que queda
- * fuera es la replicación, que este recorrido no mira (el plan la deja fuera junto con el Handy).
+ * —que es lo que el recorrido de la venta quiere probar— y el outbox sigue capturando en local.
  */
-export function limpiarDatosE2E(): string {
+export function limpiarDatosE2E(nube: boolean): string {
     const dir = dirDatosE2E();
 
     if (!dir.endsWith(".e2e")) {
@@ -162,7 +162,7 @@ export function limpiarDatosE2E(): string {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
         path.join(dir, "device_config.json"),
-        JSON.stringify({ connectivity: "off" }, null, 2),
+        JSON.stringify({ connectivity: nube ? "auto" : "off" }, null, 2),
         "utf8",
     );
 
@@ -170,18 +170,42 @@ export function limpiarDatosE2E(): string {
 }
 
 /**
- * La clave de licencia de pruebas. Vive en el `.env` de la raíz (gitignoreado), no en el repo.
- * Sin ella el test no puede hacer nada, así que se falla aquí y con el motivo, en vez de dejar
- * que reviente más adelante en un selector que no aparece.
+ * Deja la base local ilegible, que es la avería que la pantalla de recuperación existe para
+ * resolver: un fichero corrupto, no un fichero borrado. Se llama con la app cerrada (entre dos
+ * recorridos), porque en Windows no se puede reemplazar mientras SQLite lo tiene abierto.
+ *
+ * Los `-wal` y `-shm` se van con ella: dejarlos sería dejar pistas de una base que ya no existe,
+ * y SQLite intentaría reproducir un diario que no le corresponde.
  */
-export function licenciaDePruebas(): string {
-    const clave = (process.env.TPV_E2E_LICENSE_KEY ?? "").trim();
+export function romperBaseDeDatos(): void {
+    const dir = dirDatosE2E();
+    if (!dir.endsWith(".e2e")) {
+        throw new Error(`Me niego a tocar ${dir}: no es la carpeta del test.`);
+    }
+
+    const db = path.join(dir, "data.db");
+    if (!fs.existsSync(db)) {
+        throw new Error(`No hay ${db} que romper: el recorrido anterior no dejó equipo.`);
+    }
+
+    for (const extra of ["data.db-wal", "data.db-shm"]) {
+        fs.rmSync(path.join(dir, extra), { force: true });
+    }
+    // La cabecera de un SQLite son 16 bytes fijos; con esto deja de serlo.
+    fs.writeFileSync(db, "esto no es una base de datos\n".repeat(64), "utf8");
+}
+
+
+/**
+ * La clave que debe usar el recorrido que está corriendo. La pone `beforeSession` según la receta
+ * del recorrido: la fija del `.env` para la venta, una recién emitida para copias y licencia.
+ */
+export function licenciaDelRecorrido(): string {
+    const clave = (process.env.TPV_E2E_LICENCIA ?? "").trim();
     if (!clave) {
         throw new Error(
-            "Falta TPV_E2E_LICENSE_KEY.\n" +
-                "Emite una licencia de pruebas y guárdala en el .env de la raíz:\n" +
-                '  pnpm license:issue -- --term 12 --email <tu-correo> --name "E2E TEST-01"\n' +
-                "  TPV_E2E_LICENSE_KEY=TPV-...-...-...-...",
+            "No hay licencia para este recorrido. La reparte `beforeSession` desde la receta de\n" +
+                "wdio.conf.ts; si falta, o no se emitió la de la tanda o el recorrido no tiene receta.",
         );
     }
     return clave;
