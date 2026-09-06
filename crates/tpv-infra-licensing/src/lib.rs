@@ -102,6 +102,36 @@ fn delete_state(dir: &Path) -> AppResult<()> {
     Ok(())
 }
 
+/* ===== Motivo del último rechazo (license_rejection.txt) ===== */
+
+/// Fichero aparte y no un campo del estado: precisamente existe para el rato en que NO hay estado.
+fn license_rejection_path(dir: &Path) -> PathBuf {
+    dir.join("license_rejection.txt")
+}
+
+fn load_rejection(dir: &Path) -> Option<String> {
+    let code = fs::read_to_string(license_rejection_path(dir)).ok()?;
+    let code = code.trim().to_string();
+    if code.is_empty() {
+        None
+    } else {
+        Some(code)
+    }
+}
+
+fn save_rejection(dir: &Path, code: &str) -> AppResult<()> {
+    let p = license_rejection_path(dir);
+    fs::write(&p, code).map_err(|e| ext(format!("Error escribiendo {:?}: {e}", p)))
+}
+
+fn delete_rejection(dir: &Path) -> AppResult<()> {
+    let p = license_rejection_path(dir);
+    if p.exists() {
+        fs::remove_file(&p).map_err(|e| ext(format!("Error borrando {:?}: {e}", p)))?;
+    }
+    Ok(())
+}
+
 /* ===== HTTP ===== */
 
 fn http_client() -> AppResult<Client> {
@@ -391,14 +421,26 @@ impl LicensingService for LicensingAdapter {
     }
 
     fn save_state(&self, state: &LicenseLocalState) -> AppResult<()> {
+        // Con una licencia válida delante no hay rechazo pendiente que contar: la nota se va con
+        // ella. Esto es lo que hace que reactivar limpie el aviso sin que nadie tenga que acordarse.
+        delete_rejection(&self.app_data_dir)?;
         save_state(&self.app_data_dir, state)
     }
 
-    fn delete_state(&self) -> AppResult<()> {
+    fn delete_state(&self, motivo: Option<&str>) -> AppResult<()> {
         // Borrar la licencia también retira su credencial del keyring (si no, quedaría un token
         // huérfano y utilizable).
         clear_license_token().map_err(ext)?;
-        delete_state(&self.app_data_dir)
+        delete_state(&self.app_data_dir)?;
+
+        match motivo {
+            Some(code) => save_rejection(&self.app_data_dir, code),
+            None => delete_rejection(&self.app_data_dir),
+        }
+    }
+
+    fn last_rejection(&self) -> AppResult<Option<String>> {
+        Ok(load_rejection(&self.app_data_dir))
     }
 
     async fn activar_remoto(

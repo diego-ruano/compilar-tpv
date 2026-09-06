@@ -88,10 +88,14 @@ function blockedCopy(reason: string): { title: string; body: string } {
             title: "Licencia caducada",
             body: "Tu licencia ha caducado y se acabó el periodo de gracia. Renuévala con el mismo correo de compra y vuelve a intentarlo.",
         };
+    // Este es el momento en que el TPV se entera, con la app abierta: lo enseña el pulso periódico
+    // de la licencia (job `licencia` → evento `license:changed`). Al reiniciar ya no se vuelve a
+    // ver, porque un rechazo borra el estado local y el equipo cae en la pantalla de activación —
+    // que lo explica por su cuenta (ver `RechazoPrevio`).
     if (reason === "revoked")
         return {
             title: "Licencia anulada",
-            body: "Esta licencia ha sido anulada. Si crees que es un error, contacta con soporte.",
+            body: "Esta licencia ha sido anulada, así que este equipo no puede seguir trabajando. Si es un error, en cuanto se deshaga la anulación la misma clave vuelve a activarlo sin perder ningún dato.",
         };
     if (reason === "device_replaced")
         return {
@@ -117,6 +121,53 @@ function blockedCopy(reason: string): { title: string; body: string } {
         title: "Licencia bloqueada",
         body: "No se puede validar la licencia en este momento. Reintenta la comprobación o vuelve a activar con tu clave.",
     };
+}
+
+/**
+ * El aviso de la pantalla de activación cuando este equipo YA tuvo licencia y el servidor la
+ * rechazó. Sin esto, la pantalla es la misma que ve un TPV recién instalado y nadie sabe qué pasó.
+ *
+ * Lo importante que dice cada caso no es el nombre del estado, es qué hacer: una anulación se puede
+ * deshacer y entonces **la misma clave vuelve a activar sin perder ningún dato**, porque activar no
+ * toca la base local. Eso convierte una revocación por error en un susto y no en una pérdida, y es
+ * justo lo que nadie adivina mirando un formulario vacío.
+ */
+function RechazoPrevio({ motivo }: { motivo: string | null }) {
+    if (!motivo) return null;
+
+    const texto: Record<string, { titulo: string; cuerpo: string }> = {
+        revoked: {
+            titulo: "Esta licencia fue anulada",
+            cuerpo:
+                "Por eso se pide de nuevo. Si ha sido un error, en cuanto se deshaga la anulación " +
+                "esta misma clave vuelve a activar el equipo y no se pierde ningún dato: activar no " +
+                "toca lo que hay guardado aquí.",
+        },
+        device_replaced: {
+            titulo: "Esta licencia se activó en otro equipo",
+            cuerpo:
+                "Al moverla, este ordenador dejó de tener acceso. Si no has sido tú, contacta con " +
+                "soporte cuanto antes; si sí, vuelve a activarla aquí con tu clave.",
+        },
+        license_not_found: {
+            titulo: "El servidor no reconoce la licencia que tenía este equipo",
+            cuerpo:
+                "Comprueba la clave antes de volver a intentarlo. Si estás seguro de que es " +
+                "correcta, contacta con soporte.",
+        },
+    };
+
+    const aviso = texto[motivo] ?? {
+        titulo: "Este equipo se quedó sin licencia",
+        cuerpo: `El servidor la rechazó (${motivo}). Vuelve a activarla con tu clave.`,
+    };
+
+    return (
+        <div className="mt-4 rounded-2xl border border-warning bg-warning/10 px-4 py-3">
+            <p className="text-sm font-semibold text-fg">{aviso.titulo}</p>
+            <p className="mt-1 text-xs leading-relaxed text-fg-muted">{aviso.cuerpo}</p>
+        </div>
+    );
 }
 
 function BlockedScreen({
@@ -1396,6 +1447,14 @@ export default function AppBoot({ router }: { router: any }) {
                                                 </p>
                                             </div>
                                         </div>
+
+                                        {/* Por qué se está aquí, cuando no es un primer arranque.
+                                            Un rechazo del servidor borra el estado local a
+                                            propósito, así que tras reiniciar esta pantalla es
+                                            idéntica a la de un TPV recién instalado — y quien llega
+                                            no sabe si le han anulado la licencia, si se la han
+                                            movido a otro equipo, o si tocó algo. */}
+                                        <RechazoPrevio motivo={gate.last_rejection ?? null} />
 
                                         <form
                                             onSubmit={submitActivation}

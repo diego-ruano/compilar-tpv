@@ -52,6 +52,12 @@ pub struct LicenseGateResult {
     pub allowed: bool,
     pub reason: String,
     pub state: Option<LicenseLocalState>,
+    /// Por qué se quedó este equipo sin licencia, cuando fue el servidor quien la rechazó
+    /// (`revoked`, `device_replaced`, `license_not_found`…). Sólo viene si NO hay `state`: es lo
+    /// que permite que la pantalla de activación explique por qué se está ahí en vez de parecer un
+    /// primer arranque.
+    #[ts(optional)]
+    pub last_rejection: Option<String>,
 }
 
 /* =========================================================

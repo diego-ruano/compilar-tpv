@@ -383,7 +383,14 @@ export type LicenseActivateOutcome = { outcome: string, state: LicenseLocalState
  */
 export type LicenseDeviceChangeInput = { activation_key: string, };
 
-export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, };
+export type LicenseGateResult = { allowed: boolean, reason: string, state: LicenseLocalState | null, 
+/**
+ * Por qué se quedó este equipo sin licencia, cuando fue el servidor quien la rechazó
+ * (`revoked`, `device_replaced`, `license_not_found`…). Sólo viene si NO hay `state`: es lo
+ * que permite que la pantalla de activación explique por qué se está ahí en vez de parecer un
+ * primer arranque.
+ */
+last_rejection?: string, };
 
 /**
  * Estado local NO sensible de la licencia (fichero `license_state.json`). El **token** de sesión

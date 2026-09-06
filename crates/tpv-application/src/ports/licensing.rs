@@ -28,8 +28,19 @@ pub trait LicensingService: Send + Sync {
     fn load_state(&self) -> AppResult<Option<LicenseLocalState>>;
     /// Persiste el estado local.
     fn save_state(&self, state: &LicenseLocalState) -> AppResult<()>;
-    /// Borra el estado local.
-    fn delete_state(&self) -> AppResult<()>;
+    /// Borra el estado local, anotando POR QUÉ si el motivo importa.
+    ///
+    /// El motivo se guarda porque el borrado deja al equipo en la pantalla de activar, y esa
+    /// pantalla no tiene forma de saber si es un TPV recién instalado o uno al que le acaban de
+    /// anular la licencia. Sin la nota, quien llega ahí no sabe qué le ha pasado ni que basta con
+    /// deshacer la anulación para volver —sin perder nada— con la misma clave.
+    ///
+    /// `None` cuando lo pide el usuario ("borrar y volver a activar"): ahí no hay nada que contar.
+    fn delete_state(&self, motivo: Option<&str>) -> AppResult<()>;
+
+    /// El motivo del último borrado, si sigue sin haber licencia. `save_state` lo limpia: con una
+    /// licencia válida delante, no hay rechazo pendiente que enseñar.
+    fn last_rejection(&self) -> AppResult<Option<String>>;
 
     /// Canjea la clave en el servidor. Persiste el **token** concedido en el keyring (es una
     /// credencial, no estado), pero no escribe `license_state.json` (eso lo hace el caso de uso con

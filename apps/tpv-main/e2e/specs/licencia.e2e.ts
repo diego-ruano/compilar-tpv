@@ -60,12 +60,16 @@ describe("La licencia deja de valer", () => {
         expect(gate.allowed).toBe(false);
         expect(gate.reason).toBe("revoked");
 
-        // Y NO sale la pantalla de "Licencia anulada", aunque ese texto exista: un rechazo
-        // definitivo (`license_revoked`, `license_not_found`, `device_replaced`) **borra el estado
-        // local** a propósito, así que el equipo deja de tener licencia y lo que pide es activar
-        // otra vez. Lo importante es que no se puede seguir vendiendo; el matiz es que el texto
-        // "Licencia anulada" de `blockedCopy` no lo ve nunca nadie por esta vía.
+        // Tras recargar no sale la pantalla de "Licencia anulada" sino la de activar: un rechazo
+        // definitivo (`revoked`, `device_replaced`, `license_not_found`) **borra el estado local**
+        // a propósito, así que el equipo se queda sin licencia. (El texto "Licencia anulada" sí se
+        // ve, pero en el momento en que el pulso lo detecta con la app abierta, no después de
+        // reiniciar.)
         await conTexto("h1", "Activa tu TPV").waitForDisplayed({ timeout: 60_000 });
+
+        // Y la pantalla explica por qué se está ahí. Sin esto es idéntica a la de un TPV recién
+        // instalado, y quien llega no sabe si le han anulado la licencia o si tocó algo.
+        await conTexto("p", "Esta licencia fue anulada").waitForDisplayed({ timeout: 20_000 });
     });
 
     it("3 · deshecha la anulación, la misma clave vuelve a activar", async () => {

@@ -41,7 +41,9 @@ pub fn get_state(svc: &dyn LicensingService) -> AppResult<Option<LicenseLocalSta
 }
 
 pub fn clear_state(svc: &dyn LicensingService) -> AppResult<()> {
-    svc.delete_state()
+    // Sin motivo: esto lo pide el usuario desde la pantalla de bloqueo, y no hay nada que
+    // explicarle después que no sepa ya.
+    svc.delete_state(None)
 }
 
 /// Activa la licencia en este dispositivo. Si el servidor exige el código de cambio de equipo,
@@ -213,6 +215,9 @@ async fn comprobar(svc: &dyn LicensingService, forzar_red: bool) -> AppResult<Li
             allowed: false,
             reason: Motivo::NecesitaActivacion.codigo(),
             state: None,
+            // Puede que este equipo no sea nuevo, sino uno al que le anularon la licencia: la
+            // pantalla de activación necesita saberlo para poder decirlo.
+            last_rejection: svc.last_rejection()?,
         });
     };
 
@@ -259,20 +264,25 @@ fn aplicar(
     estado: LicenseLocalState,
     veredicto: Veredicto,
 ) -> AppResult<LicenseGateResult> {
+    let motivo = veredicto.motivo.codigo();
+
     let state = match veredicto.accion {
         AccionEstado::Conservar => {
             svc.save_state(&estado)?;
             Some(estado)
         }
         AccionEstado::Borrar => {
-            svc.delete_state()?;
+            // El motivo se anota al borrar: es lo único que quedará cuando la app vuelva a
+            // arrancar y se encuentre sin licencia.
+            svc.delete_state(Some(&motivo))?;
             None
         }
     };
 
     Ok(LicenseGateResult {
         allowed: veredicto.permitido,
-        reason: veredicto.motivo.codigo(),
+        reason: motivo,
+        last_rejection: if state.is_none() { svc.last_rejection()? } else { None },
         state,
     })
 }
@@ -329,7 +339,12 @@ mod tests {
     }
 
     fn result(reason: &str, state: LicenseLocalState) -> LicenseGateResult {
-        LicenseGateResult { allowed: true, reason: reason.into(), state: Some(state) }
+        LicenseGateResult {
+            allowed: true,
+            reason: reason.into(),
+            state: Some(state),
+            last_rejection: None,
+        }
     }
 
     #[tokio::test]
