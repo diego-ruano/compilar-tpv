@@ -106,7 +106,13 @@ function Modal({
     if (!open) return null;
     return (
         <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/50 p-1.5 sm:p-2">
-            <div className="flex h-[calc(100dvh-0.75rem)] w-full max-w-375 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:h-[min(90dvh,900px)]">
+            {/* El ancho se declara con `--modal-width`, no sólo con `max-w-375`: el sistema común
+                de modales de Global.css fuerza `width`/`max-width` con `!important` sobre todo
+                `.fixed.inset-0 > .bg-surface`, así que una utilidad de Tailwind aquí no gana. Sin
+                esto, esta modal se queda en los 42rem del resto y su contenido no cabe: el panel
+                del ticket sale cortado y los botones del contador de efectivo se aplastan a 12 px.
+                Este no es un diálogo de formulario, es la pantalla de trabajo de la comanda. */}
+            <div className="flex h-[calc(100dvh-0.75rem)] w-full max-w-375 [--modal-width:93.75rem] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xl sm:h-[min(90dvh,900px)]">
                 <div className="flex items-center justify-between gap-3 border-b border-border p-3 sm:p-4">
                     <div className="text-lg font-extrabold text-fg">
                         {title}
