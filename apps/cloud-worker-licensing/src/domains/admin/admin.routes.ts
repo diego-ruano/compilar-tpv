@@ -6,8 +6,10 @@
 //
 //   POST /v1/admin/licenses             → emite una clave
 //   GET  /v1/admin/licenses             → lista
-//   POST /v1/admin/licenses/:id/revoke  → anula
-//   POST /v1/admin/licenses/:id/extend  → suma meses
+//   POST /v1/admin/licenses/:id/revoke   → anula
+//   POST /v1/admin/licenses/:id/unrevoke → deshace la anulación
+//   POST /v1/admin/licenses/:id/extend   → suma meses
+//   POST /v1/admin/licenses/:id/shorten  → resta meses (puede dejarla caducada)
 //
 // La clave en claro se devuelve UNA sola vez, en la respuesta del issue: después ya solo existe
 // cifrada. Si el cliente la pierde, se reemite.
@@ -27,7 +29,9 @@ import {
 	issueLicense,
 	listLicenses,
 	markKeyEmailSent,
+	reactivateLicense,
 	revokeLicense,
+	shortenLicense,
 } from "../../server/licenseStore";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
@@ -187,6 +191,36 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	return c.json({ ok: true, licenseId, status: "revoked" });
 });
 
+/**
+ * Deshace una revocación.
+ *
+ * La operación ya existía (`reactivateLicense`, LIC-07) pero sólo la alcanzaba el cierre de una
+ * disputa ganada en el webhook de Stripe. Aquí se expone porque revocar a mano es justo donde se
+ * mete la pata —una tecla en el `licenseId` y le cortas el TPV a quien no debías—, y hasta ahora
+ * la única salida era emitir otra licencia y hacer pasar al cliente por el cambio de dispositivo.
+ *
+ * A qué estado vuelve lo decide `reactivateLicense`: `issued` si nunca se activó, `active` si sí.
+ * Una caducidad de por medio la resuelve el gate por `expires_at_ms`, aquí no se toca.
+ */
+adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
+	const db = getDb(c.env);
+	const licenseId = c.req.param("id");
+
+	const lic = await getLicenseById(db, licenseId);
+	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
+	if (lic.status !== "revoked") {
+		return c.json({ ok: false, error: "license_not_revoked", status: lic.status }, 409);
+	}
+
+	await reactivateLicense(db, licenseId);
+	// La acción se registra como `reactivate`: es la misma operación que cierra una disputa ganada
+	// en Stripe, y tener dos nombres para un mismo hecho parte la auditoría en dos.
+	await auditAdmin(db, "reactivate", licenseId, { keyShort: lic.key_short, via: "admin" });
+
+	const despues = await getLicenseById(db, licenseId);
+	return c.json({ ok: true, licenseId, status: despues?.status ?? "active" });
+});
+
 const extendSchema = z.object({
 	months: z.union([z.literal(1), z.literal(3), z.literal(12)]),
 });
@@ -213,5 +247,53 @@ adminRoutes.post("/licenses/:id/extend", async (c) => {
 		ok: true,
 		licenseId,
 		expiresAt: new Date(expiresAtMs).toISOString(),
+	});
+});
+
+/**
+ * Resta meses a la caducidad. Es el inverso de `extend`, y puede dejar la fecha en el pasado — que
+ * es exactamente "caducada", tal y como lo interpreta el gate.
+ *
+ * Como `unrevoke`, la operación (`shortenLicense`, LIC-07) ya existía para el reembolso de una
+ * renovación en Stripe. Se expone por dos motivos: corregir a mano un `extend` de más, y poder
+ * comprobar de verdad qué hace la aplicación cuando la licencia caduca — hasta ahora eso no se
+ * podía ensayar sin esperar meses.
+ *
+ * ⚠️ Deja al cliente sin servicio pasada la gracia. No hay confirmación aquí: la protección es que
+ * el token de administración no lo tiene nadie más.
+ */
+const shortenSchema = z.object({
+	months: z.number().int().positive().max(120),
+});
+
+adminRoutes.post("/licenses/:id/shorten", async (c) => {
+	const db = getDb(c.env);
+	const licenseId = c.req.param("id");
+
+	const parsed = shortenSchema.safeParse(await c.req.json().catch(() => null));
+	if (!parsed.success) {
+		return c.json(
+			{ ok: false, error: "validation_error", details: "months debe ser un entero de 1 a 120" },
+			400,
+		);
+	}
+
+	const lic = await getLicenseById(db, licenseId);
+	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
+
+	const expiresAtMs = await shortenLicense(db, licenseId, parsed.data.months);
+	if (expiresAtMs === null) {
+		// Sin `expires_at_ms` no hay nada que acortar: la licencia no se ha activado todavía, así
+		// que su reloj ni siquiera ha arrancado.
+		return c.json({ ok: false, error: "license_not_activated" }, 409);
+	}
+
+	await auditAdmin(db, "shorten", licenseId, { months: parsed.data.months, expiresAtMs });
+
+	return c.json({
+		ok: true,
+		licenseId,
+		expiresAt: new Date(expiresAtMs).toISOString(),
+		caducada: expiresAtMs < Date.now(),
 	});
 });

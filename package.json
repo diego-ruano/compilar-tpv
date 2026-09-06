@@ -10,11 +10,12 @@
     "lint": "turbo run lint",
     "generate-types": "turbo run generate-types",
     "tauri": "pnpm --filter @tpv/main tauri",
-
     "license:issue": "node scripts/tpv-license.mjs issue",
     "license:list": "node scripts/tpv-license.mjs list",
     "license:revoke": "node scripts/tpv-license.mjs revoke",
+    "license:unrevoke": "node scripts/tpv-license.mjs unrevoke",
     "license:extend": "node scripts/tpv-license.mjs extend",
+    "license:shorten": "node scripts/tpv-license.mjs shorten",
     "license:resend": "node scripts/tpv-license.mjs resend",
     "license:keypair": "node scripts/generate-license-keypair.mjs"
   },

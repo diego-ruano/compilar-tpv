@@ -1091,7 +1091,7 @@ export async function markWebhookProcessed(
 
 export async function auditAdmin(
 	db: Client,
-	action: "issue" | "revoke" | "extend" | "resend" | "refund" | "dispute" | "reactivate",
+	action: "issue" | "revoke" | "extend" | "resend" | "refund" | "dispute" | "reactivate" | "shorten",
 	licenseId: string | null,
 	detail: Record<string, unknown>,
 ) {

@@ -4,8 +4,10 @@
 //
 //   pnpm license:issue  -- --term 12 --email cliente@bar.com --name "Bar La Plaza" [--send-key]
 //   pnpm license:list   -- [--limit 50]
-//   pnpm license:revoke -- --id <licenseId>
-//   pnpm license:extend -- --id <licenseId> --months 12
+//   pnpm license:revoke   -- --id <licenseId>
+//   pnpm license:unrevoke -- --id <licenseId>          (deshace una revocacion)
+//   pnpm license:extend   -- --id <licenseId> --months 12
+//   pnpm license:shorten  -- --id <licenseId> --months 24   (puede dejarla CADUCADA)
 //   pnpm license:resend -- --id <licenseId>          (reenvía/recupera la clave por email)
 //
 // El token NO se versiona. Se lee, por este orden:
@@ -177,6 +179,39 @@ async function revoke(args) {
 	console.log(`\n  ✔ Licencia ${id} revocada. El TPV se bloqueará en su próxima comprobación.\n`);
 }
 
+async function unrevoke(args) {
+	const id = String(args.id || "").trim();
+	if (!id) fail("--id <licenseId> requerido (sacalo de `pnpm license:list`)");
+
+	const res = await api("POST", `/v1/admin/licenses/${id}/unrevoke`);
+	console.log(`
+  ✔ Licencia ${id} vuelve a estar ${res.status}. El TPV se desbloquea en su siguiente comprobacion.
+`);
+}
+
+/**
+ * Resta meses a la caducidad. Puede dejarla en el pasado, que es exactamente "caducada".
+ *
+ * Es la unica forma de ensayar que hace la aplicacion cuando a un cliente se le acaba la licencia
+ * sin esperar meses de calendario; tambien sirve para corregir a mano un `extend` de mas.
+ */
+async function shorten(args) {
+	const id = String(args.id || "").trim();
+	if (!id) fail("--id <licenseId> requerido");
+	const months = Number(args.months);
+	if (!Number.isInteger(months) || months < 1 || months > 120) {
+		fail("--months debe ser un entero de 1 a 120");
+	}
+
+	const res = await api("POST", `/v1/admin/licenses/${id}/shorten`, { months });
+	console.log(
+		`
+  ✔ Caducidad movida al ${res.expiresAt.slice(0, 10)}` +
+			`${res.caducada ? "  — la licencia queda CADUCADA" : ""}
+`,
+	);
+}
+
 async function extend(args) {
 	const id = String(args.id || "").trim();
 	if (!id) fail("--id <licenseId> requerido");
@@ -199,7 +234,7 @@ if (!TOKEN) {
 	);
 }
 
-const comandos = { issue, list, revoke, extend, resend };
+const comandos = { issue, list, revoke, unrevoke, extend, shorten, resend };
 
 if (!comandos[cmd]) {
 	console.error(`
@@ -207,8 +242,10 @@ if (!comandos[cmd]) {
 
     issue   --term 1|3|12 --email <email> [--name "Bar La Plaza"] [--send-key]
     list    [--limit 50]
-    revoke  --id <licenseId>
-    extend  --id <licenseId> --months 1|3|12
+    revoke   --id <licenseId>
+    unrevoke --id <licenseId>
+    extend   --id <licenseId> --months 1|3|12
+    shorten  --id <licenseId> --months <1-120>   (puede dejarla CADUCADA)
     resend  --id <licenseId>
 `);
 	process.exit(1);
