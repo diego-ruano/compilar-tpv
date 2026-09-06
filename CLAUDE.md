@@ -1033,12 +1033,29 @@ lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → **cier
 La última cifra es la que lo justifica entero: si algo se rompe entre la interfaz y SQLite, deja de
 cuadrar.
 
-**Las copias de seguridad** (4+4 pasos, en dos ficheros): con la nube encendida se estrena el
+**Las copias de seguridad** (4+5 pasos, en dos ficheros): con la nube encendida se estrena el
 equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca
 la `data.db`** → la app arranca igual y ofrece recuperar → se restaura la copia → la reconciliación
-converge y el login se abre. Va en dos ficheros porque en medio hay que apagar la aplicación: en
-Windows la base no se reemplaza con SQLite teniéndola abierta, y reiniciar es además lo que pasa de
-verdad.
+converge y el login se abre. Por el camino se le ofrece primero una copia **inservible**, que la
+pantalla tiene que rechazar diciendo por qué y dejando elegir otra. Va en dos ficheros porque en
+medio hay que apagar la aplicación: en Windows la base no se reemplaza con SQLite teniéndola
+abierta, y reiniciar es además lo que pasa de verdad.
+
+Lo que NO sube a E2E de las copias, y por qué —para no volver a intentarlo—:
+
+- **Las reglas de `recovery.rs`** (retención de siete, copia importada que no caduca, viaje a un
+  USB…). Son 18 tests de Rust sobre ficheros y transacciones: no pasan por React ni por el IPC, así
+  que aquí costarían cuarenta veces más sin mirar una línea más de código. Lo único que el E2E
+  añade sobre ellas es la PANTALLA, y eso es lo que cubre el paso de la copia inservible.
+- **La guardia del outbox al restaurar** (`asegurar_reemplazo_seguro`): es **inalcanzable desde la
+  interfaz**. A la pantalla de recuperación sólo se llega de tres maneras —reconciliación
+  pendiente, cero usuarios, o base ilegible— y las dos primeras están exentas de la guardia
+  a propósito, mientras que en la tercera no hay `Db` sobre la que comprobarla. Es defensa en
+  profundidad para un caso que la interfaz no sabe producir; su sitio es el test de Rust.
+- **La reconciliación bloqueada tras cinco ciclos fallidos**: un ciclo que no converge tarda ~3 min
+  **por diseño** (180 vueltas de un segundo), así que provocar cinco son quince minutos. La
+  política ya está probada donde es barata y exacta: `test/estadoSync.test.ts` y
+  `test/recoverySync.test.ts`, sin React ni DOM.
 
 **La licencia deja de valer** (5 pasos): se anula → el TPV deja de trabajar y vuelve a pedir la
 licencia → se desanula y la misma clave vuelve a activar, sin perder los datos → se caduca → sale la

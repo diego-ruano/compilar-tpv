@@ -62,12 +62,12 @@ con el token de administración y eso no se mete en CI.
 
 ```bash
 pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
-pnpm --filter @tpv/main test:e2e      # ~50 s: 22 pasos en cuatro recorridos
+pnpm --filter @tpv/main test:e2e      # ~50 s: 23 pasos en cuatro recorridos
 ```
 
 Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro y arqueo con descuadre 0), las
-**copias de seguridad** (copia → se machaca la `data.db` → recuperación → reconciliación → login) y
-**la licencia** (anulada, desanulada, caducada y renovada).
+**copias de seguridad** (copia → se machaca la `data.db` → se rechaza una copia inservible →
+recuperación → reconciliación → login) y **la licencia** (anulada, desanulada, caducada, renovada).
 
 Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y `ADMIN_API_TOKEN` en
 el `.env` de la raíz. Las licencias las emite y revoca la propia tanda.

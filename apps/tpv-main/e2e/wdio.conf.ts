@@ -23,6 +23,7 @@ import {
     exigirBinarioAlDia,
     exigirBinarioE2E,
     limpiarDatosE2E,
+    plantarCopiaCorrupta,
     romperBaseDeDatos,
 } from "./helpers/entorno.js";
 import { emitirLicencia, revocar } from "./helpers/licencias.js";
@@ -240,6 +241,9 @@ export const config: WebdriverIO.Config = {
             limpiarDatosE2E(r.nube);
         } else if (r.equipo === "el de antes, roto") {
             romperBaseDeDatos();
+            // Y una copia inservible entre las buenas: el recorrido comprueba que la pantalla la
+            // rechaza sin dejar el equipo peor y deja elegir otra.
+            plantarCopiaCorrupta();
         }
 
         process.env.TPV_E2E_LICENCIA =

@@ -197,6 +197,31 @@ export function romperBaseDeDatos(): void {
 
 
 /**
+ * Deja en la carpeta de copias una que NO es una base de datos, con fecha más reciente que las
+ * buenas para que la pantalla la ofrezca la primera ("Última copia").
+ *
+ * Una copia se corrompe en el disco como cualquier otro fichero, y el daño de no detectarlo es
+ * grande: si `prepare_restore` no validara ANTES de tocar la `data.db`, un intento con una copia
+ * mala dejaría al equipo peor de lo que estaba, justo el día de la avería. Que la validación
+ * existe lo prueba Rust; lo que no prueba nadie es que la PANTALLA lo diga y deje elegir otra.
+ */
+export function plantarCopiaCorrupta(): void {
+    const dir = dirDatosE2E();
+    if (!dir.endsWith(".e2e")) {
+        throw new Error(`Me niego a tocar ${dir}: no es la carpeta del test.`);
+    }
+
+    const copias = path.join(dir, "backups");
+    fs.mkdirSync(copias, { recursive: true });
+    // El nombre es el que reconoce `list_backups`: `data-<epoch ms>.db`.
+    fs.writeFileSync(
+        path.join(copias, `data-${Date.now()}.db`),
+        "esto tampoco es una base de datos\n".repeat(64),
+        "utf8",
+    );
+}
+
+/**
  * La clave que debe usar el recorrido que está corriendo. La pone `beforeSession` según la receta
  * del recorrido: la fija del `.env` para la venta, una recién emitida para copias y licencia.
  */
