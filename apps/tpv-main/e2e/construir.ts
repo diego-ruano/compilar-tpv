@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 //
-// Compila el build de E2E y lo deja en `target/e2e/tpv-e2e.exe`.
+// Compila el build de E2E, lo verifica y lo deja en `target/e2e/` con su huella.
 //
 // El paso de copiar no es cosmético. `tauri build --no-bundle` NO renombra el binario (el rename a
 // `productName` ocurre al empaquetar), así que el build de E2E y el de producción escriben los dos
@@ -8,27 +8,25 @@
 // una trampa: el test arrancaría la app de verdad, contra la `data.db` del equipo. La copia da una
 // ruta que sólo puede contener el binario de E2E, y aun así se verifica el identificador que lleva
 // dentro antes de aceptarla.
+//
+// Y junto a la copia se deja la huella del código que la ha producido, para que el test pueda
+// negarse a arrancar si alguien toca el código y se olvida de recompilar (ver `huella.ts`).
 
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const AQUI = path.dirname(fileURLToPath(import.meta.url));
-const APP = path.resolve(AQUI, "..");
-const RAIZ = path.resolve(APP, "..", "..");
+import { APP_ID_E2E, BINARIO, DIR_APP, HUELLA, RAIZ } from "./helpers/entorno.js";
+import { huellaDelCodigo } from "./helpers/huella.js";
 
-const RECIEN_COMPILADO = path.join(RAIZ, "target", "release", "tpv.exe");
-const DESTINO = path.join(RAIZ, "target", "e2e", "tpv-e2e.exe");
-
-const APP_ID_E2E = "com.altarialights.tpv.e2e";
 const APP_ID_PROD = "com.altarialights.tpv";
+const RECIEN_COMPILADO = path.join(RAIZ, "target", "release", "tpv.exe");
 
 // El identificador va dentro del binario sin terminador, pegado a lo que venga detrás
 // (`…tpv.e2emaindefault-src…`), así que no se puede recortar como si fuera una cadena suelta. Se
 // pregunta por presencia; el de producción es este mismo prefijo SIN `.e2e` detrás.
-function comprobarIdentificador(exe) {
+function comprobarIdentificador(exe: string) {
     const texto = fs.readFileSync(exe).toString("latin1");
     return {
         tieneE2E: texto.includes(APP_ID_E2E),
@@ -39,14 +37,18 @@ function comprobarIdentificador(exe) {
 // Se llama al CLI de Tauri por su entrada JS y con este mismo node, no por `pnpm exec`: desde
 // Node 22, `spawnSync` se niega a lanzar un `.cmd` sin shell (EINVAL), y meter un shell por medio
 // sólo añade una capa que citar mal.
-const require = createRequire(import.meta.url);
-const tauriCli = require.resolve("@tauri-apps/cli/tauri.js", { paths: [APP] });
+const require_ = createRequire(import.meta.url);
+const tauriCli = require_.resolve("@tauri-apps/cli/tauri.js", { paths: [DIR_APP] });
+
+// La huella se toma ANTES de compilar: si alguien edita a mitad del build, lo que se guarda es lo
+// que de verdad entró en el binario, y la próxima ejecución del test lo detectará.
+const huella = huellaDelCodigo();
 
 console.log("→ tauri build --config src-tauri/tauri.e2e.conf.json --no-bundle");
 execFileSync(
     process.execPath,
     [tauriCli, "build", "--config", "src-tauri/tauri.e2e.conf.json", "--no-bundle"],
-    { cwd: APP, stdio: "inherit" },
+    { cwd: DIR_APP, stdio: "inherit" },
 );
 
 if (!fs.existsSync(RECIEN_COMPILADO)) {
@@ -64,8 +66,12 @@ if (!tieneE2E || tieneProd) {
     process.exit(1);
 }
 
-fs.mkdirSync(path.dirname(DESTINO), { recursive: true });
-fs.copyFileSync(RECIEN_COMPILADO, DESTINO);
+fs.mkdirSync(path.dirname(BINARIO), { recursive: true });
+fs.copyFileSync(RECIEN_COMPILADO, BINARIO);
+fs.writeFileSync(HUELLA, JSON.stringify(huella), "utf8");
 
-console.log(`\n  ✔ Binario de E2E listo: ${DESTINO}`);
-console.log(`    identificador: ${APP_ID_E2E}  →  %APPDATA%\\${APP_ID_E2E}\\\n`);
+console.log(`\n  ✔ Binario de E2E listo: ${BINARIO}`);
+console.log(`    identificador: ${APP_ID_E2E}  →  %APPDATA%\\${APP_ID_E2E}\\`);
+console.log(
+    `    huella: ${huella.total.slice(0, 12)}… (${Object.keys(huella.ficheros).length} ficheros)\n`,
+);

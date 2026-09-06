@@ -11,6 +11,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { diferencias, huellaDelCodigo, type Huella } from "./huella.js";
+
 /** El identificador del build de E2E (`src-tauri/tauri.e2e.conf.json`). */
 export const APP_ID_E2E = "com.altarialights.tpv.e2e";
 
@@ -22,8 +24,11 @@ const AQUI = path.dirname(fileURLToPath(import.meta.url));
 /** `apps/tpv-main/e2e` */
 export const DIR_E2E = path.resolve(AQUI, "..");
 
+/** `apps/tpv-main` */
+export const DIR_APP = path.resolve(DIR_E2E, "..");
+
 /** Raíz del monorepo. */
-export const RAIZ = path.resolve(DIR_E2E, "..", "..", "..");
+export const RAIZ = path.resolve(DIR_APP, "..", "..");
 
 /**
  * El ejecutable que arranca el test.
@@ -31,9 +36,12 @@ export const RAIZ = path.resolve(DIR_E2E, "..", "..", "..");
  * NO es `target/release/tpv.exe`: `tauri build --no-bundle` no renombra el binario, así que el
  * build de E2E y el de producción escriben en esa misma ruta y el último gana. Sería cuestión de
  * tiempo que alguien compilase la app de verdad y luego lanzara el test contra sus propios datos.
- * `construir.mjs` deja aquí una copia verificada.
+ * `construir.ts` deja aquí una copia verificada.
  */
 export const BINARIO = path.join(RAIZ, "target", "e2e", "tpv-e2e.exe");
+
+/** La huella del código con el que se compiló `BINARIO` (ver `huella.ts`). */
+export const HUELLA = path.join(RAIZ, "target", "e2e", "tpv-e2e.huella.json");
 
 /**
  * Carpeta de datos del build de E2E.
@@ -81,6 +89,44 @@ export function exigirBinarioE2E(exe: string): void {
                 "Es el binario real, no el de E2E: arrancarlo machacaría los datos del equipo.",
         );
     }
+}
+
+/**
+ * Se niega a arrancar si el binario no es el de ESTE código.
+ *
+ * Es la otra mitad de la comprobación anterior, y tapa un fallo peor: un binario viejo no rompe
+ * nada, **pasa**. Alguien toca una pantalla, se olvida de `build:e2e`, lanza el test, sale verde y
+ * tagea. Un test que miente en verde es peor que no tener test, porque se usa para decidir.
+ *
+ * No mira fechas sino contenido: cambiar de rama reescribe las fechas de medio repo y obligaría a
+ * recompilar sin motivo. Lo que se compara está en `huella.ts`, con `e2e/` y `test/` fuera a
+ * propósito — retocar un selector del propio recorrido no puede exigir recompilar la aplicación.
+ */
+export function exigirBinarioAlDia(): void {
+    const consejo = "Recompílalo:  pnpm --filter @tpv/main build:e2e";
+
+    let guardada: Huella;
+    try {
+        guardada = JSON.parse(fs.readFileSync(HUELLA, "utf8")) as Huella;
+    } catch {
+        throw new Error(
+            `No hay huella del binario (${HUELLA}), así que no se puede saber de qué código sale.\n${consejo}`,
+        );
+    }
+
+    const actual = huellaDelCodigo();
+    if (guardada.total === actual.total) return;
+
+    const cambios = diferencias(guardada, actual);
+    const muestra = cambios.slice(0, 12).map((c) => `    ${c}`);
+    const resto = cambios.length - muestra.length;
+
+    throw new Error(
+        `El binario de E2E no corresponde al código: ${cambios.length} ` +
+            `${cambios.length === 1 ? "fichero ha cambiado" : "ficheros han cambiado"} desde que se compiló.\n` +
+            `${muestra.join("\n")}${resto > 0 ? `\n    …y ${resto} más` : ""}\n` +
+            `  ${consejo}`,
+    );
 }
 
 /**

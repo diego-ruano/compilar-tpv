@@ -22,6 +22,7 @@ import {
     BINARIO,
     DIR_E2E,
     cargarDotEnv,
+    exigirBinarioAlDia,
     exigirBinarioE2E,
     licenciaDePruebas,
     limpiarDatosE2E,
@@ -139,10 +140,21 @@ export const config: WebdriverIO.Config = {
     onPrepare() {
         cargarDotEnv();
 
-        // Este orden importa: primero se comprueba que el binario es el de E2E, y sólo entonces se
-        // borra la carpeta de datos. Verificar después sería borrar antes de saber qué se lanza.
-        exigirBinarioE2E(BINARIO);
-        licenciaDePruebas();
+        try {
+            // Este orden importa: primero se comprueba que el binario es el de E2E, y sólo entonces
+            // se borra la carpeta de datos. Verificar después sería borrar antes de saber qué se
+            // lanza.
+            exigirBinarioE2E(BINARIO);
+            exigirBinarioAlDia();
+            licenciaDePruebas();
+        } catch (e) {
+            // Salir aquí, y no dejar que la excepción salga del hook: WDIO se limita a registrar el
+            // error de un hook y CONTINÚA, así que arrancaba la app igual y el motivo real acababa
+            // disfrazado del fallo de un paso, un minuto más tarde. Estas tres comprobaciones dicen
+            // que el test no se puede ejecutar; no son un test que falla.
+            console.error(`\n[e2e] NO SE PUEDE EJECUTAR\n\n${(e as Error).message}\n`);
+            process.exit(1);
+        }
 
         const dir = limpiarDatosE2E();
         console.log(`\n[e2e] binario   ${BINARIO}`);

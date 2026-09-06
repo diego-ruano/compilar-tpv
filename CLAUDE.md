@@ -1033,7 +1033,8 @@ interfaz y SQLite, deja de cuadrar.
 | Arranque y aislamiento | `e2e/helpers/entorno.ts` | Verifica el binario, borra el AppData, apaga la nube |
 | Gestos | `e2e/helpers/ui.ts` | Pulsar, escribir y leer por IPC lo que la pantalla no enseña |
 | Configuración | `e2e/wdio.conf.ts` | Servicio, tiempos y captura de pantalla al fallar |
-| Build aislado | `e2e/construir.mjs` + `src-tauri/tauri.e2e.conf.json` | Identificador propio, copia verificada |
+| Build aislado | `e2e/construir.ts` + `src-tauri/tauri.e2e.conf.json` | Identificador propio, copia verificada |
+| Huella del código | `e2e/helpers/huella.ts` | Qué entra en el binario, para saber si está al día |
 
 ### Reglas
 
@@ -1049,6 +1050,19 @@ interfaz y SQLite, deja de cuadrar.
   `construir.mjs` deja una copia en `target/e2e/tpv-e2e.exe` y `onPrepare` **abre el fichero y
   comprueba el identificador que lleva dentro** antes de tocar la carpeta de datos. La limpieza,
   además, se niega si la ruta no termina en `.e2e`.
+- **Un binario viejo no rompe: PASA, que es peor.** La comprobación del identificador dice que el
+  `.exe` es el de E2E, no que sea el de **este** código. Sin nada más, alguien toca una pantalla, se
+  olvida de `build:e2e`, lanza el test, sale verde y tagea — y lo que ha probado es la versión
+  anterior. Por eso `construir.ts` deja junto al binario la huella (sha256 por fichero) de todo lo
+  que entra en él, y el arranque la recalcula y se niega en dos segundos diciendo qué cambió. Se
+  compara **contenido, no fechas**: cambiar de rama reescribe las fechas de medio repo y obligaría a
+  recompilar por nada. Y `e2e/` y `test/` quedan fuera de la huella a propósito: si retocar un
+  selector del propio recorrido exigiera recompilar la aplicación, a la tercera vez alguien quitaría
+  la comprobación entera.
+- **Lo que impide ejecutar no es un test que falla.** Las tres guardias del arranque (identificador,
+  huella, licencia) terminan el proceso ahí mismo. WDIO se limita a registrar el error de un hook y
+  **continúa**, así que sin eso arrancaba la app igual y el motivo real salía un minuto después
+  disfrazado del fallo de un paso.
 - **El equipo del test nace sin nube, y no es un atajo.** Borrar el AppData no deja un equipo nuevo:
   la licencia de pruebas es siempre la misma, o sea el mismo tenant, así que al abrir el WebSocket
   la Main se traería por catch-up lo que dejaron las ejecuciones anteriores —el fichaje abierto de
