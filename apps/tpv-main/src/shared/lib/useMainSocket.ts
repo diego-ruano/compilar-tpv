@@ -697,6 +697,14 @@ export function useMainSocket() {
 			if (!res.ok) {
 				if (res.rechazado) {
 					marcar("rechazado", res.detalle);
+					// La nube acaba de decir que esta licencia ya no vale en este equipo. Sin esto,
+					// eso sólo se convertía en un badge de conectividad: el gate seguía en verde y
+					// el TPV seguía vendiendo hasta la siguiente vuelta del job, seis horas después.
+					// `license_check_now` emite `license:changed`, así que la pantalla se entera
+					// sola. Es best-effort: si falla, el job lo resolverá igual, más tarde.
+					void invoke("license_check_now").catch(() => {
+						/* sin red no hay veredicto nuevo; decide la gracia offline */
+					});
 					scheduleReconnect(RETRY_RECHAZADO_MS);
 				} else {
 					marcar("reintentando", res.detalle);

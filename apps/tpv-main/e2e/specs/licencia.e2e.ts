@@ -9,13 +9,12 @@
 // `revoke`/`unrevoke` anulan y deshacen. La licencia es de esta tanda, así que romperla no le hace
 // nada a los demás recorridos.
 //
-// ⚠️ El pulso que se entera del cambio es el job `licencia`, cada 6 horas. Como no se puede esperar,
-// el recorrido llama a `license_check_now` —el mismo comando que ejecuta el job— y recarga el
-// webview para que la pantalla vuelva a preguntar por el gate. No hay otra forma: en la aplicación
-// NO existe un botón de "comprobar la licencia ahora" mientras todo va bien; sólo aparece uno
-// («Reintentar») cuando ya estás bloqueado, y ése sí se usa aquí, al final.
+// ⚠️ El pulso que se entera del cambio es el job `licencia`, cada 6 horas, y en la aplicación NO hay
+// ningún botón de "comprobar ahora" mientras todo va bien (sólo aparece uno —«Reintentar»— cuando ya
+// estás bloqueado, y ése sí se usa aquí al final). Como no se pueden esperar seis horas, el
+// recorrido llama a `license_check_now`, que es exactamente lo que ejecuta el job.
 
-import { browser, expect } from "@wdio/globals";
+import { $, browser, expect } from "@wdio/globals";
 
 import { activarLicencia, estrenarEquipo, ficharYEntrar } from "../helpers/arranque.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
@@ -37,15 +36,18 @@ function idLicencia(): string {
 type Gate = { allowed: boolean; reason: string | null };
 
 /**
- * Hace lo que haría el job `licencia` en su siguiente vuelta, y vuelve a pintar la pantalla.
+ * Hace lo que haría el job `licencia` en su siguiente vuelta.
+ *
+ * No hace falta recargar nada: `license_check_now` emite `license:changed` y la pantalla se entera
+ * sola. Que sea así importa fuera del test — es lo que permite que el WebSocket, cuando la nube le
+ * rechaza el ticket por licencia, convierta ese rechazo en un bloqueo de verdad en vez de dejarlo
+ * en un badge de conectividad mientras el TPV sigue vendiendo.
  *
  * Devuelve lo que contestó el gate, que es donde se ve el motivo exacto: la pantalla lo traduce a
  * un título (o a otra pantalla entera), pero el motivo es lo que decide.
  */
-async function comprobarLicenciaYRepintar(): Promise<Gate> {
-    const gate = await leerDeLaApp<Gate>("license_check_now");
-    await browser.refresh();
-    return gate;
+async function comprobarLicencia(): Promise<Gate> {
+    return leerDeLaApp<Gate>("license_check_now");
 }
 
 describe("La licencia deja de valer", () => {
@@ -56,18 +58,22 @@ describe("La licencia deja de valer", () => {
     it("2 · anulada: el TPV deja de trabajar y vuelve a pedir la licencia", async () => {
         await revocar(idLicencia());
 
-        const gate = await comprobarLicenciaYRepintar();
+        const gate = await comprobarLicencia();
         expect(gate.allowed).toBe(false);
         expect(gate.reason).toBe("revoked");
 
-        // Tras recargar no sale la pantalla de "Licencia anulada" sino la de activar: un rechazo
-        // definitivo (`revoked`, `device_replaced`, `license_not_found`) **borra el estado local**
-        // a propósito, así que el equipo se queda sin licencia. (El texto "Licencia anulada" sí se
-        // ve, pero en el momento en que el pulso lo detecta con la app abierta, no después de
-        // reiniciar.)
+        // Con la app abierta, esto es lo que ve el TPV, y lo ve EN EL ACTO: el comando emite
+        // `license:changed` y la pantalla se bloquea sin que nadie recargue nada.
+        await conTexto("h1", "Licencia anulada").waitForDisplayed({ timeout: 60_000 });
+
+        // Al reiniciar ya no hay estado que bloquear: un rechazo definitivo (`revoked`,
+        // `device_replaced`, `license_not_found`) **borra el estado local** a propósito, así que el
+        // equipo cae en la pantalla de activar. Son dos pantallas distintas del mismo hecho y las
+        // dos tienen que contarlo.
+        await browser.refresh();
         await conTexto("h1", "Activa tu TPV").waitForDisplayed({ timeout: 60_000 });
 
-        // Y la pantalla explica por qué se está ahí. Sin esto es idéntica a la de un TPV recién
+        // Y esa segunda explica por qué se está ahí. Sin el aviso es idéntica a la de un TPV recién
         // instalado, y quien llega no sabe si le han anulado la licencia o si tocó algo.
         await conTexto("p", "Esta licencia fue anulada").waitForDisplayed({ timeout: 20_000 });
     });
@@ -91,7 +97,7 @@ describe("La licencia deja de valer", () => {
         const acortada = await acortar(idLicencia(), 24);
         expect(acortada.caducada).toBe(true);
 
-        const gate = await comprobarLicenciaYRepintar();
+        const gate = await comprobarLicencia();
         expect(gate.allowed).toBe(false);
         expect(gate.reason).toBe("expired");
 
@@ -107,7 +113,9 @@ describe("La licencia deja de valer", () => {
         // sitio de la aplicación desde donde se puede forzar una comprobación.
         await pulsar("Reintentar comprobación");
 
-        await conTexto("h2", "PIN de acceso").waitForDisplayed({ timeout: 60_000 });
-        await ficharYEntrar(PIN);
+        // Se vuelve a DONDE SE ESTABA, no al login: el bloqueo tapa la aplicación pero no cierra la
+        // sesión. Es lo que hay que querer en un bar a media faena — quien renueva la licencia no
+        // tiene por qué volver a fichar y teclear el PIN con la cola esperando.
+        await $('a[href="/Inventario"]').waitForDisplayed({ timeout: 60_000 });
     });
 });

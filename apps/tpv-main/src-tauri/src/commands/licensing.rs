@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use tpv_application::use_cases::licensing as uc;
 use tpv_contracts::licensing::{
@@ -46,9 +46,22 @@ pub async fn license_gate(app: AppHandle) -> Result<LicenseGateResult, AppErrorD
     Ok(uc::gate(&service, notifier.as_deref()).await?)
 }
 
+/// Comprueba la licencia contra el servidor AHORA, sin esperar al pulso del job.
+///
+/// Emite `license:changed` con el resultado, igual que hace el job: quien llame a esto puede no ser
+/// la pantalla —lo llama también el WebSocket cuando la nube le rechaza el ticket por licencia—, y
+/// sin el evento el veredicto se quedaba en el fichero de estado mientras la interfaz seguía
+/// vendiendo tan tranquila hasta la siguiente vuelta del job, seis horas después.
 #[tauri::command]
 pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, AppErrorDto> {
-    Ok(uc::check_now(&svc(&app)?).await?)
+    let res = uc::check_now(&svc(&app)?).await?;
+
+    // Best-effort: que no se pueda avisar a la ventana no invalida la comprobación.
+    if let Err(e) = app.emit("license:changed", res.clone()) {
+        tracing::warn!(target: "tpv::licensing", error = %e, "no se pudo emitir license:changed");
+    }
+
+    Ok(res)
 }
 
 #[tauri::command]

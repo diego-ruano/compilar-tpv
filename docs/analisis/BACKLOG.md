@@ -144,6 +144,11 @@ registro — y volverá a chocar con FISCAL-01.
 Un bar pide descuento e invitación la primera semana. La devolución/abono, en cuanto alguien pague
 de más.
 
+**Decisión (responsable, 2026-09-06): la INVITACIÓN sale del alcance.** No se considera un caso
+normal; se retomará sólo si varios clientes la piden. El resto de VENTA-01 sigue en pie, y la
+**devolución** con más motivo: es la que choca con FISCAL-01 y las dos hay que diseñarlas juntas,
+porque un abono cambia qué contiene un registro de facturación.
+
 ### LEGAL-01 🟠 · RGPD
 
 Guardas datos de clientes (nombre, teléfono, email, notas) y PII de personal, y los replicas a tu
@@ -218,9 +223,6 @@ emiten licencias reales con el token de administración. Detalle y trampas en
 **Lo que encontró en su primera pasada** (que es el argumento entero a favor de tenerlo): la regla
 común de modales de `Global.css` capaba a 42 rem el modal de comanda, que pide 1500 px. El panel del
 ticket salía cortado y los botones del contador de efectivo se aplastaban a 12 px. Arreglado.
-⚠️ La misma regla sigue encogiendo `PrintTicketModal` (pide 1000 px) y el modal de `Tareas` (768 px);
-no se ha tocado ninguno porque no hay nada que demuestre que estén rotos, pero conviene mirarlo.
-
 **Lo que sigue fuera, a propósito:** cobertura de componentes, impresión (la cubren los tests de
 Rust con su mini-intérprete ESC/POS), modo Handy y recuperación de datos.
 
