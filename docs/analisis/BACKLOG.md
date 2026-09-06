@@ -199,12 +199,18 @@ El diagnóstico seguía siendo bueno: los 83 tests del frontend son **lógica pu
 de [`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible.
 Lo que quedaba fuera era el flujo de venta, que son los tres ficheros más grandes del repo.
 
-Hay ahora **un** recorrido sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO— que estrena
-el equipo como un cliente real: activa una licencia de verdad contra el worker, elige PIN, ficha
-entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja comprobando que el
-descuadre es 0. Se lanza a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no
-va a CI porque la licencia se ata al primer dispositivo que la activa y un runner es una máquina
-nueva cada vez. Detalle y trampas en [CLAUDE.md §16](../../CLAUDE.md).
+Hay ahora **cuatro** recorridos sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO, 22 pasos
+en ~50 s— que estrenan el equipo como un cliente real:
+
+1. **El camino del dinero**: activa una licencia de verdad contra el worker, elige PIN, ficha
+   entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja con descuadre 0.
+2. **Copias de seguridad**: guarda una copia con la nube al día, le machaca la `data.db`, comprueba
+   que la app arranca igual, restaura y espera a que la reconciliación abra el login.
+3. **La licencia deja de valer**: anulada, desanulada, caducada y renovada.
+
+Se lanzan a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no van a CI porque
+emiten licencias reales con el token de administración. Detalle y trampas en
+[CLAUDE.md §16](../../CLAUDE.md).
 
 **Lo que encontró en su primera pasada** (que es el argumento entero a favor de tenerlo): la regla
 común de modales de `Global.css` capaba a 42 rem el modal de comanda, que pide 1500 px. El panel del
