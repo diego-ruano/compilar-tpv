@@ -211,6 +211,9 @@ cargo test  -p tpv-contracts       # dispara la exportación ts-rs de los DTOs
 
 cargo nextest run                  # ⬅ los tests de Rust van POR AQUÍ (ver abajo)
 cargo install cargo-nextest --locked   # si no lo tienes
+
+pnpm --filter @tpv/main build:e2e  # compila el binario aislado del E2E (§16)
+pnpm --filter @tpv/main test:e2e   # el recorrido del camino del dinero (TEST-01)
 ```
 
 ### Los tests de Rust se corren con `cargo nextest`
@@ -1002,3 +1005,89 @@ que cierra también el modelo de amenaza de LIC-04.
 Los tests del generador están en `src-tauri/src/printing/tests.rs`, e incluyen un mini-intérprete
 ESC/POS: separa texto de comandos y **falla si encuentra un byte que no es ninguna de las dos
 cosas**, que es la única forma de comprobar el trabajo de impresión sin una impresora delante.
+
+---
+
+## 16. El E2E del camino del dinero (TEST-01)
+
+**Un** recorrido sobre la app **compilada** que prueba la costura que no mira nadie: React → IPC de
+Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
+componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
+sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda unos 15 segundos.
+
+```bash
+cargo install tauri-driver --locked          # una vez por máquina
+pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo verifica
+pnpm --filter @tpv/main test:e2e             # el recorrido
+```
+
+Los nueve pasos: arranque en equipo nuevo → modo TPV → **activar una licencia de verdad** contra
+`tpv-api` → elegir PIN → fichar entrada e iniciar sesión → categoría y producto con precio, IVA y
+lote → zona y mesa → dos líneas en la mesa → **cobro en efectivo exacto** → **cierre de caja con
+descuadre 0**. La última cifra es la que justifica el test entero: si algo se rompe entre la
+interfaz y SQLite, deja de cuadrar.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| El recorrido | `e2e/specs/venta.e2e.ts` | Los nueve pasos, en orden |
+| Arranque y aislamiento | `e2e/helpers/entorno.ts` | Verifica el binario, borra el AppData, apaga la nube |
+| Gestos | `e2e/helpers/ui.ts` | Pulsar, escribir y leer por IPC lo que la pantalla no enseña |
+| Configuración | `e2e/wdio.conf.ts` | Servicio, tiempos y captura de pantalla al fallar |
+| Build aislado | `e2e/construir.mjs` + `src-tauri/tauri.e2e.conf.json` | Identificador propio, copia verificada |
+
+### Reglas
+
+- **El aislamiento es un identificador, no una variable de entorno.** `app_data_dir()` de Tauri es
+  `dirs::data_dir().join(identifier)`, y en Windows eso sale de `SHGetKnownFolderPath`, que **no
+  mira `%APPDATA%`**: lanzar el `.exe` con otro `APPDATA` usaría la carpeta real y machacaría los
+  datos de trabajo. Por eso hay un build con `identifier` propio (`…tpv.e2e`), que es lo único que
+  separa una cosa de la otra.
+- **Y por eso el binario se verifica antes de borrar nada.** `tauri build --no-bundle` **no**
+  renombra el ejecutable (el rename a `productName` ocurre al empaquetar), así que el build de E2E y
+  el de producción escriben los dos en `target/release/tpv.exe`: dejarlo ahí es cuestión de tiempo
+  que alguien compile la app de verdad y luego lance el test contra sus propios datos.
+  `construir.mjs` deja una copia en `target/e2e/tpv-e2e.exe` y `onPrepare` **abre el fichero y
+  comprueba el identificador que lleva dentro** antes de tocar la carpeta de datos. La limpieza,
+  además, se niega si la ruta no termina en `.e2e`.
+- **El equipo del test nace sin nube, y no es un atajo.** Borrar el AppData no deja un equipo nuevo:
+  la licencia de pruebas es siempre la misma, o sea el mismo tenant, así que al abrir el WebSocket
+  la Main se traería por catch-up lo que dejaron las ejecuciones anteriores —el fichaje abierto de
+  ayer, la zona con el mismo nombre, las ventas ya cobradas—. Se vio como un fichaje que la app
+  rechazaba *"tienes un fichaje abierto"* unas veces sí y otras no, según quién ganara la carrera.
+  El test escribe `connectivity: "off"` (la palanca de SYNC-17, §9) en `device_config.json`: apaga
+  **sólo** el WebSocket, así que la activación de licencia sigue saliendo a internet, que es lo que
+  se quiere probar. La replicación queda fuera, como el Handy y la recuperación.
+- **La licencia es real y sale a internet.** Se emite a mano y vive en el `.env` de la raíz como
+  `TPV_E2E_LICENSE_KEY`, nunca en el repo; si falta, el test lo dice en vez de fallar de forma
+  opaca. Un fallo en el paso 2 puede ser la red y no el código: el mensaje del test recoge lo que
+  dijo la pantalla para distinguirlos.
+- **No va a CI, y no es pereza.** La licencia se ata al `main_device_id` del primer equipo que la
+  activa, y esa identidad vive en el keyring de la máquina. Un runner es una máquina nueva cada vez,
+  así que la segunda ejecución chocaría con el flujo de cambio de dispositivo, **que pide un OTP por
+  correo**. Automatizarlo sería emitir y revocar una licencia por ejecución con el token de
+  administración dentro de CI. Se corre antes de cada release (`RELEASING.md` §0-bis).
+- **La mesa se pulsa por coordenadas porque el plano es un `<canvas>`.** Las mesas son figuras de
+  Konva, no elementos: no hay nada que seleccionar. El test lee el layout real y calcula el punto con
+  la **misma** función que usa la pantalla (`fitTransform`), importada, no copiada — dos versiones de
+  esa cuenta se separan al primer retoque del encuadre.
+- **El IPC se usa para LEER, nunca para sembrar.** Los datos del recorrido los crea el test por la
+  interfaz, que es lo que se está probando. `leerDeLaApp` sólo se asoma a lo que ninguna pantalla
+  enseña: dónde cae una mesa, si ha vuelto a libre (`mesas_meta_all` sólo lista comandas **abiertas**,
+  así que "no está" *es* libre) y el número de ticket, que viaja al ESC/POS y no se pinta.
+- **Un clic se comprueba, no se supone.** El teclado del PIN se lee de vuelta tras cada tecla: una
+  pulsación perdida deja el PIN a medias y lo que falla es otra cosa dos pasos más allá. Y `pulsar`
+  elige el primer candidato **visible**, porque la app duplica bloques enteros para móvil y
+  escritorio y el primero del documento suele ser el que está oculto por CSS.
+- ⚠️ **`aria-label="Cerrar"` también es el aspa de la ventana.** Un selector sin acotar cierra el
+  TPV en mitad del test. Los selectores de dentro de un modal se anclan a su cabecera.
+- **El servicio pregunta por un plugin que la app no lleva, y hay que callarlo.**
+  `@wdio/tauri-service` intenta enfocar la ventana activa antes de cada `$`/`click` usando
+  `tauri-plugin-wdio`; sin él reintenta 100 veces cada 50 ms **y no recuerda la respuesta**: 6,5 s
+  por comando, ocho minutos de recorrido. El hook `beforeSuite` hace que ese puente falle en el acto.
+  Instalar el plugin no es la solución: sería meter un servidor de depuración en el binario que se
+  distribuye. Por lo mismo, `driverProvider` es `external` y no el `embedded` por defecto.
+- **`timeoutMsg` se construye al llamar, no al fallar.** Interpolar ahí una variable que se rellena
+  durante la espera imprime siempre su valor inicial. Lo que cuente el último intento va en un
+  `throw` **después** de esperar.
+- **Un fallo deja una captura** en `apps/tpv-main/e2e/fallos/` (no se versiona). Es lo que convirtió
+  «algo tapa el botón» en «la regla común de modales capa esta modal a 42 rem».

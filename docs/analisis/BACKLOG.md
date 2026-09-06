@@ -38,7 +38,7 @@
 | INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
 | OPS-01 | 🟠 | **Cero documentación de usuario y cero onboarding.** | Sin empezar |
 | OPS-02 | 🟡 | **«Contacta con soporte» sin canal ni forma de exportar un diagnóstico.** | Sin empezar |
-| TEST-01 | 🟡 | **43k líneas de frontend sin un solo test de componente ni E2E.** | Sin empezar |
+| TEST-01 | 🟡 | **43k líneas de frontend sin un solo test de componente ni E2E.** | ✅ Hecho (2026-09-06) |
 | SEC-02 | 🔵 | **`LICENSE_STORE_KEY` es un secreto global sin rotación ni custodia.** | Sin empezar |
 | INFRA-04 | 🔵 | **No hay linter en ningún lenguaje** (ni ESLint, ni clippy, ni fmt). | Baja prioridad |
 
@@ -193,15 +193,27 @@ dice *"contacta con soporte"* sin definir cuál. Y hay telemetría muy buena (Se
 scrubbing + fichero local rotado) pero **ningún botón** para sacar un paquete de diagnóstico — que es
 justo lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
 
-### TEST-01 🟡 · Sin E2E ni tests de componente
+### TEST-01 🟡 · Sin E2E ni tests de componente — ✅ Hecho (2026-09-06)
 
-Rust 491, worker 174, frontend 83 — pero los 83 son **lógica pura**, y el razonamiento de
-[`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible. El
-problema es lo que queda fuera: los tres ficheros más grandes del repo son el flujo de venta
-(`Cuentas.tsx` 2127, `VentaRapida.tsx` 2019, `MesaComandaModal.tsx` 1591) y no los toca ningún test.
+El diagnóstico seguía siendo bueno: los 83 tests del frontend son **lógica pura**, y el razonamiento
+de [`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible.
+Lo que quedaba fuera era el flujo de venta, que son los tres ficheros más grandes del repo.
 
-**No hace falta cubrirlos.** Hace falta **uno** que recorra la app real: abrir mesa → añadir líneas →
-cobrar → imprimir → cerrar caja. Hoy la única garantía de ese camino es haberlo probado a mano.
+Hay ahora **un** recorrido sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO— que estrena
+el equipo como un cliente real: activa una licencia de verdad contra el worker, elige PIN, ficha
+entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja comprobando que el
+descuadre es 0. Se lanza a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no
+va a CI porque la licencia se ata al primer dispositivo que la activa y un runner es una máquina
+nueva cada vez. Detalle y trampas en [CLAUDE.md §16](../../CLAUDE.md).
+
+**Lo que encontró en su primera pasada** (que es el argumento entero a favor de tenerlo): la regla
+común de modales de `Global.css` capaba a 42 rem el modal de comanda, que pide 1500 px. El panel del
+ticket salía cortado y los botones del contador de efectivo se aplastaban a 12 px. Arreglado.
+⚠️ La misma regla sigue encogiendo `PrintTicketModal` (pide 1000 px) y el modal de `Tareas` (768 px);
+no se ha tocado ninguno porque no hay nada que demuestre que estén rotos, pero conviene mirarlo.
+
+**Lo que sigue fuera, a propósito:** cobertura de componentes, impresión (la cubren los tests de
+Rust con su mini-intérprete ESC/POS), modo Handy y recuperación de datos.
 
 ### SEC-02 🔵 · `LICENSE_STORE_KEY` es global
 

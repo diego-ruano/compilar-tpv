@@ -54,6 +54,33 @@ App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-ap
 
 ---
 
+## 0-bis. Antes de tagear: pasar el E2E del camino del dinero (TEST-01)
+
+CI corre los tests de Rust, del worker y el anti-drift del esquema, pero **ninguno arranca la
+aplicación**. El único que recorre la costura React → IPC → Rust → SQLite es este, y **hay que
+lanzarlo a mano**, porque la licencia se ata al primer dispositivo que la activa y un runner de CI
+es una máquina nueva cada vez (automatizarlo sería emitir y revocar una licencia por ejecución, con
+el token de administración metido en CI).
+
+```bash
+pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
+pnpm --filter @tpv/main test:e2e      # ~15 s: 9 pasos, del primer arranque al arqueo
+```
+
+Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y una licencia de
+pruebas en el `.env` de la raíz como `TPV_E2E_LICENSE_KEY` (se emite con
+`pnpm license:issue -- --term 12 --email <tu-correo> --name "E2E TEST-01"`).
+
+**Si sale rojo, no tagees.** El último paso cierra caja y comprueba que el descuadre es 0: si algo
+se ha roto entre la interfaz y SQLite, ese número deja de cuadrar. Un fallo deja una captura en
+`apps/tpv-main/e2e/fallos/`. Ojo a la excepción legítima: el paso 2 sale a internet contra
+`tpv-api`, así que un fallo ahí puede ser la red y no el código — el mensaje del test distingue una
+cosa de la otra.
+
+Detalle del montaje y sus trampas en [CLAUDE.md §16](CLAUDE.md).
+
+---
+
 ## 1. Release automática (CI/CD) — recomendada
 
 Hay dos workflows en `.github/workflows/`:
@@ -243,6 +270,7 @@ el feed lo controlas tú. Aun así, ten esto a mano:
 
 ## 5. Checklist rápido
 
+- [ ] **E2E en verde** (`pnpm --filter @tpv/main build:e2e && pnpm --filter @tpv/main test:e2e`) — §0-bis
 - [ ] `version` subida en `tauri.conf.json` **y** `Cargo.toml`
 - [ ] `pnpm tauri build` con `TAURI_SIGNING_PRIVATE_KEY` en el entorno
 - [ ] Instalador `.exe` subido a host público
