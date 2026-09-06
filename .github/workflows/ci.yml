@@ -60,6 +60,11 @@ jobs:
       - name: Tests del frontend
         run: pnpm --filter @tpv/main test
 
+      # El nombre de un comando Tauri es una cadena: renombrarlo compila en Rust y en TypeScript,
+      # y revienta en tiempo de ejecución en el equipo del cliente. Esto lo caza aquí.
+      - name: Anti-drift de los nombres de comando Tauri
+        run: node scripts/check-comandos-tauri.mjs
+
   # Worker: typecheck, suite de tests (corre dentro de workerd con el pool de Cloudflare) y que el
   # registro manual de migraciones (tenantMigrations.ts) no se desincronice de la carpeta
   # packages/database/migrations/.

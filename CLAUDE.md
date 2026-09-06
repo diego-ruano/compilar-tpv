@@ -325,6 +325,12 @@ la lógica/SQL vive en `crates/*`.
   - **Que la DEK persista arriba es lo que hace recuperable la PII**, incluso en un equipo nuevo.
     El precio es que `LICENSE_STORE_KEY` es un secreto **global**: perderlo deja las DEK de todos
     los tenants indescifrables y la PII irrecuperable en todas partes.
+- **El NOMBRE de un comando Tauri no lo comprueba nadie.** Los tipos que cruzan la frontera sí están
+  cerrados (ts-rs genera `bindings.ts` desde los DTO), pero el nombre es una cadena: renombrar un
+  `#[tauri::command]` compila en Rust, compila en TypeScript y revienta en tiempo de ejecución con
+  *command not found*, en el equipo del cliente. Lo cubre `scripts/check-comandos-tauri.mjs`, que en
+  CI **rompe** si el frontend (o el E2E) invoca por nombre algo que no esté en el `generate_handler!`.
+  Su punto ciego son las invocaciones cuyo nombre es una variable: las enumera para que se vean.
 - **Al tocar un `*.schemas.ts` del worker**: cada schema con contrapartida en Rust lleva al final un
   drift-guard (`Assert<SameKeys<z.infer<typeof xSchema>, XInput>>`, ver `src/lib/typeGuards.ts`). Si
   añades un campo al zod, añádelo también al DTO de Rust (o al revés): el guard compara las claves en
