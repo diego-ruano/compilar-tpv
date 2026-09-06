@@ -111,6 +111,10 @@ pub struct BootstrapTabla {
 pub struct BootstrapSnapshot {
     #[ts(type = "number")]
     pub seq: i64,
+    /// `alias` porque la app y el worker se despliegan por separado: un TPV actualizado contra un
+    /// worker viejo (o al revés) no puede quedarse sin recuperar la base por el nombre de un campo
+    /// que ni siquiera se lee. El worker lo mandaba en camelCase desde el principio.
+    #[serde(alias = "totalFilas")]
     #[ts(type = "number")]
     pub total_filas: i64,
     pub tablas: Vec<BootstrapTabla>,

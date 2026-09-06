@@ -253,10 +253,16 @@ syncRoutes.post("/bootstrap", async (c) => {
 		);
 	}
 
+	// ⚠️ Los nombres de este sobre son el CONTRATO con `BootstrapSnapshot` de Rust, que lo
+	// deserializa con serde y falla ENTERO si uno no coincide. Salió `totalFilas` desde el día que
+	// se escribió (db4b5d8) mientras Rust esperaba `total_filas`: la recuperación desde la nube —la
+	// única salida de quien pierde su `data.db`— nunca llegó a funcionar, y no se vio porque ningún
+	// test recorría ese camino entero. Al tocar aquí, mira `crates/tpv-contracts/src/sync.rs`; lo
+	// vigila `syncBootstrap.test.ts` («el sobre lleva EXACTAMENTE los nombres que deserializa Rust»).
 	return c.json({
 		ok: true,
 		seq: resultado.seq,
-		totalFilas: resultado.totalFilas,
+		total_filas: resultado.totalFilas,
 		ventana_desde: resultado.desde,
 		backfill: resultado.backfill,
 		tablas: resultado.tablas,

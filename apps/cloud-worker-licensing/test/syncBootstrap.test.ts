@@ -118,6 +118,33 @@ describe("POST /v1/sync/bootstrap", () => {
 		expect(zonas!.filas).toHaveLength(1);
 	});
 
+	it("el sobre lleva EXACTAMENTE los nombres que deserializa Rust", async () => {
+		// Esto es lo que faltaba, y costó caro: el fichero decía fijar el contrato con
+		// `bootstrap_restaurar`, pero comprobaba las tablas y las filas y NO los nombres del sobre.
+		// El worker mandó `totalFilas` desde el primer día (db4b5d8) mientras `BootstrapSnapshot`
+		// esperaba `total_filas`, así que serde fallaba con "missing field" y la recuperación desde
+		// la nube —la única salida de quien pierde su `data.db`— nunca llegó a funcionar. No lo vio
+		// nadie porque ningún test recorría ese camino entero.
+		//
+		// La lista de abajo es la de `crates/tpv-contracts/src/sync.rs::BootstrapSnapshot`. Si
+		// añades un campo allí, añádelo aquí; si lo renombras en uno de los dos lados, este test
+		// cae antes de que caiga un cliente.
+		const { body } = await pedirVolcado("sobre", (sql) => {
+			sql.exec("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');");
+		});
+
+		for (const campo of ["seq", "total_filas", "tablas", "backfill"]) {
+			expect(Object.keys(body), `falta "${campo}" en la respuesta`).toContain(campo);
+		}
+		expect(typeof body.total_filas).toBe("number");
+		expect(Array.isArray(body.backfill)).toBe(true);
+
+		// Y cada tabla, igual: son los campos de `BootstrapTabla`.
+		for (const campo of ["nombre", "columnas", "filas"]) {
+			expect(Object.keys(body.tablas[0]), `falta "${campo}" en una tabla`).toContain(campo);
+		}
+	});
+
 	it("las filas van posicionales y en el orden de `columnas`", async () => {
 		// Es el formato que parsea `bootstrap_restaurar`: construye el INSERT con `columnas` y
 		// enlaza cada fila por posición. Si el worker devolviera objetos, la Main restauraría
