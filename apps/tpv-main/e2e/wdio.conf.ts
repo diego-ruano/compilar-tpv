@@ -33,9 +33,10 @@ import { emitirLicencia, revocar } from "./helpers/licencias.js";
  *
  * Cada uno prepara el suyo en `beforeSession` en vez de compartir una preparación única, porque no
  * quieren lo mismo: la venta quiere un equipo recién instalado y sin nube; las copias necesitan la
- * nube encendida (la reconciliación es lo que desbloquea el login) y un tenant limpio; y el segundo
+ * nube encendida (la reconciliación es lo que desbloquea el login) y un tenant limpio; el segundo
  * tramo de copias necesita justo lo contrario de una limpieza — el equipo del tramo anterior, con
- * la base rota.
+ * la base rota; y la licencia la necesita encendida porque lo que prueba es que anular le CORTA el
+ * WebSocket al equipo, y sin socket abierto no hay nada que cortar.
  *
  * `licencia` dice cuál de las emitidas para esta tanda le toca (ver `onPrepare`). Los dos tramos
  * de copias comparten la suya porque comparten equipo, y por tanto tienen que compartir tenant.
@@ -71,7 +72,7 @@ const RECETAS: Record<string, Receta> = {
         copiaMala: true,
     },
     "copias-3-nube.e2e.ts": { equipo: "el de antes, roto", nube: true, licencia: "copias" },
-    "licencia.e2e.ts": { equipo: "nuevo", nube: false, licencia: "licencia" },
+    "licencia.e2e.ts": { equipo: "nuevo", nube: true, licencia: "licencia" },
 };
 
 /** Las licencias emitidas para esta tanda, para revocarlas al terminar. */

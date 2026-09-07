@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
+import { cerrarSocketsDelDispositivo } from "../../lib/hub";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { ensureLicensingSchemaMw } from "../../middleware/ensureSchema";
 import { getDb } from "../../server/db";
@@ -186,8 +187,20 @@ adminRoutes.post("/licenses/:id/revoke", async (c) => {
 	await revokeLicense(db, licenseId);
 	await auditAdmin(db, "revoke", licenseId, { keyShort: lic.key_short });
 
-	// El TPV se entera en su siguiente /status (estado firmado = revoked) y se bloquea. Si además
-	// quieres cortarle el WebSocket al instante, usa POST /v1/device/revoke con su deviceId.
+	// Y se le corta el WebSocket a la Main, que es lo que convierte "anulada" en "bloqueada" ahora
+	// mismo. Sin esto el equipo se enteraba en la siguiente vuelta del job `licencia` — cada 6
+	// horas — y mientras tanto seguía vendiendo con una licencia que ya no vale.
+	//
+	// Las Handy no hace falta cerrarlas: el propio DO las congela (`main_offline`) en cuanto la
+	// Main se va, y al reconectar su ticket también se rechaza. Y si la licencia nunca llegó a
+	// activarse no hay `main_device_id` ni socket que cerrar.
+	await cerrarSocketsDelDispositivo(
+		c.env.TenantHub,
+		String(c.env.LICENSE_JWT_SECRET || ""),
+		String(lic.tenant_id || ""),
+		String(lic.main_device_id || ""),
+	);
+
 	return c.json({ ok: true, licenseId, status: "revoked" });
 });
 

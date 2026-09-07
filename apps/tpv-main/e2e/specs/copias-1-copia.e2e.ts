@@ -19,21 +19,15 @@
 // cubre `una_copia_sale_del_equipo_y_vuelve` en Rust, y por la interfaz pasa por un diálogo nativo
 // de Windows que WebDriver no puede tocar.
 
-import { $, browser, expect } from "@wdio/globals";
+import { $, expect } from "@wdio/globals";
 
 import { estrenarEquipo } from "../helpers/arranque.js";
 import { CATEGORIA, NEGOCIO, PIN } from "../helpers/copias.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
+import { esperarNubeAlDia } from "../helpers/nube.js";
 import { conTexto, irA, leerDeLaApp, pulsar } from "../helpers/ui.js";
 
 cargarDotEnv();
-
-type Salud = {
-    outbox_pending: number;
-    last_seq: number;
-    failing: number;
-    quarantined: number;
-};
 
 describe("Copias de seguridad · antes de la avería", () => {
     it("1 · estrena el equipo con la nube encendida", async () => {
@@ -56,26 +50,8 @@ describe("Copias de seguridad · antes de la avería", () => {
         // Si se hace la copia con el outbox a medias, lo que se restaura después no coincide con lo
         // que la nube conoce y la reconciliación no converge. Esperar aquí es lo que hace que el
         // segundo tramo sea determinista y no una carrera.
-        let ultima: Salud | null = null;
-        const subido = await browser
-            .waitUntil(
-                async () => {
-                    ultima = await leerDeLaApp<Salud>("sync_health");
-                    return ultima.outbox_pending === 0 && ultima.quarantined === 0;
-                },
-                { timeout: 180_000 },
-            )
-            .then(
-                () => true,
-                () => false,
-            );
-
-        if (!subido) {
-            throw new Error(
-                `La nube no llegó a tener todo lo de este equipo: ${JSON.stringify(ultima)}`,
-            );
-        }
-        expect((ultima as unknown as Salud).outbox_pending).toBe(0);
+        const salud = await esperarNubeAlDia();
+        expect(salud.outbox_pending).toBe(0);
     });
 
     it("4 · guarda una copia de seguridad desde Configuración", async () => {

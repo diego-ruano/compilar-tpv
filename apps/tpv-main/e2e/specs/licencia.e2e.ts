@@ -9,16 +9,24 @@
 // `revoke`/`unrevoke` anulan y deshacen. La licencia es de esta tanda, así que romperla no le hace
 // nada a los demás recorridos.
 //
-// ⚠️ El pulso que se entera del cambio es el job `licencia`, cada 6 horas, y en la aplicación NO hay
-// ningún botón de "comprobar ahora" mientras todo va bien (sólo aparece uno —«Reintentar»— cuando ya
-// estás bloqueado, y ése sí se usa aquí al final). Como no se pueden esperar seis horas, el
-// recorrido llama a `license_check_now`, que es exactamente lo que ejecuta el job.
+// Hay DOS pulsos que enteran al equipo de que su licencia ha cambiado, y el recorrido usa los dos:
+//
+//   · **anular empuja**: el endpoint de administración le pide al `TenantHub` que cierre el socket
+//     de la Main, y el rechazo del ticket al reconectar es lo que dispara el bloqueo. Por eso este
+//     recorrido corre con la NUBE ENCENDIDA: sin socket abierto no hay nada que cortar, y el test
+//     pasaría sin haber probado el camino. Se comprueba SIN llamar a nada, mirando la pantalla.
+//   · **caducar no empuja**: nadie avisa a nadie, se descubre en la siguiente vuelta del job
+//     `licencia` —cada 6 horas— y en la aplicación no hay botón de "comprobar ahora" mientras todo
+//     va bien (sólo aparece uno —«Reintentar»— cuando ya estás bloqueado, y ése sí se usa al
+//     final). Como no se pueden esperar seis horas, ahí el recorrido llama a `license_check_now`,
+//     que es exactamente lo que ejecuta el job.
 
 import { $, browser, expect } from "@wdio/globals";
 
 import { activarLicencia, estrenarEquipo, ficharYEntrar } from "../helpers/arranque.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
 import { acortar, alargar, desrevocar, revocar } from "../helpers/licencias.js";
+import { esperarNubeAlDia } from "../helpers/nube.js";
 import { conTexto, leerDeLaApp, pulsar } from "../helpers/ui.js";
 
 cargarDotEnv();
@@ -51,20 +59,37 @@ async function comprobarLicencia(): Promise<Gate> {
 }
 
 describe("La licencia deja de valer", () => {
-    it("1 · estrena el equipo con una licencia buena", async () => {
+    it("1 · estrena el equipo con una licencia buena, y conectado", async () => {
         await estrenarEquipo(NEGOCIO, PIN);
+
+        // Que el outbox llegue a cero prueba que el WebSocket está abierto, que es la premisa del
+        // paso siguiente. Sin esta espera, un equipo que nunca llegó a conectarse se bloquearía
+        // igual —su primer ticket ya sería un 403— y el test daría verde sin probar el empujón.
+        await esperarNubeAlDia();
     });
 
-    it("2 · anulada: el TPV deja de trabajar y vuelve a pedir la licencia", async () => {
+    it("2 · anulada: el TPV deja de trabajar SOLO, sin que nadie le pregunte", async () => {
         await revocar(idLicencia());
 
-        const gate = await comprobarLicencia();
-        expect(gate.allowed).toBe(false);
-        expect(gate.reason).toBe("revoked");
-
-        // Con la app abierta, esto es lo que ve el TPV, y lo ve EN EL ACTO: el comando emite
-        // `license:changed` y la pantalla se bloquea sin que nadie recargue nada.
-        await conTexto("h1", "Licencia anulada").waitForDisplayed({ timeout: 60_000 });
+        // Y aquí no se llama a nada. La cadena entera tiene que ocurrir por su cuenta: el endpoint
+        // de administración avisa al `TenantHub`, éste cierra el socket de la Main, el cliente
+        // reconecta a los 3 s, `/v1/ws/ticket` le contesta 403, `useMainSocket` convierte ese
+        // rechazo en un `license_check_now` y el `license:changed` que emite tapa la aplicación.
+        //
+        // Es lo único que separa "se entera en segundos" de "se entera dentro de seis horas", y
+        // ninguna de esas piezas está probada por las otras: cada una vive en un proceso distinto.
+        // Y ese título ES el motivo: `blockedCopy` ramifica por él, y una caducidad diría "Licencia
+        // caducada". Preguntarle al gate por segunda vez no serviría: la comprobación que acaba de
+        // hacer la aplicación ya borró el estado local —un rechazo definitivo lo borra a propósito—
+        // así que a partir de aquí contesta `needs_activation`, que es el paso siguiente y no éste.
+        //
+        // ⚠️ La espera es CORTA a propósito, y no se puede alargar sin romper lo que prueba. El job
+        // `licencia` tiene `retardo_inicial` de 2 minutos, o sea que con una espera generosa el
+        // bloqueo podría llegar por el job —exactamente lo que este paso existe para descartar— y
+        // el test daría verde con el empujón roto. Por el socket tarda unos segundos: cerrar,
+        // reconectar (backoff base 3 s) y un `license_check_now`. Se comprobó quitando el aviso al
+        // `TenantHub` en el worker: sin él, este paso falla.
+        await conTexto("h1", "Licencia anulada").waitForDisplayed({ timeout: 45_000 });
 
         // Al reiniciar ya no hay estado que bloquear: un rechazo definitivo (`revoked`,
         // `device_replaced`, `license_not_found`) **borra el estado local** a propósito, así que el

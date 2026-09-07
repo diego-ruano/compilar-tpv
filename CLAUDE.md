@@ -481,6 +481,22 @@ no sólo en dev.
     lo intenta y obedece. Un 403 se traduce a `rechazado` y espacia los reintentos.
   - **La gracia por caducidad sincroniza.** `expiry_grace` pasa el filtro a propósito: durante esos
     días el TPV sigue vendiendo, y vender sin replicar es la peor combinación.
+  - **Anular una licencia empuja; caducar, no.** `POST /v1/admin/licenses/:id/revoke` le pide al
+    `TenantHub` del tenant que cierre el socket de la Main (`lib/hub.ts::cerrarSocketsDelDispositivo`
+    → `/internal/revoke`). No hace falta ningún mensaje nuevo del DO: **basta con cerrar**, porque el
+    cliente reconecta a los 3 s, se lleva un 403 y `useMainSocket` traduce ese rechazo en un
+    `license_check_now` que emite `license:changed` y tapa la aplicación. Sin eso, el único pulso era
+    el job `licencia` —**cada 6 horas**— y un equipo anulado seguía vendiendo medio día. Reglas:
+    - **Es best-effort, dentro de un `try`/`catch`, y tiene que serlo.** Lo que manda es el
+      control-plane; esto sólo adelanta el momento en que el equipo se entera. Que un DO caído
+      pudiera impedir anular una licencia sería cambiar un retraso por una operación imposible.
+    - **Las Handy no se cierran a mano.** El DO las congela (`main_offline`) en cuanto la Main se va,
+      y al reconectar su ticket también se rechaza.
+    - **Lo frágil es la firma, no el cierre.** El payload HMAC incluye método, `pathname` y cuerpo:
+      desalinear cualquiera de los tres da un 401 en el DO **en silencio**, porque es best-effort. Lo
+      fija `adminLicenciaReversible.test.ts`, que pasa la request capturada por el mismo verificador.
+    - Lo que queda fuera y no tiene arreglo: un equipo **sin socket** (apagado, sin red) sigue
+      dependiendo del job. Tampoco importa: sin nube no está replicando de todos modos.
   - **Palanca de emergencia sin UI:** `connectivity: "auto" | "off"` en `device_config.json`
     (comandos `get/set_connection_mode`). Sirve para una red patológica o un cliente que no quiera
     nube. La captura del outbox NO depende de ella: al volver a `auto` se drena lo acumulado.
@@ -1070,6 +1086,13 @@ pantalla de bloqueo → se renueva y el propio botón de reintentar la desbloque
 provocan por el API de administración; sin `shorten` no había forma de ensayar una caducidad sin
 esperar meses de calendario.
 
+Corre con la **nube encendida**, y eso es parte de lo que prueba: anular empuja (§9), así que el paso
+de la anulación **no llama a nada** —espera a que la pantalla se bloquee sola— y su espera es corta
+a propósito. El job `licencia` tiene `retardo_inicial` de 2 minutos: con una espera generosa el
+bloqueo podría llegar por el job y el test daría verde con el empujón roto. Se verificó quitando el
+aviso al `TenantHub` en el worker —sin él ese paso falla— y la caducidad, que **no** empuja, sigue
+usando `license_check_now` porque ahí no hay nada que esperar.
+
 | Pieza | Archivo | Rol |
 |---|---|---|
 | El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, carta, venta, cobro y arqueo |
@@ -1080,6 +1103,7 @@ esperar meses de calendario.
 | Licencias de la tanda | `e2e/helpers/licencias.ts` | Emitir, revocar, desrevocar, acortar |
 | Aislamiento del equipo | `e2e/helpers/entorno.ts` | Verifica el binario, prepara el AppData, rompe la base |
 | Gestos | `e2e/helpers/ui.ts` | Pulsar, escribir y leer por IPC lo que la pantalla no enseña |
+| Esperar a la nube | `e2e/helpers/nube.ts` | Outbox a cero: lo único que el IPC ofrece como prueba de que el socket está abierto |
 | Configuración | `e2e/wdio.conf.ts` | Servicio, tiempos y captura de pantalla al fallar |
 | Build aislado | `e2e/construir.ts` + `src-tauri/tauri.e2e.conf.json` | Identificador propio, copia verificada |
 | Huella del código | `e2e/helpers/huella.ts` | Qué entra en el binario, para saber si está al día |

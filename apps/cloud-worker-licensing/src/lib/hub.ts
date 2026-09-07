@@ -80,3 +80,49 @@ export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 
 	return json.data;
 }
+
+/**
+ * Le dice al `TenantHub` que cierre los WebSockets vivos de un dispositivo.
+ *
+ * Es la diferencia entre "se entera cuando le toque" y "se entera ahora". El TPV sólo pregunta por
+ * su licencia cada 6 horas (job `licencia`), así que sin esto un equipo con el socket abierto sigue
+ * vendiendo hasta medio día después de anularla. Cerrándoselo, el cliente reconecta a los 3 s,
+ * `/v1/ws/ticket` le contesta 403 y ESO es lo que dispara el bloqueo de verdad: `useMainSocket`
+ * traduce un rechazo de la nube en un `license_check_now`, que emite `license:changed` y tapa la
+ * aplicación. Por eso no hace falta ningún mensaje nuevo del DO: basta con cerrar.
+ *
+ * **Best-effort a propósito.** Quien llama ya ha escrito el cambio en el control-plane, que es lo
+ * que manda; esto sólo lo adelanta. Si el DO no contesta, el equipo se bloquea igual en su próximo
+ * reconnect o en la siguiente vuelta del job. Un fallo aquí nunca puede tumbar la operación.
+ */
+export async function cerrarSocketsDelDispositivo(
+	hubNs: DurableObjectNamespace,
+	jwtSecret: string,
+	tenantId: string,
+	deviceId: string,
+): Promise<void> {
+	if (!tenantId || !deviceId) return;
+
+	try {
+		const stub = hubNs.get(hubNs.idFromName(tenantId));
+
+		const rawBody = JSON.stringify({ deviceId });
+
+		// FABLE-F: misma firma HMAC que `/internal/apply`. `pathname` y `rawBody` tienen que
+		// coincidir EXACTAMENTE con los que verá el verificador del DO.
+		const sigHeaders = await signInternalWorkerRequest(
+			jwtSecret,
+			"POST",
+			"/internal/revoke",
+			rawBody,
+		);
+
+		await stub.fetch("https://do/internal/revoke", {
+			method: "POST",
+			headers: { "content-type": "application/json", ...sigHeaders },
+			body: rawBody,
+		});
+	} catch {
+		// Ver arriba: si falla, el dispositivo se bloquea en el próximo reconnect.
+	}
+}

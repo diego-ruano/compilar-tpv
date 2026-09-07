@@ -205,7 +205,7 @@ de [`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar Rea
 Lo que quedaba fuera era el flujo de venta, que son los tres ficheros más grandes del repo.
 
 Hay ahora **cinco** recorridos sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO, 26 pasos
-en ~60 s— que estrenan el equipo como un cliente real:
+en ~70 s— que estrenan el equipo como un cliente real:
 
 1. **El camino del dinero**: activa una licencia de verdad contra el worker, elige PIN, ficha
    entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja con descuadre 0.
@@ -214,7 +214,9 @@ en ~60 s— que estrenan el equipo como un cliente real:
    reconciliación abra el login.
 3. **Volver sólo con la nube**: el volcado de SYNC-19, sin copia local. Aquí apareció que ese
    camino **nunca había funcionado** (`totalFilas` contra `total_filas`).
-4. **La licencia deja de valer**: anulada, desanulada, caducada y renovada.
+4. **La licencia deja de valer**: anulada, desanulada, caducada y renovada. Con la nube encendida,
+   porque el paso de la anulación comprueba que el bloqueo llega **solo y en segundos**, sin que el
+   test le pregunte nada a la aplicación.
 
 Se lanzan a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no van a CI porque
 emiten licencias reales con el token de administración. Detalle y trampas en
@@ -225,6 +227,13 @@ común de modales de `Global.css` capaba a 42 rem el modal de comanda, que pide 
 ticket salía cortado y los botones del contador de efectivo se aplastaban a 12 px. Arreglado.
 **Lo que sigue fuera, a propósito:** cobertura de componentes, impresión (la cubren los tests de
 Rust con su mini-intérprete ESC/POS), modo Handy y recuperación de datos.
+
+**Y lo que encontró el recorrido de la licencia** (2026-09-07): anular una licencia no avisaba a
+nadie. El único pulso era el job `licencia`, cada 6 horas, así que un equipo con el socket abierto
+seguía vendiendo hasta medio día con una licencia muerta. Arreglado en el endpoint de administración
+(cierra el socket vía `TenantHub`, ver [CLAUDE.md §9](../../CLAUDE.md)); el resto de la cadena ya
+existía. Queda fuera, sin arreglo posible y sin importancia: un equipo apagado o sin red sigue
+dependiendo del job.
 
 ### SEC-02 🔵 · `LICENSE_STORE_KEY` es global
 
