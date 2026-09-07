@@ -26,8 +26,8 @@
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | Sin empezar |
-| FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | Sin empezar |
+| FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | 🟡 Planificado (2026-09-07) |
+| FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | 🟡 Planificado (2026-09-07) |
 | CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | ✅ Hecho (2026-09-05) |
 | SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | ✅ Hecho (2026-09-05) |
 | SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | ✅ Hecho (2026-09-05) |
@@ -59,11 +59,24 @@ se diseñan al principio. La mitad del terreno ya está desbrozada — desde CUE
 borran y existe `Movimientos_Caja`, que es la tabla que después llevará el encadenamiento por
 hash —, pero el resto sigue siendo trabajo de diseño con el reglamento delante.
 
+**Plan escrito (2026-09-07): [PLAN_VERIFACTU.md](../PLAN_VERIFACTU.md).** Los plazos ya están
+confirmados —**1 de enero de 2027** para contribuyentes de IS, 1 de julio de 2027 para el resto—
+y las decisiones de fondo, tomadas: modalidad VERI*FACTU, remite la propia Main con el certificado
+del local, un cobro es una factura simplificada, y sin conexión se sigue vendiendo. Dos cosas que
+esta ficha daba por sabidas y son falsas: **la anulación fiscal existe** (pero es excepcional, y
+una devolución es una rectificativa R5, no una anulación), y **`Movimientos_Caja` no es el sitio**
+para el encadenamiento — lleva gastos, que no son facturas.
+
 ### FISCAL-02 🟠 · Factura completa con NIF del cliente
 
 `Business_Settings` guarda el CIF **del negocio** y nada más. No hay forma de emitir una factura con
 los datos fiscales del **cliente**, que es lo que pide cualquier comida de empresa. Encaja con
 FISCAL-01 y conviene diseñarlos juntos, no uno detrás de otro.
+
+**Dentro de [PLAN_VERIFACTU.md](../PLAN_VERIFACTU.md) §9**, con los dos caminos que hacen falta: `F1`
+en el momento del cobro (obligatoria además por encima de 3.000 €, que es el límite de la
+simplificada en hostelería) y `F3` **en sustitución** de la simplificada cuando el cliente vuelve
+con el ticket al día siguiente.
 
 ### CUENTA-07 ✅ · Anular un cobro borraba la fila (resuelto 2026-09-05)
 
