@@ -1035,7 +1035,7 @@ cosas**, que es la única forma de comprobar el trabajo de impresión sin una im
 **Cinco** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
 IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
 componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
-sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda unos 15 segundos.
+sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda algo más de un minuto.
 
 ```bash
 cargo install tauri-driver --locked          # una vez por máquina

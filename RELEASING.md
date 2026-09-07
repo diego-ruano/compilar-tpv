@@ -62,7 +62,7 @@ con el token de administración y eso no se mete en CI.
 
 ```bash
 pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
-pnpm --filter @tpv/main test:e2e      # ~60 s: 26 pasos en cinco recorridos
+pnpm --filter @tpv/main test:e2e      # ~70 s: 26 pasos en cinco recorridos
 ```
 
 Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro y arqueo con descuadre 0), las
