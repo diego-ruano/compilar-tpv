@@ -1,8 +1,8 @@
 # Veri*factu — diseño e implementación
 
-> **Estado: PLANIFICADO** (2026-09-07). Cierra **FISCAL-01** y **FISCAL-02** del
-> [backlog](analisis/BACKLOG.md). Lo que sigue es el **diseño** —el modelo, las decisiones y sus
-> porqués—, escrito con el reglamento y las especificaciones técnicas de la AEAT delante (§16).
+> **Estado: PLANIFICADO** (2026-09-07, revisado el 2026-09-08). Cierra **FISCAL-01** y **FISCAL-02**
+> del [backlog](analisis/BACKLOG.md). Lo que sigue es el **diseño** —el modelo, las decisiones y sus
+> porqués—, escrito con el reglamento y las especificaciones técnicas de la AEAT delante (§17).
 >
 > **Fecha límite: 1 de enero de 2027** (contribuyentes de IS). El 1 de julio de 2027 para el resto.
 > No hay bares en producción todavía, así que **el esquema se edita en `0001_inicial.sql`** y se
@@ -22,9 +22,11 @@ Acordadas con el responsable el 2026-09-07.
 |---|---|---|
 | **Modalidad** | **VERI\*FACTU**, siempre, sin interruptor | No hay firma XAdES por registro ni registro de eventos. A cambio, **todo RF generado hay que remitirlo** |
 | **Quién remite** | **La propia Main**, con el certificado del local instalado en el equipo | No custodiamos certificados de terceros. Precio: un bug en el XML se arregla **publicando una versión**, no redesplegando un worker (§6.6) |
+| **Para qué el certificado** | **Sólo para autenticar la conexión (TLS mutuo).** En VERI\*FACTU **no se firma la factura** | La integridad la da la cadena de huellas, que es un SHA-256 pelado. La firma XAdES es de la otra modalidad (§6.2) |
 | **Qué es una factura** | **Un cobro = una factura simplificada (F2)** | Tres pagos de 20 € sobre una mesa son **tres** facturas, cada una con su número, su QR y su registro |
 | **Numeración** | Serie por ejercicio: `2027/000001` | El contador se reinicia cada año. Nunca retrocede (§3.3) |
 | **Sin conexión** | **Se sigue vendiendo.** El RF se genera, se encadena, se imprime con QR y se remite después | El reglamento lo contempla; lo que no se puede es *no* remitir nunca (§1.2) |
+| **Retraso tolerado** | **Horas, no días.** Escalera de avisos que se vuelve imposible de ignorar (§1.2.1) | Un corte de tarde es normal; cuatro días acumulando no lo es, y el software tiene que decirlo |
 | **Fallo de envío** | **Nunca bloquea la aplicación.** Se clasifica, se avisa y se reintenta | Un bug nuestro no puede cerrar un bar (§6.5) |
 | **Tabla** | **Propia y append-only**, no `Movimientos_Caja` | Esa tabla lleva gastos, que no son facturas, y es «para investigar, no para calcular» |
 | **Importes** | Se guarda **el texto exacto que se hasheó** | La huella se calcula sobre una cadena; recomputarla desde un `REAL` la rompe en silencio (§4.2) |
@@ -77,6 +79,36 @@ expedida sin su RF generado**, o un RF generado que nunca se remite. La FAQ de l
 arquitecturas TPV + backoffice lo llama *«facturas huérfanas»* y es la única forma de romper esto de
 verdad.
 
+#### 1.2.1 Pero «se puede vender sin red» no es «se puede estar cuatro días sin remitir»
+
+Que no haya un plazo en horas no significa que valga cualquier cosa. El art. 16.1 pide remitir *«de
+forma continuada… automática… instantánea»*, y un equipo al que le ponen internet cada tres días para
+soltar el atraso **no es un sistema VERI\*FACTU**, por mucho que acabe enviando todo. El corte de una
+tarde es el caso que la norma contempla; el modo de funcionamiento habitual no.
+
+El software no puede impedirlo —bloquear la caja es peor—, pero sí puede hacerlo **imposible de
+ignorar**. La escalera se mide por la **antigüedad del registro pendiente más viejo**, no por el
+tiempo sin conexión: estar desconectado sin nada que enviar no es un problema.
+
+| Antigüedad del pendiente más viejo | Qué hace el TPV |
+|---|---|
+| < 1 h | Nada. Es el funcionamiento normal, incluso con fibra |
+| ≥ 1 h | Indicador visible en la barra + estado en Configuración → Conectividad |
+| ≥ 6 h | Notificación persistente (NOTIF-01), dirigida al rol administrador |
+| ≥ 24 h | **Aviso modal al iniciar sesión**, con reconocimiento explícito. No se cierra solo |
+| ≥ 72 h | Aviso modal **en cada cobro** + telemetría, para que el proveedor pueda llamar al cliente |
+
+**Nunca bloquea el cobro, en ningún escalón.** La obligación es del bar, no nuestra; nuestro trabajo
+es que no pueda decir que no lo sabía, y dejar rastro de que se le avisó.
+
+⚠️ **Y una consecuencia que hay que ver ahora, no al implementarla:** la palanca de emergencia
+`connectivity: "off"` de `device_config.json` (SYNC-17, §9 de CLAUDE.md) apaga el WebSocket de
+sincronización. **No puede apagar la remisión a la AEAT.** Son dos cosas distintas y comparten una
+palabra: una es una comodidad de producto —«este cliente no quiere nube»— y la otra es una obligación
+tributaria. Si comparten interruptor, el atajo para una red patológica convierte en silencio un TPV
+conforme en uno que no lo es. **La remisión tiene su propia puerta**, y sólo la cierran dos cosas: no
+haber certificado, o estar en modo pruebas.
+
 ### 1.3 No se envía factura a factura: hay un control de flujo obligatorio
 
 Art. 16.2 de la Orden HAC/1177/2024. La AEAT devuelve en cada respuesta un
@@ -99,17 +131,28 @@ Cada fila **activa** de `Pagos` es una **factura simplificada (`F2`)** con su pr
 comanda pagada en tres veces produce tres facturas. Es lo que ya hace el TPV con `Numero_Ticket`, así
 que no cambia la operativa: cambia lo que ese número significa.
 
-### 2.2 El límite de los 3.000 €
+### 2.2 El límite de los 3.000 € — ⏳ PENDIENTE DE DECISIÓN
 
 Una simplificada sólo vale hasta **400 € (IVA incluido)** con carácter general, pero la hostelería
 está en la lista del art. 4.2 del RD 1619/2012 (*«servicios de hostelería y restauración prestados
 por restaurantes, bares, cafeterías… así como el suministro de bebidas o comidas para consumir en el
 acto»*), que sube el límite a **3.000 €**.
 
-**Regla de producto:** por encima de 3.000 € el TPV **no puede emitir `F2`**. Tiene que pedir los
-datos fiscales del cliente y emitir una `F1`. Es raro en un bar y frecuentísimo en un catering o una
-comunión, así que no se puede dejar sin cubrir. El umbral va en `Business_Settings` (por si cambia la
-norma), no incrustado.
+Por encima de esa cifra **no cabe una `F2`**: hay que emitir factura completa con destinatario. Lo
+que está sin decidir es **qué hace la pantalla** cuando alguien va a cobrar 3.200 €:
+
+| Opción | Qué pasa | A favor / en contra |
+|---|---|---|
+| **a** | El cobro **se detiene** y pide los datos fiscales antes de continuar | Correcto siempre. Pero es la única puerta dura en el camino del dinero |
+| **b** | Se avisa y se ofrece **emitir `F1`**, con «continuar igual» deshabilitado | Igual de correcto, menos brusco |
+| **c** | Sólo se avisa y se deja pasar | **No conforme.** Anotada para descartarla por escrito |
+
+**Estado (2026-09-08):** aplazada a propósito. En un bar es un caso rarísimo, así que no puede
+condicionar el diseño de los tramos 1-5; en un catering o una comunión es normal. Se decide antes del
+**tramo 7** (factura completa), que es donde se implementa.
+
+Sea cual sea la elección, el umbral va en `Business_Settings` (`Limite_Simplif`) y no incrustado: es
+un número que la norma puede mover.
 
 ### 2.3 Los tipos de factura que necesitamos
 
@@ -395,17 +438,20 @@ Se rasteriza con la crate `qrcode` y se imprime por el camino que **ya existe** 
 impresoras lo llevan. La escala de módulo se elige para caer dentro de la banda de 30–40 mm al DPI
 configurado. En papel de 58 mm (≈48 mm imprimibles) entra a 30 mm; en 80 mm sobra sitio.
 
-### 5.3 Dónde va, y por qué rompe una regla que ya teníamos
+### 5.3 Dónde va — y la regla nuestra que deroga (decidido: 2026-09-08)
 
 El QR va **al principio de la factura**, antes de cualquier contenido. Encima lleva el texto
 **«QR tributario:»** y debajo **«VERI\*FACTU»** (o «Factura verificable en la sede electrónica de la
 AEAT»), con letra igual o mayor que el resto.
 
 Esto choca de frente con la regla de §11 de CLAUDE.md: *«El logo cierra el ticket, centrado»* y la
-cabecera son los datos del negocio. **Gana el QR**: la norma dice «al principio» y el logo ya se
-había movido abajo precisamente para que lo primero que se lea sea de quién es el ticket. El orden
-nuevo queda: QR tributario → leyenda → datos del negocio → líneas → totales → desglose de IVA →
-mensaje → logo → corte.
+cabecera son los datos del negocio. **Gana el QR**, y no por jerarquía de normas sino porque la razón
+que puso el logo abajo —que lo primero que se lea sea de quién es el ticket y cuánto se ha pagado—
+sigue cumpliéndose: el QR no es contenido que compita, es una etiqueta.
+
+El orden nuevo queda: **QR tributario → leyenda → datos del negocio → líneas → totales → desglose de
+IVA → mensaje → logo → corte.** Al implementarlo hay que **actualizar esa regla en CLAUDE.md §11**,
+no dejarla contradiciendo al código.
 
 La **vista previa** (`TicketPaper.tsx`) sigue siendo un espejo y hay que moverla igual.
 
@@ -435,30 +481,50 @@ son la puerta de la opción «lo envía el worker», que se descartó.)
 No hay crate de SOAP decente en Rust y tampoco hace falta: el sobre es fijo y el cuerpo se construye
 con `quick-xml`. Lo que sí hay que hacer bien es el **escapado** y la validación contra los XSD.
 
-### 6.2 El certificado — y el riesgo técnico que hay que despejar pronto
+### 6.2 El certificado — para qué se usa exactamente
 
-El certificado tiene que ser **cualificado reconocido**, y puede ser el del obligado, el de un
-apoderado o el de un colaborador social. Vive en el equipo del bar.
+**Lo primero, porque es el malentendido natural: en VERI\*FACTU no se firman las facturas.** La firma
+electrónica del registro (XAdES) es un requisito de la modalidad **NO** VERI\*FACTU, que descartamos
+en §0. Aquí lo que garantiza la integridad es la **cadena de huellas** (§4), y ninguna huella lleva
+criptografía de clave pública: es un SHA-256 pelado.
 
-⚠️ **Aquí está el único riesgo técnico serio del plan.** Autofirma puede usar un certificado
-instalado en el almacén de Windows aunque su clave privada sea **no exportable**, porque firma a
-través de CAPI/CNG sin sacarla nunca. `reqwest` sobre `rustls` —que es lo que usa el workspace— **no
-puede hacer eso**: necesita la clave en memoria.
+El certificado sirve para **una cosa sola**: autenticar la conexión con el servicio web de la AEAT.
+`Certificado: las aplicaciones que envían información a los servicios web deberán autenticarse con
+certificado electrónico cualificado reconocido`, dice la descripción del servicio. Es **TLS mutuo**,
+no una firma de documento. Puede ser el del obligado, el de un apoderado o el de un colaborador
+social, y vive en el equipo del bar.
 
-Dos salidas, y hay que elegir con una prueba delante, no sobre el papel:
+Dicho eso, la pregunta de fondo sigue siendo buena y la respuesta es que **sí, se puede hacer lo que
+hace Autofirma**. El handshake TLS también necesita una firma con la clave privada, y esa firma la
+puede hacer Windows sin que la clave salga nunca del almacén. Tres caminos:
 
-1. **Pedir el fichero `.p12` / `.pfx` y su contraseña** (lo que hace la mayoría del software de
-   facturación). Se guarda cifrado en el `secret_store` que ya existe (keyring en escritorio).
-   Simple, portátil, y funciona con los certificados de la FNMT, que se descargan e instalan desde un
-   `.p12` exportable.
-2. **Usar el almacén de Windows** vía `native-tls` (que en Windows es *schannel*). Evita pedir el
-   fichero, pero mete una segunda pila TLS en el binario y una ruta específica de plataforma.
+| | Cómo | La clave privada | Sirve con clave **no exportable** |
+|---|---|---|---|
+| **A** | Fichero `.p12`/`.pfx` + contraseña, guardado cifrado en `secret_store` | **En memoria** del proceso | ❌ No |
+| **B** | Almacén de Windows vía **CNG**, con [`rustls-cng`](https://github.com/rustls/rustls-cng) | **Nunca sale del almacén.** Windows hace la firma del handshake | ✅ Sí — es el mecanismo de Autofirma |
+| **C** | `native-tls` (schannel) con un `.p12` | En memoria, importada a un almacén temporal | ❌ No, y mete una segunda pila TLS |
 
-**Recomendación: empezar por (1)**, que cubre el caso real, y dejar (2) como mejora si algún cliente
-aparece con un certificado no exportable. Lo que no se puede es descubrirlo en diciembre.
+**(C) se descarta**: tiene los inconvenientes de (A) más una pila TLS extra.
 
-Además: **avisar de la caducidad**. Un certificado caducado deja de remitir en silencio. Aviso a 30
-días por el sistema de notificaciones que ya existe.
+**(B) es el destino.** `rustls-cng` está bajo la organización `rustls` (v0.7.1, agosto de 2026,
+~66.000 descargas): expone la clave del almacén como un `SigningKey` de rustls, así que se construye
+un `ClientConfig` con un resolver de certificado de cliente propio y se le pasa a `reqwest` por
+`tls_backend_preconfigured`. Importa porque es lo que el cliente va a tener de verdad: un certificado
+que le instaló su gestoría, a menudo marcado como no exportable, y al que nadie le va a sacar un
+`.p12`.
+
+⚠️ **Dos avisos sobre (B), que es por lo que no se empieza por ahí.** `tls_backend_preconfigured` está
+documentado por reqwest como una opción avanzada y *«algo frágil»*, acoplada a la versión de rustls
+que lleve reqwest por dentro; y es un camino **sólo Windows**, así que el `#[cfg]` correspondiente
+tiene que existir desde el principio.
+
+**Plan: (A) primero, (B) antes de lanzar.** (A) desbloquea el tramo 5 y las pruebas contra
+preproducción en un rato, y (B) es un cambio detrás del mismo puerto (`AeatClient`), no una reescritura.
+La selección va en la pantalla: «elegir del almacén de Windows» o «cargar un fichero .p12». La
+decisión de cuál usa cada cliente es suya, no nuestra.
+
+**Y en los dos casos: avisar de la caducidad.** Un certificado caducado deja de remitir en silencio,
+que es la peor forma de fallar. Aviso a 30 días por el sistema de notificaciones que ya existe.
 
 ### 6.3 El job
 
@@ -679,11 +745,31 @@ productor.
 **Pendiente y bloqueante para lanzar** (no para desarrollar): redactar la DR. Necesita el NIF y la
 razón social definitivos del productor, así que va cuando la empresa esté constituida.
 
-**Para las pruebas** vale el NIF y el certificado de una persona física, tanto como productor como
-obligado, siempre contra el **entorno de pruebas**. Los NIF se validan contra la base de datos
-centralizada de la AEAT, así que tiene que ser un NIF real; no hace falta estar de alta en el
-epígrafe de desarrollo de software para que un envío de pruebas se acepte. **Nunca contra
-producción.**
+### 11.3 Con qué NIF y qué certificado se puede probar
+
+Se preguntó si hace falta un autónomo dado de alta en los epígrafes de informática. **No.** Lo que la
+AEAT comprueba en el servicio web es otra cosa:
+
+- **Que el remitente esté autorizado sobre el `ObligadoEmision`.** La FAQ lo enumera: se autentica a
+  la persona remitente *«como el titular, su representante, su apoderado y, en los supuestos
+  correspondientes, su representante por colaboración social»*. La forma de esquivar el problema
+  entero es la más simple: **poner como obligado el mismo NIF del certificado**. Entonces eres el
+  titular y no hace falta ninguna autorización.
+- **Que los NIF existan** en la base de datos centralizada de la AEAT. Tienen que ser reales; no
+  tienen que dedicarse a nada en concreto.
+- El NIF del **productor**, dentro del bloque `SistemaInformatico`, es **dato declarado**. La AEAT no
+  lo contrasta contra ningún registro de actividad económica, así que el epígrafe es irrelevante para
+  que un envío se acepte.
+
+O sea que para el tramo 5 sirve el NIF y el certificado de un autónomo cualquiera, usado a la vez
+como obligado y como productor. Lo que sí hay que cambiar antes de lanzar son los datos del productor
+por los definitivos, junto con la declaración responsable.
+
+⚠️ **Sólo contra el [entorno de pruebas](https://preportal.aeat.es).** Un registro enviado a
+producción es un registro de facturación real de ese NIF, y **no se «borra»**: como mucho se anula
+con otro registro. Los endpoints de §6.1 se distinguen en tres caracteres (`prewww1` / `www1`), que
+es exactamente el tipo de error que se comete a las dos de la mañana — de ahí que `Verifactu_Entorno`
+(§3.4) sea una decisión explícita y visible, y no una variable de entorno.
 
 ---
 
@@ -726,6 +812,9 @@ Lo que hace este plan verificable sin una impresora ni Hacienda delante:
 8. **Clasificación de respuestas**: cada fila de la tabla de §6.5, con su respuesta XML de ejemplo.
 9. **Transaccionalidad**: un cobro que hace rollback no deja registro ni gasta número.
 10. **La Handy no puede escribir** en las tablas nuevas (test del worker).
+11. **La escalera de avisos** (§1.2.1): función pura de `antigüedad → escalón`, y el test que importa
+    de verdad — **`connectivity: "off"` no apaga la remisión**. Es un fallo que en producción no se
+    vería nunca (el TPV parecería sano y la AEAT no recibiría nada), así que tiene que verse aquí.
 
 **Fuera de los tests automáticos:** el envío real contra preproducción. Necesita certificado y sale a
 internet, así que va como comprobación manual antes de release, junto al E2E (`RELEASING.md` §0-bis).
@@ -744,10 +833,10 @@ Cada tramo deja el repo compilando y aporta algo comprobable.
 | **2** | **La cadena, sin AEAT** | `tpv-domain/verifactu.rs` con los tres vectores oficiales en verde. Nada conectado todavía |
 | **3** | **Emisión en el cobro** | El registro se crea en la transacción; el número fiscal sustituye a `Ticket_Contador`; el cobro devuelve el bloque fiscal |
 | **4** | **QR y papel** | Rasterizado, colocación al principio, leyenda, previa espejo. **Aquí ya se emiten facturas conformes**, sólo que sin remitir |
-| **5** | **El envío** | Crate `tpv-infra-aeat`, certificado, job, control de flujo, clasificación, panel. Preproducción |
+| **5** | **El envío** | Crate `tpv-infra-aeat`, certificado por `.p12` (§6.2 A), job, control de flujo, clasificación, panel, **escalera de avisos** (§1.2.1). Preproducción |
 | **6** | **Anulación y rectificativas** | Partir el botón (§7), `R5`, impacto en el arqueo |
-| **7** | **Factura completa** | `F1` en el cobro y `F3` en sustitución (§9) |
-| **8** | **Cierre** | Exportación (§10), declaración responsable (§11.2), reconciliación tras recuperación (§8.1), retención (DB-14) |
+| **7** | **Factura completa** | `F1` en el cobro y `F3` en sustitución (§9). Aquí se decide el límite de 3.000 € (§2.2) |
+| **8** | **Cierre** | Exportación (§10), certificado del almacén de Windows (§6.2 B), declaración responsable (§11.2), reconciliación tras recuperación (§8.1), retención (DB-14) |
 
 **El orden no es negociable en los tramos 2-4**: la cadena antes que la emisión, y la emisión antes
 que el envío. Escribir el cliente SOAP primero es la forma más rápida de acabar depurando dos cosas a
@@ -759,7 +848,24 @@ administrativo ajeno.
 
 ---
 
-## 15. Fuera de alcance (a propósito)
+## 15. Lo que queda abierto
+
+Cosas que **no** están decididas y cuándo hay que decidirlas. Que estén aquí es lo que las distingue
+de un olvido.
+
+| # | Qué | Cuándo | Bloquea |
+|---|---|---|---|
+| 1 | **Qué hace la pantalla por encima de 3.000 €** (§2.2) | Antes del tramo 7 | Nada antes |
+| 2 | **Conseguir el certificado electrónico** | **YA** — tiene plazo administrativo ajeno | El tramo 5 entero |
+| 3 | **Redactar la declaración responsable** (§11.2) | Antes de lanzar, no de desarrollar | El lanzamiento |
+| 4 | **NIF y razón social definitivos del productor** (§11.1) | Cuando la empresa esté constituida | El lanzamiento |
+| 5 | **`IdSistemaInformatico`**: elegir el código de dos caracteres | Tramo 5 | Nada |
+| 6 | **Serie única vs. serie propia para rectificativas** (§7.4) | Tramo 6 | Nada |
+| 7 | **Confirmar con un asesor** la modalidad y el tratamiento de devoluciones | Antes de lanzar | El lanzamiento |
+
+---
+
+## 16. Fuera de alcance (a propósito)
 
 - **TicketBAI** (País Vasco y Navarra). Otro sistema, otra firma, otro XML.
 - **Modalidad NO VERI\*FACTU**: firma XAdES por registro y registro de eventos. Se descartó en §0.
@@ -773,7 +879,7 @@ administrativo ajeno.
 
 ---
 
-## 16. Fuentes
+## 17. Fuentes
 
 Todo lo técnico de este documento sale de aquí, no de memoria:
 
@@ -797,6 +903,11 @@ Todo lo técnico de este documento sale de aquí, no de memoria:
   `RespuestaSuministro.xsd`.
   <https://prewww2.aeat.es/static_files/common/internet/dep/aplicaciones/es/aeat/tikeV1.0/cont/ws/SistemaFacturacion.wsdl>
 - **Portal de pruebas externas**: <https://preportal.aeat.es>
+
+Y una fuente técnica que no es de la AEAT pero decide el §6.2:
+
+- **`rustls-cng`** — puente entre las claves no exportables del almacén de Windows (CNG) y rustls.
+  v0.7.1, bajo la organización `rustls`. <https://github.com/rustls/rustls-cng>
 
 > **Aviso.** Esto es un documento de ingeniería escrito leyendo la norma y las especificaciones, no
 > asesoramiento fiscal. Las decisiones con consecuencia tributaria —modalidad, declaración
