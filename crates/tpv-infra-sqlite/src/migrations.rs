@@ -43,8 +43,9 @@ use sha2::{Digest, Sha256};
 ///
 /// ⚠️ Cargo no vigila ese directorio, así que **editar una migración no basta para que se recompile
 /// esto**: hay que tocar además este fichero, o `include_dir!` seguirá sirviendo la copia vieja y
-/// los tests pasarán contra un esquema que ya no existe. Última vez: CUENTA-07 (Pagos.Estado,
-/// Movimientos_Caja, v_lineas_cobradas, Pago_Detalles ON DELETE CASCADE).
+/// los tests pasarán contra un esquema que ya no existe. Última vez: FISCAL-01 (Veri*factu:
+/// Registros_Facturacion, Serie_Facturacion, datos fiscales de Business_Settings/Clientes y
+/// Exento/Causa_Exencion en Productos y Detalle_Comanda).
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;

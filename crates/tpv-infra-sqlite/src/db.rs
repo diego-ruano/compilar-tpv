@@ -692,6 +692,43 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
         -- Es tabla de control LOCAL (prefijo `_`, como el resto del andamiaje): no está en las
         -- migraciones, no existe en la nube y no viaja. ⚠️ Sus escrituras van por
         -- `WriteGuard::raw()`, o cada página del backfill se replicaría a la nube de vuelta.
+        -- ── FISCAL-01 (Veri*factu): estado del envio a la AEAT ────────────────────────────────
+        --
+        -- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad
+        -- no esta en nuestra nube sino en la AEAT, a la que se le puede preguntar
+        -- (ConsultaFactuSistemaFacturacion). Replicarlo daria una respuesta que parece buena y no
+        -- lo es.
+        --
+        -- ⚠️ Sus escrituras van por `WriteGuard::raw()`: por `execute()` cada intento de envio se
+        -- capturaria en `_Sync_Outbox` y se replicaria a la nube.
+        --
+        -- Estado:
+        --   PENDIENTE              -> generado, aun no aceptado por la AEAT.
+        --   ACEPTADO               -> EstadoRegistro 'Correcto' (o duplicado: ya lo teniamos alli).
+        --   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
+        --   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
+        CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
+            ID_Registro       TEXT PRIMARY KEY,
+            Estado            TEXT NOT NULL,
+            Intentos          INTEGER NOT NULL DEFAULT 0,
+            Ultimo_Intento_Ms INTEGER,
+            Codigo_Error      TEXT,
+            Descripcion_Error TEXT,
+            CSV               TEXT,
+            Creado_En_Ms      INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_verifactu_envios_estado
+            ON _Verifactu_Envios(Estado);
+        -- Control de flujo obligatorio (art. 16.2 Orden HAC/1177/2024): el siguiente envio no puede
+        -- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
+        -- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
+        -- en cada respuesta (`TiempoEsperaEnvio`).
+        CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
+            ID               INTEGER PRIMARY KEY CHECK (ID = 1),
+            Espera_Segundos  INTEGER NOT NULL DEFAULT 60,
+            Ultimo_Envio_Ms  INTEGER
+        );
+        INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
         CREATE TABLE IF NOT EXISTS _Backfill_Historico (
             Tabla TEXT PRIMARY KEY,
             Orden INTEGER NOT NULL DEFAULT 0,

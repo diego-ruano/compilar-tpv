@@ -202,6 +202,24 @@ export const TRANSACCIONALES: Transaccional[] = [
 			"Fecha_Hora >= ?1 AND (ID_Pago IS NULL OR ID_Pago IN (SELECT ID_Pago FROM sel_pagos))",
 	},
 	{
+		// FISCAL-01. Va DESPUÉS de `Pagos` porque `ID_Pago` es una FK suya, y la fase 2 inserta
+		// página a página sin `defer_foreign_keys` entre transacciones.
+		//
+		// La ventana se mide sobre `Fecha_Hora_Huso` (ISO 8601 local, ordenable) y **no** sobre
+		// `Fecha_Expedicion`, que es `DD-MM-AAAA` porque así viaja al XML y al QR: comparar eso
+		// contra una fecha `AAAA-MM-DD` da un orden lexicográfico sin ningún sentido.
+		//
+		// El `OR` del final es el que importa de verdad: la cadena de huellas se continúa desde el
+		// ÚLTIMO eslabón, así que ese tiene que volver siempre — aunque el bar lleve dos meses
+		// cerrado y no haya emitido nada dentro de la ventana. Sin él, una Main restaurada
+		// arrancaría una cadena nueva marcándose `PrimerRegistro = "S"` con registros ya existentes
+		// para ese SIF y NIF, que es exactamente el error admisible 2007.
+		nombre: "Registros_Facturacion",
+		ctes: [],
+		donde:
+			"Fecha_Hora_Huso >= ?1 OR Orden = (SELECT MAX(Orden) FROM Registros_Facturacion)",
+	},
+	{
 		nombre: "Cierres_Caja",
 		ctes: [CTE_CIERRES],
 		donde: "ID_Cierre IN (SELECT ID_Cierre FROM sel_cierres)",

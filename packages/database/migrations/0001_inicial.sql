@@ -201,8 +201,23 @@ CREATE TABLE IF NOT EXISTS Productos (
   -- distintas. Un producto que nadie ha tocado tiene que SEGUIR al tipo general si este cambia;
   -- un 10 escrito en la fila se quedaria congelado sin que nadie lo pidiera.
   IVA_Percent REAL,
+  -- FISCAL-01 (Veri*factu). "Exento" NO es "IVA al 0 %": son dos afirmaciones legales distintas y
+  -- el registro de facturacion las expresa en un <choice> del XSD (CalificacionOperacion vs
+  -- OperacionExenta), asi que no hay forma de representar una con la otra.
+  --   Exento = 0 -> operacion sujeta y no exenta: va con CalificacionOperacion 'S1' + TipoImpositivo
+  --                 + CuotaRepercutida (un producto al 0 % es ESTO, con tipo y cuota a cero).
+  --   Exento = 1 -> va con OperacionExenta = Causa_Exencion, y esta PROHIBIDO informar
+  --                 TipoImpositivo, CuotaRepercutida, TipoRecargoEquivalencia ni
+  --                 CuotaRecargoEquivalencia (error 1238 de la AEAT).
+  -- Un booleano solo no basta: OperacionExenta exige CUAL exencion, no un "si". De ahi las dos
+  -- columnas. 'E1' (art. 20 LIVA, operaciones interiores) es la unica realista en hosteleria.
+  Exento INTEGER NOT NULL DEFAULT 0,
+  Causa_Exencion TEXT,
   FOREIGN KEY (ID_Categoria) REFERENCES Categorias_Producto(ID_Categoria),
-  FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor)
+  FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor),
+  CHECK (Exento IN (0,1)),
+  CHECK (Causa_Exencion IS NULL OR Causa_Exencion IN ('E1','E2','E3','E4','E5','E6')),
+  CHECK ((Exento = 1) = (Causa_Exencion IS NOT NULL))
 );
 
 -- La rejilla de productos filtra por categoria; ambos son FKs muy consultadas.
@@ -354,7 +369,16 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Email TEXT,
   Notas TEXT,
   Total_Gastado REAL NOT NULL DEFAULT 0,
-  Created_At TEXT DEFAULT (datetime('now','localtime'))
+  Created_At TEXT DEFAULT (datetime('now','localtime')),
+  -- FISCAL-02: datos para emitir una factura COMPLETA (F1/F3) a este cliente. Son opcionales: la
+  -- inmensa mayoria de los clientes de un bar no piden factura y nunca los tendran.
+  --   NIF + Razon_Social -> van al REGISTRO de facturacion (bloque Destinatarios).
+  --   Direccion_Fiscal   -> solo al PAPEL (art. 6 ROF exige el domicilio del destinatario en la
+  --                         factura, pero el registro de la AEAT no lo lleva).
+  -- Existen para que la comida de empresa que se repite cada mes no dicte el NIF doce veces.
+  NIF TEXT,
+  Razon_Social TEXT,
+  Direccion_Fiscal TEXT
 );
 
 -- CLI-01: el email de cliente identifica de forma unica cuando existe. Indice UNICO PARCIAL sobre
@@ -481,8 +505,16 @@ CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
   Fecha_Hora_Cocina DATETIME,
   ID_Usuario_Cocinero TEXT,
+  -- FISCAL-01: la exencion se CONGELA en la linea igual que el nombre, el precio y el tipo, y por
+  -- el mismo motivo: el registro de facturacion es el hecho fiscal del dia de la venta. Si manana
+  -- alguien desmarca la casilla del producto, el registro ya emitido no puede cambiar de sentido.
+  Exento INTEGER NOT NULL DEFAULT 0,
+  Causa_Exencion TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda),
-  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE SET NULL
+  FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE SET NULL,
+  CHECK (Exento IN (0,1)),
+  CHECK (Causa_Exencion IS NULL OR Causa_Exencion IN ('E1','E2','E3','E4','E5','E6')),
+  CHECK ((Exento = 1) = (Causa_Exencion IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_dc_cocinero_fecha
@@ -817,7 +849,7 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE SET NULL,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (ID_Trabajador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
-  CHECK (Tipo IN ('COBRO','ANULACION','GASTO','GASTO_ANULADO'))
+  CHECK (Tipo IN ('COBRO','ANULACION','DEVOLUCION','GASTO','GASTO_ANULADO'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_movcaja_fecha
@@ -881,7 +913,27 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- deja pasar el centimo de redondeo y el error de vuelta sin dar la lata, y obliga a explicar lo
   -- que ya es dinero de verdad. Cada negocio lo ajusta.
   Umbral_Descuadre REAL NOT NULL DEFAULT 5,
-  Updated_At TEXT DEFAULT (datetime('now','localtime'))
+  -- ── FISCAL-01 (Veri*factu) ──────────────────────────────────────────────────────────────────
+  -- Razon_Social NO es Business_Name. "Bar La Plaza" es el rotulo; "Francisco Garcia SL" es quien
+  -- factura. El ticket ensena los dos; el registro de facturacion (NombreRazonEmisor y el bloque
+  -- ObligadoEmision de la cabecera) solo el segundo.
+  Razon_Social TEXT NOT NULL DEFAULT '',
+  -- DescripcionOperacion es un campo OBLIGATORIO del registro (hasta 500 caracteres). No se deriva
+  -- de las lineas: los nombres de producto los escribe el usuario y un campo obligatorio que puede
+  -- llegar vacio o con basura es un rechazo garantizado. Texto fijo, configurable.
+  Descripcion_Op TEXT NOT NULL DEFAULT 'Servicios de hosteleria y restauracion',
+  -- Limite (IVA incluido) por encima del cual una factura simplificada (F2) ya no vale y hay que
+  -- emitir factura completa (F1). El general del art. 4.1 RD 1619/2012 son 400 EUR, pero la
+  -- hosteleria esta en la lista del art. 4.2 y sube a 3.000. La AEAT lo valida en el servicio web
+  -- (error 1150). Va aqui y no incrustado porque es un numero que la norma puede mover.
+  Limite_Simplif REAL NOT NULL DEFAULT 3000,
+  -- 'produccion' | 'pruebas'. Cambia A LA VEZ el endpoint del servicio web y la URL del QR que se
+  -- imprime en el papel. Un ticket emitido en pruebas lleva un QR que apunta a prewww2.aeat.es: la
+  -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,
+  -- porque produccion y pruebas se distinguen en tres caracteres (www1 / prewww1).
+  Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
+  Updated_At TEXT DEFAULT (datetime('now','localtime')),
+  CHECK (Verifactu_Entorno IN ('produccion','pruebas'))
 );
 
 INSERT OR IGNORE INTO Business_Settings (ID) VALUES (1);
@@ -1053,7 +1105,133 @@ LEFT JOIN agg a ON a.ID_Producto = p.ID_Producto
 LEFT JOIN lote_fefo f ON f.ID_Producto = p.ID_Producto;
 
 /* =========================================================
-   14. Seeds (UUID fijos: identicos en local y nube)
+   14. Veri*factu / registros de facturacion (FISCAL-01, FISCAL-02)
+   RD 1007/2023 (RRSIF) + Orden HAC/1177/2024. Diseno y porques: docs/PLAN_VERIFACTU.md.
+
+   El principio que ordena todo lo demas: el REGISTRO DE FACTURACION es el hecho fiscal. El papel
+   es una copia suya y el envio a la AEAT es una consecuencia diferida. De ahi las tres reglas que
+   no se negocian:
+     1. El registro se crea EN LA MISMA TRANSACCION que el cobro (art. 9 RRSIF: "de forma
+        simultanea o inmediatamente anterior a la expedicion").
+     2. NO SE MODIFICA JAMAS. Una correccion es OTRA fila (subsanacion), nunca un UPDATE.
+     3. Nada de lo que rodea al envio puede impedir cobrar.
+
+   Se replica a la nube por el outbox como el resto del esquema: es lo que permite que una Main que
+   perdio su data.db recupere su cadena. NINGUNA ruta del worker puede escribirla: la nube es copia,
+   no fuente.
+========================================================= */
+
+-- Contador de la serie de facturacion. Serie = ejercicio ('2027'), formato '2027/000001'.
+--
+-- Se reserva como el antiguo Ticket_Contador: `UPDATE ... SET Ultimo = Ultimo + 1`, RELATIVO, para
+-- que la sentencia que sale al outbox converja sola. Sigue siendo un contador propio y no un
+-- SELECT MAX(...) de los registros.
+--
+-- Lo que si es nuevo: antes de usar el numero se comprueba contra MAX(Numero) de
+-- Registros_Facturacion para esa serie y, si el contador va por detras, SALTA HACIA ADELANTE.
+-- Existe por un caso concreto: restaurar una copia local de hace tres dias devolveria el contador a
+-- un numero ya emitido, y la AEAT rechazaria el registro por duplicado (IDFactura = emisor + numero
+-- + fecha, error 3000). Un hueco en la numeracion es explicable; un numero repetido es un registro
+-- que no entra. SE FALLA HACIA EL HUECO.
+CREATE TABLE IF NOT EXISTS Serie_Facturacion (
+  Serie  TEXT PRIMARY KEY,
+  Ultimo INTEGER NOT NULL DEFAULT 0
+);
+
+-- El corazon. Append-only: se inserta y nunca se toca (sin UPDATE, sin DELETE, sin excepciones).
+--
+-- Tres decisiones que parecen detalles y no lo son:
+--
+--   * `Orden` EXPLICITO, no rowid. El ultimo eslabon de la cadena es MAX(Orden). Con rowid la
+--     cadena dependeria del orden en que una restauracion reinserta las filas, que no esta
+--     garantizado.
+--   * `Cadena_Huella` SE GUARDA. Es redundante -se puede recomputar- y precisamente por eso vale:
+--     si algun dia el formateo cambia, el fichero ensena que se hasheo de verdad. Es ademas lo que
+--     hace auditable la exportacion (art. 8 RRSIF) sin tener que confiar en el codigo que la lee.
+--   * Los IMPORTES SON TEXTO. `ImporteTotal` y `CuotaTotal` entran en la cadena hasheada, y
+--     REAL -> texto no es una operacion unica: 123.1, 123.10 y 123.100000000000001 son tres cadenas
+--     distintas. Se formatean UNA vez y nadie recomputa nada al leer: el XML, el QR y la
+--     exportacion se construyen desde el texto guardado.
+--
+-- ID_Registro es TEXT PRIMARY KEY, asi que el UUID se genera ANTES del INSERT (nunca por DEFAULT ni
+-- trigger): CLAUDE.md 9, "IDs deterministas". ON DELETE SET NULL en ID_Pago porque un registro
+-- fiscal no puede desaparecer porque desaparezca aquello a lo que apunta (misma regla que
+-- Movimientos_Caja); ademas la fuente de verdad del dinero sigue siendo Pagos.
+CREATE TABLE IF NOT EXISTS Registros_Facturacion (
+  ID_Registro           TEXT PRIMARY KEY,
+  Orden                 INTEGER NOT NULL,
+  Tipo                  TEXT NOT NULL,
+  NIF_Emisor            TEXT NOT NULL,
+  Num_Serie_Factura     TEXT NOT NULL,
+  Fecha_Expedicion      TEXT NOT NULL,
+  Serie                 TEXT NOT NULL,
+  Numero                INTEGER NOT NULL,
+  Nombre_Razon_Emisor   TEXT NOT NULL,
+  Tipo_Factura          TEXT,
+  Tipo_Rectificativa    TEXT,
+  Descripcion_Operacion TEXT,
+  Importe_Total         TEXT,
+  Cuota_Total           TEXT,
+  Desglose_Json         TEXT,
+  Destinatario_Json     TEXT,
+  Referencias_Json      TEXT,
+  Macrodato             TEXT,
+  Primer_Registro       TEXT,
+  Ant_NIF               TEXT,
+  Ant_Num_Serie         TEXT,
+  Ant_Fecha             TEXT,
+  Ant_Huella            TEXT,
+  Cadena_Huella         TEXT NOT NULL,
+  Huella                TEXT NOT NULL,
+  Tipo_Huella           TEXT NOT NULL DEFAULT '01',
+  Fecha_Hora_Huso       TEXT NOT NULL,
+  Subsanacion           TEXT,
+  Rechazo_Previo        TEXT,
+  Sin_Registro_Previo   TEXT,
+  Subsana_ID_Registro   TEXT,
+  Sistema_Json          TEXT NOT NULL,
+  QR_Url                TEXT NOT NULL,
+  Incidencia            TEXT NOT NULL DEFAULT 'N',
+  ID_Pago               TEXT,
+  UNIQUE (Orden),
+  FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE SET NULL,
+  CHECK (Tipo IN ('ALTA','ANULACION')),
+  CHECK (Tipo_Factura IS NULL OR Tipo_Factura IN ('F1','F2','F3','R1','R2','R3','R4','R5')),
+  CHECK (Tipo_Rectificativa IS NULL OR Tipo_Rectificativa IN ('S','I')),
+  CHECK (Primer_Registro IS NULL OR Primer_Registro = 'S'),
+  CHECK (Subsanacion IS NULL OR Subsanacion IN ('S','N')),
+  CHECK (Rechazo_Previo IS NULL OR Rechazo_Previo IN ('N','S','X')),
+  CHECK (Sin_Registro_Previo IS NULL OR Sin_Registro_Previo IN ('N','S')),
+  CHECK (Macrodato IS NULL OR Macrodato IN ('N','S')),
+  CHECK (Incidencia IN ('N','S')),
+  CHECK (Tipo_Huella = '01')
+);
+
+-- La clave unica de una factura ante la AEAT es (emisor, numero de serie, fecha de expedicion). Un
+-- duplicado es el error 3000 y un registro que no entra.
+--
+-- Es UNIQUE sobre esa terna PERO NO sobre la fila entera: una SUBSANACION conserva el mismo
+-- IDFactura a proposito -no es una factura nueva, es el mismo hecho bien contado-, asi que el
+-- indice tiene que dejar pasar la segunda. Se excluyen del indice las filas de subsanacion.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_regfact_idfactura
+ON Registros_Facturacion(NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Tipo)
+WHERE Subsanacion IS NULL OR Subsanacion <> 'S';
+
+-- Ruta caliente del envio: "dame los pendientes por Orden ascendente". El orden importa porque la
+-- AEAT valida cada registro contra su encadenamiento anterior.
+CREATE INDEX IF NOT EXISTS idx_regfact_orden
+ON Registros_Facturacion(Orden);
+
+-- El panel fiscal y la exportacion (art. 8 RRSIF) filtran por rango de fechas.
+CREATE INDEX IF NOT EXISTS idx_regfact_fecha
+ON Registros_Facturacion(Fecha_Expedicion);
+
+-- "Que registro corresponde a este cobro" (reimpresion, anulacion, rectificativa).
+CREATE INDEX IF NOT EXISTS idx_regfact_pago
+ON Registros_Facturacion(ID_Pago);
+
+/* =========================================================
+   15. Seeds (UUID fijos: identicos en local y nube)
 ========================================================= */
 INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen) VALUES
   ('00000000-0000-7000-8000-000000000201', 'Gluten', 'gluten.png', '/alergenos/gluten.png'),

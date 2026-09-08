@@ -435,6 +435,11 @@ describe("bootstrap acotado · lo que la Main necesita para seguir", () => {
 			"Proveedores",
 			"Reservas",
 			"Roles",
+			// FISCAL-01: el contador de la serie de facturación. Maestra a propósito, y son cuatro
+			// filas: si volviera recortado, el número siguiente podría repetir uno ya emitido y la
+			// AEAT lo rechazaría por duplicado (error 3000). Se falla hacia el hueco, nunca hacia
+			// el número repetido.
+			"Serie_Facturacion",
 			"Tarea_Asignaciones",
 			"Tareas",
 			"Ticket_Contador",

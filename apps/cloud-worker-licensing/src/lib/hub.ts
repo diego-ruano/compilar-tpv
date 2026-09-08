@@ -33,9 +33,64 @@ export class HubError extends Error {
 	}
 }
 
+/**
+ * Tablas cuya escritura es EXCLUSIVA de la Main (FISCAL-01). No es una regla de producto como
+ * `soloLaMainCobra`: es que la nube no puede fabricar un registro de facturación.
+ *
+ * Un registro de facturación es el hecho fiscal, se crea dentro de la transacción del cobro y va
+ * encadenado por una huella al anterior. La cadena vive en el SIF del obligado —el equipo del
+ * bar—, y `Registros_Facturacion` se replica aquí para que una Main que pierda su `data.db` pueda
+ * recuperarla: **la nube es copia, no fuente**. Una fila insertada desde aquí sería un eslabón que
+ * ninguna huella ata a nada, y el `Orden` que gastara dejaría a la Main emitiendo por detrás de su
+ * propia cadena.
+ *
+ * `Serie_Facturacion` va con ella por lo mismo: es el contador que reserva el número, y un número
+ * repartido desde dos sitios acaba en una factura duplicada (error 3000 de la AEAT).
+ */
+const TABLAS_SOLO_MAIN = ["Registros_Facturacion", "Serie_Facturacion"];
+
+/**
+ * ¿Alguna sentencia de este comando escribe en una tabla vetada?
+ *
+ * Se mira el SQL y no el nombre del comando a propósito: el nombre lo elige quien añade la ruta y
+ * es justo lo que se olvida de revisar. Sólo se miran las ESCRITURAS — leer un ticket desde la
+ * Handy es legítimo y es lo que hace la pantalla de Cuentas.
+ */
+function escrituraVetada(command: ApplyCommand): string | null {
+	const stmts: any[] =
+		command.type === "tenantDb.transaction"
+			? (command.payload?.steps ?? command.payload?.statements ?? [])
+			: [command.payload];
+
+	for (const st of stmts) {
+		const sql = String(st?.sql ?? "");
+		if (!sql) continue;
+		const sqlMayus = sql.toUpperCase();
+		const head = sqlMayus.trimStart().slice(0, 6);
+		const esEscritura =
+			head.startsWith("INSERT") ||
+			head.startsWith("UPDATE") ||
+			head.startsWith("DELETE") ||
+			head.startsWith("REPLAC");
+		if (!esEscritura) continue;
+		for (const tabla of TABLAS_SOLO_MAIN) {
+			if (sqlMayus.includes(tabla.toUpperCase())) return tabla;
+		}
+	}
+	return null;
+}
+
 export async function applyViaHub(env: Env, params: ApplyParams): Promise<any> {
 	const { tenantId, deviceId, opId, commandName, command, cloudPayload, clientNow } =
 		params;
+
+	// FISCAL-01. Este es el camino de la API REST, o sea el de la Handy: el outbox de la Main
+	// entra por el WebSocket del DO y no pasa por aquí. Una regla que sólo viviera en la interfaz
+	// —o en la revisión de código de quien añade la próxima ruta— es una sugerencia.
+	const vetada = escrituraVetada(command);
+	if (vetada) {
+		throw new HubError(`escritura_solo_en_main:${vetada}`, 403);
+	}
 
 	const id = env.TenantHub.idFromName(tenantId);
 	const stub = env.TenantHub.get(id);
