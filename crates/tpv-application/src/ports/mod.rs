@@ -1,5 +1,6 @@
 //! Puertos (traits) que la infraestructura debe implementar.
 
+pub mod aeat;
 pub mod avisos;
 pub mod cierre_caja;
 pub mod clientes;

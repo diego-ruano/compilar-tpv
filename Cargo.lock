@@ -5883,6 +5883,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpv-infra-aeat"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tpv-application",
+ "tpv-domain",
+ "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "tpv-infra-http"
 version = "0.1.0"
 dependencies = [
