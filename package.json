@@ -17,7 +17,10 @@
     "license:extend": "node scripts/tpv-license.mjs extend",
     "license:shorten": "node scripts/tpv-license.mjs shorten",
     "license:resend": "node scripts/tpv-license.mjs resend",
-    "license:keypair": "node scripts/generate-license-keypair.mjs"
+    "license:keypair": "node scripts/generate-license-keypair.mjs",
+    "verifactu:validar-xml": "python scripts/verifactu-validar-xml.py",
+    "verifactu:certificados": "cargo run -q -p tpv-infra-aeat --example certificados",
+    "verifactu:probar-aeat": "cargo run -q -p tpv-infra-aeat --example probar_aeat"
   },
   "devDependencies": {
     "turbo": "^2"
