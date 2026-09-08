@@ -16,13 +16,15 @@
 
 ## 0. Decisiones tomadas
 
-Acordadas con el responsable el 2026-09-07.
+Acordadas con el responsable el 2026-09-07 y el 2026-09-08.
 
 | Decisión | Elección | Consecuencia de diseño |
 |---|---|---|
 | **Modalidad** | **VERI\*FACTU**, siempre, sin interruptor | No hay firma XAdES por registro ni registro de eventos. A cambio, **todo RF generado hay que remitirlo** |
 | **Quién remite** | **La propia Main**, con el certificado del local instalado en el equipo | No custodiamos certificados de terceros. Precio: un bug en el XML se arregla **publicando una versión**, no redesplegando un worker (§6.6) |
 | **Para qué el certificado** | **Sólo para autenticar la conexión (TLS mutuo).** En VERI\*FACTU **no se firma la factura** | La integridad la da la cadena de huellas, que es un SHA-256 pelado. La firma XAdES es de la otra modalidad (§6.2) |
+| **Dónde vive el certificado** | **En el almacén de Windows**, y sólo ahí. Desde el primer día, pruebas incluidas | No parseamos formatos ni guardamos claves: sólo la huella del elegido. A cambio, es **sólo Windows** y hay que hacer un spike antes que nada (§6.2.1) |
+| **Qué certificado vale** | **El que tenga el bar.** La interfaz no menciona el sello ni recomienda ninguno | El tipo sólo decide el endpoint (§6.1), y eso es una cuenta interna. Único filtro: que tenga clave privada (§6.2) |
 | **Qué es una factura** | **Un cobro = una factura simplificada (F2)** | Tres pagos de 20 € sobre una mesa son **tres** facturas, cada una con su número, su QR y su registro |
 | **Numeración** | Serie por ejercicio: `2027/000001` | El contador se reinicia cada año. Nunca retrocede (§3.3) |
 | **Sin conexión** | **Se sigue vendiendo.** El RF se genera, se encadena, se imprime con QR y se remite después | El reglamento lo contempla; lo que no se puede es *no* remitir nunca (§1.2) |
@@ -101,13 +103,21 @@ tiempo sin conexión: estar desconectado sin nada que enviar no es un problema.
 **Nunca bloquea el cobro, en ningún escalón.** La obligación es del bar, no nuestra; nuestro trabajo
 es que no pueda decir que no lo sabía, y dejar rastro de que se le avisó.
 
-⚠️ **Y una consecuencia que hay que ver ahora, no al implementarla:** la palanca de emergencia
-`connectivity: "off"` de `device_config.json` (SYNC-17, §9 de CLAUDE.md) apaga el WebSocket de
-sincronización. **No puede apagar la remisión a la AEAT.** Son dos cosas distintas y comparten una
-palabra: una es una comodidad de producto —«este cliente no quiere nube»— y la otra es una obligación
-tributaria. Si comparten interruptor, el atajo para una red patológica convierte en silencio un TPV
-conforme en uno que no lo es. **La remisión tiene su propia puerta**, y sólo la cierran dos cosas: no
-haber certificado, o estar en modo pruebas.
+⚠️ **Y una regla que es gratis ahora y cara después:** la palanca de emergencia `connectivity: "off"`
+de `device_config.json` (SYNC-17, §9 de CLAUDE.md) apaga el WebSocket de sincronización. **No puede
+apagar la remisión a la AEAT.** Son dos cosas distintas que comparten una palabra: una es una
+comodidad de producto —«este cliente no quiere nube»— y la otra es una obligación tributaria. Si
+compartieran interruptor, el atajo para una red patológica convertiría en silencio un TPV conforme en
+uno que no lo es, y no se notaría: la aplicación se vería perfectamente sana.
+
+Hoy **no hay ningún acoplamiento**: en Rust ese flag sólo lo tocan `get_connection_mode` y
+`set_connection_mode` (`lib.rs`), quien actúa sobre él es `useMainSocket` en el frontend, y el gating
+del runner de jobs sólo conoce `Siempre` y `MainOperativa`. O sea que cumplir esta regla consiste en
+**no añadir nada**. Por eso se escribe aquí: la forma de romperla es que a alguien le parezca
+razonable, dentro de seis meses, «respetar el modo de conexión» en el job nuevo.
+
+**La remisión tiene su propia puerta**, y sólo la cierran dos cosas: no haber certificado, o estar en
+modo pruebas.
 
 ### 1.3 No se envía factura a factura: hay un control de flujo obligatorio
 
@@ -176,6 +186,22 @@ fiscal. Nada de esto cambia.
 
 ---
 
+### 2.5 La cena que acaba a la una y media — ⏳ PENDIENTE DE DECISIÓN
+
+`FechaExpedicionFactura` es la fecha en que se expide la factura, o sea la del cobro. Pero el XSD
+tiene además un `FechaOperacion` **opcional**, para cuando la operación ocurrió otro día.
+
+Es justo el caso que ya obligó a diseñar el cierre de caja sin fechas (§12 de CLAUDE.md): *«una cena
+de 23:30 a 01:30 es un servicio, no dos días»*. Esa comanda se abre el día 4 y se cobra el día 5, así
+que operación y expedición **no coinciden**.
+
+Lo que hay que decidir es si se informa `FechaOperacion` con la fecha de apertura de la comanda
+cuando difiera de la del cobro. Rellenarlo es más fiel; dejarlo vacío significa «coinciden», que es
+lo que asume la AEAT si no se dice nada. Es un campo opcional y de bajo riesgo, pero la decisión hay
+que tomarla en el tramo 3, no descubrirla.
+
+---
+
 ## 3. Modelo de datos
 
 ### 3.1 `Registros_Facturacion` — append-only
@@ -217,6 +243,10 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   Cadena_Huella         TEXT NOT NULL,      -- la cadena EXACTA sobre la que se aplico SHA-256
   Huella                TEXT NOT NULL,      -- 64 hex mayusculas
   Fecha_Hora_Huso       TEXT NOT NULL,      -- '2027-01-15T21:34:56+01:00'
+
+  -- Subsanacion (6.5.1): una correccion es OTRA fila, nunca un UPDATE
+  Subsanacion           TEXT,               -- 'S' o NULL
+  Subsana_ID_Registro   TEXT,               -- a que registro rechazado repara
 
   -- Contexto congelado
   Sistema_Json          TEXT NOT NULL,      -- el bloque SistemaInformatico tal como iba
@@ -470,13 +500,18 @@ registro. Un cobro con RF de anulación sale además marcado, como hoy.
 - Operación `RegFactuSistemaFacturacion`, hasta **1000 registros** por envío.
 - Endpoints (`SistemaFacturacion.wsdl`):
 
-| Entorno | URL |
-|---|---|
-| Producción (certificado) | `https://www1.agenciatributaria.gob.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP` |
-| Pruebas (certificado) | `https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP` |
+| Entorno | Tipo de certificado | URL |
+|---|---|---|
+| Producción | Persona física / representante | `https://www1.agenciatributaria.gob.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP` |
+| Producción | **Sello** (@firma tipo 4 u 8) | `https://www10.agenciatributaria.gob.es/…/VerifactuSOAP` |
+| Pruebas | Persona física / representante | `https://prewww1.aeat.es/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP` |
+| Pruebas | **Sello** | `https://prewww10.aeat.es/…/VerifactuSOAP` |
 
-(Existen los gemelos `www10` / `prewww10` para certificado de **sello electrónico**. No los usamos:
-son la puerta de la opción «lo envía el worker», que se descartó.)
+⚠️ **El endpoint depende del TIPO DE CERTIFICADO, no de quién envía.** Esto estaba mal en la primera
+versión de este plan, que daba por hecho que `www10` era «la puerta de la opción de que remitiera el
+worker». No lo es: el WSDL tiene un puerto `SistemaVerifactuSello` separado porque los certificados
+de sello (tipos 4 y 8 en @firma) entran por otra subsede. Consecuencia práctica: **la URL se calcula
+a partir del certificado elegido**, no es una constante.
 
 No hay crate de SOAP decente en Rust y tampoco hace falta: el sobre es fijo y el cuerpo se construye
 con `quick-xml`. Lo que sí hay que hacer bien es el **escapado** y la validación contra los XSD.
@@ -504,29 +539,105 @@ puede hacer Windows sin que la clave salga nunca del almacén. Tres caminos:
 | **B** | Almacén de Windows vía **CNG**, con [`rustls-cng`](https://github.com/rustls/rustls-cng) | **Nunca sale del almacén.** Windows hace la firma del handshake | ✅ Sí — es el mecanismo de Autofirma |
 | **C** | `native-tls` (schannel) con un `.p12` | En memoria, importada a un almacén temporal | ❌ No, y mete una segunda pila TLS |
 
-**(C) se descarta**: tiene los inconvenientes de (A) más una pila TLS extra.
+**Decisión (2026-09-08): (B), y desde el primer día, también para las pruebas.** No es sólo por los
+certificados no exportables:
 
-**(B) es el destino.** `rustls-cng` está bajo la organización `rustls` (v0.7.1, agosto de 2026,
-~66.000 descargas): expone la clave del almacén como un `SigningKey` de rustls, así que se construye
-un `ClientConfig` con un resolver de certificado de cliente propio y se le pasa a `reqwest` por
-`tls_backend_preconfigured`. Importa porque es lo que el cliente va a tener de verdad: un certificado
-que le instaló su gestoría, a menudo marcado como no exportable, y al que nadie le va a sacar un
-`.p12`.
+- **No parseamos ningún formato.** Una vez el certificado está instalado en Windows, **da igual de
+  qué fichero vino**: `.p12`, `.pfx`, un DNIe, una tarjeta criptográfica o un token USB salen todos
+  por CNG igual. Con (A) cada formato raro es un caso nuestro; con (B) es problema de quien lo
+  instaló, que además es quien sabe hacerlo.
+- **No custodiamos nada.** No hay contraseña que pedir ni clave que guardar, así que el certificado
+  **ni siquiera toca el `secret_store`**: lo único que guardamos es la **huella digital
+  (*thumbprint*)** del certificado elegido, que no es un secreto. Un secreto menos que proteger es
+  un secreto menos que filtrar.
+- **El soporte se explica en una frase:** *«instálalo como lo instalarías para Autofirma»*. Eso una
+  gestoría ya lo sabe hacer.
 
-⚠️ **Dos avisos sobre (B), que es por lo que no se empieza por ahí.** `tls_backend_preconfigured` está
-documentado por reqwest como una opción avanzada y *«algo frágil»*, acoplada a la versión de rustls
-que lleve reqwest por dentro; y es un camino **sólo Windows**, así que el `#[cfg]` correspondiente
-tiene que existir desde el principio.
+(C) se descarta: tiene los inconvenientes de (A) más una pila TLS extra. (A) se conserva **sólo como
+plan de contingencia** si el spike de §6.2.1 sale mal.
 
-**Plan: (A) primero, (B) antes de lanzar.** (A) desbloquea el tramo 5 y las pruebas contra
-preproducción en un rato, y (B) es un cambio detrás del mismo puerto (`AeatClient`), no una reescritura.
-La selección va en la pantalla: «elegir del almacén de Windows» o «cargar un fichero .p12». La
-decisión de cuál usa cada cliente es suya, no nuestra.
+#### Qué certificado vale: el que tenga
 
-**Y en los dos casos: avisar de la caducidad.** Un certificado caducado deja de remitir en silencio,
-que es la peor forma de fallar. Aviso a 30 días por el sistema de notificaciones que ya existe.
+Sirven los tres tipos que la AEAT admite por servicio web —**persona física**, **representante** y
+**sello de entidad** (tipos 4 y 8 en @firma)—, y **la aplicación no opina sobre cuál**. Se listan los
+del almacén, el usuario elige, y el tipo sólo decide **a qué endpoint se envía** (§6.1), que es una
+cuenta interna que el usuario no ve.
 
-### 6.3 El job
+**Decisión (2026-09-08): en la interfaz no se menciona el sello.** Es de pago, sólo se emite a
+personas jurídicas —un autónomo no puede tenerlo— y recomendarlo convierte una pantalla de dos clics
+en una conversación fiscal. Quien lo tenga, lo elige de la lista como cualquier otro; quien no, usa
+el suyo. Lo único que el código necesita saber es de qué tipo es, para el endpoint.
+
+**El único filtro es técnico:** en la lista sólo aparecen los certificados **con clave privada**. Un
+`.cer` o un `.crt` sólo llevan la parte pública, así que no pueden autenticar nada; si alguien
+instala uno de esos creyendo que ya está, simplemente no saldrá en la lista.
+
+#### 6.2.1 Lo que hay que aceptar a cambio
+
+1. ⚠️ **El spike va PRIMERO, antes de una línea de XML.** `tls_backend_preconfigured` está documentado
+   por reqwest como una opción avanzada y *«algo frágil»*, acoplada a la versión de rustls que lleve
+   por dentro. La primera tarea del tramo 5 es un programa mínimo que abra una conexión a
+   `prewww1.aeat.es` con un certificado del almacén y reciba **cualquier cosa** de vuelta. Si eso no
+   sale en un día, todavía queda (A) y queda calendario. Si se descubre en diciembre con el XML ya
+   escrito, no.
+2. **Es sólo Windows.** Va tras `#[cfg(windows)]`, y el puerto `AeatClient` tiene que tener una
+   implementación que no compile CNG en Android — el `libtpv_lib.so` del Handy sigue teniendo que
+   construirse, y la Handy no remite porque no cobra.
+3. **Los tests automáticos no pueden usarlo.** El certificado real está en un almacén de una máquina
+   concreta. `AeatClient` es un puerto con un doble para los tests; el cliente de verdad se ejercita
+   a mano contra preproducción, como el resto de lo que sale a internet.
+4. **Un certificado renovado cambia de huella.** Se renuevan cada año o cada dos, y el que
+   guardamos deja de existir. La pantalla tiene que decir *«el certificado que elegiste ya no está,
+   elige otro»* — y hasta que alguien lo haga, la cola crece y la escalera de §1.2.1 hace su trabajo.
+   Lo que no puede es dejar de remitir en silencio.
+5. **El almacén es por usuario de Windows.** Si la gestoría entra con su sesión e instala ahí el
+   certificado, el TPV corriendo como otro usuario **no lo ve**. Hay que buscar en `CurrentUser` y
+   en `LocalMachine`, y decir en cuál se encontró: es una llamada de soporte garantizada.
+
+#### 6.2.2 «Contraseña» son tres cosas distintas, y sólo una es un problema
+
+Es la confusión natural al hablar de esto, y conviene tenerla desenredada por escrito:
+
+| | Qué es | Cuándo la pide | ¿Nos afecta? |
+|---|---|---|---|
+| 1 | Contraseña del fichero `.p12`/`.pfx` | **Sólo al importarlo** a Windows | **No.** Una vez en el almacén no vuelve a pedirla nunca |
+| 2 | *«Protección alta»* de clave privada — una casilla del asistente de importación | En **cada uso** | Sí, pero **se arregla**: reimportar sin marcarla |
+| 3 | PIN de una tarjeta, DNIe o token USB | En **cada firma**, o sea cada handshake | Sí, y **no tiene arreglo**: es del hardware |
+
+(1) es el caso benigno y es el que parece grave. (3) mata un job desatendido. (2) es el traicionero:
+**es una casilla que alguien marcó sin querer**, se comporta igual que un PIN y tiene arreglo en dos
+minutos si sabes que es eso.
+
+**Qué hacemos:**
+
+- **Detectar:** abrir la clave con `NCRYPT_SILENT_FLAG`. Si falla por necesitar interfaz, ese
+  certificado no sirve para remitir solo. ⚠️ No es infalible — Microsoft documenta que con lectores
+  con *pinpad* y drivers propios el flag se ignora y el diálogo sale igual.
+- **Y por eso, un botón «probar ahora»** en la pantalla de selección que hace un handshake real
+  contra preproducción. Si hay un diálogo de PIN escondido, sale **ahí, con el usuario delante**, y
+  no a las tres de la mañana.
+- **Lo que NO hacemos: guardar el PIN.** CNG permite pasarlo por programa
+  (`NCRYPT_PIN_PROPERTY`) en algunos KSP, pero eso reintroduce justo el secreto que nos ahorramos al
+  no usar `.p12`, depende del driver de cada tarjeta, y convierte «tengo el TPV» en «tengo el DNIe
+  operativo del dueño».
+
+**Y avisar de la caducidad**, que es el mismo problema visto antes de que ocurra: aviso a 30 días por
+el sistema de notificaciones que ya existe.
+
+### 6.3 El job — y nada más que el job
+
+Conviene decir lo que **no** hace falta, porque la palabra «independiente» de §1.2.1 puede sugerir
+más de lo que es. La remisión **no necesita infraestructura nueva**:
+
+- **No usa el WebSocket.** Ese canal es para replicar a nuestra nube. Con la AEAT se habla por
+  peticiones HTTPS normales (SOAP sobre HTTP, §6.1), y punto.
+- **No es un runner nuevo.** Es un `Job` más en el catálogo que ya existe, con su vencimiento por
+  reloj de pared, su jitter, su backoff y su registro en `_Jobs_State`, como los demás.
+- **No es un hilo suelto ni un `setInterval`.** Eso ya está prohibido por §10 de CLAUDE.md y aquí no
+  hay motivo para la excepción.
+
+«Independiente» significa exactamente una cosa: **que su gating no cuelgue del interruptor de la
+sincronización**. Que, como se vio arriba, se consigue no escribiendo nada.
 
 En `jobs/registro.rs`, siguiendo el patrón del §10 de CLAUDE.md — un `async fn` y una entrada en el
 catálogo, nada más:
@@ -577,6 +688,28 @@ que el envío no viva dentro de la transacción del cobro.
 Una huella mal calculada **no** se rechaza: la AEAT marca el registro como *«Aceptado con errores»*.
 O sea que un bug en §4 no se ve como un fallo ruidoso — se ve como una columna en el panel. Hay que
 mirarla.
+
+### 6.5.1 Qué se hace con un registro rechazado: la subsanación
+
+La tabla de arriba dice cuándo un registro queda `RECHAZADO`, pero no qué se hace con él, y no es
+«volver a mandar lo mismo»: si la AEAT lo rechazó por el contenido, reenviarlo idéntico lo rechazará
+igual. La norma tiene un instrumento propio, el **registro de alta de subsanación**:
+
+- Se genera un **RF de alta nuevo** con los datos ya corregidos, marcado `Subsanacion = "S"` y
+  `RechazoPrevio = "X"` (que significa: *«el anterior fue rechazado, este lo repara»*).
+- **Conserva el mismo `IDFactura`** — misma serie, mismo número, misma fecha. No es una factura
+  nueva, es el mismo hecho bien contado.
+- Y **entra en la cadena como cualquier otro registro**, con su `Orden`, su huella y su eslabón
+  anterior. La cadena no se reescribe nunca.
+
+Consecuencia en el modelo (§3.1): `Registros_Facturacion` es append-only, así que una subsanación es
+**otra fila**, no un `UPDATE` de la rechazada. Hacen falta dos columnas más para poder contarlo:
+`Subsanacion` y `Subsana_ID_Registro` (a cuál repara).
+
+⚠️ **Y una regla de producto:** subsanar **no puede ser automático**. Si el TPV corrige y reenvía
+solo, un error sistemático nuestro se convierte en dos registros malos por venta en vez de uno. La
+subsanación la dispara una persona desde el panel, después de mirar qué dijo la AEAT. Lo que sí es
+automático es el reintento de los fallos de **transporte**, que son otra cosa.
 
 ### 6.6 El precio de que envíe la Main
 
@@ -833,10 +966,10 @@ Cada tramo deja el repo compilando y aporta algo comprobable.
 | **2** | **La cadena, sin AEAT** | `tpv-domain/verifactu.rs` con los tres vectores oficiales en verde. Nada conectado todavía |
 | **3** | **Emisión en el cobro** | El registro se crea en la transacción; el número fiscal sustituye a `Ticket_Contador`; el cobro devuelve el bloque fiscal |
 | **4** | **QR y papel** | Rasterizado, colocación al principio, leyenda, previa espejo. **Aquí ya se emiten facturas conformes**, sólo que sin remitir |
-| **5** | **El envío** | Crate `tpv-infra-aeat`, certificado por `.p12` (§6.2 A), job, control de flujo, clasificación, panel, **escalera de avisos** (§1.2.1). Preproducción |
+| **5** | **El envío** | **Spike de `rustls-cng` primero** (§6.2.1), luego crate `tpv-infra-aeat`, selección del certificado, job, control de flujo, clasificación, panel, **escalera de avisos** (§1.2.1). Preproducción |
 | **6** | **Anulación y rectificativas** | Partir el botón (§7), `R5`, impacto en el arqueo |
 | **7** | **Factura completa** | `F1` en el cobro y `F3` en sustitución (§9). Aquí se decide el límite de 3.000 € (§2.2) |
-| **8** | **Cierre** | Exportación (§10), certificado del almacén de Windows (§6.2 B), declaración responsable (§11.2), reconciliación tras recuperación (§8.1), retención (DB-14) |
+| **8** | **Cierre** | Exportación (§10), declaración responsable (§11.2), reconciliación tras recuperación (§8.1), retención (DB-14) |
 
 **El orden no es negociable en los tramos 2-4**: la cadena antes que la emisión, y la emisión antes
 que el envío. Escribir el cliente SOAP primero es la forma más rápida de acabar depurando dos cosas a
@@ -856,12 +989,17 @@ de un olvido.
 | # | Qué | Cuándo | Bloquea |
 |---|---|---|---|
 | 1 | **Qué hace la pantalla por encima de 3.000 €** (§2.2) | Antes del tramo 7 | Nada antes |
-| 2 | **Conseguir el certificado electrónico** | **YA** — tiene plazo administrativo ajeno | El tramo 5 entero |
+| 2 | **Conseguir el certificado electrónico** e instalarlo en el almacén de Windows | **YA** — tiene plazo administrativo ajeno | El tramo 5 entero |
+| 2b | **Spike de `rustls-cng`**: handshake contra `prewww1.aeat.es` con un certificado del almacén | En cuanto haya certificado, **antes de escribir XML** | Confirma o tumba la decisión de §6.2 |
 | 3 | **Redactar la declaración responsable** (§11.2) | Antes de lanzar, no de desarrollar | El lanzamiento |
 | 4 | **NIF y razón social definitivos del productor** (§11.1) | Cuando la empresa esté constituida | El lanzamiento |
 | 5 | **`IdSistemaInformatico`**: elegir el código de dos caracteres | Tramo 5 | Nada |
 | 6 | **Serie única vs. serie propia para rectificativas** (§7.4) | Tramo 6 | Nada |
 | 7 | **Confirmar con un asesor** la modalidad y el tratamiento de devoluciones | Antes de lanzar | El lanzamiento |
+| 8 | **¿Canarias, Ceuta y Melilla?** Allí no se repercute IVA sino **IGIC** o **IPSI**, que son otros valores del campo `Impuesto` (03 y 02) y otros tipos impositivos | Antes del tramo 3 | El desglose, si entran |
+| 9 | **Productos exentos o no sujetos.** Hoy `Productos.IVA_Percent` es un número y no existe «exento». El caso real de un bar es la **lotería**, que la AEAT trata aparte | Antes del tramo 3 | El desglose, si aplica |
+| 10 | **`FechaOperacion` cuando el servicio cruza la medianoche** (§2.5) | Tramo 3 | Nada |
+| 11 | **Un solo TPV por negocio.** La cadena asume una única Main; dos cajas serían dos cadenas y dos series | Cuando alguien lo pida | Nada hoy |
 
 ---
 
