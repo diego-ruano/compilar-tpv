@@ -24,6 +24,7 @@ import { TextInput } from "../../features/configuracion/ui/Inputs";
 
 // Sections
 import { Negocio } from "../../features/configuracion/sections/Negocio";
+import { Fiscal } from "../../features/configuracion/sections/Fiscal";
 import { Contacto } from "../../features/configuracion/sections/Contacto";
 import { Ticket } from "../../features/configuracion/sections/Ticket";
 import { Licencia } from "../../features/configuracion/sections/Licencia";
@@ -124,6 +125,24 @@ export default function Configuracion() {
                 "cif",
                 "iva",
                 "footer",
+            ],
+        },
+        {
+            key: "FISCAL",
+            title: "Fiscal",
+            desc: "Veri*factu: datos del obligado, certificado y envío a la AEAT",
+            keywords: [
+                "verifactu",
+                "veri*factu",
+                "aeat",
+                "hacienda",
+                "factura",
+                "certificado",
+                "nif",
+                "razón social",
+                "qr",
+                "fiscal",
+                "impuestos",
             ],
         },
         {
@@ -281,6 +300,7 @@ export default function Configuracion() {
                 cif: draft.cif,
                 mensajeFooter: draft.mensajeFooter,
                 ivaPercent: draft.ivaPercent,
+                razonSocial: draft.razonSocial,
             });
             // Best-effort: si el logo anterior era una ruta relativa (canal R2) y cambió, borrarlo.
             if (
@@ -671,6 +691,26 @@ export default function Configuracion() {
                                                 saving={savingBiz}
                                                 onSave={onSaveBusiness}
                                                 onReset={resetDraft}
+                                            />
+                                        ) : null}
+
+                                        {section === "FISCAL" ? (
+                                            <Fiscal
+                                                inputTone={inputTone}
+                                                razonSocial={draft.razonSocial}
+                                                setRazonSocial={(v) =>
+                                                    setDraft((d) => ({
+                                                        ...d,
+                                                        razonSocial: v,
+                                                    }))
+                                                }
+                                                cif={draft.cif}
+                                                setCif={(v) =>
+                                                    setDraft((d) => ({ ...d, cif: v }))
+                                                }
+                                                dirty={dirty}
+                                                saving={savingBiz}
+                                                onSave={onSaveBusiness}
                                             />
                                         ) : null}
 

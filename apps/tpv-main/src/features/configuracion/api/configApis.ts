@@ -21,6 +21,24 @@ export type BusinessSettings = {
     cif: string;
     mensajeFooter: string;
     ivaPercent: number;
+
+    // ── Datos fiscales (FISCAL-01, Veri*factu) ──────────────────────────────────────────────
+    /**
+     * `NombreRazon` del obligado a expedir la factura. **No es `businessName`**: uno es el rótulo
+     * («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
+     * el registro que se remite a la AEAT, sólo este.
+     */
+    razonSocial: string;
+    /**
+     * `DescripcionOperacion`: campo obligatorio del registro, de hasta 500 caracteres. Texto fijo y
+     * no un resumen de las líneas — los nombres de producto los escribe el usuario, y un campo
+     * obligatorio que puede llegar con basura es un rechazo garantizado.
+     */
+    descripcionOp: string;
+    /** Límite (IVA incluido) por encima del cual ya no cabe una simplificada. 3.000 € en hostelería. */
+    limiteSimplif: number;
+    /** `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint y la URL del QR del papel. */
+    verifactuEntorno: string;
 };
 
 export type TicketSettings = {
@@ -91,6 +109,15 @@ function mapBizFromRust(x: any): BusinessSettings {
             pick(x, ["mensaje_footer", "mensajeFooter"], "¡Gracias por su visita!"),
         ),
         ivaPercent: num(pick(x, ["iva_percent", "ivaPercent"]), 10),
+        razonSocial: String(pick(x, ["razon_social", "razonSocial"], "")),
+        descripcionOp: String(
+            pick(x, ["descripcion_op", "descripcionOp"], "Servicios de hosteleria y restauracion"),
+        ),
+        limiteSimplif: num(pick(x, ["limite_simplif", "limiteSimplif"]), 3000),
+        verifactuEntorno:
+            String(pick(x, ["verifactu_entorno", "verifactuEntorno"], "produccion")) === "pruebas"
+                ? "pruebas"
+                : "produccion",
     };
 }
 
@@ -103,6 +130,10 @@ function mapBizPatchToRust(patch: BusinessSettingsPatch): Record<string, any> {
     if ("cif" in patch) out.cif = patch.cif;
     if ("mensajeFooter" in patch) out.mensaje_footer = patch.mensajeFooter;
     if ("ivaPercent" in patch) out.iva_percent = patch.ivaPercent;
+    if ("razonSocial" in patch) out.razon_social = patch.razonSocial;
+    if ("descripcionOp" in patch) out.descripcion_op = patch.descripcionOp;
+    if ("limiteSimplif" in patch) out.limite_simplif = patch.limiteSimplif;
+    if ("verifactuEntorno" in patch) out.verifactu_entorno = patch.verifactuEntorno;
     return out;
 }
 

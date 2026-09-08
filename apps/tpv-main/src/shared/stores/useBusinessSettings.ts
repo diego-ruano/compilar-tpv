@@ -14,6 +14,12 @@ const DEFAULTS: BusinessSettings = {
     cif: "",
     mensajeFooter: "¡Gracias por su visita!",
     ivaPercent: 10,
+    // FISCAL-01. `razonSocial` arranca VACÍA a propósito: no hay defecto razonable para quién
+    // factura, y que esté vacía es precisamente lo que impide cobrar hasta que alguien la escriba.
+    razonSocial: "",
+    descripcionOp: "Servicios de hosteleria y restauracion",
+    limiteSimplif: 3000,
+    verifactuEntorno: "produccion",
 };
 
 type BusinessSettingsState = BusinessSettings & {
@@ -31,6 +37,7 @@ type BusinessSettingsState = BusinessSettings & {
     setCif: (v: string) => void;
     setMensajeFooter: (v: string) => void;
     setIvaPercent: (v: number) => void;
+    setRazonSocial: (v: string) => void;
 };
 
 // debounce (module-level)
@@ -99,5 +106,6 @@ export const useBusinessSettings = create<BusinessSettingsState>(
         setCif: (v) => get().setMany({ cif: v }),
         setMensajeFooter: (v) => get().setMany({ mensajeFooter: v }),
         setIvaPercent: (v) => get().setMany({ ivaPercent: clampIva(v) }),
+        setRazonSocial: (v) => get().setMany({ razonSocial: v }),
     }),
 );

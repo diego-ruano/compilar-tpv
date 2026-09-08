@@ -12,6 +12,7 @@ type BizLike = {
     cif: string;
     mensajeFooter: string;
     ivaPercent: number;
+    razonSocial: string;
 };
 
 export function useBusinessDraft(biz: BizLike) {
@@ -24,6 +25,7 @@ export function useBusinessDraft(biz: BizLike) {
         cif: biz.cif,
         mensajeFooter: biz.mensajeFooter,
         ivaPercent: biz.ivaPercent,
+        razonSocial: biz.razonSocial,
     }));
 
     // 2) comparo contra estado actual del store (SIN hidratar)
@@ -36,6 +38,7 @@ export function useBusinessDraft(biz: BizLike) {
             cif: biz.cif,
             mensajeFooter: biz.mensajeFooter,
             ivaPercent: biz.ivaPercent,
+            razonSocial: biz.razonSocial,
         };
         return !shallowEqualDraft(draft, current);
     }, [
@@ -47,6 +50,7 @@ export function useBusinessDraft(biz: BizLike) {
         biz.cif,
         biz.mensajeFooter,
         biz.ivaPercent,
+        biz.razonSocial,
     ]);
 
     // 3) reset a lo que haya ahora en el store
@@ -59,6 +63,7 @@ export function useBusinessDraft(biz: BizLike) {
             cif: biz.cif,
             mensajeFooter: biz.mensajeFooter,
             ivaPercent: biz.ivaPercent,
+            razonSocial: biz.razonSocial,
         });
     };
 
