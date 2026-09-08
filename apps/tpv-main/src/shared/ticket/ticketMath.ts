@@ -19,6 +19,14 @@ export type LineaEntrada = {
 	ivaPercent?: number | null;
 	/** Unidades de la línea. Ausente = 1. */
 	cantidad?: number;
+	/**
+	 * FISCAL-01: la línea se vendió EXENTA de IVA. **No es lo mismo que un 0 %**, y por eso no se
+	 * representa con `ivaPercent: 0`: son dos afirmaciones legales distintas y el registro de
+	 * facturación las expresa en campos excluyentes (`CalificacionOperacion` vs `OperacionExenta`).
+	 */
+	exento?: boolean;
+	/** `E1`..`E6`. Sólo se mira si `exento`. */
+	causaExencion?: string | null;
 };
 
 /** Una línea ya agrupada, como se imprime. */
@@ -27,10 +35,21 @@ export type LineaAgrupada = {
 	precio: number;
 	qty: number;
 	ivaPercent: number | null;
+	exento: boolean;
+	causaExencion: string | null;
 };
 
-/** Un tramo del desglose del pie: base y cuota de un tipo de IVA. */
-export type TramoIva = { tipo: number; base: number; iva: number };
+/**
+ * Un tramo del desglose del pie. Gemelo de `TramoIva` en `tpv_domain::ticket`, y como allí son dos
+ * clases y no una: el XSD del registro pone `CalificacionOperacion` y `OperacionExenta` en un
+ * `<choice>`, así que un tramo exento **no tiene** tipo ni cuota — no los tiene a cero.
+ */
+export type TramoIva =
+	| { clase: "sujeta"; tipo: number; base: number; iva: number }
+	| { clase: "exenta"; causa: string; base: number };
+
+/** Causa por defecto de una línea marcada exenta sin elegir cuál. Gemelo del dominio. */
+export const CAUSA_EXENCION_POR_DEFECTO = "E1";
 
 /** Redondeo a céntimos. Lo que se compara es lo que se imprime, no el flotante. */
 export function aCentimos(n: number): number {
@@ -84,9 +103,14 @@ export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 		const entera = Number.isInteger(it.cantidad);
 		const unidades = entera ? (it.cantidad as number) : 1;
 		const precio = entera ? it.precio : it.precio * (it.cantidad ?? 1);
-		const key = `${it.nombre}__${precio}__${iva ?? "neg"}`;
+		const exento = it.exento === true;
+		const causa = exento ? (it.causaExencion || CAUSA_EXENCION_POR_DEFECTO) : null;
+		// La exención entra en la clave de agrupación: dos unidades del mismo producto, una exenta
+		// y otra no, son dos líneas del ticket porque son dos tramos del desglose.
+		const key = `${it.nombre}__${precio}__${iva ?? "neg"}__${causa ?? ""}`;
 		const cur = map.get(key);
-		if (!cur) map.set(key, { nombre: it.nombre, precio, qty: unidades, ivaPercent: iva });
+		if (!cur)
+			map.set(key, { nombre: it.nombre, precio, qty: unidades, ivaPercent: iva, exento, causaExencion: causa });
 		else cur.qty += unidades;
 	}
 	return Array.from(map.values());
@@ -98,7 +122,8 @@ export function totalDe(lineas: LineaAgrupada[]): number {
 }
 
 /**
- * Reparto por tipo de IVA. Espejo de `desglose_iva` en `printing.rs`.
+ * Reparto por tipo de IVA. Espejo de `tpv_domain::ticket::desglose` (que es de donde salen también
+ * el papel y el registro que se remite a la AEAT).
  *
  * Los precios llevan el IVA incluido (es lo que se le enseña al cliente en hostelería), así que la
  * base se saca dividiendo. Se calcula **por línea y luego se suma por tipo**: con dos tipos
@@ -106,20 +131,47 @@ export function totalDe(lineas: LineaAgrupada[]): number {
  *
  * ⚠️ **La cuota no se redondea: se despeja.** Redondear base y cuota por separado hace que a veces
  * suban las dos y el papel diga `0,38 + 0,02 = 0,39` (0,39 € al 4 % es el primer caso). Un ticket
- * cuya base más su IVA no dan el total es un documento contable mal emitido.
+ * cuya base más su IVA no dan el total es un documento contable mal emitido — y en el registro es
+ * además el error admisible 2005 de la AEAT.
+ *
+ * Las **exentas** se agrupan por causa, van después de las sujetas y no llevan ni tipo ni cuota.
  */
 export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null): TramoIva[] {
 	const porTipo = new Map<number, number>();
+	const porCausa = new Map<string, number>();
 	for (const g of lineas) {
-		const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
-		porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + g.qty * g.precio);
+		const importe = g.qty * g.precio;
+		if (g.exento) {
+			const causa = g.causaExencion || CAUSA_EXENCION_POR_DEFECTO;
+			porCausa.set(causa, (porCausa.get(causa) ?? 0) + importe);
+		} else {
+			const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
+			porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + importe);
+		}
 	}
-	return Array.from(porTipo.entries())
+
+	const sujetas: TramoIva[] = Array.from(porTipo.entries())
 		.sort((a, b) => a[0] - b[0])
 		.map(([tipo, bruto]) => {
 			const totalTramo = aCentimos(bruto);
 			const divisor = 1 + tipo / 100;
 			const base = divisor === 0 ? totalTramo : aCentimos(totalTramo / divisor);
-			return { tipo, base, iva: aCentimos(totalTramo - base) };
+			return { clase: "sujeta" as const, tipo, base, iva: aCentimos(totalTramo - base) };
 		});
+
+	const exentas: TramoIva[] = Array.from(porCausa.entries())
+		.sort((a, b) => a[0].localeCompare(b[0]))
+		.map(([causa, bruto]) => ({ clase: "exenta" as const, causa, base: aCentimos(bruto) }));
+
+	return [...sujetas, ...exentas];
+}
+
+/** Suma de las bases del desglose. */
+export function baseTotal(tramos: TramoIva[]): number {
+	return aCentimos(tramos.reduce((acc, t) => acc + t.base, 0));
+}
+
+/** Suma de las cuotas. Un tramo exento aporta cero — y en el XML ese cero no se informa. */
+export function cuotaTotal(tramos: TramoIva[]): number {
+	return aCentimos(tramos.reduce((acc, t) => acc + (t.clase === "sujeta" ? t.iva : 0), 0));
 }

@@ -12,6 +12,7 @@
 //! front (`PreviewModal`): qué elementos se muestran, ancho de papel, IVA, líneas, total, footer.
 
 use serde::{Deserialize, Serialize};
+use tpv_domain::ticket::{LineaTicket, TramoIva};
 
 /// Una impresora detectada por el sistema.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,13 @@ pub struct PrintTicketLine {
     /// el tipo del día de la venta.
     #[serde(default)]
     pub iva_percent: Option<f64>,
+    /// FISCAL-01: la línea se vendió EXENTA de IVA, que no es lo mismo que vendida al 0 %. Va
+    /// congelada como el tipo, y por lo mismo.
+    #[serde(default)]
+    pub exento: bool,
+    /// `E1`..`E6`. Sólo se mira si `exento`.
+    #[serde(default)]
+    pub causa_exencion: Option<String>,
 }
 
 /// Payload de impresión enviado desde el frontend. Lleva los datos del negocio + los flags de
@@ -437,35 +445,27 @@ fn a_centimos(n: f64) -> f64 {
 /// por tipo, no sobre el total del ticket: con dos tipos distintos, aplicar uno solo al total da
 /// un desglose que no cuadra.
 ///
-/// ⚠️ **La cuota no se redondea: se despeja.** Redondear base y cuota por separado hace que a
-/// veces las dos suban y el papel diga `0,38 + 0,02 = 0,39`. Pasa de verdad: 0,39 € al 4 % es el
-/// primer caso. Un ticket cuya base más su IVA no dan el total es un documento contable mal
-/// emitido, así que se redondea la base y la cuota es **lo que falta** hasta el total.
+/// Desglose de IVA del ticket, delegado en `tpv_domain::ticket`.
+///
+/// **La cuenta no vive aquí desde FISCAL-01.** Tiene tres consumidores —este generador, la vista
+/// previa de `TicketPaper.tsx` y el `Desglose` del registro de facturación que se remite a la
+/// AEAT— y tres copias de la misma aritmética es exactamente la divergencia que no se ve hasta que
+/// la AEAT devuelve un «aceptado con errores» meses después. Las reglas (la cuota se despeja, no
+/// se redondea; las exentas son otra clase de tramo) están documentadas allí.
 ///
 /// Una línea sin tipo propio usa el general del negocio, que es el caso de casi todo.
-fn desglose_iva(p: &PrintTicketPayload) -> Vec<(f64, f64, f64)> {
-    let mut por_tipo: Vec<(f64, f64)> = Vec::new(); // (tipo, total con IVA)
-
-    for it in &p.items {
-        let tipo = it.iva_percent.unwrap_or(p.iva_percent);
-        let total_linea = it.precio_unitario * it.cantidad as f64;
-        // Se agrupa comparando con tolerancia: un 10.0 y un 10.000000001 son el mismo tipo.
-        match por_tipo.iter_mut().find(|(t, _)| (*t - tipo).abs() < 1e-9) {
-            Some((_, acc)) => *acc += total_linea,
-            None => por_tipo.push((tipo, total_linea)),
-        }
-    }
-
-    por_tipo.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    por_tipo
-        .into_iter()
-        .map(|(tipo, total)| {
-            let total = a_centimos(total);
-            let divisor = 1.0 + tipo / 100.0;
-            let base = if divisor.abs() < f64::EPSILON { total } else { a_centimos(total / divisor) };
-            (tipo, base, a_centimos(total - base))
+fn desglose_iva(p: &PrintTicketPayload) -> Vec<TramoIva> {
+    let lineas: Vec<LineaTicket> = p
+        .items
+        .iter()
+        .map(|it| LineaTicket {
+            total_con_iva: it.precio_unitario * it.cantidad as f64,
+            tipo_iva: it.iva_percent.unwrap_or(p.iva_percent),
+            exento: it.exento,
+            causa_exencion: it.causa_exencion.clone(),
         })
-        .collect()
+        .collect();
+    tpv_domain::ticket::desglose(&lineas)
 }
 
 /// Puntos de ancho que puede ocupar el logo: los del cabezal del formato, menos lo que se coman
@@ -699,27 +699,48 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     // ── Base + IVA ──
     if p.show_base_and_iva {
         let tramos = desglose_iva(p);
-        if tramos.len() <= 1 {
-            // Un solo tipo (el caso de un bar normal): se imprime como toda la vida, sin
+        match tramos.as_slice() {
+            // Sin líneas: el ticket sigue enseñando su base y su IVA a cero, como toda la vida.
+            [] => {
+                text_line(&mut out, &line_two("BASE", &fmt_eur(0.0), cols));
+                text_line(
+                    &mut out,
+                    &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(0.0), cols),
+                );
+            }
+            // Un solo tipo sujeto (el caso de un bar normal): se imprime como toda la vida, sin
             // convertir el ticket en una tabla por algo que no aporta nada.
-            let t = tramos.first().copied().unwrap_or((p.iva_percent, 0.0, 0.0));
-            text_line(&mut out, &line_two("BASE", &fmt_eur(t.1), cols));
-            text_line(
-                &mut out,
-                &line_two(&format!("IVA ({}%)", fmt_pct(t.0)), &fmt_eur(t.2), cols),
-            );
-        } else {
-            // Varios tipos: hay que verlos por separado. Un ticket con comida al reducido y algo
-            // envasado para llevar al general no se puede resumir en una sola cifra.
-            for (tipo, base, iva) in &tramos {
+            [TramoIva::Sujeta { tipo, base, cuota }] => {
+                text_line(&mut out, &line_two("BASE", &fmt_eur(*base), cols));
                 text_line(
                     &mut out,
-                    &line_two(&format!("BASE ({}%)", fmt_pct(*tipo)), &fmt_eur(*base), cols),
+                    &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*cuota), cols),
                 );
-                text_line(
-                    &mut out,
-                    &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*iva), cols),
-                );
+            }
+            // Varios tramos: hay que verlos por separado. Un ticket con comida al reducido y algo
+            // envasado para llevar al general no se puede resumir en una sola cifra — y una línea
+            // exenta no tiene ninguna cifra de IVA que enseñar, así que sale sin ella.
+            _ => {
+                for t in &tramos {
+                    match t {
+                        TramoIva::Sujeta { tipo, base, cuota } => {
+                            text_line(
+                                &mut out,
+                                &line_two(&format!("BASE ({}%)", fmt_pct(*tipo)), &fmt_eur(*base), cols),
+                            );
+                            text_line(
+                                &mut out,
+                                &line_two(&format!("IVA ({}%)", fmt_pct(*tipo)), &fmt_eur(*cuota), cols),
+                            );
+                        }
+                        TramoIva::Exenta { causa, base } => {
+                            text_line(
+                                &mut out,
+                                &line_two(&format!("BASE EXENTA ({causa})"), &fmt_eur(*base), cols),
+                            );
+                        }
+                    }
+                }
             }
         }
     }

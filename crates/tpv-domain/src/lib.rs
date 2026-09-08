@@ -22,8 +22,12 @@ pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod reservas;
 pub mod tareas;
+/// Desglose de IVA: un unico calculo para el papel, la vista previa y el registro fiscal.
+pub mod ticket;
 pub mod trabajadores;
 pub mod venta_rapida;
+/// Veri*factu (FISCAL-01): huella, importes, QR, NIF. Puro y con los vectores oficiales.
+pub mod verifactu;
 
 // Los submódulos de dominio se irán añadiendo módulo por módulo:
 // pub mod mesas;

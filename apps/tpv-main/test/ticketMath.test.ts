@@ -13,6 +13,8 @@ import { describe, expect, it } from "vitest";
 
 import {
 	agruparLineas,
+	baseTotal,
+	cuotaTotal,
 	desgloseIva,
 	eur,
 	recortar,
@@ -27,12 +29,25 @@ function unidad(nombre: string, precio: number, ivaPercent?: number | null): Lin
 describe("agrupación", () => {
 	it("junta unidades idénticas", () => {
 		const g = agruparLineas([unidad("Cafe", 1.1), unidad("Cafe", 1.1)]);
-		expect(g).toEqual([{ nombre: "Cafe", precio: 1.1, qty: 2, ivaPercent: null }]);
+		expect(g).toEqual([
+			{ nombre: "Cafe", precio: 1.1, qty: 2, ivaPercent: null, exento: false, causaExencion: null },
+		]);
 	});
 
 	it("separa por precio y por tipo de IVA", () => {
 		expect(agruparLineas([unidad("Cafe", 1.1), unidad("Cafe", 1.2)])).toHaveLength(2);
 		expect(agruparLineas([unidad("Vino", 12, 10), unidad("Vino", 12, 21)])).toHaveLength(2);
+	});
+
+	it("separa también por exención: son dos tramos del desglose", () => {
+		// FISCAL-01. Juntarlas obligaría a que una sola línea del papel se repartiera entre dos
+		// tramos del registro de facturación, que es justo lo que la agrupación existe para evitar.
+		expect(
+			agruparLineas([
+				{ nombre: "X", precio: 5 },
+				{ nombre: "X", precio: 5, exento: true, causaExencion: "E1" },
+			]),
+		).toHaveLength(2);
 	});
 
 	it("respeta y suma las cantidades ya contadas", () => {
@@ -59,12 +74,12 @@ describe("agrupación", () => {
 describe("desglose de IVA", () => {
 	it("sin tipo propio todo va al tipo del negocio", () => {
 		const t = desgloseIva(agruparLineas([unidad("Cafe", 11)]), 10);
-		expect(t).toEqual([{ tipo: 10, base: 10, iva: 1 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 10, base: 10, iva: 1 }]);
 	});
 
 	it("el tipo de la línea manda sobre el del negocio", () => {
 		const t = desgloseIva(agruparLineas([unidad("Vino", 12.1, 21)]), 10);
-		expect(t).toEqual([{ tipo: 21, base: 10, iva: 2.1 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 21, base: 10, iva: 2.1 }]);
 	});
 
 	it("un ticket con dos tipos los separa y los ordena", () => {
@@ -72,17 +87,59 @@ describe("desglose de IVA", () => {
 			agruparLineas([unidad("Cafe", 11), unidad("Vino", 12.1, 21)]),
 			10,
 		);
-		expect(t.map((x) => x.tipo)).toEqual([10, 21]);
-		expect(t.reduce((acc, x) => acc + x.base + x.iva, 0)).toBeCloseTo(23.1, 10);
+		expect(t.map((x) => (x.clase === "sujeta" ? x.tipo : null))).toEqual([10, 21]);
+		expect(baseTotal(t) + cuotaTotal(t)).toBeCloseTo(23.1, 10);
 	});
 
 	it("un tipo del cero por ciento no divide entre cero", () => {
 		const t = desgloseIva(agruparLineas([unidad("Libro", 10, 0)]), 10);
-		expect(t).toEqual([{ tipo: 0, base: 10, iva: 0 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 0, base: 10, iva: 0 }]);
 	});
 
 	it("un ticket vacío no inventa tramos", () => {
 		expect(desgloseIva([], 10)).toEqual([]);
+	});
+
+	it("una línea exenta es otra clase de tramo, no un 0 %", () => {
+		// FISCAL-01. Son dos afirmaciones legales distintas y el registro de facturación las
+		// expresa en campos excluyentes; el test existe para que nadie las unifique
+		// «simplificando». Gemelo de `una_linea_exenta_no_lleva_tipo_ni_cuota` en el dominio.
+		const t = desgloseIva(
+			agruparLineas([
+				{ nombre: "Cafe", precio: 11 },
+				{ nombre: "Exento", precio: 5, exento: true, causaExencion: "E1" },
+			]),
+			10,
+		);
+		expect(t).toEqual([
+			{ clase: "sujeta", tipo: 10, base: 10, iva: 1 },
+			{ clase: "exenta", causa: "E1", base: 5 },
+		]);
+		// Y la exenta no aporta cuota: 1 €, no 1 € más un cero informado.
+		expect(cuotaTotal(t)).toBeCloseTo(1, 10);
+		expect(baseTotal(t)).toBeCloseTo(15, 10);
+	});
+
+	it("una exenta sin causa cae en E1", () => {
+		const t = desgloseIva(agruparLineas([{ nombre: "x", precio: 7, exento: true }]), 10);
+		expect(t).toEqual([{ clase: "exenta", causa: "E1", base: 7 }]);
+	});
+
+	it("las exentas se agrupan por causa y van detrás de las sujetas", () => {
+		const t = desgloseIva(
+			agruparLineas([
+				{ nombre: "b", precio: 5, exento: true, causaExencion: "E2" },
+				{ nombre: "c", precio: 11 },
+				{ nombre: "a", precio: 3, exento: true, causaExencion: "E1" },
+				{ nombre: "a", precio: 2, exento: true, causaExencion: "E1" },
+			]),
+			10,
+		);
+		expect(t.map((x) => (x.clase === "sujeta" ? `s${x.tipo}` : `e${x.causa}`))).toEqual([
+			"s10",
+			"eE1",
+			"eE2",
+		]);
 	});
 
 	it("base más IVA da el total en todos los tipos y en todos los importes", () => {
@@ -95,9 +152,9 @@ describe("desglose de IVA", () => {
 			for (let c = 1; c <= 20_000; c++) {
 				const total = c / 100;
 				const [tramo] = desgloseIva(agruparLineas([unidad("x", total)]), tipo);
-				const suma = Math.round((tramo.base + tramo.iva) * 100);
+				const suma = Math.round((tramo.base + (tramo.clase === "sujeta" ? tramo.iva : 0)) * 100);
 				if (suma !== c) {
-					fallos.push(`${total.toFixed(2)} al ${tipo}%: ${tramo.base} + ${tramo.iva}`);
+					fallos.push(`${total.toFixed(2)} al ${tipo}%: ${tramo.base}`);
 					if (fallos.length > 5) break;
 				}
 			}
@@ -116,7 +173,7 @@ describe("desglose de IVA", () => {
 					agruparLineas([unidad("A", x), unidad("B", y, 21)]),
 					10,
 				);
-				const suma = Math.round(tramos.reduce((acc, t) => acc + t.base + t.iva, 0) * 100);
+				const suma = Math.round((baseTotal(tramos) + cuotaTotal(tramos)) * 100);
 				const total = Math.round((x + y) * 100);
 				if (suma !== total) {
 					fallos.push(`${x} al 10% + ${y} al 21%: ${suma} != ${total}`);
@@ -143,7 +200,7 @@ describe("desglose de IVA", () => {
 
 		for (const [total, tipo, base, iva] of golden) {
 			expect(desgloseIva(agruparLineas([unidad("x", total)]), tipo)).toEqual([
-				{ tipo, base, iva },
+				{ clase: "sujeta", tipo, base, iva },
 			]);
 		}
 	});
