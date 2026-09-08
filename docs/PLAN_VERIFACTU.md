@@ -141,28 +141,32 @@ Cada fila **activa** de `Pagos` es una **factura simplificada (`F2`)** con su pr
 comanda pagada en tres veces produce tres facturas. Es lo que ya hace el TPV con `Numero_Ticket`, así
 que no cambia la operativa: cambia lo que ese número significa.
 
-### 2.2 El límite de los 3.000 € — ⏳ PENDIENTE DE DECISIÓN
+### 2.2 El límite de los 3.000 € (decidido: 2026-09-08)
 
 Una simplificada sólo vale hasta **400 € (IVA incluido)** con carácter general, pero la hostelería
 está en la lista del art. 4.2 del RD 1619/2012 (*«servicios de hostelería y restauración prestados
 por restaurantes, bares, cafeterías… así como el suministro de bebidas o comidas para consumir en el
 acto»*), que sube el límite a **3.000 €**.
 
-Por encima de esa cifra **no cabe una `F2`**: hay que emitir factura completa con destinatario. Lo
-que está sin decidir es **qué hace la pantalla** cuando alguien va a cobrar 3.200 €:
+Por encima de esa cifra **no cabe una `F2`**: hay que emitir factura completa con destinatario.
 
-| Opción | Qué pasa | A favor / en contra |
-|---|---|---|
-| **a** | El cobro **se detiene** y pide los datos fiscales antes de continuar | Correcto siempre. Pero es la única puerta dura en el camino del dinero |
-| **b** | Se avisa y se ofrece **emitir `F1`**, con «continuar igual» deshabilitado | Igual de correcto, menos brusco |
-| **c** | Sólo se avisa y se deja pasar | **No conforme.** Anotada para descartarla por escrito |
+**Cómo se comporta el TPV.** Al pulsar cobrar, si el importe supera el límite, sale una modal:
+*«Al continuar se emitirá una factura completa en lugar de un ticket. Hará falta el NIF y el nombre
+del cliente. ¿Continuar?»* → **Sí** abre el formulario de datos fiscales y emite `F1`; **No** vuelve
+al cobro sin hacer nada. El detalle de esa pantalla está en §9.
 
-**Estado (2026-09-08):** aplazada a propósito. En un bar es un caso rarísimo, así que no puede
-condicionar el diseño de los tramos 1-5; en un catering o una comunión es normal. Se decide antes del
-**tramo 7** (factura completa), que es donde se implementa.
+**El límite se mira sobre el importe DEL COBRO, no sobre el total de la comanda.** No es un matiz
+menor y juega a favor: como un cobro es una factura (§2.1), una comanda de 4.000 € que pagan dos
+empresas a 2.000 € cada una son **dos simplificadas correctas**, y eso ya funciona hoy con el cobro
+fraccionado.
 
-Sea cual sea la elección, el umbral va en `Business_Settings` (`Limite_Simplif`) y no incrustado: es
-un número que la norma puede mover.
+⚠️ **Y por eso mismo no hay botón de «dividir el cobro».** Partir el pago de **un mismo** cliente
+para bajar de 3.000 € es fraccionamiento artificial de una operación, que no es legal. Que el reparto
+entre clientes distintos funcione es una consecuencia del modelo, no un atajo que ofrezcamos: ofrecer
+el botón sería invitar a usarlo mal.
+
+El umbral va en `Business_Settings` (`Limite_Simplif`) y no incrustado: es un número que la norma
+puede mover.
 
 ### 2.3 Los tipos de factura que necesitamos
 
@@ -186,19 +190,65 @@ fiscal. Nada de esto cambia.
 
 ---
 
-### 2.5 La cena que acaba a la una y media — ⏳ PENDIENTE DE DECISIÓN
+### 2.5 La cena que acaba a la una y media: `FechaOperacion` NO se informa (decidido: 2026-09-08)
 
-`FechaExpedicionFactura` es la fecha en que se expide la factura, o sea la del cobro. Pero el XSD
-tiene además un `FechaOperacion` **opcional**, para cuando la operación ocurrió otro día.
+`FechaExpedicionFactura` es la fecha en que se expide la factura, o sea la del cobro. El XSD tiene
+además un `FechaOperacion` **opcional**, para cuando la operación ocurrió otro día — y una cena de
+23:30 a 01:30 abre comanda el día 4 y cobra el día 5.
 
-Es justo el caso que ya obligó a diseñar el cierre de caja sin fechas (§12 de CLAUDE.md): *«una cena
-de 23:30 a 01:30 es un servicio, no dos días»*. Esa comanda se abre el día 4 y se cobra el día 5, así
-que operación y expedición **no coinciden**.
+**No se informa**, por dos razones:
 
-Lo que hay que decidir es si se informa `FechaOperacion` con la fecha de apertura de la comanda
-cuando difiera de la del cobro. Rellenarlo es más fiel; dejarlo vacío significa «coinciden», que es
-lo que asume la AEAT si no se dice nada. Es un campo opcional y de bajo riesgo, pero la decisión hay
-que tomarla en el tramo 3, no descubrirla.
+1. **En hostelería la operación termina cuando el cliente paga y se va.** Abrir la comanda no es la
+   operación: es su comienzo. Así que la fecha de la operación *es* la del cobro y el campo sobra.
+2. Si se informara y cayera en **otro trimestre**, el devengo quedaría en un período y la factura en
+   el siguiente. Eso es un descuadre que alguien tiene que explicar, a cambio de nada.
+
+Es una decisión **reversible a coste cero**: el campo es opcional y añadirlo después no toca ni la
+cadena ni el esquema. Si algún día el producto permite dejar una cuenta abierta y saldarla días más
+tarde, hay que volver aquí. Y como es una cuestión de devengo, entra en la lista del asesor (§15).
+
+### 2.6 Productos exentos de IVA (decidido: 2026-09-08)
+
+**Poner 0 % en el IVA del producto NO sirve, porque no dice lo mismo.** En el esquema,
+`CalificacionOperacion` y `OperacionExenta` están en un `<choice>`: o una o la otra, nunca las dos.
+
+| | Cómo se expresa | Qué declara |
+|---|---|---|
+| **Tipo 0 %** | `CalificacionOperacion = S1`, `TipoImpositivo = 0`, `CuotaRepercutida = 0` | «Sujeta y **no** exenta, gravada al 0 %». Es un tipo real: fue lo que se aplicó al pan y la leche en 2023-24 |
+| **Exenta** | `OperacionExenta = E1…E6`, y **prohibido** informar `TipoImpositivo`, `CuotaRepercutida`, `TipoRecargoEquivalencia` ni `CuotaRecargoEquivalencia` | «Esto no lleva IVA por ley» |
+
+Son dos afirmaciones legales distintas, y el documento de validaciones lo hace explícito: *«Si el
+campo OperacionExenta está cumplimentado no se pueden informar ninguno de estos campos:
+TipoImpositivo, CuotaRepercutida…»*.
+
+**Qué se añade.** Una marca en el producto, que se **congela en la línea de venta** igual que el
+nombre, el precio y el tipo (§3.1 de `Detalle_Comanda`):
+
+```sql
+-- En Productos y, congelado, en Detalle_Comanda:
+Exento          INTEGER NOT NULL DEFAULT 0,   -- 0 = sujeta y no exenta
+Causa_Exencion  TEXT                          -- 'E1'..'E6'; NULL si no exento
+```
+
+⚠️ **Un booleano solo no basta para el XML**, y por eso van dos columnas: `OperacionExenta` exige
+**cuál** exención, no un «sí». La interfaz enseña una casilla «Exento de IVA» y, al marcarla, un
+desplegable de causa que **viene con `E1` puesto** (art. 20 LIVA, operaciones interiores), que es la
+única realista en hostelería. Quien no sepa qué es eso, deja lo que hay.
+
+Consecuencias en cascada, todas pequeñas pero ninguna opcional:
+
+- El **desglose** deja de tener una sola forma: las líneas exentas se agrupan **por causa**, aparte
+  de las sujetas, y no llevan tipo ni cuota (§4.2).
+- El **ticket y la previa** necesitan una línea de «Exento» en el pie de IVA, con su base y sin cuota.
+- `IVA_Percent` de un producto exento se ignora; la interfaz lo deshabilita al marcar la casilla.
+
+**Nota sobre la lotería, que es el caso que uno se imagina:** la AEAT dice que la lotería a valor
+facial es exenta **y no se factura**, y que si aparece en el mismo ticket va *«como si se pagara un
+suplido»*, de modo que **sus importes NO entran en el registro** — alteran el «total a pagar», no el
+«total factura». O sea que no es un producto exento, es otra cosa distinta, y queda **fuera de
+alcance** (§16): la mayoría de los bares la venden por el terminal de Loterías, que es otra máquina.
+Lo que esta marca cubre es cualquier otra exención que aparezca; lo que impide es que alguien intente
+representarla con un 0 %.
 
 ---
 
@@ -413,6 +463,16 @@ El desglose ya está resuelto en `printing.rs::desglose_iva`, con la regla que i
 base y **la cuota es lo que falta** para el total. Esa función se **sube a `tpv-domain`** para que el
 papel, la previa y el registro fiscal salgan del mismo sitio — hoy el papel y la previa ya son
 espejos con goldens duplicados (§11 de CLAUDE.md), y el registro pasa a ser el tercer espejo.
+
+Lo que sí cambia en esa función es que **el desglose deja de tener una sola forma** (§2.6): las
+líneas sujetas se agrupan por tipo impositivo y llevan `CalificacionOperacion` + tipo + cuota; las
+exentas se agrupan **por causa de exención** y no llevan ni tipo ni cuota. Son dos clases de tramo en
+la misma lista.
+
+Y hay un margen que conviene conocer antes de pelearse con el redondeo: la AEAT comprueba que
+`ImporteTotal` y `CuotaTotal` cuadren con la suma del desglose **con una tolerancia de ±10,00 €**
+(§6.5.2). O sea que el céntimo de redondeo nunca va a disparar ese error — si salta, no es un
+redondeo, es que el cálculo está roto.
 
 ### 4.3 `FechaHoraHusoGenRegistro` lleva huso, y la BD hoy no
 
@@ -674,7 +734,7 @@ parado:
 | Qué llega | Qué es | Qué hace el TPV |
 |---|---|---|
 | `Correcto` | Aceptado | `ACEPTADO`, guarda el CSV. Fin |
-| `AceptadoConErrores` | **Está en la AEAT**, con avisos | `ACEPTADO_CON_ERRORES`. **No se reintenta.** Se registra el aviso y se enseña en el panel |
+| `AceptadoConErrores` | **Está en la AEAT**, pero **hay que subsanarlo** (§6.5.2) | `ACEPTADO_CON_ERRORES`. No se reenvía igual — se corrige y se manda una **subsanación** (§6.5.1). Sale en el panel como pendiente de arreglar |
 | `Incorrecto` + duplicado | Ya lo teníamos allí | Se trata como **aceptado** (idempotencia). Se lee `RegistroDuplicado` para saber en qué estado quedó |
 | `Incorrecto` + otro código | El registro **no** está en la AEAT | `RECHAZADO`. Reintento con backoff; a los 5 fallos con el mismo código, notificación y telemetría |
 | Fallo de red / timeout / `Fault` de servidor | Ni idea | Reintento silencioso. Es el caso normal de un bar sin fibra |
@@ -710,6 +770,37 @@ Consecuencia en el modelo (§3.1): `Registros_Facturacion` es append-only, así 
 solo, un error sistemático nuestro se convierte en dos registros malos por venta en vez de uno. La
 subsanación la dispara una persona desde el panel, después de mirar qué dijo la AEAT. Lo que sí es
 automático es el reintento de los fallos de **transporte**, que son otra cosa.
+
+**Y un límite que la norma pone:** *«sólo podrá llevarse a cabo una subsanación cuando no se trate de
+una causa que exija la emisión de una factura rectificativa»*. Si el importe estaba mal porque se
+cobró de más, no se subsana: se rectifica (§7). La subsanación es para el registro mal contado, no
+para la venta mal hecha.
+
+### 6.5.2 Los «errores admisibles»: la lista es corta y hay que conocerla entera
+
+`AceptadoConErrores` no significa «avisos que puedes ignorar». El documento de validaciones dice que
+esos registros *«serán aceptados y registrados por los sistemas de la AEAT, pero **deberán ser
+subsanados**»*. La lista completa en la versión actual —y merece leerse porque **tres de las seis nos
+tocan directamente**— es:
+
+| Error admisible | Nos toca | Qué significa para nosotros |
+|---|---|---|
+| **La huella no coincide con la calculada por la AEAT** | 🔴 **Sí** | Un bug en §4. Aceptan el registro y lo dejan marcado. Es el fallo silencioso del que hablaba §6.5 |
+| **`ImporteTotal` no cuadra** con la suma del desglose (base + cuota + recargo), fuera del margen | 🔴 **Sí** | Un bug en el redondeo de §4.2. **El margen es de ±10,00 €**, así que un céntimo de redondeo no lo dispara: si salta, está roto de verdad |
+| **`CuotaTotal` no cuadra** con la suma de cuotas, fuera del margen | 🔴 **Sí** | Lo mismo |
+| **`PrimerRegistro = "S"` y ya existen registros** para ese SIF y NIF | 🟠 **Sí, tras una recuperación** | Es exactamente el escenario de §8.1. Otra razón para reconciliar contra la AEAT antes de seguir la cadena |
+| NIF del destinatario correcto pero **no censado** en la AEAT | 🟡 Sólo con `F1`/`F3` | El cliente dictó un NIF que no existe. Hay que poder corregirlo desde el panel |
+| `ClaveRegimen` sin informar con `Impuesto = IPSI` | ⚪ No | Ceuta y Melilla, fuera de alcance |
+
+Dos de la lista **están exceptuadas de subsanar**: la de IPSI y la de una `FechaHoraHusoGenRegistro`
+posterior al reloj de la AEAT (que admite margen). Esa segunda conviene tenerla presente: **el reloj
+del equipo del bar puede ir adelantado**, y eso genera un error admisible sin que nadie haya hecho
+nada mal. No hay que corregirlo, pero sí hay que **no asustarse** al verlo en el panel.
+
+Y una tercera vía que la norma contempla y que no viene de un rechazo: *«dato incorrecto detectado
+posteriormente por el obligado»* sobre un registro **aceptado sin errores**. También se arregla con
+una subsanación. O sea que el botón del panel tiene que poder dispararse sobre cualquier registro, no
+sólo sobre los que vinieron marcados.
 
 ### 6.6 El precio de que envíe la Main
 
@@ -816,14 +907,56 @@ recordarlo al añadir `verifactu_*`.
 
 Dos caminos, y los dos hacen falta:
 
-- **En el momento del cobro**: el cliente dice «con NIF». Se pide NIF, razón social y domicilio, y se
-  emite **`F1`** en vez de `F2`. Es también el camino **obligatorio** por encima de 3.000 € (§2.2).
+- **En el momento del cobro**: o porque el cliente dice «con NIF», o porque el importe pasa de
+  3.000 € y entonces no hay alternativa (§2.2). Se emite **`F1`** en vez de `F2`.
 - **Después**: el cliente vuelve con el ticket. Se emite **`F3` en sustitución** de la simplificada,
-  referenciándola en `FacturasSustituidas`. No se rectifica nada.
+  referenciándola en `FacturasSustituidas`. **No se rectifica nada** — canjear una simplificada por
+  una completa no es rectificar (art. 15.6 ROF).
 
-Los datos fiscales del cliente van en `Clientes` (que ya existe, con su ficha), para que un cliente
-habitual no los dicte cada vez. Y la pantalla de Cuentas gana la acción «emitir factura de este
-ticket», que es donde la va a buscar quien la necesite.
+### 9.1 Cómo se comporta el cobro
+
+1. Al pulsar cobrar, si el importe supera `Limite_Simplif`, salta una modal: *«Al continuar se
+   emitirá una factura completa en lugar de un ticket. Hará falta el NIF y el nombre del cliente.
+   ¿Continuar?»* — **Sí** / **No**. Si el cliente pide factura voluntariamente, se llega al mismo
+   sitio por un botón «Factura con NIF», sin modal de aviso.
+2. **Sí** → formulario de datos fiscales.
+3. Se cobra y se emite `F1`. El resto (cadena, QR, envío) es idéntico.
+
+### 9.2 Qué datos hacen falta, y son más de los que parecen
+
+El **registro** sólo necesita `NombreRazon` + `NIF` del destinatario. Pero la **factura en papel** es
+un documento con su propio contenido obligatorio (art. 6 ROF), y ahí hace falta también el
+**domicilio** del destinatario — y el del emisor, que ya lo tenemos en `Business_Settings`.
+
+El formulario pide, entonces:
+
+| Campo | ¿Obligatorio? | Dónde acaba |
+|---|---|---|
+| NIF | Sí | Registro **y** papel |
+| Nombre o razón social | Sí | Registro **y** papel |
+| Domicilio fiscal | Sí para el papel | Sólo el papel |
+
+Con validación de formato del NIF en el momento — un NIF mal dictado **no** se rechaza al enviar,
+vuelve como *«error admisible: NIF no censado»* (§6.5.2), o sea horas después y sin el cliente
+delante. Comprobar el dígito de control ahí mismo evita casi todos esos casos.
+
+**Se ofrece elegir un cliente de `Clientes`** y, tras escribir los datos a mano, guardarlos en su
+ficha: la comida de empresa que se repite cada mes no debería dictar el NIF doce veces. Eso exige
+añadir a `Clientes` los campos fiscales, que hoy no tiene.
+
+### 9.3 El papel
+
+Una factura completa **cabe en el rollo térmico** y es legal ahí: el ROF no impone formato. Sale más
+larga porque lleva los datos de las dos partes. Lo que cambia respecto al ticket es la cabecera —
+emisor completo y destinatario— y que la palabra «Factura» sustituye a lo que hoy no dice nada. El QR
+y la leyenda van igual, al principio.
+
+### 9.4 El canje posterior (`F3`)
+
+La pantalla de Cuentas gana la acción **«emitir factura de este ticket»**, que es donde la va a
+buscar quien la necesite. Pide los mismos datos de §9.2, emite una `F3` que referencia la
+simplificada en `FacturasSustituidas`, y **la simplificada original se queda como está**: no se anula
+ni se rectifica.
 
 ---
 
@@ -948,6 +1081,11 @@ Lo que hace este plan verificable sin una impresora ni Hacienda delante:
 11. **La escalera de avisos** (§1.2.1): función pura de `antigüedad → escalón`, y el test que importa
     de verdad — **`connectivity: "off"` no apaga la remisión**. Es un fallo que en producción no se
     vería nunca (el TPV parecería sano y la AEAT no recibiría nada), así que tiene que verse aquí.
+12. **Exentos** (§2.6): una línea exenta produce `OperacionExenta` y **ni `TipoImpositivo` ni
+    `CuotaRepercutida`**; un producto al 0 % produce `S1` con tipo y cuota a cero. Son dos goldens
+    distintos y el test existe para que nadie los unifique «simplificando».
+13. **El límite de la simplificada** (§2.2): se mira sobre el importe **del cobro**, no de la
+    comanda. Dos cobros de 2.000 € sobre una comanda de 4.000 € siguen siendo dos `F2`.
 
 **Fuera de los tests automáticos:** el envío real contra preproducción. Necesita certificado y sale a
 internet, así que va como comprobación manual antes de release, junto al E2E (`RELEASING.md` §0-bis).
@@ -962,13 +1100,13 @@ Cada tramo deja el repo compilando y aporta algo comprobable.
 
 | # | Tramo | Qué entrega |
 |---|---|---|
-| **1** | **Esquema y datos fiscales** | Tablas de §3, campos de `Business_Settings`, formulario de primer arranque, sección Fiscal. Los cinco sitios de un cambio de esquema (CLAUDE.md) |
-| **2** | **La cadena, sin AEAT** | `tpv-domain/verifactu.rs` con los tres vectores oficiales en verde. Nada conectado todavía |
+| **1** | **Esquema y datos fiscales** | Tablas de §3, campos de `Business_Settings`, **`Exento` + `Causa_Exencion` en `Productos` y `Detalle_Comanda`** (§2.6), campos fiscales en `Clientes` (§9.2), formulario de primer arranque, sección Fiscal. Los cinco sitios de un cambio de esquema (CLAUDE.md) |
+| **2** | **La cadena, sin AEAT** | `tpv-domain/verifactu.rs` con los tres vectores oficiales en verde, y el desglose con sus dos clases de tramo (§4.2). Nada conectado todavía |
 | **3** | **Emisión en el cobro** | El registro se crea en la transacción; el número fiscal sustituye a `Ticket_Contador`; el cobro devuelve el bloque fiscal |
 | **4** | **QR y papel** | Rasterizado, colocación al principio, leyenda, previa espejo. **Aquí ya se emiten facturas conformes**, sólo que sin remitir |
-| **5** | **El envío** | **Spike de `rustls-cng` primero** (§6.2.1), luego crate `tpv-infra-aeat`, selección del certificado, job, control de flujo, clasificación, panel, **escalera de avisos** (§1.2.1). Preproducción |
+| **5** | **El envío** | **Spike de `rustls-cng` primero** (§6.2.1), luego crate `tpv-infra-aeat`, selección del certificado, job, control de flujo, clasificación (§6.5), **subsanación desde el panel** (§6.5.1), **escalera de avisos** (§1.2.1). Preproducción |
 | **6** | **Anulación y rectificativas** | Partir el botón (§7), `R5`, impacto en el arqueo |
-| **7** | **Factura completa** | `F1` en el cobro y `F3` en sustitución (§9). Aquí se decide el límite de 3.000 € (§2.2) |
+| **7** | **Factura completa** | `F1` en el cobro con su modal y su formulario, `F3` en sustitución desde Cuentas, y el corte de los 3.000 € (§2.2, §9) |
 | **8** | **Cierre** | Exportación (§10), declaración responsable (§11.2), reconciliación tras recuperación (§8.1), retención (DB-14) |
 
 **El orden no es negociable en los tramos 2-4**: la cadena antes que la emisión, y la emisión antes
@@ -988,24 +1126,30 @@ de un olvido.
 
 | # | Qué | Cuándo | Bloquea |
 |---|---|---|---|
-| 1 | **Qué hace la pantalla por encima de 3.000 €** (§2.2) | Antes del tramo 7 | Nada antes |
-| 2 | **Conseguir el certificado electrónico** e instalarlo en el almacén de Windows | **YA** — tiene plazo administrativo ajeno | El tramo 5 entero |
+| 1 | **Conseguir el certificado electrónico** e instalarlo en el almacén de Windows | **YA** — tiene plazo administrativo ajeno | El tramo 5 entero |
 | 2b | **Spike de `rustls-cng`**: handshake contra `prewww1.aeat.es` con un certificado del almacén | En cuanto haya certificado, **antes de escribir XML** | Confirma o tumba la decisión de §6.2 |
 | 3 | **Redactar la declaración responsable** (§11.2) | Antes de lanzar, no de desarrollar | El lanzamiento |
 | 4 | **NIF y razón social definitivos del productor** (§11.1) | Cuando la empresa esté constituida | El lanzamiento |
 | 5 | **`IdSistemaInformatico`**: elegir el código de dos caracteres | Tramo 5 | Nada |
 | 6 | **Serie única vs. serie propia para rectificativas** (§7.4) | Tramo 6 | Nada |
-| 7 | **Confirmar con un asesor** la modalidad y el tratamiento de devoluciones | Antes de lanzar | El lanzamiento |
-| 8 | **¿Canarias, Ceuta y Melilla?** Allí no se repercute IVA sino **IGIC** o **IPSI**, que son otros valores del campo `Impuesto` (03 y 02) y otros tipos impositivos | Antes del tramo 3 | El desglose, si entran |
-| 9 | **Productos exentos o no sujetos.** Hoy `Productos.IVA_Percent` es un número y no existe «exento». El caso real de un bar es la **lotería**, que la AEAT trata aparte | Antes del tramo 3 | El desglose, si aplica |
-| 10 | **`FechaOperacion` cuando el servicio cruza la medianoche** (§2.5) | Tramo 3 | Nada |
-| 11 | **Un solo TPV por negocio.** La cadena asume una única Main; dos cajas serían dos cadenas y dos series | Cuando alguien lo pida | Nada hoy |
+| 7 | **Confirmar con un asesor**: la modalidad, el tratamiento de devoluciones y la decisión de no informar `FechaOperacion` (§2.5), que es una cuestión de devengo | Antes de lanzar | El lanzamiento |
+| 8 | **Un solo TPV por negocio.** La cadena asume una única Main; dos cajas serían dos cadenas y dos series | Cuando alguien lo pida | Nada hoy |
+
+**Cerradas el 2026-09-08:** el comportamiento por encima de 3.000 € (§2.2), los productos exentos
+(§2.6), `FechaOperacion` (§2.5) y **Canarias, Ceuta y Melilla, que quedan fuera de alcance** (§16).
 
 ---
 
 ## 16. Fuera de alcance (a propósito)
 
 - **TicketBAI** (País Vasco y Navarra). Otro sistema, otra firma, otro XML.
+- **Canarias, Ceuta y Melilla** (decidido: 2026-09-08). Allí no se repercute IVA sino **IGIC** o
+  **IPSI**, que son otros valores del campo `Impuesto` (`03` y `02`), con sus propias claves de
+  régimen, sus tipos y sus exenciones (`E7` y `E8` sólo existen para IGIC). Entrarían sin rehacer
+  nada —el desglose ya es una lista de tramos—, pero hoy no hay motivo.
+- **La lotería** (§2.6). No es un producto exento sino un **suplido**: sus importes no entran en el
+  registro y cambian el «total a pagar» sin cambiar el «total factura». Además casi todos los bares
+  la venden por el terminal de Loterías, que es otra máquina.
 - **Modalidad NO VERI\*FACTU**: firma XAdES por registro y registro de eventos. Se descartó en §0.
 - **Facturación electrónica B2B** (Crea y Crece / la futura obligación de factura electrónica entre
   empresas). Es una norma **distinta** de esta, con su propio calendario. No se mezcla.
@@ -1034,8 +1178,11 @@ Todo lo técnico de este documento sale de aquí, no de memoria:
   <https://www.agenciatributaria.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/DetalleEspecificacTecnCodigoQRfactura.pdf>
 - **Descripción del servicio web**, v1.0.3 — SOAP, control de flujo, respuestas y errores.
   <https://www.agenciatributaria.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/Veri-Factu_Descripcion_SWeb.pdf>
+- **Validaciones y errores**, v1.2.2 — tipología de validaciones, catálogo de **errores admisibles**,
+  tratamiento de la subsanación y márgenes de cuadre de importes.
+  <https://www.agenciatributaria.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/Validaciones_Errores_Veri-Factu.pdf>
 - **FAQ de empresas de desarrollo**, 04/12/2025 — anulación vs. rectificativa, arquitecturas
-  TPV + backoffice, devoluciones, F3.
+  TPV + backoffice, devoluciones, F3, lotería.
   <https://www.agenciatributaria.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf>
 - **WSDL y esquemas** — `SistemaFacturacion.wsdl`, `SuministroLR.xsd`, `SuministroInformacion.xsd`,
   `RespuestaSuministro.xsd`.
