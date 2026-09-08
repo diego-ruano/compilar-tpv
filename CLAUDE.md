@@ -799,12 +799,23 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
 - **El ancho manda.** `cols_efectivas()` sale del papel (58/80/112 mm), los márgenes y el
   `chars_per_line` configurado. Nada se maqueta con anchos fijos: un nombre largo se trunca contra
   ese ancho, no contra un 42 hardcodeado.
-- **El IVA es por producto** (`Productos.IVA_Percent`, migración 0004). Un mismo ticket puede llevar
-  varios tipos, así que el pie lleva **una línea de base+cuota por tipo**. El `iva_percent` global
-  del payload es sólo el defecto para lo que no lo traiga.
-- **El número de ticket es correlativo y lo asigna la BD** (migración 0005, `siguiente_numero_ticket`
-  con un `UPDATE … Ultimo + 1` relativo, no un `SELECT MAX`). Una reimpresión reusa el número: si
-  saliera uno nuevo, la copia parecería una venta más.
+- **El IVA es por producto** (`Productos.IVA_Percent`). Un mismo ticket puede llevar varios tipos,
+  así que el pie lleva **una línea de base+cuota por tipo**. El `iva_percent` global del payload es
+  sólo el defecto para lo que no lo traiga.
+- **El desglose vive en `tpv-domain::ticket`, no en `printing.rs`** (FISCAL-01). Tiene tres
+  consumidores —el papel, la vista previa y el `Desglose` del registro que se remite a la AEAT— y
+  tres copias de esa aritmética es la divergencia que no se ve hasta que la AEAT devuelve un
+  «aceptado con errores» meses después. Un tramo es un **enum**: las líneas *sujetas* llevan tipo y
+  cuota; las *exentas* van por causa (`E1`…`E6`) y **sin** ninguno de los dos — informarlos es el
+  error 1238. Un producto al **0 %** es *sujeto*, no exento: son dos afirmaciones legales distintas
+  y el XSD las pone en un `<choice>`.
+- **El número de ticket ES el número de la factura** (FISCAL-01). `Pagos.Numero_Ticket` guarda el
+  `Num_Serie_Factura` del registro (`2027/000001`, serie por ejercicio), y lo reserva
+  `Serie_Facturacion` con un `UPDATE … Ultimo + 1` relativo, no un `SELECT MAX`. Dos numeraciones
+  paralelas serían dos cosas que pueden divergir, y la que importa a efectos legales es la fiscal:
+  la que va en el QR y en el `IDFactura` que la AEAT usa como clave única. Una reimpresión reusa el
+  número: si saliera uno nuevo, la copia parecería una venta más — y ahora, además, sería una
+  factura duplicada que la AEAT rechaza.
 - **El cajón se abre con la impresora.** El pulso va dentro del propio flujo del ticket (`ESC p`) o
   suelto (`DLE DC4`, que la impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se
   registra en `Aperturas_Cajon` (migración 0006) — un cajón que se abre sin venta es el descuadre que
@@ -815,10 +826,20 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   difumina con Floyd–Steinberg y emite `GS v 0`. La transparencia se compone sobre blanco antes de
   nada (un PNG de fondo transparente salía como un rectángulo negro). Si la imagen no se puede leer
   devuelve `None` y el ticket sale sin logo: **nada de lo que rodea al ticket puede impedir cobrar.**
+- **El QR tributario abre la factura** (FISCAL-01, art. 21 de la Orden HAC/1177/2024). Va lo
+  primero, *«antes de que empiece el contenido de ésta generado por el sistema informático de
+  facturación»*, centrado, precedido siempre del texto **«QR tributario:»** y seguido de la leyenda
+  **«VERI\*FACTU»**. Mide entre **30 y 40 mm** con al menos 2 mm de zona de silencio, y se
+  rasteriza por el camino del logo (`GS v 0`), que es más portable que el `GS ( k` nativo de QR.
+  La URL **no se compone al imprimir**: sale de `Registros_Facturacion.QR_Url`, que es la que se
+  guardó al emitir — una reimpresión tiene que sacar exactamente la misma.
+  El orden queda: **QR → leyenda → datos del negocio → líneas → totales → desglose de IVA →
+  mensaje → logo → corte.**
 - **El logo cierra el ticket, centrado.** Va lo último: después del mensaje de despedida y antes
   del corte. Arriba obligaba a centrar debajo de él los datos del negocio para que no quedaran
   descolgados, y lo primero que se lee de un recibo tiene que ser de quién es y cuánto se ha
-  pagado. La cabecera son esos datos **alineados a la izquierda**.
+  pagado. La cabecera son esos datos **alineados a la izquierda**. (El QR sí va arriba, y no
+  contradice esto: no es contenido que compita por la atención, es una etiqueta.)
 - **El ancho del logo sale del papel, no del texto.** `ancho_logo_dots` parte del cabezal del
   formato y descuenta los márgenes; `chars_per_line` no entra. Esa opción es la densidad de las
   LETRAS: quien la baja a 20 quiere el texto más grande, no un logo del tercio del papel.

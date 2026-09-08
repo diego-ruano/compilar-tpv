@@ -43,6 +43,9 @@ uuid = { version = "1", features = ["v4"] }
 # ───────────── Imágenes (resize + recompresión JPEG antes de subir a R2) ─────────────
 image = { workspace = true }
 
+# ───────────── Código QR del ticket (FISCAL-01) ─────────────
+qrcode = { workspace = true }
+
 # ───────────── Seguridad / Auth ─────────────
 pbkdf2 = "0.12"
 password-hash = "0.5"

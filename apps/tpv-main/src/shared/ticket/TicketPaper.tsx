@@ -29,12 +29,35 @@ export type TicketPaperItem = {
     ivaPercent?: number | null;
     /** Unidades de la línea. Ausente = 1. */
     cantidad?: number;
+    /** FISCAL-01: la línea se vendió exenta de IVA. No es lo mismo que un 0 %. */
+    exento?: boolean;
+    /** `E1`..`E6`. Sólo se mira si `exento`. */
+    causaExencion?: string | null;
+};
+
+/**
+ * El bloque fiscal del ticket (FISCAL-01). `null` = este papel no lleva QR.
+ *
+ * La previa lo pinta como un **recuadro con la leyenda**, no como un código real: dibujar aquí un
+ * QR de verdad obligaría a meter una librería de QR en el bundle para enseñar algo que el usuario
+ * no va a escanear desde la pantalla — y el que importa, el del papel, lo genera Rust desde la URL
+ * guardada. Lo que la previa tiene que reflejar fielmente es **dónde va y con qué textos**.
+ */
+export type TicketPaperFiscal = {
+    qrUrl?: string | null;
+    entornoPruebas?: boolean;
 };
 
 /** Columnas mientras Rust contesta: el valor por defecto de un papel de 80 mm. */
 const COLS_POR_DEFECTO = 42;
 
-export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
+export default function TicketPaper({
+    items,
+    fiscal,
+}: {
+    items: TicketPaperItem[];
+    fiscal?: TicketPaperFiscal | null;
+}) {
     const {
         businessName,
         logoDataUrl,
@@ -114,6 +137,54 @@ export default function TicketPaper({ items }: { items: TicketPaperItem[] }) {
             {/* `ch` = ancho de un carácter en esta fuente monoespaciada: el papel mide exactamente
                 las columnas que tendrá el de verdad. */}
             <div style={{ fontFamily: "monospace", fontSize: 12, padding: 14, width: `${cols}ch` }}>
+                {/* El QR tributario abre la factura (FISCAL-01, art. 21 de la Orden): «se situará
+                    al principio de la factura, antes de que empiece el contenido de ésta generado
+                    por el sistema informático de facturación», precedido siempre por «QR
+                    tributario:» y seguido de la leyenda «VERI*FACTU».
+
+                    Esto DEROGA la regla que ponía los datos del negocio los primeros. Sigue
+                    cumpliéndose la razón que la motivaba —que lo primero que se lea sea de quién es
+                    el ticket y cuánto se ha pagado—: el QR no compite por la atención, es una
+                    etiqueta.
+
+                    Espejo de `build_ticket` en `printing.rs`. Sin URL no se pinta nada: ni el hueco
+                    ni la leyenda. Es el caso de la precuenta, que no es una factura. */}
+                {fiscal?.qrUrl ? (
+                    <>
+                        <div style={{ textAlign: "center" }}>
+                            <div>QR tributario:</div>
+                            <div
+                                aria-label="Código QR tributario"
+                                title={fiscal.qrUrl}
+                                style={{
+                                    // 30-40 mm en el papel; aquí un cuadrado equivalente en la
+                                    // previa. Se dibuja como marco y no como código real: lo que
+                                    // hay que reflejar es la colocación, no el patrón de módulos.
+                                    width: "16ch",
+                                    height: "16ch",
+                                    margin: "6px auto",
+                                    border: "2px solid #000",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: 10,
+                                    opacity: 0.75,
+                                    padding: 4,
+                                    textAlign: "center",
+                                    overflow: "hidden",
+                                }}
+                            >
+                                QR
+                            </div>
+                            <div style={{ fontWeight: 700 }}>VERI*FACTU</div>
+                            {fiscal.entornoPruebas ? (
+                                <div style={{ fontWeight: 700 }}>-- ENTORNO DE PRUEBAS --</div>
+                            ) : null}
+                        </div>
+                        <div style={{ borderTop: "1px dashed #000", margin: "10px 0" }} />
+                    </>
+                ) : null}
+
                 {/* Cabecera: sólo los datos del negocio, a la izquierda. El logo cierra el
                     ticket, abajo del todo (ver el final de este componente y de `build_ticket`). */}
                 <div style={{ textAlign: "left" }}>

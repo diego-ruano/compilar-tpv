@@ -29,6 +29,13 @@ export type PrintTicketLine = {
     precio_unitario: number;
     /** Tipo de IVA de la línea; `null` = el general del negocio. */
     iva_percent: number | null;
+    /**
+     * FISCAL-01: la línea se vendió EXENTA de IVA. No es lo mismo que un 0 %, y por eso no se
+     * representa con `iva_percent: 0`.
+     */
+    exento?: boolean;
+    /** `E1`..`E6`. Sólo se mira si `exento`. */
+    causa_exencion?: string | null;
 };
 
 /** Payload de impresión (snake_case para que serde lo deserialice directamente). */
@@ -76,6 +83,21 @@ export type PrintTicketPayload = {
     /** El cobro está anulado (CUENTA-07): el papel lo dice. */
     es_anulado?: boolean;
 
+    /**
+     * FISCAL-01: la URL exacta que va dentro del código QR tributario.
+     *
+     * **No se compone aquí.** Sale de la fila de `Registros_Facturacion` que se escribió al
+     * cobrar, y llega por `verifactuBloqueTicket()`. Es la misma cadena que se cotejará en la sede
+     * de la AEAT, así que un carácter de más la convierte en una factura que «no consta» — y una
+     * reimpresión tiene que sacar exactamente la misma.
+     *
+     * `null` = este papel no lleva QR: la precuenta (que no es una factura) o un ticket emitido
+     * antes de que el negocio completara sus datos fiscales.
+     */
+    qr_url?: string | null;
+    /** El registro se emitió contra el entorno de PRUEBAS. El papel tiene que gritarlo. */
+    qr_pruebas?: boolean;
+
     items: PrintTicketLine[];
 };
 
@@ -86,6 +108,10 @@ export type DatosDelTicket = {
     origen?: string | null;
     esCopia?: boolean;
     esAnulado?: boolean;
+    /** FISCAL-01: la URL del QR tributario, leída del registro (ver `PrintTicketPayload.qr_url`). */
+    qrUrl?: string | null;
+    /** El registro se emitió en el entorno de pruebas. */
+    qrPruebas?: boolean;
 };
 
 /** Item simple (por defecto una unidad); `buildTicketPayload` agrupa los iguales. */
@@ -100,6 +126,10 @@ export type SimpleTicketItem = {
      * puede desdoblarla sin inventarse el precio unitario.
      */
     cantidad?: number;
+    /** FISCAL-01: la línea se vendió exenta de IVA (congelado en `Detalle_Comanda`). */
+    exento?: boolean;
+    /** `E1`..`E6`. Sólo se mira si `exento`. */
+    causaExencion?: string | null;
 };
 
 /* ── API ── */
@@ -182,7 +212,11 @@ export function buildTicketPayload(
         // sigue siendo el cobrado, que es lo que no se puede perder.
         const unidades = Number.isInteger(it.cantidad) ? (it.cantidad as number) : 1;
         const precio = Number.isInteger(it.cantidad) ? it.precio : it.precio * (it.cantidad ?? 1);
-        const key = `${it.nombre}__${precio}__${iva ?? "neg"}`;
+        // La exención entra en la clave: dos unidades del mismo producto, una exenta y otra no,
+        // son dos líneas del papel porque son dos tramos del desglose (FISCAL-01).
+        const exento = it.exento === true;
+        const causa = exento ? (it.causaExencion || "E1") : null;
+        const key = `${it.nombre}__${precio}__${iva ?? "neg"}__${causa ?? ""}`;
         const cur = map.get(key);
         if (cur) {
             cur.cantidad += unidades;
@@ -192,6 +226,8 @@ export function buildTicketPayload(
                 precio_unitario: precio,
                 cantidad: unidades,
                 iva_percent: iva,
+                exento,
+                causa_exencion: causa,
             });
         }
     }
@@ -233,6 +269,9 @@ export function buildTicketPayload(
         origen: datos?.origen ?? null,
         es_copia: datos?.esCopia ?? false,
         es_anulado: datos?.esAnulado ?? false,
+
+        qr_url: datos?.qrUrl ?? null,
+        qr_pruebas: datos?.qrPruebas ?? false,
 
         items: Array.from(map.values()),
     };

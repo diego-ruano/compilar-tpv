@@ -18,7 +18,8 @@ import {
     printerPrintTicket,
     type DatosDelTicket,
 } from "../../features/configuracion/api/printerApis";
-import TicketPaper from "./TicketPaper";
+import { verifactuBloqueTicket } from "../../features/configuracion/api/verifactuApis";
+import TicketPaper, { type TicketPaperFiscal } from "./TicketPaper";
 
 export type PrintableLine = {
     id: string;
@@ -36,6 +37,10 @@ export type PrintableLine = {
      * pulsación). La reimpresión sí la trae: lee del cobro una línea que ya venía con su cantidad.
      */
     cantidad?: number;
+    /** FISCAL-01: la línea se vendió exenta de IVA. Congelado en la línea, como el tipo. */
+    exento?: boolean;
+    /** `E1`..`E6`. Sólo se mira si `exento`. */
+    causaExencion?: string | null;
 };
 
 type Modo = "completo" | "cobrado" | "seleccion";
@@ -77,6 +82,30 @@ export default function PrintTicketModal({
 
     const hayCobrados = useMemo(() => items.some((it) => it.pagado), [items]);
 
+    // FISCAL-01: el bloque fiscal del ticket (la URL del QR y si es de pruebas).
+    //
+    // Se PREGUNTA, no se compone: la URL es la que se guardó en `Registros_Facturacion` al cobrar,
+    // y es la misma que se cotejará en la sede de la AEAT. Componerla aquí sería tener dos fuentes
+    // para una cadena que tiene que ser idéntica al carácter — y una reimpresión tiene que sacar
+    // exactamente la del original.
+    //
+    // Sin número no se pregunta: una precuenta no es una factura y no lleva QR.
+    const [fiscal, setFiscal] = useState<TicketPaperFiscal | null>(null);
+    useEffect(() => {
+        if (!open) return;
+        let vivo = true;
+        setFiscal(null);
+        verifactuBloqueTicket(datos?.numeroTicket)
+            .then((b) => {
+                if (!vivo) return;
+                setFiscal(b ? { qrUrl: b.qr_url, entornoPruebas: b.entorno_pruebas } : null);
+            })
+            .catch(() => vivo && setFiscal(null));
+        return () => {
+            vivo = false;
+        };
+    }, [open, datos?.numeroTicket]);
+
     // Al abrir, resetea: modo "completo" y la selección manual parte de todo el ticket.
     useEffect(() => {
         if (!open) return;
@@ -109,7 +138,13 @@ export default function PrintTicketModal({
         if (effectiveItems.length === 0) return;
         setPrinting(true);
         try {
-            await printerPrintTicket(buildTicketPayload(effectiveItems, undefined, datos));
+            await printerPrintTicket(
+                buildTicketPayload(effectiveItems, undefined, {
+                    ...datos,
+                    qrUrl: fiscal?.qrUrl ?? null,
+                    qrPruebas: fiscal?.entornoPruebas ?? false,
+                }),
+            );
             toast.success("Ticket", "Enviado a la impresora.");
             onClose();
         } catch (e) {
@@ -237,7 +272,7 @@ export default function PrintTicketModal({
                     {/* Columna derecha: previsualización + acción */}
                     <div className="flex-1 min-h-0 flex flex-col">
                         <div className="flex-1 min-h-0 overflow-y-auto bg-surface-2 p-5 flex justify-center">
-                            <TicketPaper items={effectiveItems} />
+                            <TicketPaper items={effectiveItems} fiscal={fiscal} />
                         </div>
 
                         <div className="border-t border-border p-4 flex items-center justify-between gap-3">
