@@ -1113,6 +1113,7 @@ mod tests {
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use tpv_application::ports::aeat::RegistroParaEnvio;
 use tpv_application::ports::verifactu::VerifactuRepository;
 
 use crate::db::Db;
@@ -1168,5 +1169,175 @@ impl VerifactuRepository for SqliteVerifactuRepository {
     async fn listar(&self, limite: i64, desplazamiento: i64) -> AppResult<Vec<RegistroFiscal>> {
         let g = self.db.read().await;
         listar_registros(&g, limite, desplazamiento).await
+    }
+
+    // ── Cola de envío ───────────────────────────────────────────────────────────────────────────
+
+    async fn pendientes(&self, limite: i64) -> AppResult<Vec<RegistroParaEnvio>> {
+        let g = self.db.read().await;
+        // Por `Orden` ASCENDENTE y no por fecha: la AEAT valida cada registro contra su
+        // encadenamiento anterior, así que mandar el eslabón N+1 antes que el N es mandarlo contra
+        // una huella que todavía no tiene.
+        let mut rows = g
+            .query(
+                "SELECT r.ID_Registro, r.Tipo, r.NIF_Emisor, r.Num_Serie_Factura, \
+                        r.Fecha_Expedicion, r.Nombre_Razon_Emisor, r.Tipo_Factura, \
+                        r.Tipo_Rectificativa, r.Descripcion_Operacion, r.Importe_Total, \
+                        r.Cuota_Total, r.Desglose_Json, r.Destinatario_Json, r.Referencias_Json, \
+                        r.Macrodato, r.Primer_Registro, r.Ant_NIF, r.Ant_Num_Serie, r.Ant_Fecha, \
+                        r.Ant_Huella, r.Huella, r.Tipo_Huella, r.Fecha_Hora_Huso, r.Sistema_Json, \
+                        r.Subsanacion, r.Rechazo_Previo, r.Sin_Registro_Previo \
+                 FROM Registros_Facturacion r \
+                 JOIN _Verifactu_Envios e ON e.ID_Registro = r.ID_Registro \
+                 WHERE e.Estado = 'PENDIENTE' \
+                 ORDER BY r.Orden ASC LIMIT ?1;",
+                vec![Value::Integer(limite.clamp(1, 1000))],
+            )
+            .await
+            .map_err(db_err)?;
+
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            let g = |i: i32| row.get_value(i).map_err(db_err);
+            out.push(RegistroParaEnvio {
+                id_registro: v_string(g(0)?).unwrap_or_default(),
+                tipo: v_string(g(1)?).unwrap_or_else(|| "ALTA".to_string()),
+                nif_emisor: v_string(g(2)?).unwrap_or_default(),
+                num_serie_factura: v_string(g(3)?).unwrap_or_default(),
+                fecha_expedicion: v_string(g(4)?).unwrap_or_default(),
+                nombre_razon_emisor: v_string(g(5)?).unwrap_or_default(),
+                tipo_factura: v_string(g(6)?),
+                tipo_rectificativa: v_string(g(7)?),
+                descripcion_operacion: v_string(g(8)?),
+                importe_total: v_string(g(9)?),
+                cuota_total: v_string(g(10)?),
+                desglose_json: v_string(g(11)?),
+                destinatario_json: v_string(g(12)?),
+                referencias_json: v_string(g(13)?),
+                macrodato: v_string(g(14)?),
+                primer_registro: v_string(g(15)?),
+                ant_nif: v_string(g(16)?),
+                ant_num_serie: v_string(g(17)?),
+                ant_fecha: v_string(g(18)?),
+                ant_huella: v_string(g(19)?),
+                huella: v_string(g(20)?).unwrap_or_default(),
+                tipo_huella: v_string(g(21)?).unwrap_or_else(|| "01".to_string()),
+                fecha_hora_huso: v_string(g(22)?).unwrap_or_default(),
+                sistema_json: v_string(g(23)?).unwrap_or_default(),
+                subsanacion: v_string(g(24)?),
+                rechazo_previo: v_string(g(25)?),
+                sin_registro_previo: v_string(g(26)?),
+            });
+        }
+        Ok(out)
+    }
+
+    async fn contar_pendientes(&self) -> AppResult<i64> {
+        let g = self.db.read().await;
+        Ok(select_i64(
+            &g,
+            "SELECT COUNT(*) FROM _Verifactu_Envios WHERE Estado = 'PENDIENTE';",
+            vec![],
+        )
+        .await?
+        .unwrap_or(0))
+    }
+
+    async fn flujo(&self) -> AppResult<(i64, Option<i64>)> {
+        let g = self.db.read().await;
+        let mut rows = g
+            .query(
+                "SELECT Espera_Segundos, Ultimo_Envio_Ms FROM _Verifactu_Flujo WHERE ID = 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => Ok((
+                v_i64(row.get_value(0).map_err(db_err)?).unwrap_or(60),
+                v_i64(row.get_value(1).map_err(db_err)?).filter(|v| *v > 0),
+            )),
+            // La fila la crea `init_sync_tables`; si no está, el valor inicial de la norma es 60.
+            None => Ok((60, None)),
+        }
+    }
+
+    async fn guardar_flujo(&self, espera_s: i64, ultimo_envio_ms: i64) -> AppResult<()> {
+        let g = self.db.write().await;
+        // Por `raw()`: `_Verifactu_Flujo` es estado local del equipo. Por `execute()` cada envío
+        // replicaría a la nube «el TPV acaba de hablar con Hacienda», que no le importa a nadie y
+        // ensucia el outbox.
+        g.raw()
+            .execute(
+                "UPDATE _Verifactu_Flujo SET Espera_Segundos = ?1, Ultimo_Envio_Ms = ?2 WHERE ID = 1;",
+                vec![Value::Integer(espera_s), Value::Integer(ultimo_envio_ms)],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn marcar_resultado(
+        &self,
+        id_registro: &str,
+        estado: &str,
+        codigo_error: Option<i64>,
+        descripcion_error: Option<&str>,
+        csv: Option<&str>,
+    ) -> AppResult<()> {
+        let g = self.db.write().await;
+        g.raw()
+            .execute(
+                // El CSV se guarda con `COALESCE(?, CSV)`: la propia documentación avisa de que no
+                // se puede recuperar con una consulta posterior, así que una respuesta que no lo
+                // traiga no puede borrar el que ya teníamos.
+                "UPDATE _Verifactu_Envios \
+                 SET Estado = ?2, Intentos = Intentos + 1, Ultimo_Intento_Ms = ?3, \
+                     Codigo_Error = ?4, Descripcion_Error = ?5, CSV = COALESCE(?6, CSV) \
+                 WHERE ID_Registro = ?1;",
+                vec![
+                    Value::Text(id_registro.to_string()),
+                    Value::Text(estado.to_string()),
+                    Value::Integer(now_ms()),
+                    codigo_error.map(|c| Value::Text(c.to_string())).unwrap_or(Value::Null),
+                    opt_text(descripcion_error.map(|s| s.to_string())),
+                    opt_text(csv.map(|s| s.to_string())),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+        Ok(())
+    }
+
+    async fn marcar_intento(&self, ids: &[String]) -> AppResult<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let g = self.db.write().await;
+        for id in ids {
+            // El estado NO se toca: siguen PENDIENTE. Un fallo de transporte no dice nada de si la
+            // AEAT los tiene o no, y darlos por perdidos sería tan malo como darlos por buenos.
+            g.raw()
+                .execute(
+                    "UPDATE _Verifactu_Envios \
+                     SET Intentos = Intentos + 1, Ultimo_Intento_Ms = ?2 \
+                     WHERE ID_Registro = ?1;",
+                    vec![Value::Text(id.clone()), Value::Integer(now_ms())],
+                )
+                .await
+                .map_err(db_err)?;
+        }
+        Ok(())
+    }
+
+    async fn obligado(&self) -> AppResult<Option<(String, String, bool)>> {
+        let g = self.db.read().await;
+        match datos_obligado(&g).await {
+            Ok(d) => Ok(Some((d.nif, d.razon_social, d.entorno.es_pruebas()))),
+            // Faltan los datos fiscales: no es un error del job, es una tarea del dueño. Se
+            // devuelve `None` para que el job lo diga con un mensaje y no con una traza.
+            Err(e) if e.code() == ErrorCode::DatosFiscalesIncompletos => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }

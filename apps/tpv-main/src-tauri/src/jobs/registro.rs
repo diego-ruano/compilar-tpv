@@ -32,6 +32,17 @@ use crate::AppState;
 /// Cada cuánto se revalida la licencia contra el worker mientras la app está abierta.
 const LICENCIA_INTERVAL_SECS: u64 = 6 * 60 * 60;
 
+/// Cada cuánto se mira si hay registros de facturación que remitir a la AEAT (FISCAL-01).
+///
+/// Un minuto, que es la cadencia con la que arranca el **control de flujo** que impone el art. 16.2
+/// de la Orden: el primer valor de `TiempoEsperaEnvio` son 60 segundos. Mirar más a menudo no
+/// enviaría antes —la propia norma lo impide— y mirar menos dejaría el ticket recién cobrado
+/// esperando sin motivo.
+///
+/// El vencimiento del job es sólo *cuándo se mira*; **quién decide si se envía es
+/// `puede_enviar`**, que respeta la espera que dijo la AEAT y el tope de 1000 registros.
+const VERIFACTU_INTERVAL_SECS: u64 = 60;
+
 /// Cada cuánto se mira si la caja lleva demasiado sin cerrarse. Una hora sobra: el aviso no es
 /// urgente, sólo tiene que llegar antes de que se acumulen dos servicios sin arqueo.
 const CAJA_ABIERTA_INTERVAL_SECS: u64 = 60 * 60;
@@ -103,6 +114,30 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // este job porque sus avisos podrían escribir en una BD vacía antes del bootstrap.
             requiere: Requiere::MainOperativa,
             ejecutar: tarea(licencia),
+        },
+        Job {
+            // FISCAL-01. Remitir es un job y no una llamada dentro del cobro por una razón de la
+            // propia norma: el art. 16.2 impone un control de flujo entre envíos, así que el envío
+            // NO PUEDE ser síncrono con la venta aunque se quisiera. Y por otra de producto: nada
+            // de lo que rodea al envío puede impedir cobrar.
+            //
+            // ⚠️ Su gating es `MainOperativa` y **NO cuelga del interruptor de la sincronización**.
+            // `connectivity: "off"` (SYNC-17) apaga el WebSocket de NUESTRA nube, que es una
+            // comodidad de producto —«este cliente no quiere nube»—; remitir a la AEAT es una
+            // obligación tributaria. Si compartieran interruptor, el atajo para una red patológica
+            // convertiría en silencio un TPV conforme en uno que no lo es, y no se notaría: la
+            // aplicación se vería perfectamente sana.
+            //
+            // Cumplir esa regla consiste en NO AÑADIR NADA aquí. Se escribe porque la forma de
+            // romperla es que a alguien le parezca razonable, dentro de seis meses, «respetar el
+            // modo de conexión» en este job.
+            nombre: "verifactu_remitir",
+            cada: Duration::from_secs(VERIFACTU_INTERVAL_SECS),
+            // Un minuto de margen: el arranque (BD, licencia, WebSocket) va primero, y lo que haya
+            // en la cola lleva ahí desde antes de encender el equipo.
+            retardo_inicial: Duration::from_secs(60),
+            requiere: Requiere::MainOperativa,
+            ejecutar: tarea(verifactu_remitir),
         },
         Job {
             nombre: "avisos",
@@ -320,6 +355,72 @@ async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
     )
     .await?;
     Ok(())
+}
+
+/// Remite a la AEAT los registros de facturación pendientes (FISCAL-01).
+///
+/// El cuerpo es fino porque la decisión vive en el caso de uso, que es donde se puede probar sin
+/// red. Aquí sólo se resuelven las dos cosas que sólo el shell sabe —cuál es el certificado
+/// elegido y qué hora es— y se traduce el resultado al lenguaje del runner.
+///
+/// ## Qué es un error y qué no
+///
+/// Devolver `Err` activa el backoff y pinta el job en rojo en el panel. Eso es lo correcto para un
+/// fallo de red o para un rechazo del servicio, que se arreglan reintentando o mirando.
+///
+/// **No** lo es para «faltan los datos fiscales» ni para «no hay certificado»: eso no se arregla
+/// esperando, es una tarea del dueño, y tratarlo como avería llenaría el panel de rojo por algo que
+/// el propio panel ya explica mejor en su sección. Esos casos devuelven `Ok` y se anotan en el log.
+async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
+    use tpv_application::use_cases::verifactu::{self as uc_verifactu, SinEnviar};
+
+    let state = app.state::<AppState>();
+    let repo = state.verifactu_repo().await?;
+
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("AppData: {e}"))?;
+    let certificado = crate::certificado_verifactu(&dir);
+
+    let ahora_ms = chrono::Local::now().timestamp_millis();
+    let cliente = tpv_infra_aeat::AeatAdapter::new();
+
+    match uc_verifactu::remitir_ciclo(repo.as_ref(), &cliente, certificado.as_deref(), ahora_ms)
+        .await
+    {
+        Ok(Ok(r)) => {
+            tracing::info!(
+                target: "tpv::verifactu",
+                enviados = r.enviados,
+                aceptados = r.aceptados,
+                con_errores = r.aceptados_con_errores,
+                rechazados = r.rechazados,
+                "lote remitido a la AEAT"
+            );
+            // Que la pantalla fiscal se refresque sin tener que recargarla. Es un aviso, no un
+            // dato: quien lo reciba vuelve a pedir el estado.
+            let _ = app.emit("verifactu:cambio", ());
+            Ok(())
+        }
+        // Las tres razones normales de no enviar. Ninguna es una avería.
+        Ok(Err(SinEnviar::ColaVacia)) | Ok(Err(SinEnviar::ControlDeFlujo)) => Ok(()),
+        Ok(Err(SinEnviar::SinDatosFiscales)) => {
+            tracing::warn!(
+                target: "tpv::verifactu",
+                "hay registros pendientes y faltan los datos fiscales del negocio: no se puede remitir"
+            );
+            Ok(())
+        }
+        Ok(Err(SinEnviar::SinCertificado)) => {
+            tracing::warn!(
+                target: "tpv::verifactu",
+                "hay registros pendientes y no hay certificado elegido: no se puede remitir"
+            );
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Red de seguridad de la subida de imágenes a R2: sube lo que quedó en la cola de AppData.

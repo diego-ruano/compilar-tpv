@@ -5836,6 +5836,7 @@ dependencies = [
  "tpv-application",
  "tpv-contracts",
  "tpv-domain",
+ "tpv-infra-aeat",
  "tpv-infra-http",
  "tpv-infra-licensing",
  "tpv-infra-sqlite",

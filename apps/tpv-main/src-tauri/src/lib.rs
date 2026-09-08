@@ -133,6 +133,39 @@ struct DeviceConfig {
     /// la configuración de nadie. Una entrada ausente = ese destino no tiene impresora.
     #[serde(default)]
     printers: std::collections::HashMap<String, String>,
+    /// FISCAL-01: **huella digital** del certificado elegido para remitir a la AEAT.
+    ///
+    /// Vive aquí y no en la BD por la misma razón que la impresora: el certificado está instalado
+    /// en ESTA máquina, y replicarlo a la nube y a las Handy sería anunciar una elección que allí
+    /// no significa nada.
+    ///
+    /// **Es lo único que se guarda del certificado, y no es un secreto**: la huella lo identifica
+    /// pero no lo abre. La clave privada no sale nunca del almacén de Windows — quien firma el
+    /// handshake es Windows. Por eso el certificado ni siquiera toca el `secret_store`: un secreto
+    /// menos que proteger es un secreto menos que filtrar.
+    #[serde(default)]
+    verifactu_cert: Option<String>,
+}
+
+/// Guarda (o borra) la huella del certificado con el que se remite a la AEAT.
+///
+/// Sólo la huella: la clave privada no sale nunca del almacén de Windows, y la huella no es un
+/// secreto — identifica al certificado pero no lo abre.
+pub(crate) fn set_certificado_verifactu(
+    app_data_dir: &Path,
+    huella: Option<String>,
+) -> Result<(), String> {
+    let mut cfg = load_config(app_data_dir);
+    cfg.verifactu_cert = huella;
+    save_config(app_data_dir, &cfg)
+}
+
+/// La huella del certificado elegido para remitir a la AEAT, o `None`.
+pub(crate) fn certificado_verifactu(app_data_dir: &Path) -> Option<String> {
+    load_config(app_data_dir)
+        .verifactu_cert
+        .map(|s| s.trim().to_uppercase().replace([' ', ':'], ""))
+        .filter(|s| !s.is_empty())
 }
 
 /* =========================================================
@@ -2190,6 +2223,9 @@ pub fn run() {
             commands::verifactu::verifactu_bloque_ticket,
             commands::verifactu::verifactu_estado,
             commands::verifactu::verifactu_listar,
+            commands::verifactu::verifactu_certificados,
+            commands::verifactu::verifactu_set_certificado,
+            commands::verifactu::verifactu_probar_conexion,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,

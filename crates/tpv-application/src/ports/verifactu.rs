@@ -11,6 +11,7 @@
 use async_trait::async_trait;
 
 use crate::error::AppResult;
+use crate::ports::aeat::RegistroParaEnvio;
 use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
 
 /// La cadena de registros y su cola de envío, en local.
@@ -29,4 +30,46 @@ pub trait VerifactuRepository: Send + Sync {
 
     /// Los registros para el panel, del más reciente al más antiguo.
     async fn listar(&self, limite: i64, desplazamiento: i64) -> AppResult<Vec<RegistroFiscal>>;
+
+    // ── Cola de envío ───────────────────────────────────────────────────────────────────────────
+
+    /// Los registros pendientes de remitir, **por `Orden` ascendente**.
+    ///
+    /// El orden no es una preferencia: la AEAT valida cada registro contra su encadenamiento
+    /// anterior, así que mandar el eslabón N+1 antes que el N es mandarlo contra una huella que
+    /// todavía no tiene.
+    async fn pendientes(&self, limite: i64) -> AppResult<Vec<RegistroParaEnvio>>;
+
+    /// Cuántos hay pendientes. Se usa para el control de flujo (el tope de 1000 manda sobre el
+    /// reloj) y para el panel.
+    async fn contar_pendientes(&self) -> AppResult<i64>;
+
+    /// El estado del control de flujo: `(espera_en_segundos, instante_del_ultimo_envio_ms)`.
+    async fn flujo(&self) -> AppResult<(i64, Option<i64>)>;
+
+    /// Guarda el estado del control de flujo tras un envío.
+    async fn guardar_flujo(&self, espera_s: i64, ultimo_envio_ms: i64) -> AppResult<()>;
+
+    /// Anota en qué quedó un registro tras el envío.
+    async fn marcar_resultado(
+        &self,
+        id_registro: &str,
+        estado: &str,
+        codigo_error: Option<i64>,
+        descripcion_error: Option<&str>,
+        csv: Option<&str>,
+    ) -> AppResult<()>;
+
+    /// Anota que se intentó enviar estos registros y no se pudo procesar la respuesta.
+    ///
+    /// **Siguen `PENDIENTE`**: un fallo de transporte no dice nada de si la AEAT los tiene o no, y
+    /// darlos por perdidos sería tan malo como darlos por buenos. Sólo se cuenta el intento, que es
+    /// lo que alimenta el backoff y lo que se ve en el panel.
+    async fn marcar_intento(&self, ids: &[String]) -> AppResult<()>;
+
+    /// Los datos del obligado que van en la cabecera del envío, más el entorno.
+    ///
+    /// Devuelve `None` si faltan: sin ellos no hay nada que remitir, y no es un error del job sino
+    /// una tarea del dueño.
+    async fn obligado(&self) -> AppResult<Option<(String, String, bool)>>;
 }
