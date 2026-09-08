@@ -44,6 +44,10 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	tenant_migration_altered: "tenant_migration_altered",
 	backup_corrupt: "backup_corrupt",
 	permiso_denegado: "permiso_denegado",
+	datos_fiscales_incompletos: "datos_fiscales_incompletos",
+	// FISCAL-01: la Handy no cobra, así que no emite registros — pero el veto de
+	// `applyViaHub` sí sale por aquí si alguna ruta futura lo intenta.
+	escritura_solo_en_main: "permiso_denegado",
 	validation_error: "validation",
 	not_found: "not_found",
 };

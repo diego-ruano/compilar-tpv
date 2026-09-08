@@ -117,6 +117,15 @@ export function patchBusiness(patch: Record<string, unknown>): BuiltCommand {
 		if (Number.isFinite(n)) add("Umbral_Descuadre", n);
 	}
 
+	// FISCAL-01. Los datos fiscales (`Razon_Social`, `Descripcion_Op`, `Limite_Simplif`,
+	// `Verifactu_Entorno`) NO se escriben desde aquí, y esto es la decisión, no un olvido: quien
+	// emite los registros es la Main y es la única que puede comprobar lo que hace falta antes de
+	// tocarlos —que el NIF sigue siendo el de la cadena ya emitida, por ejemplo—. Este builder lo
+	// sirve la API REST, o sea la Handy, que ve esos campos en solo lectura.
+	//
+	// Como el `patch` es un `Record<string, unknown>`, las claves desconocidas se ignoran solas.
+	// Se dice aquí para que quien añada la siguiente línea vea por qué faltan estas cuatro.
+
 	if (sets.length) {
 		sets.push("Updated_At = datetime('now','localtime')");
 		steps.push({

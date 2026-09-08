@@ -31,6 +31,7 @@ pub mod sync;
 pub mod tareas;
 pub mod trabajadores;
 pub mod venta_rapida;
+pub mod verifactu;
 
 // Los módulos de contratos por dominio se añaden durante la migración:
 // pub mod mesas;

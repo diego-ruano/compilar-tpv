@@ -1,10 +1,14 @@
 {
   "business_name": "Bar Paco",
   "cif": "B12345678",
+  "descripcion_op": "Servicios de hosteleria y restauracion",
   "direccion": "Calle Mayor 1",
   "iva_percent": 21.0,
+  "limite_simplif": 3000.0,
   "logo_data_url": null,
   "mensaje_footer": "Hasta pronto",
+  "razon_social": "",
   "telefono": "961111111",
-  "umbral_descuadre": 12.5
+  "umbral_descuadre": 12.5,
+  "verifactu_entorno": "produccion"
 }

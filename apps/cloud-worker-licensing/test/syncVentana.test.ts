@@ -156,14 +156,16 @@ describe("bootstrap acotado · los maestros", () => {
 		}
 	});
 
-	it("`Ticket_Contador` viaja SIEMPRE", async () => {
-		// Sin él la numeración se reinicia en 1 y dos ventas distintas comparten número de ticket,
-		// que es exactamente lo que el contador propio existe para impedir.
+	it("`Serie_Facturacion` viaja SIEMPRE", async () => {
+		// FISCAL-01: es el contador de la serie de facturación, y si volviera recortado el
+		// siguiente número podría repetir uno YA EMITIDO. La clave única de una factura ante la
+		// AEAT es (emisor, número, fecha), así que un duplicado no es un ticket confuso: es un
+		// registro que no entra (error 3000). Un hueco es explicable; un número repetido no.
 		const { body } = await pedir("/bootstrap", "contador", (sql) => {
-			sql.exec("UPDATE Ticket_Contador SET Ultimo = 4321 WHERE ID = 1;");
+			sql.exec("INSERT INTO Serie_Facturacion (Serie, Ultimo) VALUES ('2027', 4321);");
 		});
 
-		const t = tabla(body, "Ticket_Contador")!;
+		const t = tabla(body, "Serie_Facturacion")!;
 		expect(t.filas).toHaveLength(1);
 		expect(t.filas[0][t.columnas.indexOf("Ultimo")]).toBe(4321);
 	});
@@ -442,7 +444,6 @@ describe("bootstrap acotado · lo que la Main necesita para seguir", () => {
 			"Serie_Facturacion",
 			"Tarea_Asignaciones",
 			"Tareas",
-			"Ticket_Contador",
 			"Ticket_Settings",
 			"Trabajadores",
 			"Turnos",

@@ -16,6 +16,14 @@ use tpv_domain::configuracion::{
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{v_f64, v_i64, v_string};
 
+/// `DescripcionOperacion` cuando nadie la ha configurado.
+///
+/// Es un campo OBLIGATORIO del registro de facturación (hasta 500 caracteres) y no se deriva de las
+/// líneas: los nombres de producto los escribe el usuario. Un campo obligatorio que puede llegar
+/// vacío es un rechazo garantizado, así que aquí no hay `Option`: hay un defecto que es correcto
+/// para un bar. Mismo texto que el `DEFAULT` del esquema.
+const DESCRIPCION_OP_POR_DEFECTO: &str = "Servicios de hosteleria y restauracion";
+
 pub struct SqliteConfiguracionRepository {
     db: Arc<Db>,
 }
@@ -111,7 +119,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre FROM Business_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Business_Name, Logo_DataUrl, Direccion, Telefono, CIF, Mensaje_Footer, IVA_Percent, Umbral_Descuadre, Razon_Social, Descripcion_Op, Limite_Simplif, Verifactu_Entorno FROM Business_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -133,6 +141,14 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             umbral_descuadre: v_f64(g(7)?).unwrap_or(
                 tpv_domain::cierre_caja::UMBRAL_DESCUADRE_POR_DEFECTO,
             ),
+            razon_social: v_string(g(8)?).unwrap_or_default(),
+            descripcion_op: v_string(g(9)?)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| DESCRIPCION_OP_POR_DEFECTO.to_string()),
+            limite_simplif: v_f64(g(10)?)
+                .filter(|v| *v > 0.0)
+                .unwrap_or(tpv_domain::verifactu::LIMITE_SIMPLIFICADA_HOSTELERIA),
+            verifactu_entorno: v_string(g(11)?).unwrap_or_else(|| "produccion".to_string()),
         })
     }
 
@@ -253,6 +269,50 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             if let Some(v) = patch_f64(patch, "iva_percent") {
                 sets.push("IVA_Percent = ?");
                 args.push(Value::Real(v));
+            }
+        }
+
+        // ── Datos fiscales (FISCAL-01) ──────────────────────────────────────────────────────────
+        if patch_has(patch, "razon_social") {
+            if let Some(v) = patch_string(patch, "razon_social") {
+                sets.push("Razon_Social = ?");
+                args.push(Value::Text(v));
+            }
+        }
+        if patch_has(patch, "descripcion_op") {
+            if let Some(v) = patch_string(patch, "descripcion_op") {
+                // Vacío no se acepta: es un campo obligatorio del registro y llegaría a la AEAT
+                // como un rechazo. Se cae al texto por defecto, que es correcto para un bar.
+                let v = if v.trim().is_empty() {
+                    DESCRIPCION_OP_POR_DEFECTO.to_string()
+                } else {
+                    tpv_domain::verifactu::sanear_texto(&v, 500)
+                };
+                sets.push("Descripcion_Op = ?");
+                args.push(Value::Text(v));
+            }
+        }
+        if patch_has(patch, "limite_simplif") {
+            if let Some(v) = patch_f64(patch, "limite_simplif") {
+                sets.push("Limite_Simplif = ?");
+                args.push(Value::Real(if v > 0.0 {
+                    v
+                } else {
+                    tpv_domain::verifactu::LIMITE_SIMPLIFICADA_HOSTELERIA
+                }));
+            }
+        }
+        if patch_has(patch, "verifactu_entorno") {
+            if let Some(v) = patch_string(patch, "verifactu_entorno") {
+                // El CHECK del esquema sólo admite dos valores, y un UPDATE que lo viole es un
+                // error de BD sin mensaje. Se normaliza aquí, donde sí se puede explicar.
+                let v = if v.trim().eq_ignore_ascii_case("pruebas") {
+                    "pruebas"
+                } else {
+                    "produccion"
+                };
+                sets.push("Verifactu_Entorno = ?");
+                args.push(Value::Text(v.to_string()));
             }
         }
 

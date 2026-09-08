@@ -16,6 +16,21 @@ pub struct BusinessSettings {
     pub iva_percent: f64,
     /// A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
     pub umbral_descuadre: f64,
+
+    // ── Datos fiscales (FISCAL-01, Veri*factu) ──────────────────────────────────────────────────
+    /// `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
+    /// («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
+    /// el registro que se remite a la AEAT, sólo este.
+    pub razon_social: String,
+    /// `DescripcionOperacion`, campo obligatorio de hasta 500 caracteres. Texto fijo configurable y
+    /// no un resumen de las líneas: los nombres de producto los escribe el usuario, y un campo
+    /// obligatorio que puede llegar vacío o con basura es un rechazo garantizado.
+    pub descripcion_op: String,
+    /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
+    /// emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
+    pub limite_simplif: f64,
+    /// `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
+    pub verifactu_entorno: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

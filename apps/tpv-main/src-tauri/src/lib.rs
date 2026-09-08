@@ -43,6 +43,7 @@ use tpv_application::ports::{
     tareas::TareasRepository,
     trabajadores::TrabajadoresRepository,
     venta_rapida::VentaRapidaRepository,
+    verifactu::VerifactuRepository,
 };
 use tpv_contracts::errors::AppErrorDto;
 use tpv_infra_http::{
@@ -66,6 +67,7 @@ use tpv_infra_sqlite::{
     stats::SqliteStatsRepository, stock_alertas::SqliteStockAlertasRepository,
     sync::SqliteSyncRepository, tareas::SqliteTareasRepository,
     trabajadores::SqliteTrabajadoresRepository, venta_rapida::SqliteVentaRapidaRepository,
+    verifactu::SqliteVerifactuRepository,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -180,6 +182,32 @@ struct SetPrinterArgs {
     #[serde(default)]
     destino: Option<String>,
 }
+
+/* =========================================================
+   FISCAL-01: identidad del PRODUCTOR del software
+   ---------------------------------------------------------
+   Va en el bloque `SistemaInformatico` de cada registro de facturación (art. 13 de la Orden
+   HAC/1177/2024). Describe a quien ha hecho el TPV, no al bar que lo usa.
+
+   Es DATO DECLARADO: la AEAT no lo contrasta contra ningún registro de actividad económica, así
+   que el epígrafe del productor es irrelevante para que un envío se acepte. Lo que sí valida es el
+   FORMATO (el NIF tiene que tener nueve caracteres) y las longitudes máximas.
+
+   ⚠️ PENDIENTE ANTES DE LANZAR (no antes de desarrollar):
+     · NIF y razón social definitivos, cuando la empresa esté constituida.
+     · `IdSistemaInformatico`: dos caracteres, los elige el productor.
+     · La declaración responsable del art. 13 RRSIF, que tiene que ser visible en el propio
+       sistema informático en cada una de sus versiones.
+========================================================= */
+
+/// Razón social del productor. Máx. 120 caracteres.
+const PRODUCTOR_NOMBRE_RAZON: &str = "Altaria Lights";
+/// NIF del productor. Máx. 9 (formato NIF).
+const PRODUCTOR_NIF: &str = "";
+/// Nombre comercial del sistema informático. Máx. **30**.
+const PRODUCTOR_NOMBRE_SISTEMA: &str = "TPV Altaria";
+/// Código corto del sistema que asigna el productor. Máx. **2** — no es el nombre.
+const PRODUCTOR_ID_SISTEMA: &str = "01";
 
 /* =========================================================
    Helpers básicos
@@ -676,6 +704,23 @@ impl AppState {
         SqliteNotificacionesRepository,
         HttpNotificacionesRepository
     );
+
+    /// Registros de facturación (FISCAL-01). **No es mode-switched: sólo existe en la Main.**
+    ///
+    /// La Handy no cobra (`soloLaMainCobra`), así que no emite registros — y no debe poder
+    /// hacerlo. La cadena de huellas vive en el SIF del obligado, que es este equipo; la nube es
+    /// una copia para poder recuperarla, no una fuente. El veto también está en el worker
+    /// (`applyViaHub`), porque una regla que sólo vive en el cliente es una sugerencia.
+    pub(crate) async fn verifactu_repo(&self) -> Result<Arc<dyn VerifactuRepository>, String> {
+        let conn = self
+            .db
+            .lock()
+            .await
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| "Los registros de facturación sólo existen en el TPV principal".to_string())?;
+        Ok(Arc::new(SqliteVerifactuRepository::new(conn)) as Arc<dyn VerifactuRepository>)
+    }
 
     /// Repositorio de sincronización (aplicar cambios de la nube en la BD local). NO es
     /// mode-switched: siempre es la Main (SQLite local) la que aplica lo recibido por el WS.
@@ -1810,6 +1855,38 @@ pub fn run() {
             // contexto async). Se comparte con el `AppState` para mantenerlo al día en cada cambio.
             let mode_sync = Arc::new(std::sync::RwLock::new(mode));
 
+            // FISCAL-01: el bloque `SistemaInformatico` que va EN CADA registro de facturación.
+            //
+            // Se inyecta aquí porque dos de sus datos sólo se conocen en el shell: la versión (de
+            // `tauri.conf.json`) y el número de instalación (el `tenant_id`, que vive en
+            // `license_state.json`, fuera de `data.db`). El resto identifica al PRODUCTOR del
+            // software —nosotros—, no al bar, y es dato declarado: la AEAT no lo contrasta contra
+            // ningún registro de actividad económica.
+            //
+            // ⚠️ PENDIENTE ANTES DE LANZAR: sustituir el NIF y la razón social provisionales por
+            // los definitivos cuando la empresa esté constituida, y elegir el `IdSistemaInformatico`
+            // de dos caracteres. Va junto con la declaración responsable del art. 13 RRSIF.
+            {
+                let tenant = tpv_infra_licensing::LicensingAdapter::new(app_data_dir.clone());
+                let numero_instalacion = {
+                    use tpv_application::ports::licensing::LicensingService;
+                    match tenant.load_state() {
+                        Ok(Some(st)) => st.tenant_id,
+                        _ => String::new(),
+                    }
+                };
+                tpv_infra_sqlite::verifactu::set_sistema_informatico(
+                    tpv_infra_sqlite::verifactu::SistemaInformatico {
+                        nombre_razon: PRODUCTOR_NOMBRE_RAZON.to_string(),
+                        nif: PRODUCTOR_NIF.to_string(),
+                        nombre_sistema: PRODUCTOR_NOMBRE_SISTEMA.to_string(),
+                        id_sistema: PRODUCTOR_ID_SISTEMA.to_string(),
+                        version: handle.package_info().version.to_string(),
+                        numero_instalacion,
+                    },
+                );
+            }
+
             // Telemetría: lo primero (tras resolver AppData), para capturar también los errores del
             // arranque. NUNCA tumba la app: si `init` falla, se avisa por stderr y se sigue sin
             // telemetría. Destinos: consola (dev) + fichero local 7 días + cola durable que un worker
@@ -2108,6 +2185,11 @@ pub fn run() {
             commands::venta_rapida::vr_delete_comanda_if_safe,
             commands::venta_rapida::vr_get_index_rows,
             commands::venta_rapida::vr_get_detalles_ver_ticket,
+            // verifactu (FISCAL-01). Sólo LECTURAS: la emisión ocurre dentro de la transacción
+            // del cobro, no por un comando propio.
+            commands::verifactu::verifactu_bloque_ticket,
+            commands::verifactu::verifactu_estado,
+            commands::verifactu::verifactu_listar,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,

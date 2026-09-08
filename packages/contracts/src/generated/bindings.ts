@@ -95,6 +95,42 @@ tabla_actual?: string,
 ultimo_error?: string, };
 
 /**
+ * El bloque fiscal que un cobro devuelve al frontend para que lo meta en el payload de impresión.
+ *
+ * **Estos datos no se pueden inventar en el cliente.** Salen de la fila que se acaba de escribir
+ * en `Registros_Facturacion` dentro de la misma transacción que el pago: el número es el que
+ * reservó el contador, el QR es la URL exacta que se guardó, y la huella es la que encadena. Una
+ * reimpresión saca los mismos tres, y por eso se leen de la fila y no se recalculan.
+ */
+export type BloqueFiscal = { 
+/**
+ * `2027/000001`. Es también `Pagos.Numero_Ticket`: un solo número para el papel, el cobro y el
+ * registro — dos numeraciones paralelas serían dos cosas que pueden divergir.
+ */
+num_serie_factura: string, 
+/**
+ * `DD-MM-AAAA`, tal cual va al XML y al QR.
+ */
+fecha_expedicion: string, 
+/**
+ * La URL que se rasteriza en el código QR del papel.
+ */
+qr_url: string, 
+/**
+ * 64 hexadecimales en mayúsculas.
+ */
+huella: string, 
+/**
+ * `F1` | `F2` | `F3` | `R1`..`R5`.
+ */
+tipo_factura: string, 
+/**
+ * `true` si el registro se emitió contra el entorno de **pruebas**. El papel lleva entonces un
+ * QR que apunta a `prewww2.aeat.es`, y la pantalla tiene que gritarlo.
+ */
+entorno_pruebas: boolean, };
+
+/**
  * Qué se restauró. `tablas_desconocidas` son las que la nube mandó y esta versión de la app no
  * tiene en su esquema: se informan en vez de fallar (un TPV con una versión por detrás debe poder
  * recuperarse igual), pero se dicen para que no pasen desapercibidas.
@@ -106,7 +142,13 @@ export type BootstrapResultado = { seq: number, filas_restauradas: number, tabla
  * tomó la foto (leído en la misma transacción). Ese `seq` pasa a ser el checkpoint local, de modo
  * que el catch-up siga desde justo después sin huecos ni solapes.
  */
-export type BootstrapSnapshot = { seq: number, total_filas: number, tablas: Array<BootstrapTabla>, 
+export type BootstrapSnapshot = { seq: number, 
+/**
+ * `alias` porque la app y el worker se despliegan por separado: un TPV actualizado contra un
+ * worker viejo (o al revés) no puede quedarse sin recuperar la base por el nombre de un campo
+ * que ni siquiera se lee. El worker lo mandaba en camelCase desde el principio.
+ */
+total_filas: number, tablas: Array<BootstrapTabla>, 
 /**
  * SYNC-19: las tablas a rellenar en la fase 2, **en orden de padres primero**. El orden lo
  * decide el worker y se guarda tal cual: cada página del backfill es su propia transacción,
@@ -132,7 +174,28 @@ export type BusinessSettings = { business_name: string, logo_data_url: string | 
 /**
  * A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
  */
-umbral_descuadre: number, };
+umbral_descuadre: number, 
+/**
+ * `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
+ * («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
+ * el registro que se remite a la AEAT, sólo este.
+ */
+razon_social: string, 
+/**
+ * `DescripcionOperacion`, campo obligatorio de hasta 500 caracteres. Texto fijo configurable y
+ * no un resumen de las líneas: los nombres de producto los escribe el usuario, y un campo
+ * obligatorio que puede llegar vacío o con basura es un rechazo garantizado.
+ */
+descripcion_op: string, 
+/**
+ * Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
+ * emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
+ */
+limite_simplif: number, 
+/**
+ * `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
+ */
+verifactu_entorno: string, };
 
 export type CategoriaInvDto = { ID_Categoria: string, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
 
@@ -295,7 +358,42 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos";
+
+/**
+ * Resumen para el panel de Configuración → Fiscal y para la barra de estado.
+ */
+export type EstadoFiscal = { 
+/**
+ * ¿Están el NIF y la razón social configurados? Sin ellos no se puede emitir, y por tanto no
+ * se puede cobrar: es la única puerta que Veri\*factu añade al camino de la venta.
+ */
+datos_fiscales_completos: boolean, nif?: string, razon_social?: string, entorno_pruebas: boolean, total_registros: number, pendientes: number, aceptados: number, aceptados_con_errores: number, rechazados: number, 
+/**
+ * Antigüedad en minutos del registro **pendiente más viejo**. `null` si no hay ninguno.
+ *
+ * Es lo que mide la escalera de avisos, y se mide sobre el registro y no sobre el tiempo sin
+ * conexión a propósito: estar desconectado sin nada que enviar no es un problema.
+ */
+antiguedad_pendiente_min?: number, 
+/**
+ * Escalón de la escalera: `ninguno` | `visible` | `notificacion` | `modal_login` |
+ * `modal_cobro`.
+ */
+escalon_aviso: string, 
+/**
+ * ¿Hay un certificado elegido y sigue existiendo en el almacén de Windows?
+ */
+certificado_ok: boolean, 
+/**
+ * Motivo por el que no se puede remitir, si lo hay: `sin_certificado`,
+ * `certificado_no_encontrado`, `sin_datos_fiscales`… Vacío si se puede.
+ */
+motivo_no_remite?: string, 
+/**
+ * Días que quedan hasta que caduque el certificado elegido. `null` si no hay certificado.
+ */
+dias_para_caducar_certificado?: number, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 
@@ -713,6 +811,40 @@ export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: s
 export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending";
 
 export type RecoveryStatus = { state: RecoveryState, };
+
+/**
+ * Una fila de `Registros_Facturacion` tal como la enseña el panel fiscal.
+ *
+ * Es un subconjunto: el panel no necesita el desglose ni el bloque del sistema informático, que
+ * son para el XML y para la exportación del art. 8 RRSIF.
+ */
+export type RegistroFiscal = { id_registro: string, orden: number, 
+/**
+ * `ALTA` | `ANULACION`.
+ */
+tipo: string, num_serie_factura: string, fecha_expedicion: string, tipo_factura?: string, importe_total?: string, cuota_total?: string, huella: string, 
+/**
+ * `AAAA-MM-DDThh:mm:ss±hh:mm`.
+ */
+fecha_hora_huso: string, 
+/**
+ * `"S"` si el registro se generó durante una incidencia (sin conexión, tras una restauración).
+ */
+incidencia: string, 
+/**
+ * `"S"` si es una subsanación de otro registro.
+ */
+subsanacion?: string, id_pago?: string, 
+/**
+ * `PENDIENTE` | `ACEPTADO` | `ACEPTADO_CON_ERRORES` | `RECHAZADO`, o `null` si por lo que sea
+ * el registro no tiene fila de envío (no debería pasar: se crean juntas).
+ */
+estado_envio?: string, intentos: number, codigo_error?: string, descripcion_error?: string, 
+/**
+ * Código Seguro de Verificación que devolvió la AEAT. **No se puede recuperar con una consulta
+ * posterior**, así que se guarda en el momento del alta o se pierde.
+ */
+csv?: string, };
 
 /**
  * Entrada de borrado de reserva.

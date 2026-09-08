@@ -794,15 +794,14 @@ WHERE p.Estado = 'ACTIVO';
 -- reclamar. Y una reimpresion tiene que salir con el MISMO numero que el original, asi que el
 -- numero no se calcula al imprimir: se guarda con el pago.
 --
--- Contador unico y no una serie por dispositivo porque solo cobra la Main: con un unico escritor no
--- hay que repartir numeros ni coordinar equipos sin conexion. El numero es TEXT para que el formato
--- pueda crecer (una serie por dispositivo, el ano delante) sin migrar los ya emitidos.
-CREATE TABLE IF NOT EXISTS Ticket_Contador (
-  ID INTEGER PRIMARY KEY CHECK (ID = 1),
-  Ultimo INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO Ticket_Contador (ID, Ultimo) VALUES (1, 0);
+-- FISCAL-01: el contador YA NO VIVE AQUI. La tabla `Ticket_Contador` (un `Ultimo` global sin serie,
+-- formato `T-000123`) se retiro y su papel lo hace `Serie_Facturacion` (§14): desde Veri*factu el
+-- numero del ticket ES el numero de la factura -`Pagos.Numero_Ticket` guarda el `Num_Serie_Factura`
+-- del registro-, con serie por ejercicio y reinicio anual.
+--
+-- Dos numeraciones paralelas serian dos cosas que pueden divergir, y la que importa a efectos
+-- legales es la fiscal: la que va en el QR del papel y en el `IDFactura` que la AEAT usa como clave
+-- unica. La columna sigue siendo TEXT, que es justo lo que permitio este cambio sin migrar nada.
 
 -- Aperturas MANUALES del cajon portamonedas. Las de un cobro se saben por su Pago y duplicarlas
 -- aqui seria ruido; lo que no dejaba rastro es abrirlo SIN una venta detras (dar cambio, cuadrar),

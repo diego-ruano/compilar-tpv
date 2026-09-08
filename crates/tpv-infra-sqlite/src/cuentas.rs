@@ -886,6 +886,11 @@ mod tests_anulacion {
     /// se quedó pendiente. Es el estado desde el que se anula, y el que permite comprobar de una
     /// vez el stock, el gasto del cliente y la reapertura de la comanda.
     const VENTA_DE_MESA: &[&str] = &[
+        // FISCAL-01: sin NIF ni razón social no se puede emitir el registro de facturación, y sin
+        // registro no se puede cobrar (art. 9 RRSIF). Es la única puerta que Veri*factu añade al
+        // camino de la venta, así que los tests que cobran tienen que pasarla como la pasa un bar.
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
         // El rol Administrador lo siembran ya las migraciones; aquí sólo hace falta el usuario que
         // firma la anulación (`Anulado_Por` es una FK y el CHECK lo exige).
         "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)

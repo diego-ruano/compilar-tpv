@@ -1,25 +1,26 @@
 {
-  "descripcion": "Cobro fraccionado de barra: 1 detalle (3 uds a 2,00 €) cubierto por un solo lote con stock de sobra, sin cobrador. FEFO trivial (un lote), sin stock suelto. Es el caso mínimo para validar el andamiaje del harness.",
-  "comando": "venta_rapida.cobrar_fraccionado",
-  "seed": [
-    "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 2.0);",
-    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 10);",
-    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Abierta');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 3, 2.0);"
-  ],
-  "entrada": {
-    "id_comanda": "comanda-1",
-    "metodo": "EFECTIVO",
-    "detalles": [
-      "detalle-1"
-    ]
-  },
-  "snapshot": {
-    "Pagos": "SELECT ID_Comanda, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador, ID_Trabajador_Cobrador FROM Pagos",
-    "Pago_Detalles": "SELECT ID_Detalle FROM Pago_Detalles",
-    "Lotes_Producto": "SELECT ID_Lote, ID_Producto, Stock_Disponible FROM Lotes_Producto",
-    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
-    "Movimientos_Caja": "SELECT mc.Tipo AS Tipo, CASE WHEN p.ID_Pago IS NULL THEN 0 ELSE 1 END AS Apunta_A_Un_Pago, mc.ID_Usuario AS ID_Usuario, mc.ID_Trabajador AS ID_Trabajador, mc.Importe AS Importe, mc.Metodo_Pago AS Metodo_Pago FROM Movimientos_Caja mc LEFT JOIN Pagos p ON p.ID_Pago = mc.ID_Pago"
-  }
+	"descripcion": "Cobro fraccionado de barra: 1 detalle (3 uds a 2,00 €) cubierto por un solo lote con stock de sobra, sin cobrador. FEFO trivial (un lote), sin stock suelto. Es el caso mínimo para validar el andamiaje del harness.",
+	"comando": "venta_rapida.cobrar_fraccionado",
+	"seed": [
+		"UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
+		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
+		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 2.0);",
+		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 10);",
+		"INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Abierta');",
+		"INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 3, 2.0);"
+	],
+	"entrada": {
+		"id_comanda": "comanda-1",
+		"metodo": "EFECTIVO",
+		"detalles": [
+			"detalle-1"
+		]
+	},
+	"snapshot": {
+		"Pagos": "SELECT ID_Comanda, Metodo_Pago, Importe_Total, Tipo, ID_Usuario_Cobrador, ID_Trabajador_Cobrador FROM Pagos",
+		"Pago_Detalles": "SELECT ID_Detalle FROM Pago_Detalles",
+		"Lotes_Producto": "SELECT ID_Lote, ID_Producto, Stock_Disponible FROM Lotes_Producto",
+		"Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
+		"Movimientos_Caja": "SELECT mc.Tipo AS Tipo, CASE WHEN p.ID_Pago IS NULL THEN 0 ELSE 1 END AS Apunta_A_Un_Pago, mc.ID_Usuario AS ID_Usuario, mc.ID_Trabajador AS ID_Trabajador, mc.Importe AS Importe, mc.Metodo_Pago AS Metodo_Pago FROM Movimientos_Caja mc LEFT JOIN Pagos p ON p.ID_Pago = mc.ID_Pago"
+	}
 }

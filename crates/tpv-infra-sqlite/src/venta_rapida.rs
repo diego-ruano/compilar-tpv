@@ -764,9 +764,6 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let db = &g;
 
         let id_pago_final = new_id();
-        // Numero correlativo del ticket: se reserva antes del cobro y viaja como literal en el
-        // pago, para que una reimpresion saque el mismo papel.
-        let numero_ticket = crate::mesas::siguiente_numero_ticket(db).await?;
 
         let id_usuario = data
             .id_usuario_cobrador
@@ -783,6 +780,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<String> = async {
+            // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
+            // con un contador de tickets daba igual gastar uno en un cobro que acabara en
+            // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
+            // de verdad y no un número emitido dos veces.
+            //
+            // `Pagos.Numero_Ticket` guarda este mismo valor: un solo número para el papel, el
+            // cobro y el registro.
+            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
+            let numero_ticket = numero_reservado.0.clone();
+
             if let Some(idt) = id_trabajador_cobrador.clone() {
                 db.execute(
                     r#"
@@ -1055,6 +1062,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             db.execute(update_total_comanda_sql(), vec![Value::Text(data.id_comanda.clone())])
                 .await
                 .map_err(db_err)?;
+
+            // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
+            // que es de donde sale el desglose de IVA del registro.
+            crate::verifactu::emitir_cobro_simplificado(
+                db,
+                &id_pago_final,
+                numero_reservado,
+                importe_total_db,
+            )
+            .await?;
 
             let mut left = db
                 .query(

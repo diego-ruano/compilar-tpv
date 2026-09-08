@@ -89,28 +89,18 @@ async fn select_one_string<C: Reader>(
     Ok(None)
 }
 
-/// Reserva el siguiente número de ticket y lo devuelve ya formateado (`T-000123`).
+/// Reserva el siguiente número de **factura** y lo devuelve formateado (`2027/000123`).
 ///
-/// El incremento es RELATIVO (`Ultimo + 1`), no un valor calculado y escrito: así la sentencia que
-/// se captura para replicar converge sola. El número resultante sí viaja como literal en el pago,
-/// que es lo que permite que una reimpresión saque el mismo papel.
+/// Desde FISCAL-01 el número del ticket **es** el número de la factura: `Pagos.Numero_Ticket`
+/// guarda el `Num_Serie_Factura` del registro. Un solo número para el papel, el cobro y el registro
+/// — dos numeraciones paralelas serían dos cosas que pueden divergir, y la que importa a efectos
+/// legales es la fiscal.
 ///
-/// Solo cobra la Main, así que un único contador basta: no hay que repartir series ni coordinar
-/// equipos sin conexión. El número es TEXT para que el formato pueda crecer (una serie por
-/// dispositivo, el año delante…) sin migrar los ya emitidos.
+/// El antiguo `Ticket_Contador` (`T-000123`, contador global sin serie) se retiró con él. La
+/// mecánica de reserva es la misma —incremento RELATIVO para que el outbox converja solo—, más la
+/// guardia contra los números ya emitidos que documenta `verifactu::reservar_numero`.
 pub(crate) async fn siguiente_numero_ticket(db: &crate::db::WriteGuard<'_>) -> AppResult<String> {
-    db.execute(
-        "UPDATE Ticket_Contador SET Ultimo = Ultimo + 1 WHERE ID = 1;",
-        Vec::<Value>::new(),
-    )
-    .await
-    .map_err(db_err)?;
-
-    let n = select_one_i64(db, "SELECT Ultimo FROM Ticket_Contador WHERE ID = 1;", vec![])
-        .await?
-        .unwrap_or(0);
-
-    Ok(format!("T-{n:06}"))
+    Ok(crate::verifactu::reservar_numero_factura(db).await?.0)
 }
 
 /// Lo que se congela del producto al vender: `(nombre, tipo de IVA)`.
@@ -1294,7 +1284,10 @@ impl MesasRepository for SqliteMesasRepository {
 
             // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
             // para que una reimpresion saque el mismo papel.
-            let numero_ticket = siguiente_numero_ticket(db).await?;
+            // El número se reserva DENTRO de la transacción: si el cobro hace ROLLBACK, no se gasta
+            // (y el registro fiscal tampoco llega a existir).
+            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
+            let numero_ticket = numero_reservado.0.clone();
             let id_pago = new_id();
             let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
@@ -1381,6 +1374,17 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             }
+
+            // FISCAL-01. El registro de facturación se crea AQUÍ, dentro de la misma transacción
+            // que el pago y después de enlazar las líneas (de las que sale el desglose). Es el
+            // orden del art. 9 RRSIF y el único que no puede dejar facturas huérfanas.
+            crate::verifactu::emitir_cobro_simplificado(
+                db,
+                &id_pago,
+                numero_reservado,
+                importe_total,
+            )
+            .await?;
 
             Ok(numero_ticket)
         }
@@ -1988,7 +1992,10 @@ impl MesasRepository for SqliteMesasRepository {
 
             // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
             // para que una reimpresion saque el mismo papel.
-            let numero_ticket = siguiente_numero_ticket(db).await?;
+            // El número se reserva DENTRO de la transacción: si el cobro hace ROLLBACK, no se gasta
+            // (y el registro fiscal tampoco llega a existir).
+            let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
+            let numero_ticket = numero_reservado.0.clone();
             let id_pago = new_id();
             let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
@@ -2076,7 +2083,7 @@ impl MesasRepository for SqliteMesasRepository {
             }
 
             let mut insert_args: Vec<Value> = Vec::with_capacity(2 + ids.len());
-            insert_args.push(Value::Text(id_pago));
+            insert_args.push(Value::Text(id_pago.clone()));
             insert_args.push(Value::Text(data.id_comanda.clone()));
             for id in ids.iter() {
                 insert_args.push(Value::Text(id.clone()));
@@ -2127,6 +2134,11 @@ impl MesasRepository for SqliteMesasRepository {
                 }
             }
             consumir_stock_fefo(db, &charged).await?;
+
+            // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
+            // que es de donde sale el desglose de IVA del registro.
+            crate::verifactu::emitir_cobro_simplificado(db, &id_pago, numero_reservado, total)
+                .await?;
 
             let pending_left = select_one_i64(
                 db,
@@ -2319,11 +2331,16 @@ async fn productos_query<C: Reader>(
 
 #[cfg(test)]
 mod tests_numero_ticket {
-    //! El número correlativo que va impreso en el ticket.
+    //! El número que va impreso en el ticket, que desde FISCAL-01 **es el número de la factura**.
     //!
-    //! Es lo que permite atar un papel a su cobro: para una devolución, para cuadrar un arqueo o
-    //! para el cliente que vuelve a reclamar. Y una reimpresión tiene que sacar el MISMO número,
-    //! así que lo importante aquí es que no se repita y que no dependa de cuándo se imprime.
+    //! Sigue siendo lo que permite atar un papel a su cobro —para una devolución, para cuadrar un
+    //! arqueo o para el cliente que vuelve a reclamar— y una reimpresión sigue teniendo que sacar
+    //! el mismo. Lo que cambia es lo que ese número significa: ahora es el `Num_Serie_Factura` del
+    //! registro que se remite a la AEAT, con serie por ejercicio y reinicio anual.
+    //!
+    //! Y aparece una obligación que el contador de tickets no tenía: **no puede repetir un número
+    //! ya emitido**. La clave única de una factura ante la AEAT es (emisor, número, fecha), y un
+    //! duplicado es un registro que no entra (error 3000).
 
     use super::*;
     use crate::db::Db;
@@ -2335,45 +2352,53 @@ mod tests_numero_ticket {
         (db, dir)
     }
 
+    /// La serie del ejercicio en curso, que es lo que prefija todos los números.
+    fn serie() -> String {
+        chrono::Local::now().format("%Y").to_string()
+    }
+
     #[tokio::test]
     async fn empieza_en_uno_y_no_repite() {
         let (db, _dir) = db_temporal().await;
         let g = db.write().await;
+        let s = serie();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000001");
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000002");
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000001"));
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000002"));
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
     }
 
     #[tokio::test]
     async fn el_formato_deja_sitio_para_crecer() {
-        // Seis dígitos con ceros a la izquierda: los tickets salen ordenables como texto, que es
-        // como se leen en un listado. Al pasar del millón simplemente crece, no se rompe.
+        // Seis dígitos con ceros a la izquierda: dentro de una serie salen ordenables como texto,
+        // que es como se leen en un listado. Al pasar del millón simplemente crece, no se rompe.
         let (db, _dir) = db_temporal().await;
         let g = db.write().await;
+        let s = serie();
 
         g.execute(
-            "UPDATE Ticket_Contador SET Ultimo = 999999 WHERE ID = 1;",
-            Vec::<Value>::new(),
+            "INSERT OR REPLACE INTO Serie_Facturacion (Serie, Ultimo) VALUES (?1, 999999);",
+            vec![Value::Text(s.clone())],
         )
         .await
         .unwrap();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-1000000");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/1000000"));
     }
+
     #[tokio::test]
     async fn anular_un_cobro_no_devuelve_el_numero_a_la_cola() {
-        // El contador es propio, no un `SELECT MAX(Numero_Ticket)`. Si saliera de los cobros
-        // existentes, anular el último haría que el siguiente ticket repitiera número: dos ventas
-        // distintas con el mismo número es lo que convierte un arqueo en una discusión.
+        // El contador es propio, no un `SELECT MAX(...)` de los cobros. Si saliera de ahí, anular
+        // el último haría que el siguiente ticket repitiera número: dos ventas distintas con el
+        // mismo número es lo que convierte un arqueo en una discusión — y ahora, además, una
+        // factura que la AEAT rechaza por duplicada.
         let (db, _dir) = db_temporal().await;
         let g = db.write().await;
+        let s = serie();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000001");
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000002");
-
-        // Se anula el segundo cobro: la fila desaparece, el contador no.
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000001"));
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000002"));
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
     }
 
     #[tokio::test]
@@ -2383,6 +2408,7 @@ mod tests_numero_ticket {
         let dir = crate::test_temp::dir_temporal("contador_persistente");
         std::fs::create_dir_all(&dir).unwrap();
         let ruta = dir.join("data.db").to_str().unwrap().to_string();
+        let s = serie();
 
         {
             let db = Db::open(&ruta).await.unwrap();
@@ -2393,7 +2419,7 @@ mod tests_numero_ticket {
 
         let db = Db::open(&ruta).await.unwrap();
         let g = db.write().await;
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), "T-000003");
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
     }
 
     #[tokio::test]
@@ -2410,7 +2436,9 @@ mod tests_numero_ticket {
         let r = db.read().await;
         let mut rows = r
             .query(
-                "SELECT Statements_Json FROM _Sync_Outbox WHERE Statements_Json LIKE '%Ticket_Contador%';",
+                "SELECT Statements_Json FROM _Sync_Outbox \
+                 WHERE Statements_Json LIKE '%Serie_Facturacion%' \
+                   AND Statements_Json LIKE '%UPDATE%';",
                 Vec::<Value>::new(),
             )
             .await
@@ -2419,6 +2447,64 @@ mod tests_numero_ticket {
         let sql = crate::mapping::v_string(fila.get_value(0).unwrap()).unwrap_or_default();
 
         assert!(sql.contains("Ultimo + 1"), "la sentencia replicada no es relativa: {sql}");
+    }
+
+    #[tokio::test]
+    async fn el_contador_salta_hacia_adelante_si_va_por_detras_de_lo_ya_emitido() {
+        // El caso que este salto existe para cubrir: restaurar una copia local de hace tres días
+        // devuelve el contador a un número YA EMITIDO. Volver a darlo sería una factura duplicada
+        // (error 3000) y un registro que no entra. Un hueco en la numeración es explicable; un
+        // número repetido no. SE FALLA HACIA EL HUECO.
+        let (db, _dir) = db_temporal().await;
+        let g = db.write().await;
+        let s = serie();
+
+        // Hay registros emitidos hasta el 500...
+        g.execute(
+            "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, \
+               Num_Serie_Factura, Fecha_Expedicion, Serie, Numero, Nombre_Razon_Emisor, \
+               Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url) \
+             VALUES ('r1', 1, 'ALTA', 'B12345674', ?2, '01-01-2027', ?1, 500, 'X', 'c', 'h', \
+                     '2027-01-01T00:00:00+01:00', '{}', 'u');",
+            vec![Value::Text(s.clone()), Value::Text(format!("{s}/000500"))],
+        )
+        .await
+        .unwrap();
+
+        // ...pero el contador se quedó en el 3 (la copia restaurada es más antigua).
+        g.execute(
+            "INSERT OR REPLACE INTO Serie_Facturacion (Serie, Ultimo) VALUES (?1, 3);",
+            vec![Value::Text(s.clone())],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000501"));
+    }
+
+    #[tokio::test]
+    async fn el_salto_del_contador_es_idempotente() {
+        // Se escribe con `MAX(Ultimo, ?)` y no con un `=`: aplicado dos veces da lo mismo, y
+        // aplicado en la nube sobre un valor MÁS ALTO no lo baja. Un `=` replicado convertiría la
+        // reparación en el problema que venía a reparar.
+        let (db, _dir) = db_temporal().await;
+        let g = db.write().await;
+        let s = serie();
+
+        g.execute(
+            "INSERT OR REPLACE INTO Serie_Facturacion (Serie, Ultimo) VALUES (?1, 900);",
+            vec![Value::Text(s.clone())],
+        )
+        .await
+        .unwrap();
+        g.execute(
+            "UPDATE Serie_Facturacion SET Ultimo = MAX(Ultimo, ?2) WHERE Serie = ?1;",
+            vec![Value::Text(s.clone()), Value::Integer(100)],
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000901"));
     }
 }
 
