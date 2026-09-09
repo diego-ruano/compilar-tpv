@@ -95,9 +95,12 @@ Dos cosas que esto resuelve antes de perder una tarde:
   el certificado ya instalado con su clave.
 
 > ⚠️ **Si un certificado sale con «uso silencioso: no», no sirve para esto.** Pedirá una contraseña o
-> un PIN en cada envío, y un job desatendido no se queda «fallando»: se queda **esperando un diálogo**
-> que nadie va a ver, a las tres de la mañana, mientras la cola crece. Si es un `.p12`, se arregla
-> volviéndolo a importar **sin** marcar «habilitar la protección segura de claves privadas».
+> un PIN en cada envío, y nadie va a estar ahí para escribirlo a las tres de la mañana: el diálogo se
+> queda esperando hasta que el envío agota su timeout, el job lo anota como un intento fallido y lo
+> vuelve a intentar en el ciclo siguiente, indefinidamente. No se pierde ninguna factura —siguen
+> `PENDIENTE`— pero **no se remite ninguna**, y el único síntoma es que la cola crece. Si es un
+> `.p12`, se arregla volviéndolo a importar **sin** marcar «habilitar la protección segura de claves
+> privadas»; si es un PIN de tarjeta o del DNIe, no tiene arreglo: hay que usar otro certificado.
 
 ### 3.2 El *handshake*
 

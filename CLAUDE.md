@@ -941,9 +941,12 @@ no dejar de hacerlo.
   aparecería en la lista. WinHTTP sirve KSP, CSP legacy y tarjetas criptográficas igual, que es lo
   que hacen el navegador y Autofirma.
 - **Un certificado que pide PIN no sirve para esto**, y hay que decirlo antes. La pantalla marca los
-  que no tienen *uso silencioso*: un envío automático que se queda esperando un diálogo a las 3 de la
-  mañana no falla, **se cuelga**, y el atraso crece sin que nada lo explique. El botón «Probar» abre
-  una conexión real **sin enviar ninguna factura** justo para que eso salga con alguien delante.
+  que no tienen *uso silencioso*: el diálogo espera a nadie hasta que el envío agota su timeout, el
+  job lo anota como intento fallido y lo repite en el ciclo siguiente, indefinidamente. No se pierde
+  ninguna factura (siguen `PENDIENTE`) pero **no se remite ninguna**, y el único síntoma es que la
+  cola crece. El botón «Probar» abre una conexión real **sin enviar ninguna factura** justo para que
+  eso salga con alguien delante. El flag de silencio además **no es infalible**: Microsoft documenta
+  que con lectores con *pinpad* y drivers propios se ignora.
 - **El entorno es una decisión explícita** (`Business_Settings.Verifactu_Entorno`). Los endpoints de
   producción y pruebas se distinguen en tres caracteres, y un ticket de pruebas que parece real es
   peor que uno que no sale: en pruebas el panel lo dice en amarillo y el QR apunta al portal de
