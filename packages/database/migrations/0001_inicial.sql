@@ -954,6 +954,14 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,
   -- porque produccion y pruebas se distinguen en tres caracteres (www1 / prewww1).
   Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
+  -- Modo FORMACION (FAQ de desarrolladores de la AEAT, apartado 11). Probar o enseñar un SIF
+  -- operativo genera facturas REALES -con su QR y su RF remitido-, asi que la norma obliga a
+  -- anularlas despues. Con este modo encendido las facturas van a una serie propia (PRU<año>), se
+  -- describen como de pruebas y se anulan TODAS al terminar, sin depender de que nadie se acuerde.
+  --
+  -- No es un "modo de mentira": las facturas son reales mientras existen. Lo que hace el modo es
+  -- garantizar el final que la norma exige.
+  Verifactu_Formacion INTEGER NOT NULL DEFAULT 0,
   Updated_At TEXT DEFAULT (datetime('now','localtime')),
   CHECK (Verifactu_Entorno IN ('produccion','pruebas'))
 );

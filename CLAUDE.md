@@ -961,6 +961,14 @@ no dejar de hacerlo.
   mide horas de cola y por tanto llega cuando ya se ha dejado de remitir; éste llega mientras renovar
   todavía es un trámite. Con el certificado ausente o caducado el job **ni lo intenta**; con el que
   pide PIN sí, porque puede haber alguien delante.
+- **El modo FORMACIÓN existe porque probar el TPV emite facturas de verdad.** El FAQ de la AEAT
+  (apartado 11) es explícito: enseñar o probar un SIF operativo genera facturas reales —con QR y con
+  su registro remitido— y *«deberá procederse a la inmediata posterior anulación de ellas»*. Con el
+  modo encendido, las facturas van a la serie **`PRU<año>`**, se describen como pruebas y **apagar el
+  modo ES la anulación** de todas las que queden vivas, en una transacción. No es un paso aparte que
+  se pueda saltar: dejarlo a que alguien se acuerde es dejar que el día que se le olvide quede una
+  venta ficticia contada como real. La serie de formación **manda sobre el tipo de factura** y
+  descarta el número que reservó el camino del cobro — usarlo dejaría un hueco en el libro de ventas.
 - **El entorno es una decisión explícita** (`Business_Settings.Verifactu_Entorno`). Los endpoints de
   producción y pruebas se distinguen en tres caracteres, y un ticket de pruebas que parece real es
   peor que uno que no sale: en pruebas el panel lo dice en amarillo y el QR apunta al portal de

@@ -1282,6 +1282,8 @@ mod tests_aviso_de_atraso {
             dias_para_caducar_certificado: Some(300),
             anomalias_sin_reconocer: 0,
             ultima_anomalia: None,
+            formacion: false,
+            formacion_sin_anular: 0,
         }
     }
 
@@ -1507,6 +1509,8 @@ mod tests_certificado {
             dias_para_caducar_certificado: None,
             anomalias_sin_reconocer: 0,
             ultima_anomalia: None,
+            formacion: false,
+            formacion_sin_anular: 0,
         }
     }
 

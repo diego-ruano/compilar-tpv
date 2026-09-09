@@ -105,3 +105,14 @@ export async function verifactuExportar(
 export async function verifactuReconocerAnomalias(): Promise<number> {
 	return await invokeClient<number>("verifactu_reconocer_anomalias");
 }
+
+/**
+ * Enciende o apaga el modo formación. Devuelve cuántas facturas de prueba se anularon.
+ *
+ * **Apagarlo ES la anulación**, no un paso aparte: la AEAT obliga a anular las facturas de prueba, y
+ * dejarlo a que alguien se acuerde es dejar que el día que se le olvide quede una venta ficticia
+ * contada como real.
+ */
+export async function verifactuSetFormacion(encendido: boolean): Promise<number> {
+	return await invokeClient<number>("verifactu_set_formacion", { encendido });
+}

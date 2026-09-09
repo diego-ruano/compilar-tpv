@@ -421,7 +421,19 @@ anomalias_sin_reconocer: number,
 /**
  * El mensaje de la más reciente, para que la pantalla diga QUÉ pasó y no sólo que pasó algo.
  */
-ultima_anomalia?: string, };
+ultima_anomalia?: string, 
+/**
+ * ¿Está encendido el **modo formación**? Mientras lo esté, cada cobro emite una factura de la
+ * serie `PRU<año>` que se anulará al terminar.
+ */
+formacion: boolean, 
+/**
+ * Facturas de formación emitidas y **todavía sin anular**.
+ *
+ * Se enseña aunque el modo esté apagado: si quedan vivas, el ciclo no se cerró y eso hay que
+ * verlo. Es lo que impide que el modo se quede a medias en silencio.
+ */
+formacion_sin_anular: number, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 

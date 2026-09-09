@@ -16,7 +16,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
 | 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
 | 8 | [La comprobación previa del art. 7.i)](#8-la-comprobación-previa-del-art-7i) | ✅ | — |
-| 9 | [Falta un modo «facturar en pruebas / formación»](#9-falta-un-modo-facturar-en-pruebas--formación) | ⬜ | El día que el bar forme a un camarero |
+| 9 | [Modo «facturar en pruebas / formación»](#9-modo-facturar-en-pruebas--formación) | ✅ | — |
 
 ---
 
@@ -311,10 +311,10 @@ que una anomalía no se quede en un log que nadie abre.
 
 ---
 
-## 9. Falta un modo «facturar en pruebas / formación»
+## 9. Modo «facturar en pruebas / formación» ✅
 
-**Encontrado el 2026-09-09** en el mismo FAQ (apartado 11, págs. 22-23). No es un incumplimiento
-nuestro: es una funcionalidad que la AEAT **recomienda expresamente** y que hoy no tenemos.
+**Resuelto el 2026-09-09.** Salía del FAQ (apartado 11, págs. 22-23). No era un incumplimiento: es
+una funcionalidad que la AEAT **recomienda expresamente**.
 
 El problema que resuelve es real y llega el día que el bar estrene el TPV o forme a un camarero:
 
@@ -336,5 +336,27 @@ Sin esto, la alternativa para el usuario es acordarse de anular a mano cada fact
 día que se le olvide una, queda una venta ficticia contada como real y sin forma de quitarla salvo
 otro registro de anulación.
 
-Encaja con lo que ya existe: la serie sale del tipo de factura (§3), así que una serie `PRU` es el
-mismo mecanismo; y la anulación por `ClaseBaja::Error` ya emite el RF de anulación correcto.
+### Cómo quedó
+
+Un interruptor en **Configuración → Fiscal → «Probar o enseñar el TPV»**, y una regla que lo sostiene
+todo: **apagarlo ES la anulación**, no un paso aparte que se pueda saltar.
+
+- Mientras está encendido, cada factura va a la serie **`PRU<año>`** y su descripción lleva delante
+  `PRUEBAS/FORMACION - `. Las dos cosas las pide el FAQ literalmente.
+- La serie de formación **manda sobre el tipo**: una rectificativa emitida durante unas pruebas
+  también es una factura de pruebas, y lo que las agrupa no es qué documentan sino que hay que
+  anularlas todas.
+- **No gastan número de la serie real.** El camino del cobro reserva el número *antes* de saber en
+  qué modo está el negocio, así que en formación ese número se descarta; usarlo dejaría un hueco en
+  el libro de ventas que no corresponde a ninguna factura.
+- **Cerrar el modo anula todas las que queden vivas**, en orden de emisión y **en una transacción**:
+  si algo falla a mitad no queda ni el interruptor cambiado ni media tanda anulada. Las anulaciones
+  se encolan para remitir, porque anular sin remitir deja la factura de prueba viva en la AEAT — que
+  es justo el problema que esto resuelve.
+- **Una tanda sin cerrar se sigue viendo con el modo apagado.** El panel cuenta las facturas de
+  prueba vivas aunque el interruptor esté en «off», así que el ciclo no puede quedarse a medias en
+  silencio.
+
+Ocho tests, y el que justifica la funcionalidad entera es `cerrar_el_modo_ANULA_todas_las_facturas_de_prueba`.
+Los otros dos que importan: que las pruebas **no se lleven por delante una venta real** anterior, y
+que cerrar dos veces no vuelva a anular.

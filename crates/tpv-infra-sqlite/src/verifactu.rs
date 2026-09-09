@@ -204,6 +204,8 @@ pub(crate) struct DatosObligado {
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada. Configurable porque es
     /// un número que la norma puede mover.
     pub limite_simplif: f64,
+    /// Modo formación encendido: las facturas van a la serie `PRU<año>` y se anulan al terminar.
+    pub formacion: bool,
 }
 
 /// Lee y **valida** los datos fiscales del obligado.
@@ -215,7 +217,7 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
     let mut rows = conn
         .query(
             "SELECT CIF, Razon_Social, Descripcion_Op, Verifactu_Entorno, IVA_Percent, \
-                    Limite_Simplif \
+                    Limite_Simplif, COALESCE(Verifactu_Formacion, 0) \
              FROM Business_Settings WHERE ID = 1 LIMIT 1;",
             (),
         )
@@ -238,6 +240,7 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         &v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
     );
     let iva_general = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(10.0);
+    let formacion = v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0) != 0;
     let limite_simplif = v_f64(row.get_value(5).map_err(db_err)?)
         .filter(|v| *v > 0.0)
         .unwrap_or(vf::LIMITE_SIMPLIFICADA_HOSTELERIA);
@@ -271,6 +274,7 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         entorno,
         iva_general,
         limite_simplif,
+        formacion,
     })
 }
 
@@ -307,6 +311,22 @@ fn serie_rectificativas() -> String {
 fn es_rectificativa(tipo_factura: &str) -> bool {
     matches!(tipo_factura, "R1" | "R2" | "R3" | "R4" | "R5")
 }
+
+/// La serie de las facturas emitidas en **modo formación** (`PRU2027/000001`).
+///
+/// Sale del FAQ de desarrolladores de la AEAT (apartado 11), que sugiere literalmente *«numeración
+/// en una serie especial de tipo PRU 25 XXXX»* para poder distinguirlas. No es un capricho de
+/// formato: es lo que permite encontrarlas todas para anularlas, y lo que hace que en el libro se
+/// vean de un vistazo como lo que son.
+fn serie_formacion() -> String {
+    format!("PRU{}", serie_actual())
+}
+
+/// Lo que se antepone a la descripción de una factura de formación.
+///
+/// El FAQ pide *«describirlas visible y claramente como "de pruebas"»*, y la descripción es lo único
+/// del registro que viaja como texto libre a la AEAT.
+pub const PREFIJO_FORMACION: &str = "PRUEBAS/FORMACION - ";
 
 /// Reserva el siguiente número de la serie y lo devuelve formateado (`2027/000001`).
 ///
@@ -460,7 +480,12 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     // art. 6.1.a) del RD 1619/2012 lo exige «en todo caso»; el resto —incluida la `F3`, que por el
     // art. 15.6 no es rectificativa— va a la del ejercicio.
     let rectificativa = es_rectificativa(&tipo_factura);
-    let serie = if rectificativa {
+    // El modo formación manda sobre el resto: sus facturas van a `PRU<año>` sean del tipo que sean,
+    // porque lo que las agrupa no es qué documentan sino que hay que anularlas todas al terminar.
+    // Una rectificativa emitida durante unas pruebas es también una factura de pruebas.
+    let serie = if obligado.formacion {
+        serie_formacion()
+    } else if rectificativa {
         serie_rectificativas()
     } else {
         serie_actual()
@@ -476,7 +501,16 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
         ));
     }
 
-    let (num_serie_factura, numero) = match d.numero_reservado.clone() {
+    // En formación pasa lo mismo pero al revés de evidente: el número lo reservó el camino del cobro
+    // ANTES de saber en qué modo estaba el negocio. Si se usara, la factura de pruebas gastaría un
+    // número de la serie real y dejaría un hueco en el libro de ventas que no corresponde a nada.
+    let numero_reservado = if obligado.formacion {
+        None
+    } else {
+        d.numero_reservado.clone()
+    };
+
+    let (num_serie_factura, numero) = match numero_reservado {
         Some(v) => v,
         None => reservar_numero(db, &serie).await?,
     };
@@ -557,7 +591,14 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
             Value::Text(obligado.razon_social.clone()),
             Value::Text(tipo_factura.clone()),
             opt_text(d.tipo_rectificativa.clone()),
-            Value::Text(obligado.descripcion_op.clone()),
+            Value::Text(if obligado.formacion {
+                vf::sanear_texto(
+                    &format!("{PREFIJO_FORMACION}{}", obligado.descripcion_op),
+                    500,
+                )
+            } else {
+                obligado.descripcion_op.clone()
+            }),
             Value::Text(importe_txt.clone()),
             Value::Text(cuota_txt.clone()),
             Value::Text(desglose_json(&tramos)),
@@ -1614,6 +1655,9 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         .unwrap_or(false)
         && razon_social.is_some();
 
+    let formacion = en_formacion(conn).await?;
+    let formacion_sin_anular = facturas_de_formacion_vivas(conn).await?;
+
     let anomalias_sin_reconocer = select_i64(
         conn,
         "SELECT COUNT(*) FROM _Verifactu_Anomalias WHERE Reconocida = 0;",
@@ -1665,7 +1709,129 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         dias_para_caducar_certificado: None,
         anomalias_sin_reconocer,
         ultima_anomalia,
+        formacion,
+        formacion_sin_anular,
     })
+}
+
+/// ¿Está el negocio en modo formación ahora mismo?
+pub async fn en_formacion<C: Reader>(conn: &C) -> AppResult<bool> {
+    Ok(select_i64(
+        conn,
+        "SELECT COALESCE(Verifactu_Formacion, 0) FROM Business_Settings WHERE ID = 1;",
+        vec![],
+    )
+    .await?
+    .unwrap_or(0)
+        != 0)
+}
+
+/// Cuántas facturas de formación quedan **sin anular**.
+///
+/// Es lo que hace que el modo no se pueda dejar a medias en silencio: aunque alguien apague el
+/// interruptor por otro camino, el panel sigue viendo lo que falta por cerrar.
+pub async fn facturas_de_formacion_vivas<C: Reader>(conn: &C) -> AppResult<i64> {
+    let serie = serie_formacion();
+    Ok(select_i64(
+        conn,
+        "SELECT COUNT(*) FROM Registros_Facturacion a \
+         WHERE a.Serie = ?1 AND a.Tipo = 'ALTA' \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM Registros_Facturacion n \
+             WHERE n.Tipo = 'ANULACION' \
+               AND n.Num_Serie_Factura = a.Num_Serie_Factura \
+               AND n.NIF_Emisor = a.NIF_Emisor \
+           );",
+        vec![Value::Text(serie)],
+    )
+    .await?
+    .unwrap_or(0))
+}
+
+/// Enciende o apaga el **modo formación**.
+///
+/// Apagarlo **anula todas las facturas de prueba que queden vivas** y devuelve cuántas anuló. Ése es
+/// el motivo de que esto exista: el FAQ de desarrolladores de la AEAT (apartado 11) dice que probar
+/// o enseñar un SIF operativo genera facturas *reales* —con su QR y su registro remitido— y que
+/// *«deberá procederse a la inmediata posterior anulación de ellas (para que no cuenten como facturas
+/// reales)»*. Dejar eso a que alguien se acuerde es dejar que el día que se le olvide quede una venta
+/// ficticia contada como real, y sin más salida que otro registro de anulación.
+///
+/// Por eso **apagar el modo ES la anulación**, no un paso aparte que se pueda saltar.
+///
+/// Todo ocurre en **una transacción**: si algo falla a mitad, no queda ni el interruptor cambiado ni
+/// media tanda anulada.
+pub async fn set_formacion(db: &Db, encendido: bool) -> AppResult<usize> {
+    let g = db.write().await;
+    g.execute_batch("BEGIN IMMEDIATE;").await.map_err(db_err)?;
+
+    let resultado = async {
+        let mut anuladas = 0usize;
+
+        if !encendido {
+            // Se listan primero y se anulan después: `emitir_anulacion` inserta en la misma tabla
+            // que estamos recorriendo, y leer y escribir a la vez sobre un cursor abierto es la
+            // clase de cosa que funciona hasta que deja de funcionar.
+            let serie = serie_formacion();
+            let mut ids = Vec::new();
+            let mut rows = g
+                .query(
+                    "SELECT a.ID_Registro FROM Registros_Facturacion a \
+                     WHERE a.Serie = ?1 AND a.Tipo = 'ALTA' \
+                       AND NOT EXISTS ( \
+                         SELECT 1 FROM Registros_Facturacion n \
+                         WHERE n.Tipo = 'ANULACION' \
+                           AND n.Num_Serie_Factura = a.Num_Serie_Factura \
+                           AND n.NIF_Emisor = a.NIF_Emisor \
+                       ) \
+                     ORDER BY a.Orden ASC;",
+                    vec![Value::Text(serie)],
+                )
+                .await
+                .map_err(db_err)?;
+            while let Some(row) = rows.next().await.map_err(db_err)? {
+                if let Some(id) = v_string(row.get_value(0).map_err(db_err)?) {
+                    ids.push(id);
+                }
+            }
+            drop(rows);
+
+            // En orden de emisión: cada anulación se encadena con la anterior, así que el orden en
+            // que se generan es el orden en que quedan en la cadena.
+            for id in ids {
+                emitir_anulacion(&g, &id).await?;
+                anuladas += 1;
+            }
+        }
+
+        g.execute(
+            "UPDATE Business_Settings SET Verifactu_Formacion = ?1 WHERE ID = 1;",
+            vec![Value::Integer(i64::from(encendido))],
+        )
+        .await
+        .map_err(db_err)?;
+
+        Ok::<usize, AppError>(anuladas)
+    }
+    .await;
+
+    match resultado {
+        Ok(n) => {
+            g.execute_batch("COMMIT;").await.map_err(db_err)?;
+            if n > 0 {
+                tracing::warn!(
+                    target: "tpv::verifactu",
+                    anuladas = n,
+                    "modo formación cerrado: {n} factura(s) de prueba anuladas y encoladas para remitir"
+                );
+            }
+            Ok(n)
+        }
+        Err(e) => {
+            let _ = g.execute_batch("ROLLBACK;").await;
+            Err(e)
+        }
+    }
 }
 
 /// Marca como reconocidas todas las anomalías pendientes. Devuelve cuántas.
@@ -1734,6 +1900,218 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_modo_formacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! Probar o enseñar el TPV emite facturas **reales**, y la AEAT obliga a anularlas después.
+    //!
+    //! Lo que se prueba aquí no es que el modo «funcione»: es que **no se pueda quedar a medias**.
+    //! El día que a alguien se le olvide anular, queda una venta ficticia contada como real y sin
+    //! más salida que otro registro de anulación.
+
+    use super::*;
+    use crate::db::Db;
+    use std::sync::Arc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_formacion");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        // Datos fiscales mínimos: sin ellos no se puede emitir.
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar SL' WHERE ID = 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        drop(g);
+        (db, dir)
+    }
+
+    async fn emitir_una(db: &Arc<Db>) -> String {
+        let g = db.write().await;
+        emitir_alta(
+            &g,
+            DatosFactura {
+                lineas: vec![LineaTicket {
+                    total_con_iva: 11.0,
+                    tipo_iva: 10.0,
+                    exento: false,
+                    causa_exencion: None,
+                }],
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .num_serie_factura
+    }
+
+    async fn cuenta(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn en_formacion_la_factura_va_a_la_serie_PRU() {
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+
+        let num = emitir_una(&db).await;
+
+        let anyo = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(num, format!("PRU{anyo}/000001"));
+    }
+
+    #[tokio::test]
+    async fn la_factura_de_formacion_NO_gasta_numero_de_la_serie_de_ventas() {
+        // Es lo que se vería en el libro: un hueco en la numeración real que no corresponde a
+        // ninguna factura. Por eso la serie manda sobre el número que reservó el camino del cobro.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+        set_formacion(&db, false).await.unwrap();
+
+        let num = emitir_una(&db).await;
+        let anyo = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(num, format!("{anyo}/000001"), "la venta real es la primera");
+    }
+
+    #[tokio::test]
+    async fn la_descripcion_dice_que_es_una_prueba() {
+        // El FAQ pide «describirlas visible y claramente como de pruebas», y la descripción es lo
+        // único del registro que viaja como texto libre a la AEAT.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Descripcion_Operacion FROM Registros_Facturacion LIMIT 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        let desc = v_string(row.get_value(0).unwrap()).unwrap_or_default();
+        assert!(desc.starts_with(PREFIJO_FORMACION), "{desc}");
+    }
+
+    #[tokio::test]
+    async fn cerrar_el_modo_ANULA_todas_las_facturas_de_prueba() {
+        // El test que justifica la funcionalidad entera.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+        emitir_una(&db).await;
+        emitir_una(&db).await;
+
+        assert_eq!(facturas_de_formacion_vivas(&db.read().await).await.unwrap(), 3);
+
+        let anuladas = set_formacion(&db, false).await.unwrap();
+
+        assert_eq!(anuladas, 3);
+        assert_eq!(facturas_de_formacion_vivas(&db.read().await).await.unwrap(), 0);
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo = 'ANULACION';").await,
+            3
+        );
+    }
+
+    #[tokio::test]
+    async fn las_anulaciones_se_encolan_para_remitir() {
+        // Anular sin remitir el registro de anulación deja la factura de prueba viva en la AEAT, que
+        // es exactamente el problema que esto viene a resolver.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+        set_formacion(&db, false).await.unwrap();
+
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM _Verifactu_Envios WHERE Estado = 'PENDIENTE';").await,
+            2,
+            "el alta y su anulación, las dos"
+        );
+    }
+
+    #[tokio::test]
+    async fn cerrar_dos_veces_no_vuelve_a_anular() {
+        // El botón se puede pulsar dos veces, y una anulación de una anulación no existe.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+
+        assert_eq!(set_formacion(&db, false).await.unwrap(), 1);
+        assert_eq!(set_formacion(&db, false).await.unwrap(), 0);
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo = 'ANULACION';").await,
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn las_pruebas_NO_se_llevan_por_delante_las_ventas_reales() {
+        // Una venta real anterior no puede acabar anulada porque alguien haga pruebas después.
+        let (db, _dir) = db_temporal().await;
+        let real = emitir_una(&db).await;
+
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+        set_formacion(&db, false).await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT COUNT(*) FROM Registros_Facturacion \
+                 WHERE Tipo = 'ANULACION' AND Num_Serie_Factura = ?1;",
+                vec![Value::Text(real.clone())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(
+            v_i64(row.get_value(0).unwrap()).unwrap_or(0),
+            0,
+            "la venta real {real} sigue viva"
+        );
+    }
+
+    #[tokio::test]
+    async fn una_prueba_sin_cerrar_se_sigue_viendo_con_el_modo_APAGADO() {
+        // Es lo que impide que el ciclo se quede a medias en silencio: aunque el interruptor se
+        // apague por otro camino, el panel sigue contando lo que falta por anular.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        emitir_una(&db).await;
+
+        // Se apaga «por debajo», sin pasar por el cierre.
+        {
+            let g = db.write().await;
+            g.raw()
+                .execute(
+                    "UPDATE Business_Settings SET Verifactu_Formacion = 0 WHERE ID = 1;",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = db.read().await;
+        assert!(!en_formacion(&r).await.unwrap());
+        assert_eq!(
+            facturas_de_formacion_vivas(&r).await.unwrap(),
+            1,
+            "la factura de prueba sigue viva y hay que verla"
+        );
+    }
 }
 
 #[cfg(test)]

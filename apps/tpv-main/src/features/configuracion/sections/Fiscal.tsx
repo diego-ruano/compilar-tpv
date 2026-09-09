@@ -41,6 +41,7 @@ import {
     verifactuEstado,
     verifactuExportar,
     verifactuReconocerAnomalias,
+    verifactuSetFormacion,
     type DeclaracionResponsable,
 } from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
@@ -152,6 +153,36 @@ export function Fiscal({
             .then(setEstado)
             .catch(() => setEstado(null));
     }, []);
+
+    const [cerrandoFormacion, setCerrandoFormacion] = useState(false);
+
+    const cambiarFormacion = useCallback(
+        async (encendido: boolean) => {
+            setCerrandoFormacion(true);
+            try {
+                const anuladas = await verifactuSetFormacion(encendido);
+                refrescarEstado();
+                if (encendido) {
+                    toast.info(
+                        "Modo formación encendido",
+                        "Lo que se cobre ahora son facturas de prueba y se anularán al terminar.",
+                    );
+                } else {
+                    toast.success(
+                        "Modo formación cerrado",
+                        anuladas === 0
+                            ? "No quedaba ninguna factura de prueba por anular."
+                            : `${anuladas} factura(s) de prueba anuladas y en cola para enviar a Hacienda.`,
+                    );
+                }
+            } catch (e) {
+                toast.error("Modo formación", toAppError(e).message);
+            } finally {
+                setCerrandoFormacion(false);
+            }
+        },
+        [refrescarEstado, toast],
+    );
 
     useEffect(() => {
         refrescarEstado();
@@ -587,6 +618,68 @@ export function Fiscal({
                     aquí, se confirma, y el panel de arriba lo repite en amarillo mientras esté en
                     pruebas.
                 </div>
+            </Panel>
+
+            {/* ── Modo formación ──────────────────────────────────────────────────────────
+                No es un "modo de mentira": mientras dura, las facturas son reales. Lo que hace el
+                modo es garantizar el final que la norma exige — anularlas todas. */}
+            <Panel
+                title="Probar o enseñar el TPV"
+                subtitle="Para formar a alguien sin dejar ventas de mentira en la contabilidad."
+            >
+                {estado?.formacion ? (
+                    <div className="rounded-2xl border border-amber-500/50 bg-amber-500/15 px-4 py-3">
+                        <p className="font-semibold text-amber-700 dark:text-amber-300">
+                            MODO FORMACIÓN ENCENDIDO
+                        </p>
+                        <p className="mt-1 text-sm text-fg">
+                            Todo lo que se cobre ahora se está facturando de verdad, en la serie{" "}
+                            <code>PRU</code>, y <strong>se anulará al terminar</strong>. No es una
+                            simulación: son facturas reales mientras existan.
+                        </p>
+                        <p className="mt-2 text-sm text-fg-muted">
+                            Llevas <strong>{estado.formacion_sin_anular}</strong> factura(s) de prueba
+                            sin anular.
+                        </p>
+                        <div className="mt-3">
+                            <PrimaryButton
+                                onClick={() => void cambiarFormacion(false)}
+                                disabled={cerrandoFormacion}
+                            >
+                                {cerrandoFormacion
+                                    ? "Anulando…"
+                                    : "Terminar y anular las facturas de prueba"}
+                            </PrimaryButton>
+                        </div>
+                    </div>
+                ) : (
+                    <>
+                        {estado && estado.formacion_sin_anular > 0 ? (
+                            <div className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
+                                <strong className="text-red-600 dark:text-red-400">
+                                    Quedan {estado.formacion_sin_anular} factura(s) de prueba sin
+                                    anular.
+                                </strong>{" "}
+                                Eso significa que unas pruebas anteriores no se cerraron. Vuelve a
+                                encender el modo y termínalo para que se anulen.
+                            </div>
+                        ) : null}
+                        <p className="text-sm text-fg-muted">
+                            Enseñar el TPV o hacer una prueba emite facturas{" "}
+                            <strong>reales</strong>: llevan su QR y se envían a Hacienda igual que una
+                            venta. La ley obliga a anularlas después. Con este modo, el TPV lo hace
+                            solo: numera aparte, las marca como pruebas y las anula todas al terminar.
+                        </p>
+                        <div className="mt-3">
+                            <GhostButton
+                                onClick={() => void cambiarFormacion(true)}
+                                disabled={cerrandoFormacion}
+                            >
+                                Empezar pruebas
+                            </GhostButton>
+                        </div>
+                    </>
+                )}
             </Panel>
 
             {/* ── Certificado ────────────────────────────────────────────────────────────── */}
