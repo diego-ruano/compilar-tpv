@@ -417,6 +417,93 @@ pub fn cabe_en_simplificada(importe: f64, limite: f64) -> bool {
     (importe * 100.0).round() / 100.0 <= (l * 100.0).round() / 100.0
 }
 
+/// Los datos del cliente cuando pide **factura completa** (`F1`) o cuando el importe obliga a
+/// emitirla (§2.2 del plan).
+///
+/// El **registro** sólo necesita `nombre_razon` + `nif`. La **factura en papel** es otro documento y
+/// el art. 6 ROF le exige además el domicilio del destinatario, así que el formulario pide tres
+/// cosas y sólo dos viajan a la AEAT.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Destinatario {
+    pub nombre_razon: String,
+    pub nif: String,
+    /// Sólo para el papel. El registro de facturación no lo lleva.
+    pub direccion: Option<String>,
+}
+
+/// Por qué unos datos de destinatario no sirven.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinatarioInvalido {
+    FaltaNombre,
+    FaltaNif,
+    NifMalFormado,
+}
+
+impl DestinatarioInvalido {
+    pub fn mensaje(self) -> &'static str {
+        match self {
+            DestinatarioInvalido::FaltaNombre => "Falta el nombre o la razón social del cliente.",
+            DestinatarioInvalido::FaltaNif => "Falta el NIF del cliente.",
+            DestinatarioInvalido::NifMalFormado => {
+                "El NIF del cliente no es válido. Compruébalo con el cliente delante: si se manda \
+                 mal, la AEAT lo avisa horas después y ya no está para corregirlo."
+            }
+        }
+    }
+}
+
+/// Normaliza y valida un destinatario.
+///
+/// **El dígito de control se comprueba aquí y no al enviar**, y eso es el punto: un NIF mal dictado
+/// no provoca un rechazo, vuelve como *«error admisible: NIF no censado»* (código 2001) — o sea,
+/// horas después, sin el cliente delante y con una subsanación que alguien tiene que disparar a
+/// mano. Comprobar el control en el momento evita casi todos esos casos.
+///
+/// Lo que esto **no** puede comprobar es que el NIF exista en el censo de la AEAT: eso sólo lo sabe
+/// la AEAT.
+pub fn validar_destinatario(d: Destinatario) -> Result<Destinatario, DestinatarioInvalido> {
+    let nombre = sanear_texto(&d.nombre_razon, 120);
+    if nombre.is_empty() {
+        return Err(DestinatarioInvalido::FaltaNombre);
+    }
+    let nif = d.nif.trim().to_ascii_uppercase().replace([' ', '-'], "");
+    if nif.is_empty() {
+        return Err(DestinatarioInvalido::FaltaNif);
+    }
+    if !nif_valido(&nif) {
+        return Err(DestinatarioInvalido::NifMalFormado);
+    }
+    Ok(Destinatario {
+        nombre_razon: nombre,
+        nif,
+        // El domicilio va al papel, no al XML, así que no se recorta a un máximo del XSD; sólo se
+        // limpia.
+        direccion: d
+            .direccion
+            .map(|v| sanear_texto(&v, 250))
+            .filter(|v| !v.is_empty()),
+    })
+}
+
+/// Qué clave de factura corresponde a un cobro.
+///
+/// - Con destinatario → `F1` (factura completa). Se emite así tanto si el cliente la pide
+///   voluntariamente como si el importe obliga.
+/// - Sin destinatario → `F2` (simplificada), **siempre que quepa**.
+///
+/// `None` significa que **no se puede emitir**: el importe pasa del límite de la simplificada y no
+/// hay destinatario. No es un fallo del sistema, es un dato que falta — y quien lo tiene es el
+/// cliente que está delante.
+pub fn clave_de_factura(importe: f64, limite: f64, hay_destinatario: bool) -> Option<&'static str> {
+    if hay_destinatario {
+        Some("F1")
+    } else if cabe_en_simplificada(importe, limite) {
+        Some("F2")
+    } else {
+        None
+    }
+}
+
 /// Umbral del campo `Macrodato`: por encima (en valor absoluto) hay que informarlo con `"S"`, y por
 /// debajo no se puede (errores 1138 y 1139). Un bar no llegará nunca; se implementa porque la
 /// validación es simétrica y omitirla sería el único caso en que el registro sale mal por no haber
@@ -711,5 +798,90 @@ mod tests {
         assert_eq!(macrodato(99_999_999.99), None);
         assert_eq!(macrodato(100_000_000.0), Some("S"));
         assert_eq!(macrodato(-100_000_000.0), Some("S"));
+    }
+    // ── Factura completa (§2.2 y §9 del plan) ───────────────────────────────────────────────────
+
+    #[test]
+    fn sin_destinatario_y_dentro_del_limite_es_una_simplificada() {
+        assert_eq!(clave_de_factura(12.10, 3000.0, false), Some("F2"));
+        assert_eq!(clave_de_factura(3000.0, 3000.0, false), Some("F2"));
+    }
+
+    #[test]
+    fn con_destinatario_es_factura_completa_aunque_el_importe_sea_pequeno() {
+        // El cliente puede pedir factura por un café. No hay mínimo.
+        assert_eq!(clave_de_factura(1.20, 3000.0, true), Some("F1"));
+    }
+
+    #[test]
+    fn por_encima_del_limite_y_sin_destinatario_NO_se_puede_emitir() {
+        // Es el caso que obliga a parar y preguntar. Emitir una F2 ahí sería emitir una factura
+        // inválida que la AEAT rechaza (error 1150), y emitir una F1 sin destinatario es imposible
+        // (el bloque Destinatarios es obligatorio en F1, error 1189).
+        assert_eq!(clave_de_factura(3000.01, 3000.0, false), None);
+        // Con los datos del cliente, la misma venta sí sale.
+        assert_eq!(clave_de_factura(3000.01, 3000.0, true), Some("F1"));
+    }
+
+    #[test]
+    fn un_destinatario_valido_se_normaliza() {
+        let d = validar_destinatario(Destinatario {
+            nombre_razon: "  Empresa Cliente SL  ".into(),
+            nif: " b-12345674 ".into(),
+            direccion: Some("  Calle Mayor 1  ".into()),
+        })
+        .unwrap();
+        assert_eq!(d.nombre_razon, "Empresa Cliente SL");
+        assert_eq!(d.nif, "B12345674");
+        assert_eq!(d.direccion.as_deref(), Some("Calle Mayor 1"));
+    }
+
+    #[test]
+    fn un_nif_de_cliente_mal_dictado_se_caza_en_el_momento() {
+        // Si se mandara, volvería como error admisible 2001 («NIF no censado») horas después y sin
+        // el cliente delante, con una subsanación que alguien tiene que disparar a mano.
+        let e = validar_destinatario(Destinatario {
+            nombre_razon: "Empresa SL".into(),
+            nif: "B12345670".into(),
+            direccion: None,
+        })
+        .unwrap_err();
+        assert_eq!(e, DestinatarioInvalido::NifMalFormado);
+    }
+
+    #[test]
+    fn un_destinatario_sin_nombre_o_sin_nif_no_vale() {
+        // Los dos son obligatorios en el registro (bloque Destinatarios de una F1).
+        assert_eq!(
+            validar_destinatario(Destinatario {
+                nombre_razon: "   ".into(),
+                nif: "B12345674".into(),
+                direccion: None,
+            })
+            .unwrap_err(),
+            DestinatarioInvalido::FaltaNombre
+        );
+        assert_eq!(
+            validar_destinatario(Destinatario {
+                nombre_razon: "Empresa SL".into(),
+                nif: "  ".into(),
+                direccion: None,
+            })
+            .unwrap_err(),
+            DestinatarioInvalido::FaltaNif
+        );
+    }
+
+    #[test]
+    fn el_nombre_del_destinatario_se_sanea_como_el_resto() {
+        // Error 1287: la AEAT rechaza la factura si un campo lleva < > " ' o =. Y este campo lo
+        // dicta un cliente y lo teclea un camarero con prisa.
+        let d = validar_destinatario(Destinatario {
+            nombre_razon: "Bar \"El Rincón\" = SL".into(),
+            nif: "B12345674".into(),
+            direccion: None,
+        })
+        .unwrap();
+        assert_eq!(d.nombre_razon, "Bar El Rincón SL");
     }
 }

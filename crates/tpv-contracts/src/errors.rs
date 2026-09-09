@@ -87,6 +87,17 @@ pub enum ErrorCode {
     /// un código genérico. Es la única puerta que Veri*factu añade al camino de la venta, y va
     /// antes de la primera venta y no a mitad de servicio.
     DatosFiscalesIncompletos,
+    /// El importe del cobro **pasa del límite de la factura simplificada** (3.000 € con IVA en
+    /// hostelería, art. 4.2 RD 1619/2012) y no se han dado los datos del cliente.
+    ///
+    /// Por encima de esa cifra no cabe una `F2`: la AEAT la rechaza (error 1150), y una `F1` sin
+    /// destinatario es imposible (el bloque `Destinatarios` es obligatorio, error 1189). O sea que
+    /// no hay ninguna factura que emitir con lo que hay.
+    ///
+    /// Tiene código propio porque la UI **hace algo distinto**: abre el formulario de datos
+    /// fiscales y reintenta el mismo cobro con el NIF y el nombre. No es un fallo, es un dato que
+    /// falta — y quien lo tiene es el cliente que está delante.
+    FacturaCompletaRequerida,
 }
 
 impl ErrorCode {
@@ -118,6 +129,9 @@ impl ErrorCode {
             ErrorCode::DatosFiscalesIncompletos => {
                 "Faltan los datos fiscales del negocio (NIF y razón social)"
             }
+            ErrorCode::FacturaCompletaRequerida => {
+                "Este importe necesita factura completa: hacen falta el NIF y el nombre del cliente"
+            }
         }
     }
 
@@ -144,6 +158,7 @@ impl ErrorCode {
             ErrorCode::BackupCorrupt => "backup_corrupt",
             ErrorCode::PermisoDenegado => "permiso_denegado",
             ErrorCode::DatosFiscalesIncompletos => "datos_fiscales_incompletos",
+            ErrorCode::FacturaCompletaRequerida => "factura_completa_requerida",
         }
     }
 

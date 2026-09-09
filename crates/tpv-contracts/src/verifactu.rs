@@ -31,6 +31,21 @@ pub struct BloqueFiscal {
     pub entorno_pruebas: bool,
 }
 
+/// Datos del cliente para emitir **factura completa** (FISCAL-02).
+///
+/// El registro de facturación sólo necesita el nombre y el NIF. El `domicilio` es para el **papel**:
+/// el art. 6 ROF le exige a una factura el domicilio del destinatario, y el registro de la AEAT no
+/// lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct DestinatarioInput {
+    pub nombre_razon: String,
+    pub nif: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub domicilio: Option<String>,
+}
+
 /// Una fila de `Registros_Facturacion` tal como la enseña el panel fiscal.
 ///
 /// Es un subconjunto: el panel no necesita el desglose ni el bloque del sistema informático, que

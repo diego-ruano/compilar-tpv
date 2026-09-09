@@ -337,6 +337,8 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_usuario_cobrador: None,
                 id_trabajador_cobrador: None,
                 detalles: strings(&e["detalles"]),
+                // FISCAL-02: una venta normal es un ticket (F2), sin datos de cliente.
+                destinatario: None,
             })
             .await
             .expect("el cobro debe aplicarse");
@@ -349,6 +351,8 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 tipo: e["tipo"].as_str().unwrap().to_string(),
                 detalle_ids: strings(&e["detalle_ids"]),
                 id_usuario: None,
+                // FISCAL-02: una venta normal es un ticket (F2), sin datos de cliente.
+                destinatario: None,
             })
             .await
             .expect("el cobro de mesa debe aplicarse");

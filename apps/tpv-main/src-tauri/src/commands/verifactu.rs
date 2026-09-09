@@ -57,6 +57,24 @@ pub async fn verifactu_listar(
     Ok(uc::listar(repo.as_ref(), limite, desplazamiento).await?)
 }
 
+/// Emite una **factura completa en sustitución** de un ticket ya expedido (`F3`, FISCAL-02).
+///
+/// Es el camino del cliente que vuelve al día siguiente con el ticket y pide factura. La
+/// simplificada original **no se toca**: canjearla por una completa no es rectificarla (art. 15.6
+/// ROF), así que se emite una `F3` que la sustituye y que sí lleva destinatario.
+///
+/// Es de Administrador, como el resto de Cuentas: emite un documento fiscal nuevo.
+#[tauri::command]
+pub async fn verifactu_emitir_factura_de_ticket(
+    state: State<'_, AppState>,
+    numero_ticket: String,
+    destinatario: tpv_contracts::verifactu::DestinatarioInput,
+) -> Result<BloqueFiscal, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let repo = state.verifactu_repo().await?;
+    Ok(uc::emitir_sustitutiva(repo.as_ref(), &numero_ticket, destinatario).await?)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // El certificado
 // ─────────────────────────────────────────────────────────────────────────────

@@ -355,6 +355,18 @@ export async function vrCobrarFraccionado(argsInput: {
     idTrabajadorCobrador: string | null;
     detalles: string[];
     opId?: string;
+    /**
+     * FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe pasa
+     * del límite de la simplificada y entonces no hay alternativa.
+     *
+     * Ausente = ticket normal (`F2`). Si el importe pasa del límite y no va, el backend rechaza el
+     * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
+     */
+    destinatario?: {
+        nombre_razon: string;
+        nif: string;
+        domicilio?: string | null;
+    } | null;
 }): Promise<VrCobrarFraccionadoResult> {
     try {
         const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", {
@@ -371,6 +383,7 @@ export async function vrCobrarFraccionado(argsInput: {
                         ? null
                         : argsInput.idTrabajadorCobrador,
                 detalles: normalizePositiveIds(argsInput.detalles ?? []),
+                destinatario: argsInput.destinatario ?? null,
             },
         });
 

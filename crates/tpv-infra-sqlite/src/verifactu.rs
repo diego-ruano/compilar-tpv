@@ -123,6 +123,9 @@ pub(crate) struct DatosObligado {
     pub descripcion_op: String,
     pub entorno: vf::Entorno,
     pub iva_general: f64,
+    /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada. Configurable porque es
+    /// un número que la norma puede mover.
+    pub limite_simplif: f64,
 }
 
 /// Lee y **valida** los datos fiscales del obligado.
@@ -133,7 +136,8 @@ pub(crate) struct DatosObligado {
 pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObligado> {
     let mut rows = conn
         .query(
-            "SELECT CIF, Razon_Social, Descripcion_Op, Verifactu_Entorno, IVA_Percent \
+            "SELECT CIF, Razon_Social, Descripcion_Op, Verifactu_Entorno, IVA_Percent, \
+                    Limite_Simplif \
              FROM Business_Settings WHERE ID = 1 LIMIT 1;",
             (),
         )
@@ -156,6 +160,9 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         &v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
     );
     let iva_general = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(10.0);
+    let limite_simplif = v_f64(row.get_value(5).map_err(db_err)?)
+        .filter(|v| *v > 0.0)
+        .unwrap_or(vf::LIMITE_SIMPLIFICADA_HOSTELERIA);
 
     if nif.is_empty() || razon_social.trim().is_empty() {
         return Err(AppError::coded(
@@ -185,6 +192,7 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         ),
         entorno,
         iva_general,
+        limite_simplif,
     })
 }
 
@@ -590,7 +598,8 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
     Ok(out)
 }
 
-/// Emite el registro de un cobro corriente: una **factura simplificada (`F2`)**.
+/// Emite el registro de un cobro: una **factura simplificada (`F2`)** o una **completa (`F1`)** si
+/// el cliente dio sus datos.
 ///
 /// Es el camino de la inmensa mayoría de las ventas de un bar, y lo llaman los tres sitios que
 /// cobran (`mesas` por detalles, `mesas` por productos sueltos y `venta_rapida`). Está aquí y no
@@ -598,16 +607,54 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
 ///
 /// **Importante**: se llama DESPUÉS de insertar `Pago_Detalles`, porque el desglose sale de ahí.
 ///
+/// ## El límite de la simplificada (§2.2 del plan)
+///
+/// Una `F2` vale hasta **3.000 € con IVA** en hostelería (art. 4.2 RD 1619/2012, y la AEAT lo valida
+/// en el servicio web con el error 1150). Por encima no cabe una `F2`, y una `F1` sin destinatario es
+/// imposible (error 1189). Así que si el importe pasa del límite y no hay destinatario, **esto
+/// devuelve `FacturaCompletaRequerida`** y la transacción del cobro rueda atrás: no hay ninguna
+/// factura que emitir con lo que hay, y emitir una inválida sería peor que no cobrar todavía.
+///
+/// El límite se mira sobre el **importe DEL COBRO**, no sobre el total de la comanda. Eso juega a
+/// favor: una comanda de 4.000 € que pagan dos empresas a 2.000 € son dos simplificadas correctas, y
+/// eso ya funciona con el cobro fraccionado. Lo que no hay es un botón de «dividir el cobro» para
+/// bajar del límite: partir el pago de un mismo cliente es fraccionamiento artificial de una
+/// operación, y ofrecer el botón sería invitar a usarlo mal.
+///
 /// Si el pago no tiene ninguna línea enlazada (un cobro que no cubre nada), se emite igualmente con
 /// el importe del pago como único tramo al tipo general: una factura sin desglose no es válida, y
 /// dejar de emitir no es una opción — sería expedir una factura huérfana.
-pub async fn emitir_cobro_simplificado(
+pub async fn emitir_cobro(
     db: &WriteGuard<'_>,
     id_pago: &str,
     numero_reservado: (String, i64),
     importe_pago: f64,
+    destinatario: Option<vf::Destinatario>,
 ) -> AppResult<BloqueFiscal> {
     let obligado = datos_obligado(db).await?;
+
+    // Los datos del cliente se validan ANTES de tocar nada: un NIF con el dígito de control mal no
+    // se rechaza al enviar, vuelve como error admisible 2001 horas después y sin el cliente delante.
+    let destinatario = match destinatario {
+        Some(d) => Some(
+            vf::validar_destinatario(d)
+                .map_err(|e| AppError::validation(e.mensaje()))?,
+        ),
+        None => None,
+    };
+
+    let clave = vf::clave_de_factura(importe_pago, obligado.limite_simplif, destinatario.is_some())
+        .ok_or_else(|| {
+            AppError::coded(
+                ErrorCode::FacturaCompletaRequerida,
+                format!(
+                    "Este cobro ({:.2} €) pasa del límite de la factura simplificada ({:.2} €). \
+                     Hacen falta el NIF y el nombre del cliente para emitir una factura completa.",
+                    importe_pago, obligado.limite_simplif
+                ),
+            )
+        })?;
+
     let mut lineas = lineas_de_pago(db, id_pago, obligado.iva_general).await?;
 
     let suma: f64 = lineas.iter().map(|l| l.total_con_iva).sum();
@@ -635,9 +682,13 @@ pub async fn emitir_cobro_simplificado(
     emitir_alta(
         db,
         DatosFactura {
-            tipo_factura: Some("F2".to_string()),
+            tipo_factura: Some(clave.to_string()),
             id_pago: Some(id_pago.to_string()),
             lineas,
+            destinatario: destinatario.map(|d| Destinatario {
+                nombre_razon: d.nombre_razon,
+                nif: d.nif,
+            }),
             numero_reservado: Some(numero_reservado),
             ..Default::default()
         },
@@ -756,6 +807,116 @@ pub async fn emitir_baja_de_pago(
 /// Si no hay desglose guardado (no debería pasar) se devuelve vacío y el registro sale con importe
 /// cero. Es mejor que no salir: lo que no puede quedar es un cobro dado de baja sin su rectificativa.
 fn desglose_negado(desglose_json: Option<&str>) -> Vec<LineaTicket> {
+    tramos_del_desglose(desglose_json, -1.0)
+}
+
+
+/// Emite una **factura completa en sustitución** de una simplificada ya expedida (`F3`).
+///
+/// Es la respuesta al *«¿me lo puedes hacer con IVA?»* del día siguiente: el cliente vuelve con el
+/// ticket y pide factura. **No se rectifica nada** (art. 15.6 ROF): canjear una simplificada por una
+/// completa no es rectificar, se emite una `F3` que la **sustituye** y que sí lleva destinatario. La
+/// simplificada original se queda exactamente como está — no se anula ni se modifica.
+///
+/// La `F3` gasta número nuevo de la misma serie y entra en la cadena como cualquier otro registro.
+///
+/// Se niega si el ticket ya tiene una `F3`: emitir dos facturas completas del mismo ticket sería
+/// facturar dos veces la misma venta.
+pub async fn emitir_sustitutiva(
+    db: &WriteGuard<'_>,
+    num_serie_original: &str,
+    destinatario: vf::Destinatario,
+) -> AppResult<BloqueFiscal> {
+    let destinatario =
+        vf::validar_destinatario(destinatario).map_err(|e| AppError::validation(e.mensaje()))?;
+
+    // El registro de alta original, del que salen el desglose y la referencia.
+    let mut rows = db
+        .query(
+            "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Desglose_Json, \
+                    ID_Pago, COALESCE(Tipo_Factura, '') \
+             FROM Registros_Facturacion \
+             WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
+             ORDER BY Orden DESC LIMIT 1;",
+            vec![Value::Text(num_serie_original.trim().to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        return Err(AppError::not_found(
+            "No existe ninguna factura con ese número.",
+        ));
+    };
+    let nif = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
+    let num_serie = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
+    let fecha = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
+    let desglose = v_string(row.get_value(4).map_err(db_err)?);
+    let id_pago = v_string(row.get_value(5).map_err(db_err)?);
+    let tipo_original = v_string(row.get_value(6).map_err(db_err)?).unwrap_or_default();
+
+    if tipo_original != "F2" {
+        // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es una
+        // rectificativa: en ninguno de los dos casos hay nada que sustituir.
+        return Err(AppError::conflict(format!(
+            "Esa factura es de tipo {tipo_original}: sólo un ticket (factura simplificada) se puede \
+             canjear por una factura completa."
+        )));
+    }
+
+    // ¿Ya se canjeó? `Referencias_Json` de la F3 lleva el número sustituido.
+    let ya = select_i64(
+        db,
+        "SELECT COUNT(*) FROM Registros_Facturacion \
+         WHERE Tipo_Factura = 'F3' AND Referencias_Json LIKE ?1;",
+        vec![Value::Text(format!("%{num_serie}%"))],
+    )
+    .await?
+    .unwrap_or(0);
+    if ya > 0 {
+        return Err(AppError::conflict(
+            "De ese ticket ya se emitió una factura completa.",
+        ));
+    }
+
+    // El desglose es el MISMO de la simplificada, con el mismo signo: la F3 no cambia el importe, lo
+    // vuelve a declarar con destinatario. Reconstruirlo del original es lo que garantiza que las dos
+    // facturas digan exactamente lo mismo del dinero.
+    let lineas = desglose_mismo_signo(desglose.as_deref());
+
+    emitir_alta(
+        db,
+        DatosFactura {
+            tipo_factura: Some("F3".to_string()),
+            id_pago,
+            lineas,
+            destinatario: Some(Destinatario {
+                nombre_razon: destinatario.nombre_razon,
+                nif: destinatario.nif,
+            }),
+            // `FacturasSustituidas` sólo puede ir en una F3 (error 1116). Y no es
+            // `FacturasRectificadas`: no se rectifica nada.
+            sustituidas: vec![RefFactura {
+                nif,
+                num_serie,
+                fecha,
+            }],
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+/// Las líneas del desglose original, **con su signo**. Gemela de `desglose_negado`, que es la de la
+/// rectificativa; aquí el importe no cambia de signo porque la `F3` no devuelve nada.
+fn desglose_mismo_signo(desglose_json: Option<&str>) -> Vec<LineaTicket> {
+    tramos_del_desglose(desglose_json, 1.0)
+}
+
+/// Lee `Desglose_Json` y devuelve sus tramos como líneas, multiplicando el importe por `signo`.
+///
+/// Existe porque la rectificativa y la sustitutiva necesitan lo mismo con el signo contrario, y dos
+/// copias de este parseo se separarían en cuanto alguien añadiera un campo al desglose.
+fn tramos_del_desglose(desglose_json: Option<&str>, signo: f64) -> Vec<LineaTicket> {
     let Some(arr) = desglose_json
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .and_then(|v| v.as_array().cloned())
@@ -781,9 +942,8 @@ fn desglose_negado(desglose_json: Option<&str>) -> Vec<LineaTicket> {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(0.0);
             Some(LineaTicket {
-                // `LineaTicket` trabaja con el total CON IVA, que es base + cuota. El signo se
-                // cambia aquí, una sola vez.
-                total_con_iva: -(base + cuota),
+                // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
+                total_con_iva: signo * (base + cuota),
                 tipo_iva: tipo,
                 exento: exenta.is_some(),
                 causa_exencion: exenta.map(str::to_string),
@@ -1475,6 +1635,28 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                 .map_err(db_err)?;
         }
         Ok(())
+    }
+
+    async fn emitir_sustitutiva(
+        &self,
+        num_serie_original: &str,
+        destinatario: vf::Destinatario,
+    ) -> AppResult<BloqueFiscal> {
+        // En su propia transacción: la `F3` gasta número y entra en la cadena, así que o se escribe
+        // entera o no se escribe.
+        let g = self.db.write().await;
+        g.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res = emitir_sustitutiva(&g, num_serie_original, destinatario).await;
+        match res {
+            Ok(v) => {
+                g.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(v)
+            }
+            Err(e) => {
+                let _ = g.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
     }
 
     async fn obligado(&self) -> AppResult<Option<(String, String, bool)>> {

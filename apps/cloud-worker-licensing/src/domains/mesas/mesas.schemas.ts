@@ -210,9 +210,21 @@ export type AddLineaInput = Pick<
 	id_trabajador_o_usuario: string | null;
 };
 
+/**
+ * FISCAL-02: el `destinatario` se declara porque está en el DTO de Rust, pero esta ruta **no lo
+ * usa** y no puede usarlo.
+ *
+ * Cobrar es de la Main (`soloLaMainCobra`): esta ruta está vetada a una Handy, así que aquí no llega
+ * nadie. Y aunque llegara, emitir una factura completa exige escribir en `Registros_Facturacion`,
+ * que es justo lo que el veto de `applyViaHub` impide desde la nube — la cadena de huellas vive en
+ * el SIF del obligado, y la nube es copia, no fuente.
+ *
+ * Se quita del tipo local con `Omit` en vez de declararlo en el zod y tirarlo: un campo validado que
+ * nadie lee es una promesa que el código no cumple.
+ */
 export type CobrarDetallesInput = Omit<
 	ContractMesasCobrarDetallesInput,
-	"id_usuario"
+	"id_usuario" | "destinatario"
 > & {
 	id_usuario: string | null;
 };

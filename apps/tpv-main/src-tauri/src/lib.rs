@@ -2226,6 +2226,7 @@ pub fn run() {
             commands::verifactu::verifactu_certificados,
             commands::verifactu::verifactu_set_certificado,
             commands::verifactu::verifactu_probar_conexion,
+            commands::verifactu::verifactu_emitir_factura_de_ticket,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,

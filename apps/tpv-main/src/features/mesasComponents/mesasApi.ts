@@ -443,6 +443,18 @@ export async function mesasCobrarDetalles(params: {
     tipo: "TOTAL" | "FRACCIONADO";
     detalleIds: string[];
     idUsuario: string | null;
+    /**
+     * FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe pasa
+     * del límite de la simplificada y entonces no hay alternativa.
+     *
+     * Ausente = ticket normal (`F2`). Si el importe pasa del límite y no va, el backend rechaza el
+     * cobro con `factura_completa_requerida` y la pantalla abre `DatosFiscalesModal`.
+     */
+    destinatario?: {
+        nombre_razon: string;
+        nif: string;
+        domicilio?: string | null;
+    } | null;
     /** Devuelve el número de ticket del cobro (cadena vacía si no había nada que cobrar). */
 }): Promise<string> {
     const idComanda = toId(params.idComanda);
@@ -462,6 +474,7 @@ export async function mesasCobrarDetalles(params: {
             tipo: params.tipo,
             detalle_ids: detalleIds,
             id_usuario: idUsuario,
+            destinatario: params.destinatario ?? null,
         },
     });
 }

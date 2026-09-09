@@ -1288,6 +1288,8 @@ impl MesasRepository for SqliteMesasRepository {
             // (y el registro fiscal tampoco llega a existir).
             let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
             let numero_ticket = numero_reservado.0.clone();
+            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
+            let destinatario = data.destinatario.clone();
             let id_pago = new_id();
             let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
@@ -1378,11 +1380,15 @@ impl MesasRepository for SqliteMesasRepository {
             // FISCAL-01. El registro de facturación se crea AQUÍ, dentro de la misma transacción
             // que el pago y después de enlazar las líneas (de las que sale el desglose). Es el
             // orden del art. 9 RRSIF y el único que no puede dejar facturas huérfanas.
-            crate::verifactu::emitir_cobro_simplificado(
+            crate::verifactu::emitir_cobro(
                 db,
                 &id_pago,
                 numero_reservado,
                 importe_total,
+                // FISCAL-02: si el cliente dio sus datos sale una F1; si no, una F2 — y si el
+                // importe pasa del límite de la simplificada sin datos, esto corta el cobro con
+                // `factura_completa_requerida` y la pantalla los pide.
+                destinatario,
             )
             .await?;
 
@@ -1996,6 +2002,8 @@ impl MesasRepository for SqliteMesasRepository {
             // (y el registro fiscal tampoco llega a existir).
             let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
             let numero_ticket = numero_reservado.0.clone();
+            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
+            let destinatario = data.destinatario.clone();
             let id_pago = new_id();
             let trabajador_mov = id_trabajador_cobrador.clone();
             let ok = try_exec(
@@ -2137,7 +2145,7 @@ impl MesasRepository for SqliteMesasRepository {
 
             // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
             // que es de donde sale el desglose de IVA del registro.
-            crate::verifactu::emitir_cobro_simplificado(db, &id_pago, numero_reservado, total)
+            crate::verifactu::emitir_cobro(db, &id_pago, numero_reservado, total, destinatario)
                 .await?;
 
             let pending_left = select_one_i64(

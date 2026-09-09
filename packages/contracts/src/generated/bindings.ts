@@ -340,6 +340,15 @@ export type DenominacionDto = { valor: number, unidades: number, };
 
 export type DenominacionInput = { valor: number, unidades: number, };
 
+/**
+ * Datos del cliente para emitir **factura completa** (FISCAL-02).
+ *
+ * El registro de facturación sólo necesita el nombre y el NIF. El `domicilio` es para el **papel**:
+ * el art. 6 ROF le exige a una factura el domicilio del destinatario, y el registro de la AEAT no
+ * lo lleva. Por eso el formulario pide tres cosas y sólo dos viajan.
+ */
+export type DestinatarioInput = { nombre_razon: string, nif: string, domicilio?: string, };
+
 export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 
 export type DeviceSignB64Args = { payload: string, };
@@ -367,7 +376,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida";
 
 /**
  * Resumen para el panel de Configuración → Fiscal y para la barra de estado.
@@ -593,13 +602,26 @@ export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: strin
 
 export type MesasCerrarComandaInput = { id_comanda: string, total: number, };
 
-export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tipo: string, detalle_ids: Array<string>, id_usuario?: string, };
+export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tipo: string, detalle_ids: Array<string>, id_usuario?: string, 
+/**
+ * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
+ *
+ * Se llega aquí por dos caminos: el cliente lo pide («Factura con NIF») o el importe pasa del
+ * límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
+ * el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
+ */
+destinatario?: DestinatarioInput, };
 
 export type MesasCobrarVentaRapidaInput = { metodo: string, items: Array<CobroVRItem>, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, 
 /**
  * Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
  */
-id_comanda?: string, };
+id_comanda?: string, 
+/**
+ * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket. Ver
+ * `MesasCobrarDetallesInput::destinatario`.
+ */
+destinatario?: DestinatarioInput, };
 
 export type MesasComandaSetTrabajadorInput = { id_comanda: string, id_usuario?: string, id_trabajador?: string, };
 
@@ -1112,7 +1134,15 @@ IVA_Percent?: number, Estado_Cocina: string, Pagado: number, Notas: string | nul
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 
-export type VrCobrarFraccionadoInput = { id_comanda: string, metodo: string, importe_total: number, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, detalles: Array<string>, };
+export type VrCobrarFraccionadoInput = { id_comanda: string, metodo: string, importe_total: number, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, detalles: Array<string>, 
+/**
+ * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
+ *
+ * Se llega aquí por dos caminos: el cliente lo pide («Factura con NIF») o el importe pasa del
+ * límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
+ * el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
+ */
+destinatario?: DestinatarioInput, };
 
 export type VrCreateComandaBarraInput = { id_trabajador?: string, 
 /**

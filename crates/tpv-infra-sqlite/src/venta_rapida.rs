@@ -789,6 +789,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             // cobro y el registro.
             let numero_reservado = crate::verifactu::reservar_numero_factura(db).await?;
             let numero_ticket = numero_reservado.0.clone();
+            // FISCAL-02: se captura aquí porque `data` se consume al construir los parámetros.
+            let destinatario = data.destinatario.clone();
 
             if let Some(idt) = id_trabajador_cobrador.clone() {
                 db.execute(
@@ -1065,11 +1067,15 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
             // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
             // que es de donde sale el desglose de IVA del registro.
-            crate::verifactu::emitir_cobro_simplificado(
+            crate::verifactu::emitir_cobro(
                 db,
                 &id_pago_final,
                 numero_reservado,
                 importe_total_db,
+                // FISCAL-02: si el cliente dio sus datos sale una F1; si no, una F2 — y si el
+                // importe pasa del límite de la simplificada sin datos, esto corta el cobro con
+                // `factura_completa_requerida` y la pantalla los pide.
+                destinatario,
             )
             .await?;
 

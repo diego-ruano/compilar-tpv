@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+use crate::verifactu::DestinatarioInput;
 
 /* =========================================================
    Salida (read models)
@@ -203,6 +204,14 @@ pub struct VrCobrarFraccionadoInput {
     #[ts(optional)]
     pub id_trabajador_cobrador: Option<String>,
     pub detalles: Vec<String>,
+    /// FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
+    ///
+    /// Se llega aquí por dos caminos: el cliente lo pide («Factura con NIF») o el importe pasa del
+    /// límite de la simplificada y entonces no hay alternativa. Si pasa del límite y esto va vacío,
+    /// el cobro se rechaza con `factura_completa_requerida` y la pantalla pide los datos.
+    #[serde(default)]
+    #[ts(optional)]
+    pub destinatario: Option<DestinatarioInput>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

@@ -13,6 +13,7 @@ use tpv_contracts::mesas::{
     MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput,
     MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
 };
+use tpv_contracts::verifactu::DestinatarioInput;
 use tpv_domain::mesas::{
     limpiar_opcional, normalize_estado_cocina, normalize_metodo, requerido, AbrirComandaData,
     CobroDetalles, CobroVentaRapida,
@@ -170,6 +171,7 @@ pub async fn cobrar_venta_rapida(
         id_usuario_cobrador: opt_id(input.id_usuario_cobrador),
         id_trabajador_cobrador: opt_id(input.id_trabajador_cobrador),
         id_comanda: opt_id(input.id_comanda),
+        destinatario: destinatario_de(input.destinatario),
     };
     repo.cobrar_venta_rapida(data).await
 }
@@ -288,6 +290,7 @@ pub async fn cobrar_detalles(
         tipo,
         detalle_ids: ids,
         id_usuario: opt_id(input.id_usuario),
+        destinatario: destinatario_de(input.destinatario),
     };
     repo.cobrar_detalles(data).await
 }
@@ -338,4 +341,17 @@ mod tests {
     fn opt_id_descarta_distintos_tipos_de_espacio() {
         assert_eq!(opt_id(Some("\t\n".into())), None);
     }
+}
+
+/// Traduce el destinatario del input al del dominio.
+///
+/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
+/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
+/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
+fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
+    input.map(|d| tpv_domain::verifactu::Destinatario {
+        nombre_razon: d.nombre_razon,
+        nif: d.nif,
+        direccion: d.domicilio,
+    })
 }

@@ -72,4 +72,15 @@ pub trait VerifactuRepository: Send + Sync {
     /// Devuelve `None` si faltan: sin ellos no hay nada que remitir, y no es un error del job sino
     /// una tarea del dueño.
     async fn obligado(&self) -> AppResult<Option<(String, String, bool)>>;
+
+    /// Emite una **factura completa en sustitución** de un ticket ya expedido (`F3`, FISCAL-02).
+    ///
+    /// Es el *«¿me lo puedes hacer con IVA?»* del día siguiente. **No rectifica nada** (art. 15.6
+    /// ROF): canjear una simplificada por una completa no es rectificar, y la original se queda
+    /// exactamente como está.
+    async fn emitir_sustitutiva(
+        &self,
+        num_serie_original: &str,
+        destinatario: tpv_domain::verifactu::Destinatario,
+    ) -> AppResult<BloqueFiscal>;
 }

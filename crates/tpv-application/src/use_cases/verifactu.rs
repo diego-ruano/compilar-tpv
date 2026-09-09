@@ -8,7 +8,10 @@
 use crate::error::AppResult;
 use crate::ports::aeat::{AeatClient, CabeceraEnvio, EntornoAeat};
 use crate::ports::verifactu::VerifactuRepository;
-use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
+use crate::error::AppError;
+use tpv_contracts::verifactu::{
+    BloqueFiscal, DestinatarioInput, EstadoFiscal, RegistroFiscal,
+};
 
 /// El bloque fiscal de un ticket ya emitido. Sirve igual para imprimir y para reimprimir.
 pub async fn bloque_por_numero(
@@ -38,6 +41,32 @@ pub async fn listar(
 ) -> AppResult<Vec<RegistroFiscal>> {
     repo.listar(limite.unwrap_or(100), desplazamiento.unwrap_or(0))
         .await
+}
+
+/// Emite una factura completa en sustitución de un ticket (`F3`, FISCAL-02).
+///
+/// Los datos del cliente se validan en el repositorio, justo antes de emitir: un NIF con el dígito
+/// de control mal no se rechaza al enviar, vuelve como error admisible 2001 horas después.
+pub async fn emitir_sustitutiva(
+    repo: &dyn VerifactuRepository,
+    num_serie_original: &str,
+    destinatario: DestinatarioInput,
+) -> AppResult<BloqueFiscal> {
+    let n = num_serie_original.trim();
+    if n.is_empty() {
+        return Err(AppError::validation(
+            "Hace falta el número del ticket que se quiere facturar.",
+        ));
+    }
+    repo.emitir_sustitutiva(
+        n,
+        tpv_domain::verifactu::Destinatario {
+            nombre_razon: destinatario.nombre_razon,
+            nif: destinatario.nif,
+            direccion: destinatario.domicilio,
+        },
+    )
+    .await
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,12 +509,14 @@ mod tests {
 
     mod ciclo {
         use super::super::*;
-        use crate::error::AppError;
         use crate::ports::aeat::{
             CertificadoDisponible, LineaRespuesta, RegistroParaEnvio, RespuestaRemision,
         };
         use std::sync::Mutex;
-        use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
+        use crate::error::AppError;
+use tpv_contracts::verifactu::{
+    BloqueFiscal, DestinatarioInput, EstadoFiscal, RegistroFiscal,
+};
 
         fn registro(num: &str) -> RegistroParaEnvio {
             RegistroParaEnvio {
@@ -591,6 +622,13 @@ mod tests {
             }
             async fn obligado(&self) -> AppResult<Option<(String, String, bool)>> {
                 Ok(self.obligado.clone())
+            }
+            async fn emitir_sustitutiva(
+                &self,
+                _n: &str,
+                _d: tpv_domain::verifactu::Destinatario,
+            ) -> AppResult<BloqueFiscal> {
+                unreachable!("el ciclo de remisión no emite facturas")
             }
         }
 

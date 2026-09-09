@@ -8,6 +8,7 @@ use tpv_contracts::venta_rapida::{
     VrRemoveLastUnpaidLineaInput, VrRestarStockInput, VrSearchProductosArgs,
     VrUpdateNotaDetalleInput,
 };
+use tpv_contracts::verifactu::DestinatarioInput;
 use tpv_domain::venta_rapida::{limpiar_opcional, normalize_metodo, CobroFraccionado};
 
 use crate::error::{AppError, AppResult};
@@ -200,6 +201,7 @@ pub async fn cobrar_fraccionado(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
         detalles,
+        destinatario: destinatario_de(input.destinatario),
     };
 
     repo.cobrar_fraccionado(data).await
@@ -337,6 +339,7 @@ mod tests {
             id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: 12.5,
             id_usuario_cobrador: Some(" usuario-1 ".into()), id_trabajador_cobrador: Some(" ".into()),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
+            destinatario: None,
         };
         // Devuelve el número de ticket del cobro, que es lo que el POS imprime a continuación.
         assert_eq!(cobrar_fraccionado(&repo, input).await.unwrap(), "T-000001");
@@ -354,9 +357,23 @@ mod tests {
         let invalido = |importe, detalles| VrCobrarFraccionadoInput {
             id_comanda: "c1".into(), metodo: "efectivo".into(), importe_total: importe,
             id_usuario_cobrador: None, id_trabajador_cobrador: None, detalles,
+            destinatario: None,
         };
         assert!(cobrar_fraccionado(&repo, invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
         assert!(cobrar_fraccionado(&repo, invalido(1.0, vec![" ".into()])).await.is_err());
         assert!(repo.cobros.lock().unwrap().is_empty());
     }
+}
+
+/// Traduce el destinatario del input al del dominio.
+///
+/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
+/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
+/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
+fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
+    input.map(|d| tpv_domain::verifactu::Destinatario {
+        nombre_razon: d.nombre_razon,
+        nif: d.nif,
+        direccion: d.domicilio,
+    })
 }

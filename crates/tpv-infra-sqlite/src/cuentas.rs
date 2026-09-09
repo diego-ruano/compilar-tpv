@@ -1246,6 +1246,8 @@ mod tests_anulacion {
                 metodo: "Efectivo".into(),
                 tipo: "PARCIAL".into(),
                 id_usuario: Some("u1".into()),
+                // FISCAL-02: una venta normal es un ticket (F2), sin datos de cliente.
+                destinatario: None,
             })
             .await
             .unwrap();
@@ -1792,6 +1794,399 @@ mod tests_reimpresion {
 }
 
 #[cfg(test)]
+mod tests_factura_completa {
+    //! La factura completa (FISCAL-02): `F1` al cobrar y `F3` en sustitución.
+    //!
+    //! Lo que se fija aquí es el **corte de los 3.000 €**, que es la única regla de este tramo que
+    //! no se puede deshacer después: emitir una `F2` por encima del límite es emitir una factura
+    //! inválida —la AEAT la rechaza con el error 1150— y el registro, una vez emitido, no se
+    //! modifica jamás.
+
+    use super::tests_comunes::*;
+    use super::*;
+    use tpv_domain::verifactu::Destinatario;
+
+    /// Un ticket de barra con una línea cara, para poder pasar del límite sin inventar 300 líneas.
+    const VENTA_CARA: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Banquetes');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('prod', 'cat', 'Menu de boda', 3500.0);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3500.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det', 'com', 'prod', 1, 3500.0, 10);",
+    ];
+
+    /// Un ticket normal, por debajo del límite.
+    const VENTA_NORMAL: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+           VALUES ('prod', 'cat', 'Cerveza', 3.0);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+    ];
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap()?;
+        crate::mapping::v_string(row.get_value(0).unwrap())
+    }
+
+    /// Cobra por el camino real de venta rápida, con o sin destinatario.
+    async fn cobrar(
+        db: &Arc<Db>,
+        destinatario: Option<Destinatario>,
+    ) -> tpv_application::error::AppResult<String> {
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_comanda: "com".into(),
+                metodo: "Efectivo".into(),
+                importe_total: 0.0,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["det".into()],
+                destinatario,
+            })
+            .await
+    }
+
+    fn cliente() -> Destinatario {
+        Destinatario {
+            nombre_razon: "Empresa Cliente SL".into(),
+            nif: "B12345674".into(),
+            direccion: Some("Calle Mayor 1".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn un_cobro_normal_sin_datos_del_cliente_emite_una_simplificada() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, None).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Tipo_Factura FROM Registros_Facturacion LIMIT 1;").await,
+            Some("F2".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT Destinatario_Json FROM Registros_Facturacion LIMIT 1;").await,
+            None,
+            "una F2 NO puede llevar destinatario (error 1190)"
+        );
+    }
+
+    #[tokio::test]
+    async fn con_los_datos_del_cliente_emite_factura_completa_aunque_sea_un_cafe() {
+        // No hay importe mínimo: el cliente puede pedir factura por una caña.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, Some(cliente())).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Tipo_Factura FROM Registros_Facturacion LIMIT 1;").await,
+            Some("F1".into())
+        );
+        let dest = texto(&db, "SELECT Destinatario_Json FROM Registros_Facturacion LIMIT 1;")
+            .await
+            .expect("una F1 tiene que llevar destinatario (error 1189)");
+        assert!(dest.contains("Empresa Cliente SL"), "{dest}");
+        assert!(dest.contains("B12345674"), "{dest}");
+        // El domicilio es SÓLO para el papel: el registro no lo lleva.
+        assert!(!dest.contains("Calle Mayor"), "{dest}");
+    }
+
+    #[tokio::test]
+    async fn por_encima_del_limite_sin_datos_el_cobro_se_RECHAZA_con_su_codigo() {
+        // El corte. No se emite una F2 inválida ni se cobra a medias: la transacción rueda atrás y
+        // la pantalla recibe un código por el que ramificar para pedir el NIF.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_CARA).await;
+
+        let e = cobrar(&db, None).await.unwrap_err();
+        assert_eq!(
+            e.code(),
+            tpv_contracts::errors::ErrorCode::FacturaCompletaRequerida,
+            "la UI ramifica por el código, no por el mensaje"
+        );
+
+        // Y lo que importa de verdad: no quedó NADA a medias.
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Pagos;").await, 0.0);
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await,
+            0.0
+        );
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Abierta".into()),
+            "la comanda sigue abierta: se puede reintentar con los datos del cliente"
+        );
+    }
+
+    #[tokio::test]
+    async fn el_numero_no_se_gasta_en_un_cobro_rechazado() {
+        // El número se reserva DENTRO de la transacción, así que el rollback lo devuelve. Si se
+        // gastara, el primer cobro de verdad saldría con un hueco que nadie puede explicar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_CARA).await;
+        assert!(cobrar(&db, None).await.is_err());
+
+        let serie = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(
+            escalar(
+                &db,
+                &format!("SELECT COALESCE((SELECT Ultimo FROM Serie_Facturacion WHERE Serie='{serie}'), 0);")
+            )
+            .await,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn por_encima_del_limite_CON_datos_sale_una_F1() {
+        // La misma venta que el test anterior, con el NIF del cliente: ahora sí se puede facturar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_CARA).await;
+        cobrar(&db, Some(cliente())).await.unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Tipo_Factura FROM Registros_Facturacion LIMIT 1;").await,
+            Some("F1".into())
+        );
+        assert_eq!(
+            texto(&db, "SELECT Importe_Total FROM Registros_Facturacion LIMIT 1;").await,
+            Some("3500.00".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn el_limite_se_mira_sobre_el_COBRO_y_no_sobre_la_comanda() {
+        // Una comanda de 4.000 € que pagan dos empresas a 2.000 € son dos simplificadas correctas,
+        // y eso ya funciona con el cobro fraccionado. Es una consecuencia del modelo, no un atajo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar SL' WHERE ID = 1;",
+                "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Banquetes');",
+                "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
+                   VALUES ('prod', 'cat', 'Menu', 2000.0);",
+                "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+                   VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 4000.0);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('d1', 'com', 'prod', 1, 2000.0, 10);",
+                "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+                   VALUES ('d2', 'com', 'prod', 1, 2000.0, 10);",
+            ],
+        )
+        .await;
+
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        let repo = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone());
+        for det in ["d1", "d2"] {
+            repo.cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_comanda: "com".into(),
+                metodo: "Efectivo".into(),
+                importe_total: 0.0,
+                id_usuario_cobrador: None,
+                id_trabajador_cobrador: None,
+                detalles: vec![det.into()],
+                destinatario: None,
+            })
+            .await
+            .unwrap_or_else(|e| panic!("el cobro de {det} debería salir: {e:?}"));
+        }
+
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo_Factura='F2';"
+            )
+            .await,
+            2.0,
+            "dos cobros de 2.000 € son DOS simplificadas correctas"
+        );
+    }
+
+    #[tokio::test]
+    async fn un_nif_de_cliente_mal_dictado_no_deja_cobrar_y_lo_dice() {
+        // Y el cobro no entra: mejor pedir que lo repita con el cliente delante que mandarlo mal y
+        // que vuelva como error admisible 2001 horas después.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+
+        let e = cobrar(
+            &db,
+            Some(Destinatario {
+                nombre_razon: "Empresa SL".into(),
+                nif: "B12345670".into(),
+                direccion: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(format!("{e:?}").contains("NIF"), "{e:?}");
+        assert_eq!(escalar(&db, "SELECT COUNT(*) FROM Pagos;").await, 0.0);
+    }
+
+    #[tokio::test]
+    async fn el_limite_configurado_del_negocio_es_el_que_manda() {
+        // `Limite_Simplif` existe porque es un número que la norma puede mover. Con 400 € (el
+        // general del art. 4.1, para un negocio que no fuera hostelería) la misma venta corta antes.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        sembrar(&db, &["UPDATE Business_Settings SET Limite_Simplif = 2.0 WHERE ID = 1;"]).await;
+
+        let e = cobrar(&db, None).await.unwrap_err();
+        assert_eq!(
+            e.code(),
+            tpv_contracts::errors::ErrorCode::FacturaCompletaRequerida
+        );
+    }
+
+    // ── F3: el canje posterior ──────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn el_cliente_vuelve_con_el_ticket_y_se_emite_una_F3_que_lo_sustituye() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, None).await.unwrap();
+
+        let num = texto(&db, "SELECT Num_Serie_Factura FROM Registros_Facturacion LIMIT 1;")
+            .await
+            .unwrap();
+
+        use tpv_application::ports::verifactu::VerifactuRepository as _;
+        let repo = crate::verifactu::SqliteVerifactuRepository::new(db.clone());
+        let bloque = repo.emitir_sustitutiva(&num, cliente()).await.unwrap();
+
+        assert_eq!(bloque.tipo_factura, "F3");
+        // La simplificada original NO se toca: canjearla no es rectificarla (art. 15.6 ROF).
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo_Factura='F2';"
+            )
+            .await,
+            1.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo='ANULACION';").await,
+            0.0,
+            "no se anula nada"
+        );
+        // Y la referencia va en `FacturasSustituidas`, no en `FacturasRectificadas` (error 1116).
+        let refs = texto(
+            &db,
+            "SELECT Referencias_Json FROM Registros_Facturacion WHERE Tipo_Factura='F3';",
+        )
+        .await
+        .unwrap();
+        assert!(refs.contains("sustituidas"), "{refs}");
+        assert!(refs.contains(&num), "{refs}");
+    }
+
+    #[tokio::test]
+    async fn la_F3_declara_el_mismo_dinero_que_el_ticket() {
+        // No cambia el importe: lo vuelve a declarar con destinatario. Si difiriera, habría dos
+        // facturas del mismo hecho diciendo cosas distintas.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, None).await.unwrap();
+        let num = texto(&db, "SELECT Num_Serie_Factura FROM Registros_Facturacion LIMIT 1;")
+            .await
+            .unwrap();
+
+        use tpv_application::ports::verifactu::VerifactuRepository as _;
+        crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+            .emitir_sustitutiva(&num, cliente())
+            .await
+            .unwrap();
+
+        let f2 = texto(
+            &db,
+            "SELECT Importe_Total FROM Registros_Facturacion WHERE Tipo_Factura='F2';",
+        )
+        .await;
+        let f3 = texto(
+            &db,
+            "SELECT Importe_Total FROM Registros_Facturacion WHERE Tipo_Factura='F3';",
+        )
+        .await;
+        assert_eq!(f2, f3);
+        assert_eq!(f3, Some("3.00".into()));
+    }
+
+    #[tokio::test]
+    async fn un_ticket_no_se_factura_dos_veces() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, None).await.unwrap();
+        let num = texto(&db, "SELECT Num_Serie_Factura FROM Registros_Facturacion LIMIT 1;")
+            .await
+            .unwrap();
+
+        use tpv_application::ports::verifactu::VerifactuRepository as _;
+        let repo = crate::verifactu::SqliteVerifactuRepository::new(db.clone());
+        repo.emitir_sustitutiva(&num, cliente()).await.unwrap();
+
+        let e = repo.emitir_sustitutiva(&num, cliente()).await.unwrap_err();
+        assert!(format!("{e:?}").contains("ya se emitió"), "{e:?}");
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo_Factura='F3';"
+            )
+            .await,
+            1.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_factura_que_ya_es_completa_no_se_canjea() {
+        // Una `F1` ya lleva destinatario y una `R5` es una rectificativa: en ninguna hay nada que
+        // sustituir, y dejarlo pasar emitiría una segunda factura del mismo hecho.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+        cobrar(&db, Some(cliente())).await.unwrap();
+        let num = texto(&db, "SELECT Num_Serie_Factura FROM Registros_Facturacion LIMIT 1;")
+            .await
+            .unwrap();
+
+        use tpv_application::ports::verifactu::VerifactuRepository as _;
+        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+            .emitir_sustitutiva(&num, cliente())
+            .await
+            .unwrap_err();
+        assert!(format!("{e:?}").contains("F1"), "{e:?}");
+    }
+
+    #[tokio::test]
+    async fn canjear_un_numero_que_no_existe_no_revienta() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_NORMAL).await;
+
+        use tpv_application::ports::verifactu::VerifactuRepository as _;
+        let e = crate::verifactu::SqliteVerifactuRepository::new(db.clone())
+            .emitir_sustitutiva("2027/999999", cliente())
+            .await
+            .unwrap_err();
+        assert!(format!("{e:?}").contains("No existe"), "{e:?}");
+    }
+}
+
+#[cfg(test)]
 mod tests_anular_vs_devolver {
     //! Los **dos instrumentos** de FISCAL-01, que hasta ahora salían por el mismo botón.
     //!
@@ -1850,6 +2245,8 @@ mod tests_anular_vs_devolver {
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
                 detalles: vec!["det".into()],
+                // FISCAL-02: una venta normal es un ticket (F2), sin datos de cliente.
+                destinatario: None,
             })
             .await
             .expect("el cobro tiene que salir");
