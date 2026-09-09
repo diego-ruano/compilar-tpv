@@ -23,7 +23,8 @@
     "verifactu:probar-aeat": "cargo run -q -p tpv-infra-aeat --example probar_aeat",
     "verifactu:ciclo": "cargo run -q -p tpv-infra-aeat --example ciclo_completo",
     "verifactu:experimento": "cargo run -q -p tpv-infra-aeat --example experimento_cadena",
-    "verifactu:errores": "cargo run -q -p tpv-infra-aeat --example errores_esperados"
+    "verifactu:errores": "cargo run -q -p tpv-infra-aeat --example errores_esperados",
+    "verifactu:limites": "cargo run -q --release -p tpv-infra-aeat --example lote_y_subsanacion"
   },
   "devDependencies": {
     "turbo": "^2"

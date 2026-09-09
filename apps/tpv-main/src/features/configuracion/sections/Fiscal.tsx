@@ -42,6 +42,7 @@ import {
     verifactuExportar,
     verifactuReconocerAnomalias,
     verifactuSetFormacion,
+    verifactuSubsanarRechazados,
     type DeclaracionResponsable,
 } from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
@@ -448,6 +449,43 @@ export function Fiscal({
                                     : "No hay nada pendiente de enviar."}
                             </div>
                         )}
+
+                        {estado.rechazados > 0 ? (
+                            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-3 text-sm">
+                                <strong className="text-red-600 dark:text-red-400">
+                                    Hay {estado.rechazados} factura(s) que Hacienda no ha admitido.
+                                </strong>
+                                <p className="mt-1 text-fg-muted">
+                                    No se reintentan solas: repetir lo mismo daría el mismo rechazo.
+                                    Normalmente se arreglan con una actualización del programa, y
+                                    entonces este botón las vuelve a mandar corregidas.
+                                </p>
+                                <div className="mt-2">
+                                    <GhostButton
+                                        onClick={() => {
+                                            void verifactuSubsanarRechazados()
+                                                .then((n) => {
+                                                    refrescarEstado();
+                                                    toast.success(
+                                                        "Subsanación emitida",
+                                                        n === 0
+                                                            ? "No había ninguna pendiente de subsanar."
+                                                            : `${n} factura(s) vuelven a la cola de envío.`,
+                                                    );
+                                                })
+                                                .catch((e) =>
+                                                    toast.error(
+                                                        "No se pudo subsanar",
+                                                        toAppError(e).message,
+                                                    ),
+                                                );
+                                        }}
+                                    >
+                                        Volver a mandarlas corregidas
+                                    </GhostButton>
+                                </div>
+                            </div>
+                        ) : null}
 
                         {estado.motivo_no_remite ? (
                             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">

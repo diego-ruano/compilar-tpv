@@ -405,6 +405,32 @@ pub(crate) async fn reservar_numero(
 // Emisión
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Lo que hace falta para emitir una **subsanación**: reemitir el mismo `IDFactura` corregido.
+///
+/// Una subsanación **no es una factura nueva**. Es el mismo hecho vuelto a contar bien, así que
+/// conserva la terna que la identifica ante la AEAT —emisor, número de serie y fecha de expedición—
+/// y **no gasta número**. Lo que sí cambia es todo lo demás: ocupa su propio `Orden`, se encadena al
+/// final de la cadena y tiene su propia huella y su propia hora de generación.
+///
+/// Por eso el índice único de la terna excluye las subsanaciones: si no, la segunda no entraría.
+#[derive(Debug, Clone)]
+pub struct Subsanar {
+    /// El registro al que subsana. Se guarda en `Subsana_ID_Registro` para poder seguir el hilo.
+    pub id_registro_original: String,
+    pub num_serie_factura: String,
+    pub numero: i64,
+    pub serie: String,
+    /// `DD-MM-AAAA`, la del original: forma parte de su identidad.
+    pub fecha_expedicion: String,
+    /// Siempre `"S"`.
+    pub marca: &'static str,
+    /// `"X"` si el original fue **rechazado** (la AEAT no lo tiene), `None` si lo aceptó.
+    ///
+    /// La diferencia no es cosmética: dice si el registro que se está mandando sustituye a uno que
+    /// ya está en la AEAT o si es el primero que llega de ese `IDFactura`.
+    pub rechazo_previo: Option<&'static str>,
+}
+
 /// Un destinatario de factura completa (`F1`/`F3`). En `F2` y `R5` **no puede haberlo**: la AEAT
 /// rechaza el registro con el error 1190.
 #[derive(Debug, Clone)]
@@ -448,6 +474,8 @@ pub struct DatosFactura {
     /// registro — dos numeraciones paralelas serían dos cosas que pueden divergir. Si es `None`,
     /// lo reserva esta función.
     pub numero_reservado: Option<(String, i64)>,
+    /// Cuando este registro **subsana** a otro. Ver [`Subsanar`].
+    pub subsanar: Option<Subsanar>,
     /// `DD-MM-AAAA`: el día en que se efectuó la operación, **si no es el de expedición**.
     ///
     /// Lo decide quien emite, porque sólo él sabe a qué operación corresponde: la apertura de la
@@ -510,12 +538,24 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
         d.numero_reservado.clone()
     };
 
-    let (num_serie_factura, numero) = match numero_reservado {
-        Some(v) => v,
-        None => reservar_numero(db, &serie).await?,
+    // Una subsanación conserva la identidad del original y NO gasta número: es el mismo hecho vuelto
+    // a contar, no una factura más.
+    let (serie, num_serie_factura, numero) = match &d.subsanar {
+        Some(sub) => (sub.serie.clone(), sub.num_serie_factura.clone(), sub.numero),
+        None => {
+            let (n, num) = match numero_reservado {
+                Some(v) => v,
+                None => reservar_numero(db, &serie).await?,
+            };
+            (serie, n, num)
+        }
     };
-    let fecha_expedicion = vf::fecha_registro_desde_iso(&crate::util::now_local_date())
-        .ok_or_else(|| AppError::internal("El reloj del equipo no da una fecha utilizable"))?;
+    let fecha_expedicion = match &d.subsanar {
+        // La fecha de expedición forma parte del `IDFactura`: cambiarla sería otra factura.
+        Some(sub) => sub.fecha_expedicion.clone(),
+        None => vf::fecha_registro_desde_iso(&crate::util::now_local_date())
+            .ok_or_else(|| AppError::internal("El reloj del equipo no da una fecha utilizable"))?,
+    };
 
     // Sólo si es DISTINTA de la de expedición. Los arts. 6.1.i) y 7.1.c) del RD 1619/2012 lo
     // condicionan a eso con la misma redacción, y la AEAT interpreta la ausencia como «igual a la
@@ -569,7 +609,8 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
           Importe_Total, Cuota_Total, Desglose_Json, Destinatario_Json, Referencias_Json, Macrodato,
           Primer_Registro, Ant_NIF, Ant_Num_Serie, Ant_Fecha, Ant_Huella,
           Cadena_Huella, Huella, Tipo_Huella, Fecha_Hora_Huso,
-          Sistema_Json, QR_Url, Incidencia, ID_Pago
+          Sistema_Json, QR_Url, Incidencia, ID_Pago,
+          Subsanacion, Rechazo_Previo, Subsana_ID_Registro
         ) VALUES (
           ?1, ?2, 'ALTA',
           ?3, ?4, ?5, ?31, ?6, ?7,
@@ -577,7 +618,8 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
           ?12, ?13, ?14, ?15, ?16, ?17,
           ?18, ?19, ?20, ?21, ?22,
           ?23, ?24, ?25, ?26,
-          ?27, ?28, ?29, ?30
+          ?27, ?28, ?29, ?30,
+          ?32, ?33, ?34
         );
         "#,
         vec![
@@ -622,6 +664,10 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
             // treinta anteriores para colocarlo "en su sitio" es exactamente el cambio que desplaza
             // un parámetro sin que nada lo note.
             opt_text(fecha_operacion.clone()),
+            // ?32..?34 — la subsanación, por lo mismo.
+            opt_text(d.subsanar.as_ref().map(|s| s.marca.to_string())),
+            opt_text(d.subsanar.as_ref().and_then(|s| s.rechazo_previo.map(str::to_string))),
+            opt_text(d.subsanar.as_ref().map(|s| s.id_registro_original.clone())),
         ],
     )
     .await
@@ -1035,6 +1081,7 @@ pub async fn emitir_baja_de_pago(
                     sustituidas: vec![],
                     incidencia: false,
                     numero_reservado: None,
+                    subsanar: None,
                     fecha_operacion: fecha_op_original,
                 },
             )
@@ -1714,6 +1761,193 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
     })
 }
 
+/// Emite una **subsanación** de todos los registros que la AEAT rechazó. Devuelve cuántas emitió.
+///
+/// ## El agujero que esto cierra
+///
+/// `pendientes()` sólo coge los que están `PENDIENTE`, así que **un registro rechazado se quedaba
+/// ahí para siempre**: visible en el panel, contado en el marcador de rechazados y sin ninguna forma
+/// de avanzar. Las columnas estaban, el XML las escribía y `marcas_de_subsanacion` decidía los
+/// valores — pero no había nadie que creara la fila. Toda la maquinaria y ningún productor.
+///
+/// ## Qué es exactamente una subsanación
+///
+/// **No es una factura nueva.** Es el mismo hecho vuelto a contar bien, así que conserva el
+/// `IDFactura` del original —emisor, número y fecha de expedición— y no gasta número. Lo que cambia
+/// es que ocupa su propio `Orden`, se encadena al final y tiene su propia huella y su propia hora.
+///
+/// La marca `RechazoPrevio` distingue los dos casos, y no es cosmética:
+///
+/// - El original fue **rechazado** → `RechazoPrevio = "X"`. La AEAT **no tiene** ese `IDFactura`, así
+///   que esto es lo primero que le llega de esa factura.
+/// - El original fue **aceptado** (con o sin errores) → sin `RechazoPrevio`. La AEAT ya lo tiene y
+///   esto lo sustituye.
+///
+/// Lo decide `marcas_de_subsanacion` a partir del estado guardado, que es donde se puede probar.
+///
+/// ## Por qué se reemiten los MISMOS datos
+///
+/// Porque en este TPV un rechazo no viene de un dato que el usuario pueda corregir: los importes los
+/// calcula el dominio, el desglose sale del ticket y el destinatario se valida antes de cobrar. Un
+/// rechazo es casi siempre **un fallo nuestro** —un campo mal construido, un formato— que se corrige
+/// en una versión nueva del programa. Reemitir los mismos datos fiscales con el XML ya arreglado es
+/// exactamente lo que hay que hacer.
+///
+/// Si algún día un rechazo dependiera de un dato editable, esto necesitaría una variante que lo
+/// acepte. Hoy no la hay porque no hay ese caso.
+pub async fn subsanar_rechazados(db: &Db) -> AppResult<usize> {
+    use tpv_application::use_cases::verifactu::{marcas_de_subsanacion, EstadoEnvio};
+
+    let g = db.write().await;
+
+    // Los rechazados que NO tengan ya una subsanación por delante. Sin ese filtro, pulsar dos veces
+    // emitiría dos subsanaciones del mismo registro — y cada una gasta un eslabón de la cadena.
+    let mut ids = Vec::new();
+    {
+        let mut rows = g
+            .query(
+                "SELECT r.ID_Registro FROM Registros_Facturacion r \
+                 JOIN _Verifactu_Envios e ON e.ID_Registro = r.ID_Registro \
+                 WHERE e.Estado = 'RECHAZADO' \
+                   AND NOT EXISTS ( \
+                     SELECT 1 FROM Registros_Facturacion s \
+                     WHERE s.Subsana_ID_Registro = r.ID_Registro \
+                   ) \
+                 ORDER BY r.Orden ASC;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        while let Some(row) = rows.next().await.map_err(db_err)? {
+            if let Some(id) = v_string(row.get_value(0).map_err(db_err)?) {
+                ids.push(id);
+            }
+        }
+    }
+
+    let (marca, rechazo) = marcas_de_subsanacion(EstadoEnvio::Rechazado);
+    let Some(marca) = marca else {
+        return Ok(0);
+    };
+
+    let mut n = 0usize;
+    for id in ids {
+        emitir_subsanacion_de(&g, &id, marca, rechazo).await?;
+        n += 1;
+    }
+
+    if n > 0 {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            subsanadas = n,
+            "{n} registro(s) rechazados vuelven a la cola como subsanación"
+        );
+    }
+    Ok(n)
+}
+
+/// Emite la subsanación de UN registro, copiando sus datos fiscales.
+async fn emitir_subsanacion_de(
+    db: &WriteGuard<'_>,
+    id_original: &str,
+    marca: &'static str,
+    rechazo_previo: Option<&'static str>,
+) -> AppResult<()> {
+    let (num_serie, serie, numero, fecha, tipo_factura, tipo_rect, desglose, dest, refs, id_pago, fecha_op) = {
+        let mut rows = db
+            .query(
+                "SELECT Num_Serie_Factura, Serie, Numero, Fecha_Expedicion, \
+                        COALESCE(Tipo_Factura,'F2'), Tipo_Rectificativa, Desglose_Json, \
+                        Destinatario_Json, Referencias_Json, ID_Pago, Fecha_Operacion \
+                 FROM Registros_Facturacion WHERE ID_Registro = ?1;",
+                vec![Value::Text(id_original.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        let Some(row) = rows.next().await.map_err(db_err)? else {
+            return Err(AppError::not_found("Ese registro no existe."));
+        };
+        let t = |i: i32| -> AppResult<Option<String>> {
+            Ok(v_string(row.get_value(i).map_err(db_err)?))
+        };
+        (
+            t(0)?.unwrap_or_default(),
+            t(1)?.unwrap_or_default(),
+            v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0),
+            t(3)?.unwrap_or_default(),
+            t(4)?.unwrap_or_else(|| "F2".to_string()),
+            t(5)?,
+            t(6)?,
+            t(7)?,
+            t(8)?,
+            t(9)?,
+            t(10)?,
+        )
+    };
+
+    // El desglose se reconstruye del original, igual que en la `F3` y en la `R5` y por lo mismo: la
+    // subsanación tiene que declarar EXACTAMENTE el mismo dinero. Recalcularlo desde el ticket podría
+    // dar un céntimo distinto, y entonces habría dos versiones del mismo hecho.
+    let lineas = desglose_mismo_signo(desglose.as_deref());
+
+    emitir_alta(
+        db,
+        DatosFactura {
+            tipo_factura: Some(tipo_factura),
+            tipo_rectificativa: tipo_rect,
+            id_pago,
+            lineas,
+            destinatario: destinatario_desde_json(dest.as_deref()),
+            rectificadas: refs_desde_json(refs.as_deref(), "rectificadas"),
+            sustituidas: refs_desde_json(refs.as_deref(), "sustituidas"),
+            fecha_operacion: fecha_op,
+            subsanar: Some(Subsanar {
+                id_registro_original: id_original.to_string(),
+                num_serie_factura: num_serie,
+                numero,
+                serie,
+                fecha_expedicion: fecha,
+                marca,
+                rechazo_previo,
+            }),
+            ..Default::default()
+        },
+    )
+    .await?;
+    Ok(())
+}
+
+/// Reconstruye el destinatario desde el JSON guardado.
+fn destinatario_desde_json(json: Option<&str>) -> Option<Destinatario> {
+    let v: serde_json::Value = serde_json::from_str(json?).ok()?;
+    Some(Destinatario {
+        nombre_razon: v.get("NombreRazon")?.as_str()?.to_string(),
+        nif: v.get("NIF")?.as_str()?.to_string(),
+    })
+}
+
+/// Reconstruye las referencias (`rectificadas` o `sustituidas`) desde el JSON guardado.
+fn refs_desde_json(json: Option<&str>, clave: &str) -> Vec<RefFactura> {
+    let Some(j) = json else { return vec![] };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(j) else {
+        return vec![];
+    };
+    v.get(clave)
+        .and_then(|a| a.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| {
+                    Some(RefFactura {
+                        nif: r.get("IDEmisorFactura")?.as_str()?.to_string(),
+                        num_serie: r.get("NumSerieFactura")?.as_str()?.to_string(),
+                        fecha: r.get("FechaExpedicionFactura")?.as_str()?.to_string(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// ¿Está el negocio en modo formación ahora mismo?
 pub async fn en_formacion<C: Reader>(conn: &C) -> AppResult<bool> {
     Ok(select_i64(
@@ -1900,6 +2134,239 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_subsanacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! La subsanación de un rechazo: el único camino del sistema que **no tenía productor**.
+    //!
+    //! Las columnas estaban, el XML las escribía y `marcas_de_subsanacion` decidía los valores, pero
+    //! nadie creaba la fila. Y como `pendientes()` sólo coge los `PENDIENTE`, un registro rechazado
+    //! se quedaba en el panel para siempre, contado como rechazado y sin ninguna forma de avanzar.
+
+    use super::*;
+    use crate::db::Db;
+    use std::sync::Arc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_subsana");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar SL' WHERE ID = 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        drop(g);
+        (db, dir)
+    }
+
+    /// Emite un alta y la deja marcada como RECHAZADA por la AEAT.
+    async fn alta_rechazada(db: &Arc<Db>) -> String {
+        let num = {
+            let g = db.write().await;
+            emitir_alta(
+                &g,
+                DatosFactura {
+                    lineas: vec![LineaTicket {
+                        total_con_iva: 12.10,
+                        tipo_iva: 10.0,
+                        exento: false,
+                        causa_exencion: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .num_serie_factura
+        };
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "UPDATE _Verifactu_Envios SET Estado = 'RECHAZADO', Codigo_Error = '1189';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        num
+    }
+
+    async fn cuenta(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn un_rechazado_vuelve_a_la_cola_como_subsanacion() {
+        let (db, _dir) = db_temporal().await;
+        alta_rechazada(&db).await;
+
+        assert_eq!(subsanar_rechazados(&db).await.unwrap(), 1);
+
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Subsanacion = 'S';").await,
+            1
+        );
+        assert_eq!(
+            cuenta(&db, "SELECT COUNT(*) FROM _Verifactu_Envios WHERE Estado = 'PENDIENTE';").await,
+            1,
+            "la subsanación sale a la cola; el rechazado se queda como estaba"
+        );
+    }
+
+    #[tokio::test]
+    async fn conserva_el_IDFactura_del_original_y_NO_gasta_numero() {
+        // Una subsanación no es una factura nueva: es el mismo hecho vuelto a contar bien. Si gastara
+        // número, el libro tendría dos facturas donde hubo una — y un hueco en la numeración real.
+        let (db, _dir) = db_temporal().await;
+        let num = alta_rechazada(&db).await;
+
+        subsanar_rechazados(&db).await.unwrap();
+
+        assert_eq!(
+            cuenta(
+                &db,
+                &format!("SELECT COUNT(*) FROM Registros_Facturacion WHERE Num_Serie_Factura = '{num}';")
+            )
+            .await,
+            2,
+            "los dos registros comparten número"
+        );
+        // Y el contador no se movió: la siguiente venta es la 2.
+        let g = db.write().await;
+        let (siguiente, _) = reservar_numero_factura(&g).await.unwrap();
+        let serie = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(siguiente, format!("{serie}/000002"));
+    }
+
+    #[tokio::test]
+    async fn un_rechazo_lleva_RechazoPrevio_X() {
+        // No es cosmético: dice si la AEAT tiene ya ese IDFactura o si esto es lo primero que le
+        // llega de esa factura. Con `X` significa que NO lo tiene.
+        let (db, _dir) = db_temporal().await;
+        alta_rechazada(&db).await;
+        subsanar_rechazados(&db).await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Subsanacion, Rechazo_Previo FROM Registros_Facturacion WHERE Subsanacion = 'S';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_string(row.get_value(0).unwrap()).as_deref(), Some("S"));
+        assert_eq!(v_string(row.get_value(1).unwrap()).as_deref(), Some("X"));
+    }
+
+    #[tokio::test]
+    async fn la_subsanacion_ocupa_su_propio_eslabon_de_la_cadena() {
+        // Comparte IDFactura pero no huella: es un registro más de la cadena, con su Orden, su hora
+        // de generación y su propio encadenamiento.
+        let (db, _dir) = db_temporal().await;
+        alta_rechazada(&db).await;
+        subsanar_rechazados(&db).await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Orden, Huella, COALESCE(Ant_Huella,'') FROM Registros_Facturacion ORDER BY Orden;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        // ⚠️ Cada fila se lee ENTERA antes de pedir la siguiente. Un `Row` de libsql deja de ser
+        // válido en cuanto se avanza el cursor, así que guardar dos y leerlos después devuelve dos
+        // veces el último — y el test compara algo consigo mismo y pasa siempre. Costó un rojo
+        // desconcertante ("huellas distintas: A vs A") descubrirlo.
+        let a = rows.next().await.unwrap().unwrap();
+        let h_a = v_string(a.get_value(1).unwrap()).unwrap_or_default();
+
+        let b = rows.next().await.unwrap().unwrap();
+        let orden_b = v_i64(b.get_value(0).unwrap()).unwrap_or(0);
+        let h_b = v_string(b.get_value(1).unwrap()).unwrap_or_default();
+        let ant_b = v_string(b.get_value(2).unwrap()).unwrap_or_default();
+
+        assert_ne!(h_a, h_b, "huellas distintas");
+        assert_eq!(ant_b, h_a, "la subsanación encadena con el rechazado");
+        assert_eq!(orden_b, 2);
+    }
+
+    #[tokio::test]
+    async fn subsanar_dos_veces_NO_emite_dos() {
+        // El botón se puede pulsar dos veces, y cada subsanación gasta un eslabón de la cadena.
+        let (db, _dir) = db_temporal().await;
+        alta_rechazada(&db).await;
+
+        assert_eq!(subsanar_rechazados(&db).await.unwrap(), 1);
+        assert_eq!(subsanar_rechazados(&db).await.unwrap(), 0);
+        assert_eq!(cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await, 2);
+    }
+
+    #[tokio::test]
+    async fn sin_rechazados_no_hace_nada() {
+        let (db, _dir) = db_temporal().await;
+        {
+            let g = db.write().await;
+            emitir_alta(
+                &g,
+                DatosFactura {
+                    lineas: vec![LineaTicket {
+                        total_con_iva: 12.10,
+                        tipo_iva: 10.0,
+                        exento: false,
+                        causa_exencion: None,
+                    }],
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(subsanar_rechazados(&db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn el_dinero_de_la_subsanacion_es_el_MISMO() {
+        // Se reconstruye del desglose del original, igual que la F3 y la R5 y por lo mismo: si
+        // difiriera un céntimo, habría dos versiones del mismo hecho.
+        let (db, _dir) = db_temporal().await;
+        alta_rechazada(&db).await;
+        subsanar_rechazados(&db).await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Importe_Total, Cuota_Total FROM Registros_Facturacion ORDER BY Orden;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        // Cada fila, entera, antes de avanzar (ver la nota del test anterior). Aquí además el
+        // descuido sería invisible: comparar la última consigo misma pasa siempre.
+        let a = rows.next().await.unwrap().unwrap();
+        let (imp_a, cuota_a) = (
+            v_string(a.get_value(0).unwrap()),
+            v_string(a.get_value(1).unwrap()),
+        );
+        let b = rows.next().await.unwrap().unwrap();
+        let (imp_b, cuota_b) = (
+            v_string(b.get_value(0).unwrap()),
+            v_string(b.get_value(1).unwrap()),
+        );
+        assert_eq!(imp_a, imp_b, "mismo importe");
+        assert_eq!(cuota_a, cuota_b, "misma cuota");
+        assert!(imp_a.is_some(), "y no vacíos");
+    }
 }
 
 #[cfg(test)]

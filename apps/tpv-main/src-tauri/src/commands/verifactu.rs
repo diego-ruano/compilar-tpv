@@ -120,6 +120,32 @@ pub async fn verifactu_set_formacion(
     Ok(n)
 }
 
+/// Vuelve a mandar los registros que la AEAT **rechazó**, como subsanación. Devuelve cuántos.
+///
+/// Sin esto, un rechazo era el final del camino: `pendientes()` sólo coge los `PENDIENTE`, así que el
+/// registro se quedaba en el panel, contado como rechazado y sin ninguna forma de avanzar.
+///
+/// Es **manual a propósito**. Un reintento automático de algo que la AEAT ya rechazó una vez
+/// repetiría el rechazo cada minuto: si el motivo era un fallo del programa, hace falta la versión
+/// que lo arregla; si era otra cosa, hace falta mirarla. Lo que se automatiza aquí es lo que no
+/// puede fallar dos veces igual, no lo que ya falló.
+#[tauri::command]
+pub async fn verifactu_subsanar_rechazados(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<usize, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let db = {
+        let guard = state.db.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| {
+            AppErrorDto::internal("Los registros de facturación sólo existen en el TPV principal")
+        })?
+    };
+    let n = tpv_infra_sqlite::verifactu::subsanar_rechazados(&db).await?;
+    let _ = tauri::Emitter::emit(&app, "verifactu:cambio", ());
+    Ok(n)
+}
+
 /// Da por vistas las anomalías de la cadena. Devuelve cuántas ha marcado.
 ///
 /// «Reconocida» no es «resuelta»: las filas se conservan, porque lo que registran es que a este

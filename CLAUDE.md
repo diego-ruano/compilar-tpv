@@ -932,6 +932,12 @@ no dejar de hacerlo.
   reglamento: *«las facturas que se expidan en sustitución o canje de facturas simplificadas […] no
   tendrán la condición de rectificativas»*. La serie sale del **tipo de factura**, no del camino que
   llamó, que es lo único que no se puede olvidar al añadir un camino nuevo.
+- **Un rechazo se subsana a mano, y sólo a mano.** `pendientes()` coge únicamente los `PENDIENTE`, así
+  que un registro rechazado no se reintenta solo — y no debe: repetir lo mismo daría el mismo rechazo
+  cada minuto. `subsanar_rechazados` emite un registro nuevo con **el mismo `IDFactura`**,
+  `Subsanacion='S'` y `RechazoPrevio='X'`, que **no gasta número** pero sí ocupa su propio eslabón de
+  la cadena. Lo dispara el botón de Configuración → Fiscal, normalmente después de que una versión
+  nueva arregle lo que causó el rechazo. Probado contra la AEAT: acepta la subsanación.
 - **Las tres subsanaciones son tres operativas distintas**, no una. `Subsanacion='S'` (corregir un
   registro que la AEAT aceptó), `RechazoPrevio` (reenviar tras un rechazo) y `SinRegistroPrevio`
   (alta de algo que nunca llegó a registrarse) se informan según el anexo oficial, y un `IDFactura`

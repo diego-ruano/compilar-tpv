@@ -116,3 +116,12 @@ export async function verifactuReconocerAnomalias(): Promise<number> {
 export async function verifactuSetFormacion(encendido: boolean): Promise<number> {
 	return await invokeClient<number>("verifactu_set_formacion", { encendido });
 }
+
+/**
+ * Vuelve a mandar como subsanación los registros que la AEAT rechazó. Devuelve cuántos.
+ *
+ * Es manual a propósito: reintentar solo algo que ya fue rechazado repetiría el rechazo cada minuto.
+ */
+export async function verifactuSubsanarRechazados(): Promise<number> {
+	return await invokeClient<number>("verifactu_subsanar_rechazados");
+}

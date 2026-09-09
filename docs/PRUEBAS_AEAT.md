@@ -398,6 +398,68 @@ comparación de dos cadenas de texto.
 
 ---
 
+## Los dos límites: el lote de 1000 y la subsanación
+
+```bash
+pnpm verifactu:limites -- <huella> <NIF> "Razon Social"
+```
+
+### El tope del art. 16.2
+
+Un envío de **1000 registros**, que es el máximo del diseño de registro:
+
+```
+1000 registros emitidos y encadenados en 2,9 s
+Remitiendo el lote…
+► enviados 1000 · aceptados 999 · con avisos 1 · rechazados 0   (3,1 s)
+```
+
+El único aviso fue un **2007** en el primer registro —«no debe informarse como primer registro»—
+porque la AEAT ya tenía registros de ese NIF de las pruebas anteriores. En un primer envío real de
+producción no aparecería.
+
+Lo que esto cierra: nuestro `pendientes()` recorta a 1000 y `puede_enviar()` implementa la regla,
+pero **un sobre de ese tamaño nunca se había mandado**. Unos 2 MB de XML suben por WinHTTP en tres
+segundos y la respuesta con mil líneas se parsea sin despeinarse.
+
+### La subsanación de un rechazo
+
+Es el único camino del sistema que la AEAT no había visto nunca — y hasta ese momento **no existía**:
+las columnas estaban, el XML las escribía y `marcas_de_subsanacion` decidía los valores, pero **nadie
+creaba la fila**. Como `pendientes()` sólo coge los `PENDIENTE`, un registro rechazado se quedaba en
+el panel para siempre, contado como rechazado y sin ninguna forma de avanzar.
+
+Se provocó un rechazo de verdad y se subsanó:
+
+```
+1) Remitiendo — se espera un RECHAZO…
+   #1 2026/20689069 F1  subsana=- rechazoPrevio=-  → RECHAZADO [1189] …el bloque Destinatarios
+                                                     tiene que estar cumplimentado.
+2) Emitiendo la SUBSANACIÓN…
+   #2 2026/20689069 F1  subsana=S rechazoPrevio=X  → PENDIENTE
+3) Remitiendo la subsanación…
+   ► enviados 1 · aceptados 1 · rechazados 0
+   #2 2026/20689069 F1  subsana=S rechazoPrevio=X  → ACEPTADO
+4) Volver a subsanar emite 0 (ya tiene una por delante)
+```
+
+Lo que confirma, además de que la AEAT la acepta:
+
+- Los **dos registros comparten `Num_Serie_Factura`**. Una subsanación no es una factura nueva: es el
+  mismo hecho vuelto a contar bien, así que conserva el `IDFactura` y **no gasta número**. El índice
+  único de la terna excluye las subsanaciones justo para que la segunda entre.
+- El `RechazoPrevio = "X"` es correcto para este caso: el original fue **rechazado**, así que la AEAT
+  no lo tenía y la subsanación es lo primero que le llega de esa factura.
+- **Ocupa su propio eslabón**: su `Orden`, su hora de generación y su propia huella, encadenada con
+  el registro rechazado.
+
+Se dispara **a mano** desde Configuración → Fiscal («Volver a mandarlas corregidas»), y eso es
+deliberado: reintentar solo algo que la AEAT ya rechazó repetiría el rechazo cada minuto. Si el
+motivo era un fallo del programa, hace falta la versión que lo arregla; si era otra cosa, hace falta
+mirarla.
+
+---
+
 ## Lo que NO hay que hacer
 
 - **No apuntar a producción para «probar».** Un registro de facturación enviado a producción es un
