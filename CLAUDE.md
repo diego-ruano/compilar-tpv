@@ -1002,6 +1002,10 @@ no dejar de hacerlo.
   no da un error legible: un parámetro `Option<…>` llega como `None` y el comando se queda con su
   valor por defecto. `check-comandos-tauri.mjs` comprueba el **nombre**, no la forma de los
   argumentos.
+- **Lo que queda abierto está en una lista, no en la cabeza de nadie**:
+  [docs/VERIFACTU_PENDIENTES.md](docs/VERIFACTU_PENDIENTES.md). Son decisiones y datos que no
+  dependen del código (identidad del productor, texto de la declaración responsable, serie de las
+  rectificativas…). Se resuelven de una en una y se tachan ahí.
 - Las **pruebas contra la AEAT** se lanzan a mano y están documentadas en
   [docs/PRUEBAS_AEAT.md](docs/PRUEBAS_AEAT.md): `pnpm verifactu:certificados` para ver qué hay en el
   almacén, `pnpm verifactu:probar-aeat` para el *handshake*, `pnpm verifactu:validar-xml` para

@@ -279,7 +279,9 @@ rojo con el número delante.
 
 ## Qué falta antes de producción
 
-Lo que **no** depende de código y hay que tener resuelto antes del primer envío real:
+La lista viva, con el detalle de cada punto, está en
+[VERIFACTU_PENDIENTES.md](VERIFACTU_PENDIENTES.md). En corto, lo que **no** depende de código y hay
+que tener resuelto antes del primer envío real:
 
 - [ ] El **alta / declaración responsable** del productor del software con sus datos definitivos
       (NIF y razón social). Hoy la pantalla dice que está incompleta, a propósito.
