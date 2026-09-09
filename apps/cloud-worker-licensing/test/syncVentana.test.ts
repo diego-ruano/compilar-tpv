@@ -46,8 +46,14 @@ vi.mock("../src/middleware/tenant", async (original) => ({
 const { syncRoutes } = await import("../src/domains/sync/sync.routes");
 
 /** Literal `YYYY-MM-DD HH:MM:SS` de hace `n` días, en el mismo huso que usa `parseClientNow`. */
+// El instante de referencia se congela al cargar el fichero, y no se lee el reloj en cada llamada.
+// Con `Date.now()` dentro, la misma expresión daba dos valores distintos al caer entre dos segundos:
+// el test que compara `ventana_desde` con `haceDias(...)` fallaba por un segundo, al azar, una vez
+// cada muchas ejecuciones. Un test que falla por el reloj enseña a reejecutar la tanda.
+const INSTANTE = Date.now();
+
 function haceDias(n: number): string {
-	return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
+	return new Date(INSTANTE - n * 86_400_000).toISOString().slice(0, 19).replace("T", " ");
 }
 const AHORA = haceDias(0);
 /** Bien dentro de la ventana. */
