@@ -141,10 +141,19 @@ fn escribir_alta(b: &mut String, r: &RegistroParaEnvio) {
         escribir_referencias(b, &refs, "sustituidas", "FacturasSustituidas", "IDFacturaSustituida");
     }
 
-    // `FechaOperacion` NO se informa (decidido en el diseño): en hostelería la operación termina
-    // cuando el cliente paga y se va, así que la fecha de la operación ES la del cobro y el campo
-    // sobra. Informarla y que cayera en otro trimestre dejaría el devengo en un período y la
-    // factura en el siguiente, a cambio de nada.
+    // `FechaOperacion` va SÓLO si la operación se efectuó otro día. No es opcional a nuestro gusto:
+    // los arts. 6.1.i) (factura completa) y 7.1.c) (simplificada) del RD 1619/2012 lo exigen con la
+    // misma redacción, *«siempre que se trate de una fecha distinta a la de expedición»*. Al revés
+    // también manda: informarlo cuando coincide es ruido, y la AEAT ya interpreta la ausencia como
+    // «igual a FechaExpedicionFactura».
+    //
+    // En un bar el caso normal es que coincidan —se consume y se cobra en el mismo acto— y por eso
+    // esto está vacío casi siempre. Los tres casos en que no: una comanda que cruza la medianoche,
+    // una rectificativa de una venta de otro día y una F3 que canjea un ticket anterior.
+    //
+    // Quién decide el valor es la capa que emite; aquí sólo se transcribe. Va DESPUÉS de las
+    // referencias y ANTES de `DescripcionOperacion`, que es el orden del `sequence` del XSD.
+    el_opt(b, "FechaOperacion", r.fecha_operacion.as_deref());
 
     el(
         b,
@@ -435,6 +444,7 @@ mod tests {
             nif_emisor: "89890001K".into(),
             num_serie_factura: "2027/000001".into(),
             fecha_expedicion: "15-01-2027".into(),
+            fecha_operacion: None,
             nombre_razon_emisor: "Bar de Pruebas SL".into(),
             tipo_factura: Some("F2".into()),
             tipo_rectificativa: None,

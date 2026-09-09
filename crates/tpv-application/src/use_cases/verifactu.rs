@@ -624,6 +624,7 @@ mod tests {
                 nif_emisor: "89890001K".into(),
                 num_serie_factura: num.into(),
                 fecha_expedicion: "15-01-2027".into(),
+                fecha_operacion: None,
                 nombre_razon_emisor: "Bar".into(),
                 tipo_factura: Some("F2".into()),
                 tipo_rectificativa: None,

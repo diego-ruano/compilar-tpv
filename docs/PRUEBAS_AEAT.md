@@ -45,8 +45,9 @@ su regla de «base + cuota tienen que dar el total».
 pnpm verifactu:validar-xml
 ```
 
-Genera **12 muestras** que cubren los casos que importan —alta simplificada, alta con destinatario,
-varios tipos de IVA, exenta, rectificativa por sustitución, anulación, subsanación, macrodato…— y las
+Genera **13 muestras** que cubren los casos que importan —alta simplificada, alta con destinatario,
+varios tipos de IVA, exenta, rectificativa por sustitución, anulación, subsanación, operación de otro
+día…— y las
 valida contra los XSD que vienen en `crates/tpv-infra-aeat/esquemas/` (descargados de la sede
 electrónica, sin tocar).
 
@@ -56,7 +57,7 @@ Requisito la primera vez:
 pip install xmlschema
 ```
 
-**Las 12 tienen que pasar.** El script está probado en negativo a propósito: si se le rompe un campo
+**Las 13 tienen que pasar.** El script está probado en negativo a propósito: si se le rompe un campo
 a mano, falla. Un «todas correctas» con un validador que no valida nada es peor que no tener paso 2.
 
 Para ver el XML que se generaría sin validarlo:

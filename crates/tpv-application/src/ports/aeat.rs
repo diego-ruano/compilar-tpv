@@ -89,6 +89,9 @@ pub struct RegistroParaEnvio {
     pub num_serie_factura: String,
     /// `DD-MM-AAAA`.
     pub fecha_expedicion: String,
+    /// `DD-MM-AAAA`. Se informa **sólo** si la operación se efectuó otro día (arts. 6.1.i) y
+    /// 7.1.c) del RD 1619/2012). Ausente = la AEAT toma la de expedición.
+    pub fecha_operacion: Option<String>,
     pub nombre_razon_emisor: String,
     pub tipo_factura: Option<String>,
     pub tipo_rectificativa: Option<String>,

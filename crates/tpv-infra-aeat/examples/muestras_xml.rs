@@ -32,6 +32,7 @@ fn base() -> RegistroParaEnvio {
         nif_emisor: "89890001K".into(),
         num_serie_factura: "2027/000001".into(),
         fecha_expedicion: "15-01-2027".into(),
+        fecha_operacion: None,
         nombre_razon_emisor: "Bar de Pruebas SL".into(),
         tipo_factura: Some("F2".into()),
         tipo_rectificativa: None,
@@ -198,6 +199,20 @@ fn main() {
     muestras.push((
         "12-lote-con-incidencia",
         xml::construir_envio(&cabecera(true), &[base(), encadenado(base())]),
+    ));
+
+    // ── La cena que cruza la medianoche: se consumió el 15 y se cobró el 16 ──
+    //
+    // `FechaOperacion` sólo se informa cuando difiere de la de expedición (arts. 6.1.i) y 7.1.c)
+    // del RD 1619/2012). Esta muestra existe para que el XSD confirme dos cosas que un test
+    // unitario no puede: que el campo cabe donde lo ponemos dentro del `sequence`, y que su tipo
+    // `fecha` acepta el formato `DD-MM-AAAA` que usamos en todo lo demás.
+    let mut cruza_medianoche = base();
+    cruza_medianoche.fecha_expedicion = "16-01-2027".into();
+    cruza_medianoche.fecha_operacion = Some("15-01-2027".into());
+    muestras.push((
+        "13-f2-operacion-de-otro-dia",
+        xml::construir_envio(&cabecera(false), &[cruza_medianoche]),
     ));
 
     for (nombre, contenido) in &muestras {

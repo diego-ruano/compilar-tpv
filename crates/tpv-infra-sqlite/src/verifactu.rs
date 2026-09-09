@@ -428,6 +428,13 @@ pub struct DatosFactura {
     /// registro — dos numeraciones paralelas serían dos cosas que pueden divergir. Si es `None`,
     /// lo reserva esta función.
     pub numero_reservado: Option<(String, i64)>,
+    /// `DD-MM-AAAA`: el día en que se efectuó la operación, **si no es el de expedición**.
+    ///
+    /// Lo decide quien emite, porque sólo él sabe a qué operación corresponde: la apertura de la
+    /// comanda en un cobro, la fecha de la factura original en una rectificativa o en una `F3`.
+    /// `emitir_alta` lo descarta si coincide con la de expedición — informarlo entonces es ruido, y
+    /// la norma lo condiciona a que sea distinta.
+    pub fecha_operacion: Option<String>,
 }
 
 /// Emite un registro de **alta** y lo deja encolado para remitir.
@@ -475,6 +482,17 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     };
     let fecha_expedicion = vf::fecha_registro_desde_iso(&crate::util::now_local_date())
         .ok_or_else(|| AppError::internal("El reloj del equipo no da una fecha utilizable"))?;
+
+    // Sólo si es DISTINTA de la de expedición. Los arts. 6.1.i) y 7.1.c) del RD 1619/2012 lo
+    // condicionan a eso con la misma redacción, y la AEAT interpreta la ausencia como «igual a la
+    // de expedición». Se filtra aquí y no en cada llamante para que no dependa de que todos se
+    // acuerden.
+    let fecha_operacion = d
+        .fecha_operacion
+        .as_deref()
+        .map(str::trim)
+        .filter(|f| !f.is_empty() && *f != fecha_expedicion)
+        .map(str::to_string);
     // `chrono::Local` y no `datetime('now')`: el campo lleva HUSO y la BD no lo escribe. Es un
     // literal calculado en Rust, igual que los UUID, así que el outbox lo replica tal cual.
     let fecha_hora_huso = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
@@ -511,7 +529,7 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
         r#"
         INSERT INTO Registros_Facturacion (
           ID_Registro, Orden, Tipo,
-          NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Serie, Numero,
+          NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Fecha_Operacion, Serie, Numero,
           Nombre_Razon_Emisor, Tipo_Factura, Tipo_Rectificativa, Descripcion_Operacion,
           Importe_Total, Cuota_Total, Desglose_Json, Destinatario_Json, Referencias_Json, Macrodato,
           Primer_Registro, Ant_NIF, Ant_Num_Serie, Ant_Fecha, Ant_Huella,
@@ -519,7 +537,7 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
           Sistema_Json, QR_Url, Incidencia, ID_Pago
         ) VALUES (
           ?1, ?2, 'ALTA',
-          ?3, ?4, ?5, ?6, ?7,
+          ?3, ?4, ?5, ?31, ?6, ?7,
           ?8, ?9, ?10, ?11,
           ?12, ?13, ?14, ?15, ?16, ?17,
           ?18, ?19, ?20, ?21, ?22,
@@ -558,6 +576,10 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
             Value::Text(qr_url.clone()),
             Value::Text(if d.incidencia { "S" } else { "N" }.to_string()),
             opt_text(d.id_pago.clone()),
+            // ?31 — va al final de la lista aunque su columna esté al principio: renumerar los
+            // treinta anteriores para colocarlo "en su sitio" es exactamente el cambio que desplaza
+            // un parámetro sin que nada lo note.
+            opt_text(fecha_operacion.clone()),
         ],
     )
     .await
@@ -778,6 +800,12 @@ pub async fn emitir_cobro(
             )
         })?;
 
+    // El día en que se efectuó la operación es aquel en que se consumió, o sea el de apertura de la
+    // comanda. Casi siempre es hoy y entonces no se informa; el caso que lo justifica es la cena que
+    // cruza la medianoche, que en hostelería no es raro. Lo exigen los arts. 6.1.i) y 7.1.c) del
+    // RD 1619/2012 con la misma redacción para la factura completa y para la simplificada.
+    let fecha_operacion = fecha_apertura_de_la_comanda(db, id_pago).await?;
+
     let mut lineas = lineas_de_pago(db, id_pago, obligado.iva_general).await?;
 
     let suma: f64 = lineas.iter().map(|l| l.total_con_iva).sum();
@@ -813,10 +841,38 @@ pub async fn emitir_cobro(
                 nif: d.nif,
             }),
             numero_reservado: Some(numero_reservado),
+            fecha_operacion,
             ..Default::default()
         },
     )
     .await
+}
+
+/// El día de apertura de la comanda a la que pertenece un cobro, en `DD-MM-AAAA`.
+///
+/// Devuelve `None` cuando no se puede saber, y eso **no es un error**: un cobro sin comanda o con
+/// una fecha que no se parse deja el campo sin informar, que es exactamente lo mismo que declarar
+/// que la operación fue el día de la expedición — el caso normal. Nada de lo que rodea al registro
+/// puede impedir emitirlo.
+async fn fecha_apertura_de_la_comanda<C: Reader>(
+    conn: &C,
+    id_pago: &str,
+) -> AppResult<Option<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT c.Fecha_Hora_Apertura FROM Pagos p              JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda              WHERE p.ID_Pago = ?1 LIMIT 1;",
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        return Ok(None);
+    };
+    // `Fecha_Hora_Apertura` es `AAAA-MM-DD hh:mm:ss`; sólo interesa el día.
+    Ok(v_string(row.get_value(0).map_err(db_err)?)
+        .filter(|f| f.len() >= 10)
+        .and_then(|f| vf::fecha_registro_desde_iso(&f[..10])))
 }
 
 /// Emite el registro que corresponde cuando un cobro deja de contar (FISCAL-01, §7 del plan).
@@ -858,7 +914,7 @@ pub async fn emitir_baja_de_pago(
     let mut rows = db
         .query(
             "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, \
-                    Importe_Total, Cuota_Total, Desglose_Json \
+                    Importe_Total, Cuota_Total, Desglose_Json, Fecha_Operacion \
              FROM Registros_Facturacion \
              WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
              ORDER BY Orden DESC LIMIT 1;",
@@ -881,6 +937,15 @@ pub async fn emitir_baja_de_pago(
     let importe = v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default();
     let cuota = v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default();
     let desglose = v_string(row.get_value(6).map_err(db_err)?);
+
+    // La operación que documenta una rectificativa es la MISMA que la de la factura original, y
+    // esa se efectuó otro día: la devolución se hace días después. Es, con diferencia, el caso más
+    // frecuente de `FechaOperacion` en un bar — mucho más que la comanda que cruza la medianoche.
+    //
+    // Se toma la del original si la tenía (una venta que ya cruzó medianoche) y, si no, su fecha de
+    // expedición. `emitir_alta` la descarta sola si acaba coincidiendo con la de hoy, que es el caso
+    // de devolver algo cobrado esta misma mañana.
+    let fecha_op_original = v_string(row.get_value(7).map_err(db_err)?).or_else(|| Some(fecha.clone()));
 
     match clase {
         ClaseBaja::Error => {
@@ -913,6 +978,7 @@ pub async fn emitir_baja_de_pago(
                     sustituidas: vec![],
                     incidencia: false,
                     numero_reservado: None,
+                    fecha_operacion: fecha_op_original,
                 },
             )
             .await?;
@@ -958,7 +1024,7 @@ pub async fn emitir_sustitutiva(
     let mut rows = db
         .query(
             "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Desglose_Json, \
-                    ID_Pago, COALESCE(Tipo_Factura, '') \
+                    ID_Pago, COALESCE(Tipo_Factura, ''), Fecha_Operacion \
              FROM Registros_Facturacion \
              WHERE Num_Serie_Factura = ?1 AND Tipo = 'ALTA' \
              ORDER BY Orden DESC LIMIT 1;",
@@ -977,6 +1043,11 @@ pub async fn emitir_sustitutiva(
     let desglose = v_string(row.get_value(4).map_err(db_err)?);
     let id_pago = v_string(row.get_value(5).map_err(db_err)?);
     let tipo_original = v_string(row.get_value(6).map_err(db_err)?).unwrap_or_default();
+    // La `F3` documenta LA MISMA operación que el ticket que canjea, y ese se consumió otro día: el
+    // cliente vuelve al día siguiente o a la semana. Se hereda la del original (o su expedición si
+    // no la tenía); `emitir_alta` la descarta sola si el canje es del mismo día.
+    let fecha_op_original =
+        v_string(row.get_value(7).map_err(db_err)?).or_else(|| Some(fecha.clone()));
 
     if tipo_original != "F2" {
         // Sólo una simplificada se canjea. Una `F1` ya es una factura completa y una `R5` es una
@@ -1024,6 +1095,7 @@ pub async fn emitir_sustitutiva(
                 num_serie,
                 fecha,
             }],
+            fecha_operacion: fecha_op_original,
             ..Default::default()
         },
     )
@@ -1505,6 +1577,81 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_fecha_de_operacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! Cuándo se informa `FechaOperacion` y cuándo no.
+    //!
+    //! La regla no es nuestra: los arts. 6.1.i) (factura completa) y 7.1.c) (simplificada) del
+    //! RD 1619/2012 la escriben igual — *«la fecha en que se hayan efectuado las operaciones que se
+    //! documentan […] siempre que se trate de una fecha distinta a la de expedición de la factura»*.
+    //!
+    //! O sea que el campo tiene DOS condiciones y las dos se prueban aquí: se informa si difiere, y
+    //! **no** se informa si coincide. La segunda es la que se olvida, y su síntoma es un XML con un
+    //! dato redundante que la AEAT no necesita.
+
+    use super::*;
+
+    /// `emitir_alta` filtra el valor antes de guardarlo. Este es ese filtro, aislado.
+    fn filtrada(fecha_operacion: Option<&str>, fecha_expedicion: &str) -> Option<String> {
+        fecha_operacion
+            .map(str::trim)
+            .filter(|f| !f.is_empty() && *f != fecha_expedicion)
+            .map(str::to_string)
+    }
+
+    #[test]
+    fn si_la_operacion_es_de_OTRO_dia_se_informa() {
+        // La cena que cruza la medianoche: comanda abierta el 15, cobrada el 16.
+        assert_eq!(
+            filtrada(Some("15-01-2027"), "16-01-2027"),
+            Some("15-01-2027".to_string())
+        );
+    }
+
+    #[test]
+    fn si_coincide_con_la_expedicion_NO_se_informa() {
+        // El caso normal de un bar, y el 99 % de las facturas. La norma condiciona el campo a que
+        // sea una fecha DISTINTA, y la AEAT ya toma la de expedición cuando falta.
+        assert_eq!(filtrada(Some("15-01-2027"), "15-01-2027"), None);
+    }
+
+    #[test]
+    fn una_cadena_vacia_no_es_una_fecha() {
+        // Un `Some("")` colado desde una fila sin dato pondría `<FechaOperacion></FechaOperacion>`
+        // en el XML, que no valida contra el XSD (el tipo es una fecha, no un texto libre).
+        assert_eq!(filtrada(Some(""), "15-01-2027"), None);
+        assert_eq!(filtrada(Some("   "), "15-01-2027"), None);
+    }
+
+    #[test]
+    fn sin_dato_no_se_inventa() {
+        assert_eq!(filtrada(None, "15-01-2027"), None);
+    }
+
+    #[test]
+    fn la_fecha_de_operacion_NO_entra_en_la_cadena_de_huella() {
+        // Es lo que permite añadir este campo sin invalidar ninguna huella ya calculada, y lo que
+        // permitió corregir el bloque del productor. Se comprueba sobre la cadena de verdad, no
+        // sobre la lista de campos de memoria.
+        let cadena = vf::cadena_huella_alta(&vf::EntradaHuellaAlta {
+            id_emisor_factura: "89890001K",
+            num_serie_factura: "2027/000001",
+            fecha_expedicion_factura: "16-01-2027",
+            tipo_factura: "F2",
+            cuota_total: "1.10",
+            importe_total: "12.10",
+            huella_anterior: None,
+            fecha_hora_huso: "2027-01-16T01:34:56+01:00",
+        });
+        assert!(
+            !cadena.contains("FechaOperacion"),
+            "si entrara, informarla cambiaría huellas ya emitidas: {cadena}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2057,7 +2204,8 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                         r.Cuota_Total, r.Desglose_Json, r.Destinatario_Json, r.Referencias_Json, \
                         r.Macrodato, r.Primer_Registro, r.Ant_NIF, r.Ant_Num_Serie, r.Ant_Fecha, \
                         r.Ant_Huella, r.Huella, r.Tipo_Huella, r.Fecha_Hora_Huso, r.Sistema_Json, \
-                        r.Subsanacion, r.Rechazo_Previo, r.Sin_Registro_Previo \
+                        r.Subsanacion, r.Rechazo_Previo, r.Sin_Registro_Previo, \
+                        r.Fecha_Operacion \
                  FROM Registros_Facturacion r \
                  JOIN _Verifactu_Envios e ON e.ID_Registro = r.ID_Registro \
                  WHERE e.Estado = 'PENDIENTE' \
@@ -2076,6 +2224,9 @@ impl VerifactuRepository for SqliteVerifactuRepository {
                 nif_emisor: v_string(g(2)?).unwrap_or_default(),
                 num_serie_factura: v_string(g(3)?).unwrap_or_default(),
                 fecha_expedicion: v_string(g(4)?).unwrap_or_default(),
+                // Va la última en el SELECT (índice 26) aunque su columna esté al principio de la
+                // tabla: añadirla en medio desplazaría los veintiséis índices siguientes de golpe.
+                fecha_operacion: v_string(g(26)?),
                 nombre_razon_emisor: v_string(g(5)?).unwrap_or_default(),
                 tipo_factura: v_string(g(6)?),
                 tipo_rectificativa: v_string(g(7)?),

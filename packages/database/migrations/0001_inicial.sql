@@ -1175,6 +1175,19 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
 --     distintas. Se formatean UNA vez y nadie recomputa nada al leer: el XML, el QR y la
 --     exportacion se construyen desde el texto guardado.
 --
+-- `Fecha_Operacion` (DD-MM-AAAA) se informa SOLO cuando la operacion se efectuo en un dia distinto
+-- al de expedicion de la factura. No es opcional a nuestro gusto: lo exigen el art. 6.1.i) para la
+-- factura completa y el 7.1.c) para la simplificada, con la MISMA redaccion -"siempre que se trate
+-- de una fecha distinta a la de expedicion de la factura"-, asi que tambien alcanza a los tickets.
+--
+-- NULL es el caso normal de un bar -se consume y se cobra en el mismo acto- y la AEAT interpreta la
+-- ausencia como "igual a FechaExpedicionFactura"; lo dicen sus propios codigos de error, que
+-- repiten "FechaExpedicionFactura si no se informa FechaOperacion". Los tres casos en que NO
+-- coinciden: una comanda que cruza la medianoche, una rectificativa de una venta de otro dia y una
+-- F3 que canjea un ticket anterior.
+--
+-- NO entra en la cadena de huella, asi que informarlo no cambia ninguna huella ya calculada.
+--
 -- ID_Registro es TEXT PRIMARY KEY, asi que el UUID se genera ANTES del INSERT (nunca por DEFAULT ni
 -- trigger): CLAUDE.md 9, "IDs deterministas". ON DELETE SET NULL en ID_Pago porque un registro
 -- fiscal no puede desaparecer porque desaparezca aquello a lo que apunta (misma regla que
@@ -1193,6 +1206,7 @@ CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   NIF_Emisor            TEXT NOT NULL,
   Num_Serie_Factura     TEXT NOT NULL,
   Fecha_Expedicion      TEXT NOT NULL,
+  Fecha_Operacion       TEXT,
   Serie                 TEXT NOT NULL,
   Numero                INTEGER NOT NULL,
   Nombre_Razon_Emisor   TEXT NOT NULL,

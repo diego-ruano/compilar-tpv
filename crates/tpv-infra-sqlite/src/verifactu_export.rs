@@ -49,6 +49,8 @@ struct Fila {
     nif_emisor: String,
     num_serie: String,
     fecha: String,
+    /// Vacía en el caso normal: la operación se efectuó el mismo día que se expidió la factura.
+    fecha_operacion: String,
     tipo_factura: String,
     importe: String,
     cuota: String,
@@ -104,7 +106,8 @@ async fn leer<C: Reader>(conn: &C, desde: &str, hasta: &str) -> AppResult<Vec<Fi
                     COALESCE(r.Incidencia,'N'), COALESCE(r.Subsanacion,''), \
                     COALESCE(r.Desglose_Json,''), COALESCE(r.Destinatario_Json,''), \
                     COALESCE(r.Referencias_Json,''), COALESCE(r.Ant_Huella,''), \
-                    COALESCE(e.Estado,''), COALESCE(e.CSV,'') \
+                    COALESCE(e.Estado,''), COALESCE(e.CSV,''), \
+                    COALESCE(r.Fecha_Operacion,'') \
              FROM Registros_Facturacion r \
              LEFT JOIN _Verifactu_Envios e ON e.ID_Registro = r.ID_Registro \
              WHERE r.Fecha_Hora_Huso >= ?1 AND r.Fecha_Hora_Huso <= ?2 \
@@ -142,6 +145,7 @@ async fn leer<C: Reader>(conn: &C, desde: &str, hasta: &str) -> AppResult<Vec<Fi
             ant_huella: t(16)?,
             estado_envio: t(17)?,
             csv_aeat: t(18)?,
+            fecha_operacion: t(19)?,
         });
     }
     Ok(out)
@@ -160,6 +164,9 @@ fn construir_xml(filas: &[Fila]) -> String {
         el(&mut b, "IDEmisorFactura", &f.nif_emisor);
         el(&mut b, "NumSerieFactura", &f.num_serie);
         el(&mut b, "FechaExpedicionFactura", &f.fecha);
+        if !f.fecha_operacion.is_empty() {
+            el(&mut b, "FechaOperacion", &f.fecha_operacion);
+        }
         if !f.tipo_factura.is_empty() {
             el(&mut b, "TipoFactura", &f.tipo_factura);
         }
@@ -213,17 +220,18 @@ fn construir_csv(filas: &[Fila]) -> String {
     // alguien lo abra, así que esto no es un detalle cosmético.
     b.push('\u{FEFF}');
     b.push_str(
-        "Orden;Tipo;TipoFactura;NumSerieFactura;FechaExpedicion;ImporteTotal;CuotaTotal;\
+        "Orden;Tipo;TipoFactura;NumSerieFactura;FechaExpedicion;FechaOperacion;ImporteTotal;CuotaTotal;\
          FechaHoraGeneracion;Huella;HuellaAnterior;Incidencia;Subsanacion;EstadoRemision;CSV\n",
     );
     for f in filas {
         b.push_str(&format!(
-            "{};{};{};{};{};{};{};{};{};{};{};{};{};{}\n",
+            "{};{};{};{};{};{};{};{};{};{};{};{};{};{};{}\n",
             f.orden,
             csv(&f.tipo),
             csv(&f.tipo_factura),
             csv(&f.num_serie),
             csv(&f.fecha),
+            csv(&f.fecha_operacion),
             csv(&f.importe),
             csv(&f.cuota),
             csv(&f.fecha_hora_huso),
@@ -382,6 +390,7 @@ mod tests {
             nif_emisor: "89890001K".into(),
             num_serie: num.into(),
             fecha: "15-01-2027".into(),
+            fecha_operacion: String::new(),
             tipo_factura: "F2".into(),
             importe: "12.10".into(),
             cuota: "1.10".into(),
@@ -422,7 +431,25 @@ mod tests {
         let txt = construir_csv(&[fila(1, "2027/000001", "")]);
         assert!(txt.starts_with('\u{FEFF}'));
         assert!(txt.contains("Orden;Tipo;TipoFactura;"));
-        assert!(txt.contains("1;ALTA;F2;2027/000001;15-01-2027;12.10;1.10;"));
+        // La columna de `FechaOperacion` va vacía en el caso normal —la operación es del mismo día—
+        // pero la columna EXISTE: un CSV cuyo número de campos cambia según la fila no lo abre bien
+        // ninguna hoja de cálculo.
+        assert!(txt.contains("1;ALTA;F2;2027/000001;15-01-2027;;12.10;1.10;"));
+    }
+
+    #[test]
+    fn el_csv_saca_la_fecha_de_operacion_cuando_la_hay() {
+        // La cena que cruza la medianoche. Quien abra el fichero tiene que poder ver que esa factura
+        // documenta una operación de otro día: es justo el dato por el que preguntaría un inspector
+        // al ver una venta fechada a la una de la madrugada.
+        let mut f = fila(1, "2027/000001", "");
+        f.fecha = "16-01-2027".into();
+        f.fecha_operacion = "15-01-2027".into();
+        let txt = construir_csv(&[f]);
+        assert!(
+            txt.contains("1;ALTA;F2;2027/000001;16-01-2027;15-01-2027;12.10;1.10;"),
+            "{txt}"
+        );
     }
 
     #[test]

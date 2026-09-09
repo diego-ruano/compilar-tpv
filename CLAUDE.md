@@ -889,7 +889,7 @@ no dejar de hacerlo.
 | Pantalla | `src/features/configuracion/sections/Fiscal.tsx` | Obligado, certificado, cola, exportación, declaración responsable |
 | Factura completa | `src/shared/ticket/DatosFiscalesModal.tsx` | El formulario de `F1`, cableado en los dos caminos del cobro |
 | Escalera de avisos | `src/shared/ticket/AvisoFiscalModal.tsx` + `shared/stores/useEstadoFiscal.ts` | Los dos peldaños altos |
-| Validación del XML | `scripts/verifactu-validar-xml.py` | Genera 12 muestras y las valida contra los XSD oficiales |
+| Validación del XML | `scripts/verifactu-validar-xml.py` | Genera 13 muestras y las valida contra los XSD oficiales |
 
 ### Las reglas
 
@@ -921,6 +921,11 @@ no dejar de hacerlo.
   estado de envío (`resembrar_cola_de_envio`) en vez de preguntar a la AEAT qué tiene:
   `Registros_Facturacion` se replica y vuelve, pero `_Verifactu_Envios` es estado **local** y no, así
   que sin esto el panel diría «0 pendientes» y el job no mandaría nada.
+- **Las rectificativas van en SERIE PROPIA** (`R2027/000001`), y no es una elección: el art. 6.1.a)
+  del RD 1619/2012 la impone «en todo caso». La **`F3` no**, y eso sale del art. 15.6 del mismo
+  reglamento: *«las facturas que se expidan en sustitución o canje de facturas simplificadas […] no
+  tendrán la condición de rectificativas»*. La serie sale del **tipo de factura**, no del camino que
+  llamó, que es lo único que no se puede olvidar al añadir un camino nuevo.
 - **Las tres subsanaciones son tres operativas distintas**, no una. `Subsanacion='S'` (corregir un
   registro que la AEAT aceptó), `RechazoPrevio` (reenviar tras un rechazo) y `SinRegistroPrevio`
   (alta de algo que nunca llegó a registrarse) se informan según el anexo oficial, y un `IDFactura`
@@ -972,6 +977,15 @@ no dejar de hacerlo.
   de verdad.
 - **`Orden` es explícito, no `rowid`.** El eslabón anterior es `MAX(Orden)`; con `rowid` la cadena
   dependería del orden en que una restauración reinserta las filas, que no está garantizado.
+- **`FechaOperacion` se informa sólo si la operación fue otro día.** Los arts. 6.1.i) (factura
+  completa) y 7.1.c) (simplificada) del RD 1619/2012 lo escriben igual —*«siempre que se trate de
+  una fecha distinta a la de expedición»*—, y que el 7 lo repita es lo que decide el caso: alcanza
+  también a los tickets, que son el 99 % de lo que emite un bar. La regla tiene **dos mitades** y las
+  dos importan: se informa si difiere, y **no** se informa si coincide (la AEAT ya toma la de
+  expedición cuando falta). El filtro vive en `emitir_alta`, no en cada llamante. Los tres casos en
+  que no coinciden: una comanda que cruza la medianoche (la fecha sale de su apertura), una
+  rectificativa de una venta de otro día y una `F3` que canjea un ticket anterior (las dos heredan la
+  del original). No entra en la cadena de huella.
 - **Un producto al 0 % es *sujeto*, no *exento*.** Son dos afirmaciones legales distintas y el XSD las
   pone en un `<choice>`: informar tipo o cuota en un tramo exento es el error 1238. La causa de
   exención (`E1`…`E6`) la lleva el producto (`Productos.Exento`, `Causa_Exencion`) y se congela en la

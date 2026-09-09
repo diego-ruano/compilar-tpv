@@ -11,7 +11,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 1 | [Identidad del productor del software](#1-identidad-del-productor-del-software) | 🟡 **aplazado a propósito** | Producción; **ya no rompe nada mientras tanto** |
 | 2 | [Texto de la declaración responsable](#2-texto-de-la-declaración-responsable) | ⬜ | Producción |
 | 3 | [Serie de las rectificativas](#3-serie-de-las-rectificativas) | ✅ | — |
-| 4 | [`FechaOperacion`: hoy no se informa](#4-fechaoperacion-hoy-no-se-informa) | ⬜ | Nada; es una confirmación |
+| 4 | [`FechaOperacion`](#4-fechaoperacion) | ✅ | — |
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
 | 7 | [`certificado_ok` no lo rellena nadie](#7-certificado_ok-no-lo-rellena-nadie) | ⬜ | Nada hoy; el panel no puede decir «no hay certificado» |
@@ -111,14 +111,39 @@ que no lo es.
 
 ---
 
-## 4. `FechaOperacion`: hoy no se informa
+## 4. `FechaOperacion` ✅
 
-El registro puede llevar `FechaOperacion` además de `FechaExpedicionFactura`, y **hoy no se informa**
-porque en un bar la operación y la expedición son el mismo instante: se consume y se cobra.
+**Resuelto (2026-09-09). Tampoco era una preferencia.**
 
-Donde dejaría de ser verdad: un catering o un evento que se factura días después, o una cuenta que se
-abre un día y se cobra al siguiente (una comanda de madrugada cobrada por la mañana). Conviene que un
-asesor lo confirme antes de producción.
+Estaba anotado como «conviene que un asesor lo confirme». El reglamento lo dice sin necesidad de
+asesor, y con la misma redacción para los dos tipos de factura:
+
+> *Art. 6.1.i)* (factura completa) **y** *art. 7.1.c)* (simplificada), RD 1619/2012: «La fecha en que
+> se hayan efectuado las operaciones que se documentan […] **siempre que se trate de una fecha
+> distinta a la de expedición de la factura**.»
+
+Que el art. 7 lo repita es lo que decide el caso: el 99 % de las facturas de un bar son
+simplificadas, así que la obligación alcanza a los tickets, no sólo a las facturas con NIF.
+
+La regla tiene **dos mitades** y las dos están implementadas: se informa si la fecha difiere, y **no**
+se informa si coincide (la AEAT ya interpreta la ausencia como «igual a la de expedición» — lo dicen
+sus propios códigos de error, que repiten *«FechaExpedicionFactura si no se informa
+FechaOperacion»*). El filtro vive en `emitir_alta`, no en cada llamante, para que no dependa de que
+todos se acuerden.
+
+Los tres casos en que no coinciden, y de dónde sale la fecha en cada uno:
+
+| Caso | Fecha de operación |
+|---|---|
+| Una comanda que **cruza la medianoche** | La de apertura de la comanda |
+| Una **rectificativa** (`R5`) de una venta de otro día | La de la factura original |
+| Una **`F3`** que canja un ticket anterior | La del ticket sustituido |
+
+El segundo y el tercero son mucho más frecuentes que el primero: una devolución o un canje casi
+nunca son del mismo día. El primero es el que se ve venir y el que menos pasa.
+
+`FechaOperacion` **no entra en la cadena de huella**, así que añadirlo no invalida ninguna huella ya
+calculada. Hay un test que lo comprueba sobre la cadena real, no sobre una lista de campos.
 
 ---
 
