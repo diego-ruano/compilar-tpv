@@ -845,6 +845,12 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   LETRAS: quien la baja a 20 quiere el texto más grande, no un logo del tercio del papel.
 - **Cobrar es cosa de la Main.** El worker rechaza el cobro desde una Handy (`cobro_solo_en_main`),
   porque el número correlativo y el cajón viven en la Main.
+- **Base + IVA tienen que dar el total, y NADIE MÁS LO VIGILA.** Se comprobó contra la AEAT
+  mandando un `CuotaTotal` descuadrado a propósito: **lo acepta sin decir nada** (el `ImporteTotal`
+  descuadrado sí salta, error 2005; el de la cuota no salta ninguno). Así que la regla de que la
+  cuota es *lo que falta* para llegar al total, y sus tablas de golden en el dominio, son la única
+  red que hay contra esa clase de error. Ver el banco adversario en
+  [docs/PRUEBAS_AEAT.md](docs/PRUEBAS_AEAT.md).
 - **Base + IVA tienen que dar el total.** Se redondea la base y la cuota es **lo que falta**: si se
   redondean por separado, a veces suben las dos y el papel dice `0,38 + 0,02 = 0,39` (0,39 € al 4 %
   es el primer caso). Un ticket cuya base más su IVA no dan el total es un documento mal emitido.
@@ -1023,8 +1029,15 @@ no dejar de hacerlo.
   **anulación**; una **devolución** al cliente emite una rectificativa `R5` y no deshace nada. Lo
   decide `ClaseBaja` en `anular_pago`, y de ello depende si las líneas y el stock vuelven.
 - **El texto que viaja en el XML se sanea.** `<`, `>`, `"`, `'` y `=` se quitan de los campos libres
-  (error 1287). El nombre de un producto lo escribe el usuario, y una comilla en «Tosta d'all» tiraba
-  el envío entero.
+  en el dominio (`sanear_texto`), y además el constructor de XML los **escapa**. Es doble red y se
+  deja así a propósito, aunque el banco adversario demostró que **la AEAT acepta esos caracteres
+  escapados** en `DescripcionOperacion`: el error 1287 existe en el catálogo con un `%s` para el
+  nombre del campo, así que puede aplicar a otros, y pasarse de estricto en un campo descriptivo no
+  rompe nada.
+- **Que una línea exenta no lleve tipo ni cuota no depende de la AEAT.** `escribir_detalle` en
+  `xml.rs` **no sabe** construir las dos cosas a la vez: la rama de la exenta escribe `OperacionExenta`
+  y la base, y punto. Se intentó forzar el error 1238 manipulando la fila y no llegó a salir del
+  equipo. Una invariante que el código no puede violar es mejor que una que alguien vigila.
 - **El NIF se valida en los dos lados, y la copia es deliberada.** `tpv_domain::verifactu::nif_valido`
   y `nifValido` en `DatosFiscalesModal.tsx`. El backend lo revalida porque quien puede invocar un
   comando puede mandar lo que quiera; el frontend lo comprueba porque un NIF mal dictado **no** se

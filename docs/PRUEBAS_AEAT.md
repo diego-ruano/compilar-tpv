@@ -323,6 +323,81 @@ exactamente para lo que existe ese fichero.
 
 ---
 
+## Banco de pruebas adversarias: qué contesta la AEAT de verdad
+
+```bash
+pnpm verifactu:errores -- <huella> <NIF> "Razon Social"
+```
+
+Manda registros **rotos a propósito** y compara el código que devuelve la AEAT con el que teníamos
+documentado. Existe porque todo el diseño se apoya en suposiciones sacadas de **leer** su catálogo de
+errores, y leer no es comprobar.
+
+### Resultados (2026-09-09, preproducción)
+
+| Caso | Esperado | Real | |
+|---|---|---|---|
+| Huella incorrecta | 2000 | **2000** | ✅ |
+| `ImporteTotal` que no cuadra con el desglose | 2005 | **2005** | ✅ |
+| Fecha de generación de hace tres días | 2004 | **2004** | ✅ |
+| `F2` **con** destinatario (prohibido) | 1190 | **1190** | ✅ |
+| `F1` **sin** destinatario (obligatorio) | 1189 | **1189** | ✅ |
+| `F2` por encima de 3.000 € | 1150 | **1150** | ✅ |
+| Registro sano (control) | aceptado | **aceptado** | ✅ |
+| **Reenviar lo mismo (duplicado)** | **3000 → tratado como aceptado** | **3000 → ACEPTADO** | ✅ |
+| `CuotaTotal` que no cuadra | 2006 | **aceptado, sin código** | ◆ |
+| Caracteres `< > " =` en la descripción | 1287 | **aceptado, sin código** | ◆ |
+
+El **3000** es el que más importa de toda la tabla: es la idempotencia del sistema entero — lo que
+hace que reenviar tras un corte, tras una restauración o tras un reintento converja en vez de
+duplicar. Confirmado contra el servidor real, y confirmado además que nuestro `clasificar()` lo
+guarda como `ACEPTADO`.
+
+### Los dos que no coincidieron
+
+**`CuotaTotal` descuadrado se acepta.** Con un `ImporteTotal` que no cuadra salta el 2005, pero con
+un `CuotaTotal` que no cuadra **no salta nada**. La consecuencia práctica: **no se puede contar con
+la AEAT para detectar ese error**, así que la única red es nuestra propia aritmética — la regla de
+que la cuota es *lo que falta* para llegar al total (§11 de CLAUDE.md), que está probada en el
+dominio con tablas de golden. Ese test dejó de ser una comodidad.
+
+**Los caracteres prohibidos se aceptaron.** Se mandó `Menu <del> dia = "bueno"` en
+`DescripcionOperacion` y entró sin queja. Nuestro constructor de XML los **escapa** (`&lt;`), y la
+AEAT los aceptó así. O sea que `sanear_texto` —que los **elimina** en el dominio— es **más estricto de
+lo que la AEAT exige**, al menos para este campo. Se deja como está: pasarse de estricto en un campo
+descriptivo no rompe nada, y el error 1287 existe en el catálogo (con un `%s` para el nombre del
+campo), así que puede aplicar a otros.
+
+### Y uno que no llegó a probarse, por una buena razón
+
+El caso «línea exenta informando `TipoImpositivo`» (error 1238) salió aceptado, pero **no porque la
+AEAT lo tolere**: es que nunca llegó. `escribir_detalle` en `xml.rs` **no puede** emitir las dos cosas
+a la vez — la rama de la exenta escribe `OperacionExenta` y la base, y punto. La manipulación se
+quedó en nuestra propia puerta.
+
+Es el mejor resultado posible: esa invariante no depende de que la AEAT la vigile, sino de que el
+código no sepa construir lo contrario.
+
+### Dos cosas aprendidas sobre el orden de validación
+
+Salieron de una primera tanda que hubo que descartar, y las dos ahorran horas:
+
+1. **Los errores de formato (`1xxx`) se comprueban antes que los de contenido (`2xxx`)**, y dentro de
+   los `2xxx` **la huella (2000) va primero**. Consecuencia: si manipulas un campo que entra en la
+   cadena hasheada —importe, cuota, tipo de factura, fecha-hora— la AEAT contesta 2000 y **nunca
+   llegas a ver la validación de negocio**. Para probarla hay que recalcular la huella después de
+   manipular, que es lo que hace el banco.
+2. **La numeración tiene que ser única entre tandas.** Una factura se identifica por
+   (emisor, número, fecha), así que repetir números entre ejecuciones devuelve 3000 duplicado y
+   enmascara el error que se quería provocar. El banco salta el contador a un número alto por
+   ejecución.
+
+Y un regalo del servidor: cuando falla la huella, **la AEAT devuelve la cadena exacta que usó para
+calcularla** y el hash que le salió. Eso convierte lo que sería una depuración a ciegas en una
+comparación de dos cadenas de texto.
+
+---
+
 ## Lo que NO hay que hacer
 
 - **No apuntar a producción para «probar».** Un registro de facturación enviado a producción es un
