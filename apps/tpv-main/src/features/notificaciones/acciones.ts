@@ -2,7 +2,7 @@
 //
 // Traduce la `accion` de una notificación a la pantalla que resuelve el aviso. La acción la fija
 // el emisor en Rust (`use_cases/*`: "ver_tareas", "ver_reservas", "ver_pedidos", "ver_licencia",
-// "ver_inventario", "ver_clientes"); aquí solo se mapea a una ruta del router.
+// "ver_inventario", "ver_clientes", "ver_fiscal"); aquí solo se mapea a una ruta del router.
 //
 // Una acción desconocida devuelve `null`: la notificación se marca como leída y no navega. Así el
 // backend puede emitir acciones nuevas (o una versión vieja del front recibir una acción reciente)
@@ -27,6 +27,9 @@ const DESTINOS: Record<string, DestinoNotificacion> = {
   // (ajustar el lote / revisar la ficha del cliente).
   ver_inventario: { to: "/Inventario" },
   ver_clientes: { to: "/Clientes" },
+  // FISCAL-01: atraso en la remisión a la AEAT. Lleva a la pantalla donde se ve la cola, el
+  // certificado y el botón de probar la conexión, que es donde se resuelve.
+  ver_fiscal: { to: "/Configuracion", state: { seccion: "FISCAL" } },
 };
 
 export function destinoDeAccion(

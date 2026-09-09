@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import NavBar from "../layoutComponent/NavBar";
 import Titlebar from "../layoutComponent/Titlebar";
+import { AvisoFiscalMontado } from "../../shared/ticket/AvisoFiscalModal";
 
 function Layout({ children }: { children: React.ReactNode }) {
   // Estado del sidebar controlado desde layout (para overlay en móvil).
@@ -88,6 +89,10 @@ function Layout({ children }: { children: React.ReactNode }) {
         {/* Main scrolleable */}
         <main className="min-w-0 flex-1 overflow-y-auto bg-bg">{children}</main>
       </div>
+
+      {/* FISCAL-01: los dos peldaños altos de la escalera de avisos. Va aquí, montado una vez, y no
+          en cada pantalla: así cubre también las que se añadan después. */}
+      <AvisoFiscalMontado />
     </div>
   );
 }

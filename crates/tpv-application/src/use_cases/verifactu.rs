@@ -33,6 +33,90 @@ pub async fn estado(repo: &dyn VerifactuRepository) -> AppResult<EstadoFiscal> {
     repo.estado().await
 }
 
+/// Clave de dedupe del aviso por atraso. Una sola, a propósito: lo que cambia con los escalones es
+/// la severidad y el texto, no el hecho. Con una clave por escalón, subir de peldaño dejaría el
+/// anterior abierto y el centro de notificaciones acumularía tres avisos de lo mismo.
+pub const CLAVE_ATRASO: &str = "verifactu_atraso";
+
+/// Emite (o cierra) el aviso por **atraso en la remisión**, según el escalón.
+///
+/// ## Por qué esto existe aparte del panel
+///
+/// La obligación de remitir es del bar, y un panel que hay que abrir para enterarse no informa a
+/// nadie: el día que el atraso importa es justo el día en que nadie está mirando Configuración →
+/// Fiscal. El escalón `visible` se queda en el panel a propósito —una hora de cola es
+/// funcionamiento normal, incluso con fibra— y a partir de **6 horas** el aviso sale a buscar al
+/// administrador.
+///
+/// ## Y se CIERRA solo
+///
+/// Cuando la cola se vacía (o baja del escalón), el aviso se resuelve. Un aviso que hay que
+/// descartar a mano después de que el problema se arregle enseña a descartar avisos, que es lo
+/// contrario de lo que esto busca.
+pub async fn avisar_de_atraso(
+    repo: &dyn VerifactuRepository,
+    notifier: &dyn crate::ports::notificaciones::Notifier,
+) -> AppResult<bool> {
+    use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
+    let e = repo.estado().await?;
+
+    // Sin datos fiscales no hay nada que remitir todavía, y el panel ya lo dice con un mensaje mucho
+    // más útil («mientras falten, no se puede cobrar»). Avisar aquí sería decir dos veces lo mismo
+    // por dos caminos distintos.
+    if !e.datos_fiscales_completos {
+        let _ = notifier.resolver_por_clave(CLAVE_ATRASO).await;
+        return Ok(false);
+    }
+
+    let (severidad, titulo, cuerpo) = match e.escalon_aviso.as_str() {
+        "notificacion" => (
+            Severidad::Aviso,
+            "Hay facturas sin enviar a Hacienda".to_string(),
+            "Llevan más de 6 horas en cola. El registro se emite sin conexión y no se pierde nada, \
+             pero hay que remitirlo: revisa la conexión y el certificado en Configuración → Fiscal."
+                .to_string(),
+        ),
+        "modal_login" => (
+            Severidad::Error,
+            "Llevas más de un día sin enviar facturas a Hacienda".to_string(),
+            "Esto ya no se arregla solo. Comprueba la conexión y que el certificado siga siendo \
+             válido en Configuración → Fiscal; si no sabes por dónde empezar, llama a soporte."
+                .to_string(),
+        ),
+        "modal_cobro" => (
+            Severidad::Error,
+            "Llevas más de TRES DÍAS sin enviar facturas a Hacienda".to_string(),
+            "Un equipo al que se le pone internet cada tres días para soltar el atraso no es un \
+             sistema VERI*FACTU. Hay que resolverlo hoy: Configuración → Fiscal, o soporte."
+                .to_string(),
+        ),
+        // `ninguno` y `visible`: nada que avisar, y si había un aviso de antes se cierra.
+        _ => {
+            let _ = notifier.resolver_por_clave(CLAVE_ATRASO).await;
+            return Ok(false);
+        }
+    };
+
+    let _ = notifier
+        .emitir(NuevaNotificacion {
+            tipo: "verifactu_atraso".to_string(),
+            severidad,
+            titulo,
+            cuerpo: Some(cuerpo),
+            // Al Administrador y no a todos: el camarero no puede hacer nada con esto, y un aviso
+            // que no se puede accionar es ruido que entrena a ignorar el centro de notificaciones.
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_fiscal".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_ATRASO.to_string()),
+            expira_en: None,
+        })
+        .await;
+
+    Ok(true)
+}
+
 /// Los registros del panel.
 pub async fn listar(
     repo: &dyn VerifactuRepository,
@@ -514,9 +598,7 @@ mod tests {
         };
         use std::sync::Mutex;
         use crate::error::AppError;
-use tpv_contracts::verifactu::{
-    BloqueFiscal, DestinatarioInput, EstadoFiscal, RegistroFiscal,
-};
+        use tpv_contracts::verifactu::{BloqueFiscal, EstadoFiscal, RegistroFiscal};
 
         fn registro(num: &str) -> RegistroParaEnvio {
             RegistroParaEnvio {
@@ -921,5 +1003,195 @@ use tpv_contracts::verifactu::{
         assert_eq!(espera_siguiente(Some(120), 60), 120);
         assert_eq!(espera_siguiente(Some(99_999), 60), 3600);
         assert_eq!(espera_siguiente(Some(-5), 60), 60);
+    }
+}
+#[cfg(test)]
+mod tests_aviso_de_atraso {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! La escalera de avisos, en el único peldaño que este caso de uso decide: si sale notificación.
+    //!
+    //! Los peldaños los calcula `tpv_infra_sqlite::verifactu::escalon_aviso` (y tiene sus propios
+    //! tests de los umbrales); aquí se fija qué se hace con cada uno, que es otra decisión.
+
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+    use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
+    use super::*;
+    use crate::ports::aeat::RegistroParaEnvio;
+    use crate::ports::notificaciones::Notifier;
+
+    struct RepoEstado(EstadoFiscal);
+
+    fn estado_con(escalon: &str, completos: bool) -> EstadoFiscal {
+        EstadoFiscal {
+            datos_fiscales_completos: completos,
+            nif: Some("89890001K".into()),
+            razon_social: Some("Bar".into()),
+            entorno_pruebas: false,
+            total_registros: 10,
+            pendientes: 4,
+            aceptados: 6,
+            aceptados_con_errores: 0,
+            rechazados: 0,
+            antiguedad_pendiente_min: Some(100),
+            escalon_aviso: escalon.to_string(),
+            certificado_ok: true,
+            motivo_no_remite: None,
+            dias_para_caducar_certificado: Some(300),
+        }
+    }
+
+    #[async_trait]
+    impl VerifactuRepository for RepoEstado {
+        async fn bloque_por_numero(&self, _n: &str) -> AppResult<Option<BloqueFiscal>> {
+            Ok(None)
+        }
+        async fn estado(&self) -> AppResult<EstadoFiscal> {
+            Ok(self.0.clone())
+        }
+        async fn listar(&self, _l: i64, _d: i64) -> AppResult<Vec<RegistroFiscal>> {
+            Ok(vec![])
+        }
+        async fn pendientes(&self, _l: i64) -> AppResult<Vec<RegistroParaEnvio>> {
+            Ok(vec![])
+        }
+        async fn contar_pendientes(&self) -> AppResult<i64> {
+            Ok(self.0.pendientes)
+        }
+        async fn flujo(&self) -> AppResult<(i64, Option<i64>)> {
+            Ok((60, None))
+        }
+        async fn guardar_flujo(&self, _e: i64, _u: i64) -> AppResult<()> {
+            Ok(())
+        }
+        async fn marcar_resultado(
+            &self,
+            _id: &str,
+            _e: &str,
+            _c: Option<i64>,
+            _d: Option<&str>,
+            _csv: Option<&str>,
+        ) -> AppResult<()> {
+            Ok(())
+        }
+        async fn marcar_intento(&self, _ids: &[String]) -> AppResult<()> {
+            Ok(())
+        }
+        async fn obligado(&self) -> AppResult<Option<(String, String, bool)>> {
+            Ok(None)
+        }
+        async fn emitir_sustitutiva(
+            &self,
+            _n: &str,
+            _d: tpv_domain::verifactu::Destinatario,
+        ) -> AppResult<BloqueFiscal> {
+            unreachable!()
+        }
+    }
+
+    #[derive(Default)]
+    struct NotifierFalso {
+        emitidas: Mutex<Vec<NuevaNotificacion>>,
+        resueltas: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl Notifier for NotifierFalso {
+        async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(nueva);
+            Ok("id".to_string())
+        }
+        async fn resolver_por_clave(&self, clave: &str) -> AppResult<bool> {
+            self.resueltas.lock().unwrap().push(clave.to_string());
+            Ok(true)
+        }
+    }
+
+    async fn avisar(escalon: &str, completos: bool) -> (bool, NotifierFalso) {
+        let repo = RepoEstado(estado_con(escalon, completos));
+        let n = NotifierFalso::default();
+        let r = avisar_de_atraso(&repo, &n).await.unwrap();
+        (r, n)
+    }
+
+    #[tokio::test]
+    async fn los_dos_primeros_peldanos_no_notifican() {
+        // Una hora de cola es funcionamiento normal incluso con fibra: la AEAT impone una espera
+        // entre envíos. Notificar ahí enseñaría a ignorar la notificación.
+        for escalon in ["ninguno", "visible"] {
+            let (emitio, n) = avisar(escalon, true).await;
+            assert!(!emitio, "{escalon} no debe notificar");
+            assert!(n.emitidas.lock().unwrap().is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn a_partir_de_seis_horas_sale_a_buscar_al_administrador() {
+        let (emitio, n) = avisar("notificacion", true).await;
+        assert!(emitio);
+        let e = n.emitidas.lock().unwrap();
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].tipo, "verifactu_atraso");
+        assert_eq!(e[0].severidad, Severidad::Aviso);
+        assert_eq!(
+            e[0].destino,
+            Destino::Rol(ADMIN_ROL_ID.to_string()),
+            "el camarero no puede hacer nada con esto"
+        );
+        assert_eq!(e[0].accion.as_deref(), Some("ver_fiscal"));
+    }
+
+    #[tokio::test]
+    async fn los_peldanos_altos_suben_a_error() {
+        for escalon in ["modal_login", "modal_cobro"] {
+            let (emitio, n) = avisar(escalon, true).await;
+            assert!(emitio);
+            let e = n.emitidas.lock().unwrap();
+            assert_eq!(e[0].severidad, Severidad::Error, "{escalon}");
+        }
+    }
+
+    #[tokio::test]
+    async fn la_clave_de_dedupe_es_UNA_para_todos_los_peldanos() {
+        // Con una clave por peldaño, subir de escalón dejaría el anterior abierto y el centro de
+        // notificaciones acumularía tres avisos del mismo problema.
+        let mut claves = std::collections::HashSet::new();
+        for escalon in ["notificacion", "modal_login", "modal_cobro"] {
+            let (_, n) = avisar(escalon, true).await;
+            claves.insert(n.emitidas.lock().unwrap()[0].clave_dedupe.clone());
+        }
+        assert_eq!(claves.len(), 1);
+        assert_eq!(claves.into_iter().next().unwrap().as_deref(), Some(CLAVE_ATRASO));
+    }
+
+    #[tokio::test]
+    async fn al_bajar_del_peldano_el_aviso_se_CIERRA() {
+        // Un aviso que hay que descartar a mano después de que el problema se arregle enseña a
+        // descartar avisos, que es lo contrario de lo que esto busca.
+        let (_, n) = avisar("ninguno", true).await;
+        assert_eq!(n.resueltas.lock().unwrap().as_slice(), [CLAVE_ATRASO.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn sin_datos_fiscales_no_avisa_de_esto() {
+        // Faltan el NIF o la razón social: el panel ya lo dice con un mensaje mucho más útil
+        // («mientras falten, no se puede cobrar»), y esto sería decir dos veces lo mismo por dos
+        // caminos distintos.
+        let (emitio, n) = avisar("modal_cobro", false).await;
+        assert!(!emitio);
+        assert!(n.emitidas.lock().unwrap().is_empty());
+        assert_eq!(n.resueltas.lock().unwrap().as_slice(), [CLAVE_ATRASO.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn un_peldano_desconocido_no_avisa() {
+        // Si alguien añade un escalón nuevo en Rust y se olvida de esto, lo que NO puede pasar es
+        // que se emita un aviso con un texto que no corresponde.
+        let (emitio, n) = avisar("peldano_del_futuro", true).await;
+        assert!(!emitio);
+        assert!(n.emitidas.lock().unwrap().is_empty());
     }
 }

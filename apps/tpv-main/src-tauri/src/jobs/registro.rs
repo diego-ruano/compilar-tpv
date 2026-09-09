@@ -386,9 +386,24 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     let ahora_ms = chrono::Local::now().timestamp_millis();
     let cliente = tpv_infra_aeat::AeatAdapter::new();
 
-    match uc_verifactu::remitir_ciclo(repo.as_ref(), &cliente, certificado.as_deref(), ahora_ms)
-        .await
-    {
+    let resultado =
+        uc_verifactu::remitir_ciclo(repo.as_ref(), &cliente, certificado.as_deref(), ahora_ms).await;
+
+    // La escalera de avisos se evalúa DESPUÉS y SIEMPRE, pase lo que pase arriba: lo que la dispara
+    // es la antigüedad del pendiente más viejo, que no depende de si este ciclo envió algo. Se hace
+    // aquí y no dentro de `remitir_ciclo` porque el caso de uso del envío no tiene por qué conocer
+    // el notificador —y porque los dos caminos que NO envían (cola vacía, control de flujo) salen
+    // antes y se saltarían el aviso—.
+    //
+    // Y es best-effort: que no se pueda emitir una notificación no puede convertir un envío correcto
+    // en un job en rojo.
+    if let Ok(notifier) = state.notifier().await {
+        if let Err(e) = uc_verifactu::avisar_de_atraso(repo.as_ref(), notifier.as_ref()).await {
+            tracing::warn!(target: "tpv::verifactu", error = %e, "no se pudo evaluar el aviso por atraso");
+        }
+    }
+
+    match resultado {
         Ok(Ok(r)) => {
             tracing::info!(
                 target: "tpv::verifactu",
