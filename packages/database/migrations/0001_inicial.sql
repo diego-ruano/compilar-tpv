@@ -1179,6 +1179,13 @@ CREATE TABLE IF NOT EXISTS Serie_Facturacion (
 -- trigger): CLAUDE.md 9, "IDs deterministas". ON DELETE SET NULL en ID_Pago porque un registro
 -- fiscal no puede desaparecer porque desaparezca aquello a lo que apunta (misma regla que
 -- Movimientos_Caja); ademas la fuente de verdad del dinero sigue siendo Pagos.
+--
+-- ESTA TABLA NO SE PURGA NUNCA (DB-14). El dia que se implemente el archivado de datos antiguos,
+-- esta y `Serie_Facturacion` quedan fuera: el art. 7 RRSIF exige conservarlos "sin que puedan ser
+-- modificados ni eliminados", y borrar una fila de `Serie_Facturacion` devolveria el contador a 1 y
+-- reemitiria numeros ya usados. El detalle de BACKLOG.md DB-14 dice que SI se puede archivar y por
+-- que: el importe, la base, la cuota y el desglose ya viven DENTRO del registro, no se derivan de
+-- la comanda al leer.
 CREATE TABLE IF NOT EXISTS Registros_Facturacion (
   ID_Registro           TEXT PRIMARY KEY,
   Orden                 INTEGER NOT NULL,

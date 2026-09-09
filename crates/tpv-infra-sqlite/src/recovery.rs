@@ -84,6 +84,15 @@ pub async fn status(db: &Db) -> AppResult<RecoveryStatus> {
 }
 
 /// Mantiene bloqueado el login hasta que el ciclo online confirme la convergencia.
+///
+/// Y aprovecha para **volver a encolar los registros de facturación** (FISCAL-01). Es el sitio
+/// correcto porque lo llaman todos los caminos de restauración —la nube y la copia local— y porque
+/// es el primer momento en que los registros ya están en la base.
+///
+/// Hace falta porque `Registros_Facturacion` se replica y vuelve, pero `_Verifactu_Envios` **no**:
+/// es estado local del equipo. Sin esto, tras restaurar el panel diría «0 pendientes» y el job no
+/// mandaría nada — incluidos los registros que nunca llegaron a la AEAT. Ver
+/// `verifactu::resembrar_cola_de_envio` para por qué se reenvía en vez de preguntar.
 pub async fn mark_reconciliation_pending(db: &Db) -> AppResult<()> {
     let w = db.write().await;
     w.raw()
@@ -94,6 +103,18 @@ pub async fn mark_reconciliation_pending(db: &Db) -> AppResult<()> {
         .await
         .map_err(db_err)?;
     drop(w);
+
+    // Best-effort y por una razón: si esto fallara, lo que NO puede es impedir que el equipo
+    // recupere sus datos. Un registro sin encolar se arregla en el arranque siguiente (se vuelve a
+    // llamar aquí); un equipo que no puede restaurar no tiene salida.
+    if let Err(e) = crate::verifactu::resembrar_cola_de_envio(db).await {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            error = %e,
+            "no se pudo reencolar los registros de facturación tras restaurar; se reintentará"
+        );
+    }
+
     db.bloquear_escrituras_de_negocio(true);
     Ok(())
 }

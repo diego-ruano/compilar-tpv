@@ -234,13 +234,13 @@ struct SetPrinterArgs {
 ========================================================= */
 
 /// Razón social del productor. Máx. 120 caracteres.
-const PRODUCTOR_NOMBRE_RAZON: &str = "Altaria Lights";
+pub(crate) const PRODUCTOR_NOMBRE_RAZON: &str = "Altaria Lights";
 /// NIF del productor. Máx. 9 (formato NIF).
-const PRODUCTOR_NIF: &str = "";
+pub(crate) const PRODUCTOR_NIF: &str = "";
 /// Nombre comercial del sistema informático. Máx. **30**.
-const PRODUCTOR_NOMBRE_SISTEMA: &str = "TPV Altaria";
+pub(crate) const PRODUCTOR_NOMBRE_SISTEMA: &str = "TPV Altaria";
 /// Código corto del sistema que asigna el productor. Máx. **2** — no es el nombre.
-const PRODUCTOR_ID_SISTEMA: &str = "01";
+pub(crate) const PRODUCTOR_ID_SISTEMA: &str = "01";
 
 /* =========================================================
    Helpers básicos
@@ -2227,6 +2227,8 @@ pub fn run() {
             commands::verifactu::verifactu_set_certificado,
             commands::verifactu::verifactu_probar_conexion,
             commands::verifactu::verifactu_emitir_factura_de_ticket,
+            commands::verifactu::verifactu_exportar,
+            commands::verifactu::verifactu_declaracion_responsable,
             // stats
             commands::stats::stats_mesas_get,
             commands::stats::stats_productos_list_categorias,

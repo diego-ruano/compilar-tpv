@@ -148,6 +148,27 @@ datos de negocio. Esto es lo que alimenta SYNC-19, y además engorda las 7 copia
 Ojo al resolverlo: archivar ventas choca de frente con FISCAL-01 (los registros de facturación no se
 pueden borrar). Lo que se archive tiene que ser lo que **no** sea registro fiscal.
 
+**Regla fijada al implementar FISCAL-01 (2026-09-09).** `Registros_Facturacion` y `Serie_Facturacion`
+**no se purgan nunca**, y eso ya no es una recomendación sino parte del diseño:
+
+- La tabla es **append-only** y la norma lo exige: art. 7 RRSIF (*«sin que puedan ser modificados ni
+  eliminados»*). Un sistema que borra registros de facturación no es un sistema VERI\*FACTU, por
+  antiguos que sean.
+- El plazo mínimo de conservación es el de prescripción (**4 años**, art. 66 LGT) y se extiende si
+  hay una comprobación abierta o pérdidas a compensar. En la práctica: no se borran.
+- `Serie_Facturacion` tampoco, y por un motivo distinto: si se borrara la fila de una serie antigua,
+  el contador volvería a 1 y se reemitirían números ya usados. La guardia por `MAX()` de
+  `verifactu::reservar_numero` lo taparía, pero no hay razón para depender de ella.
+- Consecuencia para el archivado que algún día se haga: **una comanda no se puede archivar sin
+  comprobar antes que su registro de facturación no la referencia**. `Registros_Facturacion.ID_Pago`
+  es `ON DELETE SET NULL`, así que borrar un pago no rompe nada — pero deja el registro sin poder
+  reimprimir el papel que lo justifica, que es justo lo que un inspector pide.
+- Lo que **sí** se puede archivar es el detalle operativo que no sostiene el registro: la cocina
+  (`Fecha_Hora_Cocina`, `Estado_Cocina`), los movimientos de stock antiguos, las notificaciones
+  cerradas. El importe, la base, la cuota y el desglose ya viven **dentro** del registro fiscal
+  (`Desglose_Json`, `Importe_Total`, `Cuota_Total`) y no se derivan de la comanda al leer: eso es lo
+  que hace archivable la comanda.
+
 ### VENTA-01 🟠 · Faltan descuentos, invitaciones, propinas y devoluciones
 
 Verificado por grep: cero apariciones en sentido de venta. Los precios salen del catálogo y no son

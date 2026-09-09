@@ -20,5 +20,7 @@ uuid = { workspace = true }
 # Migraciones: embeber packages/database/migrations + hash de integridad.
 include_dir = { workspace = true }
 sha2 = { workspace = true }
+# Exportacion de los registros de facturacion en ZIP (art. 8 RRSIF, ver verifactu::exportar).
+zip = { workspace = true }
 # Fachada de logging: los fallos de aplicación de sync se registran en local (el SQL sólo a `debug`).
 tracing = { workspace = true }

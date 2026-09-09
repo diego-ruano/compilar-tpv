@@ -952,6 +952,68 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: f64) -> Vec<LineaTick
         .collect()
 }
 
+/// Vuelve a encolar para remitir **todo registro que no tenga estado de envío**.
+///
+/// Se llama después de restaurar (desde la nube o desde una copia local) y devuelve cuántos encoló.
+///
+/// ## Por qué hace falta
+///
+/// `Registros_Facturacion` se replica y vuelve; `_Verifactu_Envios` **no**, porque es estado local
+/// del equipo. Así que tras una restauración los registros están ahí y su cola de envío está vacía:
+/// el panel diría «0 pendientes» y el job no mandaría nada — incluidos los registros que nunca
+/// llegaron a la AEAT. Dejar de remitir en silencio es la única forma de romper esto de verdad.
+///
+/// ## Por qué se REENVÍA en vez de preguntar a la AEAT
+///
+/// El diseño original proponía reconstruir el estado con `ConsultaFactuSistemaFacturacion`. Se hace
+/// de otra forma, y es mejor por tres razones:
+///
+/// 1. **Ya está resuelto.** Reenviar un registro que la AEAT tiene devuelve «registro duplicado»
+///    (error 3000), que el clasificador trata como aceptado. Esa idempotencia existe, está probada y
+///    es la misma que cubre un corte de luz entre el envío y el guardado del resultado.
+/// 2. **La consulta no lo sabe todo.** Preguntaría por lo que la AEAT tiene, pero no distingue un
+///    registro que nunca se mandó de uno que se mandó y fue rechazado — y los dos hay que reenviarlos.
+/// 3. **Una operación SOAP menos.** Otro mensaje, otro parser y otro modo de fallo, para llegar al
+///    mismo sitio.
+///
+/// El precio es un envío de más por registro ya aceptado, acotado por el control de flujo (1000 por
+/// envío, 60 s entre envíos) y que sólo se paga una vez tras una avería. A cambio, la verdad sobre
+/// qué tiene la AEAT la sigue diciendo la AEAT, que es donde está.
+///
+/// ⚠️ Va por `raw()`: `_Verifactu_Envios` es estado local y por `execute()` se replicaría a la nube.
+pub async fn resembrar_cola_de_envio(db: &Db) -> AppResult<usize> {
+    let g = db.write().await;
+
+    // `Creado_En_Ms` se pone al instante de la RESTAURACIÓN y no al de la factura, y es a propósito:
+    // la escalera de avisos mide la antigüedad del pendiente más viejo, y fecharlos con su fecha
+    // original pondría el panel en rojo («tres días sin remitir») desde el primer segundo, por algo
+    // que se está arreglando solo en ese momento. Lo que la escalera tiene que medir es cuánto lleva
+    // este equipo sin conseguir remitir, que empieza ahora.
+    let afectadas = g
+        .raw()
+        .execute(
+            "INSERT OR IGNORE INTO _Verifactu_Envios (ID_Registro, Estado, Creado_En_Ms) \
+             SELECT r.ID_Registro, 'PENDIENTE', ?1 \
+             FROM Registros_Facturacion r \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM _Verifactu_Envios e WHERE e.ID_Registro = r.ID_Registro \
+             );",
+            vec![Value::Integer(now_ms())],
+        )
+        .await
+        .map_err(db_err)?;
+
+    if afectadas > 0 {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            registros = afectadas,
+            "tras restaurar, {afectadas} registro(s) de facturación vuelven a la cola de envío: \
+             los que la AEAT ya tenga volverán como duplicados y se darán por aceptados"
+        );
+    }
+    Ok(afectadas as usize)
+}
+
 /// Reserva el número de la serie del ejercicio en curso. Lo llama el camino del cobro antes del
 /// `INSERT INTO Pagos`, para que `Numero_Ticket` y `Num_Serie_Factura` sean el mismo número.
 pub async fn reservar_numero_factura(db: &WriteGuard<'_>) -> AppResult<(String, i64)> {
@@ -1313,6 +1375,172 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_reconciliacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+    //! Qué pasa con los registros de facturación cuando el equipo recupera sus datos.
+    //!
+    //! `Registros_Facturacion` se replica a la nube y vuelve; `_Verifactu_Envios` **no**, porque es
+    //! estado local. El agujero que esto cierra es silencioso: tras restaurar, el panel diría «0
+    //! pendientes» y el job no mandaría nada — incluidos los registros que nunca llegaron a la AEAT.
+    //! Dejar de remitir sin que se note es la única forma de romper esto de verdad.
+
+    use super::*;
+    use crate::db::Db;
+    use std::sync::Arc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_recon");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    /// Inserta un registro como lo haría la restauración: la fila fiscal, **sin** su fila de envío.
+    async fn registro_restaurado(db: &Arc<Db>, orden: i64, num: &str) {
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, \
+                   Num_Serie_Factura, Fecha_Expedicion, Serie, Numero, Nombre_Razon_Emisor, \
+                   Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url) \
+                 VALUES (?1, ?2, 'ALTA', 'B12345674', ?3, '15-01-2027', '2027', ?2, 'Bar', \
+                         'c', 'h', '2027-01-15T21:34:56+01:00', '{}', 'u');",
+                vec![
+                    Value::Text(format!("r{orden}")),
+                    Value::Integer(orden),
+                    Value::Text(num.to_string()),
+                ],
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn cuenta(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn tras_restaurar_los_registros_vuelven_a_la_cola_de_envio() {
+        let (db, _dir) = db_temporal().await;
+        registro_restaurado(&db, 1, "2027/000001").await;
+        registro_restaurado(&db, 2, "2027/000002").await;
+
+        // Antes: los registros están, la cola está vacía. El panel diría «0 pendientes».
+        assert_eq!(cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await, 2);
+        assert_eq!(cuenta(&db, "SELECT COUNT(*) FROM _Verifactu_Envios;").await, 0);
+
+        let n = resembrar_cola_de_envio(&db).await.unwrap();
+
+        assert_eq!(n, 2);
+        assert_eq!(
+            cuenta(
+                &db,
+                "SELECT COUNT(*) FROM _Verifactu_Envios WHERE Estado = 'PENDIENTE';"
+            )
+            .await,
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn no_pisa_el_estado_de_lo_que_ya_se_habia_enviado() {
+        // Lo que ya tiene estado lo tiene por algo: o se envió en este equipo antes de la avería, o
+        // ya se reenvió. Volver a ponerlo PENDIENTE lo mandaría otra vez para nada.
+        let (db, _dir) = db_temporal().await;
+        registro_restaurado(&db, 1, "2027/000001").await;
+        registro_restaurado(&db, 2, "2027/000002").await;
+        {
+            let g = db.write().await;
+            g.raw()
+                .execute(
+                    "INSERT INTO _Verifactu_Envios (ID_Registro, Estado, CSV, Creado_En_Ms) \
+                     VALUES ('r1', 'ACEPTADO', 'CSV123', 1);",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let n = resembrar_cola_de_envio(&db).await.unwrap();
+
+        assert_eq!(n, 1, "sólo encola el que no tenía estado");
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Estado, COALESCE(CSV,'') FROM _Verifactu_Envios WHERE ID_Registro = 'r1';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_string(row.get_value(0).unwrap()).as_deref(), Some("ACEPTADO"));
+        assert_eq!(
+            v_string(row.get_value(1).unwrap()).as_deref(),
+            Some("CSV123"),
+            "el CSV no se puede recuperar con una consulta posterior: no se pierde"
+        );
+    }
+
+    #[tokio::test]
+    async fn es_idempotente() {
+        // Se llama en cada restauración y en cada arranque que la reintente: la segunda vuelta no
+        // puede duplicar filas ni devolver nada a PENDIENTE.
+        let (db, _dir) = db_temporal().await;
+        registro_restaurado(&db, 1, "2027/000001").await;
+
+        assert_eq!(resembrar_cola_de_envio(&db).await.unwrap(), 1);
+        assert_eq!(resembrar_cola_de_envio(&db).await.unwrap(), 0);
+        assert_eq!(cuenta(&db, "SELECT COUNT(*) FROM _Verifactu_Envios;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn la_antiguedad_se_cuenta_desde_la_RESTAURACION_y_no_desde_la_factura() {
+        // Si se fecharan con la fecha de la factura, la escalera de avisos pondría el panel en rojo
+        // («tres días sin remitir») desde el primer segundo, por algo que se está arreglando solo en
+        // ese momento. Lo que la escalera mide es cuánto lleva ESTE equipo sin conseguir remitir.
+        let (db, _dir) = db_temporal().await;
+        registro_restaurado(&db, 1, "2027/000001").await;
+        let antes = crate::util::now_ms();
+
+        resembrar_cola_de_envio(&db).await.unwrap();
+
+        let creado = cuenta(&db, "SELECT Creado_En_Ms FROM _Verifactu_Envios LIMIT 1;").await;
+        assert!(
+            creado >= antes,
+            "la cola se fecha ahora ({creado}), no con la fecha de la factura"
+        );
+    }
+
+    #[tokio::test]
+    async fn sin_registros_no_hace_nada() {
+        let (db, _dir) = db_temporal().await;
+        assert_eq!(resembrar_cola_de_envio(&db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn reencolar_NO_sale_por_el_outbox() {
+        // `_Verifactu_Envios` es estado local. Si esto fuera por `execute()`, una restauración
+        // replicaría a la nube «he reencolado 400 registros», que allí no significa nada — y encima
+        // con la base bloqueada para escrituras de negocio, que es justo cuando se llama.
+        let (db, _dir) = db_temporal().await;
+        registro_restaurado(&db, 1, "2027/000001").await;
+        resembrar_cola_de_envio(&db).await.unwrap();
+
+        assert_eq!(
+            cuenta(
+                &db,
+                "SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%_Verifactu_Envios%';"
+            )
+            .await,
+            0
+        );
+    }
 }
 
 #[cfg(test)]

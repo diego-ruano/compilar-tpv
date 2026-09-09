@@ -1015,7 +1015,7 @@ fn def_cpl() -> u32 {
 /// El papel del arqueo (CUENTA-06).
 ///
 /// Es un **documento interno**, no un ticket de venta, y de ahí salen sus tres diferencias:
-/// - **No consume numeración.** No pasa por `siguiente_numero_ticket`: gastar un correlativo en un
+/// - **No consume numeración.** No reserva número de la serie: gastar un correlativo en un
 ///   arqueo dejaría huecos sin explicación en la serie de ventas.
 /// - **Sin datos fiscales**: ni CIF, ni desglose de IVA. Sí el nombre del negocio y la fecha, para
 ///   saber de quién y de cuándo es el papel.

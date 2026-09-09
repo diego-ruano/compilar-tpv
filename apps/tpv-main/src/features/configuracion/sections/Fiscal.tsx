@@ -15,10 +15,19 @@
 //   4. El estado de la COLA: cuántos registros esperan y desde cuándo. Es lo que hace visible la
 //      escalera de avisos (§1.2.1 del plan) — la obligación de remitir es del bar, y nuestro
 //      trabajo es que no pueda decir que no lo sabía.
+//
+// Y dos cosas que no son ajustes sino OBLIGACIONES del sistema, y que por eso viven aquí y no en un
+// PDF que nadie encuentra el día que hace falta:
+//
+//   5. La EXPORTACIÓN de los registros (art. 8 RRSIF). Un inspector puede pedirla.
+//   6. La DECLARACIÓN RESPONSABLE del productor (art. 13 RRSIF), que la norma exige poder ver
+//      «en el propio sistema informático, visible en cada una de sus versiones».
 
 import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import { toAppError } from "@tpv/client";
 
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
@@ -26,8 +35,26 @@ import { TextInput } from "../ui/Inputs";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
 import { useToast } from "../../../shared/toast";
-import { verifactuEstado } from "../api/verifactuApis";
+import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
+import {
+    verifactuDeclaracionResponsable,
+    verifactuEstado,
+    verifactuExportar,
+    type DeclaracionResponsable,
+} from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
+
+/** `AAAA-MM-DD` de hoy en hora local (`toISOString` da UTC y en España adelanta el día por la noche). */
+function hoyISO(): string {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** El 1 de enero del año en curso: el rango que pide un asesor por defecto es el ejercicio. */
+function inicioDeEjercicioISO(): string {
+    return `${new Date().getFullYear()}-01-01`;
+}
 
 /** Un certificado del almacén, tal como lo devuelve `verifactu_certificados`. */
 type Certificado = {
@@ -103,6 +130,22 @@ export function Fiscal({
     const [probando, setProbando] = useState(false);
     const [resultadoPrueba, setResultadoPrueba] = useState<string>("");
 
+    const [desde, setDesde] = useState(inicioDeEjercicioISO);
+    const [hasta, setHasta] = useState(hoyISO);
+    const [exportando, setExportando] = useState(false);
+
+    const [dr, setDr] = useState<DeclaracionResponsable | null>(null);
+    const [verDr, setVerDr] = useState(false);
+
+    // El entorno NO va por el `draft` de la pantalla de negocio con el resto de los campos, y es a
+    // propósito: no es un dato que se teclea y se guarda junto a los demás, es un interruptor con
+    // consecuencias inmediatas sobre lo que sale impreso. Se aplica en el momento y se confirma.
+    const entorno = useBusinessSettings((st) => st.verifactuEntorno);
+    const setMany = useBusinessSettings((st) => st.setMany);
+    const [confirmandoEntorno, setConfirmandoEntorno] = useState<
+        "produccion" | "pruebas" | null
+    >(null);
+
     const refrescarEstado = useCallback(() => {
         verifactuEstado()
             .then(setEstado)
@@ -137,6 +180,53 @@ export function Fiscal({
             dejarDeEscuchar?.();
         };
     }, [refrescarEstado]);
+
+    // La declaración responsable no cambia salvo con la versión del programa, así que se pide una
+    // vez y se queda. No se esconde tras un botón «cargar»: la norma pide que esté visible.
+    useEffect(() => {
+        let vivo = true;
+        verifactuDeclaracionResponsable()
+            .then((d) => {
+                if (vivo) setDr(d);
+            })
+            .catch(() => {
+                if (vivo) setDr(null);
+            });
+        return () => {
+            vivo = false;
+        };
+    }, []);
+
+    const exportar = useCallback(async () => {
+        setExportando(true);
+        try {
+            // El nombre por defecto lleva el rango dentro: estos ficheros se acumulan en el
+            // escritorio de alguien y «registros.zip» no se distingue del de hace tres meses.
+            const destino = await save({
+                title: "Guardar la exportación de los registros de facturación",
+                defaultPath: `registros-facturacion-${desde}_${hasta}.zip`,
+                filters: [{ name: "Exportación Veri*factu", extensions: ["zip"] }],
+            });
+            if (!destino) return;
+
+            const n = await verifactuExportar(destino, desde, hasta);
+            if (n === 0) {
+                toast.info(
+                    "No hay registros en ese rango",
+                    "El fichero se ha creado igual, vacío: un rango sin facturas no es un error.",
+                );
+            } else {
+                toast.success(
+                    "Exportación guardada",
+                    `${n} registro(s). El fichero cadena.txt permite verificar las huellas sin este programa.`,
+                );
+            }
+        } catch (e) {
+            toast.error("No se pudo exportar", toAppError(e).message);
+        } finally {
+            setExportando(false);
+        }
+    }, [desde, hasta, toast]);
 
     const cargarCertificados = useCallback(async () => {
         setCargandoCerts(true);
@@ -305,6 +395,121 @@ export function Fiscal({
                 )}
             </Panel>
 
+            {/* ── Entorno ─────────────────────────────────────────────────────────────────── */}
+            <Panel
+                title="Entorno de la AEAT"
+                subtitle="A dónde se mandan las facturas. Producción es el de verdad."
+            >
+                <div className="flex flex-wrap gap-2">
+                    {(["produccion", "pruebas"] as const).map((v) => {
+                        const activo = entorno === v;
+                        return (
+                            <button
+                                key={v}
+                                type="button"
+                                onClick={() =>
+                                    activo ? undefined : setConfirmandoEntorno(v)
+                                }
+                                className={cn(
+                                    "rounded-2xl border px-4 py-3 text-left text-sm transition",
+                                    activo
+                                        ? v === "pruebas"
+                                            ? "border-amber-500/50 bg-amber-500/15 font-semibold text-amber-700 dark:text-amber-300"
+                                            : "border-accent/40 bg-accent-soft font-semibold text-accent"
+                                        : "border-border bg-surface-2 text-fg hover:bg-surface",
+                                )}
+                            >
+                                <div>{v === "produccion" ? "Producción" : "Pruebas"}</div>
+                                <div className="mt-0.5 text-xs font-normal text-fg-muted">
+                                    {v === "produccion"
+                                        ? "Las facturas cuentan. Es lo que tiene que estar puesto en un bar"
+                                        : "Preproducción de la AEAT. Para ensayar sin que nada cuente"}
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {confirmandoEntorno === "pruebas" ? (
+                    <div className="mt-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+                        <p className="font-semibold text-amber-700 dark:text-amber-300">
+                            Pasar a pruebas deja de emitir facturas válidas.
+                        </p>
+                        <p className="mt-1 text-fg-muted">
+                            Todo lo que se cobre a partir de ahora irá a la preproducción de la AEAT:
+                            el QR del ticket llevará al portal de pruebas y esas facturas{" "}
+                            <strong>no constan en Hacienda</strong>. No hagas esto en un negocio que
+                            esté vendiendo.
+                        </p>
+                        <div className="mt-3 flex gap-2">
+                            <PrimaryButton
+                                onClick={() => {
+                                    setMany({ verifactuEntorno: "pruebas" });
+                                    setConfirmandoEntorno(null);
+                                    refrescarEstado();
+                                    toast.info(
+                                        "Entorno de pruebas",
+                                        "Las facturas que se emitan ahora no son reales.",
+                                    );
+                                }}
+                            >
+                                Entiendo, pasar a pruebas
+                            </PrimaryButton>
+                            <GhostButton onClick={() => setConfirmandoEntorno(null)}>
+                                Cancelar
+                            </GhostButton>
+                        </div>
+                    </div>
+                ) : null}
+
+                {confirmandoEntorno === "produccion" ? (
+                    <div className="mt-3 rounded-2xl border border-accent/40 bg-accent-soft px-4 py-3 text-sm">
+                        <p className="font-semibold">Pasar a producción empieza a facturar de verdad.</p>
+                        <p className="mt-1 text-fg-muted">
+                            Desde ese momento cada cobro es una factura que consta en Hacienda y que{" "}
+                            <strong>no se puede borrar</strong>: como mucho se anula con otro
+                            registro, que también queda.
+                        </p>
+                        {estado && estado.total_registros > 0 ? (
+                            <p className="mt-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-600 dark:text-red-400">
+                                <strong>
+                                    Este equipo ya ha emitido {estado.total_registros} registro(s).
+                                </strong>{" "}
+                                Si se emitieron ensayando contra preproducción, Hacienda no los tiene,
+                                y la cadena de huellas continuaría desde un eslabón que ella no
+                                conoce. Antes de facturar de verdad hay que partir de cero: ver{" "}
+                                <code>docs/PRUEBAS_AEAT.md</code>.
+                            </p>
+                        ) : null}
+                        <div className="mt-3 flex gap-2">
+                            <PrimaryButton
+                                onClick={() => {
+                                    setMany({ verifactuEntorno: "produccion" });
+                                    setConfirmandoEntorno(null);
+                                    refrescarEstado();
+                                    toast.success(
+                                        "Entorno de producción",
+                                        "Las facturas que se emitan ahora son reales.",
+                                    );
+                                }}
+                            >
+                                Entiendo, pasar a producción
+                            </PrimaryButton>
+                            <GhostButton onClick={() => setConfirmandoEntorno(null)}>
+                                Cancelar
+                            </GhostButton>
+                        </div>
+                    </div>
+                ) : null}
+
+                <div className="mt-3 text-xs text-fg-muted">
+                    Los dos endpoints se distinguen en tres caracteres (<code>prewww1</code> frente a{" "}
+                    <code>www1</code>), así que esto no se decide por un ajuste escondido: se elige
+                    aquí, se confirma, y el panel de arriba lo repite en amarillo mientras esté en
+                    pruebas.
+                </div>
+            </Panel>
+
             {/* ── Certificado ────────────────────────────────────────────────────────────── */}
             <Panel
                 title="Certificado electrónico"
@@ -399,6 +604,121 @@ export function Fiscal({
                     esconde una petición de PIN, salga ahora y no de madrugada con las facturas
                     acumulándose.
                 </div>
+            </Panel>
+
+            {/* ── Exportación (art. 8 RRSIF) ──────────────────────────────────────────────── */}
+            <Panel
+                title="Exportar los registros de facturación"
+                subtitle="Lo que hay que poder entregar si lo piden. No es una copia de seguridad."
+            >
+                <div className="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+                    <Field label="Desde">
+                        <TextInput
+                            type="date"
+                            value={desde}
+                            max={hasta}
+                            onChange={(e) => setDesde(e.target.value)}
+                            className={inputTone}
+                        />
+                    </Field>
+                    <Field label="Hasta">
+                        <TextInput
+                            type="date"
+                            value={hasta}
+                            min={desde}
+                            onChange={(e) => setHasta(e.target.value)}
+                            className={inputTone}
+                        />
+                    </Field>
+                    <PrimaryButton
+                        onClick={() => void exportar()}
+                        disabled={exportando || !desde || !hasta || desde > hasta}
+                    >
+                        {exportando ? "Exportando…" : "Exportar…"}
+                    </PrimaryButton>
+                </div>
+
+                <div className="mt-3 rounded-xl border border-border bg-surface-2 px-3 py-3 text-xs text-fg-muted">
+                    Sale un <code>.zip</code> con cuatro ficheros, y el que de verdad importa es{" "}
+                    <code>cadena.txt</code>: lleva, registro a registro, el texto exacto del que se
+                    calculó su huella.{" "}
+                    <strong>
+                        Con eso cualquiera puede recalcular las huellas con un SHA-256 y comprobar
+                        que la cadena no se ha tocado, sin este programa y sin fiarse de nosotros
+                    </strong>
+                    . Los otros tres son el XML (el mismo formato que se remite a la AEAT), un CSV
+                    para abrir con Excel y un manifiesto con quién exportó, cuándo y qué rango.
+                </div>
+
+                <div className="mt-2 text-xs text-fg-muted">
+                    Esto <strong>no sustituye a las copias de seguridad</strong> (Configuración →
+                    Conectividad): es un extracto de los registros fiscales, no la base de datos del
+                    negocio.
+                </div>
+            </Panel>
+
+            {/* ── Declaración responsable (art. 13 RRSIF) ─────────────────────────────────── */}
+            <Panel
+                title="Declaración responsable del programa"
+                subtitle="Lo que el fabricante de este software declara ante la AEAT."
+                right={
+                    dr ? (
+                        <GhostButton onClick={() => setVerDr((v) => !v)}>
+                            {verDr ? "Ocultar" : "Leerla"}
+                        </GhostButton>
+                    ) : null
+                }
+            >
+                {dr === null ? (
+                    <div className="text-sm text-fg-muted">Cargando…</div>
+                ) : (
+                    <>
+                        <div className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+                            <div>
+                                <span className="text-fg-muted">Sistema: </span>
+                                <strong>{dr.nombre_sistema}</strong>{" "}
+                                <span className="text-fg-muted">({dr.id_sistema})</span>
+                            </div>
+                            <div>
+                                <span className="text-fg-muted">Versión: </span>
+                                <strong>{dr.version}</strong>
+                            </div>
+                            <div className="sm:col-span-2">
+                                <span className="text-fg-muted">Productor: </span>
+                                <strong>{dr.productor_nombre_razon || "—"}</strong>
+                                {dr.productor_nif ? (
+                                    <span className="text-fg-muted"> · {dr.productor_nif}</span>
+                                ) : null}
+                            </div>
+                        </div>
+
+                        {!dr.completa ? (
+                            <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+                                <strong>Pendiente de completar.</strong> Faltan los datos
+                                identificativos definitivos del productor del software. Esto tiene
+                                que estar resuelto antes de emitir una sola factura real: el art. 13
+                                del RD 1007/2023 exige que la declaración figure en el propio
+                                sistema, y una declaración a medias no es una declaración.
+                            </div>
+                        ) : null}
+
+                        {verDr && dr.texto ? (
+                            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-surface-2 px-3 py-3 text-xs leading-relaxed text-fg">
+                                {dr.texto}
+                            </pre>
+                        ) : null}
+
+                        <div className="mt-3 text-xs text-fg-muted">
+                            Va aquí porque la norma pide que se pueda leer{" "}
+                            <em>
+                                «en el propio sistema informático, visible en cada una de sus
+                                versiones»
+                            </em>
+                            . La versión que se lee arriba es la de este programa, no un número
+                            escrito a mano.
+                        </div>
+                    </>
+                )}
             </Panel>
         </div>
     );

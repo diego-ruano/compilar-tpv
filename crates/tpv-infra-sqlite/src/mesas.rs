@@ -89,20 +89,6 @@ async fn select_one_string<C: Reader>(
     Ok(None)
 }
 
-/// Reserva el siguiente número de **factura** y lo devuelve formateado (`2027/000123`).
-///
-/// Desde FISCAL-01 el número del ticket **es** el número de la factura: `Pagos.Numero_Ticket`
-/// guarda el `Num_Serie_Factura` del registro. Un solo número para el papel, el cobro y el registro
-/// — dos numeraciones paralelas serían dos cosas que pueden divergir, y la que importa a efectos
-/// legales es la fiscal.
-///
-/// El antiguo `Ticket_Contador` (`T-000123`, contador global sin serie) se retiró con él. La
-/// mecánica de reserva es la misma —incremento RELATIVO para que el outbox converja solo—, más la
-/// guardia contra los números ya emitidos que documenta `verifactu::reservar_numero`.
-pub(crate) async fn siguiente_numero_ticket(db: &crate::db::WriteGuard<'_>) -> AppResult<String> {
-    Ok(crate::verifactu::reservar_numero_factura(db).await?.0)
-}
-
 /// Lo que se congela del producto al vender: `(nombre, tipo de IVA)`.
 ///
 /// Se lee ANTES del INSERT y se insertan como literales, igual que `Estado_Cocina` y por el mismo
@@ -2371,9 +2357,9 @@ mod tests_numero_ticket {
         let g = db.write().await;
         let s = serie();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000001"));
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000002"));
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000001"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000002"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000003"));
     }
 
     #[tokio::test]
@@ -2391,7 +2377,7 @@ mod tests_numero_ticket {
         .await
         .unwrap();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/1000000"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/1000000"));
     }
 
     #[tokio::test]
@@ -2404,9 +2390,9 @@ mod tests_numero_ticket {
         let g = db.write().await;
         let s = serie();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000001"));
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000002"));
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000001"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000002"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000003"));
     }
 
     #[tokio::test]
@@ -2421,13 +2407,13 @@ mod tests_numero_ticket {
         {
             let db = Db::open(&ruta).await.unwrap();
             let g = db.write().await;
-            siguiente_numero_ticket(&g).await.unwrap();
-            siguiente_numero_ticket(&g).await.unwrap();
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
         }
 
         let db = Db::open(&ruta).await.unwrap();
         let g = db.write().await;
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000003"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000003"));
     }
 
     #[tokio::test]
@@ -2438,7 +2424,7 @@ mod tests_numero_ticket {
         let (db, _dir) = db_temporal().await;
         {
             let g = db.write().await;
-            siguiente_numero_ticket(&g).await.unwrap();
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
         }
 
         let r = db.read().await;
@@ -2487,7 +2473,7 @@ mod tests_numero_ticket {
         .await
         .unwrap();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000501"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000501"));
     }
 
     #[tokio::test]
@@ -2512,7 +2498,7 @@ mod tests_numero_ticket {
         .await
         .unwrap();
 
-        assert_eq!(siguiente_numero_ticket(&g).await.unwrap(), format!("{s}/000901"));
+        assert_eq!(crate::verifactu::reservar_numero_factura(&g).await.unwrap().0, format!("{s}/000901"));
     }
 }
 

@@ -861,6 +861,149 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
 
 ---
 
+## 11-bis. Veri\*factu: el registro de facturación (FISCAL-01 / FISCAL-02)
+
+Cada cobro expide una **factura** y produce un **registro de facturación** encadenado que se remite a
+la AEAT. Es obligatorio desde el **1 de enero de 2027** para contribuyentes del Impuesto sobre
+Sociedades (RD 1007/2023 — RRSIF — y Orden HAC/1177/2024). El diseño y los porqués largos están en
+[docs/PLAN_VERIFACTU.md](docs/PLAN_VERIFACTU.md); esta sección es lo que hay que saber para no
+romperlo.
+
+Operamos en modalidad **VERI\*FACTU** (remitimos todos los registros) y no como SIF no verificable.
+Esa elección quita de encima la firma XAdES, el libro sellado y las obligaciones de conservación
+reforzada — el precio es que **hay que remitir**, y por eso la mitad de las reglas de abajo son sobre
+no dejar de hacerlo.
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| La aritmética fiscal | `crates/tpv-domain/src/verifactu.rs` | Cadena de huella, SHA-256, URL del QR, validación de NIF, `F1`/`F2`, saneado de texto. **Sin BD ni reloj: aquí están los tests** (y los 3 vectores oficiales de la AEAT como golden) |
+| El desglose de IVA | `crates/tpv-domain/src/ticket.rs` | Un tramo es un enum: *sujeta* (tipo + cuota) o *exenta* (causa, sin tipo ni cuota). Tres consumidores, una sola aritmética (§11) |
+| Puerto de la AEAT | `tpv-application/src/ports/aeat.rs` | `AeatClient`, los 4 endpoints, certificados disponibles |
+| Puerto del registro | `tpv-application/src/ports/verifactu.rs` | `VerifactuRepository` |
+| Clasificación y control de flujo | `tpv-application/src/use_cases/verifactu.rs` | `clasificar`, `puede_enviar`, `remitir_ciclo`, `avisar_de_atraso` |
+| Persistencia y emisión | `crates/tpv-infra-sqlite/src/verifactu.rs` | `emitir_cobro` / `emitir_anulacion` / `emitir_sustitutiva`, reserva de número, reencolado tras restaurar |
+| Exportación (art. 8) | `crates/tpv-infra-sqlite/src/verifactu_export.rs` | El ZIP con `registros.xml`, `registros.csv`, **`cadena.txt`** y `manifiesto.json` |
+| SOAP, XSD y TLS | `crates/tpv-infra-aeat/` | `xml.rs` (construir/parsear), `certificados.rs` (almacén de Windows), `transporte.rs` (WinHTTP con TLS mutuo), `esquemas/` (XSD y WSDL oficiales vendorizados) |
+| El envío | `src-tauri/src/jobs/registro.rs::verifactu_remitir` | Cada 60 s, `MainOperativa` |
+| Comandos | `src-tauri/src/commands/verifactu.rs` | Estado, listado, certificados, probar, exportar, declaración responsable, `F3` |
+| Pantalla | `src/features/configuracion/sections/Fiscal.tsx` | Obligado, certificado, cola, exportación, declaración responsable |
+| Factura completa | `src/shared/ticket/DatosFiscalesModal.tsx` | El formulario de `F1`, cableado en los dos caminos del cobro |
+| Escalera de avisos | `src/shared/ticket/AvisoFiscalModal.tsx` + `shared/stores/useEstadoFiscal.ts` | Los dos peldaños altos |
+| Validación del XML | `scripts/verifactu-validar-xml.py` | Genera 12 muestras y las valida contra los XSD oficiales |
+
+### Las reglas
+
+- **El registro se emite DENTRO de la transacción del cobro**, entre el `INSERT INTO Pagos` y el
+  `COMMIT`. Es lo que exige el art. 9 RRSIF (*«de forma simultánea o inmediatamente anterior a la
+  expedición»*) y lo único que no puede dejar **facturas huérfanas** — una factura expedida cuyo
+  registro no existe, que es la única forma de romper esto de verdad. Si el cobro hace `ROLLBACK` no
+  queda registro ni se gasta número; si la **impresión** falla después, el registro ya es correcto y
+  el papel se reimprime.
+- **Remitir es un job, y no puede ser otra cosa.** El art. 16.2 de la Orden impone un **control de
+  flujo** entre envíos (`TiempoEsperaEnvio`, 60 s al principio, o 1000 registros, lo que ocurra
+  primero), así que el envío no puede ser síncrono con la venta aunque se quisiera. Y por producto:
+  nada de lo que rodea al envío puede impedir cobrar.
+- ⚠️ **El job de remisión NO cuelga del interruptor de la sincronización.** `connectivity: "off"`
+  (SYNC-17, §9) apaga el WebSocket de *nuestra* nube, que es una comodidad —«este cliente no quiere
+  nube»—; remitir a la AEAT es una obligación tributaria. Si compartieran interruptor, el atajo para
+  una red patológica convertiría en silencio un TPV conforme en uno que no lo es, y no se notaría:
+  la aplicación se vería perfectamente sana. Cumplir la regla consiste en **no añadir nada** a ese
+  job; se escribe porque la forma de romperla es que a alguien le parezca razonable «respetar el
+  modo de conexión» dentro de seis meses.
+- **Los errores se clasifican por RANGO, no por lista.** `2000–2999` = **admisible** (el registro se
+  acepta y hay que **subsanarlo**); `3000` = **duplicado**, que se trata como aceptado y es la
+  idempotencia de todo el sistema; cualquier otro = rechazado. Una lista cerrada de códigos se queda
+  vieja en la primera nota técnica de la AEAT, y el fallo sería tratar un aceptado como rechazado
+  —reenviarlo para siempre— o al revés.
+- **Que el duplicado sea «aceptado» es lo que hace recuperable todo lo demás.** Un corte de luz entre
+  el envío y el guardado del resultado, una restauración, un reintento: todo converge porque reenviar
+  algo que la AEAT ya tiene devuelve 3000. Por eso **tras restaurar se reencola todo** lo que no tenga
+  estado de envío (`resembrar_cola_de_envio`) en vez de preguntar a la AEAT qué tiene:
+  `Registros_Facturacion` se replica y vuelve, pero `_Verifactu_Envios` es estado **local** y no, así
+  que sin esto el panel diría «0 pendientes» y el job no mandaría nada.
+- **Las tres subsanaciones son tres operativas distintas**, no una. `Subsanacion='S'` (corregir un
+  registro que la AEAT aceptó), `RechazoPrevio` (reenviar tras un rechazo) y `SinRegistroPrevio`
+  (alta de algo que nunca llegó a registrarse) se informan según el anexo oficial, y un `IDFactura`
+  de subsanación **es el mismo** que el del original — de ahí que el índice único de la terna excluya
+  las filas de subsanación.
+- **Las tablas `_Verifactu_*` van por `WriteGuard::raw()`.** Son estado local del dispositivo (como
+  `_Jobs_State` y `_Sync_*`): por `execute()` se capturarían en `_Sync_Outbox` y cada tick del job
+  replicaría a la nube, facturado, el estado de una cola que allí no significa nada.
+  `Registros_Facturacion` y `Serie_Facturacion` sí van por `execute()`: son esquema compartido y
+  tienen que volver de la nube.
+- **`Registros_Facturacion` es append-only y no se purga nunca** (art. 7 RRSIF; ver DB-14 en
+  `docs/analisis/BACKLOG.md` para qué sí se podrá archivar y por qué).
+- **El certificado lo usa Windows, no nosotros.** El TLS mutuo va por **WinHTTP** (schannel), al que
+  sólo se le pasa la **huella** del certificado elegido; la clave privada no sale del almacén, no hay
+  `.p12` que leer ni contraseña que guardar. Es a propósito y no un detalle: `rustls-cng` —la opción
+  obvia— habla **NCrypt**, que sólo ve claves en un *Key Storage Provider*, y un `.p12` importado con
+  doble clic aterriza en un **CSP legacy**. Con NCrypt, el certificado del bar simplemente no
+  aparecería en la lista. WinHTTP sirve KSP, CSP legacy y tarjetas criptográficas igual, que es lo
+  que hacen el navegador y Autofirma.
+- **Un certificado que pide PIN no sirve para esto**, y hay que decirlo antes. La pantalla marca los
+  que no tienen *uso silencioso*: un envío automático que se queda esperando un diálogo a las 3 de la
+  mañana no falla, **se cuelga**, y el atraso crece sin que nada lo explique. El botón «Probar» abre
+  una conexión real **sin enviar ninguna factura** justo para que eso salga con alguien delante.
+- **El entorno es una decisión explícita** (`Business_Settings.Verifactu_Entorno`). Los endpoints de
+  producción y pruebas se distinguen en tres caracteres, y un ticket de pruebas que parece real es
+  peor que uno que no sale: en pruebas el panel lo dice en amarillo y el QR apunta al portal de
+  pruebas. Si el valor guardado no se reconoce, **se cae a producción** — fallar hacia el lado que
+  cumple.
+- **La escalera de avisos tiene cinco peldaños y cada uno vive donde corresponde**: `<1 h` nada (es
+  funcionamiento normal, la espera la impone la norma), `1–6 h` el panel, `6–24 h` una notificación
+  al Administrador, `24–72 h` un aviso al iniciar sesión, `>72 h` un aviso tras cada cobro. La clave
+  de dedupe es **una sola** para todos: con una por peldaño, subir de escalón dejaría el anterior
+  abierto. Y el aviso **se cierra solo** cuando la cola baja — uno que hay que descartar a mano
+  después de que el problema se arregle enseña a descartar avisos.
+- **El aviso de cobro va DESPUÉS del cobro.** El plan decía «modal en cada cobro»; se hace al
+  terminar, por la regla más firme del producto: nada de lo que rodea al ticket puede impedir cobrar.
+  Un diálogo *delante* del cobro es una pulsación más en la ruta más caliente, cableada en dos
+  pantallas, que un bug convierte en «el TPV no cobra» en hora punta.
+- **Los importes se guardan como TEXTO.** `ImporteTotal` y `CuotaTotal` entran en la cadena que se
+  hashea, y `REAL → texto` no es una operación única: `123.1`, `123.10` y `123.100000000000001` son
+  tres cadenas distintas y tres huellas distintas. Se formatean **una vez** (`fmt_importe`) y el XML,
+  el QR y la exportación se construyen desde el texto guardado. Nadie recomputa nada al leer.
+- **`Cadena_Huella` se guarda aunque sea redundante**, y es lo que hace auditable la exportación: con
+  `cadena.txt` cualquiera recalcula las huellas con un SHA-256 y comprueba que la cadena no se ha
+  tocado, **sin nuestro código**. Si algún día el formateo cambiara, el fichero enseña qué se hasheó
+  de verdad.
+- **`Orden` es explícito, no `rowid`.** El eslabón anterior es `MAX(Orden)`; con `rowid` la cadena
+  dependería del orden en que una restauración reinserta las filas, que no está garantizado.
+- **Un producto al 0 % es *sujeto*, no *exento*.** Son dos afirmaciones legales distintas y el XSD las
+  pone en un `<choice>`: informar tipo o cuota en un tramo exento es el error 1238. La causa de
+  exención (`E1`…`E6`) la lleva el producto (`Productos.Exento`, `Causa_Exencion`) y se congela en la
+  línea al vender, como el nombre y el tipo.
+- **Anular y devolver no son lo mismo** (§13). Un cobro anulado **por error** emite un registro de
+  **anulación**; una **devolución** al cliente emite una rectificativa `R5` y no deshace nada. Lo
+  decide `ClaseBaja` en `anular_pago`, y de ello depende si las líneas y el stock vuelven.
+- **El texto que viaja en el XML se sanea.** `<`, `>`, `"`, `'` y `=` se quitan de los campos libres
+  (error 1287). El nombre de un producto lo escribe el usuario, y una comilla en «Tosta d'all» tiraba
+  el envío entero.
+- **El NIF se valida en los dos lados, y la copia es deliberada.** `tpv_domain::verifactu::nif_valido`
+  y `nifValido` en `DatosFiscalesModal.tsx`. El backend lo revalida porque quien puede invocar un
+  comando puede mandar lo que quiera; el frontend lo comprueba porque un NIF mal dictado **no** se
+  rechaza al enviar: vuelve como «error admisible: NIF no censado» horas después, sin el cliente
+  delante y con una subsanación que alguien tiene que disparar a mano.
+- **La Handy no factura.** Ya no cobra (`cobro_solo_en_main`), y el worker veta además cualquier
+  escritura a las tablas fiscales (`test/fiscalSoloMain.test.ts`): el número correlativo y la cadena
+  de huellas viven en la Main y no pueden tener dos escritores.
+- **La declaración responsable se ve desde dentro del programa** (art. 13 RRSIF, *«visible en cada
+  una de sus versiones»*), con la versión real de `tauri.conf.json`, no un número escrito a mano.
+  Mientras falten los datos definitivos del productor, la pantalla **dice que está incompleta** en
+  vez de enseñar una declaración a medias.
+
+### Al tocar esto
+
+- Los **argumentos de los comandos `verifactu_*` van planos** (`{ numeroTicket }`), no envueltos en
+  `{ args: {…} }`. En el repo conviven las dos formas según la firma de cada comando, y equivocarse
+  no da un error legible: un parámetro `Option<…>` llega como `None` y el comando se queda con su
+  valor por defecto. `check-comandos-tauri.mjs` comprueba el **nombre**, no la forma de los
+  argumentos.
+- Las **pruebas contra la AEAT** se lanzan a mano y están documentadas en
+  [docs/PRUEBAS_AEAT.md](docs/PRUEBAS_AEAT.md): `pnpm verifactu:certificados` para ver qué hay en el
+  almacén, `pnpm verifactu:probar-aeat` para el *handshake*, `pnpm verifactu:validar-xml` para
+  validar las muestras contra los XSD oficiales.
+
 ## 12. Cierre de caja (arqueo)
 
 El corte del periodo de caja. **CUENTA-06**; diseño y porqués en

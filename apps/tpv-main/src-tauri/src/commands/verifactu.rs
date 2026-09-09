@@ -209,3 +209,133 @@ pub async fn verifactu_probar_conexion(
 
     Ok(AeatAdapter::new().probar_conexion(entorno, &h).await?)
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// Exportación (art. 8 RRSIF) y declaración responsable (art. 13 RRSIF)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Genera el ZIP con los registros de facturación de un rango.
+///
+/// Es una **obligación del sistema**, no una comodidad: el art. 8 RRSIF exige que el SIF pueda
+/// exportar sus registros, y un inspector puede pedirlo. El ZIP lleva cuatro ficheros y el que lo
+/// justifica es `cadena.txt`: con la cadena exacta que se hasheó de cada registro, **un tercero
+/// verifica la integridad entera con un SHA-256 y sin nuestro código**.
+///
+/// El destino lo elige el usuario (`destino` es una ruta absoluta, fuera de AppData), como en las
+/// copias de seguridad. Devuelve cuántos registros entraron — un rango vacío no es un error.
+#[tauri::command]
+pub async fn verifactu_exportar(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    destino: String,
+    desde: String,
+    hasta: String,
+) -> Result<usize, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+
+    // Se lee de la BD directamente y no por el repositorio: exportar es de las cosas que se piden
+    // justo cuando algo va mal, así que no se apoya en nada más que en leer filas.
+    let db = {
+        let guard = state.db.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| {
+            AppErrorDto::internal("Los registros de facturación sólo existen en el TPV principal")
+        })?
+    };
+
+    // El contexto del manifiesto: quién factura, con qué sistema y en qué entorno.
+    let estado = uc::estado(state.verifactu_repo().await?.as_ref()).await?;
+    let ctx = tpv_infra_sqlite::verifactu_export::ContextoExport {
+        nif: estado.nif.clone().unwrap_or_default(),
+        razon_social: estado.razon_social.clone().unwrap_or_default(),
+        version_sistema: app.package_info().version.to_string(),
+        nombre_sistema: crate::PRODUCTOR_NOMBRE_SISTEMA.to_string(),
+        id_sistema: crate::PRODUCTOR_ID_SISTEMA.to_string(),
+        nif_productor: crate::PRODUCTOR_NIF.to_string(),
+        nombre_productor: crate::PRODUCTOR_NOMBRE_RAZON.to_string(),
+        entorno: if estado.entorno_pruebas {
+            "pruebas".to_string()
+        } else {
+            "produccion".to_string()
+        },
+    };
+
+    Ok(tpv_infra_sqlite::verifactu_export::exportar(
+        &db,
+        std::path::Path::new(&destino),
+        &desde,
+        &hasta,
+        &ctx,
+    )
+    .await?)
+}
+
+/// La **declaración responsable** del productor del software (art. 13 RRSIF).
+///
+/// > *«Los sistemas informáticos […] deberán incluir una declaración responsable […] que podrá
+/// > figurar en el propio sistema informático, visible en cada una de sus versiones»*.
+///
+/// O sea que no basta con tenerla en un PDF: tiene que poder verse **desde dentro del programa**, y
+/// con la versión delante. Esto es lo que alimenta esa pantalla.
+///
+/// Sin exigir rol: la declaración es pública por definición — su objeto es que cualquiera pueda
+/// leerla, incluido un inspector que se siente en la barra.
+#[tauri::command]
+pub async fn verifactu_declaracion_responsable(
+    app: AppHandle,
+) -> Result<DeclaracionResponsableDto, AppErrorDto> {
+    Ok(DeclaracionResponsableDto {
+        productor_nombre_razon: crate::PRODUCTOR_NOMBRE_RAZON.to_string(),
+        productor_nif: crate::PRODUCTOR_NIF.to_string(),
+        nombre_sistema: crate::PRODUCTOR_NOMBRE_SISTEMA.to_string(),
+        id_sistema: crate::PRODUCTOR_ID_SISTEMA.to_string(),
+        version: app.package_info().version.to_string(),
+        // ⚠️ El texto está PENDIENTE de redactar y necesita el NIF y la razón social definitivos del
+        // productor (§15 del plan, puntos 3 y 4). Lo que NO puede es salir en blanco sin decirlo:
+        // una pantalla vacía donde la ley exige una declaración se lee como que la hay.
+        texto: if crate::PRODUCTOR_NIF.trim().is_empty() {
+            String::new()
+        } else {
+            TEXTO_DECLARACION.to_string()
+        },
+        completa: !crate::PRODUCTOR_NIF.trim().is_empty(),
+    })
+}
+
+/// La declaración responsable tal como la enseña la pantalla.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DeclaracionResponsableDto {
+    pub productor_nombre_razon: String,
+    pub productor_nif: String,
+    pub nombre_sistema: String,
+    pub id_sistema: String,
+    pub version: String,
+    pub texto: String,
+    /// `false` mientras falten los datos definitivos del productor. La pantalla lo dice en vez de
+    /// enseñar una declaración a medias, que sería peor que no enseñar ninguna.
+    pub completa: bool,
+}
+
+/// Texto de la declaración responsable.
+///
+/// ⚠️ **Borrador.** Recoge lo que el art. 13 RRSIF exige declarar, pero hay que revisarlo con la
+/// empresa constituida y, si procede, con un asesor: es una declaración con consecuencias.
+const TEXTO_DECLARACION: &str = "\
+Declaración responsable (art. 13 del Real Decreto 1007/2023)
+
+El productor de este sistema informático de facturación declara, bajo su responsabilidad, que el \
+sistema cumple lo dispuesto en el Real Decreto 1007/2023, de 5 de diciembre, y en su normativa de \
+desarrollo (Orden HAC/1177/2024), y en particular que:
+
+· Produce un registro de facturación de alta por cada factura expedida, de forma simultánea o \
+inmediatamente anterior a su expedición.
+· Encadena cada registro con el inmediatamente anterior mediante una huella o «hash» SHA-256, \
+calculada conforme a las especificaciones publicadas por la Agencia Estatal de Administración \
+Tributaria.
+· Conserva los registros de facturación sin que puedan ser modificados ni eliminados, y permite su \
+exportación.
+· Funciona exclusivamente como «Sistema de emisión de facturas verificables» (VERI*FACTU), \
+remitiendo a la Agencia Estatal de Administración Tributaria todos los registros de facturación \
+generados.
+· Incluye en cada factura el código «QR» y la leyenda exigidos por los artículos 20 y 21 de la \
+Orden HAC/1177/2024.
+· No permite la llevanza de contabilidades, registros o cuentas distintas de las declaradas, ni la \
+ocultación o alteración de operaciones.";

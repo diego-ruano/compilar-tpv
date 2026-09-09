@@ -81,6 +81,12 @@ hmac = "0.12"
 # serde-compat va activo por defecto; chrono-impl añade soporte para tipos chrono.
 ts-rs = { version = "12", features = ["chrono-impl"] }
 
+# ── Exportacion de los registros de facturacion (art. 8 RRSIF) ──
+# Sin default-features y solo `deflate`: el ZIP lleva cuatro ficheros de texto, asi que no hacen
+# falta ni bzip2, ni zstd, ni el cifrado. Un ZIP y no una carpeta porque es UN fichero que se le
+# entrega a quien lo pide.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
 # ── Codigo QR del ticket (FISCAL-01, arts. 20-21 de la Orden HAC/1177/2024) ──
 # Sin default-features: solo hace falta la MATRIZ de modulos, no renderizar a imagen. La
 # rasterizacion a ESC/POS la hace printing.rs por el mismo camino que el logo (GS v 0), que es
