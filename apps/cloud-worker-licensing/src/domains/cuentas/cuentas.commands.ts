@@ -185,6 +185,17 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand {
 	const motivo = (input.motivo ?? "").trim();
 	const idUsuario = input.id_usuario;
+	// FISCAL-01: los dos instrumentos. Espejo de `ClaseBaja` en Rust.
+	//
+	//   ERROR      → la venta NO existió: se abona el stock, las líneas vuelven a la comanda.
+	//   DEVOLUCION → la venta SÍ existió: el stock NO se abona (el cliente se llevó la
+	//                consumición) y las líneas NO vuelven, o quedarían pendientes de cobro otra vez.
+	//
+	// Lo que esta ruta **no** hace en ningún caso es emitir el registro de facturación: lo emite la
+	// Main dentro de su propia transacción, y el veto de `applyViaHub` impide escribir
+	// `Registros_Facturacion` desde aquí. La nube es copia, no fuente.
+	const clase = input.clase === "DEVOLUCION" ? "DEVOLUCION" : "ERROR";
+	const devuelveLasLineas = clase === "ERROR";
 	const steps = [
 		// El id del movimiento de caja se genera ANTES del INSERT, nunca dentro de la sentencia:
 		// una TEXT PRIMARY KEY calculada en SQL se re-evaluaría al replicar y la nube y la Main
@@ -192,7 +203,10 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 		idStep(null),
 		// 1) Devolver el stock consumido por los detalles del pago. La traza (`Lote_Consumos`) se
 		//    CONSERVA: ya no es ella la que impide el doble abono, sino el `Estado` del pago.
-		{
+		//
+		//    SÓLO si la venta no existió (FISCAL-01). En una devolución el cliente se llevó la
+		//    consumición: abonar el stock inventaría unidades que no están en la estantería.
+		devuelveLasLineas && {
 			kind: "execute",
 			sql: `
 				UPDATE Lotes_Producto
@@ -213,7 +227,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			args: [idPago],
 		},
 		// 1-bis) Y el stock SUELTO que consumió el pago (lo que los lotes no cubrieron, VR-04).
-		{
+		devuelveLasLineas && {
 			kind: "execute",
 			sql: `
 				UPDATE Productos
@@ -252,24 +266,25 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago],
 		},
-		// 3) El movimiento en el historial de caja. Va ANTES de marcar el pago porque lee su
-		//    importe y su método de la fila todavía activa.
+		// 3) El movimiento en el historial de caja, con el tipo que corresponde: son dos hechos
+		//    distintos y el historial existe para poder distinguirlos al investigar un descuadre.
+		//    Va ANTES de marcar el pago porque lee su importe y su método de la fila todavía activa.
 		{
 			kind: "execute",
 			sql: `
 				INSERT INTO Movimientos_Caja (
 				  ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Usuario, Importe, Metodo_Pago, Motivo
 				)
-				SELECT ?2, datetime('now','localtime'), 'ANULACION', p.ID_Pago, ?3,
+				SELECT ?2, datetime('now','localtime'), ?5, p.ID_Pago, ?3,
 				       ABS(ROUND(IFNULL(p.Importe_Total,0), 2)), NULLIF(COALESCE(p.Metodo_Pago,''),''), ?4
 				FROM Pagos p
 				WHERE p.ID_Pago = ?1 AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 				  AND NOT EXISTS (
 				    SELECT 1 FROM Movimientos_Caja mc
-				    WHERE mc.Tipo = 'ANULACION' AND mc.ID_Pago = ?1
+				    WHERE mc.Tipo IN ('ANULACION','DEVOLUCION') AND mc.ID_Pago = ?1
 				  );
 			`,
-			args: [idPago, REF_ID, idUsuario, motivo],
+			args: [idPago, REF_ID, idUsuario, motivo, clase === "DEVOLUCION" ? "DEVOLUCION" : "ANULACION"],
 		},
 		// 4) Marcar el pago. El `Estado <> 'ANULADO'` deja el UPDATE idempotente, y es el guardia
 		//    que impide abonar el stock dos veces.
@@ -280,14 +295,18 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				SET Estado = 'ANULADO',
 				    Anulado_En = datetime('now','localtime'),
 				    Anulado_Por = ?2,
-				    Motivo_Anulacion = ?3
+				    Motivo_Anulacion = ?3,
+				    Motivo_Baja = ?4
 				WHERE ID_Pago = ?1 AND COALESCE(Estado,'ACTIVO') <> 'ANULADO';
 			`,
-			args: [idPago, idUsuario, motivo],
+			args: [idPago, idUsuario, motivo, clase],
 		},
 		// 5) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las cubría
 		//    ya no está activo—, así que se reabre si no hay otra comanda abierta para la mesa.
-		{
+		//
+		//    Sólo en una anulación por error: en una devolución la mesa está cerrada y reabrirla
+		//    pondría las líneas otra vez a cobrar.
+		devuelveLasLineas && {
 			kind: "execute",
 			sql: `
 				UPDATE Comandas
@@ -327,10 +346,13 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			`,
 			args: [idPago],
 		},
-	];
+		// Los pasos marcados con `devuelveLasLineas && …` quedan en `false` cuando es una
+		// devolución; se descartan aquí. Es más legible que montar el array por trozos, y lo que
+		// importa —qué paso aplica a qué caso— se lee en el propio paso.
+	].filter(Boolean) as any[];
 	return {
 		commandName: "cuentas_anular_pago",
 		command: { type: "tenantDb.transaction", payload: { steps } },
-		cloudPayload: { id_pago: idPago, id_usuario: idUsuario, motivo },
+		cloudPayload: { id_pago: idPago, id_usuario: idUsuario, motivo, clase },
 	};
 }

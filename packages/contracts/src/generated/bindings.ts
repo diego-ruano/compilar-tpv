@@ -15,7 +15,16 @@ export type AnularPagoInput = { id_pago: string,
 /**
  * Obligatorio. Quién y cuándo los pone el sistema; el porqué sólo puede ponerlo quien anula.
  */
-motivo?: string, };
+motivo?: string, 
+/**
+ * FISCAL-01: `"ERROR"` (la venta no existió → RF de anulación) o `"DEVOLUCION"` (la venta
+ * existió y se devuelve el dinero → factura rectificativa `R5`).
+ *
+ * Ausente = `"ERROR"`, que es lo que hacía este comando antes de FISCAL-01. Son dos
+ * instrumentos legales distintos y la pantalla tiene que explicar la diferencia en una frase,
+ * no ofrecer dos botones parecidos.
+ */
+clase?: string, };
 
 /**
  * Cabeceras firmadas para tpv-server (campos camelCase, compat frontend).

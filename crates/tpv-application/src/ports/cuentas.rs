@@ -16,6 +16,60 @@ pub struct AnularPagoArgs {
     pub id_pago: String,
     pub id_usuario: String,
     pub motivo: String,
+    /// FISCAL-01: **cuál de los dos instrumentos legales** se está usando. Son distintos y generan
+    /// registros de facturación distintos; ver [`ClaseBaja`].
+    pub clase: ClaseBaja,
+}
+
+/// Por qué un cobro deja de contar. Son **dos cosas distintas** y el registro que generan no es el
+/// mismo — hasta FISCAL-01 salían por el mismo botón, y la que más se usa no era la que el botón
+/// decía.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClaseBaja {
+    /// **La venta no existió**: un ticket de prueba, una formación, una mesa equivocada, un cobro
+    /// que nunca debió emitirse. Genera un **RF de anulación** (art. 11.1 RRSIF), que no borra nada
+    /// —el registro erróneo y el de anulación se conservan y se remiten los dos— y devuelve las
+    /// líneas a la comanda.
+    ///
+    /// La AEAT avisa en su FAQ de desarrolladores de que estos casos deben ser *«MUY POCO
+    /// FRECUENTES»*.
+    #[default]
+    Error,
+    /// **La venta existió** y se devuelve el dinero (o se corrige el importe). Genera una **factura
+    /// rectificativa** (RF de alta `R5` con `TipoRectificativa = I` e importe negativo), y las
+    /// líneas **no** vuelven a la comanda: se vendieron.
+    ///
+    /// La AEAT lo dice sin matices: *«todas las facturas emitidas, en la medida en que respondan a
+    /// operaciones realmente efectuadas (como es el caso habitual) no pueden anularse»*.
+    Devolucion,
+}
+
+impl ClaseBaja {
+    /// Valor que se guarda en `Pagos.Motivo_Baja`.
+    pub fn wire(self) -> &'static str {
+        match self {
+            ClaseBaja::Error => "ERROR",
+            ClaseBaja::Devolucion => "DEVOLUCION",
+        }
+    }
+
+    /// Lee lo que llega del frontend. Cualquier cosa que no sea exactamente `"DEVOLUCION"` es una
+    /// anulación por error, que es el comportamiento que había antes de FISCAL-01: un cliente
+    /// antiguo que no manda el campo sigue haciendo lo que hacía.
+    pub fn desde_texto(s: Option<&str>) -> Self {
+        match s.map(str::trim) {
+            Some(v) if v.eq_ignore_ascii_case("DEVOLUCION") => ClaseBaja::Devolucion,
+            _ => ClaseBaja::Error,
+        }
+    }
+
+    /// ¿Las líneas vuelven a la comanda?
+    ///
+    /// Sólo si la venta no existió. En una devolución se vendieron de verdad: devolverlas a la mesa
+    /// las dejaría pendientes de cobro y el camarero las volvería a cobrar.
+    pub fn devuelve_las_lineas(self) -> bool {
+        matches!(self, ClaseBaja::Error)
+    }
 }
 
 /// Filtros de listado de caja: rango, búsqueda de texto y paginación (`page`/`page_size` en `None`

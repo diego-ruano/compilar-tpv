@@ -20,6 +20,11 @@ use crate::util::new_id;
 /// es tocar el `CHECK` y añadir aquí la constante.
 pub const TIPO_COBRO: &str = "COBRO";
 pub const TIPO_ANULACION: &str = "ANULACION";
+/// FISCAL-01: dinero que SALE del cajon por una venta real que se devuelve. No es una
+/// anulacion: la venta existio, y lo que se emite es una factura rectificativa (R5), no un
+/// RF de anulacion. Se distinguen en el historial porque son dos hechos distintos y al
+/// investigar un descuadre importa cual fue.
+pub const TIPO_DEVOLUCION: &str = "DEVOLUCION";
 pub const TIPO_GASTO: &str = "GASTO";
 pub const TIPO_GASTO_ANULADO: &str = "GASTO_ANULADO";
 

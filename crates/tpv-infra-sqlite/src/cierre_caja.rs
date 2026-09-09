@@ -173,6 +173,15 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         // cero: el único control de caja del producto era ciego ante la forma más común de sisa.
         // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
         // sale como que falta.
+        //
+        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES, sin tocar nada. El plan
+        // pedía que «una devolución en efectivo tiene que restar del esperado»; eso es exactamente
+        // lo que hace `Estado = 'ACTIVO'`, porque una devolución deja el cobro en 'ANULADO'
+        // (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual POR QUÉ salió el dinero: lo que
+        // cambia entre los dos instrumentos es el registro fiscal que se emite, no la aritmética.
+        //
+        // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
+        // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
         let (sql, params) = match desde {
             Some(d) => (
                 r#"
@@ -209,6 +218,11 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
     ///
     /// Se cuenta por `Anulado_En` y no por `Fecha_Hora`: lo que pertenece a este periodo es el
     /// acto de anular, no la venta original —que puede ser de anteayer.
+    ///
+    /// Cuenta las dos clases de baja juntas (FISCAL-01: `Motivo_Baja` 'ERROR' y 'DEVOLUCION')
+    /// porque para explicar un descuadre son lo mismo: dinero que salió del cajón sin venta que lo
+    /// respalde en el arqueo. La diferencia entre ellas es fiscal y se ve en el historial de caja,
+    /// donde sí llevan tipos distintos.
     async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, f64)> {
         let db = self.db.read().await;
         let (sql, params) = match desde {

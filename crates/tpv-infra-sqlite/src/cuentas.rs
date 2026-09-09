@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
+use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
 use tpv_contracts::cuentas::{
     EntradaDto, LineaTicketDto, ResumenCajaDto, SalidaDto, TicketReimpresionDto,
 };
@@ -625,6 +625,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             id_pago,
             id_usuario,
             motivo,
+            clase,
         } = args;
         let g = self.db.write().await;
         let conn = &g;
@@ -665,6 +666,18 @@ impl CuentasRepository for SqliteCuentasRepository {
                 return Ok(false);
             }
 
+            // FISCAL-01. A partir de aquí hay dos caminos y la diferencia no es cosmética:
+            //
+            //   · ERROR      → la venta NO EXISTIÓ. Se abona el stock, las líneas vuelven a la
+            //                  comanda y se emite un RF DE ANULACIÓN.
+            //   · DEVOLUCION → la venta SÍ EXISTIÓ y se devuelve el dinero. El stock NO se abona
+            //                  (el cliente se llevó la consumición) y las líneas NO vuelven: si
+            //                  volvieran, quedarían pendientes de cobro y el camarero las cobraría
+            //                  otra vez. Se emite una FACTURA RECTIFICATIVA (R5).
+            //
+            // Lo que hacen igual las dos es dejar de contar como venta, y por eso comparten
+            // `Estado = 'ANULADO'`: al cajón le da igual por qué salió el dinero.
+            if clase.devuelve_las_lineas() {
             // 2) Devolver el stock de lotes consumido por las líneas de este pago. La traza
             //    (`Lote_Consumos`) se CONSERVA: ya no es ella la que impide el doble abono.
             conn.execute(
@@ -709,8 +722,12 @@ impl CuentasRepository for SqliteCuentasRepository {
             )
             .await
             .map_err(db_err)?;
+            }
 
             // 3) Restar el gasto del cliente ligado a la comanda (vía Reservas), sin bajar de 0.
+            //
+            //    Esto SÍ se hace en los dos casos: el cliente ya no ha gastado ese dinero, haya
+            //    sido porque la venta no existía o porque se le ha devuelto.
             let importe = (importe * 100.0).round() / 100.0;
             if importe > 0.0 && !id_comanda.is_empty() {
                 conn.execute(
@@ -740,23 +757,30 @@ impl CuentasRepository for SqliteCuentasRepository {
                     SET Estado = 'ANULADO',
                         Anulado_En = datetime('now','localtime'),
                         Anulado_Por = ?2,
-                        Motivo_Anulacion = ?3
+                        Motivo_Anulacion = ?3,
+                        Motivo_Baja = ?4
                     WHERE ID_Pago = ?1 AND COALESCE(Estado,'ACTIVO') <> 'ANULADO';
                     "#,
                     vec![
                         Value::Text(id_pago.clone()),
                         Value::Text(id_usuario.clone()),
                         Value::Text(motivo.clone()),
+                        Value::Text(clase.wire().to_string()),
                     ],
                 )
                 .await
                 .map_err(db_err)?;
 
-            // 5) El movimiento en el historial de caja.
+            // 5) El movimiento en el historial de caja, con el tipo que corresponde. Son dos
+            //    hechos distintos y el historial existe justo para poder distinguirlos después:
+            //    una devolución es dinero que sale del cajón por una venta real.
             caja_movimientos::registrar(
                 conn,
                 MovimientoCaja {
-                    tipo: caja_movimientos::TIPO_ANULACION,
+                    tipo: match clase {
+                        ClaseBaja::Error => caja_movimientos::TIPO_ANULACION,
+                        ClaseBaja::Devolucion => caja_movimientos::TIPO_DEVOLUCION,
+                    },
                     id_pago: Some(id_pago.clone()),
                     id_usuario: Some(id_usuario.clone()),
                     importe,
@@ -770,7 +794,10 @@ impl CuentasRepository for SqliteCuentasRepository {
             // 6) Recalcular la comanda. Sus líneas vuelven a estar pendientes —el pago que las
             //    cubría ya no está activo—, así que se reabre si no hay otra comanda abierta para
             //    la misma mesa. `Total_Comanda` no cambia: las líneas siguen ahí.
-            if !id_comanda.is_empty() {
+            //
+            //    Sólo en una anulación POR ERROR. En una devolución la mesa está cerrada y la
+            //    consumición se la llevó el cliente: reabrirla pondría las líneas otra vez a cobrar.
+            if clase.devuelve_las_lineas() && !id_comanda.is_empty() {
                 conn.execute(
                     r#"
                     UPDATE Comandas
@@ -815,6 +842,15 @@ impl CuentasRepository for SqliteCuentasRepository {
                 )
                 .await
                 .map_err(db_err)?;
+            }
+
+            // 7) FISCAL-01: el registro de facturación, DENTRO de esta misma transacción.
+            //
+            //    Si `affected` es 0 el pago ya estaba anulado y no se emite nada: el registro
+            //    correspondiente se emitió la primera vez, y emitir otro gastaría un número y
+            //    mandaría a la AEAT un hecho que no ha ocurrido.
+            if affected > 0 {
+                crate::verifactu::emitir_baja_de_pago(conn, &id_pago, clase).await?;
             }
 
             Ok(affected > 0)
@@ -931,6 +967,9 @@ mod tests_anulacion {
             id_pago: id_pago.to_string(),
             id_usuario: "u1".to_string(),
             motivo: "cobro duplicado".to_string(),
+            // FISCAL-01: anulación POR ERROR, que es lo que hacía el botón único
+            // antes de partirlo. El test sigue describiendo el mismo comportamiento.
+            clase: ClaseBaja::Error,
         }
     }
 
@@ -1372,6 +1411,9 @@ mod tests_lineas_devueltas {
             id_pago: "pago".into(),
             id_usuario: "u1".into(),
             motivo: "error de cobro".into(),
+            // FISCAL-01: anulación POR ERROR, que es lo que hacía el botón único
+            // antes de partirlo. El test sigue describiendo el mismo comportamiento.
+            clase: ClaseBaja::Error,
         }
     }
 
@@ -1476,6 +1518,9 @@ mod tests_arqueo_ciego {
                 id_pago: "p2".into(),
                 id_usuario: "u1".into(),
                 motivo: "se lo llevó puesto".into(),
+                // FISCAL-01: anulación POR ERROR, que es lo que hacía el botón único
+                // antes de partirlo. El test sigue describiendo el mismo comportamiento.
+                clase: ClaseBaja::Error,
             })
             .await
             .unwrap();
@@ -1504,6 +1549,7 @@ mod tests_arqueo_ciego {
                 id_pago: "p1".into(),
                 id_usuario: "u1".into(),
                 motivo: "x".into(),
+                clase: ClaseBaja::Error,
             })
             .await
             .unwrap();
@@ -1527,6 +1573,7 @@ mod tests_arqueo_ciego {
             id_pago: "p2".into(),
             id_usuario: "u1".into(),
             motivo: "x".into(),
+            clase: ClaseBaja::Error,
         })
         .await
         .unwrap();
@@ -1741,6 +1788,385 @@ mod tests_reimpresion {
 
         let t = repo(&db).ticket_para_reimprimir("pago").await.unwrap().unwrap();
         assert_eq!(t.numero_ticket, "");
+    }
+}
+
+#[cfg(test)]
+mod tests_anular_vs_devolver {
+    //! Los **dos instrumentos** de FISCAL-01, que hasta ahora salían por el mismo botón.
+    //!
+    //! La AEAT los separa sin matices:
+    //!
+    //! - **Anular** es para una factura que *no responde a una operación real* (art. 11.1 RRSIF):
+    //!   un ticket de prueba, una formación, una mesa equivocada. Su FAQ dice que estos casos deben
+    //!   ser «MUY POCO FRECUENTES».
+    //! - **Rectificar** es para cuando la operación **sí existió** y hay que devolver dinero:
+    //!   *«todas las facturas emitidas, en la medida en que respondan a operaciones realmente
+    //!   efectuadas (como es el caso habitual) no pueden anularse»*.
+    //!
+    //! Y la que más se va a usar —la devolución— es justo la que no era una anulación.
+
+    use super::tests_comunes::*;
+    use super::*;
+
+    /// El repositorio y el lector de un escalar de texto: los mismos que usa `tests_anulacion`.
+    /// Están aquí y no en `tests_comunes` porque son de tres líneas y moverlos obligaría a tocar el
+    /// módulo de al lado sin necesidad.
+    fn repo(db: &Arc<Db>) -> SqliteCuentasRepository {
+        SqliteCuentasRepository::new(db.clone())
+    }
+
+    async fn texto(db: &Arc<Db>, sql: &str) -> Option<String> {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap()?;
+        crate::mapping::v_string(row.get_value(0).unwrap())
+    }
+
+    /// Una venta de barra cobrada, con datos fiscales configurados para que el registro se emita.
+    const VENTA_COBRADA: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('prod', 'cat', 'Cerveza', 3.0, 10);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Pagada', 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det', 'prod', 1);",
+    ];
+
+    /// Cobra por el camino real (para que se emita el registro fiscal) y devuelve el `ID_Pago`.
+    async fn cobrar(db: &Arc<Db>) -> String {
+        use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
+        crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_comanda: "com".into(),
+                metodo: "Efectivo".into(),
+                importe_total: 0.0,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec!["det".into()],
+            })
+            .await
+            .expect("el cobro tiene que salir");
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT ID_Pago FROM Pagos WHERE ID_Comanda = 'com' LIMIT 1;",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().expect("tiene que haber un pago");
+        crate::mapping::v_string(row.get_value(0).unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn anular_por_error_emite_un_registro_de_anulacion() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago: id_pago.clone(),
+                id_usuario: "u1".into(),
+                motivo: "mesa equivocada".into(),
+                clase: ClaseBaja::Error,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo='ANULACION';").await,
+            1.0,
+            "una anulación por error emite un RF de anulación"
+        );
+        assert_eq!(
+            escalar(
+                &db,
+                "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo_Factura='R5';"
+            )
+            .await,
+            0.0,
+            "y NO una rectificativa"
+        );
+        // Anular no borra nada: el alta original sigue ahí, y los dos se remiten.
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo='ALTA';").await,
+            1.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM _Verifactu_Envios;").await,
+            2.0,
+            "los dos registros se encolan para remitir"
+        );
+    }
+
+    #[tokio::test]
+    async fn devolver_emite_una_rectificativa_R5_con_importe_negativo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago: id_pago.clone(),
+                id_usuario: "u1".into(),
+                motivo: "devolución al cliente".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo='ANULACION';").await,
+            0.0,
+            "una devolución NO se anula: la operación existió"
+        );
+        assert_eq!(
+            texto(
+                &db,
+                "SELECT Tipo_Factura FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 1;"
+            )
+            .await,
+            Some("R5".into())
+        );
+        assert_eq!(
+            texto(
+                &db,
+                "SELECT Tipo_Rectificativa FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 1;"
+            )
+            .await,
+            Some("I".into()),
+            "por diferencias, no por sustitución"
+        );
+        assert_eq!(
+            texto(
+                &db,
+                "SELECT Importe_Total FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 1;"
+            )
+            .await,
+            Some("-3.00".into()),
+            "el importe va NEGATIVO, y es el mismo número que se cobró con el signo cambiado"
+        );
+    }
+
+    #[tokio::test]
+    async fn la_rectificativa_referencia_la_factura_original() {
+        // Sin la referencia, la AEAT no sabe qué se está rectificando: es el bloque
+        // `FacturasRectificadas`, obligatorio en una R*.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        let num_original = texto(
+            &db,
+            "SELECT Num_Serie_Factura FROM Registros_Facturacion WHERE Tipo='ALTA' LIMIT 1;",
+        )
+        .await
+        .unwrap();
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        let refs = texto(
+            &db,
+            "SELECT Referencias_Json FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 1;",
+        )
+        .await
+        .expect("la rectificativa tiene que llevar referencias");
+        assert!(refs.contains(&num_original), "{refs}");
+        assert!(refs.contains("rectificadas"), "{refs}");
+    }
+
+    #[tokio::test]
+    async fn la_rectificativa_gasta_numero_de_la_misma_serie() {
+        // Se podría usar una serie aparte (`R-2027/…`) y sería más legible en un listado, pero
+        // serían dos contadores que mantener. El tipo de factura ya está en su columna.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+        let serie = chrono::Local::now().format("%Y").to_string();
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            texto(
+                &db,
+                "SELECT Num_Serie_Factura FROM Registros_Facturacion WHERE Tipo_Factura='R5';"
+            )
+            .await,
+            Some(format!("{serie}/000002")),
+            "la R5 es el número siguiente de la misma serie"
+        );
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_NO_devuelve_las_lineas_a_la_comanda() {
+        // Es la diferencia que se nota en la barra: el cliente se llevó la consumición. Si las
+        // líneas volvieran, quedarían pendientes de cobro y el camarero las cobraría otra vez.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Pagada".into()),
+            "la comanda NO se reabre"
+        );
+        // Y el stock tampoco vuelve: la cerveza se la bebieron.
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            9.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_anulacion_por_error_SI_las_devuelve() {
+        // El otro lado: la venta no existió, así que la consumición sigue en la mesa y el stock
+        // nunca debió bajar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "mesa equivocada".into(),
+                clase: ClaseBaja::Error,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Comandas WHERE ID_Comanda='com';").await,
+            Some("Abierta".into()),
+            "la comanda se reabre: las líneas siguen pendientes de cobro"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Suelto FROM Productos WHERE ID_Producto='prod';").await,
+            10.0,
+            "el stock vuelve"
+        );
+    }
+
+    #[tokio::test]
+    async fn el_historial_de_caja_distingue_los_dos_hechos() {
+        // Al investigar un descuadre importa cuál fue: una devolución es dinero que salió por una
+        // venta real, y una anulación es una venta que nunca existió.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='DEVOLUCION';").await,
+            1.0
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Movimientos_Caja WHERE Tipo='ANULACION';").await,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn la_clase_queda_escrita_en_el_pago() {
+        // `Motivo_Baja` es lo que permite saber después qué instrumento se usó, y es lo que lee el
+        // emisor del registro. Sin esto, una reimpresión no podría decir qué pasó con ese cobro.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago: id_pago.clone(),
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            texto(&db, "SELECT Motivo_Baja FROM Pagos WHERE ID_Pago = (SELECT ID_Pago FROM Pagos LIMIT 1);").await,
+            Some("DEVOLUCION".into())
+        );
+        // Y sigue contando como ANULADO para todo lo demás: al cajón le da igual por qué salió el
+        // dinero, y es lo que mantiene intactas las ~14 consultas que filtran por `Estado`.
+        assert_eq!(
+            texto(&db, "SELECT Estado FROM Pagos LIMIT 1;").await,
+            Some("ANULADO".into())
+        );
+    }
+
+    #[tokio::test]
+    async fn una_segunda_baja_no_emite_otro_registro() {
+        // El guardia de idempotencia, visto desde lo fiscal: el segundo clic no puede gastar otro
+        // número ni mandar a la AEAT un hecho que no ha ocurrido.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+
+        let args = |c: ClaseBaja| AnularPagoArgs {
+            id_pago: id_pago.clone(),
+            id_usuario: "u1".into(),
+            motivo: "x".into(),
+            clase: c,
+        };
+
+        assert!(repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap());
+        let registros = escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await;
+
+        assert!(
+            !repo(&db).anular_pago(args(ClaseBaja::Error)).await.unwrap(),
+            "la segunda vez devuelve false"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT COUNT(*) FROM Registros_Facturacion;").await,
+            registros,
+            "y no emite ningún registro nuevo"
+        );
     }
 }
 

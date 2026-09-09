@@ -305,12 +305,38 @@ export async function cuentasUpdatePago(payload: {
 export async function cuentasAnularPago(payload: {
     idPago: string;
     motivo: string;
+    /**
+     * FISCAL-01: cuál de los dos instrumentos legales se está usando. Ausente = `"ERROR"`.
+     *
+     * - `"ERROR"`: la venta **no existió** (ticket de prueba, mesa equivocada). Genera un registro
+     *   de anulación, devuelve el stock y las líneas vuelven a la comanda.
+     * - `"DEVOLUCION"`: la venta **sí existió** y se devuelve el dinero. Genera una factura
+     *   rectificativa (`R5`). El stock no vuelve y las líneas tampoco.
+     */
+    clase?: ClaseBaja;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_anular_pago", {
-        args: { id_pago: payload.idPago, motivo: cleanString(payload.motivo) },
+        args: {
+            id_pago: payload.idPago,
+            motivo: cleanString(payload.motivo),
+            clase: payload.clase ?? "ERROR",
+        },
     });
     return typeof r === "boolean" ? r : true;
 }
+
+/**
+ * Los dos instrumentos de FISCAL-01. La AEAT los separa sin matices:
+ *
+ * - Anular es para una factura que *no responde a una operación real* (art. 11.1 RRSIF), y su FAQ
+ *   dice que estos casos deben ser «MUY POCO FRECUENTES».
+ * - Rectificar es para cuando la operación **sí existió**: *«todas las facturas emitidas, en la
+ *   medida en que respondan a operaciones realmente efectuadas (como es el caso habitual) no pueden
+ *   anularse»*.
+ *
+ * Y la que más se va a usar —la devolución— es justo la que no era una anulación.
+ */
+export type ClaseBaja = "ERROR" | "DEVOLUCION";
 
 /* =========================================================
    Recuento de efectivo (lo usa el cierre de caja)

@@ -700,6 +700,9 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_pago: s(&e["id_pago"]),
                 id_usuario: s(&e["id_usuario"]),
                 motivo: s(&e["motivo"]),
+                // FISCAL-01: anulación POR ERROR, que es lo que hacía el botón único
+                // antes de partirlo. El test sigue describiendo el mismo comportamiento.
+                clase: tpv_application::ports::cuentas::ClaseBaja::Error,
             })
             .await
             .expect("anular pago");

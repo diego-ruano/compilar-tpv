@@ -50,6 +50,16 @@ export const updatePagoSchema = z.object({
 export const anularPagoSchema = z.object({
 	id_usuario: idStr,
 	motivo: z.string().transform(clean).refine(Boolean, "motivo required"),
+	// FISCAL-01: cuál de los dos instrumentos legales se usa. Ausente = "ERROR", que es lo que
+	// hacía el botón único antes de partirlo, así que un cliente antiguo sigue haciendo lo mismo.
+	//
+	// Un valor que no sea ninguno de los dos también cae en "ERROR" y no en un 400: la alternativa
+	// sería que un cliente con una errata no pudiera anular un cobro, y lo conservador aquí es la
+	// anulación (devuelve las líneas y el stock, que es reversible).
+	clase: z
+		.enum(["ERROR", "DEVOLUCION"])
+		.nullish()
+		.transform((v) => v ?? "ERROR"),
 });
 
 export const rangoSchema = z.object({

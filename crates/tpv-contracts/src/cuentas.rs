@@ -174,4 +174,13 @@ pub struct AnularPagoInput {
     #[serde(default)]
     #[ts(optional)]
     pub motivo: Option<String>,
+    /// FISCAL-01: `"ERROR"` (la venta no existió → RF de anulación) o `"DEVOLUCION"` (la venta
+    /// existió y se devuelve el dinero → factura rectificativa `R5`).
+    ///
+    /// Ausente = `"ERROR"`, que es lo que hacía este comando antes de FISCAL-01. Son dos
+    /// instrumentos legales distintos y la pantalla tiene que explicar la diferencia en una frase,
+    /// no ofrecer dos botones parecidos.
+    #[serde(default)]
+    #[ts(optional)]
+    pub clase: Option<String>,
 }

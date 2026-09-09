@@ -725,12 +725,35 @@ CREATE TABLE IF NOT EXISTS Pagos (
   Anulado_En TEXT,
   Anulado_Por TEXT,
   Motivo_Anulacion TEXT,
+  -- FISCAL-01: POR QUE este cobro dejo de contar. Son dos instrumentos legales distintos y el
+  -- registro de facturacion que genera cada uno es distinto:
+  --
+  --   'ERROR'      -> la venta NO EXISTIO (ticket de prueba, formacion, mesa equivocada). Genera un
+  --                   RF DE ANULACION (art. 11.1 RRSIF). La AEAT dice en su FAQ que estos casos
+  --                   deben ser "MUY POCO FRECUENTES". Las lineas vuelven a la comanda.
+  --   'DEVOLUCION' -> la venta SI EXISTIO y se devuelve el dinero. Genera una FACTURA
+  --                   RECTIFICATIVA (RF de alta R5, TipoRectificativa=I, importe negativo). La
+  --                   AEAT es explicita: "todas las facturas emitidas, en la medida en que
+  --                   respondan a operaciones realmente efectuadas (como es el caso habitual) NO
+  --                   PUEDEN ANULARSE". Las lineas NO vuelven: se vendieron.
+  --
+  -- Antes las dos cosas salian por el mismo boton, y la que mas se va a usar -la devolucion- es
+  -- justo la que no era una anulacion.
+  --
+  -- NO se toca `Estado` para distinguirlas, y eso es la decision: en este esquema 'ANULADO' ya
+  -- significa "no cuenta como venta", y las dos lo son. Mezclar el motivo en `Estado` obligaria a
+  -- revisar las ~14 consultas que filtran por el -el arqueo, las estadisticas, el pendiente de una
+  -- comanda, la reconciliacion y sus espejos del worker- para algo que al cajon le da igual: el
+  -- dinero salio en los dos casos. Lo que cambia es el papel que hay que emitir.
+  Motivo_Baja TEXT,
   FOREIGN KEY (ID_Comanda) REFERENCES Comandas(ID_Comanda) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario_Cobrador) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (ID_Trabajador_Cobrador) REFERENCES Trabajadores(ID_Trabajador) ON DELETE SET NULL,
   FOREIGN KEY (Anulado_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   CHECK (Estado IN ('ACTIVO','ANULADO')),
-  CHECK ((Estado = 'ANULADO') = (Anulado_En IS NOT NULL AND Anulado_Por IS NOT NULL))
+  CHECK ((Estado = 'ANULADO') = (Anulado_En IS NOT NULL AND Anulado_Por IS NOT NULL)),
+  CHECK (Motivo_Baja IS NULL OR Motivo_Baja IN ('ERROR','DEVOLUCION')),
+  CHECK ((Motivo_Baja IS NOT NULL) <= (Estado = 'ANULADO'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_pagos_fecha

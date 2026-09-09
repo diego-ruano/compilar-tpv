@@ -13,7 +13,7 @@ use tpv_domain::cuentas::{
 };
 
 use crate::error::{AppError, AppResult};
-use crate::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository};
+use crate::ports::cuentas::{AnularPagoArgs, CuentasFiltro, CuentasRepository, ClaseBaja};
 
 fn filtro_de(args: CuentasRangoArgs) -> CuentasFiltro {
     CuentasFiltro {
@@ -199,6 +199,9 @@ pub async fn anular_pago(
         id_pago: id_pago.to_string(),
         id_usuario: id_usuario.to_string(),
         motivo,
+        // FISCAL-01. Ausente = anulación por error, que es lo que hacía este comando antes: un
+        // cliente que no manda el campo sigue haciendo lo que hacía.
+        clase: ClaseBaja::desde_texto(input.clase.as_deref()),
     })
     .await
 }

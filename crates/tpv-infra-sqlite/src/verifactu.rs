@@ -645,6 +645,153 @@ pub async fn emitir_cobro_simplificado(
     .await
 }
 
+/// Emite el registro que corresponde cuando un cobro deja de contar (FISCAL-01, §7 del plan).
+///
+/// **Los dos instrumentos no son intercambiables y la AEAT es explícita al respecto**:
+///
+/// - `ClaseBaja::Error` → la factura **no respondía a una operación real** (un ticket de prueba, una
+///   formación, una mesa equivocada). Se emite un **RF de anulación** del art. 11.1 RRSIF. Anular
+///   no borra nada: el registro erróneo y el de anulación se conservan y se remiten los dos. La FAQ
+///   de desarrolladores avisa de que estos casos deben ser *«MUY POCO FRECUENTES»*.
+///
+/// - `ClaseBaja::Devolucion` → la operación **sí existió** y hay que devolver el dinero. Se emite
+///   una **factura rectificativa**: un RF de **alta `R5`** con `TipoRectificativa = I` (por
+///   diferencias) e importe **negativo**, referenciando la simplificada original en
+///   `FacturasRectificadas`. *«Todas las facturas emitidas, en la medida en que respondan a
+///   operaciones realmente efectuadas (como es el caso habitual) no pueden anularse»*.
+///
+/// Una rectificativa **gasta número de la misma serie** que las facturas normales. Se podría usar
+/// una serie aparte (`R-2027/…`) y sería más legible en un listado, pero serían dos contadores que
+/// mantener y dos cosas que pueden divergir; el tipo de factura ya está en su columna.
+///
+/// Se llama **dentro de la transacción** de la baja: si esa transacción rueda atrás, no queda
+/// registro ni se gasta número.
+///
+/// Si el pago no tiene registro fiscal (un cobro anterior a FISCAL-01, o emitido cuando faltaban los
+/// datos fiscales) no hay nada que anular ni que rectificar, y no es un error: la baja del cobro
+/// sigue adelante. Lo que no puede es fallar y dejar el cobro sin anular.
+pub async fn emitir_baja_de_pago(
+    db: &WriteGuard<'_>,
+    id_pago: &str,
+    clase: tpv_application::ports::cuentas::ClaseBaja,
+) -> AppResult<()> {
+    use tpv_application::ports::cuentas::ClaseBaja;
+
+    // El registro de ALTA que hay que anular o rectificar. Se busca el último por `Orden` porque un
+    // pago puede tener más de uno (una subsanación es otra fila con el mismo `IDFactura`), y el
+    // vigente es el último.
+    let mut rows = db
+        .query(
+            "SELECT ID_Registro, NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, \
+                    Importe_Total, Cuota_Total, Desglose_Json \
+             FROM Registros_Facturacion \
+             WHERE ID_Pago = ?1 AND Tipo = 'ALTA' \
+             ORDER BY Orden DESC LIMIT 1;",
+            vec![Value::Text(id_pago.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(row) = rows.next().await.map_err(db_err)? else {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            id_pago = %id_pago,
+            "el cobro no tiene registro de facturación: no hay nada que anular ni rectificar"
+        );
+        return Ok(());
+    };
+    let id_alta = v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default();
+    let nif = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
+    let num_serie = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
+    let fecha = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
+    let importe = v_string(row.get_value(4).map_err(db_err)?).unwrap_or_default();
+    let cuota = v_string(row.get_value(5).map_err(db_err)?).unwrap_or_default();
+    let desglose = v_string(row.get_value(6).map_err(db_err)?);
+
+    match clase {
+        ClaseBaja::Error => {
+            emitir_anulacion(db, &id_alta).await?;
+        }
+        ClaseBaja::Devolucion => {
+            // Los importes se NIEGAN sobre el texto guardado, no se recalculan desde un `f64`: es
+            // el mismo número que se facturó, con el signo cambiado. Recalcularlo podría devolver
+            // un céntimo distinto del que se cobró.
+            let lineas = desglose_negado(desglose.as_deref());
+            emitir_alta(
+                db,
+                DatosFactura {
+                    tipo_factura: Some("R5".to_string()),
+                    // `I` = rectificativa **por diferencias**: se declara sólo lo que cambia (el
+                    // importe negativo), no la factura completa sustituida. Con `S` (sustitución)
+                    // habría que informar `ImporteRectificacion`, que es otro camino y no el que
+                    // marca la FAQ para una devolución sobre una simplificada.
+                    tipo_rectificativa: Some("I".to_string()),
+                    id_pago: Some(id_pago.to_string()),
+                    lineas,
+                    // Una `R5` **no puede llevar destinatario** (error 1190): rectifica una
+                    // simplificada, que por definición no lo tiene.
+                    destinatario: None,
+                    rectificadas: vec![RefFactura {
+                        nif,
+                        num_serie,
+                        fecha,
+                    }],
+                    sustituidas: vec![],
+                    incidencia: false,
+                    numero_reservado: None,
+                },
+            )
+            .await?;
+            let _ = (importe, cuota);
+        }
+    }
+    Ok(())
+}
+
+/// Las líneas de la rectificativa: las del desglose original con el signo cambiado.
+///
+/// Se reconstruyen desde `Desglose_Json` para que el desglose de la `R5` sea el espejo exacto del de
+/// la factura rectificada — mismos tipos, mismas causas de exención, mismas bases. Un desglose
+/// inventado aquí podría no cuadrar con lo que se devolvió.
+///
+/// Si no hay desglose guardado (no debería pasar) se devuelve vacío y el registro sale con importe
+/// cero. Es mejor que no salir: lo que no puede quedar es un cobro dado de baja sin su rectificativa.
+fn desglose_negado(desglose_json: Option<&str>) -> Vec<LineaTicket> {
+    let Some(arr) = desglose_json
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+        .and_then(|v| v.as_array().cloned())
+    else {
+        return Vec::new();
+    };
+
+    arr.iter()
+        .filter_map(|t| {
+            let base: f64 = t
+                .get("BaseImponibleOimporteNoSujeto")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())?;
+            let cuota: f64 = t
+                .get("CuotaRepercutida")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let exenta = t.get("OperacionExenta").and_then(|v| v.as_str());
+            let tipo: f64 = t
+                .get("TipoImpositivo")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            Some(LineaTicket {
+                // `LineaTicket` trabaja con el total CON IVA, que es base + cuota. El signo se
+                // cambia aquí, una sola vez.
+                total_con_iva: -(base + cuota),
+                tipo_iva: tipo,
+                exento: exenta.is_some(),
+                causa_exencion: exenta.map(str::to_string),
+            })
+        })
+        .collect()
+}
+
 /// Reserva el número de la serie del ejercicio en curso. Lo llama el camino del cobro antes del
 /// `INSERT INTO Pagos`, para que `Numero_Ticket` y `Num_Serie_Factura` sean el mismo número.
 pub async fn reservar_numero_factura(db: &WriteGuard<'_>) -> AppResult<(String, i64)> {

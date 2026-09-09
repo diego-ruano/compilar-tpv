@@ -37,6 +37,7 @@ import {
     resetCash,
     type Denom,
     type CashCount,
+    type ClaseBaja,
 } from "../../features/cuentas/cuentasApis";
 import { euro, moneyLabel } from "../../features/cuentas/formato";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
@@ -333,6 +334,15 @@ export default function Cuentas() {
     /// Motivo de la anulación (CUENTA-07). Obligatorio: quién y cuándo los pone el sistema, el
     /// porqué sólo puede ponerlo quien anula.
     const [motivoAnulacion, setMotivoAnulacion] = useState("");
+    /**
+     * FISCAL-01: cuál de los dos instrumentos se está usando. Arranca **sin elegir** a propósito.
+     *
+     * Son dos cosas legalmente distintas —anular una factura que no respondía a una operación real
+     * frente a rectificar una que sí— y la mayoría de las veces lo que hace falta es la segunda.
+     * Preseleccionar una sería elegir por el usuario en la única decisión de esta pantalla que no
+     * se puede deshacer: el registro que se emita no se modifica jamás.
+     */
+    const [claseBaja, setClaseBaja] = useState<ClaseBaja | null>(null);
 
     const [openAddGasto, setOpenAddGasto] = useState(false);
     const [gFecha, setGFecha] = useState(() => todayYMD());
@@ -602,6 +612,7 @@ export default function Cuentas() {
     const borrarPago = (e: Entrada) => {
         setConfirmError(null);
         setMotivoAnulacion("");
+        setClaseBaja(null);
         setConfirmAccion({ tipo: "entrada", entrada: e });
     };
 
@@ -618,6 +629,10 @@ export default function Cuentas() {
                 await anularPago.mutateAsync({
                     idPago: confirmAccion.entrada.id,
                     motivo: motivoAnulacion,
+                    // El botón está deshabilitado hasta que se elige, así que aquí nunca es null.
+                    // El `?? "ERROR"` es el lado conservador si alguna vez lo fuera: una anulación
+                    // devuelve las líneas y el stock, que es reversible.
+                    clase: claseBaja ?? "ERROR",
                 });
             }
 
@@ -2092,12 +2107,14 @@ export default function Cuentas() {
                         <div className="flex items-start justify-between gap-3">
                             <div>
                                 <h3 className="text-lg font-semibold text-fg">
-                                    {confirmAccion.tipo === "gasto" ? "Borrar gasto" : "Anular cobro"}
+                                    {confirmAccion.tipo === "gasto"
+                                        ? "Borrar gasto"
+                                        : "Deshacer este cobro"}
                                 </h3>
                                 <p className="text-sm text-fg-muted">
                                     {confirmAccion.tipo === "gasto"
                                         ? "Esto eliminará el gasto de la base de datos."
-                                        : "El cobro no se borra: queda registrado como anulado con tu nombre, la hora y el motivo. Sus artículos vuelven a la comanda como pendientes de cobro."}
+                                        : "El cobro no se borra: queda registrado con tu nombre, la hora y el motivo. Elige abajo qué ha pasado — son dos cosas distintas y la factura que se emite no es la misma."}
                                 </p>
                             </div>
 
@@ -2156,10 +2173,60 @@ export default function Cuentas() {
                             )}
                         </div>
 
+                        {/* FISCAL-01: los dos instrumentos, con la diferencia explicada en una
+                            frase cada uno. No son dos botones parecidos: el de arriba dice que la
+                            venta no ocurrió y el de abajo que sí. */}
+                        {confirmAccion.tipo === "entrada" ? (
+                            <div className="mt-4 grid gap-2">
+                                {(
+                                    [
+                                        {
+                                            clase: "DEVOLUCION" as ClaseBaja,
+                                            titulo: "Le devuelvo el dinero al cliente",
+                                            detalle:
+                                                "La venta ocurrió. Se emite una factura rectificativa por el importe en negativo. Los artículos NO vuelven a la comanda y el stock no se repone: el cliente se los llevó.",
+                                        },
+                                        {
+                                            clase: "ERROR" as ClaseBaja,
+                                            titulo: "Este cobro nunca debió existir",
+                                            detalle:
+                                                "Un ticket de prueba, una mesa equivocada, un cobro duplicado. Se anula la factura, los artículos vuelven a la comanda como pendientes y el stock se repone.",
+                                        },
+                                    ] as const
+                                ).map((op) => {
+                                    const activa = claseBaja === op.clase;
+                                    return (
+                                        <button
+                                            key={op.clase}
+                                            type="button"
+                                            disabled={confirmando}
+                                            onClick={() => setClaseBaja(op.clase)}
+                                            className={[
+                                                "w-full rounded-2xl border px-4 py-3 text-left transition",
+                                                activa
+                                                    ? "border-primary bg-primary/10"
+                                                    : "border-border bg-surface hover:bg-surface-2",
+                                                confirmando ? "opacity-60 cursor-not-allowed" : "",
+                                            ].join(" ")}
+                                        >
+                                            <div className="text-sm font-semibold text-fg">
+                                                {op.titulo}
+                                            </div>
+                                            <div className="mt-0.5 text-xs text-fg-muted">
+                                                {op.detalle}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        ) : null}
+
                         {confirmAccion.tipo === "entrada" ? (
                             <label className="mt-4 block">
                                 <span className="text-sm font-semibold text-fg">
-                                    Motivo de la anulación
+                                    {claseBaja === "DEVOLUCION"
+                                        ? "Motivo de la devolución"
+                                        : "Motivo de la anulación"}
                                 </span>
                                 <input
                                     type="text"
@@ -2193,30 +2260,39 @@ export default function Cuentas() {
                                 Cancelar
                             </button>
 
-                            <button
-                                type="button"
-                                disabled={
-                                    confirmando ||
-                                    (confirmAccion.tipo === "entrada" && !motivoAnulacion.trim())
-                                }
-                                onClick={confirmarBorrado}
-                                className={[
-                                    "h-10 px-5 rounded-xl border border-danger bg-danger text-sm font-bold text-white shadow-sm",
-                                    "hover:opacity-90 active:scale-[0.97]",
-                                    confirmando ||
-                                    (confirmAccion.tipo === "entrada" && !motivoAnulacion.trim())
-                                        ? "opacity-60 cursor-not-allowed"
-                                        : "",
-                                ].join(" ")}
-                            >
-                                {confirmAccion.tipo === "gasto"
-                                    ? confirmando
-                                        ? "Borrando..."
-                                        : "Sí, borrar"
-                                    : confirmando
-                                      ? "Anulando..."
-                                      : "Sí, anular"}
-                            </button>
+                            {(() => {
+                                // Para un cobro hacen falta las dos cosas: haber elegido QUÉ ha
+                                // pasado y escribir por qué. Sin la primera no se sabe qué factura
+                                // emitir, y es una decisión que no se deshace.
+                                const falta =
+                                    confirmAccion.tipo === "entrada" &&
+                                    (!motivoAnulacion.trim() || claseBaja === null);
+                                const bloqueado = confirmando || falta;
+                                return (
+                                    <button
+                                        type="button"
+                                        disabled={bloqueado}
+                                        onClick={confirmarBorrado}
+                                        className={[
+                                            "h-10 px-5 rounded-xl border border-danger bg-danger text-sm font-bold text-white shadow-sm",
+                                            "hover:opacity-90 active:scale-[0.97]",
+                                            bloqueado ? "opacity-60 cursor-not-allowed" : "",
+                                        ].join(" ")}
+                                    >
+                                        {confirmAccion.tipo === "gasto"
+                                            ? confirmando
+                                                ? "Borrando..."
+                                                : "Sí, borrar"
+                                            : claseBaja === "DEVOLUCION"
+                                              ? confirmando
+                                                  ? "Devolviendo..."
+                                                  : "Sí, devolver"
+                                              : confirmando
+                                                ? "Anulando..."
+                                                : "Sí, anular"}
+                                    </button>
+                                );
+                            })()}
                         </div>
                     </div>
             </ModalShell>
