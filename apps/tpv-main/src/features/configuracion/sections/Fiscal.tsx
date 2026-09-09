@@ -376,10 +376,19 @@ export function Fiscal({
 
                         {estado.motivo_no_remite ? (
                             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-                                No se puede remitir:{" "}
-                                {estado.motivo_no_remite === "sin_datos_fiscales"
-                                    ? "faltan los datos fiscales del negocio."
-                                    : estado.motivo_no_remite}
+                                {estado.motivo_no_remite === "sin_datos_fiscales" ? (
+                                    <>No se puede remitir: faltan los datos fiscales del negocio.</>
+                                ) : estado.motivo_no_remite === "sin_datos_del_productor" ? (
+                                    <>
+                                        <strong>Esto es un problema del programa, no tuyo.</strong>{" "}
+                                        Le falta un dato identificativo del fabricante, así que las
+                                        facturas se están guardando pero no se envían. No se pierde
+                                        ninguna: se mandarán solas en cuanto actualices. Avisa a
+                                        soporte para que te confirmen cuándo.
+                                    </>
+                                ) : (
+                                    <>No se puede remitir: {estado.motivo_no_remite}</>
+                                )}
                             </div>
                         ) : null}
 

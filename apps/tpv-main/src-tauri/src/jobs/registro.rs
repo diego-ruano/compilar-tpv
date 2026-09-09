@@ -383,6 +383,30 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("AppData: {e}"))?;
     let certificado = crate::certificado_verifactu(&dir);
 
+    // Sin identidad del productor NO se remite, y es deliberado aunque duela.
+    //
+    // `Sistema_Json` se congela en la fila al emitir, así que un registro creado con el NIF del
+    // productor vacío lo lleva vacío para siempre. Mandarlo sería que la AEAT lo rechazara por
+    // formato y que ese rechazo fuese definitivo: la fila ya está escrita y no se recompone al
+    // remitir. Callándonos ahora, esos registros esperan a que una versión posterior traiga la
+    // constante — y al arrancar con ella se corrigen solos (`reparar_sistema_informatico`) y salen.
+    //
+    // Es un bug NUESTRO, no del bar, así que se registra como error y no como aviso: el panel dirá
+    // `sin_datos_del_productor` y la escalera de avisos mandará a soporte en vez de a mirar el
+    // router.
+    if !tpv_infra_sqlite::verifactu::productor_configurado() {
+        tracing::error!(
+            target: "tpv::verifactu",
+            "no se remite: falta la identidad del productor del software (PRODUCTOR_NIF). \
+             Los registros quedan PENDIENTE y se corregirán solos en cuanto la versión la traiga."
+        );
+        // Se evalúa el aviso igualmente: el bar tiene derecho a saber que lleva sin remitir.
+        if let Ok(notifier) = state.notifier().await {
+            let _ = uc_verifactu::avisar_de_atraso(repo.as_ref(), notifier.as_ref()).await;
+        }
+        return Ok(());
+    }
+
     let ahora_ms = chrono::Local::now().timestamp_millis();
     let cliente = tpv_infra_aeat::AeatAdapter::new();
 

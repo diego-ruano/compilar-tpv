@@ -111,6 +111,84 @@ fn sistema() -> SistemaInformatico {
         })
 }
 
+/// ¿Está configurada la identidad del **productor del software**?
+///
+/// Es una constante compilada en el binario (`PRODUCTOR_NIF` en `lib.rs`), no un ajuste del bar: o
+/// está bien en toda la release o está mal en toda la release. Se comprueba el NIF con su dígito de
+/// control porque es lo único que la AEAT valida de este bloque —el resto es dato declarado— y
+/// porque un NIF con una errata es igual de irremitible que uno vacío.
+pub fn productor_configurado() -> bool {
+    vf::nif_valido(&sistema().nif)
+}
+
+/// Corrige el bloque `SistemaInformatico` de los registros que se emitieron **antes** de que el
+/// productor tuviera identidad. Devuelve cuántos corrigió.
+///
+/// ## Por qué esto tiene que existir
+///
+/// `Sistema_Json` se congela en la fila al emitir y **no se recompone al remitir**, que es lo
+/// correcto: el registro de ayer tiene que seguir diciendo con qué versión del TPV se generó. Pero
+/// eso convierte un `PRODUCTOR_NIF` vacío en una trampa silenciosa: los registros emitidos con él
+/// llevan `"NIF":""`, la AEAT valida ese campo por formato (nueve caracteres) y los rechazaría —
+/// **para siempre**, porque rellenar la constante en una versión posterior no toca las filas ya
+/// escritas. Un bar que empiece a usar el TPV antes de que exista la empresa se quedaría con un
+/// tramo de facturación imposible de presentar.
+///
+/// ## Por qué es legítimo tocar una tabla append-only
+///
+/// Tres condiciones, y hacen falta las tres:
+///
+/// 1. **No toca la huella.** `SistemaInformatico` **no entra** en la cadena que se hashea (ver
+///    `tpv_domain::verifactu::cadena_huella_alta`: son emisor, número, fecha, tipo, cuota, importe,
+///    huella anterior y fecha-hora). Corregirlo no rompe el encadenamiento de nada.
+/// 2. **No toca la factura.** Lo que se corrige es quién hizo el programa, no qué se vendió ni por
+///    cuánto. Ningún dato del hecho imponible cambia.
+/// 3. **Sólo alcanza a registros que la AEAT no tiene.** Se exige que no haya un envío aceptado, y
+///    esa condición no puede fallar por sí sola: con el productor sin configurar el job **se niega a
+///    remitir** (ver `productor_configurado`), así que un registro con `"NIF":""` nunca ha podido
+///    ser aceptado. La condición está de todos modos, porque una guardia que se apoya en el
+///    comportamiento de otro módulo es una guardia prestada.
+///
+/// Va por `execute()` y no por `raw()`: `Registros_Facturacion` es esquema compartido y la copia de
+/// la nube tiene que quedar igual de corregida que la local.
+///
+/// Se llama al arrancar, después de inyectar el bloque. Es idempotente —la segunda vuelta no
+/// encuentra nada— y best-effort: si la base está bloqueada para escrituras de negocio (una
+/// recuperación en curso), no pasa nada y se reintenta en el arranque siguiente.
+pub async fn reparar_sistema_informatico(db: &Db) -> AppResult<usize> {
+    if !productor_configurado() {
+        // Todavía no hay con qué reparar. No es un error: es el estado en el que nace el proyecto.
+        return Ok(0);
+    }
+
+    let json = sistema().to_json();
+    let g = db.write().await;
+
+    let afectadas = g
+        .execute(
+            "UPDATE Registros_Facturacion SET Sistema_Json = ?1 \
+             WHERE Sistema_Json LIKE '%\"NIF\":\"\"%' \
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM _Verifactu_Envios e \
+                 WHERE e.ID_Registro = Registros_Facturacion.ID_Registro \
+                   AND e.Estado IN ('ACEPTADO', 'ACEPTADO_CON_ERRORES') \
+               );",
+            vec![Value::Text(json)],
+        )
+        .await
+        .map_err(db_err)?;
+
+    if afectadas > 0 {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            registros = afectadas,
+            "{afectadas} registro(s) se emitieron sin identidad del productor y se han corregido: \
+             ya se pueden remitir"
+        );
+    }
+    Ok(afectadas as usize)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Datos del obligado, leídos en la misma transacción
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1318,10 +1396,16 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         // Los rellena la capa que conoce el almacén de certificados (sólo Windows). Aquí se dejan
         // en el estado "no se puede remitir" para que nadie lo lea como "todo bien" por omisión.
         certificado_ok: false,
-        motivo_no_remite: if datos_fiscales_completos {
-            None
-        } else {
+        // El orden importa: primero lo que puede arreglar el bar, después lo que sólo podemos
+        // arreglar nosotros. Faltando sus datos fiscales ni siquiera puede cobrar, así que es lo
+        // que tiene delante de todos modos; decirle antes «llama a soporte» sería mandarlo a hacer
+        // una llamada que no resuelve lo que le impide abrir.
+        motivo_no_remite: if !datos_fiscales_completos {
             Some("sin_datos_fiscales".to_string())
+        } else if !productor_configurado() {
+            Some("sin_datos_del_productor".to_string())
+        } else {
+            None
         },
         dias_para_caducar_certificado: None,
     })
@@ -1375,6 +1459,212 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_identidad_del_productor {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! Qué pasa con los registros emitidos ANTES de que el productor del software tuviera NIF.
+    //!
+    //! El agujero es silencioso y definitivo: `Sistema_Json` se congela en la fila, así que un
+    //! registro creado con `"NIF":""` lo lleva vacío para siempre, la AEAT lo rechaza por formato y
+    //! rellenar la constante en una versión posterior no toca las filas ya escritas.
+    //!
+    //! ⚠️ Estos tests **dependen de `cargo nextest`**, que ya es lo que manda CLAUDE.md §6. El bloque
+    //! del productor vive en un `OnceLock` (se inyecta una vez, al arrancar), así que un test que lo
+    //! inyecta y otro que lo quiere vacío no pueden convivir en el mismo proceso. Con nextest cada
+    //! test tiene el suyo; con `cargo test` se pisarían y el que fallara dependería del orden.
+
+    use super::*;
+    use crate::db::Db;
+    use std::sync::Arc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_productor");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    /// Inserta un registro con el `Sistema_Json` que se le pase.
+    async fn registro(db: &Arc<Db>, orden: i64, sistema_json: &str) {
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, \
+                   Num_Serie_Factura, Fecha_Expedicion, Serie, Numero, Nombre_Razon_Emisor, \
+                   Cadena_Huella, Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url) \
+                 VALUES (?1, ?2, 'ALTA', 'B12345674', ?1, '15-01-2027', '2027', ?2, 'Bar', \
+                         'c', 'h', '2027-01-15T21:34:56+01:00', ?3, 'u');",
+                vec![
+                    Value::Text(format!("r{orden}")),
+                    Value::Integer(orden),
+                    Value::Text(sistema_json.to_string()),
+                ],
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn sistema_json_de(db: &Arc<Db>, id: &str) -> String {
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT Sistema_Json FROM Registros_Facturacion WHERE ID_Registro = ?1;",
+                vec![Value::Text(id.to_string())],
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        v_string(row.get_value(0).unwrap()).unwrap_or_default()
+    }
+
+    /// El bloque tal como sale hoy: sin NIF, porque la constante está vacía a la espera de que la
+    /// empresa exista.
+    const SIN_IDENTIDAD: &str = r#"{"NIF":"","NombreRazon":"Altaria Lights"}"#;
+
+    #[test]
+    fn el_NIF_del_productor_se_valida_con_su_digito_de_control() {
+        // No basta con "no está vacío": una errata en el NIF es tan irremitible como no tenerlo, y
+        // se descubriría igual de tarde. Es además lo ÚNICO que la AEAT valida de este bloque.
+        assert!(!vf::nif_valido(""));
+        assert!(!vf::nif_valido("B12345678"), "dígito de control incorrecto");
+        assert!(vf::nif_valido("B12345674"));
+    }
+
+    #[tokio::test]
+    async fn sin_identidad_no_repara_nada_y_no_es_un_error() {
+        // Es el estado en el que nace el proyecto, no una avería: la constante se rellenará cuando
+        // se sepa si el productor es un autónomo o una sociedad.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0);
+        assert_eq!(sistema_json_de(&db, "r1").await, SIN_IDENTIDAD);
+    }
+
+    #[tokio::test]
+    async fn con_identidad_corrige_los_que_se_emitieron_sin_ella() {
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+        set_sistema_informatico(SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: "t-1".into(),
+        });
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 1);
+        let json = sistema_json_de(&db, "r1").await;
+        assert!(json.contains(r#""NIF":"B12345674""#), "{json}");
+        assert!(!json.contains(r#""NIF":"""#));
+    }
+
+    #[tokio::test]
+    async fn NO_toca_un_registro_que_la_AEAT_ya_acepto() {
+        // No puede darse con el job negándose a remitir sin identidad, pero la guardia va igual: una
+        // que se apoya en el comportamiento de otro módulo es una guardia prestada. Y si se tocara,
+        // la copia local diría algo distinto de lo que se presentó.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+        {
+            let g = db.write().await;
+            g.raw()
+                .execute(
+                    "INSERT INTO _Verifactu_Envios (ID_Registro, Estado, CSV, Creado_En_Ms) \
+                     VALUES ('r1', 'ACEPTADO', 'CSV1', 1);",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+        set_sistema_informatico(SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: "t-1".into(),
+        });
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0);
+        assert_eq!(sistema_json_de(&db, "r1").await, SIN_IDENTIDAD);
+    }
+
+    #[tokio::test]
+    async fn NO_toca_un_registro_que_ya_tenia_identidad() {
+        // La versión del TPV va dentro de este mismo bloque y NO se recompone: el registro de ayer
+        // tiene que seguir diciendo con qué versión se generó. Reescribir de más se llevaría eso por
+        // delante sin que nada lo delatara.
+        let (db, _dir) = db_temporal().await;
+        let viejo = r#"{"NIF":"B12345674","Version":"0.9.0"}"#;
+        registro(&db, 1, viejo).await;
+        set_sistema_informatico(SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: "t-1".into(),
+        });
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0);
+        assert_eq!(
+            sistema_json_de(&db, "r1").await,
+            viejo,
+            "la versión con la que se generó no se puede reescribir"
+        );
+    }
+
+    #[tokio::test]
+    async fn es_idempotente() {
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+        set_sistema_informatico(SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: "t-1".into(),
+        });
+
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 1);
+        assert_eq!(reparar_sistema_informatico(&db).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn la_correccion_SI_sale_por_el_outbox() {
+        // Al revés que `_Verifactu_Envios`: `Registros_Facturacion` es esquema compartido, así que
+        // la copia de la nube tiene que quedar igual de corregida que la local. Si no, restaurar
+        // devolvería los registros rotos.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, SIN_IDENTIDAD).await;
+        set_sistema_informatico(SistemaInformatico {
+            nombre_razon: "Altaria Lights SL".into(),
+            nif: "B12345674".into(),
+            nombre_sistema: "TPV Altaria".into(),
+            id_sistema: "01".into(),
+            version: "1.0.0".into(),
+            numero_instalacion: "t-1".into(),
+        });
+
+        reparar_sistema_informatico(&db).await.unwrap();
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%Registros_Facturacion%';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert!(v_i64(row.get_value(0).unwrap()).unwrap_or(0) > 0);
+    }
 }
 
 #[cfg(test)]

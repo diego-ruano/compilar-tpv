@@ -8,12 +8,13 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 
 | # | Qué | Estado | Bloquea |
 |---|---|---|---|
-| 1 | [Identidad del productor del software](#1-identidad-del-productor-del-software) | 🟡 | **Producción entera** |
+| 1 | [Identidad del productor del software](#1-identidad-del-productor-del-software) | 🟡 **aplazado a propósito** | Producción; **ya no rompe nada mientras tanto** |
 | 2 | [Texto de la declaración responsable](#2-texto-de-la-declaración-responsable) | ⬜ | Producción |
 | 3 | [Serie de las rectificativas: única o separada](#3-serie-de-las-rectificativas-única-o-separada) | ⬜ | Nada; cambiarlo después es migrar datos |
 | 4 | [`FechaOperacion`: hoy no se informa](#4-fechaoperacion-hoy-no-se-informa) | ⬜ | Nada; es una confirmación |
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
+| 7 | [`certificado_ok` no lo rellena nadie](#7-certificado_ok-no-lo-rellena-nadie) | ⬜ | Nada hoy; el panel no puede decir «no hay certificado» |
 
 ---
 
@@ -34,6 +35,40 @@ el epígrafe del productor es irrelevante para que un envío se acepte. Lo que s
 | `PRODUCTOR_NIF` | **vacío** | 9 | **El NIF definitivo** |
 | `PRODUCTOR_NOMBRE_SISTEMA` | `TPV Altaria` | 30 | Confirmar |
 | `PRODUCTOR_ID_SISTEMA` | `01` | **2** | Confirmar |
+
+**Decisión (2026-09-09): se aplaza a propósito.** Todavía no se sabe si el productor será un
+autónomo o una sociedad, y la obligación no arranca hasta el 1 de enero. El programa se puede
+comercializar y validar antes.
+
+### Lo que se hizo para que aplazarlo sea seguro
+
+Aplazarlo tenía una trampa que había que desactivar primero, porque era **silenciosa y definitiva**:
+
+`Sistema_Json` se congela en la fila al emitir y **no se recompone al remitir** (correcto: el
+registro de ayer tiene que seguir diciendo con qué versión del TPV se generó). Así que un registro
+emitido con `PRODUCTOR_NIF` vacío lleva `"NIF":""` para siempre, la AEAT valida ese campo por formato
+—nueve caracteres— y lo rechazaría. Rellenar la constante en una versión posterior **no toca las
+filas ya escritas**: un bar que empezara a usar el TPV antes de que exista la empresa se quedaría con
+un tramo de facturación imposible de presentar, y no se enteraría hasta el día de la inspección.
+
+Tres piezas, y hacen falta las tres:
+
+1. **El job se niega a remitir** sin identidad del productor (`productor_configurado`, que comprueba
+   el NIF con su dígito de control: una errata es tan irremitible como un vacío). Los registros
+   quedan `PENDIENTE`, que es un estado del que se sale; «rechazado por formato» no lo es.
+2. **El panel y el aviso dicen de quién es la culpa.** `motivo_no_remite` pasa a
+   `sin_datos_del_productor` y el texto cambia entero: *«esto es un problema del programa, no tuyo;
+   las facturas están guardadas y se enviarán solas al actualizar»*. Mandar a un bar a revisar su
+   router por un fallo nuestro le hace perder una tarde y le enseña a ignorar el único aviso que no
+   puede ignorar.
+3. **Al arrancar con la constante puesta, se corrigen solos** (`reparar_sistema_informatico`). Es la
+   única escritura que toca una tabla append-only, y es legítima porque cumple las tres condiciones:
+   `SistemaInformatico` **no entra en la cadena de huella** (son emisor, número, fecha, tipo, cuota,
+   importe, huella anterior y fecha-hora), no toca ningún dato de la factura, y sólo alcanza a
+   registros que la AEAT no tiene.
+
+O sea que hoy se puede vender, emitir y encadenar; lo único que no se puede es remitir, y eso se
+desbloquea solo el día que se rellene la constante.
 
 Mientras `PRODUCTOR_NIF` esté vacío, el panel de la declaración responsable **dice que está
 incompleta** en vez de enseñarla a medias.
@@ -94,3 +129,18 @@ tocan ni el certificado ni internet. Los dos últimos necesitan:
 
 - el **alta en preproducción** de la AEAT con el NIF con el que se va a probar (trámite suyo);
 - **autorización explícita para usar el certificado digital** en el *handshake*.
+
+---
+
+## 7. `certificado_ok` no lo rellena nadie
+
+`EstadoFiscal` declara `certificado_ok` y `dias_para_caducar_certificado`, y el comentario dice que
+«los rellena la capa que conoce el almacén de certificados». **Esa capa no existe**: se dejan en
+`false` / `None` y nadie los sobrescribe después, así que son dos campos muertos.
+
+Hoy no rompe nada —la pantalla no los lee, y el panel de certificados enseña la lista y el botón de
+probar— pero significa que `motivo_no_remite` no puede decir nunca «no hay certificado elegido» ni
+«el certificado caduca en 12 días», que es justo el aviso que llega tarde si no se da con tiempo.
+
+Lo natural es rellenarlos en `verifactu_estado` (el comando ya está en el shell, que es quien sabe
+leer el almacén de Windows) en vez de en `estado_fiscal` de infra-sqlite, que no puede saberlo.

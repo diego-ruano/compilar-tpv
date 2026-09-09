@@ -226,11 +226,20 @@ struct SetPrinterArgs {
    que el epígrafe del productor es irrelevante para que un envío se acepte. Lo que sí valida es el
    FORMATO (el NIF tiene que tener nueve caracteres) y las longitudes máximas.
 
-   ⚠️ PENDIENTE ANTES DE LANZAR (no antes de desarrollar):
-     · NIF y razón social definitivos, cuando la empresa esté constituida.
-     · `IdSistemaInformatico`: dos caracteres, los elige el productor.
-     · La declaración responsable del art. 13 RRSIF, que tiene que ser visible en el propio
-       sistema informático en cada una de sus versiones.
+   ⚠️ `PRODUCTOR_NIF` ESTÁ VACÍO A PROPÓSITO, y aplazarlo es seguro. Todavía no se sabe si el
+   productor será un autónomo o una sociedad. Lo que hace que la espera no cueste nada:
+
+     · El job SE NIEGA A REMITIR sin identidad (`verifactu::productor_configurado`). No es una
+       carencia: mandar un registro con `"NIF":""` sería que la AEAT lo rechazara por formato, y ese
+       rechazo es DEFINITIVO porque `Sistema_Json` se congela en la fila y no se recompone al
+       remitir. Quedándose `PENDIENTE` se sale; «rechazado» no.
+     · Al arrancar con la constante puesta, los registros emitidos sin ella se corrigen solos
+       (`verifactu::reparar_sistema_informatico`). Es legítimo porque `SistemaInformatico` NO entra
+       en la cadena de huella.
+     · El panel y el aviso dicen que la culpa es del programa, no del bar.
+
+   Lo que falta y por qué, en docs/VERIFACTU_PENDIENTES.md §1. Va junto con la declaración
+   responsable del art. 13 RRSIF (§2 de ese mismo documento).
 ========================================================= */
 
 /// Razón social del productor. Máx. 120 caracteres.
@@ -989,6 +998,22 @@ async fn init_main(app: AppHandle, state: State<'_, AppState>) -> Result<String,
         Ok(_) => {}
         Err(e) => {
             tracing::warn!(target: "tpv::fichajes", error = %e, "auto_close_stale_punches falló")
+        }
+    }
+
+    // FISCAL-01: corrige el bloque `SistemaInformatico` de los registros que se emitieron antes de
+    // que el productor del software tuviera identidad. Va aquí porque `setup()` ya inyectó el bloque
+    // y aquí es donde hay base. Best-effort y por lo mismo que el auto-cierre de jornadas: nada del
+    // arranque puede impedir que el TPV abra. Si falla (base bloqueada por una recuperación en
+    // curso), se reintenta en el arranque siguiente — y mientras tanto el job no remite esos
+    // registros, así que no se pierde nada.
+    match tpv_infra_sqlite::verifactu::reparar_sistema_informatico(&db).await {
+        Ok(n) if n > 0 => {
+            tracing::warn!(target: "tpv::verifactu", registros = n, "registros corregidos: ya tienen identidad del productor")
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(target: "tpv::verifactu", error = %e, "reparar_sistema_informatico falló")
         }
     }
 
@@ -1896,9 +1921,8 @@ pub fn run() {
             // software —nosotros—, no al bar, y es dato declarado: la AEAT no lo contrasta contra
             // ningún registro de actividad económica.
             //
-            // ⚠️ PENDIENTE ANTES DE LANZAR: sustituir el NIF y la razón social provisionales por
-            // los definitivos cuando la empresa esté constituida, y elegir el `IdSistemaInformatico`
-            // de dos caracteres. Va junto con la declaración responsable del art. 13 RRSIF.
+            // ⚠️ El NIF está vacío a propósito y no rompe nada: ver el bloque de constantes arriba
+            // y docs/VERIFACTU_PENDIENTES.md §1.
             {
                 let tenant = tpv_infra_licensing::LicensingAdapter::new(app_data_dir.clone());
                 let numero_instalacion = {

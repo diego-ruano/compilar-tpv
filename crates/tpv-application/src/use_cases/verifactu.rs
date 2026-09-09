@@ -69,7 +69,24 @@ pub async fn avisar_de_atraso(
         return Ok(false);
     }
 
+    // Cuando lo que impide remitir es un fallo NUESTRO, el texto cambia entero. Un bar al que se le
+    // dice «revisa la conexión y el certificado» por algo que él no puede tocar pierde una tarde y
+    // acaba desconfiando del aviso — que es el único que no puede permitirse ignorar.
+    //
+    // Lo que NO cambia es la puerta: sigue mandando el escalón. Un fallo nuestro con la cola vacía
+    // no es nada que contarle a nadie, y avisar ahí sería avisar de que no pasa nada.
+    let culpa_nuestra = e.motivo_no_remite.as_deref() == Some("sin_datos_del_productor");
+
     let (severidad, titulo, cuerpo) = match e.escalon_aviso.as_str() {
+        "notificacion" | "modal_login" | "modal_cobro" if culpa_nuestra => (
+            Severidad::Error,
+            "No se están enviando las facturas a Hacienda".to_string(),
+            "Es un problema de este programa, no de tu equipo ni de tu conexión: le falta un dato \
+             identificativo del fabricante. Las facturas están emitidas y guardadas —no se ha \
+             perdido ninguna— y se enviarán solas en cuanto se actualice el programa. Avisa a \
+             soporte para que te confirmen cuándo."
+                .to_string(),
+        ),
         "notificacion" => (
             Severidad::Aviso,
             "Hay facturas sin enviar a Hacienda".to_string(),
@@ -1184,6 +1201,40 @@ mod tests_aviso_de_atraso {
         assert!(!emitio);
         assert!(n.emitidas.lock().unwrap().is_empty());
         assert_eq!(n.resueltas.lock().unwrap().as_slice(), [CLAVE_ATRASO.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn si_la_culpa_es_NUESTRA_el_aviso_no_manda_a_mirar_el_router() {
+        // Cuando lo que impide remitir es un dato que falta en el propio programa, decirle al bar
+        // «revisa la conexión y el certificado» le hace perder una tarde en algo que no puede tocar
+        // — y a la tercera vez deja de leer el único aviso que no puede ignorar.
+        let mut e = estado_con("modal_login", true);
+        e.motivo_no_remite = Some("sin_datos_del_productor".to_string());
+        let repo = RepoEstado(e);
+        let n = NotifierFalso::default();
+
+        assert!(avisar_de_atraso(&repo, &n).await.unwrap());
+        let emitidas = n.emitidas.lock().unwrap();
+        let cuerpo = emitidas[0].cuerpo.clone().unwrap_or_default();
+        assert!(cuerpo.contains("problema de este programa"), "{cuerpo}");
+        assert!(!cuerpo.contains("conexión y el certificado"), "{cuerpo}");
+        assert!(
+            cuerpo.contains("no se ha perdido ninguna"),
+            "lo primero que hay que decirle es que sus ventas están: {cuerpo}"
+        );
+    }
+
+    #[tokio::test]
+    async fn la_culpa_nuestra_NO_se_salta_la_puerta_del_escalon() {
+        // El texto cambia; la puerta no. Un fallo nuestro con la cola vacía no es nada que contarle
+        // a nadie, y avisar ahí sería avisar de que no pasa nada.
+        let mut e = estado_con("ninguno", true);
+        e.motivo_no_remite = Some("sin_datos_del_productor".to_string());
+        let repo = RepoEstado(e);
+        let n = NotifierFalso::default();
+
+        assert!(!avisar_de_atraso(&repo, &n).await.unwrap());
+        assert!(n.emitidas.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
