@@ -2072,6 +2072,16 @@ mod tests_factura_completa {
         let bloque = repo.emitir_sustitutiva(&num, cliente()).await.unwrap();
 
         assert_eq!(bloque.tipo_factura, "F3");
+        // Y va en la serie ORDINARIA, no en la de rectificativas. Es el mismo art. 15.6: «las
+        // facturas que se expidan en sustitución o canje de facturas simplificadas expedidas con
+        // anterioridad NO TENDRÁN LA CONDICIÓN DE RECTIFICATIVAS». Mandarla a la serie `R` sería
+        // declarar como rectificación algo que el reglamento dice expresamente que no lo es.
+        let serie = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(
+            bloque.num_serie_factura,
+            format!("{serie}/000002"),
+            "la F3 continúa la serie de las ventas"
+        );
         // La simplificada original NO se toca: canjearla no es rectificarla (art. 15.6 ROF).
         assert_eq!(
             escalar(
@@ -2390,9 +2400,13 @@ mod tests_anular_vs_devolver {
     }
 
     #[tokio::test]
-    async fn la_rectificativa_gasta_numero_de_la_misma_serie() {
-        // Se podría usar una serie aparte (`R-2027/…`) y sería más legible en un listado, pero
-        // serían dos contadores que mantener. El tipo de factura ya está en su columna.
+    async fn la_rectificativa_gasta_numero_de_SU_PROPIA_serie() {
+        // Art. 6.1.a) RD 1619/2012: «será obligatoria, EN TODO CASO, la expedición en series
+        // específicas de las facturas siguientes: […] 2.º Las rectificativas.»
+        //
+        // Este test decía justo lo contrario hasta que se leyó el reglamento. El razonamiento que
+        // lo sostenía —«serían dos contadores que mantener»— era cierto y da igual: no es un
+        // argumento contra un «en todo caso».
         let (db, _dir) = db_temporal().await;
         sembrar(&db, VENTA_COBRADA).await;
         let id_pago = cobrar(&db).await;
@@ -2414,8 +2428,37 @@ mod tests_anular_vs_devolver {
                 "SELECT Num_Serie_Factura FROM Registros_Facturacion WHERE Tipo_Factura='R5';"
             )
             .await,
-            Some(format!("{serie}/000002")),
-            "la R5 es el número siguiente de la misma serie"
+            Some(format!("R{serie}/000001")),
+            "la R5 abre su propia serie, no continúa la de las ventas"
+        );
+    }
+
+    #[tokio::test]
+    async fn la_rectificativa_NO_gasta_numero_de_la_serie_de_ventas() {
+        // La otra mitad, y la que se nota en el libro: si la R5 consumiera un número de la serie
+        // ordinaria, la venta siguiente saltaría uno y el listado tendría un hueco que no
+        // corresponde a ninguna factura.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_COBRADA).await;
+        let id_pago = cobrar(&db).await;
+        let serie = chrono::Local::now().format("%Y").to_string();
+
+        repo(&db)
+            .anular_pago(AnularPagoArgs {
+                id_pago,
+                id_usuario: "u1".into(),
+                motivo: "devolución".into(),
+                clase: ClaseBaja::Devolucion,
+            })
+            .await
+            .unwrap();
+
+        // El contador de la serie ordinaria se quedó donde estaba: la venta gastó el 1 y nadie más.
+        let g = db.write().await;
+        assert_eq!(
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0,
+            format!("{serie}/000002"),
+            "la siguiente venta es la 2, no la 3"
         );
     }
 

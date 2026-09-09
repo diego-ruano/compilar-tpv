@@ -283,6 +283,31 @@ fn serie_actual() -> String {
     chrono::Local::now().format("%Y").to_string()
 }
 
+/// La serie de las **facturas rectificativas**, que por ley tiene que ser propia.
+///
+/// > *Art. 6.1.a) RD 1619/2012:* «será obligatoria, **en todo caso**, la expedición en series
+/// > específicas de las facturas siguientes: […] 2.º Las rectificativas.»
+///
+/// No es una preferencia de listado ni una comodidad: es un «en todo caso». Se usa el mismo
+/// ejercicio con una `R` delante (`R2027/000001`) para que las dos series se lean juntas y ordenen
+/// igual.
+///
+/// **La `F3` NO entra aquí**, y no es un olvido: el art. 15.6 del mismo reglamento dice que *«las
+/// facturas que se expidan en sustitución o canje de facturas simplificadas expedidas con
+/// anterioridad no tendrán la condición de rectificativas»*. Una `F3` es una factura normal que
+/// sustituye a un ticket, así que va en la serie normal.
+fn serie_rectificativas() -> String {
+    format!("R{}", serie_actual())
+}
+
+/// ¿Este tipo de factura es una **rectificativa** a efectos del art. 6.1.a)?
+///
+/// `R1`–`R5`, y sólo esas. `F1`, `F2` y `F3` son facturas ordinarias — la `F3` también, por el
+/// art. 15.6.
+fn es_rectificativa(tipo_factura: &str) -> bool {
+    matches!(tipo_factura, "R1" | "R2" | "R3" | "R4" | "R5")
+}
+
 /// Reserva el siguiente número de la serie y lo devuelve formateado (`2027/000001`).
 ///
 /// El incremento es **relativo** (`Ultimo + 1`), como el antiguo `Ticket_Contador`, para que la
@@ -423,7 +448,27 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     let cuota_txt = vf::fmt_importe(cuota_total);
 
     // ── Identificación de la factura ──
-    let serie = serie_actual();
+    //
+    // La serie sale del TIPO, no del camino que llamó. Una rectificativa va a la suya porque el
+    // art. 6.1.a) del RD 1619/2012 lo exige «en todo caso»; el resto —incluida la `F3`, que por el
+    // art. 15.6 no es rectificativa— va a la del ejercicio.
+    let rectificativa = es_rectificativa(&tipo_factura);
+    let serie = if rectificativa {
+        serie_rectificativas()
+    } else {
+        serie_actual()
+    };
+
+    // Un número reservado de antemano SÓLO puede venir del camino del cobro, que reserva en la serie
+    // ordinaria antes de saber siquiera si habrá destinatario. Si llegara aquí con una rectificativa
+    // sería un número de la serie equivocada, y el síntoma —una rectificativa numerada como una
+    // venta— no se distingue a simple vista de lo correcto. Se para en vez de escribirlo.
+    if rectificativa && d.numero_reservado.is_some() {
+        return Err(AppError::internal(
+            "una factura rectificativa no puede usar un número reservado de la serie ordinaria",
+        ));
+    }
+
     let (num_serie_factura, numero) = match d.numero_reservado.clone() {
         Some(v) => v,
         None => reservar_numero(db, &serie).await?,
@@ -789,9 +834,10 @@ pub async fn emitir_cobro(
 ///   `FacturasRectificadas`. *«Todas las facturas emitidas, en la medida en que respondan a
 ///   operaciones realmente efectuadas (como es el caso habitual) no pueden anularse»*.
 ///
-/// Una rectificativa **gasta número de la misma serie** que las facturas normales. Se podría usar
-/// una serie aparte (`R-2027/…`) y sería más legible en un listado, pero serían dos contadores que
-/// mantener y dos cosas que pueden divergir; el tipo de factura ya está en su columna.
+/// Una rectificativa gasta número de **su propia serie** (`R2027/000001`), no de la de las ventas.
+/// No es una elección de diseño: el art. 6.1.a) del RD 1619/2012 la impone «en todo caso». Sí son
+/// dos contadores que mantener, que es lo que este comentario decía antes para justificar lo
+/// contrario — pero eso no es un argumento contra la ley, es el precio de cumplirla.
 ///
 /// Se llama **dentro de la transacción** de la baja: si esa transacción rueda atrás, no queda
 /// registro ni se gasta número.

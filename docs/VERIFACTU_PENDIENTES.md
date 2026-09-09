@@ -10,7 +10,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 |---|---|---|---|
 | 1 | [Identidad del productor del software](#1-identidad-del-productor-del-software) | 🟡 **aplazado a propósito** | Producción; **ya no rompe nada mientras tanto** |
 | 2 | [Texto de la declaración responsable](#2-texto-de-la-declaración-responsable) | ⬜ | Producción |
-| 3 | [Serie de las rectificativas: única o separada](#3-serie-de-las-rectificativas-única-o-separada) | ⬜ | Nada; cambiarlo después es migrar datos |
+| 3 | [Serie de las rectificativas](#3-serie-de-las-rectificativas) | ✅ | — |
 | 4 | [`FechaOperacion`: hoy no se informa](#4-fechaoperacion-hoy-no-se-informa) | ⬜ | Nada; es una confirmación |
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
@@ -87,15 +87,27 @@ productor, no el programa.
 
 ---
 
-## 3. Serie de las rectificativas: única o separada
+## 3. Serie de las rectificativas ✅
 
-Hoy las rectificativas (`R1`–`R5`) y las sustitutivas (`F3`) **comparten serie** con las facturas
-normales: `2027/000123`, un solo contador por ejercicio.
+**Resuelto (2026-09-09), y no era una decisión: era un incumplimiento.**
 
-Es correcto y la norma no obliga a separarlas, pero algunos asesores prefieren una serie propia
-(`R-2027/000001`) para que el libro se lea de un vistazo. La decisión importa **ahora y no después**:
-cambiarla con registros ya emitidos es migrar datos de una tabla append-only, que es exactamente lo
-que no se puede hacer.
+Estaba anotado aquí como «algunos asesores prefieren una serie propia». Al leer el reglamento resultó
+no ser una preferencia:
+
+> *Art. 6.1.a) RD 1619/2012:* «será obligatoria, **en todo caso**, la expedición en series
+> específicas de las facturas siguientes: […] **2.º Las rectificativas.**»
+
+Las rectificativas (`R1`–`R5`) pasan a su propia serie, `R2027/000001`, con su propio contador. El
+código y un test decían lo contrario y lo justificaban con «serían dos contadores que mantener»: es
+cierto, y da igual — no es un argumento contra un «en todo caso».
+
+**La `F3` se queda en la serie ordinaria**, y eso también sale del reglamento:
+
+> *Art. 15.6:* «las facturas que se expidan en sustitución o canje de facturas simplificadas
+> expedidas con anterioridad **no tendrán la condición de rectificativas**.»
+
+Mandar la `F3` a la serie `R` sería declarar como rectificación algo que la norma dice expresamente
+que no lo es.
 
 ---
 
