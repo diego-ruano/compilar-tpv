@@ -1,7 +1,7 @@
 //! **Prueba real contra el servicio web de la AEAT**, con un certificado del almacén de Windows.
 //!
 //! ```text
-//! pnpm verifactu:probar-aeat -- <huella-del-certificado> [pruebas|produccion]
+//! pnpm verifactu:probar-aeat -- <huella-del-certificado> [pruebas|produccion] [NIF] ["Razon Social"]
 //! ```
 //!
 //! La huella sale de `pnpm verifactu:certificados`. El entorno por defecto es **pruebas**, y hay
@@ -37,7 +37,7 @@ fn main() {
 
     #[cfg(windows)]
     {
-        use tpv_application::ports::aeat::{AeatClient, EntornoAeat};
+        use tpv_application::ports::aeat::{AeatClient, CabeceraEnvio, EntornoAeat};
 
         let args: Vec<String> = std::env::args().skip(1).collect();
         let Some(huella) = args.first().cloned() else {
@@ -98,7 +98,23 @@ fn main() {
         }
 
         println!("Conectando…");
-        match rt.block_on(cliente.probar_conexion(entorno, &huella)) {
+        // Con NIF y razón social, la sonda prueba ADEMÁS la autorización del titular sobre ese NIF
+        // — que es lo otro que puede tumbar un envío real. Sigue yendo sin registros.
+        let obligado = match (args.get(2), args.get(3)) {
+            (Some(nif), Some(razon)) => Some(CabeceraEnvio {
+                nif_obligado: nif.trim().to_uppercase(),
+                nombre_razon_obligado: razon.trim().to_string(),
+                incidencia: false,
+            }),
+            _ => None,
+        };
+        if obligado.is_some() {
+            println!("Obligado    : (el que se ha pasado por argumento)");
+        } else {
+            println!("Obligado    : cabecera de relleno (sólo se prueba el transporte)");
+        }
+
+        match rt.block_on(cliente.probar_conexion(entorno, &huella, obligado.as_ref())) {
             Ok(msg) => {
                 println!();
                 println!("{msg}");

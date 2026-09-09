@@ -124,6 +124,48 @@ todo lo que este paso quería saber.
 Lo mismo se puede hacer desde dentro de la aplicación: **Configuración → Fiscal → Certificado
 electrónico → Probar**.
 
+#### Qué demuestra cada variante
+
+La sonda acepta **NIF y razón social opcionales**, y eso cambia lo que la prueba prueba:
+
+```bash
+# Sólo el transporte
+pnpm verifactu:probar-aeat -- <huella> pruebas
+
+# El transporte Y la autorización del titular sobre ese NIF
+pnpm verifactu:probar-aeat -- <huella> pruebas <NIF> "Razon Social"
+```
+
+Sin obligado, la cabecera lleva un NIF de relleno y la AEAT contesta **4116** («el campo NIF del
+bloque ObligadoEmision tiene un formato incorrecto»). Eso ya es el éxito: significa que la conexión
+se estableció y que el servidor nos leyó.
+
+Con el obligado de verdad, la cabecera pasa y la respuesta avanza hasta **4102** («El XML no cumple
+el esquema. Falta informar campo obligatorio: RegistroFactura»), que es el error del cuerpo vacío. Y
+ahí está lo valioso: **la validación de la cabecera va ANTES que la del cuerpo** —se ve porque el NIF
+de relleno daba 4116 con el mismo cuerpo vacío—, así que llegar al 4102 significa haber pasado
+también estos dos:
+
+| Código | Qué comprueba |
+|---|---|
+| **4104** | El NIF del obligado **está identificado** en el censo de la AEAT |
+| **4112** | El titular del certificado **es** Obligado Emisión, Colaborador Social, Apoderado o Sucesor |
+
+O sea que un 4102 con obligado real es la señal de que el certificado sirve **y** está autorizado
+sobre ese NIF, sin haber emitido ninguna factura. La confirmación definitiva sigue siendo un envío
+real, pero esto descarta de antemano el fallo más caro de diagnosticar.
+
+#### Resultado en esta máquina (2026-09-09)
+
+Ejecutado contra preproducción con un certificado de persona física del almacén `CurrentUser`:
+
+- ✅ **Handshake TLS mutuo correcto.** Es lo que valida la decisión de usar **WinHTTP** en lugar de
+  `rustls-cng`: el certificado vive en un CSP legacy de CAPI, que NCrypt no ve. Ya no es un
+  razonamiento, es una conexión establecida contra el servidor real.
+- ✅ **Sin diálogo de PIN.** El indicador de uso silencioso resultó fiable.
+- ✅ **Endpoint correcto** y respuesta SOAP parseada por nuestro código sin tocar nada.
+- ✅ **Cabecera aceptada** con el NIF real: sin 4104 ni 4112.
+
 #### Si falla, por orden de probabilidad
 
 | Síntoma | Qué es |

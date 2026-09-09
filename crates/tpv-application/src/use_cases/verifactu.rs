@@ -999,7 +999,12 @@ mod tests {
                     .take()
                     .unwrap_or_else(|| Err(AppError::internal("el doble sólo responde una vez")))
             }
-            async fn probar_conexion(&self, _e: EntornoAeat, _h: &str) -> AppResult<String> {
+            async fn probar_conexion(
+                &self,
+                _e: EntornoAeat,
+                _h: &str,
+                _o: Option<&CabeceraEnvio>,
+            ) -> AppResult<String> {
                 Ok("ok".into())
             }
         }

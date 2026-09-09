@@ -13,7 +13,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 3 | [Serie de las rectificativas](#3-serie-de-las-rectificativas) | ✅ | — |
 | 4 | [`FechaOperacion`](#4-fechaoperacion) | ✅ | — |
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
-| 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
+| 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | 🟡 **pasos 1-3 hechos** | Falta el envío real (paso 4) |
 | 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
 | 8 | [La comprobación previa del art. 7.i)](#8-la-comprobación-previa-del-art-7i) | ✅ | — |
 | 9 | [Modo «facturar en pruebas / formación»](#9-modo-facturar-en-pruebas--formación) | ✅ | — |
@@ -206,8 +206,21 @@ Tres consecuencias:
    60 s indefinidamente va justo contra eso. Las pruebas se hacen y el entorno se devuelve a
    producción; no es un sitio donde vivir.
 
-Lo único que sigue haciendo falta es **autorización explícita para usar el certificado digital** en el
-*handshake*, y decidir **con qué NIF se prueba**: el certificado tiene que ser titular o apoderado del
+### Estado: pasos 1, 2 y 3 hechos (2026-09-09)
+
+- **Paso 1** (aritmética) y **paso 2** (XML contra los XSD): pasan, y no tocan ni certificado ni red.
+- **Paso 3** (*handshake*): ✅ **hecho contra preproducción con un certificado real.** El TLS mutuo
+  funciona, no pidió PIN, el endpoint es el correcto y nuestro parser leyó la respuesta SOAP. Con el
+  NIF del obligado de verdad la cabecera pasó entera —ni 4104 «no identificado en el censo» ni 4112
+  «el titular del certificado debe ser Obligado Emisión…»—, así que la autorización también está
+  cubierta. Detalle en [PRUEBAS_AEAT.md](PRUEBAS_AEAT.md) §3.2.
+
+  Esto es lo que valida **la decisión arquitectónica de más riesgo del proyecto**: usar WinHTTP en
+  lugar de `rustls-cng`. Ya no es un razonamiento sobre CSP legacy y NCrypt, es una conexión
+  establecida contra el servidor real.
+- **Paso 4** (envío real): pendiente. Es el único que emite un registro.
+
+Sigue haciendo falta decidir **con qué NIF se prueba**: el certificado tiene que ser titular o apoderado del
 NIF que vaya como obligado, o el envío se queda en un problema de autorización en vez de probar el TPV.
 
 ---

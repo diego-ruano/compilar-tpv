@@ -212,9 +212,21 @@ pub trait AeatClient: Send + Sync {
     /// Es el botón «probar ahora» de la pantalla de selección, y existe por una razón concreta: si
     /// el certificado esconde un diálogo de PIN, sale **ahí, con el usuario delante**, y no a las
     /// tres de la mañana con la cola creciendo en silencio.
+    ///
+    /// `obligado` es opcional y **cambia lo que la prueba demuestra**:
+    ///
+    /// - **Sin él**, se manda una cabecera de relleno y sólo se prueba el transporte: que Windows
+    ///   firma con esa clave sin pedir nada y que la AEAT nos lee. La respuesta es un error de
+    ///   cabecera, y eso ya es el éxito.
+    /// - **Con él**, la cabecera pasa la validación de formato y la AEAT llega a comprobar si el
+    ///   titular del certificado está **autorizado sobre ese NIF**. Eso es lo otro que puede
+    ///   bloquear un envío real, y así se descubre aquí en vez de con la primera venta.
+    ///
+    /// En los dos casos va **sin registros**: no se emite ninguna factura.
     async fn probar_conexion(
         &self,
         entorno: EntornoAeat,
         huella_certificado: &str,
+        obligado: Option<&CabeceraEnvio>,
     ) -> AppResult<String>;
 }

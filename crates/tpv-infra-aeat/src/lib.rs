@@ -127,6 +127,7 @@ impl AeatClient for AeatAdapter {
         &self,
         entorno: EntornoAeat,
         huella_certificado: &str,
+        obligado: Option<&CabeceraEnvio>,
     ) -> AppResult<String> {
         let cert = certificados::buscar(huella_certificado)
             .map_err(AppError::external)?
@@ -135,18 +136,20 @@ impl AeatClient for AeatAdapter {
         let url = endpoint(entorno, tipo_de(&cert)).to_string();
         let huella = huella_certificado.to_string();
 
-        // Se manda un sobre VACÍO a propósito: sin `RegistroFactura`, el XSD no valida y la AEAT
-        // contesta con un Fault. Eso basta y es lo que se quiere — lo que se está probando es el
-        // HANDSHAKE (que el certificado se puede usar sin diálogos y que el servidor lo acepta),
-        // no el contenido. Mandar un registro de verdad para «probar» sería emitir una factura.
-        let sonda = xml::construir_envio(
-            &CabeceraEnvio {
-                nif_obligado: "00000000T".to_string(),
-                nombre_razon_obligado: "PRUEBA DE CONEXION".to_string(),
-                incidencia: false,
-            },
-            &[],
-        );
+        // Se manda un sobre SIN REGISTROS a propósito. La AEAT contesta con un Fault, y eso basta:
+        // lo que se está probando es el HANDSHAKE, no el contenido. Mandar un registro de verdad
+        // para «probar» sería emitir una factura.
+        //
+        // La cabecera sí importa, y por eso es un parámetro. Con el NIF del obligado de verdad la
+        // validación de formato pasa y la AEAT llega a mirar si el titular del certificado está
+        // autorizado sobre ese NIF — que es lo otro que puede tumbar un envío real. Con la de
+        // relleno, se queda en el error 4116 y sólo se prueba el transporte.
+        let cabecera = obligado.cloned().unwrap_or(CabeceraEnvio {
+            nif_obligado: "00000000T".to_string(),
+            nombre_razon_obligado: "PRUEBA DE CONEXION".to_string(),
+            incidencia: false,
+        });
+        let sonda = xml::construir_envio(&cabecera, &[]);
 
         let cuerpo =
             tokio::task::spawn_blocking(move || transporte::post_soap(&url, &huella, &sonda))
@@ -208,6 +211,7 @@ impl AeatClient for AeatAdapter {
         &self,
         _entorno: EntornoAeat,
         _huella_certificado: &str,
+        _obligado: Option<&CabeceraEnvio>,
     ) -> AppResult<String> {
         Err(AppError::external(
             "La remisión a la AEAT sólo está disponible en el TPV principal (Windows)",

@@ -297,13 +297,30 @@ pub async fn verifactu_probar_conexion(
     // TPV está en producción daría un «funciona» que no dice nada: son subsedes distintas y la
     // autorización del titular se comprueba en cada una.
     let repo = state.verifactu_repo().await?;
-    let entorno = if uc::estado(repo.as_ref()).await?.entorno_pruebas {
+    let estado = uc::estado(repo.as_ref()).await?;
+    let entorno = if estado.entorno_pruebas {
         EntornoAeat::Pruebas
     } else {
         EntornoAeat::Produccion
     };
 
-    Ok(AeatAdapter::new().probar_conexion(entorno, &h).await?)
+    // Con los datos del obligado ya configurados, la prueba comprueba ADEMÁS que el titular del
+    // certificado esté autorizado sobre ese NIF. Es lo otro que puede tumbar un envío real, y así
+    // sale con el usuario delante en vez de con la primera venta. Sigue sin enviar ningún registro.
+    let obligado = match (estado.nif.as_deref(), estado.razon_social.as_deref()) {
+        (Some(nif), Some(razon)) if !nif.trim().is_empty() && !razon.trim().is_empty() => {
+            Some(tpv_application::ports::aeat::CabeceraEnvio {
+                nif_obligado: nif.trim().to_uppercase(),
+                nombre_razon_obligado: razon.trim().to_string(),
+                incidencia: false,
+            })
+        }
+        _ => None,
+    };
+
+    Ok(AeatAdapter::new()
+        .probar_conexion(entorno, &h, obligado.as_ref())
+        .await?)
 }
 // ─────────────────────────────────────────────────────────────────────────────
 // Exportación (art. 8 RRSIF) y declaración responsable (art. 13 RRSIF)
