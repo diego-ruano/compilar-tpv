@@ -14,12 +14,17 @@ import {
     Plus,
     Minus,
     Printer,
+    FileText,
 } from "lucide-react";
 
 import PrintTicketModal, {
     type PrintableLine,
 } from "../../shared/ticket/PrintTicketModal";
 import type { DatosDelTicket } from "../../features/configuracion/api/printerApis";
+import DatosFiscalesModal, {
+    type DatosFiscales,
+} from "../../shared/ticket/DatosFiscalesModal";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import type { LineaTicketDto, TicketReimpresionDto } from "@tpv/contracts";
 import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
@@ -566,6 +571,60 @@ export default function Cuentas() {
             });
         } catch (err) {
             console.error("cuentas_ticket_para_reimprimir falló:", err);
+        }
+    };
+
+    /* ── FISCAL-02: la factura completa EN SUSTITUCIÓN (`F3`) ───────────────────
+       Es el «¿me lo puedes hacer con IVA?» del día siguiente: el cliente vuelve con un ticket ya
+       expedido y pide factura.
+
+       **No rectifica nada** (art. 15.6 ROF): canjear una simplificada por una completa no es
+       rectificar, así que la original se queda exactamente como está y se emite un registro nuevo
+       que la referencia en `FacturasSustituidas`. Por eso el botón no se esconde cuando el cobro ya
+       tiene factura: un cliente puede pedirla con días de diferencia y lo que hay que poder hacer es
+       emitirla, no impedirlo.
+
+       Lo que sí se esconde es en los **anulados**: un cobro que no existe no se puede facturar. */
+    const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+    const [f3Pago, setF3Pago] = useState<Entrada | null>(null);
+    const [f3Guardando, setF3Guardando] = useState(false);
+    const [f3Error, setF3Error] = useState<string | null>(null);
+
+    const emitirFacturaSustitutiva = async (e: Entrada, d: DatosFiscales) => {
+        setF3Guardando(true);
+        setF3Error(null);
+        try {
+            // El número de la factura original no viaja en la fila de la lista; se pide por el mismo
+            // camino que la reimpresión, que es el que ya sabe resolverlo desde el id del pago.
+            const t = await invokeClient<TicketReimpresionDto | null>(
+                "cuentas_ticket_para_reimprimir",
+                { idPago: e.id },
+            );
+            const numero = (t?.numero_ticket ?? "").trim();
+            if (!numero) {
+                setF3Error(
+                    "Ese cobro no tiene número de factura, así que no hay nada que sustituir. " +
+                        "Pasa con los cobros anteriores a que el negocio completara sus datos fiscales.",
+                );
+                return;
+            }
+
+            await invokeClient("verifactu_emitir_factura_de_ticket", {
+                numeroTicket: numero,
+                destinatario: {
+                    nombre_razon: d.nombre_razon,
+                    nif: d.nif,
+                    domicilio: d.domicilio ?? null,
+                },
+            });
+
+            setF3Pago(null);
+            // Y se imprime, que es para lo que ha venido el cliente.
+            await reimprimirTicket(e);
+        } catch (err) {
+            setF3Error(toAppError(err).message);
+        } finally {
+            setF3Guardando(false);
         }
     };
 
@@ -1343,6 +1402,15 @@ export default function Cuentas() {
                                                                 </MiniIconButton>
                                                                 {e.anulado ? null : (
                                                                     <>
+                                                                        <MiniIconButton
+                                                                            title="Hacer factura con NIF"
+                                                                            onClick={() => {
+                                                                                setF3Error(null);
+                                                                                setF3Pago(e);
+                                                                            }}
+                                                                        >
+                                                                            <FileText className="size-4" aria-hidden />
+                                                                        </MiniIconButton>
                                                                         <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
                                                                             <Pencil className="size-4" aria-hidden />
                                                                         </MiniIconButton>
@@ -1382,6 +1450,15 @@ export default function Cuentas() {
                                                             </MiniIconButton>
                                                             {e.anulado ? null : (
                                                                 <>
+                                                                    <MiniIconButton
+                                                                        title="Hacer factura con NIF"
+                                                                        onClick={() => {
+                                                                            setF3Error(null);
+                                                                            setF3Pago(e);
+                                                                        }}
+                                                                    >
+                                                                        <FileText className="size-4" aria-hidden />
+                                                                    </MiniIconButton>
                                                                     <MiniIconButton title="Editar" onClick={() => abrirEditarPago(e)}>
                                                                         <Pencil className="size-4" aria-hidden />
                                                                     </MiniIconButton>
@@ -2297,6 +2374,25 @@ export default function Cuentas() {
                     </div>
             </ModalShell>
             ) : null}
+
+            {/* FISCAL-02: el cliente vuelve con el ticket y pide factura. Se emite una F3 EN
+                SUSTITUCIÓN y se reimprime; la simplificada original no se toca. */}
+            <DatosFiscalesModal
+                open={f3Pago !== null}
+                onClose={() => {
+                    setF3Pago(null);
+                    setF3Error(null);
+                }}
+                onConfirmar={(d) => {
+                    const e = f3Pago;
+                    if (e) return emitirFacturaSustitutiva(e, d);
+                }}
+                importe={f3Pago?.importe ?? 0}
+                limite={limiteSimplif}
+                obligatorio={false}
+                guardando={f3Guardando}
+                error={f3Error}
+            />
 
             {/* Reimpresión de un cobro ya hecho: mismo número que el original, marcado COPIA. */}
             <PrintTicketModal

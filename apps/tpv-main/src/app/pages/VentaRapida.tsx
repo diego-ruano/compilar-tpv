@@ -17,6 +17,12 @@ import type { DatosDelTicket } from "../../features/configuracion/api/printerApi
 import VerTicketsModal from "../../features/ventaRapida/ui/VerTicketsModal";
 
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
+import DatosFiscalesModal, {
+  type DatosFiscales,
+} from "../../shared/ticket/DatosFiscalesModal";
+import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { esError } from "@tpv/client";
 
 import {
   Categoria,
@@ -74,6 +80,22 @@ type PendingCobroIntent = {
   idTrabajadorCobrador: string | null;
   opIdCobro: string;
   createdAtMs: number;
+  /**
+   * FISCAL-02: los datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe
+   * pasa del límite de la simplificada y entonces no hay alternativa. Ausente = ticket (`F2`).
+   *
+   * Viaja DENTRO del intent, y por tanto se persiste en `localStorage` con él. Tiene coste —el
+   * nombre y el NIF de un cliente ahí mientras el cobro no cierre— y se paga a propósito: la
+   * alternativa es que un reinicio a mitad de cobro reemita el intent sin estos datos, y entonces
+   * el camino VOLUNTARIO se degrada en silencio a un ticket simplificado. Un cliente que pidió
+   * factura y se fue con un ticket es un error que nadie descubre hasta su trimestre. El dato, por
+   * lo demás, acaba en el SQLite de este mismo equipo de todas formas.
+   */
+  destinatario?: {
+    nombre_razon: string;
+    nif: string;
+    domicilio?: string | null;
+  } | null;
 };
 
 const PENDING_COBROS_STORAGE_PREFIX = "tpv:ventaRapida:pendingCobros:v1";
@@ -141,6 +163,20 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
   const createdAtMs = Number(obj.createdAtMs ?? Date.now());
   const opIdCobro = String(obj.opIdCobro ?? obj.op_id_cobro ?? "").trim() || makeStableCobroOpId(id);
 
+  // El destinatario se valida entero o se descarta: medio destinatario (nombre sin NIF) haría que
+  // el backend rechazara el cobro una y otra vez sin que nada lo explicara.
+  const dRaw = obj.destinatario;
+  let destinatario: PendingCobroIntent["destinatario"] = null;
+  if (dRaw && typeof dRaw === "object") {
+    const d = dRaw as Record<string, unknown>;
+    const nombre = String(d.nombre_razon ?? "").trim();
+    const nif = String(d.nif ?? "").trim().toUpperCase();
+    const domicilio = String(d.domicilio ?? "").trim();
+    if (nombre && nif) {
+      destinatario = { nombre_razon: nombre, nif, domicilio: domicilio || null };
+    }
+  }
+
   if (!id) return null;
   if (!idComanda) return null;
   if (metodoRaw !== "tarjeta" && metodoRaw !== "efectivo") return null;
@@ -158,6 +194,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     idTrabajadorCobrador: String(obj.idTrabajadorCobrador ?? "").trim() || null,
     opIdCobro,
     createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
+    destinatario,
   };
 }
 
@@ -292,6 +329,30 @@ export default function VentaRapida() {
   const pendingCobrosRef = useRef<PendingCobroIntent[]>([]);
   const runningCobrosRef = useRef<Set<string>>(new Set());
   const cobroFlushTimerRef = useRef<number | null>(null);
+
+  /* ── FISCAL-02: la factura completa ─────────────────────────────────────────
+     Aquí el cobro es OPTIMISTA y diferido (el intent se encola, se marca la línea como cobrada y
+     la llamada sale después), así que los dos caminos hasta el formulario llegan en momentos
+     distintos:
+
+       · VOLUNTARIO. Se marca la casilla y se piden los datos ANTES de encolar.
+       · OBLIGATORIO. El backend rechaza el intent con `factura_completa_requerida`, ya encolado.
+         Ese intent NO se deshace: se queda en la cola esperando el dato, porque deshacerlo
+         devolvería las líneas a pendiente y el camarero tendría que volver a seleccionarlas con el
+         cliente delante.
+
+     El límite no se comprueba en esta pantalla. Lo decide Rust dentro de la transacción del cobro,
+     que es donde se conoce el importe exacto que se va a registrar. */
+  const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+  const [quiereFactura, setQuiereFactura] = useState(false);
+  /** Intents parados esperando un destinatario. Mientras estén aquí, el drenado los salta. */
+  const esperandoDestinatarioRef = useRef<Set<string>>(new Set());
+  const [pideFactura, setPideFactura] = useState<
+    | { clase: "voluntario"; metodo: "tarjeta" | "efectivo"; importe: number }
+    | { clase: "obligatorio"; intentId: string; importe: number }
+    | null
+  >(null);
+  const [errorFactura, setErrorFactura] = useState<string | null>(null);
 
   const syncTimerRef = useRef<number | null>(null);
   const syncRunIdRef = useRef(0);
@@ -955,7 +1016,11 @@ export default function VentaRapida() {
     }
 
     const runnable = pendingCobrosRef.current.filter(
-      (intent) => !runningCobrosRef.current.has(intent.id),
+      (intent) =>
+        !runningCobrosRef.current.has(intent.id) &&
+        // Un intent parado esperando el NIF del cliente no se reintenta: volvería a ser rechazado
+        // cada 500 ms, en bucle y con el formulario abierto delante.
+        !esperandoDestinatarioRef.current.has(intent.id),
     );
 
     for (const intent of runnable) {
@@ -987,6 +1052,7 @@ export default function VentaRapida() {
             idTrabajadorCobrador: intent.idTrabajadorCobrador,
             detalles: detallesUsados,
             opId: intent.opIdCobro,
+            destinatario: intent.destinatario ?? null,
           });
 
           if (pago?.numeroTicket) {
@@ -1025,8 +1091,26 @@ export default function VentaRapida() {
 
           setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== intent.id));
           emitVrChanged();
+          // FISCAL-01: aquí es donde el cobro ha salido de verdad (el intent se encoló antes, de
+          // forma optimista). Si el equipo lleva tres días sin remitir, el aviso sale ahora.
+          anunciarCobro();
         } catch (e) {
           console.error("Error cobrando venta rápida:", e);
+
+          // El importe pasa del límite de la simplificada y falta el destinatario. No es un fallo
+          // del cobro: es un dato que falta. El intent se CONSERVA —con sus líneas marcadas— y se
+          // para hasta que alguien escriba el NIF; deshacerlo obligaría a volver a seleccionar las
+          // líneas con el cliente delante.
+          if (esError(e, "factura_completa_requerida")) {
+            esperandoDestinatarioRef.current.add(intent.id);
+            setErrorFactura(null);
+            setPideFactura({
+              clase: "obligatorio",
+              intentId: intent.id,
+              importe: intent.importeTotal,
+            });
+            return;
+          }
 
           setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== intent.id));
           rollbackTicketItemsPaidLocal(intent.ticketItemIds, detallesUsados);
@@ -1045,7 +1129,12 @@ export default function VentaRapida() {
         } finally {
           runningCobrosRef.current.delete(intent.id);
 
-          if (pendingCobrosRef.current.length > 0) {
+          // Se cuentan los REMITIBLES, no los pendientes: con un intent parado esperando un NIF,
+          // mirar sólo el tamaño de la cola dejaría un temporizador girando cada 500 ms para nada.
+          const hayRemitibles = pendingCobrosRef.current.some(
+            (x) => !esperandoDestinatarioRef.current.has(x.id),
+          );
+          if (hayRemitibles) {
             cobroFlushTimerRef.current = window.setTimeout(() => {
               flushPendingCobros();
             }, 500);
@@ -1057,7 +1146,9 @@ export default function VentaRapida() {
     if (
       pendingCobrosRef.current.length > 0 &&
       pendingCobrosRef.current.some(
-        (intent) => resolveDetallesForCobroIntent(intent) === null,
+        (intent) =>
+          !esperandoDestinatarioRef.current.has(intent.id) &&
+          resolveDetallesForCobroIntent(intent) === null,
       )
     ) {
       cobroFlushTimerRef.current = window.setTimeout(() => {
@@ -1464,7 +1555,10 @@ export default function VentaRapida() {
   );
 
   const cobrar = useCallback(
-    async (_metodo: "tarjeta" | "efectivo") => {
+    async (
+      _metodo: "tarjeta" | "efectivo",
+      destinatario?: DatosFiscales | null,
+    ) => {
       if (hasPendingTicketWrites()) {
         warnPendingTicketWrites();
         return;
@@ -1478,6 +1572,19 @@ export default function VentaRapida() {
       );
 
       if (seleccionadosItems.length === 0) return;
+
+      // Camino voluntario: se pidió factura y aún no hay datos. Se preguntan ANTES de encolar el
+      // intent, porque una vez cobrado convertir el ticket en factura ya es otra operación (una F3
+      // sustitutiva, desde Cuentas).
+      if (quiereFactura && !destinatario) {
+        const importe =
+          Math.round(
+            seleccionadosItems.reduce((acc, it) => acc + Number(it.precio || 0), 0) * 100,
+          ) / 100;
+        setErrorFactura(null);
+        setPideFactura({ clase: "voluntario", metodo: _metodo, importe });
+        return;
+      }
 
       const idUsuarioCobrador: string | null = idUsuarioAuth ?? null;
       const idTrabajadorCobrador: string | null = idTrabajadorAuth ?? null;
@@ -1528,6 +1635,7 @@ export default function VentaRapida() {
           idTrabajadorCobrador,
           opIdCobro: makeStableCobroOpId(intentId),
           createdAtMs: Date.now(),
+          destinatario: destinatario ?? null,
         };
 
         setPendingCobrosLocal((prev) => [
@@ -1548,6 +1656,9 @@ export default function VentaRapida() {
         setCashCount({});
         setPaso("categorias");
         setSeleccionadosLocal(new Set());
+        setQuiereFactura(false);
+        setPideFactura(null);
+        setErrorFactura(null);
 
         queueFlushPendingCobros();
         emitVrChanged();
@@ -1557,6 +1668,7 @@ export default function VentaRapida() {
       }
     },
     [
+      quiereFactura,
       hasPendingTicketWrites,
       idUsuarioAuth,
       idTrabajadorAuth,
@@ -1570,6 +1682,86 @@ export default function VentaRapida() {
       warnPendingTicketWrites,
     ],
   );
+
+  /**
+   * Los datos del cliente ya están. Según de dónde se venga, son dos cosas distintas:
+   *
+   *   · VOLUNTARIO — el cobro no ha salido todavía: se encola con el destinatario dentro.
+   *   · OBLIGATORIO — el intent ya está en la cola y parado: se le añade el dato y se suelta. No se
+   *     vuelve a encolar nada, porque el `opIdCobro` es el mismo y la idempotencia del backend es
+   *     por ahí: reencolar crearía un segundo intent para el mismo cobro.
+   */
+  const confirmarFactura = useCallback(
+    async (d: DatosFiscales) => {
+      const p = pideFactura;
+      if (!p) return;
+
+      if (p.clase === "voluntario") {
+        await cobrar(p.metodo, d);
+        return;
+      }
+
+      setPendingCobrosLocal((prev) =>
+        prev.map((x) =>
+          x.id === p.intentId
+            ? {
+                  ...x,
+                  destinatario: {
+                      nombre_razon: d.nombre_razon,
+                      nif: d.nif,
+                      domicilio: d.domicilio ?? null,
+                  },
+              }
+            : x,
+        ),
+      );
+      esperandoDestinatarioRef.current.delete(p.intentId);
+      setPideFactura(null);
+      setErrorFactura(null);
+      setQuiereFactura(false);
+      queueFlushPendingCobros();
+    },
+    [pideFactura, cobrar, setPendingCobrosLocal, queueFlushPendingCobros],
+  );
+
+  /**
+   * Se cierra el formulario sin datos.
+   *
+   * En el camino OBLIGATORIO hay que deshacer: el intent está en la cola con sus líneas marcadas
+   * como cobradas y ese cobro no va a poder salir nunca. Dejarlo ahí sería una venta que el ticket
+   * da por cobrada y que no existe. Las líneas vuelven a pendiente y el camarero decide —el cliente
+   * puede ir a buscar el NIF, o cobrar por partes por debajo del límite—.
+   */
+  const cancelarFactura = useCallback(() => {
+    const p = pideFactura;
+    setPideFactura(null);
+    setErrorFactura(null);
+    setQuiereFactura(false);
+    if (!p || p.clase !== "obligatorio") return;
+
+    const intent = pendingCobrosRef.current.find((x) => x.id === p.intentId);
+    esperandoDestinatarioRef.current.delete(p.intentId);
+    setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== p.intentId));
+    if (intent) {
+      rollbackTicketItemsPaidLocal(intent.ticketItemIds, intent.detalleIds);
+      toast.info(
+        "Cobro deshecho",
+        "Ese importe necesita factura con NIF. He devuelto las líneas a pendiente.",
+      );
+      if (idComandaActivaRef.current === intent.idComanda) {
+        queueComandaRefresh(intent.idComanda, {
+          refreshTicket: true,
+          refreshComandas: false,
+        });
+      }
+    }
+  }, [
+    pideFactura,
+    setPendingCobrosLocal,
+    rollbackTicketItemsPaidLocal,
+    queueComandaRefresh,
+    toast,
+  ]);
 
   const totalEfectivo = useMemo(() => {
     let sum = 0;
@@ -1981,7 +2173,10 @@ export default function VentaRapida() {
             onCancelarCobro={() => {
               setPaso("categorias");
               limpiarSeleccion();
+              setQuiereFactura(false);
             }}
+            quiereFactura={quiereFactura}
+            onQuiereFacturaChange={setQuiereFactura}
             onGuardarNota={onGuardarNota}
           />
         </div>
@@ -2002,6 +2197,16 @@ export default function VentaRapida() {
         open={openProductDetail}
         onClose={cerrarDetalleProducto}
         productId={productDetailId}
+      />
+
+      <DatosFiscalesModal
+        open={pideFactura !== null}
+        onClose={cancelarFactura}
+        onConfirmar={confirmarFactura}
+        importe={pideFactura?.importe ?? 0}
+        limite={limiteSimplif}
+        obligatorio={pideFactura?.clase === "obligatorio"}
+        error={errorFactura}
       />
 
       <VerTicketsModal

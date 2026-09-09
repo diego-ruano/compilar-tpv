@@ -32,6 +32,9 @@ export default function TicketPanel({
   onStartEfectivo,
   onCancelarCobro,
 
+  quiereFactura,
+  onQuiereFacturaChange,
+
   onGuardarNota,
 
   formatMoney,
@@ -56,6 +59,10 @@ export default function TicketPanel({
   datosTicket?: DatosDelTicket;
   onStartEfectivo: () => void;
   onCancelarCobro: () => void;
+
+  /** FISCAL-02: el cliente pide factura completa. Los datos se piden al cobrar. */
+  quiereFactura: boolean;
+  onQuiereFacturaChange: (v: boolean) => void;
 
   onGuardarNota: (detalleId: string, nota: string) => void | Promise<void>;
 
@@ -464,6 +471,21 @@ export default function TicketPanel({
             >
               Cobrar en efectivo
             </button>
+
+            <label className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-sm sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={quiereFactura}
+                onChange={(e) => onQuiereFacturaChange(e.target.checked)}
+                className="h-4 w-4 accent-[var(--accent)]"
+              />
+              <span className="font-semibold text-fg">
+                El cliente pide factura con NIF
+              </span>
+              <span className="text-xs text-fg-subtle">
+                (se piden sus datos al cobrar)
+              </span>
+            </label>
 
             <button
               className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg cursor-pointer sm:col-span-2"

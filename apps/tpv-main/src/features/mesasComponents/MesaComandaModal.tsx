@@ -12,8 +12,14 @@ import { reservasKeys } from "../reservas/reservasQueries";
 
 import ProductDetailModal from "../InventaryComponents/ProductDetailModal";
 import PrintTicketModal from "../../shared/ticket/PrintTicketModal";
+import DatosFiscalesModal, {
+    type DatosFiscales,
+} from "../../shared/ticket/DatosFiscalesModal";
+import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import type { DatosDelTicket } from "../configuracion/api/printerApis";
 import { useMode } from "../../shared/stores/useMode";
+import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
+import { esError, toAppError } from "@tpv/client";
 
 import {
     mesasEnsureOpenComanda,
@@ -827,7 +833,31 @@ export default function MesaComandaModal({
         await reloadTicket();
     };
 
-    const cobrar = async (metodo: "tarjeta" | "efectivo") => {
+    /* ── FISCAL-02: la factura completa ───────────────────────────────────────
+       Dos caminos distintos hasta el mismo formulario, y la pantalla los distingue porque no se
+       parecen:
+
+         · VOLUNTARIO. El cliente la pide. Se marca la casilla antes de cobrar y se puede cancelar.
+         · OBLIGATORIO. El importe pasa del límite de la simplificada, así que el backend RECHAZA el
+           cobro con `factura_completa_requerida`. Sin esos datos no se puede cobrar, y esto es lo
+           que impide que el camarero se quede mirando un error sin salida.
+
+       El límite no se comprueba aquí. Lo decide Rust dentro de la transacción del cobro, que es
+       donde se conoce el importe exacto que se va a registrar; la pantalla sólo reacciona a su
+       rechazo. Comprobarlo en los dos lados sería tener dos criterios para la misma cifra. */
+    const limiteSimplif = useBusinessSettings((st) => st.limiteSimplif);
+    const [quiereFactura, setQuiereFactura] = useState(false);
+    const [pideFactura, setPideFactura] = useState<{
+        metodo: "tarjeta" | "efectivo";
+        obligatorio: boolean;
+    } | null>(null);
+    const [errorFactura, setErrorFactura] = useState<string | null>(null);
+    const [cobrandoFactura, setCobrandoFactura] = useState(false);
+
+    const cobrar = async (
+        metodo: "tarjeta" | "efectivo",
+        destinatario?: DatosFiscales | null,
+    ) => {
         if (!idComanda) return;
 
         const ids = ticket
@@ -835,6 +865,15 @@ export default function MesaComandaModal({
             .map((t) => t.id);
 
         if (!ids.length) return;
+
+        // Camino voluntario: se pidió factura y todavía no hay datos. Se pregunta ANTES de cobrar —
+        // una vez cobrado, convertir el ticket en factura ya es otra operación (una F3 sustitutiva).
+        if (quiereFactura && !destinatario) {
+            setErrorFactura(null);
+            setPideFactura({ metodo, obligatorio: false });
+            return;
+        }
+        if (destinatario) setCobrandoFactura(true);
 
         try {
             console.log("Cobrando detalles:", {
@@ -853,6 +892,7 @@ export default function MesaComandaModal({
                         : "FRACCIONADO",
                 detalleIds: ids,
                 idUsuario: operador,
+                destinatario: destinatario ?? null,
             });
 
             // Datos del ticket recién emitido: con ellos, imprimir saca un ticket de venta
@@ -874,8 +914,26 @@ export default function MesaComandaModal({
             setTicket(t);
             window.dispatchEvent(new CustomEvent("mesas:changed"));
             notifyChanged();
+            // FISCAL-01: se ha cobrado. Si el equipo lleva tres días sin remitir, el aviso sale
+            // ahora — después del cobro, nunca antes.
+            anunciarCobro();
+            setQuiereFactura(false);
+            setPideFactura(null);
+            setErrorFactura(null);
         } catch (e) {
             console.error("Error cobrando:", e);
+            // El importe pasa del límite de la simplificada: no es un fallo, es que falta un dato.
+            // Se abre el formulario en modo obligatorio en vez de dejar al camarero sin salida.
+            if (esError(e, "factura_completa_requerida")) {
+                setErrorFactura(null);
+                setPideFactura({ metodo, obligatorio: true });
+                return;
+            }
+            // Si el fallo llega con el formulario abierto, se enseña DENTRO: cerrarlo perdería los
+            // datos que el cliente acaba de dictar.
+            if (pideFactura) setErrorFactura(toAppError(e).message);
+        } finally {
+            setCobrandoFactura(false);
         }
     };
 
@@ -983,6 +1041,26 @@ export default function MesaComandaModal({
                 onClose={() => setPrintOpen(false)}
                 items={ticket}
                 datos={datosTicket}
+            />
+            <DatosFiscalesModal
+                open={pideFactura !== null}
+                onClose={() => {
+                    setPideFactura(null);
+                    setErrorFactura(null);
+                    // Cancelar el camino OBLIGATORIO deja la casilla sin marcar: el cobro no se ha
+                    // hecho y el camarero vuelve a la pantalla de método. Es lo correcto — el
+                    // cliente puede ir a buscar el NIF y volver.
+                    setQuiereFactura(false);
+                }}
+                onConfirmar={async (d) => {
+                    const metodo = pideFactura?.metodo ?? "tarjeta";
+                    await cobrar(metodo, d);
+                }}
+                importe={totalSeleccionado}
+                limite={limiteSimplif}
+                obligatorio={pideFactura?.obligatorio ?? false}
+                guardando={cobrandoFactura}
+                error={errorFactura}
             />
             <NotaLineaModal
                 open={openNota}
@@ -1571,11 +1649,29 @@ export default function MesaComandaModal({
                                         Cobrar en efectivo
                                     </button>
 
+                                    <label className="col-span-2 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm">
+                                        <input
+                                            type="checkbox"
+                                            checked={quiereFactura}
+                                            onChange={(e) =>
+                                                setQuiereFactura(e.target.checked)
+                                            }
+                                            className="h-4 w-4 accent-[var(--accent)]"
+                                        />
+                                        <span className="font-semibold">
+                                            El cliente pide factura con NIF
+                                        </span>
+                                        <span className="text-xs text-fg-subtle">
+                                            (se piden sus datos al cobrar)
+                                        </span>
+                                    </label>
+
                                     <button
                                         className="col-span-2 px-3 py-2 rounded-xl border border-border bg-surface hover:bg-surface-2 text-sm font-semibold"
                                         onClick={() => {
                                             setPaso("categorias");
                                             limpiarSeleccion();
+                                            setQuiereFactura(false);
                                         }}
                                         type="button"
                                     >
