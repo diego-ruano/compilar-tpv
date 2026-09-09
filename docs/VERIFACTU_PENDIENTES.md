@@ -15,6 +15,8 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
 | 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
+| 8 | [La comprobación previa del art. 7.i): no la hacemos](#8-la-comprobación-previa-del-art-7i-no-la-hacemos) | ⬜ | Nada visible; es una comprobación que falta |
+| 9 | [Falta un modo «facturar en pruebas / formación»](#9-falta-un-modo-facturar-en-pruebas--formación) | ⬜ | El día que el bar forme a un camarero |
 
 ---
 
@@ -150,22 +152,63 @@ calculada. Hay un test que lo comprueba sobre la cadena real, no sobre una lista
 ## 5. Qué hace la AEAT con un eslabón anterior que no tiene
 
 Si se remite un registro cuyo `Encadenamiento/RegistroAnterior` declara una huella que la AEAT nunca
-ha recibido, **no sé con certeza qué devuelve**: un rechazo, o un «aceptado con errores» de la banda
-2000–2999.
+ha recibido, ¿qué devuelve?
 
-No cambia ninguna recomendación —partir de cero antes de producción es correcto en los dos casos, ver
-[PRUEBAS_AEAT.md](PRUEBAS_AEAT.md)— pero sí cuánto margen hay si alguien se lo salta. **No se
-inventa: sale del primer envío de prueba.**
+**Casi resuelto sin enviar nada (2026-09-09)**, leyendo el catálogo oficial de errores
+(`crates/tpv-infra-aeat/esquemas/errores.properties`):
+
+- **No existe ningún código** para «el registro anterior no existe en la AEAT».
+- **Sí existe el `2007`** —*«No debe informarse como primer registro, existen facturas emitidas con el
+  obligado emisión y el sistema informático actual»*— y está en la banda **admisible (2000–2999)**:
+  aceptado con errores, no rechazado. O sea que la AEAT **sí sabe** si tienes registros previos, y el
+  caso contrario al de esta pregunta lo trata como admisible.
+- Los errores del encadenamiento son de **formato** (`1180` «Error en el bloque de Encadenamiento»,
+  `1269` «El bloque Registro Anterior no está informado correctamente» → rechazo) o de **contenido de
+  la huella** (`2000`, `2002`, `2003`, `2008` → admisibles).
+
+Lo que se deduce: la AEAT comprueba que la huella del registro **actual** esté bien calculada con los
+datos suministrados —incluida la huella anterior que se declare—, no que ese eslabón exista en su
+base. Con lo cual **partir de cero antes de producción es limpio**, y equivocarse al revés (declarar
+primer registro teniendo ya facturas) es un `2007` admisible, no un muro.
+
+Queda como «muy probable» hasta el primer envío real, que es lo único que lo convierte en certeza.
 
 ---
 
 ## 6. La prueba contra la AEAT en preproducción
 
 Los cuatro escalones están en [PRUEBAS_AEAT.md](PRUEBAS_AEAT.md). Los dos primeros ya pasan y no
-tocan ni el certificado ni internet. Los dos últimos necesitan:
+tocan ni el certificado ni internet.
 
-- el **alta en preproducción** de la AEAT con el NIF con el que se va a probar (trámite suyo);
-- **autorización explícita para usar el certificado digital** en el *handshake*.
+**Averiguado el 2026-09-09**, en palabras de la propia AEAT ([preportal.aeat.es](https://preportal.aeat.es/)):
+
+> «Este portal tiene por finalidad facilitar las pruebas de presentación y consulta de declaraciones
+> tributarias a los usuarios externos de la Agencia Tributaria, **de forma totalmente libre, con la
+> única condición de autenticarse mediante un certificado electrónico**.»
+>
+> «Las declaraciones presentadas a través de este Portal se guardan en una Base de Datos del entorno
+> de pruebas de la AEAT, **sin que en ningún caso tengan trascendencia tributaria**.»
+>
+> «este entorno solo se debe utilizar para realizar este tipo de **pruebas puntuales** y en ningún
+> caso para realizar pruebas masivas […] Si se detectan usos que se consideren abusivos se podrán
+> adoptar medidas para bloquear el acceso.»
+
+Tres consecuencias:
+
+1. **No hay alta ni registro previo.** Este documento decía antes que sí; era falso, y no venía de
+   ninguna fuente. Basta el certificado.
+2. **No es ficticio: es sin efectos.** Lo que se manda se guarda de verdad en la base de pruebas, con
+   el certificado y el NIF reales. Lo que no tiene es trascendencia tributaria. La mitad que **sí es
+   completamente real** es la nuestra: los registros que emita el TPV ocupan su `Orden`, gastan número
+   y entran en la cadena de huellas locales, con o sin efectos al otro lado. De ahí la regla de partir
+   de cero antes de producción.
+3. ⚠️ **«Pruebas puntuales, no masivas.»** Dejar un TPV apuntando a preproducción y remitiendo cada
+   60 s indefinidamente va justo contra eso. Las pruebas se hacen y el entorno se devuelve a
+   producción; no es un sitio donde vivir.
+
+Lo único que sigue haciendo falta es **autorización explícita para usar el certificado digital** en el
+*handshake*, y decidir **con qué NIF se prueba**: el certificado tiene que ser titular o apoderado del
+NIF que vaya como obligado, o el envío se queda en un problema de autorización en vez de probar el TPV.
 
 ---
 
@@ -194,3 +237,78 @@ Windows.
 Con el certificado ausente o caducado el job **ni lo intenta**: el handshake fallaría seguro y sería
 una conexión TLS por minuto para nada. Con el que pide PIN sí lo intenta, porque ahí puede haber
 alguien delante y negarlo garantizaría el fallo donde había una posibilidad.
+
+---
+
+## 8. La comprobación previa del art. 7.i): no la hacemos
+
+**Encontrado el 2026-09-09** leyendo el
+[FAQ de desarrolladores de la AEAT](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf)
+(apartado 15), que cita el art. 7.i) de la Orden HAC/1177/2024:
+
+> «Salvo cuando se trate del primer registro de facturación, cada vez que el sistema informático vaya
+> a generar un nuevo registro de facturación, de alta o de anulación, antes deberá comprobar que se
+> cumplen los siguientes requisitos:
+> **1.º** El último registro de facturación generado está correctamente encadenado.
+> **2.º** La fecha y hora de generación del último registro de facturación generado **no es superior
+> en más de un minuto** a la fecha y hora actuales que se utilizarán para fechar el registro de
+> facturación a generar.»
+
+**No hacemos ninguna de las dos.** Emitimos leyendo el último eslabón (`ultimo_eslabon`) y encadenando,
+pero sin verificar que ese eslabón esté a su vez bien encadenado con el suyo, ni comparar relojes.
+
+### Qué alcance tiene realmente
+
+Honestamente: **es ambiguo si obliga a un SIF «SOLO VERI\*FACTU» como el nuestro.** El art. 7 de la
+Orden está escrito en general, pero las dos veces que el FAQ concreta esta comprobación la acota a la
+modalidad **NO** VERI\*FACTU —porque lo que hay que hacer al fallar es *anotar un evento*, y el
+registro de eventos solo es obligatorio ahí (NOTA 1 del mismo apartado, que de paso **confirma** que
+nuestro `TipoUsoPosibleSoloVerifactu = "S"` nos exime del registro de eventos)—.
+
+### Por qué conviene hacerla igual
+
+El punto 2.º tiene un argumento que no depende de cómo se lea la norma: **detecta el reloj que va
+hacia atrás** (corrección NTP, cambio manual, un equipo con la pila de la BIOS gastada). Si eso pasa:
+
+- generamos registros con `FechaHoraHusoGenRegistro` decreciente, que es lo que un sistema manipulado
+  produciría, y
+- la AEAT los marca con el error **2004** (*«debe ser la fecha actual del sistema de la AEAT»*),
+  admisible pero acumulable.
+
+Y el FAQ deja clara una cosa sobre qué hacer cuando la comprobación falla, que sí cumplimos y hay que
+seguir cumpliendo:
+
+> «será preciso generar el siguiente RF, ya que **la facturación por este motivo NUNCA debe
+> interrumpirse**.»
+
+O sea: detectarlo y avisar, nunca dejar de facturar.
+
+---
+
+## 9. Falta un modo «facturar en pruebas / formación»
+
+**Encontrado el 2026-09-09** en el mismo FAQ (apartado 11, págs. 22-23). No es un incumplimiento
+nuestro: es una funcionalidad que la AEAT **recomienda expresamente** y que hoy no tenemos.
+
+El problema que resuelve es real y llega el día que el bar estrene el TPV o forme a un camarero:
+
+> «si se desea poder probar el SIF, deberá ser con el certificado electrónico cualificado válido y
+> admitido instalado […] Desde ese momento, el usuario puede ya expedir facturas con él, que **siempre
+> serán "reales"** (con su QR tributario, y cuyos RF de alta son remitidos a la AEAT) pero, en este
+> caso, al ser expedidas con la intención de hacer pruebas […] **deberá procederse a la inmediata
+> posterior anulación de ellas** (para que no cuenten como facturas reales).»
+
+Y sugiere la solución:
+
+> «el SIF podría ofrecer una funcionalidad de "facturar en pruebas (o formación)" ya preparada para que
+> haga todo esto automáticamente: dejar al usuario expedir facturas "reales" […] pero "para
+> pruebas/formación" (que deberá poder distinguir, por ejemplo, con numeración en **una serie especial
+> de tipo PRU 25 XXXX**), describirlas visible y claramente como "de pruebas" y asegurarse de que
+> **siempre serán anuladas** (con remisión de RF de anulación a la AEAT) una vez terminadas.»
+
+Sin esto, la alternativa para el usuario es acordarse de anular a mano cada factura de prueba — y el
+día que se le olvide una, queda una venta ficticia contada como real y sin forma de quitarla salvo
+otro registro de anulación.
+
+Encaja con lo que ya existe: la serie sale del tipo de factura (§3), así que una serie `PRU` es el
+mismo mecanismo; y la anulación por `ClaseBaja::Error` ya emite el RF de anulación correcto.

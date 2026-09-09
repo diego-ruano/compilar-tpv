@@ -17,7 +17,7 @@ sin haber hecho el siguiente, y los dos primeros no tocan ni el certificado ni i
 | 1 | Que la **aritmética** (huella, QR, NIF, desglose) es la oficial | nada | ninguno |
 | 2 | Que el **XML** valida contra los XSD oficiales | Python + `xmlschema` | ninguno |
 | 3 | Que el **certificado** sirve para el TLS mutuo con la AEAT | certificado instalado + internet | ninguno: la sonda va **sin facturas** |
-| 4 | Que la AEAT **acepta un registro de verdad** | alta en preproducción | emite una factura **en preproducción** |
+| 4 | Que la AEAT **acepta un registro de verdad** | sólo el certificado | ninguno en Hacienda (preproducción **no tiene trascendencia tributaria**); en el TPV **sí** gasta número y cadena |
 
 ---
 
@@ -145,19 +145,63 @@ la sede electrónica (trámite «Apoderamiento» → suministro de registros de 
 Este es el único paso que **emite una factura**. En preproducción, que es un entorno separado del de
 verdad, pero una factura.
 
-### 4.1 Antes de empezar: darse de alta en preproducción
+### 4.1 El entorno de preproducción: qué es y qué NO hace falta
 
-La AEAT exige registrarse para usar el entorno de pruebas:
+**No hay que darse de alta ni registrarse.** Lo dice la propia AEAT en la portada de
+<https://preportal.aeat.es/>:
 
-1. Entrar en el **portal de preproducción** con el certificado:
-   <https://prewww1.aeat.es/> (sede de pruebas).
-2. Buscar el apartado de **Veri\*factu / Sistemas informáticos de facturación** y seguir el alta de
-   pruebas. La AEAT pide asociar el NIF con el que se va a probar.
-3. Comprobar que el NIF que se va a usar como **obligado** está habilitado ahí.
+> «Este portal tiene por finalidad facilitar las pruebas de presentación y consulta de declaraciones
+> tributarias a los usuarios externos de la Agencia Tributaria, **de forma totalmente libre, con la
+> única condición de autenticarse mediante un certificado electrónico**.»
 
-> El alta en preproducción es un trámite de la AEAT y puede cambiar de sitio en su web. Si no
-> aparece, el punto de entrada estable es la **sede electrónica → Todas las gestiones → Impuestos y
-> tasas → Veri\*factu**, y desde ahí el enlace a preproducción.
+Y sobre qué pasa con lo que se envía:
+
+> «Las declaraciones presentadas a través de este Portal se guardan en una Base de Datos del entorno
+> de pruebas de la AEAT, **sin que en ningún caso tengan trascendencia tributaria**.»
+
+O sea que **no es ficticio: es sin efectos.** Lo que se manda se guarda de verdad, con el certificado
+y el NIF reales, en la base de pruebas. Lo que no tiene es consecuencia fiscal: no es una factura,
+no entra en ningún libro y no hay nada que anular después.
+
+⚠️ **La mitad que sí es completamente real es la nuestra.** Los registros que emita el TPV apuntando a
+preproducción ocupan su `Orden`, gastan número de la serie y entran en la cadena de huellas **locales**,
+tenga o no efectos al otro lado. Es lo que obliga a partir de cero antes de pasar a producción (ver
+más abajo).
+
+⚠️ **Y es para pruebas puntuales, no para vivir ahí.** La misma portada avisa:
+
+> «este entorno solo se debe utilizar para realizar este tipo de **pruebas puntuales** y en ningún
+> caso para realizar pruebas masivas […] Si se detectan usos que se consideren abusivos se podrán
+> adoptar medidas para bloquear el acceso.»
+
+Un TPV con el entorno en `pruebas` remite **cada 60 segundos**. Se hace la prueba, se comprueba lo que
+haya que comprobar y **se devuelve el entorno a producción**; dejarlo apuntando ahí de fondo durante
+semanas es exactamente lo que ese aviso pide no hacer.
+
+### 4.1-bis · Dónde está cada cosa en preproducción
+
+Desde <https://preportal.aeat.es/> → **VERI\*FACTU · Sistemas Informáticos de Facturación** hay tres
+herramientas, todas «con certificado»:
+
+| Herramienta | Para qué |
+|---|---|
+| **Cliente de servicio web** | Subir un XML a mano y mandarlo al endpoint. Es `ClienteWSAEAT_OPC.html` |
+| **Aplicación de facturación de la AEAT** | La app gratuita de la AEAT, para comparar comportamientos |
+| **Consulta de registros de facturación** | Ver lo que ha llegado. Es la otra cara del paso 4.5 |
+
+En el desplegable del cliente de servicio web salen tres endpoints y **sólo el primero es el nuestro**:
+
+- `/wlpl/TIKE-CONT/ws/SistemaFacturacion/VerifactuSOAP` — **el nuestro**, coincide con el WSDL oficial.
+- `/wlpl/TIKE-CONT/ws/SistemaFacturacion/RequerimientoSOAP` — remisión cuando la AEAT la requiere; es
+  para SIF **no** VERI\*FACTU.
+- `/wlpl/TIKE-CONT/ws/SistemaFacturacion/ValRegistroNoVF` — validación de registros **no verificables**;
+  tampoco es nuestra modalidad.
+
+> **Las 13 muestras de `pnpm verifactu:validar-xml` NO se pueden enviar por ahí tal cual**, y conviene
+> saberlo antes de intentarlo: el obligado es `89890001K` (un NIF ficticio del que tu certificado no es
+> titular) y las fechas son de 2027 (el `FechaHoraHusoGenRegistro` tiene que ser la fecha actual de la
+> AEAT — error 2004 — y la de operación no puede ser futura — error 1173). Sirven para validar contra
+> el XSD, que es para lo que se hicieron.
 
 ### 4.2 Configurar el TPV para pruebas
 
@@ -244,6 +288,9 @@ exactamente para lo que existe ese fichero.
   queda. Las pruebas van a preproducción.
 - **No cambiar el NIF del obligado con registros ya emitidos.** Sería empezar otra cadena de
   facturación. La pantalla lo advierte cuando ya hay registros.
+- **No dejar el TPV apuntando a preproducción de fondo.** La AEAT pide «pruebas puntuales» y avisa de
+  que puede bloquear el acceso ante usos abusivos; el job remite cada 60 segundos, así que un equipo
+  olvidado en `pruebas` durante semanas es justo lo que describe ese aviso. Se prueba y se vuelve.
 - **No restaurar una copia local antigua después de haber remitido.** Se perdería un tramo de cadena
   que la AEAT ya tiene. Para volver de una avería, la vía es recuperar de la nube (§9 de CLAUDE.md).
 
@@ -290,4 +337,6 @@ que tener resuelto antes del primer envío real:
       sistema. Va en cada registro.
 - [ ] El **certificado del bar** instalado en la sesión de Windows desde la que se usa el TPV, con uso
       silencioso, y con el obligado = titular del certificado (o el apoderamiento hecho).
+- [ ] Los registros de las pruebas, **borrados** (ver «Volver a producción»): los emitidos contra
+      preproducción ocupan sitio en la cadena local aunque Hacienda no los tenga.
 - [ ] El entorno puesto en **produccion** y verificado en el panel.
