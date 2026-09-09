@@ -952,6 +952,15 @@ no dejar de hacerlo.
   cola crece. El botón «Probar» abre una conexión real **sin enviar ninguna factura** justo para que
   eso salga con alguien delante. El flag de silencio además **no es infalible**: Microsoft documenta
   que con lectores con *pinpad* y drivers propios se ignora.
+- **El estado del certificado lo pone el SHELL, no la capa de datos.** El almacén de Windows no está
+  en la base de datos, así que `estado_fiscal` no puede saberlo: lo completa `verifactu_estado` con
+  `completar_con_el_certificado`. De ahí salen `certificado_ok`, los días que le quedan y cuatro
+  causas de `motivo_no_remite` (`sin_certificado`, `certificado_no_encontrado`,
+  `certificado_caducado`, `certificado_pide_pin`), que **no pisan** las que ya trae la capa de datos.
+  El aviso de caducidad va **a 30 días y a 7**, y es distinto del aviso por atraso a propósito: aquel
+  mide horas de cola y por tanto llega cuando ya se ha dejado de remitir; éste llega mientras renovar
+  todavía es un trámite. Con el certificado ausente o caducado el job **ni lo intenta**; con el que
+  pide PIN sí, porque puede haber alguien delante.
 - **El entorno es una decisión explícita** (`Business_Settings.Verifactu_Entorno`). Los endpoints de
   producción y pruebas se distinguen en tres caracteres, y un ticket de pruebas que parece real es
   peor que uno que no sale: en pruebas el panel lo dice en amarillo y el QR apunta al portal de

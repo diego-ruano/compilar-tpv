@@ -38,9 +38,62 @@ pub async fn verifactu_bloque_ticket(
 /// Sin exigir rol tampoco: el escalón de aviso lo pinta la barra de estado, que ve todo el mundo, y
 /// el objetivo de la escalera es justamente que **no se pueda ignorar**.
 #[tauri::command]
-pub async fn verifactu_estado(state: State<'_, AppState>) -> Result<EstadoFiscal, AppErrorDto> {
+pub async fn verifactu_estado(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<EstadoFiscal, AppErrorDto> {
     let repo = state.verifactu_repo().await?;
-    Ok(uc::estado(repo.as_ref()).await?)
+    let mut estado = uc::estado(repo.as_ref()).await?;
+    // Lo del certificado lo añade el shell: el almacén de Windows no está en la base de datos, así
+    // que `estado_fiscal` no puede saberlo. Es best-effort — si el almacén no se deja leer, el panel
+    // enseña todo lo demás en vez de fallar entero.
+    if let Ok(dir) = app_data_dir(&app) {
+        uc::completar_con_el_certificado(&mut estado, &estado_del_certificado(&dir).await);
+    }
+    Ok(estado)
+}
+
+/// Mira el almacén de Windows y resume el estado del certificado **elegido**.
+///
+/// Ante la duda devuelve el estado más pesimista que sea cierto: si el almacén no se puede leer, se
+/// informa «no encontrado» en vez de «todo bien». Un panel que dice que se puede remitir cuando no
+/// se puede es peor que uno que se equivoca al revés — el segundo provoca una llamada, el primero
+/// deja la cola creciendo en silencio.
+pub(crate) async fn estado_del_certificado(dir: &std::path::Path) -> uc::EstadoCertificado {
+    let Some(huella) = crate::certificado_verifactu(dir) else {
+        return uc::EstadoCertificado {
+            elegido: false,
+            ..Default::default()
+        };
+    };
+
+    let Ok(certs) = AeatAdapter::new().certificados().await else {
+        return uc::EstadoCertificado {
+            elegido: true,
+            encontrado: false,
+            ..Default::default()
+        };
+    };
+
+    match certs.into_iter().find(|c| c.huella == huella) {
+        Some(c) => uc::EstadoCertificado {
+            elegido: true,
+            encontrado: true,
+            dias_para_caducar: dias_hasta(&c.valido_hasta),
+            uso_silencioso: c.uso_silencioso,
+        },
+        None => uc::EstadoCertificado {
+            elegido: true,
+            encontrado: false,
+            ..Default::default()
+        },
+    }
+}
+
+/// Días desde hoy hasta una fecha `AAAA-MM-DD`. Negativo si ya pasó, `None` si no se puede leer.
+fn dias_hasta(fecha: &str) -> Option<i64> {
+    let d = chrono::NaiveDate::parse_from_str(fecha.trim(), "%Y-%m-%d").ok()?;
+    Some((d - chrono::Local::now().date_naive()).num_days())
 }
 
 /// Los registros del panel, del más reciente al más antiguo.

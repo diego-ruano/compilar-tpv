@@ -14,7 +14,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 4 | [`FechaOperacion`](#4-fechaoperacion) | ✅ | — |
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
-| 7 | [`certificado_ok` no lo rellena nadie](#7-certificado_ok-no-lo-rellena-nadie) | ⬜ | Nada hoy; el panel no puede decir «no hay certificado» |
+| 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
 
 ---
 
@@ -169,15 +169,28 @@ tocan ni el certificado ni internet. Los dos últimos necesitan:
 
 ---
 
-## 7. `certificado_ok` no lo rellena nadie
+## 7. El estado del certificado ✅
 
-`EstadoFiscal` declara `certificado_ok` y `dias_para_caducar_certificado`, y el comentario dice que
-«los rellena la capa que conoce el almacén de certificados». **Esa capa no existe**: se dejan en
-`false` / `None` y nadie los sobrescribe después, así que son dos campos muertos.
+**Resuelto (2026-09-09).**
 
-Hoy no rompe nada —la pantalla no los lee, y el panel de certificados enseña la lista y el botón de
-probar— pero significa que `motivo_no_remite` no puede decir nunca «no hay certificado elegido» ni
-«el certificado caduca en 12 días», que es justo el aviso que llega tarde si no se da con tiempo.
+`EstadoFiscal` declaraba `certificado_ok` y `dias_para_caducar_certificado` con un comentario que
+decía que los rellenaría «la capa que conoce el almacén de certificados». Esa capa no existía, así
+que eran dos campos muertos. El síntoma no era un fallo sino un **silencio**: el panel no podía decir
+«no hay certificado» ni «caduca en 12 días».
 
-Lo natural es rellenarlos en `verifactu_estado` (el comando ya está en el shell, que es quien sabe
-leer el almacén de Windows) en vez de en `estado_fiscal` de infra-sqlite, que no puede saberlo.
+Los rellena ahora `verifactu_estado`, que vive en el shell y es quien sabe leer el almacén de
+Windows. `motivo_no_remite` gana cuatro causas —`sin_certificado`, `certificado_no_encontrado`,
+`certificado_caducado`, `certificado_pide_pin`— **sin pisar** las que pone la capa de datos: «faltan
+tus datos fiscales» impide hasta cobrar, así que ir antes con el certificado sería mandar al usuario
+al tercer problema de la lista.
+
+Lo que de verdad añade esto es un **aviso que llega a tiempo**. El del atraso mide horas de cola, o
+sea que llega tarde por definición: cuando salta, ya se ha dejado de remitir. El del certificado
+avisa **a 30 días** (aviso) y **a 7** (error), que es cuando renovar todavía es un trámite de
+gestoría y no una urgencia. Y hay un caso que nadie ve venir y que ahora se dice solo: el certificado
+que **estaba y ya no**, porque se renovó —la huella cambia— o porque se entró con otro usuario de
+Windows.
+
+Con el certificado ausente o caducado el job **ni lo intenta**: el handshake fallaría seguro y sería
+una conexión TLS por minuto para nada. Con el que pide PIN sí lo intenta, porque ahí puede haber
+alguien delante y negarlo garantizaría el fallo donde había una posibilidad.

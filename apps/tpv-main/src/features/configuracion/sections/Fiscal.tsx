@@ -378,6 +378,32 @@ export function Fiscal({
                             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
                                 {estado.motivo_no_remite === "sin_datos_fiscales" ? (
                                     <>No se puede remitir: faltan los datos fiscales del negocio.</>
+                                ) : estado.motivo_no_remite === "sin_certificado" ? (
+                                    <>
+                                        No se puede remitir: <strong>no hay certificado elegido</strong>.
+                                        Elige uno abajo; sin él no se puede identificar el equipo ante
+                                        la AEAT.
+                                    </>
+                                ) : estado.motivo_no_remite === "certificado_no_encontrado" ? (
+                                    <>
+                                        El certificado que tenías elegido{" "}
+                                        <strong>ya no está en el almacén de Windows</strong>. Pasa al
+                                        renovarlo —el nuevo tiene otra huella y hay que volver a
+                                        elegirlo— y al entrar con otro usuario de Windows, porque el
+                                        almacén es de cada uno.
+                                    </>
+                                ) : estado.motivo_no_remite === "certificado_caducado" ? (
+                                    <>
+                                        <strong>El certificado ha caducado.</strong> Las facturas se
+                                        siguen guardando y saldrán solas en cuanto instales el
+                                        renovado y lo elijas aquí.
+                                    </>
+                                ) : estado.motivo_no_remite === "certificado_pide_pin" ? (
+                                    <>
+                                        El certificado <strong>pide una contraseña en cada envío</strong>,
+                                        así que no puede enviar solo. Si es un <code>.p12</code>,
+                                        vuelve a importarlo sin marcar «protección alta».
+                                    </>
                                 ) : estado.motivo_no_remite === "sin_datos_del_productor" ? (
                                     <>
                                         <strong>Esto es un problema del programa, no tuyo.</strong>{" "}
@@ -529,6 +555,41 @@ export function Fiscal({
                     </GhostButton>
                 }
             >
+                {estado && estado.dias_para_caducar_certificado != null ? (
+                    <div
+                        className={cn(
+                            "mb-3 rounded-xl border px-3 py-2 text-sm",
+                            estado.dias_para_caducar_certificado < 0
+                                ? "border-red-500/40 bg-red-500/10 font-semibold text-red-600 dark:text-red-400"
+                                : estado.dias_para_caducar_certificado <= 7
+                                  ? "border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400"
+                                  : estado.dias_para_caducar_certificado <= 30
+                                    ? "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                                    : "border-border bg-surface-2 text-fg-muted",
+                        )}
+                    >
+                        {estado.dias_para_caducar_certificado < 0 ? (
+                            <>
+                                El certificado elegido <strong>caducó</strong> hace{" "}
+                                {Math.abs(estado.dias_para_caducar_certificado)} día(s). Mientras no
+                                se cambie, no sale ninguna factura.
+                            </>
+                        ) : estado.dias_para_caducar_certificado <= 30 ? (
+                            <>
+                                El certificado elegido caduca en{" "}
+                                <strong>{estado.dias_para_caducar_certificado} día(s)</strong>.
+                                Renuévalo con tu gestoría antes de esa fecha: el día que caduque se
+                                dejan de enviar facturas.
+                            </>
+                        ) : (
+                            <>
+                                Certificado en uso, válido {estado.dias_para_caducar_certificado}{" "}
+                                día(s) más.
+                            </>
+                        )}
+                    </div>
+                ) : null}
+
                 <div className="text-sm text-fg-muted">
                     Instálalo en Windows como lo instalarías para Autofirma (doble clic en el
                     fichero <code>.p12</code> o <code>.pfx</code>). El TPV{" "}

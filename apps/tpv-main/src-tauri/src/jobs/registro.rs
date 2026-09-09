@@ -407,6 +407,33 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // El aviso del CERTIFICADO, antes de intentar nada. Va aparte del aviso por atraso y por una
+    // razón de fondo: aquel mide horas de cola, así que llega tarde por definición —cuando salta, ya
+    // se ha dejado de remitir—. Éste llega antes de que pase nada, que es el único momento en que
+    // renovar un certificado es un trámite y no una urgencia.
+    let cert = crate::commands::verifactu::estado_del_certificado(&dir).await;
+    if let Ok(notifier) = state.notifier().await {
+        if let Err(e) = uc_verifactu::avisar_del_certificado(notifier.as_ref(), &cert).await {
+            tracing::warn!(target: "tpv::verifactu", error = %e, "no se pudo evaluar el aviso del certificado");
+        }
+    }
+
+    // Si el certificado elegido ya no está o caducó, no se intenta: el handshake fallaría seguro y
+    // sería una conexión TLS por minuto contra la AEAT para nada. Los registros se quedan
+    // `PENDIENTE`, que es de donde salen solos en cuanto alguien elija uno válido.
+    //
+    // Se paran SÓLO esos dos casos, no el del certificado que pide un PIN: ahí el envío puede
+    // funcionar si hay alguien delante, y negarlo garantizaría el fallo donde había una posibilidad.
+    if cert.elegido && (!cert.encontrado || cert.dias_para_caducar.is_some_and(|d| d < 0)) {
+        tracing::warn!(
+            target: "tpv::verifactu",
+            encontrado = cert.encontrado,
+            dias = ?cert.dias_para_caducar,
+            "no se remite: el certificado elegido ya no sirve"
+        );
+        return Ok(());
+    }
+
     let ahora_ms = chrono::Local::now().timestamp_millis();
     let cliente = tpv_infra_aeat::AeatAdapter::new();
 

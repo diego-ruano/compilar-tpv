@@ -33,6 +33,170 @@ pub async fn estado(repo: &dyn VerifactuRepository) -> AppResult<EstadoFiscal> {
     repo.estado().await
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// El certificado: lo que la capa de datos no puede saber
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Lo que el shell averigua del certificado elegido mirando el almacén de Windows.
+///
+/// `estado_fiscal` (infra-sqlite) no puede rellenarlo: el almacén no está en la base de datos. Antes
+/// esto se resolvía dejando los campos en «no se puede remitir» con un comentario que decía que los
+/// rellenaría «la capa que conoce el almacén de certificados» — y esa capa no existía, así que eran
+/// dos campos muertos y el panel nunca podía decir «no hay certificado» ni «caduca en 12 días».
+#[derive(Debug, Clone, Default)]
+pub struct EstadoCertificado {
+    /// ¿Hay una huella guardada en `device_config.json`?
+    pub elegido: bool,
+    /// ¿Y esa huella sigue estando en el almacén? Un certificado renovado cambia de huella, así que
+    /// **esto se pone a `false` solo** el día que alguien reinstala el suyo.
+    pub encontrado: bool,
+    /// Días que faltan para que caduque. Negativo si ya caducó. `None` si no se ha encontrado.
+    pub dias_para_caducar: Option<i64>,
+    /// ¿Se puede usar sin que Windows pida un PIN o una contraseña?
+    pub uso_silencioso: bool,
+}
+
+/// A partir de cuántos días de margen se empieza a avisar de que el certificado caduca.
+///
+/// Un mes es lo que tarda una gestoría en renovar sin prisa. Menos deja al bar con el problema
+/// encima; más convierte el aviso en parte del paisaje once meses al año.
+pub const DIAS_AVISO_CADUCIDAD: i64 = 30;
+
+/// Cuando quedan menos de esto, el aviso sube a error: ya no es «acuérdate», es «hazlo».
+pub const DIAS_CADUCIDAD_URGENTE: i64 = 7;
+
+/// Clave de dedupe del aviso del certificado. Una sola, como la del atraso y por lo mismo: lo que
+/// cambia entre «caduca en tres semanas» y «caducó» es el texto, no el hecho.
+pub const CLAVE_CERTIFICADO: &str = "verifactu_certificado";
+
+/// Completa el estado fiscal con lo que sólo el shell sabe.
+///
+/// **No pisa un `motivo_no_remite` que ya venga puesto.** Los que pone la capa de datos —faltan los
+/// datos fiscales del negocio, falta la identidad del productor— van antes a propósito: el primero
+/// impide cobrar, así que el usuario lo tiene delante de todos modos, y el segundo es un fallo
+/// nuestro. Decirle «no hay certificado» a quien todavía no puede ni abrir la persiana es mandarlo a
+/// resolver el tercer problema de la lista.
+pub fn completar_con_el_certificado(estado: &mut EstadoFiscal, cert: &EstadoCertificado) {
+    estado.dias_para_caducar_certificado = cert.dias_para_caducar;
+
+    let caducado = cert.dias_para_caducar.is_some_and(|d| d < 0);
+    estado.certificado_ok =
+        cert.elegido && cert.encontrado && !caducado && cert.uso_silencioso;
+
+    if estado.motivo_no_remite.is_some() {
+        return;
+    }
+
+    estado.motivo_no_remite = if !cert.elegido {
+        Some("sin_certificado".to_string())
+    } else if !cert.encontrado {
+        // El caso que más despista: el certificado ESTABA y ya no. Pasa al renovarlo (la huella
+        // cambia) y al usar el TPV desde otra sesión de Windows, porque el almacén es por usuario.
+        Some("certificado_no_encontrado".to_string())
+    } else if caducado {
+        Some("certificado_caducado".to_string())
+    } else if !cert.uso_silencioso {
+        // No impide *intentarlo*, pero el intento no va a terminar nunca sin alguien delante. Contar
+        // esto como «se puede remitir» es lo que deja la cola creciendo sin que nada lo explique.
+        Some("certificado_pide_pin".to_string())
+    } else {
+        None
+    };
+}
+
+/// Emite (o cierra) el aviso del **certificado**: que falta, que ya no está, que caducó o que le
+/// queda poco.
+///
+/// Es un aviso distinto del atraso y va aparte a propósito. El del atraso llega **tarde por
+/// definición**: mide horas de cola, así que para cuando salta ya se ha dejado de remitir. Este
+/// llega **antes de que pase nada**, que es el único momento en que renovar un certificado es un
+/// trámite y no una urgencia.
+pub async fn avisar_del_certificado(
+    notifier: &dyn crate::ports::notificaciones::Notifier,
+    cert: &EstadoCertificado,
+) -> AppResult<bool> {
+    use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
+    let dias = cert.dias_para_caducar;
+    let caducado = dias.is_some_and(|d| d < 0);
+
+    let (severidad, titulo, cuerpo) = if !cert.elegido {
+        // Sin certificado elegido no se avisa desde aquí: es parte de la puesta en marcha y el panel
+        // ya lo dice. Un TPV recién instalado no necesita una notificación de algo que todavía no ha
+        // configurado nadie.
+        let _ = notifier.resolver_por_clave(CLAVE_CERTIFICADO).await;
+        return Ok(false);
+    } else if !cert.encontrado {
+        (
+            Severidad::Error,
+            "El certificado para enviar a Hacienda ya no está".to_string(),
+            "El certificado que tenías elegido no aparece en el almacén de Windows. Pasa al \
+             renovarlo —el nuevo tiene otra huella y hay que volver a elegirlo— y al entrar con otro \
+             usuario de Windows, porque el almacén es de cada uno. Mientras tanto no se envía \
+             ninguna factura. Configuración → Fiscal."
+                .to_string(),
+        )
+    } else if caducado {
+        (
+            Severidad::Error,
+            "El certificado para enviar a Hacienda ha caducado".to_string(),
+            "No se está enviando ninguna factura. Las que se emitan se guardan y saldrán solas en \
+             cuanto instales el certificado renovado y lo elijas en Configuración → Fiscal."
+                .to_string(),
+        )
+    } else if !cert.uso_silencioso {
+        (
+            Severidad::Aviso,
+            "El certificado pide una contraseña en cada envío".to_string(),
+            "Así no se puede enviar solo: el envío se queda esperando a que alguien la escriba. Si \
+             es un fichero .p12, vuelve a importarlo SIN marcar «protección alta»; si es un PIN de \
+             tarjeta o del DNIe, hace falta otro certificado."
+                .to_string(),
+        )
+    } else if dias.is_some_and(|d| d <= DIAS_CADUCIDAD_URGENTE) {
+        (
+            Severidad::Error,
+            format!(
+                "El certificado de Hacienda caduca en {} día(s)",
+                dias.unwrap_or(0)
+            ),
+            "Cuando caduque se dejarán de enviar facturas. Renuévalo con tu gestoría e instálalo en \
+             este equipo antes de esa fecha."
+                .to_string(),
+        )
+    } else if dias.is_some_and(|d| d <= DIAS_AVISO_CADUCIDAD) {
+        (
+            Severidad::Aviso,
+            format!(
+                "El certificado de Hacienda caduca en {} día(s)",
+                dias.unwrap_or(0)
+            ),
+            "Todavía hay tiempo, y por eso se avisa ahora: renovarlo con margen es un trámite, y el \
+             día que caduca es una urgencia que para los envíos."
+                .to_string(),
+        )
+    } else {
+        let _ = notifier.resolver_por_clave(CLAVE_CERTIFICADO).await;
+        return Ok(false);
+    };
+
+    let _ = notifier
+        .emitir(NuevaNotificacion {
+            tipo: "verifactu_certificado".to_string(),
+            severidad,
+            titulo,
+            cuerpo: Some(cuerpo),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_fiscal".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_CERTIFICADO.to_string()),
+            expira_en: None,
+        })
+        .await;
+
+    Ok(true)
+}
+
 /// Clave de dedupe del aviso por atraso. Una sola, a propósito: lo que cambia con los escalones es
 /// la severidad y el texto, no el hecho. Con una clave por escalón, subir de peldaño dejaría el
 /// anterior abierto y el centro de notificaciones acumularía tres avisos de lo mismo.
@@ -1245,5 +1409,214 @@ mod tests_aviso_de_atraso {
         let (emitio, n) = avisar("peldano_del_futuro", true).await;
         assert!(!emitio);
         assert!(n.emitidas.lock().unwrap().is_empty());
+    }
+}
+#[cfg(test)]
+mod tests_certificado {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! El estado del certificado y su aviso.
+    //!
+    //! Estos dos campos (`certificado_ok`, `dias_para_caducar_certificado`) estuvieron declarados y
+    //! sin rellenar: el comentario decía que lo haría «la capa que conoce el almacén de
+    //! certificados» y esa capa no existía. El síntoma no era un fallo, era un silencio — el panel
+    //! no podía decir «no hay certificado» ni «caduca en 12 días».
+
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+    use tpv_domain::notificaciones::{NuevaNotificacion, Severidad};
+
+    use super::*;
+    use crate::ports::notificaciones::Notifier;
+
+    fn estado_base() -> EstadoFiscal {
+        EstadoFiscal {
+            datos_fiscales_completos: true,
+            nif: Some("89890001K".into()),
+            razon_social: Some("Bar".into()),
+            entorno_pruebas: false,
+            total_registros: 1,
+            pendientes: 1,
+            aceptados: 0,
+            aceptados_con_errores: 0,
+            rechazados: 0,
+            antiguedad_pendiente_min: Some(10),
+            escalon_aviso: "ninguno".to_string(),
+            certificado_ok: false,
+            motivo_no_remite: None,
+            dias_para_caducar_certificado: None,
+        }
+    }
+
+    fn cert_sano() -> EstadoCertificado {
+        EstadoCertificado {
+            elegido: true,
+            encontrado: true,
+            dias_para_caducar: Some(200),
+            uso_silencioso: true,
+        }
+    }
+
+    #[derive(Default)]
+    struct NotifierFalso {
+        emitidas: Mutex<Vec<NuevaNotificacion>>,
+        resueltas: Mutex<Vec<String>>,
+    }
+
+    #[async_trait]
+    impl Notifier for NotifierFalso {
+        async fn emitir(&self, nueva: NuevaNotificacion) -> AppResult<String> {
+            self.emitidas.lock().unwrap().push(nueva);
+            Ok("id".to_string())
+        }
+        async fn resolver_por_clave(&self, clave: &str) -> AppResult<bool> {
+            self.resueltas.lock().unwrap().push(clave.to_string());
+            Ok(true)
+        }
+    }
+
+    // ── El estado que ve el panel ────────────────────────────────────────────
+
+    #[test]
+    fn con_un_certificado_sano_el_panel_dice_que_se_puede_remitir() {
+        let mut e = estado_base();
+        completar_con_el_certificado(&mut e, &cert_sano());
+        assert!(e.certificado_ok);
+        assert_eq!(e.motivo_no_remite, None);
+        assert_eq!(e.dias_para_caducar_certificado, Some(200));
+    }
+
+    #[test]
+    fn cada_problema_del_certificado_tiene_su_motivo() {
+        let casos: [(EstadoCertificado, &str); 4] = [
+            (EstadoCertificado::default(), "sin_certificado"),
+            (
+                EstadoCertificado { elegido: true, ..Default::default() },
+                "certificado_no_encontrado",
+            ),
+            (
+                EstadoCertificado { dias_para_caducar: Some(-1), ..cert_sano() },
+                "certificado_caducado",
+            ),
+            (
+                EstadoCertificado { uso_silencioso: false, ..cert_sano() },
+                "certificado_pide_pin",
+            ),
+        ];
+        for (cert, esperado) in casos {
+            let mut e = estado_base();
+            completar_con_el_certificado(&mut e, &cert);
+            assert_eq!(e.motivo_no_remite.as_deref(), Some(esperado));
+            assert!(!e.certificado_ok, "{esperado}");
+        }
+    }
+
+    #[test]
+    fn NO_pisa_un_motivo_que_ya_venia_puesto() {
+        // Los de la capa de datos van antes: «faltan tus datos fiscales» impide hasta cobrar, así
+        // que el usuario lo tiene delante de todos modos. Decirle «no hay certificado» a quien
+        // todavía no puede abrir la persiana es mandarlo al tercer problema de la lista.
+        let mut e = estado_base();
+        e.motivo_no_remite = Some("sin_datos_fiscales".to_string());
+        completar_con_el_certificado(&mut e, &EstadoCertificado::default());
+        assert_eq!(e.motivo_no_remite.as_deref(), Some("sin_datos_fiscales"));
+        // Pero los DATOS del certificado sí se rellenan igual: el panel los enseña aparte.
+        assert!(!e.certificado_ok);
+    }
+
+    #[test]
+    fn caducar_hoy_todavia_no_es_haber_caducado() {
+        // El borde exacto. `0` es «caduca hoy»: sigue valiendo. `-1` es ayer.
+        let mut e = estado_base();
+        completar_con_el_certificado(
+            &mut e,
+            &EstadoCertificado { dias_para_caducar: Some(0), ..cert_sano() },
+        );
+        assert!(e.certificado_ok);
+        assert_eq!(e.motivo_no_remite, None);
+    }
+
+    // ── El aviso ─────────────────────────────────────────────────────────────
+
+    async fn avisar(cert: EstadoCertificado) -> (bool, NotifierFalso) {
+        let n = NotifierFalso::default();
+        let r = avisar_del_certificado(&n, &cert).await.unwrap();
+        (r, n)
+    }
+
+    #[tokio::test]
+    async fn un_certificado_sano_y_con_margen_no_avisa() {
+        let (aviso, n) = avisar(cert_sano()).await;
+        assert!(!aviso);
+        assert!(n.emitidas.lock().unwrap().is_empty());
+        assert_eq!(n.resueltas.lock().unwrap().as_slice(), [CLAVE_CERTIFICADO.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn sin_certificado_elegido_NO_se_avisa() {
+        // Es parte de la puesta en marcha, no una avería. Un TPV recién instalado no necesita una
+        // notificación de algo que todavía no ha configurado nadie — y el panel ya lo dice.
+        let (aviso, n) = avisar(EstadoCertificado::default()).await;
+        assert!(!aviso);
+        assert!(n.emitidas.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_treinta_dias_avisa_y_a_siete_sube_a_error() {
+        // El escalón importa: el primero es «acuérdate» y el segundo «hazlo». Renovar con margen es
+        // un trámite de gestoría; el día que caduca es una urgencia que para los envíos.
+        let (_, n) = avisar(EstadoCertificado { dias_para_caducar: Some(DIAS_AVISO_CADUCIDAD), ..cert_sano() }).await;
+        assert_eq!(n.emitidas.lock().unwrap()[0].severidad, Severidad::Aviso);
+
+        let (_, n) = avisar(EstadoCertificado { dias_para_caducar: Some(DIAS_CADUCIDAD_URGENTE), ..cert_sano() }).await;
+        assert_eq!(n.emitidas.lock().unwrap()[0].severidad, Severidad::Error);
+    }
+
+    #[tokio::test]
+    async fn un_dia_mas_del_umbral_todavia_no_avisa() {
+        // Sin este borde, el aviso saltaría once meses al año y se convertiría en parte del paisaje.
+        let (aviso, _) = avisar(EstadoCertificado {
+            dias_para_caducar: Some(DIAS_AVISO_CADUCIDAD + 1),
+            ..cert_sano()
+        })
+        .await;
+        assert!(!aviso);
+    }
+
+    #[tokio::test]
+    async fn el_que_ya_no_esta_en_el_almacen_avisa_como_error() {
+        // El caso que más despista: el certificado ESTABA y ya no. Pasa al renovarlo (la huella
+        // cambia) y al usar el TPV desde otra sesión de Windows.
+        let (aviso, n) = avisar(EstadoCertificado { elegido: true, ..Default::default() }).await;
+        assert!(aviso);
+        let e = n.emitidas.lock().unwrap();
+        assert_eq!(e[0].severidad, Severidad::Error);
+        assert!(e[0].cuerpo.as_deref().unwrap_or("").contains("otro usuario de Windows"));
+    }
+
+    #[tokio::test]
+    async fn la_clave_de_dedupe_es_UNA_para_todos_los_casos() {
+        // Igual que la del atraso y por lo mismo: pasar de «caduca en tres semanas» a «caducó»
+        // dejaría el aviso anterior abierto y el centro acumularía dos avisos del mismo hecho.
+        let mut claves = std::collections::HashSet::new();
+        for cert in [
+            EstadoCertificado { elegido: true, ..Default::default() },
+            EstadoCertificado { dias_para_caducar: Some(-1), ..cert_sano() },
+            EstadoCertificado { dias_para_caducar: Some(3), ..cert_sano() },
+            EstadoCertificado { uso_silencioso: false, ..cert_sano() },
+        ] {
+            let (_, n) = avisar(cert).await;
+            claves.insert(n.emitidas.lock().unwrap()[0].clave_dedupe.clone());
+        }
+        assert_eq!(claves.len(), 1);
+        assert_eq!(claves.into_iter().next().unwrap().as_deref(), Some(CLAVE_CERTIFICADO));
+    }
+
+    #[tokio::test]
+    async fn el_aviso_del_certificado_es_DISTINTO_del_aviso_por_atraso() {
+        // Y tiene que serlo: el del atraso mide horas de cola, así que llega cuando ya se ha dejado
+        // de remitir. Éste llega antes de que pase nada. Si compartieran clave, uno cerraría al otro.
+        assert_ne!(CLAVE_CERTIFICADO, CLAVE_ATRASO);
     }
 }
