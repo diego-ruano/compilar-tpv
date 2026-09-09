@@ -20,7 +20,9 @@
     "license:keypair": "node scripts/generate-license-keypair.mjs",
     "verifactu:validar-xml": "python scripts/verifactu-validar-xml.py",
     "verifactu:certificados": "cargo run -q -p tpv-infra-aeat --example certificados",
-    "verifactu:probar-aeat": "cargo run -q -p tpv-infra-aeat --example probar_aeat"
+    "verifactu:probar-aeat": "cargo run -q -p tpv-infra-aeat --example probar_aeat",
+    "verifactu:ciclo": "cargo run -q -p tpv-infra-aeat --example ciclo_completo",
+    "verifactu:experimento": "cargo run -q -p tpv-infra-aeat --example experimento_cadena"
   },
   "devDependencies": {
     "turbo": "^2"

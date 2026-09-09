@@ -23,3 +23,10 @@ tpv-domain = { workspace = true }
 # una tarjeta.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true }
+
+# Sólo para el arnés `ciclo_completo`, que necesita emitir registros de verdad para poder
+# remitirlos. No entra en el binario: `tpv-infra-sqlite` no depende de esta crate, así que no hay
+# ciclo — es esta la que, para probarse, necesita a la otra.
+[dev-dependencies]
+tpv-infra-sqlite = { workspace = true }
+libsql = { workspace = true }

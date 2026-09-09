@@ -12,8 +12,8 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 2 | [Texto de la declaración responsable](#2-texto-de-la-declaración-responsable) | ⬜ | Producción |
 | 3 | [Serie de las rectificativas](#3-serie-de-las-rectificativas) | ✅ | — |
 | 4 | [`FechaOperacion`](#4-fechaoperacion) | ✅ | — |
-| 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
-| 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | 🟡 **pasos 1-3 hechos** | Falta el envío real (paso 4) |
+| 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ✅ | — |
+| 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ✅ | — |
 | 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
 | 8 | [La comprobación previa del art. 7.i)](#8-la-comprobación-previa-del-art-7i) | ✅ | — |
 | 9 | [Modo «facturar en pruebas / formación»](#9-modo-facturar-en-pruebas--formación) | ✅ | — |
@@ -171,7 +171,42 @@ datos suministrados —incluida la huella anterior que se declare—, no que ese
 base. Con lo cual **partir de cero antes de producción es limpio**, y equivocarse al revés (declarar
 primer registro teniendo ya facturas) es un `2007` admisible, no un muro.
 
-Queda como «muy probable» hasta el primer envío real, que es lo único que lo convierte en certeza.
+### Confirmado con dos experimentos reales (2026-09-09) ✅
+
+Ya no es una deducción. Se montaron dos escenarios contra preproducción
+(`pnpm verifactu:experimento`), porque el catálogo permite deducirlo pero no confirmarlo:
+
+**A — un eslabón anterior que la AEAT no tiene.** Se emiten dos registros encadenados y se remite
+**sólo el segundo**, marcando el primero como enviado sin enviarlo. La AEAT recibe entonces un
+registro que declara como anterior una huella que nunca ha visto.
+
+> Resultado: **ACEPTADO, sin ningún error.**
+
+Confirma lo que decía el catálogo: la AEAT comprueba que la huella del registro **actual** cuadre con
+los datos suministrados —incluida la huella anterior que se declare—, **no** que ese eslabón exista en
+su base.
+
+**B — declararse «primer registro» teniendo ya facturas.** Base nueva, `PrimerRegistro='S'`, con un
+NIF para el que la AEAT ya tiene registros.
+
+> Resultado: **ACEPTADO_CON_ERRORES, código 2007** («No debe informarse como primer registro, existen
+> facturas emitidas con el obligado emisión y el sistema informático actual»).
+
+Admisible, como estaba previsto: cuenta como presentado y hay que subsanarlo, no es un rechazo.
+
+### La consecuencia práctica, que es lo que importa
+
+**Partir de cero antes de producción funciona**, y en el peor caso deja un 2007 admisible en el primer
+registro. Pero fíjate en la redacción del 2007: la clave es **(obligado + sistema informático)**, y
+los entornos de pruebas y producción son **bases separadas**. O sea:
+
+- Si sólo se ha probado en **preproducción**, el primer registro real en producción es genuinamente el
+  primero y **no habrá 2007**.
+- El 2007 sólo aparece si se ha emitido antes en **el mismo entorno** con el mismo NIF y el mismo
+  `IdSistemaInformatico`. Es decir, si se probó en producción y luego se reseteó la base.
+
+Eso da una pista para el punto 1: si algún día hay que probar en producción, usar un
+`IdSistemaInformatico` distinto para las pruebas hace que el sistema definitivo empiece limpio.
 
 ---
 
@@ -218,10 +253,36 @@ Tres consecuencias:
   Esto es lo que valida **la decisión arquitectónica de más riesgo del proyecto**: usar WinHTTP en
   lugar de `rustls-cng`. Ya no es un razonamiento sobre CSP legacy y NCrypt, es una conexión
   establecida contra el servidor real.
-- **Paso 4** (envío real): pendiente. Es el único que emite un registro.
+- **Paso 4** (envío real): ✅ **hecho.** Ciclo completo contra preproducción, sin un solo error:
 
-Sigue haciendo falta decidir **con qué NIF se prueba**: el certificado tiene que ser titular o apoderado del
-NIF que vaya como obligado, o el envío se queda en un problema de autorización en vez de probar el TPV.
+  ```
+  [3] Emitida PRU2026/000001 · Emitida PRU2026/000002
+  [4] Remitiendo…  enviados 2 · aceptados 2 · con avisos 0 · rechazados 0
+        · PRU2026/000001  ALTA       ACEPTADO  CSV=A-LBP8YAGTWKRNAP
+        · PRU2026/000002  ALTA       ACEPTADO  CSV=A-LBP8YAGTWKRNAP
+  [5] Modo formación CERRADO: 2 factura(s) de prueba anuladas.
+  [6] Esperando 60 s (control de flujo del art. 16.2)…
+      Remitiendo las anulaciones…  enviados 2 · aceptados 2 · rechazados 0
+        · PRU2026/000001  ANULACION  ACEPTADO  CSV=A-E6LL7DQG75S69G
+        · PRU2026/000002  ANULACION  ACEPTADO  CSV=A-E6LL7DQG75S69G
+
+  registros 4 · aceptados 4 · con avisos 0 · rechazados 0 · pendientes 0 · sin anular 0
+  ```
+
+  Cero errores significa que están bien **todas** estas cosas a la vez, y ninguna se podía comprobar
+  sin conectarse: la cadena de huellas (un cálculo distinto habría dado el error 2000), el XML, el
+  desglose, los importes formateados como texto, la cabecera, la autorización del titular, el camino
+  de anulación, el control de flujo y la interpretación de la respuesta.
+
+  Se hizo con el **modo formación** encendido, así que estrenó también el punto 9 en su caso exacto:
+  las facturas de prueba se anularon solas al cerrar y sus anulaciones se remitieron.
+
+  El arnés es `pnpm verifactu:ciclo` y usa una base **dedicada** (`target/verifactu-pruebas/`), no la
+  del TPV instalado: el equipo de desarrollo no se toca y «borrón y cuenta nueva» es borrar una
+  carpeta.
+
+**Lo que queda para producción no es técnico**: el punto 1 (identidad del productor) y el 2 (la
+declaración responsable). El sistema, contra la AEAT, funciona.
 
 ---
 
