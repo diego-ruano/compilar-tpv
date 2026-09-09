@@ -197,6 +197,63 @@ pub async fn avisar_del_certificado(
     Ok(true)
 }
 
+/// Clave de dedupe del aviso por anomalías de la cadena.
+pub const CLAVE_ANOMALIA: &str = "verifactu_anomalia";
+
+/// Emite (o cierra) el aviso por **anomalías de la cadena** detectadas por la comprobación previa
+/// del art. 7.i).
+///
+/// Es el tercer aviso fiscal y el más raro de los tres: los otros dos hablan de cosas que pasan en el
+/// curso normal —una cola que crece, un certificado que caduca—, y éste sólo salta si el reloj del
+/// equipo se ha movido hacia atrás o si alguien ha tocado la cadena por debajo. Precisamente por eso
+/// no puede quedarse en un registro de diagnóstico que nadie abre.
+///
+/// **No lleva escalón.** A diferencia del atraso, aquí no hay un «todavía es pronto»: una cadena rota
+/// no mejora esperando.
+pub async fn avisar_de_anomalias(
+    notifier: &dyn crate::ports::notificaciones::Notifier,
+    sin_reconocer: i64,
+    ultimo_mensaje: Option<&str>,
+) -> AppResult<bool> {
+    use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
+
+    if sin_reconocer <= 0 {
+        let _ = notifier.resolver_por_clave(CLAVE_ANOMALIA).await;
+        return Ok(false);
+    }
+
+    let detalle = ultimo_mensaje.unwrap_or("").trim();
+    let cuerpo = if detalle.is_empty() {
+        "Revisa Configuración → Fiscal.".to_string()
+    } else {
+        format!(
+            "Lo último detectado: {detalle}. Las facturas se siguen emitiendo y enviando con \
+             normalidad —esto no para la caja—, pero conviene mirarlo: revisa la hora del equipo y \
+             avisa a soporte. Configuración → Fiscal."
+        )
+    };
+
+    let _ = notifier
+        .emitir(NuevaNotificacion {
+            tipo: "verifactu_anomalia".to_string(),
+            severidad: Severidad::Error,
+            titulo: if sin_reconocer == 1 {
+                "Se ha detectado una anomalía en la cadena de facturación".to_string()
+            } else {
+                format!("Se han detectado {sin_reconocer} anomalías en la cadena de facturación")
+            },
+            cuerpo: Some(cuerpo),
+            destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+            accion: Some("ver_fiscal".to_string()),
+            payload: None,
+            clave_dedupe: Some(CLAVE_ANOMALIA.to_string()),
+            expira_en: None,
+        })
+        .await;
+
+    Ok(true)
+}
+
 /// Clave de dedupe del aviso por atraso. Una sola, a propósito: lo que cambia con los escalones es
 /// la severidad y el texto, no el hecho. Con una clave por escalón, subir de peldaño dejaría el
 /// anterior abierto y el centro de notificaciones acumularía tres avisos de lo mismo.
@@ -1223,6 +1280,8 @@ mod tests_aviso_de_atraso {
             certificado_ok: true,
             motivo_no_remite: None,
             dias_para_caducar_certificado: Some(300),
+            anomalias_sin_reconocer: 0,
+            ultima_anomalia: None,
         }
     }
 
@@ -1446,6 +1505,8 @@ mod tests_certificado {
             certificado_ok: false,
             motivo_no_remite: None,
             dias_para_caducar_certificado: None,
+            anomalias_sin_reconocer: 0,
+            ultima_anomalia: None,
         }
     }
 

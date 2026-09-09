@@ -15,7 +15,7 @@ Estado: ⬜ sin empezar · 🟡 en curso · ✅ resuelto
 | 5 | [Qué hace la AEAT con un eslabón anterior que no tiene](#5-qué-hace-la-aeat-con-un-eslabón-anterior-que-no-tiene) | ⬜ | Nada; sale de la prueba |
 | 6 | [La prueba contra la AEAT en preproducción](#6-la-prueba-contra-la-aeat-en-preproducción) | ⬜ | Pasar a producción con confianza |
 | 7 | [El estado del certificado](#7-el-estado-del-certificado) | ✅ | — |
-| 8 | [La comprobación previa del art. 7.i): no la hacemos](#8-la-comprobación-previa-del-art-7i-no-la-hacemos) | ⬜ | Nada visible; es una comprobación que falta |
+| 8 | [La comprobación previa del art. 7.i)](#8-la-comprobación-previa-del-art-7i) | ✅ | — |
 | 9 | [Falta un modo «facturar en pruebas / formación»](#9-falta-un-modo-facturar-en-pruebas--formación) | ⬜ | El día que el bar forme a un camarero |
 
 ---
@@ -240,9 +240,9 @@ alguien delante y negarlo garantizaría el fallo donde había una posibilidad.
 
 ---
 
-## 8. La comprobación previa del art. 7.i): no la hacemos
+## 8. La comprobación previa del art. 7.i) ✅
 
-**Encontrado el 2026-09-09** leyendo el
+**Resuelto el 2026-09-09.** Encontrado el mismo día leyendo el
 [FAQ de desarrolladores de la AEAT](https://sede.agenciatributaria.gob.es/static_files/AEAT_Desarrolladores/EEDD/IVA/VERI-FACTU/FAQs-Desarrolladores.pdf)
 (apartado 15), que cita el art. 7.i) de la Orden HAC/1177/2024:
 
@@ -282,6 +282,32 @@ seguir cumpliendo:
 > interrumpirse**.»
 
 O sea: detectarlo y avisar, nunca dejar de facturar.
+
+### Cómo quedó
+
+- La aritmética vive en `tpv_domain::verifactu::comprobar_registro_previo`, pura y con sus once tests
+  de borde. Devuelve **qué** ha encontrado, no si se puede facturar.
+- Se ejecuta en `estado_de_la_cadena`, que lee las **dos** últimas filas en la misma consulta que ya
+  leía el eslabón anterior: cero viajes de más en el camino del cobro. La FAQ ya avisaba de que el
+  coste no debe notarse.
+- Cubre los **dos** caminos, alta y anulación, porque el art. 7.i) dice «de alta o de anulación».
+- Al detectar algo se anota en `_Verifactu_Anomalias` (tabla local, por `raw()`, no se replica) y se
+  registra como `error` en el log. **Nunca impide emitir ni cobrar**, y la anotación es best-effort:
+  que falle el diagnóstico no puede tumbar la venta.
+- Sale en el panel **lo primero de la pantalla** y en una notificación al Administrador. Se pueden
+  marcar como vistas; las filas se conservan, porque lo que registran siguió pasando.
+
+### Lo que esto NO es
+
+No es el **registro de eventos** del RRSIF, y conviene no confundirlos. Ese sólo es obligatorio para
+los SIF que pueden actuar en modalidad NO VERI\*FACTU, y la NOTA 1 del apartado 15 del FAQ lo dice:
+
+> «El productor de un SIF que solo puede actuar exclusivamente en modo VERI\*FACTU ("SOLO
+> VERI\*FACTU"), **no está obligado a implementar en él un registro de eventos**, pero puede hacerlo
+> voluntariamente, si así lo desea.»
+
+Nuestro `TipoUsoPosibleSoloVerifactu = "S"` nos deja en ese lado. Lo que se ha hecho es la parte útil:
+que una anomalía no se quede en un log que nadie abre.
 
 ---
 

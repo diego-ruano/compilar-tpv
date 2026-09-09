@@ -139,4 +139,13 @@ pub struct EstadoFiscal {
     #[ts(optional)]
     #[ts(type = "number")]
     pub dias_para_caducar_certificado: Option<i64>,
+
+    /// Anomalías de la cadena detectadas por la comprobación previa del art. 7.i) y todavía sin
+    /// reconocer. Normalmente **cero**: lo que las produce es un reloj que se ha movido hacia atrás
+    /// o una cadena que alguien ha tocado por debajo.
+    #[ts(type = "number")]
+    pub anomalias_sin_reconocer: i64,
+    /// El mensaje de la más reciente, para que la pantalla diga QUÉ pasó y no sólo que pasó algo.
+    #[ts(optional)]
+    pub ultima_anomalia: Option<String>,
 }

@@ -984,6 +984,18 @@ no dejar de hacerlo.
   `cadena.txt` cualquiera recalcula las huellas con un SHA-256 y comprueba que la cadena no se ha
   tocado, **sin nuestro código**. Si algún día el formateo cambiara, el fichero enseña qué se hasheó
   de verdad.
+- **Antes de generar cada registro se comprueba el anterior** (art. 7.i) de la Orden): que esté bien
+  encadenado con el suyo, y que no esté fechado **más de un minuto por delante** del reloj actual —o
+  sea, que el reloj no haya ido hacia atrás—. Se lee en la misma consulta que el eslabón anterior
+  (`estado_de_la_cadena`, dos filas), así que no cuesta un viaje más en el camino del cobro.
+  ⚠️ **Y NUNCA impide facturar.** La FAQ de la AEAT es literal: *«será preciso generar el siguiente
+  RF, ya que la facturación por este motivo NUNCA debe interrumpirse»*. Lo que se hace es anotarlo en
+  `_Verifactu_Anomalias` (local, por `raw()`), gritarlo en el panel y notificarlo.
+- **No llevamos registro de eventos, y es legítimo.** Sólo es obligatorio para los SIF que pueden
+  actuar en modalidad **NO** VERI\*FACTU; la NOTA 1 del apartado 15 del FAQ de desarrolladores exime
+  expresamente a los «SOLO VERI\*FACTU», que es lo que declaramos con
+  `TipoUsoPosibleSoloVerifactu = "S"`. Si algún día se ofreciera el modo no verificable, esa
+  exención decae y habría que construirlo entero.
 - **`Orden` es explícito, no `rowid`.** El eslabón anterior es `MAX(Orden)`; con `rowid` la cadena
   dependería del orden en que una restauración reinserta las filas, que no está garantizado.
 - **`FechaOperacion` se informa sólo si la operación fue otro día.** Los arts. 6.1.i) (factura

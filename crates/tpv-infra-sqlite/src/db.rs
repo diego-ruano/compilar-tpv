@@ -723,6 +723,24 @@ async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
         -- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
         -- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
         -- en cada respuesta (`TiempoEsperaEnvio`).
+        -- Anomalias de la cadena detectadas por la comprobacion previa del art. 7.i) de la Orden
+        -- HAC/1177/2024. Es estado LOCAL de diagnostico (por eso el prefijo `_`): describe lo que le
+        -- ha pasado a ESTE equipo, no forma parte del esquema compartido y no se replica.
+        --
+        -- No es el "registro de eventos" del RRSIF: ese solo es obligatorio para los SIF que pueden
+        -- actuar en modalidad NO VERI*FACTU, y este es SOLO VERI*FACTU (lo confirma la NOTA 1 del
+        -- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
+        -- una anomalia no se quede solo en un log que nadie abre.
+        CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
+            ID_Anomalia     TEXT PRIMARY KEY,
+            Clase           TEXT NOT NULL,
+            Mensaje         TEXT NOT NULL,
+            ID_Registro     TEXT,
+            Detectada_En_Ms INTEGER NOT NULL,
+            Reconocida      INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_verifactu_anomalias_pend
+            ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
         CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
             ID               INTEGER PRIMARY KEY CHECK (ID = 1),
             Espera_Segundos  INTEGER NOT NULL DEFAULT 60,

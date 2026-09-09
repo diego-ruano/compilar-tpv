@@ -416,6 +416,15 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
         if let Err(e) = uc_verifactu::avisar_del_certificado(notifier.as_ref(), &cert).await {
             tracing::warn!(target: "tpv::verifactu", error = %e, "no se pudo evaluar el aviso del certificado");
         }
+        // Y las anomalías de la cadena (art. 7.i). Se leen del mismo estado que pinta el panel.
+        if let Ok(e) = uc_verifactu::estado(repo.as_ref()).await {
+            let _ = uc_verifactu::avisar_de_anomalias(
+                notifier.as_ref(),
+                e.anomalias_sin_reconocer,
+                e.ultima_anomalia.as_deref(),
+            )
+            .await;
+        }
     }
 
     // Si el certificado elegido ya no está o caducó, no se intenta: el handshake fallaría seguro y

@@ -411,7 +411,17 @@ motivo_no_remite?: string,
 /**
  * Días que quedan hasta que caduque el certificado elegido. `null` si no hay certificado.
  */
-dias_para_caducar_certificado?: number, };
+dias_para_caducar_certificado?: number, 
+/**
+ * Anomalías de la cadena detectadas por la comprobación previa del art. 7.i) y todavía sin
+ * reconocer. Normalmente **cero**: lo que las produce es un reloj que se ha movido hacia atrás
+ * o una cadena que alguien ha tocado por debajo.
+ */
+anomalias_sin_reconocer: number, 
+/**
+ * El mensaje de la más reciente, para que la pantalla diga QUÉ pasó y no sólo que pasó algo.
+ */
+ultima_anomalia?: string, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 

@@ -498,7 +498,8 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     let fecha_hora_huso = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
 
     // ── El eslabón anterior ──
-    let anterior = ultimo_eslabon(db).await?;
+    let eslabones = estado_de_la_cadena(db).await?;
+    let anterior = eslabones.ultimo.clone();
     let primer_registro = if anterior.is_none() { Some("S") } else { None };
 
     let entrada = vf::EntradaHuellaAlta {
@@ -587,6 +588,13 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
 
     encolar_envio(db, &id_registro).await?;
 
+    // La comprobación del art. 7.i) se hizo ANTES de generar (al leer la cadena); aquí sólo se deja
+    // constancia, ya con el identificador del registro nuevo delante. Nunca impide nada: el registro
+    // está emitido y el cobro hecho.
+    if let Some(a) = eslabones.anomalia {
+        anotar_anomalia(db, a, &id_registro).await;
+    }
+
     Ok(BloqueFiscal {
         num_serie_factura,
         fecha_expedicion,
@@ -635,7 +643,8 @@ pub async fn emitir_anulacion(
     let id_pago = v_string(row.get_value(5).map_err(db_err)?);
 
     let fecha_hora_huso = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
-    let anterior = ultimo_eslabon(db).await?;
+    let eslabones = estado_de_la_cadena(db).await?;
+    let anterior = eslabones.ultimo.clone();
     let primer_registro = if anterior.is_none() { Some("S") } else { None };
 
     let entrada = vf::EntradaHuellaAnulacion {
@@ -700,6 +709,13 @@ pub async fn emitir_anulacion(
     .map_err(db_err)?;
 
     encolar_envio(db, &id_registro).await?;
+
+    // La comprobación del art. 7.i) se hizo ANTES de generar (al leer la cadena); aquí sólo se deja
+    // constancia, ya con el identificador del registro nuevo delante. Nunca impide nada: el registro
+    // está emitido y el cobro hecho.
+    if let Some(a) = eslabones.anomalia {
+        anotar_anomalia(db, a, &id_registro).await;
+    }
 
     Ok(BloqueFiscal {
         num_serie_factura: num_anulada,
@@ -1221,6 +1237,7 @@ pub async fn reservar_numero_factura(db: &WriteGuard<'_>) -> AppResult<(String, 
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// El último eslabón de la cadena: `MAX(Orden)`.
+#[derive(Clone)]
 struct Eslabon {
     nif: String,
     num_serie: String,
@@ -1228,26 +1245,124 @@ struct Eslabon {
     huella: String,
 }
 
+/// El último eslabón **y** el resultado de la comprobación previa del art. 7.i).
+///
+/// Van juntos porque salen de la misma consulta: comprobar que el último registro está bien
+/// encadenado exige mirar el que hay detrás de él, o sea las dos últimas filas. Separarlo en dos
+/// funciones costaría una consulta más en el camino del cobro para leer lo mismo.
+struct EstadoDeLaCadena {
+    ultimo: Option<Eslabon>,
+    anomalia: Option<vf::AnomaliaPrevia>,
+}
+
+/// Lee las **dos** últimas filas de la cadena y comprueba lo que exige el art. 7.i) de la Orden
+/// HAC/1177/2024 antes de generar un registro nuevo.
+///
 /// Se busca por `MAX(Orden)` y **no por `rowid`**: con `rowid` la cadena dependería del orden en
 /// que una restauración reinserta las filas, que no está garantizado.
-async fn ultimo_eslabon<C: Reader>(conn: &C) -> AppResult<Option<Eslabon>> {
+///
+/// ⚠️ **Lo que devuelve NO decide si se puede facturar.** La FAQ de desarrolladores de la AEAT lo
+/// dice sin matices: *«será preciso generar el siguiente RF, ya que la facturación por este motivo
+/// NUNCA debe interrumpirse»*. Un TPV que se niega a cobrar porque su propia cadena tiene una
+/// anomalía convierte un problema de trazabilidad en un bar que no puede vender.
+async fn estado_de_la_cadena<C: Reader>(conn: &C) -> AppResult<EstadoDeLaCadena> {
     let mut rows = conn
         .query(
-            "SELECT NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Huella \
-             FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 1;",
+            "SELECT NIF_Emisor, Num_Serie_Factura, Fecha_Expedicion, Huella, \
+                    COALESCE(Ant_Huella, ''), Fecha_Hora_Huso \
+             FROM Registros_Facturacion ORDER BY Orden DESC LIMIT 2;",
             (),
         )
         .await
         .map_err(db_err)?;
-    let Some(row) = rows.next().await.map_err(db_err)? else {
-        return Ok(None);
+
+    let t = |row: &libsql::Row, i: i32| -> AppResult<String> {
+        Ok(v_string(row.get_value(i).map_err(db_err)?).unwrap_or_default())
     };
-    Ok(Some(Eslabon {
-        nif: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-        num_serie: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-        fecha: v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
-        huella: v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
-    }))
+
+    let Some(fila_ultimo) = rows.next().await.map_err(db_err)? else {
+        // Sin registros: es el primero de la cadena y no hay nada que comprobar.
+        return Ok(EstadoDeLaCadena {
+            ultimo: None,
+            anomalia: None,
+        });
+    };
+
+    let ultimo = Eslabon {
+        nif: t(&fila_ultimo, 0)?,
+        num_serie: t(&fila_ultimo, 1)?,
+        fecha: t(&fila_ultimo, 2)?,
+        huella: t(&fila_ultimo, 3)?,
+    };
+    let ant_declarada = t(&fila_ultimo, 4)?;
+    let generado = t(&fila_ultimo, 5)?;
+
+    let huella_penultimo = match rows.next().await.map_err(db_err)? {
+        Some(fila) => Some(t(&fila, 3)?),
+        None => None,
+    };
+
+    // Si la fecha del último no se puede leer no se inventa una anomalía: se da por buena. Fallar
+    // aquí sería acusar a la cadena de algo que sólo prueba que no supimos parsear una fecha.
+    let anomalia = match chrono::DateTime::parse_from_rfc3339(&generado) {
+        Ok(dt) => vf::comprobar_registro_previo(
+            Some(&vf::UltimoRegistro {
+                ant_huella_declarada: if ant_declarada.is_empty() {
+                    None
+                } else {
+                    Some(&ant_declarada)
+                },
+                huella_del_anterior: huella_penultimo.as_deref(),
+                generado_en_segundos: dt.timestamp(),
+            }),
+            chrono::Local::now().timestamp(),
+        ),
+        Err(_) => None,
+    };
+
+    Ok(EstadoDeLaCadena {
+        ultimo: Some(ultimo),
+        anomalia,
+    })
+}
+
+/// Anota una anomalía de la cadena en la tabla local de diagnóstico.
+///
+/// ⚠️ Va por `raw()`: `_Verifactu_Anomalias` es estado LOCAL del dispositivo, como `_Verifactu_Envios`
+/// y `_Jobs_State`. Por `execute()` se capturaría en `_Sync_Outbox` y se replicaría a la nube el
+/// diagnóstico de un equipo concreto, que allí no significa nada.
+///
+/// Y es **best-effort**: si esto falla, lo que NO puede es tumbar el cobro. Se está registrando una
+/// anomalía, no cobrando; que el diagnóstico impida la venta sería exactamente al revés de lo que
+/// pide la norma.
+async fn anotar_anomalia(db: &WriteGuard<'_>, anomalia: vf::AnomaliaPrevia, id_registro: &str) {
+    let clase = match anomalia {
+        vf::AnomaliaPrevia::EncadenamientoRoto => "ENCADENAMIENTO",
+        vf::AnomaliaPrevia::RelojHaciaAtras { .. } => "RELOJ",
+    };
+    tracing::error!(
+        target: "tpv::verifactu",
+        clase,
+        id_registro,
+        "{}", anomalia.mensaje()
+    );
+    let r = db
+        .raw()
+        .execute(
+            "INSERT INTO _Verifactu_Anomalias (ID_Anomalia, Clase, Mensaje, ID_Registro, Detectada_En_Ms) \
+             VALUES (?1, ?2, ?3, ?4, ?5);",
+            vec![
+                Value::Text(new_id()),
+                Value::Text(clase.to_string()),
+                Value::Text(anomalia.mensaje()),
+                Value::Text(id_registro.to_string()),
+                Value::Integer(now_ms()),
+            ],
+        )
+        .await;
+    if let Err(e) = r {
+        tracing::warn!(target: "tpv::verifactu", error = %e, "no se pudo anotar la anomalía");
+    }
 }
 
 async fn siguiente_orden<C: Reader>(conn: &C) -> AppResult<i64> {
@@ -1499,6 +1614,28 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         .unwrap_or(false)
         && razon_social.is_some();
 
+    let anomalias_sin_reconocer = select_i64(
+        conn,
+        "SELECT COUNT(*) FROM _Verifactu_Anomalias WHERE Reconocida = 0;",
+        vec![],
+    )
+    .await?
+    .unwrap_or(0);
+    let ultima_anomalia = {
+        let mut rows = conn
+            .query(
+                "SELECT Mensaje FROM _Verifactu_Anomalias WHERE Reconocida = 0 \
+                 ORDER BY Detectada_En_Ms DESC LIMIT 1;",
+                (),
+            )
+            .await
+            .map_err(db_err)?;
+        match rows.next().await.map_err(db_err)? {
+            Some(row) => v_string(row.get_value(0).map_err(db_err)?),
+            None => None,
+        }
+    };
+
     Ok(EstadoFiscal {
         datos_fiscales_completos,
         nif,
@@ -1526,7 +1663,27 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
             None
         },
         dias_para_caducar_certificado: None,
+        anomalias_sin_reconocer,
+        ultima_anomalia,
     })
+}
+
+/// Marca como reconocidas todas las anomalías pendientes. Devuelve cuántas.
+///
+/// «Reconocida» no es «resuelta»: la fila se conserva, porque lo que registra es que a este equipo le
+/// pasó algo y eso no deja de ser cierto porque alguien pulse un botón. Lo único que cambia es que
+/// deja de gritarlo.
+pub async fn reconocer_anomalias(db: &Db) -> AppResult<usize> {
+    let g = db.write().await;
+    let n = g
+        .raw()
+        .execute(
+            "UPDATE _Verifactu_Anomalias SET Reconocida = 1 WHERE Reconocida = 0;",
+            Vec::<Value>::new(),
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(n as usize)
 }
 
 /// Lista los registros para el panel, del más reciente al más antiguo.
@@ -1577,6 +1734,189 @@ pub async fn listar_registros<C: Reader>(
         });
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests_anomalias_de_la_cadena {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! La comprobación previa del art. 7.i) leída de la base de datos de verdad.
+    //!
+    //! La aritmética está probada en `tpv_domain::verifactu`; aquí se prueba lo que sólo se puede
+    //! romper en SQL: que se lean las DOS últimas filas, que se lean por `Orden` y no por `rowid`, y
+    //! que anotar la anomalía no salga por el outbox ni tumbe nada.
+
+    use super::*;
+    use crate::db::Db;
+    use std::sync::Arc;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verifactu_anomalias");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    /// Inserta un registro con la huella y el eslabón declarado que se le pasen.
+    async fn registro(
+        db: &Arc<Db>,
+        orden: i64,
+        huella: &str,
+        ant_huella: Option<&str>,
+        fecha_hora_huso: &str,
+    ) {
+        let g = db.write().await;
+        g.raw()
+            .execute(
+                "INSERT INTO Registros_Facturacion (ID_Registro, Orden, Tipo, NIF_Emisor, \
+                   Num_Serie_Factura, Fecha_Expedicion, Serie, Numero, Nombre_Razon_Emisor, \
+                   Cadena_Huella, Huella, Ant_Huella, Fecha_Hora_Huso, Sistema_Json, QR_Url) \
+                 VALUES (?1, ?2, 'ALTA', 'B12345674', ?1, '15-01-2027', '2027', ?2, 'Bar', \
+                         'c', ?3, ?4, ?5, '{}', 'u');",
+                vec![
+                    Value::Text(format!("r{orden}")),
+                    Value::Integer(orden),
+                    Value::Text(huella.to_string()),
+                    match ant_huella {
+                        Some(h) => Value::Text(h.to_string()),
+                        None => Value::Null,
+                    },
+                    Value::Text(fecha_hora_huso.to_string()),
+                ],
+            )
+            .await
+            .unwrap();
+    }
+
+    fn hace(segundos: i64) -> String {
+        (chrono::Local::now() - chrono::Duration::seconds(segundos))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+    }
+
+    fn dentro_de(segundos: i64) -> String {
+        (chrono::Local::now() + chrono::Duration::seconds(segundos))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+    }
+
+    #[tokio::test]
+    async fn una_cadena_sana_no_da_anomalia() {
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, "H1", None, &hace(600)).await;
+        registro(&db, 2, "H2", Some("H1"), &hace(300)).await;
+
+        let r = db.read().await;
+        let e = estado_de_la_cadena(&r).await.unwrap();
+        assert!(e.anomalia.is_none());
+        assert_eq!(e.ultimo.unwrap().huella, "H2");
+    }
+
+    #[tokio::test]
+    async fn una_base_vacia_no_da_anomalia() {
+        // Es el primer registro de la cadena: no hay nada detrás que comprobar.
+        let (db, _dir) = db_temporal().await;
+        let r = db.read().await;
+        let e = estado_de_la_cadena(&r).await.unwrap();
+        assert!(e.anomalia.is_none());
+        assert!(e.ultimo.is_none());
+    }
+
+    #[tokio::test]
+    async fn si_el_ultimo_declara_una_huella_que_no_es_la_del_anterior_lo_detecta() {
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, "H1", None, &hace(600)).await;
+        registro(&db, 2, "H2", Some("OTRA"), &hace(300)).await;
+
+        let r = db.read().await;
+        let e = estado_de_la_cadena(&r).await.unwrap();
+        assert_eq!(e.anomalia, Some(vf::AnomaliaPrevia::EncadenamientoRoto));
+    }
+
+    #[tokio::test]
+    async fn un_registro_fechado_en_el_FUTURO_delata_el_reloj_hacia_atras() {
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, "H1", None, &hace(600)).await;
+        registro(&db, 2, "H2", Some("H1"), &dentro_de(3600)).await;
+
+        let r = db.read().await;
+        let e = estado_de_la_cadena(&r).await.unwrap();
+        assert!(matches!(
+            e.anomalia,
+            Some(vf::AnomaliaPrevia::RelojHaciaAtras { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn una_fecha_ilegible_NO_se_convierte_en_anomalia() {
+        // Fallar al parsear una fecha sólo prueba que no supimos leerla. Acusar a la cadena por eso
+        // llenaría el panel de rojo por un problema de formato.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 1, "H1", None, "no-es-una-fecha").await;
+
+        let r = db.read().await;
+        assert!(estado_de_la_cadena(&r).await.unwrap().anomalia.is_none());
+    }
+
+    #[tokio::test]
+    async fn se_leen_las_dos_ultimas_por_ORDEN_y_no_por_el_orden_de_insercion() {
+        // Con `rowid` la cadena dependería del orden en que una restauración reinserta las filas.
+        // Aquí se insertan al revés a propósito: la 2 antes que la 1.
+        let (db, _dir) = db_temporal().await;
+        registro(&db, 2, "H2", Some("H1"), &hace(300)).await;
+        registro(&db, 1, "H1", None, &hace(600)).await;
+
+        let r = db.read().await;
+        let e = estado_de_la_cadena(&r).await.unwrap();
+        assert_eq!(e.ultimo.unwrap().huella, "H2", "el último es el de Orden mayor");
+        assert!(e.anomalia.is_none(), "y la cadena está sana");
+    }
+
+    #[tokio::test]
+    async fn anotar_una_anomalia_NO_sale_por_el_outbox() {
+        // `_Verifactu_Anomalias` es diagnóstico local de ESTE equipo. Por `execute()` se replicaría
+        // a la nube, donde no significa nada.
+        let (db, _dir) = db_temporal().await;
+        {
+            let g = db.write().await;
+            anotar_anomalia(&g, vf::AnomaliaPrevia::EncadenamientoRoto, "r1").await;
+        }
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT (SELECT COUNT(*) FROM _Verifactu_Anomalias), \
+                        (SELECT COUNT(*) FROM _Sync_Outbox WHERE Statements_Json LIKE '%Anomalias%');",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_i64(row.get_value(0).unwrap()).unwrap_or(0), 1, "se anota");
+        assert_eq!(v_i64(row.get_value(1).unwrap()).unwrap_or(0), 0, "y no se replica");
+    }
+
+    #[tokio::test]
+    async fn reconocer_las_deja_de_contar_pero_NO_las_borra() {
+        let (db, _dir) = db_temporal().await;
+        {
+            let g = db.write().await;
+            anotar_anomalia(&g, vf::AnomaliaPrevia::EncadenamientoRoto, "r1").await;
+        }
+
+        assert_eq!(reconocer_anomalias(&db).await.unwrap(), 1);
+
+        let r = db.read().await;
+        let mut rows = r
+            .query(
+                "SELECT (SELECT COUNT(*) FROM _Verifactu_Anomalias), \
+                        (SELECT COUNT(*) FROM _Verifactu_Anomalias WHERE Reconocida = 0);",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let row = rows.next().await.unwrap().unwrap();
+        assert_eq!(v_i64(row.get_value(0).unwrap()).unwrap_or(0), 1, "la fila se conserva");
+        assert_eq!(v_i64(row.get_value(1).unwrap()).unwrap_or(0), 0, "pero deja de contar");
+    }
 }
 
 #[cfg(test)]

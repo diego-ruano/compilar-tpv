@@ -96,3 +96,12 @@ export async function verifactuExportar(
 ): Promise<number> {
 	return await invokeClient<number>("verifactu_exportar", { destino, desde, hasta });
 }
+
+/**
+ * Da por vistas las anomalías de la cadena. Devuelve cuántas ha marcado.
+ *
+ * «Reconocida» no es «resuelta»: las filas se conservan. Lo único que cambia es que dejan de gritar.
+ */
+export async function verifactuReconocerAnomalias(): Promise<number> {
+	return await invokeClient<number>("verifactu_reconocer_anomalias");
+}

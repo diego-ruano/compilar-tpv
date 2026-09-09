@@ -40,6 +40,7 @@ import {
     verifactuDeclaracionResponsable,
     verifactuEstado,
     verifactuExportar,
+    verifactuReconocerAnomalias,
     type DeclaracionResponsable,
 } from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
@@ -275,6 +276,49 @@ export function Fiscal({
 
     return (
         <div className="flex flex-col gap-4">
+            {/* ── Anomalías de la cadena (art. 7.i) ───────────────────────────────────────
+                Va lo primero de la pantalla a propósito: es lo más raro que puede pasar aquí y lo
+                único que no se arregla esperando. */}
+            {estado && estado.anomalias_sin_reconocer > 0 ? (
+                <div className="rounded-2xl border border-red-500/40 bg-red-500/10 p-4">
+                    <h3 className="font-bold text-red-600 dark:text-red-400">
+                        {estado.anomalias_sin_reconocer === 1
+                            ? "Se ha detectado una anomalía en la cadena de facturación"
+                            : `Se han detectado ${estado.anomalias_sin_reconocer} anomalías en la cadena de facturación`}
+                    </h3>
+                    {estado.ultima_anomalia ? (
+                        <p className="mt-2 text-sm text-fg">
+                            Lo último detectado: <strong>{estado.ultima_anomalia}</strong>.
+                        </p>
+                    ) : null}
+                    <p className="mt-2 text-sm text-fg-muted">
+                        Las facturas se siguen emitiendo y enviando con normalidad:{" "}
+                        <strong>esto no para la caja</strong>, y no debe pararla. Lo que hay que mirar
+                        es la <strong>hora del equipo</strong> —la causa habitual es un reloj que se ha
+                        movido hacia atrás— y avisar a soporte para que revise la cadena.
+                    </p>
+                    <div className="mt-3">
+                        <GhostButton
+                            onClick={() => {
+                                void verifactuReconocerAnomalias()
+                                    .then(() => {
+                                        refrescarEstado();
+                                        toast.info(
+                                            "Anomalías marcadas como vistas",
+                                            "Se conservan en el registro: dejan de avisar, no se borran.",
+                                        );
+                                    })
+                                    .catch((e) =>
+                                        toast.error("No se pudo marcar", toAppError(e).message),
+                                    );
+                            }}
+                        >
+                            Marcar como vistas
+                        </GhostButton>
+                    </div>
+                </div>
+            ) : null}
+
             {/* ── Datos del obligado ─────────────────────────────────────────────────────── */}
             <Panel
                 title="Datos fiscales del negocio"

@@ -96,6 +96,25 @@ fn dias_hasta(fecha: &str) -> Option<i64> {
     Some((d - chrono::Local::now().date_naive()).num_days())
 }
 
+/// Da por vistas las anomalías de la cadena. Devuelve cuántas ha marcado.
+///
+/// «Reconocida» no es «resuelta»: las filas se conservan, porque lo que registran es que a este
+/// equipo le pasó algo y eso no deja de ser cierto porque alguien pulse un botón. Lo único que
+/// cambia es que dejan de gritarlo.
+#[tauri::command]
+pub async fn verifactu_reconocer_anomalias(
+    state: State<'_, AppState>,
+) -> Result<usize, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let db = {
+        let guard = state.db.lock().await;
+        guard.as_ref().cloned().ok_or_else(|| {
+            AppErrorDto::internal("Las anomalías sólo existen en el TPV principal")
+        })?
+    };
+    Ok(tpv_infra_sqlite::verifactu::reconocer_anomalias(&db).await?)
+}
+
 /// Los registros del panel, del más reciente al más antiguo.
 ///
 /// Este sí es de Administrador: es el libro de facturación del negocio.
