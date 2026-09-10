@@ -182,7 +182,7 @@ export default function Proveedores() {
       if (proveedoresQuery.isError) setProveedores([]);
       return;
     }
-    (async () => {
+    void (async () => {
       const ui = await mapProveedoresUI(rows);
       if (cancelado) return;
       setProveedores(ui);
@@ -218,14 +218,14 @@ export default function Proveedores() {
       if (productosProveedorQuery.isError) setProductosProveedor([]);
       return;
     }
-    (async () => {
+    void (async () => {
       const ui = await mapProductosUI(rows);
       if (!cancelado) setProductosProveedor(ui);
     })();
     return () => {
       cancelado = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [vista, proveedorActivo, productosProveedorQuery.data, productosProveedorQuery.isError]);
 
   const proveedoresFiltrados = useMemo(() => {

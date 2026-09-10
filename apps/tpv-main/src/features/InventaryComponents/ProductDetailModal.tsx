@@ -98,7 +98,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
       return;
     }
 
-    (async () => {
+    void (async () => {
       const url = (p as any)?.Ruta_Imagen ? await toImageUrlMaybe((p as any).Ruta_Imagen) : "";
 
       const map: Record<string, string> = {};

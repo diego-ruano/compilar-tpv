@@ -105,7 +105,7 @@ pub fn init(config: TelemetryConfig) -> Result<(), TelemetryError> {
     // ── Capa 1: consola (sólo dev). ──
     let console_layer = config
         .console
-        .then(|| fmt::layer().with_ansi(true).with_writer(|| std::io::stderr()));
+        .then(|| fmt::layer().with_ansi(true).with_writer(std::io::stderr));
 
     // ── Capa 3: reenvío a la cola durable de la nube. ──
     let forward_layer = forward::ForwardLayer::new(state.clone());

@@ -78,7 +78,11 @@ impl SqliteTrabajadoresRepository {
 
         // El personal de un negocio son decenas de filas: se leen todas y se filtra en Rust,
         // que evita repetir el prefijo de versión dentro del SQL.
-        let pendientes: Vec<(String, Option<String>, Option<String>, Option<String>)> = {
+        /// Una fila de PII del personal tal y como sale de la tabla: el id y las tres columnas
+        /// cifradas (`DNI`, `IBAN`, `Numero_Seguridad_Social`), cualquiera de ellas ausente.
+        type FilaPii = (String, Option<String>, Option<String>, Option<String>);
+
+        let pendientes: Vec<FilaPii> = {
             let db = self.db.read().await;
             let mut rows = db
                 .query(
@@ -453,7 +457,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
                 let nombre_turno =
                     v_string(r.get_value(8).map_err(db_err)?).unwrap_or_default();
 
-                if id_trab.is_empty() || weekday < 1 || weekday > 7 || id_turno.is_empty() {
+                if id_trab.is_empty() || !(1..=7).contains(&weekday) || id_turno.is_empty() {
                     continue;
                 }
 
@@ -470,7 +474,7 @@ impl TrabajadoresRepository for SqliteTrabajadoresRepository {
             for day_offset in 0..7 {
                 let date = req_monday + Duration::days(day_offset);
                 let ymd = date.format("%Y-%m-%d").to_string();
-                let wd = (day_offset + 1) as i64;
+                let wd = day_offset + 1;
 
                 for ((id_trab, weekday), list) in defs.iter() {
                     if *weekday != wd {

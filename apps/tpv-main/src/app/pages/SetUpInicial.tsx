@@ -147,7 +147,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     email: cleanEmail,
                 });
 
-                navigate("/", { replace: true });
+                void navigate("/", { replace: true });
                 return;
             }
 

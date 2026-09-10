@@ -388,7 +388,7 @@ function EditTrabajador() {
         return;
       }
 
-      navigate("/Trabajadores");
+      void navigate("/Trabajadores");
     } catch (e) {
       console.error(e);
       setError(getErrorMessage(e));

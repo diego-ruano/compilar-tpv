@@ -7,7 +7,9 @@
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "generate-types": "turbo run generate-types",
     "tauri": "pnpm --filter @tpv/main tauri",
     "license:issue": "node scripts/tpv-license.mjs issue",
@@ -27,7 +29,11 @@
     "verifactu:limites": "cargo run -q --release -p tpv-infra-aeat --example lote_y_subsanacion"
   },
   "devDependencies": {
-    "turbo": "^2"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "turbo": "^2",
+    "typescript-eslint": "^8.70.0"
   },
   "engines": {
     "node": ">=18"

@@ -636,7 +636,7 @@ pub async fn remitir_ciclo(
     // lote acumulado, o si el registro más antiguo lleva esperando más de una hora, el envío no
     // pudo ser inmediato y la norma tiene un campo para decirlo. Usarlo es mejor que no usarlo.
     let incidencia = pendientes > MAX_POR_ENVIO
-        || ultimo_envio_ms.map_or(false, |u| ahora_ms.saturating_sub(u) > 3_600_000);
+        || ultimo_envio_ms.is_some_and(|u| ahora_ms.saturating_sub(u) > 3_600_000);
 
     let cabecera = CabeceraEnvio {
         nif_obligado: nif,
@@ -721,6 +721,9 @@ pub async fn remitir_ciclo(
 }
 
 #[cfg(test)]
+// Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+// (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 
@@ -829,6 +832,9 @@ mod tests {
     // duele si se equivoca— es la ORQUESTACIÓN: qué se manda, en qué orden, cómo se casan las
     // respuestas y qué pasa cuando algo falla a la mitad.
 
+    // Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+    // (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
+    #[allow(non_snake_case)]
     mod ciclo {
         use super::super::*;
         use crate::ports::aeat::{

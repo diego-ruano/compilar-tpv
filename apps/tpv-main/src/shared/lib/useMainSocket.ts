@@ -202,7 +202,7 @@ export function useMainSocket() {
 
 		// Estado de aplicación (compartido entre reconexiones dentro de este efecto).
 		let caughtUp = false;
-		let buffer: ChangeArg[] = [];
+		const buffer: ChangeArg[] = [];
 		let chain: Promise<void> = Promise.resolve();
 
 		// Estado del drenado del outbox (Main → nube).
@@ -255,10 +255,10 @@ export function useMainSocket() {
 						// una tabla no mapeada).
 						const featureKeys = affectedFeatureKeys(statements);
 						if (featureKeys === null) {
-							queryClient.invalidateQueries();
+							void queryClient.invalidateQueries();
 						} else {
 							for (const k of featureKeys)
-								queryClient.invalidateQueries({ queryKey: [k] });
+								void queryClient.invalidateQueries({ queryKey: [k] });
 						}
 						useSyncSignal.getState().bump(affectedComandas(statements));
 						// Los ajustes del negocio/ticket no están en React Query: viven en stores que se
@@ -759,7 +759,7 @@ export function useMainSocket() {
 				// trae la solicitud —con la huella que hay que verificar— es el REST firmado que
 				// hay detrás de esta query. Sustituye al sondeo cada 5 s del panel.
 				if (msg.type === "pair_request") {
-					queryClient.invalidateQueries({ queryKey: ["pairing"] });
+					void queryClient.invalidateQueries({ queryKey: ["pairing"] });
 					return;
 				}
 
@@ -930,7 +930,7 @@ export function useMainSocket() {
 				if (msg.type === "change") {
 					const ch = toChange(msg);
 					if (!ch) return;
-					if (caughtUp) enqueue([ch]);
+					if (caughtUp) void enqueue([ch]);
 					else buffer.push(ch);
 					return;
 				}

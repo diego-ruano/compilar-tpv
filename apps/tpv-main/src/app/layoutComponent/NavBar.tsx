@@ -139,7 +139,7 @@ function NavBar({ open: openProp, onToggle, onClose }: Props) {
 
   const handleLogout = () => {
     logout();
-    navigate("/", { replace: true });
+    void navigate("/", { replace: true });
     closeIfMobile();
   };
 

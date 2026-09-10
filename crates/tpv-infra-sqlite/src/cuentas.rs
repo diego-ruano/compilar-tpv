@@ -1794,6 +1794,9 @@ mod tests_reimpresion {
 }
 
 #[cfg(test)]
+// Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+// (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
+#[allow(non_snake_case)]
 mod tests_factura_completa {
     //! La factura completa (FISCAL-02): `F1` al cobrar y `F3` en sustitución.
     //!
@@ -2197,6 +2200,9 @@ mod tests_factura_completa {
 }
 
 #[cfg(test)]
+// Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+// (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
+#[allow(non_snake_case)]
 mod tests_anular_vs_devolver {
     //! Los **dos instrumentos** de FISCAL-01, que hasta ahora salían por el mismo botón.
     //!

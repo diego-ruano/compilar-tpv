@@ -36,7 +36,9 @@ struct Caso {
     esperado: i64,
     /// Qué le hacemos a la fila para romperla. `{id}` se sustituye por el ID del registro.
     sql: &'static str,
-    /// Por qué esperamos ese código.
+    /// Por qué esperamos ese código. Se lee al leer el fichero —es la mitad del valor de este
+    /// banco de pruebas— y no en ejecución, de ahí el `allow`.
+    #[allow(dead_code)]
     porque: &'static str,
     /// ¿Hay que **recalcular la huella** tras manipular?
     ///
@@ -58,7 +60,7 @@ fn main() {
         use tpv_domain::ticket::LineaTicket;
         use tpv_infra_sqlite::db::{Db, Reader};
         use tpv_infra_sqlite::verifactu::{
-            self as vfdb, DatosFactura, Destinatario, SistemaInformatico, SqliteVerifactuRepository,
+            self as vfdb, DatosFactura, SistemaInformatico, SqliteVerifactuRepository,
         };
 
         let a: Vec<String> = std::env::args().skip(1).collect();
@@ -250,7 +252,7 @@ fn main() {
             }
 
             // ── Comparación ─────────────────────────────────────────────────────────────────────
-            println!("{:<44} {:>9} {:>9}  {}", "CASO", "ESPERADO", "REAL", "VEREDICTO");
+            println!("{:<44} {:>9} {:>9}  VEREDICTO", "CASO", "ESPERADO", "REAL");
             println!("{}", "─".repeat(100));
             let mut sorpresas = Vec::new();
             for (caso, (num, _id)) in casos.iter().zip(ids.iter()) {

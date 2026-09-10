@@ -28,65 +28,64 @@ fn rules() -> &'static [Rule] {
     static RULES: OnceLock<Vec<Rule>> = OnceLock::new();
     RULES.get_or_init(|| {
         // Orden importante: los más específicos (secreto clave=valor, JWT) antes que los genéricos.
-        let mut v = Vec::new();
+        vec![
+            // Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`),
+            // no sólo el primer token (si no, se redactaría "Bearer" y el token quedaría en claro).
+            Rule {
+                re: Regex::new(r"(?i)\b(authorization|auth)\b\s*[:=]\s*\S+(?:\s+\S+)?")
+                    .expect("regex cabecera authorization"),
+                with: "$1=[redacted]",
+            },
 
-        // Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`),
-        // no sólo el primer token (si no, se redactaría "Bearer" y el token quedaría en claro).
-        v.push(Rule {
-            re: Regex::new(r"(?i)\b(authorization|auth)\b\s*[:=]\s*\S+(?:\s+\S+)?")
-                .expect("regex cabecera authorization"),
-            with: "$1=[redacted]",
-        });
+            // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
+            Rule {
+                re: Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}")
+                    .expect("regex esquema bearer/basic"),
+                with: "[redacted]",
+            },
 
-        // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
-        v.push(Rule {
-            re: Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}")
-                .expect("regex esquema bearer/basic"),
-            with: "[redacted]",
-        });
+            // Secretos con forma `clave = valor` / `clave: valor` (password, token, api_key…). Se
+            // preserva la clave y se redacta sólo el valor, para no perder la pista del "qué".
+            Rule {
+                re: Regex::new(
+                    r"(?i)\b(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey)\b\s*[:=]\s*\S+",
+                )
+                .expect("regex secreto clave=valor"),
+                with: "$1=[redacted]",
+            },
 
-        // Secretos con forma `clave = valor` / `clave: valor` (password, token, api_key…). Se
-        // preserva la clave y se redacta sólo el valor, para no perder la pista del "qué".
-        v.push(Rule {
-            re: Regex::new(
-                r"(?i)\b(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey)\b\s*[:=]\s*\S+",
-            )
-            .expect("regex secreto clave=valor"),
-            with: "$1=[redacted]",
-        });
+            // JWT / tokens con forma header.payload.signature (base64url).
+            Rule {
+                re: Regex::new(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
+                    .expect("regex jwt"),
+                with: "[jwt]",
+            },
 
-        // JWT / tokens con forma header.payload.signature (base64url).
-        v.push(Rule {
-            re: Regex::new(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
-                .expect("regex jwt"),
-            with: "[jwt]",
-        });
+            // Emails.
+            Rule {
+                re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("regex email"),
+                with: "[email]",
+            },
 
-        // Emails.
-        v.push(Rule {
-            re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("regex email"),
-            with: "[email]",
-        });
+            // IBAN (2 letras país + 2 dígitos control + 10..30 alfanum).
+            Rule {
+                re: Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b").expect("regex iban"),
+                with: "[iban]",
+            },
 
-        // IBAN (2 letras país + 2 dígitos control + 10..30 alfanum).
-        v.push(Rule {
-            re: Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b").expect("regex iban"),
-            with: "[iban]",
-        });
+            // Teléfonos: prefijo internacional opcional + 9..15 dígitos, admitiendo espacios/guiones.
+            Rule {
+                re: Regex::new(r"\+?\d(?:[\s\-]?\d){8,14}").expect("regex telefono/numero largo"),
+                with: "[num]",
+            },
 
-        // Teléfonos: prefijo internacional opcional + 9..15 dígitos, admitiendo espacios/guiones.
-        v.push(Rule {
-            re: Regex::new(r"\+?\d(?:[\s\-]?\d){8,14}").expect("regex telefono/numero largo"),
-            with: "[num]",
-        });
+            // DNI/NIE español (7-8 dígitos + letra, con prefijo X/Y/Z opcional para NIE).
+            Rule {
+                re: Regex::new(r"\b[XYZ]?\d{7,8}[A-Za-z]\b").expect("regex dni/nie"),
+                with: "[id]",
+            },
 
-        // DNI/NIE español (7-8 dígitos + letra, con prefijo X/Y/Z opcional para NIE).
-        v.push(Rule {
-            re: Regex::new(r"\b[XYZ]?\d{7,8}[A-Za-z]\b").expect("regex dni/nie"),
-            with: "[id]",
-        });
-
-        v
+        ]
     })
 }
 

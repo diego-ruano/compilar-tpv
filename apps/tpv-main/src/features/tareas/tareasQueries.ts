@@ -57,7 +57,7 @@ export function useCreateTarea() {
   return useMutation({
     mutationFn: tareasApi.createTarea,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -68,7 +68,7 @@ export function useUpdateTarea() {
   return useMutation({
     mutationFn: tareasApi.updateTarea,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -79,7 +79,7 @@ export function useSetAsignacionesTarea() {
   return useMutation({
     mutationFn: tareasApi.setAsignacionesTarea,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -90,7 +90,7 @@ export function useDeleteTarea() {
   return useMutation({
     mutationFn: tareasApi.deleteTarea,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -110,7 +110,7 @@ export function useRestaurarTarea() {
   return useMutation({
     mutationFn: tareasApi.restaurarTarea,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -121,7 +121,7 @@ export function useVaciarPapelera() {
   return useMutation({
     mutationFn: tareasApi.vaciarPapelera,
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: tareasKeys.all });
+      void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }
@@ -132,7 +132,7 @@ export function useMarcarTareaFinalizada() {
   return useMutation({
     mutationFn: tareasApi.marcarTareaFinalizada,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: tareasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: tareasKeys.all });
     },
   });
 }

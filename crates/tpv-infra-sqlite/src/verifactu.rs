@@ -1698,7 +1698,7 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
 
     let datos_fiscales_completos = nif
         .as_deref()
-        .map(|n| vf::nif_valido(n))
+        .map(vf::nif_valido)
         .unwrap_or(false)
         && razon_social.is_some();
 

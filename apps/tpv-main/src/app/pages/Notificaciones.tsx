@@ -93,7 +93,7 @@ export default function Notificaciones() {
     // Navegar es lo último: la mutación (y su invalidación en `onSuccess`) sobrevive al desmontaje
     // de esta pantalla, así que el marcado se completa aunque salgamos de aquí al instante.
     const destino = destinoDeAccion(n.accion);
-    if (destino) navigate(destino.to, { state: destino.state });
+    if (destino) void navigate(destino.to, { state: destino.state });
   }
 
   // El borrado definitivo se confirma: es la única acción de esta pantalla que no se puede

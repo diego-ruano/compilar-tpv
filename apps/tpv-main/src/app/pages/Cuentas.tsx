@@ -88,6 +88,8 @@ function asciiSafe(s: string) {
         .replace(/[\u0300-\u036f]/g, "")
         .replace(/ñ/g, "n")
         .replace(/Ñ/g, "N")
+        // jsPDF sólo lleva WinAnsi: lo que no sea ASCII imprimible hay que quitarlo antes.
+        // eslint-disable-next-line no-control-regex -- el rango es a propósito, no un descuido.
         .replace(/[^\x00-\x7F]/g, "");
 }
 
@@ -416,8 +418,8 @@ export default function Cuentas() {
         try {
             await cierreReabrir(idCierre);
             await recargarCierres();
-            entradasQuery.refetch();
-            salidasQuery.refetch();
+            void entradasQuery.refetch();
+            void salidasQuery.refetch();
         } catch (e) {
             setCierresError(toAppError(e).message);
         }
@@ -2164,8 +2166,8 @@ export default function Cuentas() {
                     // Un cierre cambia lo que se puede editar (bloquea su periodo) y estrena el
                     // historico, asi que se recarga todo lo que cuelga de el.
                     void recargarCierres();
-                    entradasQuery.refetch();
-                    salidasQuery.refetch();
+                    void entradasQuery.refetch();
+                    void salidasQuery.refetch();
                 }}
             />
 

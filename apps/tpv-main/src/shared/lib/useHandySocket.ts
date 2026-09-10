@@ -280,10 +280,10 @@ export function useHandySocket() {
 							// toca una tabla no mapeada).
 							const featureKeys = affectedFeatureKeys(statements);
 							if (featureKeys === null) {
-								queryClient.invalidateQueries();
+								void queryClient.invalidateQueries();
 							} else {
 								for (const k of featureKeys)
-									queryClient.invalidateQueries({ queryKey: [k] });
+									void queryClient.invalidateQueries({ queryKey: [k] });
 							}
 							useSyncSignal.getState().bump(affectedComandas(statements));
 							// Los ajustes del negocio/ticket viven en stores que se leen al arrancar,

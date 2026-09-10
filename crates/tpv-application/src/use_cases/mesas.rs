@@ -318,6 +318,19 @@ pub async fn kitchen_set_line_state(
         .await
 }
 
+/// Traduce el destinatario del input al del dominio.
+///
+/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
+/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
+/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
+fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
+    input.map(|d| tpv_domain::verifactu::Destinatario {
+        nombre_razon: d.nombre_razon,
+        nif: d.nif,
+        direccion: d.domicilio,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,17 +354,4 @@ mod tests {
     fn opt_id_descarta_distintos_tipos_de_espacio() {
         assert_eq!(opt_id(Some("\t\n".into())), None);
     }
-}
-
-/// Traduce el destinatario del input al del dominio.
-///
-/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
-/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
-/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
-fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
-    input.map(|d| tpv_domain::verifactu::Destinatario {
-        nombre_razon: d.nombre_razon,
-        nif: d.nif,
-        direccion: d.domicilio,
-    })
 }

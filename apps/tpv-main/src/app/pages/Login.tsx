@@ -171,7 +171,7 @@ export default function Login() {
     useEffect(() => {
         let mounted = true;
 
-        (async () => {
+        void (async () => {
             try {
                 setLoadingUsers(true);
                 const arr = await listLoginUsers();
@@ -203,7 +203,7 @@ export default function Login() {
         if (!selectedUserId) return;
 
         let mounted = true;
-        (async () => {
+        void (async () => {
             try {
                 setLoadingPunch(true);
                 const st = await getTodayPunchStatus({
@@ -387,7 +387,7 @@ export default function Login() {
                     email: ok.email,
                 });
 
-                navigate("/setup", { replace: true });
+                void navigate("/setup", { replace: true });
                 return;
             }
 
@@ -410,7 +410,7 @@ export default function Login() {
                 email: ok.email,
             });
 
-            navigate(ok.rol === "Cocinero" ? "/Comandas" : "/", { replace: true });
+            void navigate(ok.rol === "Cocinero" ? "/Comandas" : "/", { replace: true });
         } catch (e: any) {
             const msg =
                 typeof e === "string"
@@ -473,8 +473,8 @@ export default function Login() {
 
             if (e.key === "Enter") {
                 e.preventDefault();
-                if (!hasEntrada1) handlePunch();
-                else handleSubmit();
+                if (!hasEntrada1) void handlePunch();
+                else void handleSubmit();
             }
         };
 

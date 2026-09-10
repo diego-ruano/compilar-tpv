@@ -818,7 +818,11 @@ export class TenantHub {
 
 		// Que empiece a drenar ya. `setAlarm` es idempotente: si ya había una programada, esto la
 		// adelanta como mucho, nunca encola dos.
-		this.state.storage.setAlarm(nowMs());
+		//
+		// Por `waitUntil` y no suelta: `encolar` es síncrona (devuelve los `Op_Id` aceptados), así
+		// que no hay dónde esperarla. Dejarla flotando haría que un fallo al programar la alarma
+		// fuera una promesa rechazada que nadie ve — y sin alarma la cola no se drena.
+		this.state.waitUntil(this.state.storage.setAlarm(nowMs()));
 
 		// Las Handy se congelan mientras dure. Solo en la transición: si ya estaba volcando, ya lo
 		// saben.
@@ -962,13 +966,13 @@ export class TenantHub {
 			// y a intentar lo mismo, girando en caliente hasta agotar el presupuesto (y facturando
 			// ese tiempo). Si no se avanza, se para y se reintenta más tarde con calma.
 			if (this.cuantasEnCola() >= antes) {
-				this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
+				await this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
 				return;
 			}
 		}
 
 		// Se acabó el presupuesto pero queda cola: seguimos en la siguiente alarma.
-		if (this.cuantasEnCola() > 0) this.state.storage.setAlarm(nowMs());
+		if (this.cuantasEnCola() > 0) await this.state.storage.setAlarm(nowMs());
 	}
 
 	/**
@@ -985,7 +989,7 @@ export class TenantHub {
 			this.emitSyncEvent("cola_ciclo_error", {
 				error: String(e?.message || e).slice(0, 500),
 			});
-			this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
+			await this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
 		}
 	}
 
@@ -1686,7 +1690,7 @@ export class TenantHub {
 
 						if (roleFinal === "tpv") {
 							this.broadcast({ type: "main_online", deviceId }, deviceId);
-							if (Boolean(msg.recovering)) {
+							if (msg.recovering) {
 								this.broadcastAuthed(
 									{ type: "main_volcando", volcando: true },
 									deviceId,

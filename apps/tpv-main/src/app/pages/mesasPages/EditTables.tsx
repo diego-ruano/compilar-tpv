@@ -477,7 +477,7 @@ function useUnsavedGuard(enabled: boolean) {
                 return;
             }
 
-            navigate(location.pathname, { replace: true });
+            void navigate(location.pathname, { replace: true });
             setOpen(true);
             pendingActionRef.current = () => {
                 allowOnceRef.current = true;
@@ -567,7 +567,7 @@ export default function EditTables() {
     const [loadingDb, setLoadingDb] = useState(true);
 
     useEffect(() => {
-        (async () => {
+        void (async () => {
             try {
                 const data = await mesasLoadLayout();
 
@@ -1480,7 +1480,7 @@ export default function EditTables() {
                                         }
 
                                         await mesasSaveLayout(salonsRef.current as any);
-                                        queryClient.invalidateQueries({ queryKey: mesasKeys.layout() });
+                                        void queryClient.invalidateQueries({ queryKey: mesasKeys.layout() });
 
                                         const fresh = await mesasLoadLayout();
                                         setSalons(fresh as Salon[]);

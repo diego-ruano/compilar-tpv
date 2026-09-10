@@ -3,6 +3,10 @@
 //! Viven en su propio fichero porque son mas largos que el generador: mezclados, cada cambio
 //! del ticket obligaba a pasar por delante de setecientas lineas de asserts para encontrar el
 //! codigo.
+//!
+//! Los nombres de algunos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+//! (`..._y_dice_COPIA`). Es deliberado y no es snake case.
+#![allow(non_snake_case)]
 
 use super::*;
 
@@ -497,7 +501,7 @@ mod tests_logo {
         let bytes = build_ticket(&p, None);
 
         assert!(!bytes.windows(4).any(|w| w == [0x1D, 0x76, 0x30, 0x00]));
-        assert!(bytes.len() > 0);
+        assert!(!bytes.is_empty());
     }
 
     #[test]
@@ -653,7 +657,7 @@ mod tests_qr_tributario {
             .expect("el bloque del QR tiene que ir precedido de ESC a 1 (centrado)");
         let izquierda = previo.windows(3).rposition(|w| w == [0x1B, 0x61, 0x00]);
         assert!(
-            izquierda.map_or(true, |i| i < centrado),
+            izquierda.is_none_or(|i| i < centrado),
             "lo último antes del QR tiene que ser centrar, no volver a la izquierda"
         );
     }
@@ -1426,7 +1430,8 @@ mod tests_secciones {
     #[test]
     fn cada_casilla_apagada_quita_su_trozo_y_encendida_lo_pone() {
         // (texto que debe salir, apagar)
-        let casos: Vec<(&str, fn(&mut PrintTicketPayload))> = vec![
+        type Caso = (&'static str, fn(&mut PrintTicketPayload));
+        let casos: Vec<Caso> = vec![
             ("Bar", |p| p.show_business_name = false),
             ("Calle Mayor 1", |p| p.show_address = false),
             ("600123456", |p| p.show_phone = false),
@@ -1683,7 +1688,7 @@ mod tests_logo_imagen {
 
     /// Codifica una imagen RGBA a PNG en memoria, como la que llegaría del disco.
     fn png(ancho: u32, alto: u32, pixel: impl Fn(u32, u32) -> Rgba<u8>) -> Vec<u8> {
-        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_fn(ancho, alto, |x, y| pixel(x, y));
+        let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_fn(ancho, alto, pixel);
         let mut buf = std::io::Cursor::new(Vec::new());
         img.write_to(&mut buf, image::ImageFormat::Png).expect("codificar PNG");
         buf.into_inner()

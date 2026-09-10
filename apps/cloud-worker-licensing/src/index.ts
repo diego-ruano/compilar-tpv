@@ -62,7 +62,6 @@ import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
 // la instrumentación funciona en runtime con cualquier DO, pero la firma de tipos del SDK espera
 // la clase base moderna, de ahí el cast acotado.
 import { TenantHub as TenantHubClass } from "./durableObjects/tenantHub";
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 	sentryOptions,
 	TenantHubClass as any,

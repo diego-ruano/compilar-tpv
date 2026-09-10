@@ -16,7 +16,7 @@ function forceU8(v: any): Uint8Array {
 		u8 = new Uint8Array(v);
 	} else {
 		// SharedArrayBuffer (si existe)
-		// eslint-disable-next-line no-undef
+		 
 		if (typeof SharedArrayBuffer !== "undefined" && v instanceof SharedArrayBuffer) {
 			u8 = new Uint8Array(v);
 		} else if (v && typeof v === "object" && v.buffer && typeof v.byteLength === "number") {

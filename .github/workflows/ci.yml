@@ -34,6 +34,39 @@ jobs:
       - name: Tests de dominio, casos de uso y persistencia
         run: cargo test -p tpv-domain -p tpv-application -p tpv-infra-sqlite
 
+      # INFRA-04. Va aquí y no en un job propio porque este ya compila estas crates y tiene la
+      # caché caliente: en uno aparte se pagaría el build entero otra vez para lo mismo.
+      #
+      # ⚠️ La lista de crates es la MISMA que la de los tests, y por el mismo motivo: en un runner
+      # Ubuntu pelado no compilan ni `apps/tpv-main/src-tauri` (GTK/webkit2gtk) ni `tpv-infra-aeat`
+      # (WinHTTP). El workspace completo se pasa en local con `pnpm lint:rust`, en Windows.
+      - name: Clippy (sin avisos)
+        run: cargo clippy -p tpv-domain -p tpv-application -p tpv-infra-sqlite -p tpv-contracts -p tpv-telemetry --all-targets -- -D warnings
+
+  # ESLint del monorepo (INFRA-04). Tres reglas de ANÁLISIS, no de estilo: hooks mal colocados,
+  # dependencias de efecto incompletas y promesas sin gestionar. El criterio de por qué son tan
+  # pocas está en `eslint.config.mjs` y conviene leerlo antes de añadir la cuarta.
+  #
+  # `--max-warnings` NO se pone a 0 a propósito: `react-hooks/exhaustive-deps` es un aviso porque a
+  # veces la dependencia se omite a sabiendas. Lo que rompe el build son los errores.
+  lint:
+    name: ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm lint
+
   # Frontend: typecheck (usa bindings.ts ya commiteado, sin recompilar Rust).
   frontend:
     name: Typecheck + tests del frontend

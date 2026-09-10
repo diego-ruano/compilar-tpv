@@ -7,8 +7,8 @@
 //!   usando una clave maestra **no exportable** del **Android Keystore** (respaldo hardware TEE/
 //!   StrongBox cuando el dispositivo lo tiene). Equivale a `EncryptedSharedPreferences` de AndroidX
 //!   pero implementado con **solo clases del framework** vía JNI, para:
-//!     · no añadir dependencias AndroidX ni un plugin Kotlin, y
-//!     · no tocar `gen/android` (sobrevive a `tauri android init`, que regenera ese árbol).
+//!   · no añadir dependencias AndroidX ni un plugin Kotlin, y
+//!   · no tocar `gen/android` (sobrevive a `tauri android init`, que regenera ese árbol).
 //!   El `Context` de la app se obtiene globalmente con `ndk_context` (no hace falta `AppHandle`),
 //!   así las funciones libres de `device.rs` no cambian de firma.
 //!

@@ -346,6 +346,37 @@ la lógica/SQL vive en `crates/*`.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
 - El frontend en **modo TPV** no hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`. En **modo Handy**, las lecturas van por REST al worker y las escrituras también (no hay BD local).
 
+### Linters: análisis, no formato (INFRA-04)
+
+`pnpm lint` (ESLint, todo el monorepo) y `pnpm lint:rust` (clippy, el workspace entero). Los dos
+corren en CI — clippy dentro del job de tests de Rust, para no pagar el build dos veces.
+
+**No hay formateador y no debe haberlo.** No hay reglas de comillas, ni de punto y coma, ni de
+sangría: el código ya está escrito y reescribirlo entero en un commit sólo enterraría el historial.
+Las reglas que hay son de **análisis** — cazan lo que `tsc` no puede ver — y son **tres**:
+
+| Regla | Qué caza | Nivel |
+|---|---|---|
+| `react-hooks/rules-of-hooks` | un hook dentro de un `if`: corrompe el estado del componente | error |
+| `react-hooks/exhaustive-deps` | *stale closures*: un efecto que actúa sobre un valor caducado | aviso |
+| `@typescript-eslint/no-floating-promises` | una promesa rechazada sin `catch`, o sea un fallo **mudo** | error |
+
+**Antes de añadir la cuarta**, la pregunta no es «¿esto es mejor estilo?» sino «¿esta regla habría
+cazado un bug que hemos tenido?». Es la misma razón por la que la lista de comandos gateados de
+SEC-01 es corta: un linter que grita se desactiva a la semana, y entonces no queda ni el linter ni
+la costumbre. Lo que se apaga está apagado **con su motivo escrito** en `eslint.config.mjs`; si vas
+a encender algo, lee esos motivos primero.
+
+- `exhaustive-deps` va en **aviso** y no en error a propósito: a veces la dependencia se omite a
+  sabiendas. Lo que importa es que cada omisión sea una decisión visible, no que no exista. Por eso
+  CI **no** pasa `--max-warnings 0`.
+- **Los `packages/*` quedan fuera del análisis con tipos** porque no tienen `tsconfig.json`, y sin
+  proyecto no hay tipos que consultar. Si algún día lo ganan, muévelos al primer bloque de la
+  configuración y heredarán la regla de las promesas.
+- **`void` no es decoración.** Marca «esto es fuego y olvido, a sabiendas». Si lo que va detrás
+  puede fallar de una forma que el usuario deba ver, `void` es la respuesta equivocada: lo correcto
+  es un `.catch` que lo cuente.
+
 ### Capa de datos del frontend (TanStack Query)
 
 - `QueryClient` único en `shared/lib/queryClient.ts` (staleTime 30s, sin `refetchOnWindowFocus`,

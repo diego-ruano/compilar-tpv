@@ -43,7 +43,7 @@ export function useSaveReserva() {
   return useMutation({
     mutationFn: reservasSave,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: reservasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
     },
   });
 }
@@ -54,7 +54,7 @@ export function useDeleteReserva() {
   return useMutation({
     mutationFn: reservasDelete,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: reservasKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: reservasKeys.all });
     },
   });
 }

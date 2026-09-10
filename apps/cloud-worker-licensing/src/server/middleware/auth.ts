@@ -146,6 +146,8 @@ export async function verifyDeviceProofOrThrow(
 		const ok = await ed25519Verify(sigU8, payloadU8, pubU8);
 		if (!ok) throw new Error("bad_device_signature");
 	} catch (e: any) {
-		throw new Error(`verify_failed: ${String(e?.message || e)}`);
+		// `cause`: sin ella se pierde la traza del fallo original (una firma mal formada y un
+		// error de la cripto llegan indistinguibles al log).
+		throw new Error(`verify_failed: ${String(e?.message || e)}`, { cause: e });
 	}
 }

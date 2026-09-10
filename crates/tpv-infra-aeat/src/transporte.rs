@@ -108,7 +108,7 @@ pub fn post_soap(url: &str, huella_certificado: &str, cuerpo: &str) -> Result<St
         let conexion = Handle(WinHttpConnect(
             sesion.0,
             a_utf16(&host).as_ptr(),
-            INTERNET_DEFAULT_HTTPS_PORT as u16,
+            INTERNET_DEFAULT_HTTPS_PORT,
             0,
         ));
         if conexion.0.is_null() {

@@ -124,57 +124,6 @@ pub fn device_proof_message(
     )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Fija el formato del device-proof. Si alguien lo cambia aquí sin cambiarlo en el worker (o
-    /// al revés), el cliente empieza a recibir 401 en TODAS sus llamadas y cuesta mucho verlo:
-    /// este test convierte ese despiste en un fallo de compilación de la suite.
-    #[test]
-    fn mensaje_device_proof_tiene_el_formato_acordado() {
-        let msg = device_proof_message(1700000000000, "post", "/v1/mesas/cobrar", "tok", b"{\"a\":1}");
-
-        let lineas: Vec<&str> = msg.split('\n').collect();
-        assert_eq!(lineas.len(), 5, "el mensaje son 5 tramos separados por \\n");
-        assert_eq!(lineas[0], "1700000000000");
-        assert_eq!(lineas[1], "POST", "el método va en mayúsculas");
-        assert_eq!(lineas[2], "/v1/mesas/cobrar");
-        // sha256("tok") y sha256(r#"{"a":1}"#) en hex minúsculas: exactamente lo que produce
-        // `sha256HexStr` en el worker. Valores fijados a mano (no calculados aquí) para que el
-        // test falle si alguien cambia el algoritmo o la codificación.
-        assert_eq!(
-            lineas[3],
-            "1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62"
-        );
-        assert_eq!(
-            lineas[4],
-            "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
-        );
-    }
-
-    /// Un cuerpo distinto ⇒ firma distinta. Es justo lo que FABLE-E venía a cerrar: antes se
-    /// podía cambiar el contenido de una petición sin invalidar su firma.
-    #[test]
-    fn el_cuerpo_cambia_el_mensaje() {
-        let a = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":10}");
-        let b = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":9999}");
-        assert_ne!(a, b);
-    }
-
-    /// Sin cuerpo (GET/DELETE) se firma la cadena vacía, no se omite el tramo.
-    #[test]
-    fn sin_cuerpo_se_firma_la_cadena_vacia() {
-        let msg = device_proof_message(1, "GET", "/x", "tok", b"");
-        assert_eq!(msg.split('\n').count(), 5);
-        assert_eq!(
-            msg.split('\n').nth(4).unwrap(),
-            sha256_hex(""),
-            "el último tramo es sha256(\"\")"
-        );
-    }
-}
-
 pub fn sign_payload_b64(sk: &SigningKey, payload: &str) -> Result<String, String> {
     let sig: Signature = sk.sign(payload.as_bytes());
     Ok(B64.encode(sig.to_bytes()))
@@ -272,4 +221,55 @@ pub fn set_field_dek(dek_b64: &str) -> Result<(), String> {
 pub fn clear_field_dek() -> Result<(), String> {
     let _ = secret_store::delete(SVC_AUTH, KEY_FIELD_DEK);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Fija el formato del device-proof. Si alguien lo cambia aquí sin cambiarlo en el worker (o
+    /// al revés), el cliente empieza a recibir 401 en TODAS sus llamadas y cuesta mucho verlo:
+    /// este test convierte ese despiste en un fallo de compilación de la suite.
+    #[test]
+    fn mensaje_device_proof_tiene_el_formato_acordado() {
+        let msg = device_proof_message(1700000000000, "post", "/v1/mesas/cobrar", "tok", b"{\"a\":1}");
+
+        let lineas: Vec<&str> = msg.split('\n').collect();
+        assert_eq!(lineas.len(), 5, "el mensaje son 5 tramos separados por \\n");
+        assert_eq!(lineas[0], "1700000000000");
+        assert_eq!(lineas[1], "POST", "el método va en mayúsculas");
+        assert_eq!(lineas[2], "/v1/mesas/cobrar");
+        // sha256("tok") y sha256(r#"{"a":1}"#) en hex minúsculas: exactamente lo que produce
+        // `sha256HexStr` en el worker. Valores fijados a mano (no calculados aquí) para que el
+        // test falle si alguien cambia el algoritmo o la codificación.
+        assert_eq!(
+            lineas[3],
+            "1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62"
+        );
+        assert_eq!(
+            lineas[4],
+            "015abd7f5cc57a2dd94b7590f04ad8084273905ee33ec5cebeae62276a97f862"
+        );
+    }
+
+    /// Un cuerpo distinto ⇒ firma distinta. Es justo lo que FABLE-E venía a cerrar: antes se
+    /// podía cambiar el contenido de una petición sin invalidar su firma.
+    #[test]
+    fn el_cuerpo_cambia_el_mensaje() {
+        let a = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":10}");
+        let b = device_proof_message(1, "POST", "/x", "tok", b"{\"importe\":9999}");
+        assert_ne!(a, b);
+    }
+
+    /// Sin cuerpo (GET/DELETE) se firma la cadena vacía, no se omite el tramo.
+    #[test]
+    fn sin_cuerpo_se_firma_la_cadena_vacia() {
+        let msg = device_proof_message(1, "GET", "/x", "tok", b"");
+        assert_eq!(msg.split('\n').count(), 5);
+        assert_eq!(
+            msg.split('\n').nth(4).unwrap(),
+            sha256_hex(""),
+            "el último tramo es sha256(\"\")"
+        );
+    }
 }

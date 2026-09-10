@@ -108,7 +108,7 @@ export function useCreateGasto() {
     return useMutation({
         mutationFn: cuentasCreateGasto,
         onSuccess: (ok) => {
-            if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
+            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }
@@ -118,7 +118,7 @@ export function useUpdateGasto() {
     return useMutation({
         mutationFn: cuentasUpdateGasto,
         onSuccess: (ok) => {
-            if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
+            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }
@@ -128,7 +128,7 @@ export function useDeleteGasto() {
     return useMutation({
         mutationFn: cuentasDeleteGasto,
         onSuccess: (ok) => {
-            if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
+            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }
@@ -138,7 +138,7 @@ export function useUpdatePago() {
     return useMutation({
         mutationFn: cuentasUpdatePago,
         onSuccess: (ok) => {
-            if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
+            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }
@@ -148,7 +148,7 @@ export function useAnularPago() {
     return useMutation({
         mutationFn: cuentasAnularPago,
         onSuccess: (ok) => {
-            if (ok) qc.invalidateQueries({ queryKey: cuentasKeys.all });
+            if (ok) void qc.invalidateQueries({ queryKey: cuentasKeys.all });
         },
     });
 }

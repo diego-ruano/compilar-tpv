@@ -28,7 +28,7 @@ export default function ErrorFallback({ error, resetError }: Props) {
 
     const goHome = () => {
         resetError?.();
-        navigate("/", { replace: true }); // tu menú principal es "/"
+        void navigate("/", { replace: true }); // tu menú principal es "/"
     };
 
     const reload = () => {

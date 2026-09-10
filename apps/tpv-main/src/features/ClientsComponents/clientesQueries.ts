@@ -36,7 +36,7 @@ export function useCreateCliente() {
   return useMutation({
     mutationFn: clientesCreateCliente,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: clientesKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: clientesKeys.all });
     },
   });
 }
@@ -47,7 +47,7 @@ export function useUpdateCliente() {
   return useMutation({
     mutationFn: clientesUpdateCliente,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: clientesKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: clientesKeys.all });
     },
   });
 }

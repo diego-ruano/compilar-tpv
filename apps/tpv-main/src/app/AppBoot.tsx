@@ -418,7 +418,7 @@ export default function AppBoot({ router }: { router: any }) {
 
     useEffect(() => {
         let alive = true;
-        (async () => {
+        void (async () => {
             try {
                 const ident = await handyGetIdentity();
                 const fp = await deviceFingerprint(ident.devicePubKeyB64);
@@ -430,7 +430,7 @@ export default function AppBoot({ router }: { router: any }) {
         return () => {
             alive = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, []);
 
     async function handyGetIdentity(): Promise<HandyIdentity> {
@@ -614,7 +614,7 @@ export default function AppBoot({ router }: { router: any }) {
     }, []);
 
     useEffect(() => {
-        (async () => {
+        void (async () => {
             try {
                 const rawMode = await invokeClient("get_device_mode");
                 setMode(isDeviceMode(rawMode) ? rawMode : null);
@@ -675,7 +675,7 @@ export default function AppBoot({ router }: { router: any }) {
     }
 
     useEffect(() => {
-        refreshLicense();
+        void refreshLicense();
     }, []);
 
     async function refreshGate(forceNow: boolean) {
@@ -700,11 +700,11 @@ export default function AppBoot({ router }: { router: any }) {
 
     useEffect(() => {
         if (mode === "tpv") {
-            refreshGate(false);
+            void refreshGate(false);
         } else {
             setGate("loading");
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, [mode]);
 
     // El pulso periódico de la licencia lo lleva el job `licencia` en Rust (jobs/registro.rs), no
@@ -1301,7 +1301,7 @@ export default function AppBoot({ router }: { router: any }) {
                                                             return;
                                                         }
 
-                                                        handyStartPair(
+                                                        void handyStartPair(
                                                             parsed.pairCode,
                                                             parsed.pairSecret,
                                                         );

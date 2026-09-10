@@ -415,25 +415,27 @@ mod tests {
 
     #[tokio::test]
     async fn create_tarea_emite_notificacion_por_cada_asignado() {
-        let mut repo = FakeRepo::default();
-        repo.trabajadores = vec![
-            TrabajadorUI {
-                id_trabajador: "t1".into(),
-                id_usuario: "u1".into(),
-                nombre: "Ana".into(),
-                apellido: None,
-                puesto: None,
-                email: "ana@x.com".into(),
-            },
-            TrabajadorUI {
-                id_trabajador: "t2".into(),
-                id_usuario: "u2".into(),
-                nombre: "Beto".into(),
-                apellido: None,
-                puesto: None,
-                email: "beto@x.com".into(),
-            },
-        ];
+        let repo = FakeRepo {
+            trabajadores: vec![
+                TrabajadorUI {
+                    id_trabajador: "t1".into(),
+                    id_usuario: "u1".into(),
+                    nombre: "Ana".into(),
+                    apellido: None,
+                    puesto: None,
+                    email: "ana@x.com".into(),
+                },
+                TrabajadorUI {
+                    id_trabajador: "t2".into(),
+                    id_usuario: "u2".into(),
+                    nombre: "Beto".into(),
+                    apellido: None,
+                    puesto: None,
+                    email: "beto@x.com".into(),
+                },
+            ],
+            ..Default::default()
+        };
         let notifier = FakeNotifier::default();
 
         let input = CreateTareaInput {
@@ -555,24 +557,26 @@ mod tests {
 
     #[tokio::test]
     async fn update_tarea_notifica_a_los_asignados_actuales() {
-        let mut repo = FakeRepo::default();
-        repo.trabajadores = vec![TrabajadorUI {
-            id_trabajador: "t1".into(),
-            id_usuario: "u1".into(),
-            nombre: "Ana".into(),
-            apellido: None,
-            puesto: None,
-            email: "ana@x.com".into(),
-        }];
-        repo.asignados = vec![TareaAsignadoRow {
-            id_trabajador: "t1".into(),
-            nombre: "Ana".into(),
-            apellido: None,
-            puesto: None,
-            asignada_at: "2026-01-01 00:00:00".into(),
-            estado: "PENDIENTE".into(),
-            finalizada_at: None,
-        }];
+        let repo = FakeRepo {
+            trabajadores: vec![TrabajadorUI {
+                id_trabajador: "t1".into(),
+                id_usuario: "u1".into(),
+                nombre: "Ana".into(),
+                apellido: None,
+                puesto: None,
+                email: "ana@x.com".into(),
+            }],
+            asignados: vec![TareaAsignadoRow {
+                id_trabajador: "t1".into(),
+                nombre: "Ana".into(),
+                apellido: None,
+                puesto: None,
+                asignada_at: "2026-01-01 00:00:00".into(),
+                estado: "PENDIENTE".into(),
+                finalizada_at: None,
+            }],
+            ..Default::default()
+        };
         let notifier = FakeNotifier::default();
 
         let input = UpdateTareaInput {
@@ -591,42 +595,44 @@ mod tests {
 
     #[tokio::test]
     async fn set_asignaciones_notifica_solo_a_los_nuevos() {
-        let mut repo = FakeRepo::default();
-        repo.trabajadores = vec![
-            TrabajadorUI {
+        let repo = FakeRepo {
+            trabajadores: vec![
+                TrabajadorUI {
+                    id_trabajador: "t1".into(),
+                    id_usuario: "u1".into(),
+                    nombre: "Ana".into(),
+                    apellido: None,
+                    puesto: None,
+                    email: "a@x.com".into(),
+                },
+                TrabajadorUI {
+                    id_trabajador: "t2".into(),
+                    id_usuario: "u2".into(),
+                    nombre: "Beto".into(),
+                    apellido: None,
+                    puesto: None,
+                    email: "b@x.com".into(),
+                },
+            ],
+            // t1 ya estaba asignado; al guardar {t1, t2} solo t2 es nuevo.
+            asignados: vec![TareaAsignadoRow {
                 id_trabajador: "t1".into(),
-                id_usuario: "u1".into(),
                 nombre: "Ana".into(),
                 apellido: None,
                 puesto: None,
-                email: "a@x.com".into(),
-            },
-            TrabajadorUI {
-                id_trabajador: "t2".into(),
-                id_usuario: "u2".into(),
-                nombre: "Beto".into(),
-                apellido: None,
-                puesto: None,
-                email: "b@x.com".into(),
-            },
-        ];
-        // t1 ya estaba asignado; al guardar {t1, t2} solo t2 es nuevo.
-        repo.asignados = vec![TareaAsignadoRow {
-            id_trabajador: "t1".into(),
-            nombre: "Ana".into(),
-            apellido: None,
-            puesto: None,
-            asignada_at: "2026-01-01 00:00:00".into(),
-            estado: "PENDIENTE".into(),
-            finalizada_at: None,
-        }];
-        repo.tarea = Some(TareaRow {
-            id_tarea: "tarea1".into(),
-            titulo: "Limpiar barra".into(),
-            descripcion: None,
-            fecha_creacion: "2026-01-01 00:00:00".into(),
-            fecha_limite: None,
-        });
+                asignada_at: "2026-01-01 00:00:00".into(),
+                estado: "PENDIENTE".into(),
+                finalizada_at: None,
+            }],
+            tarea: Some(TareaRow {
+                id_tarea: "tarea1".into(),
+                titulo: "Limpiar barra".into(),
+                descripcion: None,
+                fecha_creacion: "2026-01-01 00:00:00".into(),
+                fecha_limite: None,
+            }),
+            ..Default::default()
+        };
         let notifier = FakeNotifier::default();
 
         let input = SetAsignacionesTareaInput {

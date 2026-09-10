@@ -32,7 +32,7 @@ fn main() {
         use libsql::Value;
         use tpv_application::use_cases::verifactu as uc;
         use tpv_domain::ticket::LineaTicket;
-        use tpv_infra_sqlite::db::{Db, Reader};
+        use tpv_infra_sqlite::db::Db;
         use tpv_infra_sqlite::verifactu::{
             self as vfdb, DatosFactura, SistemaInformatico, SqliteVerifactuRepository,
         };

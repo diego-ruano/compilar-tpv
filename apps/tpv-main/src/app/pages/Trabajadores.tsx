@@ -97,6 +97,8 @@ function asciiSafe(s: string) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/ñ/g, "n")
     .replace(/Ñ/g, "N")
+    // jsPDF sólo lleva WinAnsi: lo que no sea ASCII imprimible hay que quitarlo antes.
+    // eslint-disable-next-line no-control-regex -- el rango es a propósito, no un descuido.
     .replace(/[^\x00-\x7F]/g, "");
 }
 

@@ -4,16 +4,22 @@
   "tasks": {
     "generate-types": {
       "cache": false,
-      "outputs": ["src/generated/**"]
+      "outputs": [
+        "src/generated/**"
+      ]
     },
     "build": {
-      "dependsOn": ["^generate-types", "^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": [
+        "^generate-types",
+        "^build"
+      ],
+      "outputs": [
+        "dist/**"
+      ]
     },
     "dev": {
       "cache": false,
       "persistent": true
-    },
-    "lint": {}
+    }
   }
 }

@@ -62,7 +62,7 @@ export function useSaveProveedor() {
   return useMutation({
     mutationFn: proveedoresSave,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: proveedoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: proveedoresKeys.all });
     },
   });
 }
@@ -73,7 +73,7 @@ export function useDeleteProveedor() {
   return useMutation({
     mutationFn: proveedoresDelete,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: proveedoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: proveedoresKeys.all });
     },
   });
 }
@@ -84,7 +84,7 @@ export function useSetVinculos() {
   return useMutation({
     mutationFn: proveedoresSetVinculos,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: proveedoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: proveedoresKeys.all });
     },
   });
 }
@@ -95,7 +95,7 @@ export function useCreateProducto() {
   return useMutation({
     mutationFn: proveedoresCreateProducto,
     onSuccess: (idNuevo) => {
-      if (idNuevo) qc.invalidateQueries({ queryKey: proveedoresKeys.all });
+      if (idNuevo) void qc.invalidateQueries({ queryKey: proveedoresKeys.all });
     },
   });
 }

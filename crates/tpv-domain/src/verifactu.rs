@@ -625,6 +625,9 @@ pub fn comprobar_registro_previo(
 }
 
 #[cfg(test)]
+// Los nombres de estos tests usan MAYUSCULAS para enfatizar la afirmacion que fijan
+// (`..._NO_gasta_numero`, `..._por_RANGO_...`). Es deliberado y no es snake case.
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 

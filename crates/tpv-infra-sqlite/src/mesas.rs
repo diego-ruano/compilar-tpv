@@ -2407,8 +2407,8 @@ mod tests_numero_ticket {
         {
             let db = Db::open(&ruta).await.unwrap();
             let g = db.write().await;
-            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
-            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap();
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap();
         }
 
         let db = Db::open(&ruta).await.unwrap();
@@ -2424,7 +2424,7 @@ mod tests_numero_ticket {
         let (db, _dir) = db_temporal().await;
         {
             let g = db.write().await;
-            crate::verifactu::reservar_numero_factura(&g).await.unwrap().0;
+            crate::verifactu::reservar_numero_factura(&g).await.unwrap();
         }
 
         let r = db.read().await;

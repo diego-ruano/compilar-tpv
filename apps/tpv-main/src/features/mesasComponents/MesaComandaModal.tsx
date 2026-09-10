@@ -198,7 +198,7 @@ function NotaLineaModal({
                             const isModifier = e.ctrlKey || e.metaKey;
                             if (isEnter && isModifier) {
                                 e.preventDefault();
-                                onSave(value);
+                                void onSave(value);
                             }
                         }}
                         placeholder='Ej: "Sin queso", "Muy hecho", "Sin sal"...'
@@ -584,13 +584,13 @@ export default function MesaComandaModal({
             }
         };
 
-        cargarCategorias();
+        void cargarCategorias();
     }, [open]);
 
     useEffect(() => {
         if (!open) return;
 
-        (async () => {
+        void (async () => {
             try {
                 setLoadingTicket(true);
 
@@ -670,7 +670,7 @@ export default function MesaComandaModal({
             }
         };
 
-        cargarProductos();
+        void cargarProductos();
     }, [open, categoriaSeleccionada]);
 
     useEffect(() => {
@@ -1594,7 +1594,7 @@ export default function MesaComandaModal({
                                                             type="button"
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                eliminarLineaTicket(t.id);
+                                                                void eliminarLineaTicket(t.id);
                                                             }}
                                                             className="w-8 h-8 flex items-center justify-center rounded-lg border border-border text-fg-subtle hover:bg-danger-soft hover:text-danger hover:border-danger/30 transition"
                                                             title="Eliminar producto"

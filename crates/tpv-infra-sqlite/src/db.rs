@@ -144,12 +144,9 @@ fn uncovered_time_source(sql: &str) -> Option<&'static str> {
     for form in ALLOWED_NOW_FORMS {
         stripped = stripped.replace(form, "");
     }
-    for pat in ["'now'", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME"] {
-        if stripped.contains(pat) {
-            return Some(pat);
-        }
-    }
-    None
+    ["'now'", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME"]
+        .into_iter()
+        .find(|pat| stripped.contains(pat))
 }
 
 fn is_write_sql(sql: &str) -> bool {
@@ -979,12 +976,13 @@ mod tests {
                 }
                 // Buscar el `sql:` del mismo objeto (misma línea o siguientes, hasta el cierre `}`).
                 let mut found: Option<String> = None;
-                for j in i..(i + 8).min(lines.len()) {
-                    if let Some(sql) = extract_sql_literal(lines[j]) {
+                for (desplazamiento, linea) in lines[i..(i + 8).min(lines.len())].iter().enumerate()
+                {
+                    if let Some(sql) = extract_sql_literal(linea) {
                         found = Some(sql);
                         break;
                     }
-                    if j > i && lines[j].contains('}') {
+                    if desplazamiento > 0 && linea.contains('}') {
                         break;
                     }
                 }

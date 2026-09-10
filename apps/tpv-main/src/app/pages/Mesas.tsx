@@ -89,8 +89,8 @@ export default function Mesas() {
     }, []);
 
     const handleReloadAll = () => {
-        layoutQuery.refetch();
-        metaQuery.refetch();
+        void layoutQuery.refetch();
+        void metaQuery.refetch();
     };
 
     return (
@@ -148,7 +148,7 @@ export default function Mesas() {
                                 // refetch en cada cambio de línea, redundante y concurrente con la
                                 // reactivación de las queries al cerrar. refetch() ignora staleTime,
                                 // así que el plano queda fresco aunque el modal se cierre enseguida.
-                                metaQuery.refetch();
+                                void metaQuery.refetch();
                             }}
                         />
                     ) : null}

@@ -90,7 +90,7 @@ export default function KitchenBoard({
     }, []);
 
     useEffect(() => {
-        load();
+        void load();
     }, [load, refreshTick]);
 
     useEffect(() => {
@@ -106,7 +106,7 @@ export default function KitchenBoard({
 
         window.addEventListener("vr:changed", onChanged);
         return () => window.removeEventListener("vr:changed", onChanged);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+         
     }, []);
 
     const comandas: KitchenComanda[] = useMemo(() => {

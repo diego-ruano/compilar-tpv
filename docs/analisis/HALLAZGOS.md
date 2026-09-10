@@ -28,9 +28,10 @@
 | CFG-02 | 🟡 | `hono` 4.13.2 con tres avisos moderados | Sin empezar |
 | CFG-03 | 🟡 | La firma interna del worker **falla abriendo** si el secreto está vacío | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
-| HIG-01 | 🔵 | Sin linter en ningún lenguaje, y ~20 `eslint-disable` decorativos | Sin decidir |
+| HIG-01 | 🔵 | Sin linter en ningún lenguaje, y ~20 `eslint-disable` decorativos | ✅ Hecho (2026-09-10) |
 | HIG-02 | 🔵 | Drift numérico y de referencias en CLAUDE.md | Sin empezar |
 | HIG-03 | 🔵 | `npx wrangler` contra la regla del repo | ✅ Hecho (2026-09-10) |
+| HIG-04 | 🟡 | Promesas de la comanda que se pierden sin decir nada | Sin empezar |
 | TEST-02 | 🟡 | Cero E2E del área fiscal, que es la más nueva y la legalmente vinculante | ✅ Hecho (2026-09-10) |
 
 ---
@@ -267,20 +268,51 @@ anota por si algún día conviene convertirlo en un error devuelto en vez de en 
 comprobación es una búsqueda de subcadenas sobre un SQL que ya se está recorriendo, así que el coste
 real de dejarla en release es difícil de medir.
 
-## HIG-01 🔵 · Sin linter, y ~20 `eslint-disable` decorativos
+## HIG-01 ✅ · Sin linter en ningún lenguaje (resuelto 2026-09-10)
 
-No hay ESLint, ni Biome, ni configuración de clippy o rustfmt. `pnpm lint` sólo tiene tarea en los
-tres `packages/` y es un `tsc --noEmit`: ni la app ni el worker pasan por ahí. Mientras tanto hay
-~20 `// eslint-disable-next-line react-hooks/exhaustive-deps` repartidos por el frontend, que no
-suprimen nada porque no hay nada que suprimir.
+No había ESLint, ni Biome, ni configuración de clippy. Y mientras tanto había ~20
+`// eslint-disable-next-line react-hooks/exhaustive-deps` repartidos por el frontend que no
+suprimían nada, porque no había nada que suprimir.
 
-**Datos para decidir**, medidos hoy: `cargo clippy --workspace --all-targets` saca **223 avisos**, de
-los cuales **sólo ~24 son lints de clippy** (`redundant_closure`, `unnecessary_map_or`,
-`needless_range_loop`… todos cosméticos). El resto son avisos de rustc que ya salen en un `cargo
-check` normal, casi todos `dead_code` en código de test. O sea: **el lado Rust está esencialmente
-limpio** y activar clippy en CI costaría una tarde de arreglos triviales.
+**Resuelto**, y no como formateador: tres reglas de análisis (`rules-of-hooks`, `exhaustive-deps`,
+`no-floating-promises`) más clippy, los dos en CI. El criterio y lo que se apagó —con su motivo—
+están en `eslint.config.mjs` y resumidos en CLAUDE.md §8.
 
-Del lado JS no hay medida porque no hay configuración. Ver la nota de decisión más abajo.
+**Lo que encontró al encenderlo**, que es la respuesta a si servía de algo:
+
+- **72 promesas sin gestionar.** 25 eran invalidaciones de TanStack en `onSuccess` (fuego y olvido
+  legítimo, ahora marcado con `void`); 4 eran `setAlarm` del `TenantHub` **sin esperar** — y un
+  `setAlarm` perdido deja la cola de SYNC-18 sin drenar, que es justo lo que el comentario de ese
+  fichero dice que no puede pasar. Ahora se esperan (o van por `waitUntil` donde la función es
+  síncrona).
+- **`pnpm lint` estaba roto**: 0 de 3 tareas pasaban. Los tres `packages/*` declaraban
+  `"lint": "tsc --noEmit"` y **no tienen `tsconfig.json`**, así que el comando fallaba siempre.
+  Nadie lo notó porque el script no estaba en CI.
+- **4 de los ~20 `eslint-disable` de `exhaustive-deps` estaban obsoletos** (`AppBoot.tsx` ×2,
+  `Proveedores.tsx`, `KitchenBoard.tsx`): la regla ya no salta ahí. ESLint los retiró.
+- Del lado Rust, **223 avisos de los que sólo ~24 eran de clippy** y todos cosméticos. Se
+  arreglaron; dos se silenciaron con su motivo (los alias FFI `HANDLE`/`BOOL`, que son los nombres
+  de Win32, y los nombres de test que usan MAYÚSCULAS o `dominio__caso` a propósito).
+- Y **una pieza de código muerto real**: `PairingAdapter` guardaba una `app_data_dir` que nadie
+  leía desde que sus credenciales se movieron al `secret_store`.
+
+**Lo que queda fuera y por qué**: los `packages/*` no entran en el análisis con tipos —sin
+`tsconfig.json` no hay tipos—, así que `invokeClient.ts`, que es la frontera del IPC, no está
+cubierto por `no-floating-promises`. Darles un `tsconfig.json` es la forma de arreglarlo.
+
+## HIG-04 🟡 · Promesas de la comanda que se pierden sin decir nada
+
+Lo destapó `no-floating-promises`. `void` marca la intención de «fuego y olvido», pero **no** dice
+que el callee gestione sus errores, y en el camino de la comanda hay al menos uno que no:
+
+- [`MesaComandaModal.tsx:828`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L828)
+  `eliminarLineaTicket` hace `await deleteDetalleById(...)` y `await reloadTicket()` **sin
+  `try`/`catch`**. Si el borrado falla, la línea se queda en pantalla y nadie dice por qué.
+
+Es la misma forma que FIS-01: un fallo mudo en la ruta caliente. La diferencia es que aquí el
+arreglo es pequeño (un `.catch` con un aviso), pero conviene hacerlo con la lista delante y no de
+uno en uno: el linter ya marcó los 47 sitios de fuego y olvido, y falta repasar **cuáles de ellos
+tragan errores** en vez de contarlos.
 
 ## HIG-02 🔵 · Drift en CLAUDE.md
 

@@ -1155,7 +1155,10 @@ pub fn build_test_ticket(printer_name: &str) -> Vec<u8> {
 
 #[cfg(windows)]
 mod imp {
-    #![allow(non_snake_case)]
+    // Los nombres de aqui son los de la API de Win32 tal cual (`OpenPrinterW`, `HANDLE`, `BOOL`):
+    // traducirlos a snake case o a `Handle` rompe la correspondencia con la documentacion de
+    // Microsoft, que es lo unico con lo que se puede cotejar esta capa.
+    #![allow(non_snake_case, clippy::upper_case_acronyms)]
     use super::PrinterInfo;
     use std::ffi::c_void;
 
@@ -1251,7 +1254,7 @@ mod imp {
             }
 
             // Buffer alineado a 8 bytes (los structs llevan punteros): usamos Vec<u64>.
-            let n_u64 = ((needed as usize) + 7) / 8;
+            let n_u64 = (needed as usize).div_ceil(8);
             let mut buf: Vec<u64> = vec![0u64; n_u64];
             let buf_ptr = buf.as_mut_ptr() as *mut u8;
 

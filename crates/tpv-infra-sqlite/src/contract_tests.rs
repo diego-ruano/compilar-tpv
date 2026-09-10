@@ -19,7 +19,12 @@
 //! - La comparación es por **multiconjunto** de filas (sin orden) con igualdad estructural (números
 //!   como números, con tolerancia). El golden lo **bendice Rust** (lado canónico: escritor único);
 //!   el worker se conforma. Regenerar: `BLESS_CONTRACT=1 cargo test -p tpv-infra-sqlite contrato_`.
-#![cfg(test)]
+//!
+//! **Los tests se llaman `dominio__caso`**, con doble guion bajo, para separar de un vistazo el
+//! dominio del supuesto — y ese nombre es ademas la clave del JSON en `tests/contract/casos/`. Como
+//! `non_snake_case` considera que dos guiones bajos seguidos no son snake case, se silencia abajo:
+//! es la convencion del harness, no un descuido, y renombrarlos rompe esa correspondencia.
+#![allow(non_snake_case)]
 
 use std::path::PathBuf;
 use std::sync::Arc;

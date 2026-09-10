@@ -2322,13 +2322,14 @@ mod tests_impresora_por_destino {
     use super::*;
 
     fn config(printers: &[(&str, &str)], antiguo: Option<&str>) -> DeviceConfig {
-        let mut cfg = DeviceConfig::default();
-        cfg.printer_name = antiguo.map(|s| s.to_string());
-        cfg.printers = printers
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-        cfg
+        DeviceConfig {
+            printer_name: antiguo.map(|s| s.to_string()),
+            printers: printers
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            ..Default::default()
+        }
     }
 
     #[test]

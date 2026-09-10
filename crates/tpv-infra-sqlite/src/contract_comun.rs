@@ -12,8 +12,6 @@
 //! Lo que sí es idéntico en los dos —abrir una BD temporal, sembrarla y decidir cuándo dos celdas
 //! son "la misma"— vive aquí para que no se pueda desincronizar.
 
-#![cfg(test)]
-
 use std::path::PathBuf;
 use std::sync::Arc;
 

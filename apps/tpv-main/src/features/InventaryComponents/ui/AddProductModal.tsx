@@ -132,7 +132,7 @@ export function AddProductModal({
 
         let cancelled = false;
 
-        (async () => {
+        void (async () => {
             const urlMap: Record<string, string> = {};
             await Promise.all(
                 (alergenos ?? []).map(async (a) => {

@@ -85,7 +85,7 @@ export function useCreateAsignacion() {
   return useMutation({
     mutationFn: horariosCreateAsignacion,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
   });
 }
@@ -96,7 +96,7 @@ export function useUpdateAsignacion() {
   return useMutation({
     mutationFn: horariosUpdateAsignacion,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
   });
 }
@@ -107,7 +107,7 @@ export function useDeleteAsignacion() {
   return useMutation({
     mutationFn: horariosDeleteAsignacion,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
   });
 }
@@ -118,7 +118,7 @@ export function useCopySemanaAsignaciones() {
   return useMutation({
     mutationFn: horariosCopySemanaAsignaciones,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
   });
 }
@@ -129,7 +129,7 @@ export function useSetPredeterminadoDesdeSemana() {
   return useMutation({
     mutationFn: horariosSetPredeterminadoDesdeSemana,
     onSuccess: (ok) => {
-      if (ok) qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
+      if (ok) void qc.invalidateQueries({ queryKey: trabajadoresKeys.all });
     },
   });
 }

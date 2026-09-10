@@ -249,6 +249,19 @@ pub async fn delete_comanda_if_safe(
     repo.delete_comanda_if_safe(&input.id_comanda).await
 }
 
+/// Traduce el destinatario del input al del dominio.
+///
+/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
+/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
+/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
+fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
+    input.map(|d| tpv_domain::verifactu::Destinatario {
+        nombre_razon: d.nombre_razon,
+        nif: d.nif,
+        direccion: d.domicilio,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,17 +376,4 @@ mod tests {
         assert!(cobrar_fraccionado(&repo, invalido(1.0, vec![" ".into()])).await.is_err());
         assert!(repo.cobros.lock().unwrap().is_empty());
     }
-}
-
-/// Traduce el destinatario del input al del dominio.
-///
-/// La VALIDACIÓN (nombre, NIF y su dígito de control) no se hace aquí sino en el repositorio, justo
-/// antes de emitir: es donde se conoce el límite configurado del negocio y donde está la transacción
-/// que hay que rodar atrás si los datos no sirven. Aquí sólo se cambia de forma.
-fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verifactu::Destinatario> {
-    input.map(|d| tpv_domain::verifactu::Destinatario {
-        nombre_razon: d.nombre_razon,
-        nif: d.nif,
-        direccion: d.domicilio,
-    })
 }
