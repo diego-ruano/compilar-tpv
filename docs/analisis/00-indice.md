@@ -4,7 +4,12 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-08-25).** De los ~136 hallazgos del análisis original **quedan 4 abiertos, y
+> **Estado (2026-09-10).** Repaso completo del repo con las suites en verde delante, ya con
+> Veri\*factu dentro: **[HALLAZGOS.md](HALLAZGOS.md)**. Doce puntos abiertos, dos de ellos
+> bloqueantes y los dos en el área fiscal, que es la más nueva. Es una lista viva y aparte de este
+> índice: éste recoge la auditoría por módulos, aquélla lo que salió del repaso del 10/09.
+>
+> **Antes (2026-08-25).** De los ~136 hallazgos del análisis original **quedan 4 abiertos, y
 > ninguno es un bug**. El 25/08 se cerró **CUENTA-06** implementando el cierre de caja (ver
 > [PLAN_CIERRE_CAJA.md](../PLAN_CIERRE_CAJA.md)).
 >
