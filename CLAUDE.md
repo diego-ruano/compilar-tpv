@@ -1265,7 +1265,7 @@ cosas**, que es la única forma de comprobar el trabajo de impresión sin una im
 
 ## 16. Los E2E sobre la app compilada (TEST-01)
 
-**Cinco** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
+**Seis** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
 IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
 componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
 sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda algo más de un minuto.
@@ -1276,11 +1276,28 @@ pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo v
 pnpm --filter @tpv/main test:e2e             # el recorrido
 ```
 
-**El camino del dinero** (9 pasos): equipo nuevo → modo TPV → **activar una licencia de verdad**
-contra `tpv-api` → elegir PIN → fichar entrada y entrar → categoría y producto con precio, IVA y
-lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → **cierre de caja con descuadre 0**.
-La última cifra es la que lo justifica entero: si algo se rompe entre la interfaz y SQLite, deja de
-cuadrar.
+**El camino del dinero** (10 pasos): equipo nuevo → modo TPV → **activar una licencia de verdad**
+contra `tpv-api` → elegir PIN → fichar entrada y entrar → **declarar quién factura** → categoría y
+producto con precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** →
+**cierre de caja con descuadre 0**. La última cifra es la que lo justifica entero: si algo se rompe
+entre la interfaz y SQLite, deja de cuadrar.
+
+El paso de los datos fiscales no es andamiaje del test: desde FISCAL-01 cada cobro expide una
+factura, y `emitir_cobro` corta la transacción si faltan el NIF y la razón social. La activación de
+la licencia **no** los rellena (su «nombre legal» va a la licencia, no a `Business_Settings`), así
+que declararlos es parte del estreno de un equipo real.
+
+**La factura de cada cobro** (8 pasos): estreno → un equipo recién estrenado **no sabe quién
+factura** y la pantalla lo grita → se declara por Configuración → Fiscal → venta y cobro → el
+registro de facturación existe, es `F2`, y **su número ES el número del ticket** → el ticket lleva
+su QR y una reimpresión saca exactamente el mismo → una segunda venta avanza la cadena sin
+anomalías → las dos quedan en la cola diciendo por qué no han salido (`sin_certificado`).
+
+Los pasos 5 y 6 son el corazón: hay ~100 tests de Rust sobre la huella y la persistencia, y ninguno
+recorría React → IPC → cobro → registro → vuelta al papel. Si esa cadena se parte la aplicación no
+protesta — el papel sale sin QR y ya está. El **modo formación** se queda fuera a propósito: hoy
+rompe esa invariante (ver [docs/analisis/HALLAZGOS.md](docs/analisis/HALLAZGOS.md)), y un paso que
+falla convertiría el E2E en un semáforo que nadie mira.
 
 **Las copias de seguridad** (4+5+3 pasos, en tres ficheros): con la nube encendida se estrena el
 equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca
@@ -1329,10 +1346,13 @@ usando `license_check_now` porque ahí no hay nada que esperar.
 | Pieza | Archivo | Rol |
 |---|---|---|
 | El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, carta, venta, cobro y arqueo |
+| La factura de cada cobro | `e2e/specs/fiscal.e2e.ts` | Datos del obligado, registro, QR del ticket y cadena |
 | Copias de seguridad | `e2e/specs/copias-1-copia.e2e.ts` · `copias-2-recuperar.e2e.ts` | Copia, avería, restauración y reconciliación |
 | Volver sólo con la nube | `e2e/specs/copias-3-nube.e2e.ts` | El volcado de SYNC-19, sin copia local |
 | La licencia deja de valer | `e2e/specs/licencia.e2e.ts` | Anulada, desanulada, caducada y renovada |
 | Arranque compartido | `e2e/helpers/arranque.ts` | Modo, activación, PIN y login |
+| Vender por mesa | `e2e/helpers/vender.ts` | Carta, plano, líneas y cobro: lo que comparten venta y fiscal |
+| Lo fiscal | `e2e/helpers/fiscal.ts` | Declarar el obligado y leer el registro, el estado y el bloque del ticket |
 | Licencias de la tanda | `e2e/helpers/licencias.ts` | Emitir, revocar, desrevocar, acortar |
 | Aislamiento del equipo | `e2e/helpers/entorno.ts` | Verifica el binario, prepara el AppData, rompe la base |
 | Gestos | `e2e/helpers/ui.ts` | Pulsar, escribir y leer por IPC lo que la pantalla no enseña |
@@ -1420,5 +1440,10 @@ usando `license_check_now` porque ahí no hay nada que esperar.
 - **`timeoutMsg` se construye al llamar, no al fallar.** Interpolar ahí una variable que se rellena
   durante la espera imprime siempre su valor inicial. Lo que cuente el último intento va en un
   `throw` **después** de esperar.
+- **El E2E SÍ pasa por el typecheck de CI**, aunque no se ejecute allí. `e2e/` vive fuera del
+  `include` de la app, igual que `test/`, así que sin su tsconfig propio en el script `typecheck`
+  sus errores de tipos no los vería nadie hasta que alguien lanzara la tanda a mano — o sea, justo
+  antes de una release. Renombrar un helper y romper un recorrido sale gratis si nada compila esa
+  carpeta.
 - **Un fallo deja una captura** en `apps/tpv-main/e2e/fallos/` (no se versiona). Es lo que convirtió
   «algo tapa el botón» en «la regla común de modales capa esta modal a 42 rem».

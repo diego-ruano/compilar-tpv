@@ -58,12 +58,15 @@ type Receta = {
  * `migration_altered`. Una licencia por tanda hace el recorrido hermético y deja el `.env` con una
  * sola cosa dentro: el token de administración.
  */
-type Licencia = "venta" | "copias" | "licencia";
+type Licencia = "venta" | "fiscal" | "copias" | "licencia";
 
-const LICENCIAS: Licencia[] = ["venta", "copias", "licencia"];
+const LICENCIAS: Licencia[] = ["venta", "fiscal", "copias", "licencia"];
 
 const RECETAS: Record<string, Receta> = {
     "venta.e2e.ts": { equipo: "nuevo", nube: false, licencia: "venta" },
+    // Sin nube, como la venta y por lo mismo: el recorrido cuenta registros de facturación, y un
+    // catch-up traería los que dejaron las ejecuciones anteriores del mismo tenant.
+    "fiscal.e2e.ts": { equipo: "nuevo", nube: false, licencia: "fiscal" },
     "copias-1-copia.e2e.ts": { equipo: "nuevo", nube: true, licencia: "copias" },
     "copias-2-recuperar.e2e.ts": {
         equipo: "el de antes, roto",
@@ -100,6 +103,7 @@ export const config: WebdriverIO.Config = {
     // En orden explícito y no por glob: `copias-2` recupera el equipo que deja `copias-1`.
     specs: [
         "./specs/venta.e2e.ts",
+        "./specs/fiscal.e2e.ts",
         "./specs/copias-1-copia.e2e.ts",
         "./specs/copias-2-recuperar.e2e.ts",
         "./specs/copias-3-nube.e2e.ts",

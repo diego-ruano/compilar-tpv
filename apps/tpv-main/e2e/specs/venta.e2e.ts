@@ -8,15 +8,17 @@
 // cliente real, y tampoco los prueba nadie.
 //
 // El recorrido está pensado para que la última cifra lo verifique todo: si algo se rompe entre
-// React y SQLite, el arqueo del paso 8 deja de cuadrar.
+// React y SQLite, el arqueo del paso 9 deja de cuadrar.
+//
+// Los gestos de montar la carta, abrir la mesa y cobrar viven en `helpers/vender.ts` porque los
+// comparte con `fiscal.e2e.ts`. Un recorrido NO puede importar a otro —importar un spec lo
+// EJECUTA—, así que lo común va en `helpers/`.
 
 import fs from "node:fs";
 import path from "node:path";
 
-import { $, $$, browser, expect } from "@wdio/globals";
+import { $, browser, expect } from "@wdio/globals";
 
-import { fitTransform } from "../../src/features/mesasComponents/geometry.js";
-import type { Salon } from "../../src/features/mesasComponents/types.js";
 import {
     activarLicencia,
     elegirModoTpv,
@@ -24,15 +26,21 @@ import {
     ficharYEntrar,
 } from "../helpers/arranque.js";
 import { APP_ID_E2E, cargarDotEnv, dirDatosE2E } from "../helpers/entorno.js";
+import { declararDatosFiscales } from "../helpers/fiscal.js";
+import { conTexto, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "../helpers/ui.js";
 import {
-    conTexto,
-    escribir,
-    irA,
-    leerDeLaApp,
-    literalXPath,
-    pulsar,
-    pulsarXPath,
-} from "../helpers/ui.js";
+    abrirMesa,
+    anadirLineas,
+    cerrarElModalDeLaMesa,
+    cobrarTodoEnEfectivo,
+    crearZonaConMesa,
+    entradasDeCaja,
+    esperarMesaLibre,
+    esperarTotalPendiente,
+    estadoDeMesa,
+    montarLaCarta,
+    type Producto,
+} from "../helpers/vender.js";
 
 cargarDotEnv();
 
@@ -45,14 +53,17 @@ const NEGOCIO = "Bar E2E TEST-01";
 const PIN = "4321"; // distinto del 1234 del seed: así el login prueba el PIN elegido, no el sembrado
 const ZONA = "Salón E2E";
 const MESA = "M1";
-const CATEGORIA = "Bebidas E2E";
-const PRODUCTO = "Caña E2E";
-const PRECIO = "5.00";
-const IVA = "10";
 const UNIDADES = 2;
 const TOTAL = "10,00";
 
-/** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 5. */
+const PRODUCTO: Producto = {
+    categoria: "Bebidas E2E",
+    nombre: "Caña E2E",
+    precio: "5.00",
+    iva: "10",
+};
+
+/** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 5b. */
 let idMesa = "";
 
 describe("El camino del dinero", () => {
@@ -85,144 +96,48 @@ describe("El camino del dinero", () => {
         await ficharYEntrar(PIN);
     });
 
-    it("5a · crea una categoría y un producto con precio, IVA y stock", async () => {
-        await irA("/Inventario");
-
-        await pulsar("Nueva categoría");
-        const nombreCategoria = $('//label[contains(., "Nombre")]/following-sibling::input');
-        await nombreCategoria.waitForDisplayed({ timeout: 20_000 });
-        await nombreCategoria.setValue(CATEGORIA);
-        await pulsar("Guardar categoría");
-
-        // Hay que entrar en la categoría: "Nuevo producto" no existe en la lista de categorías,
-        // sólo dentro de una. Es lo mismo que hace quien da de alta la carta.
-        await pulsar(CATEGORIA);
-        await pulsar("Nuevo producto");
-        await escribir("#producto-nombre", PRODUCTO);
-        // Las categorías del desplegable se cargan aparte del modal.
-        const categoria = $("#producto-categoria");
-        await browser.waitUntil(
-            async () => (await categoria.getText()).includes(CATEGORIA),
-            { timeout: 30_000, timeoutMsg: `"${CATEGORIA}" no llegó al desplegable de categorías` },
-        );
-        await categoria.selectByVisibleText(CATEGORIA);
-        await escribir("#producto-precio-venta", PRECIO);
-        await escribir("#producto-iva", IVA);
-        // El lote inicial viene activado: es lo que da stock, y cobrar tiene que descontarlo.
-        await escribir("#producto-lote-codigo", "L-E2E");
-        await escribir("#producto-lote-cantidad", "50");
-        await pulsar("Guardar producto");
-
-        // El modal se cierra al guardar: esperarlo es esperar a que la escritura haya terminado.
-        await $("#producto-nombre").waitForExist({ reverse: true, timeout: 30_000 });
+    it("5 · declara quién factura, sin lo cual no se puede cobrar", async () => {
+        // Desde FISCAL-01 cada cobro expide una factura, y una factura necesita saber quién la
+        // emite: sin NIF ni razón social, `emitir_cobro` corta la transacción del cobro. La
+        // activación NO los rellena (su "nombre legal" va a la licencia), así que esto es parte del
+        // estreno de un equipo, no andamiaje del test. Lo que prueba de verdad es lo de siempre:
+        // que el camino del dinero funciona de punta a punta, y ahora ese camino pasa por aquí.
+        await declararDatosFiscales("Bar E2E TEST-01 SL", "B12345674");
     });
 
-    it("5b · crea una zona con una mesa y guarda el plano", async () => {
-        await irA("/Mesas");
-        await $('a[href="/Mesas/editar"]').waitForClickable({ timeout: 30_000 });
-        await $('a[href="/Mesas/editar"]').click();
+    it("6a · crea una categoría y un producto con precio, IVA y stock", async () => {
+        await montarLaCarta(PRODUCTO);
+    });
 
-        await pulsar("Crear primera zona");
-
-        const nombreZona = $('//div[normalize-space(.)="Nombre zona"]/following-sibling::input');
-        await nombreZona.waitForDisplayed({ timeout: 20_000 });
-        await nombreZona.setValue(ZONA);
-
-        await pulsar("Añadir mesa");
-        const nombreMesa = $('//div[contains(., "Nombre / Nº mesa")]/following-sibling::input');
-        await nombreMesa.waitForDisplayed({ timeout: 20_000 });
-        await nombreMesa.clearValue();
-        await nombreMesa.setValue(MESA);
-        await pulsar("Crear mesa");
-
-        await pulsar("Guardar layout");
-
-        // El guardado le pone a la mesa su UUID de la BD; hasta que vuelve con él, no hay mesa que
-        // abrir en el plano.
-        const salones = await browser.waitUntil(
-            async () => {
-                const s = await leerDeLaApp<Salon[]>("load_layout");
-                return s.length && s[0].tables.length ? s : false;
-            },
-            { timeout: 30_000, timeoutMsg: "El layout guardado no volvió con la mesa" },
-        );
-
-        expect(salones[0].name).toBe(ZONA);
-        expect(salones[0].tables[0].name).toBe(MESA);
-        idMesa = salones[0].tables[0].id.replace(/^db-mesa-/, "");
+    it("6b · crea una zona con una mesa y guarda el plano", async () => {
+        idMesa = await crearZonaConMesa(ZONA, MESA);
         expect(idMesa.length).toBeGreaterThan(0);
-
-        await pulsar("Volver");
     });
 
-    it("6 · abre la mesa y le añade dos líneas", async () => {
-        await abrirLaMesa();
-
-        await conTexto("p", CATEGORIA).waitForDisplayed({ timeout: 30_000 });
-        await conTexto("button", CATEGORIA).click();
-
-        const tarjeta = conTexto("p", PRODUCTO);
-        await tarjeta.waitForDisplayed({ timeout: 30_000 });
-        for (let i = 0; i < UNIDADES; i++) await tarjeta.click();
-
+    it("7 · abre la mesa y le añade dos líneas", async () => {
+        await abrirMesa(MESA);
+        await anadirLineas(PRODUCTO, UNIDADES);
         await esperarTotalPendiente(TOTAL);
 
         // Con la comanda abierta y sin cobrar, la mesa figura como PENDIENTE. Se comprueba aquí
-        // para que el "vuelve a libre" del paso 7 signifique algo: sin esto, ver que la mesa no
+        // para que el "vuelve a libre" del paso 8 signifique algo: sin esto, ver que la mesa no
         // está ocupada pasaría igual con una mesa que nunca llegó a estarlo.
-        expect(await estadoDeLaMesa()).toBe("PENDIENTE");
+        expect(await estadoDeMesa(idMesa)).toBe("PENDIENTE");
     });
 
-    it("7 · cobra en efectivo, con el importe exacto", async () => {
-        await pulsar("Cobrar todo");
-        await pulsar("Cobrar en efectivo");
-
+    it("8 · cobra en efectivo, con el importe exacto", async () => {
         // Un billete de 10 € para 10,00 €: cambio 0.
-        await sumarBillete("10€");
-        await conTexto("p", "Cambio").waitForDisplayed({ timeout: 20_000 });
+        await cobrarTodoEnEfectivo("10€");
 
-        await pulsar("Confirmar cobro");
-
-        // Cobrado todo: ya no queda nada que cobrar en esta comanda.
-        await browser.waitUntil(
-            async () => !(await conTexto("button", "Cobrar todo").isEnabled()),
-            { timeout: 30_000, timeoutMsg: 'Tras cobrar, "Cobrar todo" seguía activo' },
-        );
-
-        // Acotado a la cabecera del modal a propósito: el aspa de la barra de título de la propia
-        // aplicación lleva el mismo `aria-label="Cerrar"`, y ese botón cierra el TPV.
-        await pulsarXPath(
-            `//div[normalize-space(text())=${literalXPath(`Mesa: ${MESA}`)}]` +
-                `/following-sibling::div//button[@aria-label="Cerrar"]`,
-            "aspa de cerrar el modal de la mesa",
-        );
+        await cerrarElModalDeLaMesa(MESA);
 
         // La mesa vuelve a libre. El plano es un `<canvas>`, así que el estado se lee por el mismo
         // comando con el que lo pinta la app.
-        let ultimo = "(no se llegó a leer)";
-        const libre = await browser
-            .waitUntil(
-                async () => {
-                    ultimo = await estadoDeLaMesa();
-                    return ultimo === "LIBRE";
-                },
-                { timeout: 30_000 },
-            )
-            .then(
-                () => true,
-                () => false,
-            );
-
-        // `timeoutMsg` se construye al llamar y no al fallar, así que lo que cuenta el último
-        // intento hay que lanzarlo después de esperar.
-        if (!libre) throw new Error(`La mesa ${idMesa} sigue en ${ultimo} tras el cobro.`);
+        await esperarMesaLibre(idMesa);
 
         // Y el cobro salió con número de ticket. No se pinta en ninguna pantalla —viaja al
         // ESC/POS—, así que se lee por el mismo comando que usa la reimpresión de Cuentas.
-        const entradas = await leerDeLaApp<Array<{ id: string; importe: number; metodo: string }>>(
-            "cuentas_get_entradas",
-            { args: { del: null, al: null, q: null, page: null, page_size: null } },
-        );
+        const entradas = await entradasDeCaja();
         expect(entradas.length).toBe(1);
         expect(entradas[0].metodo).toBe("Efectivo");
         expect(entradas[0].importe).toBeCloseTo(10, 2);
@@ -234,7 +149,7 @@ describe("El camino del dinero", () => {
         expect(ticket.numero_ticket).toBeTruthy();
     });
 
-    it("8 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
+    it("9 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
         await irA("/Cuentas");
         await pulsar("Cerrar caja");
 
@@ -281,90 +196,6 @@ describe("El camino del dinero", () => {
 });
 
 /* ── Gestos que no son un `click` en un selector ─────────────────────────── */
-
-
-/**
- * Abre la mesa creada por el test.
- *
- * El plano de salones lo pinta Konva sobre un `<canvas>`: las mesas no son elementos, así que no
- * hay nada que seleccionar ni nada a lo que hacer `click()`. Se calcula dónde cae la mesa con la
- * MISMA función que usa la pantalla (`fitTransform`) sobre el layout real, y se pulsa ahí. Copiar
- * la cuenta en vez de importarla habría dejado dos versiones que se separan al primer retoque del
- * encuadre.
- */
-async function abrirLaMesa(): Promise<void> {
-    await irA("/Mesas");
-
-    const lienzo = $("canvas");
-    await lienzo.waitForDisplayed({ timeout: 30_000 });
-
-    const salones = await leerDeLaApp<Salon[]>("load_layout");
-    const salon = salones[0];
-    const mesa = salon.tables[0];
-
-    const { width, height } = await lienzo.getSize();
-    const vista = fitTransform(salon, width, height, 26);
-
-    // El nodo de la mesa se dibuja con su origen en (x, y) y la figura de (0,0) a (ancho, alto).
-    const centroX = vista.x + (mesa.x + mesa.width / 2) * vista.scale;
-    const centroY = vista.y + (mesa.y + mesa.height / 2) * vista.scale;
-
-    // Los desplazamientos de la acción son relativos al CENTRO del elemento.
-    await browser
-        .action("pointer")
-        .move({
-            origin: lienzo,
-            x: Math.round(centroX - width / 2),
-            y: Math.round(centroY - height / 2),
-        })
-        .down()
-        .pause(80)
-        .up()
-        .perform();
-
-    // El titulo del modal es un `div`, no un encabezado: se busca el nodo exacto para no acabar
-    // encontrando cualquier contenedor que lo envuelva.
-    await $(`//div[normalize-space(text())=${literalXPath(`Mesa: ${MESA}`)}]`).waitForDisplayed({
-        timeout: 30_000,
-    });
-}
-
-/**
- * Cómo ve la app el estado de esta mesa.
- *
- * `mesas_meta_all` sólo devuelve las mesas con una comanda ABIERTA: una mesa libre no sale en el
- * mapa, y así es justamente como la pinta el plano (sin meta = libre). Por eso "no está" se
- * traduce aquí a LIBRE en vez de a un fallo.
- */
-async function estadoDeLaMesa(): Promise<string> {
-    try {
-        const mapa = await leerDeLaApp<Record<string, { estado?: string }>>("mesas_meta_all");
-        // La clave puede venir como UUID o como `db-mesa-<uuid>`: `mesasLoadMesaMeta` normaliza
-        // las dos, así que aquí se aceptan las dos también.
-        const meta = mapa[idMesa] ?? mapa[`db-mesa-${idMesa}`];
-        return meta?.estado ?? "LIBRE";
-    } catch (e) {
-        return `el comando falló: ${String(e)}`;
-    }
-}
-
-/** Espera a que el panel del ticket muestre ese total pendiente. */
-async function esperarTotalPendiente(importe: string): Promise<void> {
-    const cifra = $('//div[starts-with(normalize-space(.), "Total pendiente")]/span');
-    await browser.waitUntil(async () => (await cifra.getText()).includes(importe), {
-        timeout: 30_000,
-        timeoutMsg: `El ticket no llegó a ${importe} €`,
-    });
-}
-
-/** Suma un billete en el contador de efectivo del cobro (el "+" de esa denominación). */
-async function sumarBillete(etiqueta: string): Promise<void> {
-    await pulsarXPath(
-        `//p[normalize-space(text())=${literalXPath(etiqueta)}]` +
-            `/ancestor::div[contains(@class,"flex-col")][1]//button[normalize-space(.)="+"]`,
-        `"+" de ${etiqueta} en el cobro`,
-    );
-}
 
 /** Suma un billete al recuento del cajón del cierre (hay dos contadores: se acota por el título). */
 async function contarEnElCajon(etiqueta: string): Promise<void> {

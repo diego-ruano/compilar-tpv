@@ -10,7 +10,7 @@
     "test": "vitest run",
     "build:e2e": "tsx e2e/construir.ts",
     "test:e2e": "wdio run e2e/wdio.conf.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json",
     "tauri": "tauri"
   },
   "dependencies": {
