@@ -221,7 +221,12 @@ export function Negocio({
                         />
                     </Field>
 
-                    <Field label="CIF" hint="Opcional">
+                    {/* NO es opcional, y es la MISMA columna (`Business_Settings.CIF`) que edita
+                        Configuración → Fiscal diciendo «sin esto no se puede cobrar». Dos pantallas
+                        sobre el mismo dato diciendo lo contrario es peor que una sola mal puesta:
+                        quien lee ésta se queda tranquilo. El sitio para rellenarlo con su contexto
+                        —y con la validación del NIF— es Fiscal; aquí sólo se dice dónde. */}
+                    <Field label="CIF" hint="Se configura en Fiscal">
                         <TextInput
                             value={draft.cif}
                             onChange={(e) =>

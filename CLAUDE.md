@@ -1090,6 +1090,15 @@ no dejar de hacerlo.
 - **La Handy no factura.** Ya no cobra (`cobro_solo_en_main`), y el worker veta además cualquier
   escritura a las tablas fiscales (`test/fiscalSoloMain.test.ts`): el número correlativo y la cadena
   de huellas viven en la Main y no pueden tener dos escritores.
+- **Sin los datos del obligado no se cobra, y la aplicación lo DICE.** `datos_obligado` corta la
+  transacción del cobro si faltan el NIF o la razón social, y eso es correcto: cada cobro expide una
+  factura. Lo que no puede pasar es que se descubra en la caja con un cliente delante, así que hay
+  tres redes y las tres importan: el `catch` del cobro **enseña el mensaje** en las dos pantallas de
+  venta (antes mesas se lo tragaba entero y no pasaba *nada* al pulsar «Confirmar cobro»); un aviso
+  al entrar lleva a Configuración → Fiscal de un clic; y `Negocio.tsx` ya no llama «Opcional» al CIF,
+  que es la misma columna. El aviso va **después del login** porque
+  `config_patch_business_settings` exige Administrador, y **manda sobre la escalera de atraso**:
+  aquélla dice que hay facturas sin remitir, ésta que el siguiente cobro va a fallar.
 - **La declaración responsable se ve desde dentro del programa** (art. 13 RRSIF, *«visible en cada
   una de sus versiones»*), con la versión real de `tauri.conf.json`, no un número escrito a mano.
   Mientras falten los datos definitivos del productor, la pantalla **dice que está incompleta** en

@@ -46,6 +46,25 @@ type Estado = {
     escalon: EscalonFiscal;
     antiguedadMin: number | null;
     pendientes: number;
+    /**
+     * ¿Están el NIF y la razón social del obligado configurados?
+     *
+     * **Arranca en `true` a propósito.** Es lo contrario de lo que pide la prudencia en casi todo
+     * lo demás, y aquí es lo correcto por dos motivos: en una **Handy** este comando falla (no hay
+     * registros de facturación allí), y antes de la primera respuesta no se sabe nada. En los dos
+     * casos, un `false` sacaría un aviso bloqueante en un equipo que no tiene ese problema. Lo que
+     * cubre el lado pesimista ya está donde importa: sin estos datos, `emitir_cobro` corta la
+     * transacción del cobro pase lo que pase en la interfaz.
+     */
+    datosFiscalesCompletos: boolean;
+    /**
+     * El aviso de los datos que faltan ya se ha visto en esta sesión.
+     *
+     * Es un reconocimiento aparte del de la escalera de atraso porque son problemas distintos:
+     * aquél mide horas de cola, éste dice que el equipo **no puede cobrar**. Reconocer uno no puede
+     * silenciar el otro.
+     */
+    datosReconocidos: boolean;
     /** `false` hasta la primera respuesta. Sin esto, el aviso parpadearía al arrancar. */
     listo: boolean;
     /**
@@ -59,17 +78,31 @@ type Estado = {
     init: () => void;
     refrescar: () => Promise<void>;
     reconocer: () => void;
+    reconocerDatos: () => void;
 };
 
 let timer: number | null = null;
 let iniciado = false;
 
-export const useEstadoFiscal = create<Estado>((set, get) => ({
-    escalon: "ninguno",
-    antiguedadMin: null,
+/**
+ * Los valores de partida, en UN solo sitio.
+ *
+ * Estaban escritos dos veces —en el `create` y en `_resetEstadoFiscal`— y eso no es sólo
+ * duplicación: hacía que un test del arranque midiera el reset en vez del store, y por tanto que
+ * pasara aunque el defecto de verdad fuera el contrario.
+ */
+const INICIAL = {
+    escalon: "ninguno" as EscalonFiscal,
+    antiguedadMin: null as number | null,
     pendientes: 0,
+    datosFiscalesCompletos: true,
+    datosReconocidos: false,
     listo: false,
     reconocido: false,
+};
+
+export const useEstadoFiscal = create<Estado>((set, get) => ({
+    ...INICIAL,
 
     init: () => {
         if (iniciado) return;
@@ -94,6 +127,7 @@ export const useEstadoFiscal = create<Estado>((set, get) => ({
                 escalon: ORDEN.includes(escalon) ? escalon : "ninguno",
                 antiguedadMin: e.antiguedad_pendiente_min ?? null,
                 pendientes: Number(e.pendientes ?? 0),
+                datosFiscalesCompletos: e.datos_fiscales_completos !== false,
                 listo: true,
                 // Si el escalón SUBE, el reconocimiento anterior ya no vale: lo que se reconoció era
                 // un problema más pequeño. Y si baja, da igual: el aviso deja de salir.
@@ -107,6 +141,7 @@ export const useEstadoFiscal = create<Estado>((set, get) => ({
     },
 
     reconocer: () => set({ reconocido: true }),
+    reconocerDatos: () => set({ datosReconocidos: true }),
 }));
 
 /** Para los tests y para un cierre de sesión: deja el store como recién cargado. */
@@ -114,11 +149,5 @@ export function _resetEstadoFiscal(): void {
     if (timer !== null) window.clearInterval(timer);
     timer = null;
     iniciado = false;
-    useEstadoFiscal.setState({
-        escalon: "ninguno",
-        antiguedadMin: null,
-        pendientes: 0,
-        listo: false,
-        reconocido: false,
-    });
+    useEstadoFiscal.setState({ ...INICIAL });
 }

@@ -18,6 +18,7 @@ import DatosFiscalesModal, {
 import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import type { DatosDelTicket } from "../configuracion/api/printerApis";
 import { useMode } from "../../shared/stores/useMode";
+import { useToast } from "../../shared/toast";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { esError, toAppError } from "@tpv/client";
 
@@ -853,6 +854,7 @@ export default function MesaComandaModal({
     } | null>(null);
     const [errorFactura, setErrorFactura] = useState<string | null>(null);
     const [cobrandoFactura, setCobrandoFactura] = useState(false);
+    const toast = useToast();
 
     const cobrar = async (
         metodo: "tarjeta" | "efectivo",
@@ -931,7 +933,22 @@ export default function MesaComandaModal({
             }
             // Si el fallo llega con el formulario abierto, se enseña DENTRO: cerrarlo perdería los
             // datos que el cliente acaba de dictar.
-            if (pideFactura) setErrorFactura(toAppError(e).message);
+            if (pideFactura) {
+                setErrorFactura(toAppError(e).message);
+                return;
+            }
+            // ⚠️ Y si no, se DICE. Esto antes no existía: cualquier error que no fuera
+            // `factura_completa_requerida` acababa en un `console.error` y nada más, así que el
+            // camarero pulsaba «Confirmar cobro» y **no pasaba nada** — ni toast, ni mensaje, ni
+            // cobro. El caso que lo destapó es el peor posible: un equipo recién instalado sin el
+            // NIF del negocio no puede emitir la factura, así que NINGÚN cobro entra, y la pantalla
+            // no lo contaba (FIS-01).
+            //
+            // El texto sale de `AppErrorDto.message`, que el catálogo de `ErrorCode` ya escribe en
+            // castellano y para humanos («Faltan los datos fiscales del negocio…»). Aquí no se
+            // ramifica por código: cualquier cosa que llegue hasta este punto es algo que quien
+            // está cobrando tiene que ver.
+            toast.error("No se pudo cobrar", toAppError(e).message);
         } finally {
             setCobrandoFactura(false);
         }

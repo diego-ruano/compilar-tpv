@@ -22,7 +22,7 @@ import DatosFiscalesModal, {
 } from "../../shared/ticket/DatosFiscalesModal";
 import { anunciarCobro } from "../../shared/ticket/AvisoFiscalModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import { esError } from "@tpv/client";
+import { esError, toAppError } from "@tpv/client";
 
 import {
   Categoria,
@@ -1115,9 +1115,14 @@ export default function VentaRapida() {
           setPendingCobrosLocal((prev) => prev.filter((x) => x.id !== intent.id));
           rollbackTicketItemsPaidLocal(intent.ticketItemIds, detallesUsados);
 
+          // El motivo, no un «Error» a secas. `AppErrorDto.message` ya viene del catálogo de
+          // `ErrorCode` escrito para humanos y en castellano, así que decirlo cuesta lo mismo que
+          // callarlo — y la diferencia es enorme cuando lo que pasa es que faltan los datos
+          // fiscales del negocio y ningún cobro va a entrar hasta que alguien los rellene
+          // (FIS-01). Con «Error» a secas, el camarero repite el cobro cuatro veces.
           toast.error(
-            "Error",
-            "No se pudo completar el cobro. He devuelto esas líneas a pendiente.",
+            "No se pudo cobrar",
+            `${toAppError(e).message} He devuelto esas líneas a pendiente.`,
           );
 
           if (idComandaActivaRef.current === intent.idComanda) {

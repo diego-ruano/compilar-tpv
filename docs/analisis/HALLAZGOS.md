@@ -11,13 +11,13 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido:** FIS-01 y FIS-02 antes de que esto entre en un bar (los dos son de la semana
-> pasada y los dos rompen algo que la aplicación no señala). FIS-03 y FIS-04 después. El resto,
-> cuando toque.
+> **Estado (2026-09-10, tarde):** los cinco puntos del área fiscal que bloqueaban un piloto están
+> resueltos (FIS-01 a FIS-04) más HIG-01, HIG-03 y TEST-02. Lo que queda no impide entrar en un bar:
+> CAJA-01 es el siguiente por severidad, y FIS-05 conviene decidirlo (es alcance, no bug).
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| FIS-01 | 🔴 | Un TPV recién instalado **no puede cobrar**, y el fallo es mudo | Sin empezar |
+| FIS-01 | 🔴 | Un TPV recién instalado **no puede cobrar**, y el fallo es mudo | ✅ Hecho (2026-09-10) |
 | FIS-02 | 🔴 | El **modo formación** rompe el vínculo ticket ↔ registro | ✅ Hecho (2026-09-10) |
 | FIS-03 | 🟠 | Las facturas de prueba de diciembre **no se anulan nunca** | ✅ Hecho (2026-09-10) |
 | FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
@@ -36,41 +36,47 @@
 
 ---
 
-## FIS-01 🔴 · Un TPV recién instalado no puede cobrar, y el fallo es mudo
+## FIS-01 ✅ · Un TPV recién instalado no podía cobrar, y el fallo era mudo (resuelto 2026-09-10)
 
-`Business_Settings.CIF` y `Razon_Social` nacen vacíos
-([`0001_inicial.sql:931,942`](../../packages/database/migrations/0001_inicial.sql#L931)), y la
-activación de la licencia **no los rellena**: el `legal_name` del formulario de activación viaja en
-el payload de `license_activate` y se queda en la licencia, no en `Business_Settings`.
+`Business_Settings.CIF` y `Razon_Social` nacen vacíos y la activación de la licencia **no los
+rellena** (el `legal_name` del formulario va a la licencia, no al obligado tributario). Pero
+`datos_obligado` devuelve `DatosFiscalesIncompletos` sin ellos, y ese error se propaga con `?` desde
+`emitir_cobro` **dentro de la transacción del cobro** → `ROLLBACK`.
 
-Pero [`datos_obligado`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L248) devuelve
-`DatosFiscalesIncompletos` sin ellos, y ese error se propaga con `?` desde `emitir_cobro`
-**dentro de la transacción del cobro** ([`mesas.rs:2134`](../../crates/tpv-infra-sqlite/src/mesas.rs#L2134),
-[`venta_rapida.rs:1070`](../../crates/tpv-infra-sqlite/src/venta_rapida.rs#L1070)) → `ROLLBACK`.
+Que **haga falta** el NIF es correcto y estaba decidido: desde 2027 cada cobro expide una factura.
+Lo que faltaba eran las tres cosas que hacen que eso se descubra a tiempo, y las tres están hechas:
 
-Que **haga falta** el NIF es correcto y está decidido: desde 2027 cada cobro expide una factura y
-una factura necesita saber quién la emite. `Fiscal.tsx` lo dice con todas las letras («Sin esto no
-se puede cobrar»). Lo que falta son las tres cosas que hacen que eso se descubra a tiempo:
+1. **El error ya no es mudo.** El `catch` de `MesaComandaModal` sólo hacía algo con
+   `factura_completa_requerida`; para cualquier otro error era `console.error` y nada más — el
+   camarero pulsaba «Confirmar cobro» y **no pasaba nada**. Ahora saca un toast con
+   `toAppError(e).message`, que el catálogo de `ErrorCode` ya escribe en castellano y para humanos.
+   No se ramifica por código: cualquier cosa que llegue ahí es algo que quien cobra tiene que ver.
+2. **Venta rápida dice el motivo.** Avisaba, pero con un «Error / No se pudo completar el cobro»
+   que no distingue un fallo pasajero de uno que va a repetirse en los siguientes cien intentos.
+3. **Alguien te lleva allí.** Un aviso al entrar, montado en `AvisoFiscalMontado` (que ya vivía en
+   el layout), que dice que el equipo no puede cobrar y lleva a Configuración → Fiscal de un clic.
 
-1. **Nada lleva al usuario allí.** El estreno va de la licencia al PIN y del PIN al menú. El
-   siguiente sitio donde se entera es la caja, con un cliente delante.
-2. **El error no dice nada.** `DatosFiscalesIncompletos` no lo trata **nadie** en el frontend (grep
-   en `apps/tpv-main/src`: cero coincidencias).
-3. **Y en mesas ni siquiera se ve.** El `catch` de
-   [`MesaComandaModal.tsx:923-935`](../../apps/tpv-main/src/features/mesasComponents/MesaComandaModal.tsx#L923)
-   sólo hace algo con `factura_completa_requerida` y con el formulario de factura abierto. Para
-   cualquier otro error: `console.error` y punto. El camarero pulsa «Confirmar cobro» y **no pasa
-   nada**. Ni toast, ni mensaje, ni cobro.
+**Dónde va el aviso y por qué.** Después del login y no antes: `config_patch_business_settings`
+exige Administrador, así que una pantalla anterior al login no podría guardar nada. Manda sobre los
+dos peldaños de la escalera de atraso —aquéllos dicen «hay facturas sin remitir», éste dice que el
+**siguiente cobro va a fallar**— y lleva su propio reconocimiento, porque cerrar uno no puede
+silenciar el otro. Se puede cerrar: atrapar a un camarero que sólo quiere mirar las mesas no arregla
+nada (él no puede rellenarlo) y la caja ya dice por qué no cobra.
 
-**Qué haría falta.** Un gate en el arranque (como el de la licencia o el del PIN) que pida los datos
-del obligado antes de dejar entrar; que `DatosFiscalesIncompletos` se traduzca en la caja a «faltan
-los datos fiscales, ve a Configuración → Fiscal»; y que el `catch` del cobro no se trague un error
-que no reconoce. Y de paso, [`Negocio.tsx:224`](../../apps/tpv-main/src/features/configuracion/sections/Negocio.tsx#L224)
-sigue etiquetando el CIF como **«Opcional»** mientras `Fiscal.tsx` edita esa misma columna diciendo
-que sin ella no se cobra: dos pantallas sobre el mismo dato diciendo lo contrario.
+**`datosFiscalesCompletos` arranca en `true`**, que es lo contrario de lo que pide la prudencia en
+casi todo este repo, y aquí es lo correcto: en una **Handy** ese comando falla (no hay registros de
+facturación) y antes de la primera respuesta no se sabe nada. Un `false` sacaría un modal bloqueante
+en equipos que no tienen ese problema. Lo pesimista ya está donde importa — sin esos datos el cobro
+se cancela pase lo que pase en la interfaz.
 
-> Efecto colateral ya resuelto: esto dejaba `venta.e2e.ts` en rojo desde el 9 de septiembre. El
-> recorrido ya declara los datos fiscales (commit `bd8acb6`).
+De paso, `Negocio.tsx` etiquetaba el CIF como **«Opcional»** mientras `Fiscal.tsx` edita esa misma
+columna diciendo que sin ella no se cobra. Dos pantallas sobre el mismo dato diciendo lo contrario
+es peor que una sola mal puesta: quien lee la primera se queda tranquilo. Ahora remite a Fiscal, que
+es donde está el contexto y la validación del NIF.
+
+Ocho tests nuevos del store, **tres comprobados en rojo** antes de darlos por buenos. Los defectos
+del store estaban escritos dos veces (en `create` y en `_resetEstadoFiscal`), lo que hacía que el
+test del arranque midiera el reset y no el store: ahora hay una sola constante.
 
 ## FIS-02 ✅ · El modo formación rompía el vínculo ticket ↔ registro (resuelto 2026-09-10)
 
