@@ -6,8 +6,7 @@
 
 import { $, browser } from "@wdio/globals";
 
-import { escribir, irA, literalXPath, pulsarXPath } from "./ui.js";
-import { leerDeLaApp } from "./ui.js";
+import { escribir, irA, leerDeLaApp, literalXPath, pulsarXPath } from "./ui.js";
 
 /** Lo que el recorrido mira de `verifactu_estado`. */
 export type EstadoFiscal = {
