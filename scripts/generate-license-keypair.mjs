@@ -39,7 +39,7 @@ console.log(`
   1) PRIVADA → secreto del worker. Pégala cuando te la pida el comando:
 
        cd apps/cloud-worker-licensing
-       pnpx wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
+       pnpm exec wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
 
      ${b64(seed)}
 
