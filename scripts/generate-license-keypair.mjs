@@ -18,9 +18,9 @@
 import { webcrypto } from "node:crypto";
 
 const { publicKey, privateKey } = await webcrypto.subtle.generateKey(
-	{ name: "Ed25519" },
-	true,
-	["sign", "verify"],
+  { name: "Ed25519" },
+  true,
+  ["sign", "verify"],
 );
 
 // pkcs8 lleva 16 bytes de cabecera ASN.1 antes de la semilla de 32 bytes. El worker
@@ -39,7 +39,7 @@ console.log(`
   1) PRIVADA → secreto del worker. Pégala cuando te la pida el comando:
 
        cd apps/cloud-worker-licensing
-       npx wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
+       pnpx wrangler secret put LICENSE_SIGNING_PRIVATE_KEY
 
      ${b64(seed)}
 
