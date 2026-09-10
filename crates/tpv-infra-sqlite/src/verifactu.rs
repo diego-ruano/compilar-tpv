@@ -319,8 +319,20 @@ fn es_rectificativa(tipo_factura: &str) -> bool {
 /// formato: es lo que permite encontrarlas todas para anularlas, y lo que hace que en el libro se
 /// vean de un vistazo como lo que son.
 fn serie_formacion() -> String {
-    format!("PRU{}", serie_actual())
+    format!("{PREFIJO_SERIE_FORMACION}{}", serie_actual())
 }
+
+/// Prefijo de TODAS las series de formación, y el patrón `LIKE` con el que se las busca.
+///
+/// ⚠️ **Buscarlas por `Serie = serie_formacion()` era un agujero de calendario.** Esa función mira
+/// el año EN CURSO, así que unas pruebas hechas el 28 de diciembre y cerradas el 2 de enero
+/// buscaban `PRU2028`, no encontraban nada y **no anulaban ninguna**. El panel decía «0 sin anular»
+/// por el mismo motivo, así que ni siquiera avisaba: quedaban facturas de prueba vivas para
+/// Hacienda, que es exactamente lo que este modo existe para impedir.
+///
+/// Por prefijo no hay calendario que valga: se encuentran todas, sean del ejercicio que sean.
+const PREFIJO_SERIE_FORMACION: &str = "PRU";
+const PATRON_SERIE_FORMACION: &str = "PRU%";
 
 /// Lo que se antepone a la descripción de una factura de formación.
 ///
@@ -529,14 +541,19 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
         ));
     }
 
-    // En formación pasa lo mismo pero al revés de evidente: el número lo reservó el camino del cobro
-    // ANTES de saber en qué modo estaba el negocio. Si se usara, la factura de pruebas gastaría un
-    // número de la serie real y dejaría un hueco en el libro de ventas que no corresponde a nada.
-    let numero_reservado = if obligado.formacion {
-        None
-    } else {
-        d.numero_reservado.clone()
-    };
+    // Un número reservado tiene que venir YA en la serie que le toca. El camino del cobro lo
+    // consigue preguntando por el modo antes de reservar (`serie_del_cobro`), y lo comprueba aquí
+    // porque `Pagos.Numero_Ticket` guarda ese mismo valor: si los dos dejaran de coincidir, el
+    // ticket llevaría un número que no corresponde a ningún registro y saldría sin QR, sin que nada
+    // protestara. Se para en vez de escribirlo.
+    let numero_reservado = d.numero_reservado.clone();
+    if let Some((num, _)) = &numero_reservado {
+        if !num.starts_with(&format!("{serie}/")) {
+            return Err(AppError::internal(format!(
+                "el número reservado ({num}) no es de la serie que corresponde a esta factura ({serie})"
+            )));
+        }
+    }
 
     // Una subsanación conserva la identidad del original y NO gasta número: es el mismo hecho vuelto
     // a contar, no una factura más.
@@ -1317,7 +1334,36 @@ pub async fn resembrar_cola_de_envio(db: &Db) -> AppResult<usize> {
 /// Reserva el número de la serie del ejercicio en curso. Lo llama el camino del cobro antes del
 /// `INSERT INTO Pagos`, para que `Numero_Ticket` y `Num_Serie_Factura` sean el mismo número.
 pub async fn reservar_numero_factura(db: &WriteGuard<'_>) -> AppResult<(String, i64)> {
-    reservar_numero(db, &serie_actual()).await
+    reservar_numero(db, &serie_del_cobro(db).await?).await
+}
+
+/// La serie en la que numera **un cobro**: la del ejercicio, o la de formación si el modo está
+/// encendido.
+///
+/// ## Por qué esto se pregunta AQUÍ y no se corrige después
+///
+/// El camino del cobro reserva el número antes del `INSERT INTO Pagos`, porque `Pagos.Numero_Ticket`
+/// guarda ese mismo valor. Si la serie se decidiera más tarde —en `emitir_alta`, que es donde se
+/// sabe el modo— habría que elegir entre dos males: usar el número reservado y numerar una factura
+/// de pruebas en la serie de ventas, o descartarlo y que el ticket lleve un número que **no
+/// corresponde a ningún registro**. Lo segundo es lo que pasaba: el papel salía sin QR (nadie
+/// encuentra `2027/000045` cuando el registro es `PRU2027/000001`), la reimpresión tampoco, y el
+/// contador de la serie real quedaba gastado — un hueco en el libro de ventas por cada prueba.
+///
+/// Preguntando antes de reservar no hay nada que corregir: el número nace en la serie correcta y
+/// `Pagos.Numero_Ticket` y `Num_Serie_Factura` vuelven a ser el mismo dato.
+///
+/// ## Por qué no hay carrera
+///
+/// Esto y `emitir_alta` corren dentro de la MISMA transacción del cobro, y `set_formacion` toma el
+/// `WriteGuard` (que serializa a todo escritor: sólo hay uno vivo a la vez). Así que el modo no
+/// puede cambiar entre la reserva y la emisión.
+async fn serie_del_cobro(db: &WriteGuard<'_>) -> AppResult<String> {
+    Ok(if en_formacion(db).await? {
+        serie_formacion()
+    } else {
+        serie_actual()
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1965,18 +2011,17 @@ pub async fn en_formacion<C: Reader>(conn: &C) -> AppResult<bool> {
 /// Es lo que hace que el modo no se pueda dejar a medias en silencio: aunque alguien apague el
 /// interruptor por otro camino, el panel sigue viendo lo que falta por cerrar.
 pub async fn facturas_de_formacion_vivas<C: Reader>(conn: &C) -> AppResult<i64> {
-    let serie = serie_formacion();
     Ok(select_i64(
         conn,
         "SELECT COUNT(*) FROM Registros_Facturacion a \
-         WHERE a.Serie = ?1 AND a.Tipo = 'ALTA' \
+         WHERE a.Serie LIKE ?1 AND a.Tipo = 'ALTA' \
            AND NOT EXISTS ( \
              SELECT 1 FROM Registros_Facturacion n \
              WHERE n.Tipo = 'ANULACION' \
                AND n.Num_Serie_Factura = a.Num_Serie_Factura \
                AND n.NIF_Emisor = a.NIF_Emisor \
            );",
-        vec![Value::Text(serie)],
+        vec![Value::Text(PATRON_SERIE_FORMACION.to_string())],
     )
     .await?
     .unwrap_or(0))
@@ -2006,12 +2051,11 @@ pub async fn set_formacion(db: &Db, encendido: bool) -> AppResult<usize> {
             // Se listan primero y se anulan después: `emitir_anulacion` inserta en la misma tabla
             // que estamos recorriendo, y leer y escribir a la vez sobre un cursor abierto es la
             // clase de cosa que funciona hasta que deja de funcionar.
-            let serie = serie_formacion();
             let mut ids = Vec::new();
             let mut rows = g
                 .query(
                     "SELECT a.ID_Registro FROM Registros_Facturacion a \
-                     WHERE a.Serie = ?1 AND a.Tipo = 'ALTA' \
+                     WHERE a.Serie LIKE ?1 AND a.Tipo = 'ALTA' \
                        AND NOT EXISTS ( \
                          SELECT 1 FROM Registros_Facturacion n \
                          WHERE n.Tipo = 'ANULACION' \
@@ -2019,7 +2063,7 @@ pub async fn set_formacion(db: &Db, encendido: bool) -> AppResult<usize> {
                            AND n.NIF_Emisor = a.NIF_Emisor \
                        ) \
                      ORDER BY a.Orden ASC;",
-                    vec![Value::Text(serie)],
+                    vec![Value::Text(PATRON_SERIE_FORMACION.to_string())],
                 )
                 .await
                 .map_err(db_err)?;
@@ -2424,6 +2468,130 @@ mod tests_modo_formacion {
         let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
         let row = rows.next().await.unwrap().unwrap();
         v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    /// Emite **por el camino del cobro**: reserva primero (como hacen `mesas` y `venta_rapida`) y
+    /// pasa ese número a `emitir_alta`. Devuelve `(numero_reservado, num_serie_factura_del_registro)`.
+    ///
+    /// Es LA diferencia con `emitir_una`, que pasa `numero_reservado: None`. Ese caso no ocurre
+    /// nunca al cobrar, y por pasar por él los tests de formación no veían que los dos números
+    /// habían dejado de ser el mismo.
+    async fn cobrar_una(db: &Arc<Db>) -> (String, String) {
+        let g = db.write().await;
+        let reservado = reservar_numero_factura(&g).await.unwrap();
+        let bloque = emitir_alta(
+            &g,
+            DatosFactura {
+                lineas: vec![LineaTicket {
+                    total_con_iva: 11.0,
+                    tipo_iva: 10.0,
+                    exento: false,
+                    causa_exencion: None,
+                }],
+                numero_reservado: Some(reservado.clone()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        (reservado.0, bloque.num_serie_factura)
+    }
+
+    #[tokio::test]
+    async fn en_formacion_el_numero_del_TICKET_y_el_de_la_FACTURA_son_el_mismo() {
+        // El fallo que esto cierra: el cobro reservaba en la serie del ejercicio y `emitir_alta`
+        // descartaba ese número para numerar en `PRU`. `Pagos.Numero_Ticket` se quedaba con
+        // `2027/000045` y el registro con `PRU2027/000001`, así que `verifactu_bloque_ticket` —que
+        // busca por `Num_Serie_Factura`— no encontraba nada y el papel salía SIN QR, en el cobro y
+        // en la reimpresión. Y sin una sola queja: esa lectura devuelve `null` a propósito.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+
+        let (ticket, factura) = cobrar_una(&db).await;
+
+        assert_eq!(ticket, factura, "el número del ticket ES el número de la factura");
+        let anyo = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(factura, format!("PRU{anyo}/000001"));
+    }
+
+    #[tokio::test]
+    async fn una_venta_de_formacion_NO_gasta_numero_de_la_serie_de_ventas() {
+        // Por el camino del cobro, que es donde estaba el agujero: el contador de la serie real se
+        // incrementaba igual, así que cada prueba dejaba un hueco permanente en el libro de ventas.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        cobrar_una(&db).await;
+        set_formacion(&db, false).await.unwrap();
+
+        let (ticket, factura) = cobrar_una(&db).await;
+        let anyo = chrono::Local::now().format("%Y").to_string();
+        assert_eq!(factura, format!("{anyo}/000001"), "la venta real es la primera");
+        assert_eq!(ticket, factura);
+    }
+
+    #[tokio::test]
+    async fn un_numero_de_OTRA_serie_se_rechaza_en_vez_de_escribirse() {
+        // La red por debajo: si alguien añade un camino que reserve por su cuenta y se equivoque de
+        // serie, el síntoma sería otra vez un ticket sin QR. Aquí se para.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+
+        let g = db.write().await;
+        let e = emitir_alta(
+            &g,
+            DatosFactura {
+                lineas: vec![LineaTicket {
+                    total_con_iva: 11.0,
+                    tipo_iva: 10.0,
+                    exento: false,
+                    causa_exencion: None,
+                }],
+                // De la serie del ejercicio, estando en formación.
+                numero_reservado: Some((format!("{}/000001", chrono::Local::now().format("%Y")), 1)),
+                ..Default::default()
+            },
+        )
+        .await;
+
+        assert!(e.is_err(), "un número de otra serie no puede acabar en el registro");
+    }
+
+    #[tokio::test]
+    async fn las_pruebas_de_OTRO_ejercicio_tambien_se_anulan() {
+        // El agujero de calendario: se buscaban por `Serie = PRU<año actual>`, así que unas pruebas
+        // del 28 de diciembre cerradas el 2 de enero no las encontraba nadie — ni el barrido ni el
+        // contador del panel, que decía «0 sin anular». Quedaban vivas para Hacienda.
+        let (db, _dir) = db_temporal().await;
+        set_formacion(&db, true).await.unwrap();
+        cobrar_una(&db).await;
+
+        // Se reetiqueta a mano como si fuera de un ejercicio anterior. Es lo que habría en la base
+        // de un equipo que cruzó el fin de año con el modo abierto.
+        {
+            let g = db.write().await;
+            g.raw()
+                .execute(
+                    "UPDATE Registros_Facturacion SET Serie = 'PRU2019',                      Num_Serie_Factura = 'PRU2019/000001' WHERE Serie LIKE 'PRU%';",
+                    (),
+                )
+                .await
+                .unwrap();
+        }
+
+        let vivas = {
+            let r = db.read().await;
+            facturas_de_formacion_vivas(&r).await.unwrap()
+        };
+        assert_eq!(vivas, 1, "el panel tiene que seguir viéndolas");
+
+        let anuladas = set_formacion(&db, false).await.unwrap();
+        assert_eq!(anuladas, 1, "y el barrido tiene que anularlas");
+
+        let quedan = {
+            let r = db.read().await;
+            facturas_de_formacion_vivas(&r).await.unwrap()
+        };
+        assert_eq!(quedan, 0);
     }
 
     #[tokio::test]

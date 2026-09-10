@@ -11,13 +11,12 @@
 // de la fila guardada, no recomponerse al imprimir. Si esa cadena se parte, la aplicación no
 // protesta: el papel sale sin QR y ya está.
 //
-// ── Lo que este recorrido NO cubre todavía, y por qué ────────────────────────────────────────
+// ── El modo formación (pasos 9 y 10) ────────────────────────────────────────────────────────
 //
-// El **modo formación** se queda fuera a propósito, no por olvido: hoy rompe justo la invariante
-// del paso 5 (el cobro reserva el número en la serie del ejercicio y `emitir_alta` lo descarta para
-// numerar en `PRU<año>`, así que `Pagos.Numero_Ticket` y `Num_Serie_Factura` dejan de coincidir y
-// el ticket sale sin QR). Está anotado en `docs/analisis/HALLAZGOS.md`. Añadir aquí un paso que
-// falla convertiría el E2E en un semáforo que nadie mira; cuando se arregle, el paso entra aquí.
+// Probar el TPV emite facturas REALES, así que la norma obliga a anularlas. El modo hace las dos
+// cosas —numerar aparte y anularlas al terminar— y aquí se comprueban las dos, más lo que no se ve:
+// que en formación el ticket SIGUE llevando su QR (su número y el de la factura son el mismo) y que
+// la serie de ventas no gasta ni un número por el camino.
 
 import { expect } from "@wdio/globals";
 
@@ -25,8 +24,10 @@ import { estrenarEquipo } from "../helpers/arranque.js";
 import {
     avisoDeDatosFiscalesVisible,
     bloqueDelTicket,
+    empezarPruebas,
     irASeccionFiscal,
     declararDatosFiscales,
+    terminarPruebas,
     verifactuEstado,
     verifactuListar,
     type RegistroFiscal,
@@ -249,5 +250,77 @@ describe("La factura de cada cobro", () => {
         // Y que no dé la lata todavía: por debajo de una hora, no remitir es funcionamiento normal
         // —la propia norma impone una espera entre envíos—, así que la escalera de avisos calla.
         expect(estado.escalon_aviso).toBe("ninguno");
+    });
+
+    it("9 · en formación la factura va aparte, y el ticket sigue llevando su QR", async () => {
+        await empezarPruebas();
+
+        const antes = (await entradasDeCaja()).map((e) => e.id);
+        await abrirMesa(MESA);
+        await anadirLineas(PRODUCTO, UNIDADES);
+        await esperarTotalPendiente(TOTAL);
+        await cobrarTodoEnEfectivo(BILLETE);
+        await cerrarElModalDeLaMesa(MESA);
+        await esperarMesaLibre(idMesa);
+
+        const nueva = (await entradasDeCaja()).find((e) => !antes.includes(e.id));
+        if (!nueva) throw new Error("El cobro de formación no dejó entrada en caja.");
+
+        const ticket = await leerDeLaApp<{ numero_ticket: string | null }>(
+            "cuentas_ticket_para_reimprimir",
+            { idPago: nueva.id },
+        );
+        const numero = ticket.numero_ticket ?? "";
+
+        // El número del TICKET va a la serie de pruebas. Antes se quedaba con uno de la serie de
+        // ventas mientras el registro se numeraba en `PRU`, y ahí se rompía todo lo demás.
+        expect(numero.startsWith("PRU")).toBe(true);
+
+        const registro = (await verifactuListar()).find((r) => r.id_pago === nueva.id);
+        if (!registro) throw new Error("El cobro de formación no emitió registro.");
+        expect(registro.num_serie_factura).toBe(numero);
+
+        // Y por tanto el papel lleva su QR. Ésta es la comprobación que de verdad importa: es el
+        // camino literal de `PrintTicketModal`, y cuando los dos números divergían devolvía `null`
+        // —ticket sin QR— sin que nada protestara.
+        const bloque = await bloqueDelTicket(numero);
+        if (!bloque) {
+            throw new Error(`El ticket de formación ${numero} saldría SIN QR: no tiene bloque.`);
+        }
+        expect(bloque.qr_url).toContain(`numserie=${encodeURIComponent(numero)}`);
+
+        // La descripción dice que es una prueba, que es lo que pide el FAQ de la AEAT.
+        const estado = await verifactuEstado();
+        expect(estado.formacion).toBe(true);
+        expect(estado.formacion_sin_anular).toBe(1);
+    });
+
+    it("10 · terminar las pruebas las anula, y la serie de ventas no gastó ningún número", async () => {
+        await terminarPruebas();
+
+        // Apagar el modo ES la anulación: tiene que existir el registro que lo dice.
+        const registros = await verifactuListar();
+        const anulaciones = registros.filter((r) => r.tipo === "ANULACION");
+        expect(anulaciones.length).toBe(1);
+        expect(anulaciones[0].num_serie_factura.startsWith("PRU")).toBe(true);
+
+        // Y lo que no se ve en ninguna pantalla: la serie de ventas siguió donde estaba. Las dos
+        // ventas reales fueron /000001 y /000002, así que la siguiente es /000003 — si la prueba
+        // hubiera quemado un número, aquí saldría /000004 y el libro tendría un hueco.
+        const antes = (await entradasDeCaja()).map((e) => e.id);
+        await abrirMesa(MESA);
+        await anadirLineas(PRODUCTO, UNIDADES);
+        await esperarTotalPendiente(TOTAL);
+        await cobrarTodoEnEfectivo(BILLETE);
+        await cerrarElModalDeLaMesa(MESA);
+        await esperarMesaLibre(idMesa);
+
+        const nueva = (await entradasDeCaja()).find((e) => !antes.includes(e.id));
+        if (!nueva) throw new Error("La venta real posterior a las pruebas no dejó entrada.");
+        const registro = (await verifactuListar()).find((r) => r.id_pago === nueva.id);
+        if (!registro) throw new Error("La venta real posterior a las pruebas no emitió registro.");
+
+        const anyo = primero!.num_serie_factura.split("/")[0];
+        expect(registro.num_serie_factura).toBe(`${anyo}/000003`);
     });
 });

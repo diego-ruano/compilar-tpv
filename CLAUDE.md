@@ -1010,8 +1010,15 @@ no dejar de hacerlo.
   modo encendido, las facturas van a la serie **`PRU<año>`**, se describen como pruebas y **apagar el
   modo ES la anulación** de todas las que queden vivas, en una transacción. No es un paso aparte que
   se pueda saltar: dejarlo a que alguien se acuerde es dejar que el día que se le olvide quede una
-  venta ficticia contada como real. La serie de formación **manda sobre el tipo de factura** y
-  descarta el número que reservó el camino del cobro — usarlo dejaría un hueco en el libro de ventas.
+  venta ficticia contada como real. La serie de formación **manda sobre el tipo de factura**, y se decide
+  **antes de reservar el número** (`serie_del_cobro`), no después: el camino del cobro escribe ese
+  mismo número en `Pagos.Numero_Ticket`, así que elegir la serie más tarde obligaba a descartarlo —
+  y entonces el ticket llevaba un número que no correspondía a ningún registro, salía **sin QR** y
+  el contador de la serie real quedaba gastado igual. `emitir_alta` rechaza un número que no sea de
+  la serie que corresponde en vez de aceptarlo callando.
+- **Las facturas de prueba se buscan por prefijo (`PRU%`), no por `PRU<año actual>`.** Unas pruebas
+  del 28 de diciembre cerradas el 2 de enero no las encontraba nadie —ni el barrido que las anula ni
+  el contador del panel, que decía «0 sin anular»— y quedaban vivas para Hacienda.
 - **El entorno es una decisión explícita** (`Business_Settings.Verifactu_Entorno`). Los endpoints de
   producción y pruebas se distinguen en tres caracteres, y un ticket de pruebas que parece real es
   peor que uno que no sale: en pruebas el panel lo dice en amarillo y el QR apunta al portal de
@@ -1318,17 +1325,17 @@ factura, y `emitir_cobro` corta la transacción si faltan el NIF y la razón soc
 la licencia **no** los rellena (su «nombre legal» va a la licencia, no a `Business_Settings`), así
 que declararlos es parte del estreno de un equipo real.
 
-**La factura de cada cobro** (8 pasos): estreno → un equipo recién estrenado **no sabe quién
+**La factura de cada cobro** (10 pasos): estreno → un equipo recién estrenado **no sabe quién
 factura** y la pantalla lo grita → se declara por Configuración → Fiscal → venta y cobro → el
 registro de facturación existe, es `F2`, y **su número ES el número del ticket** → el ticket lleva
 su QR y una reimpresión saca exactamente el mismo → una segunda venta avanza la cadena sin
-anomalías → las dos quedan en la cola diciendo por qué no han salido (`sin_certificado`).
+anomalías → las dos quedan en la cola diciendo por qué no han salido → **modo formación**: la
+factura va a `PRU<año>`, el ticket sigue llevando su QR, y al terminar se anulan todas sin que la
+serie de ventas haya gastado un número.
 
 Los pasos 5 y 6 son el corazón: hay ~100 tests de Rust sobre la huella y la persistencia, y ninguno
 recorría React → IPC → cobro → registro → vuelta al papel. Si esa cadena se parte la aplicación no
-protesta — el papel sale sin QR y ya está. El **modo formación** se queda fuera a propósito: hoy
-rompe esa invariante (ver [docs/analisis/HALLAZGOS.md](docs/analisis/HALLAZGOS.md)), y un paso que
-falla convertiría el E2E en un semáforo que nadie mira.
+protesta — el papel sale sin QR y ya está.
 
 **Las copias de seguridad** (4+5+3 pasos, en tres ficheros): con la nube encendida se estrena el
 equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca

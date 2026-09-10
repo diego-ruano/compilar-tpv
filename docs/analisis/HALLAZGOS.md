@@ -18,8 +18,8 @@
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
 | FIS-01 | 🔴 | Un TPV recién instalado **no puede cobrar**, y el fallo es mudo | Sin empezar |
-| FIS-02 | 🔴 | El **modo formación** rompe el vínculo ticket ↔ registro | Sin empezar |
-| FIS-03 | 🟠 | Las facturas de prueba de diciembre **no se anulan nunca** | Sin empezar |
+| FIS-02 | 🔴 | El **modo formación** rompe el vínculo ticket ↔ registro | ✅ Hecho (2026-09-10) |
+| FIS-03 | 🟠 | Las facturas de prueba de diciembre **no se anulan nunca** | ✅ Hecho (2026-09-10) |
 | FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
@@ -72,65 +72,41 @@ que sin ella no se cobra: dos pantallas sobre el mismo dato diciendo lo contrari
 > Efecto colateral ya resuelto: esto dejaba `venta.e2e.ts` en rojo desde el 9 de septiembre. El
 > recorrido ya declara los datos fiscales (commit `bd8acb6`).
 
-## FIS-02 🔴 · El modo formación rompe el vínculo ticket ↔ registro
+## FIS-02 ✅ · El modo formación rompía el vínculo ticket ↔ registro (resuelto 2026-09-10)
 
-El camino real de cobro reserva el número **antes** de saber si el negocio está en formación:
+El camino del cobro reservaba el número **antes** de saber si el negocio estaba en formación
+(`reservar_numero_factura` iba siempre a la serie del ejercicio), lo escribía en
+`Pagos.Numero_Ticket`, y después `emitir_alta` lo **descartaba** para numerar en `PRU<año>`.
 
-- [`mesas.rs:1275`](../../crates/tpv-infra-sqlite/src/mesas.rs#L1275),
-  [`mesas.rs:1989`](../../crates/tpv-infra-sqlite/src/mesas.rs#L1989) y
-  [`venta_rapida.rs:790`](../../crates/tpv-infra-sqlite/src/venta_rapida.rs#L790) llaman a
-  `reservar_numero_factura()`, que va siempre a `serie_actual()`.
-- Ese número se escribe en `Pagos.Numero_Ticket` y se devuelve como `numero_ticket`.
-- Después, [`verifactu.rs:535`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L535) lo **descarta**
-  si `obligado.formacion` y reserva en `PRU<año>`. El `BloqueFiscal` que devuelve `emitir_cobro` se
-  ignora en los tres caminos.
+Las tres consecuencias eran reales: el ticket salía **sin QR** —`verifactu_bloque_ticket` busca por
+`Num_Serie_Factura` y no encontraba `2026/000045`— en el cobro y en la reimpresión, y sin una sola
+queja, porque esa lectura devuelve `null` a propósito; `Pagos.Numero_Ticket` dejaba de ser el número
+de la factura; y el contador de la serie real quedaba gastado, o sea **un hueco en el libro de
+ventas por cada prueba** — justo lo que el comentario del código decía estar evitando.
 
-Consecuencias, las tres reales:
+**Resuelto por el otro lado**: en vez de corregir el número después, se pregunta por el modo
+**antes de reservar** (`serie_del_cobro`). El número nace en la serie que le toca y no hay nada que
+descartar. `emitir_alta` además se niega ahora a escribir un número que no sea de la serie que
+corresponde, en vez de aceptarlo en silencio.
 
-1. **El ticket sale sin QR tributario.**
-   [`PrintTicketModal.tsx:98`](../../apps/tpv-main/src/shared/ticket/PrintTicketModal.tsx#L98)
-   pregunta por `datos.numeroTicket` (`2026/000045`) y
-   [`bloque_por_numero`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L3345) busca
-   `WHERE Num_Serie_Factura = ?1`, que vale `PRU2026/000001`. No hay fila → `null` → papel sin QR,
-   en el cobro y en la reimpresión. Y sin ningún error: esa llamada tiene un `catch` que devuelve
-   `null` a propósito, porque nada de lo que rodea al ticket puede impedir imprimirlo.
-2. **`Pagos.Numero_Ticket` deja de ser el número de la factura**, que es la invariante escrita en
-   CLAUDE.md §11.
-3. **Hueco permanente en la serie real.** El contador de `2026` ya se incrementó. Cada venta de
-   formación quema un número de la serie de ventas — que es exactamente lo que el comentario del
-   código dice estar evitando.
+No hay carrera: la reserva y la emisión van en la misma transacción del cobro, y `set_formacion`
+toma el mismo `WriteGuard`, que serializa a todo escritor.
 
-**Por qué las suites no lo ven.** El helper
-[`emitir_una`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L2403) de los tests de formación llama
-a `emitir_alta` con `numero_reservado: None`, que es el único caso que **no** ocurre en un cobro
-real. El test `la_factura_de_formacion_NO_gasta_numero_de_la_serie_de_ventas` pasa por eso.
+**Por qué las suites no lo veían**: el helper de los tests de formación pasaba
+`numero_reservado: None`, que es el único caso que **no** ocurre al cobrar. Ahora hay un helper que
+emite por el camino real, y los cuatro tests nuevos se comprobaron en rojo antes de darlos por
+buenos. El E2E cubre además los pasos 9 y 10 (`fiscal.e2e.ts`).
 
-**Qué haría falta.** Que el camino del cobro pregunte por el modo antes de reservar (una lectura más
-en la transacción), o que `emitir_alta` devuelva el número que de verdad usó y el cobro actualice
-`Pagos.Numero_Ticket` con él. La segunda es más barata y cierra también cualquier futuro caso en que
-la serie no sea la que el llamante creía.
+## FIS-03 ✅ · Las pruebas de otro ejercicio no se anulaban (resuelto 2026-09-10)
 
-Cuando se arregle, el paso entra en `e2e/specs/fiscal.e2e.ts`, que hoy lo deja fuera a propósito.
+`facturas_de_formacion_vivas` y el barrido de `set_formacion(false)` buscaban por
+`Serie = serie_formacion()`, que mira el **año en curso**. Unas pruebas del 28 de diciembre cerradas
+el 2 de enero buscaban `PRU2028`, no encontraban nada y **no anulaban ninguna** — y el aviso rojo del
+panel salía del mismo contador, así que tampoco avisaba. Quedaban facturas de prueba vivas para
+Hacienda: exactamente lo que el modo existe para impedir.
 
-## FIS-03 🟠 · Las facturas de prueba de diciembre no se anulan nunca
-
-[`serie_formacion()`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L321) es `PRU<año actual>`, y
-tanto [`facturas_de_formacion_vivas`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L1968) como el
-barrido de [`set_formacion(false)`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L2009) filtran por
-esa serie **calculada en el momento de apagar**.
-
-Formación abierta el 28 de diciembre y cerrada el 2 de enero: se buscan las `PRU2027`, no hay
-ninguna, se anulan **cero**. Y el aviso rojo de «Quedan N facturas de prueba sin anular» de
-[`Fiscal.tsx:695`](../../apps/tpv-main/src/features/configuracion/sections/Fiscal.tsx#L695) tampoco
-las ve, porque sale del mismo contador. Quedan facturas reales sin anular y el panel dice que todo
-está bien.
-
-Que el caso sea raro no lo hace menos grave: es exactamente el fallo que el modo formación existe
-para impedir («dejarlo a que alguien se acuerde es dejar que el día que se le olvide quede una venta
-ficticia contada como real»).
-
-**Qué haría falta.** Buscar por `Serie LIKE 'PRU%'` en vez de por la serie del año en curso. Las dos
-consultas ya excluyen las que tienen anulación, así que no hay que tocar nada más.
+**Resuelto**: se buscan por prefijo (`Serie LIKE 'PRU%'`), que no depende del calendario. Con test
+que reetiqueta un registro a `PRU2019` y comprueba que el panel lo ve y el barrido lo anula.
 
 ## FIS-04 ✅ · `remitir_ciclo` cruzaba el ALTA con su ANULACIÓN (resuelto 2026-09-10)
 
