@@ -20,7 +20,7 @@
 | FIS-01 | 🔴 | Un TPV recién instalado **no puede cobrar**, y el fallo es mudo | Sin empezar |
 | FIS-02 | 🔴 | El **modo formación** rompe el vínculo ticket ↔ registro | Sin empezar |
 | FIS-03 | 🟠 | Las facturas de prueba de diciembre **no se anulan nunca** | Sin empezar |
-| FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | Sin empezar |
+| FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
@@ -132,32 +132,25 @@ ficticia contada como real»).
 **Qué haría falta.** Buscar por `Serie LIKE 'PRU%'` en vez de por la serie del año en curso. Las dos
 consultas ya excluyen las que tienen anulación, así que no hay que tocar nada más.
 
-## FIS-04 🟠 · `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN
+## FIS-04 ✅ · `remitir_ciclo` cruzaba el ALTA con su ANULACIÓN (resuelto 2026-09-10)
 
-[`use_cases/verifactu.rs:686`](../../crates/tpv-application/src/use_cases/verifactu.rs#L686):
+Se casaba la respuesta de la AEAT **sólo por `num_serie_factura`**, y un registro de anulación lleva
+el mismo número que el alta que anula (su `IDFactura` **es** el de esa factura). `pendientes()` no
+filtra por tipo, así que los dos podían ir en el mismo envío — basta cobrar por error y anular dentro
+del mismo ciclo de 60 s, o apagar el modo formación antes de que la cola se drene. `find` devolvía la
+primera línea para ambos.
 
-```rust
-.find(|l| l.num_serie_factura == enviado.num_serie_factura)
-```
+El daño no se veía: si la AEAT aceptaba el alta y rechazaba la anulación, la anulación quedaba
+anotada como **aceptada**. Y como `pendientes()` sólo coge los `PENDIENTE` y `subsanar_rechazados`
+sólo los `RECHAZADO`, esa anulación no se reintentaba jamás — la factura seguía viva para Hacienda
+mientras el panel decía que todo salió bien.
 
-El comentario de arriba explica que se casa por número «y no por posición» para que una línea omitida
-por la AEAT no desplace todos los estados. El razonamiento es bueno; el problema es que **el número
-no es único dentro del lote**: un registro de anulación lleva el mismo `Num_Serie_Factura` que su
-alta, y [`pendientes()`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L3379) no filtra por `Tipo`.
+**Resuelto.** El dato para distinguirlas ya se leía y se tiraba: la AEAT no manda un campo «tipo»,
+lo dice la **forma** del `IDFactura` (`NumSerieFacturaAnulada` en la anulación). `LineaRespuesta`
+gana `anulacion: bool`, el parser lo rellena y `remitir_ciclo` casa por **(tipo, número)**.
 
-Basta cobrar por error y anular dentro del mismo ciclo de 60 s —o apagar el modo formación antes de
-que la cola se drene— para que los dos vayan juntos. `.find()` devuelve la **misma línea** para
-ambos.
-
-**El caso silencioso**, que es el que importa: si la AEAT acepta el alta y rechaza la anulación, la
-anulación queda anotada como aceptada. Como `subsanar_rechazados` sólo mira los `RECHAZADO`, esa
-anulación **no se reintenta jamás** — la AEAT sigue teniendo la factura viva y el panel dice que todo
-salió bien.
-
-**Qué haría falta.** El dato para distinguirlas ya se lee y se tira:
-[`xml.rs:417`](../../crates/tpv-infra-aeat/src/xml.rs#L417) hace
-`extraer("NumSerieFactura").or_else(|| extraer("NumSerieFacturaAnulada"))` y colapsa las dos formas
-en un campo. Conservar cuál de las dos era y casar por `(tipo, num_serie_factura)` cierra el hueco.
+Tres tests nuevos, y los dos del caso de uso **se comprobaron en rojo** revirtiendo el arreglo antes
+de darlos por buenos: un test de regresión que pasa por el motivo equivocado no vale nada.
 
 ## FIS-05 🟡 · El modo formación sólo limpia lo fiscal
 

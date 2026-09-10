@@ -126,7 +126,22 @@ pub struct RegistroParaEnvio {
 #[derive(Debug, Clone)]
 pub struct LineaRespuesta {
     /// El número de factura, con el que se casa contra el registro enviado.
+    ///
+    /// ⚠️ **No identifica la línea por sí solo**: un registro de anulación lleva el mismo número
+    /// que el alta que anula, así que hace falta [`Self::anulacion`] para saber de cuál de los dos
+    /// habla. Ver la nota de ese campo.
     pub num_serie_factura: String,
+    /// `true` si la línea responde a un registro de **anulación**, `false` si a uno de alta.
+    ///
+    /// La AEAT no manda un campo «tipo»: lo dice la **forma** del `IDFactura` de la respuesta, que
+    /// en una anulación trae `NumSerieFacturaAnulada` en vez de `NumSerieFactura`. El adaptador
+    /// traduce esa forma a este booleano porque interpretar XML no es trabajo del caso de uso.
+    ///
+    /// **Sin esto el par (alta, anulación) del mismo número es indistinguible**, y en un envío
+    /// pueden ir los dos: basta cobrar por error y anular dentro del mismo ciclo. El daño no es
+    /// visible — si la AEAT acepta el alta y rechaza la anulación, la anulación queda anotada como
+    /// aceptada, `subsanar_rechazados` no la ve nunca y la factura sigue viva para Hacienda.
+    pub anulacion: bool,
     /// `Correcto` | `AceptadoConErrores` | `Incorrecto`.
     pub estado: String,
     /// Código numérico del catálogo (`errores.properties`). El **rango** decide la clase:

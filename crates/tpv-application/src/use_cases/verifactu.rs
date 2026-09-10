@@ -679,11 +679,22 @@ pub async fn remitir_ciclo(
     };
 
     for enviado in &lote {
-        // Se casa por número de factura, no por posición. Ver la nota de arriba.
+        // Se casa por **tipo y número**, no por posición. Ver la nota de arriba.
+        //
+        // El tipo no es un extra: un registro de anulación lleva el MISMO `NumSerieFactura` que el
+        // alta que anula, y los dos pueden ir en el mismo envío — basta cobrar por error y anular
+        // dentro del mismo ciclo, o apagar el modo formación antes de que la cola se drene. Casando
+        // sólo por número, `find` devuelve la primera de las dos líneas para ambos registros.
+        //
+        // Lo que eso rompe no se ve: si la AEAT acepta el alta y rechaza la anulación, la anulación
+        // queda anotada como ACEPTADA. Y como `pendientes()` sólo coge los `PENDIENTE` y
+        // `subsanar_rechazados` sólo los `RECHAZADO`, esa anulación no se reintenta jamás: la
+        // factura sigue viva para Hacienda y el panel dice que todo salió bien.
+        let es_anulacion = enviado.tipo.eq_ignore_ascii_case("ANULACION");
         let Some(linea) = respuesta
             .lineas
             .iter()
-            .find(|l| l.num_serie_factura == enviado.num_serie_factura)
+            .find(|l| l.anulacion == es_anulacion && l.num_serie_factura == enviado.num_serie_factura)
         else {
             // La AEAT no dijo nada de este registro. Se queda PENDIENTE y se reintenta: es
             // exactamente el caso en el que no se puede suponer nada.
@@ -1018,10 +1029,29 @@ mod tests {
         fn linea(num: &str, estado: &str, cod: Option<i64>) -> LineaRespuesta {
             LineaRespuesta {
                 num_serie_factura: num.into(),
+                anulacion: false,
                 estado: estado.into(),
                 codigo_error: cod,
                 descripcion_error: None,
                 estado_duplicado: None,
+            }
+        }
+
+        /// La respuesta a un registro de ANULACIÓN: mismo número que su alta, otra cosa.
+        fn linea_anulacion(num: &str, estado: &str, cod: Option<i64>) -> LineaRespuesta {
+            LineaRespuesta {
+                anulacion: true,
+                ..linea(num, estado, cod)
+            }
+        }
+
+        /// Un registro de anulación de la factura `num`. El `IDFactura` es el del alta: eso es
+        /// precisamente lo que hace que no se puedan distinguir sólo por el número.
+        fn registro_anulacion(num: &str) -> RegistroParaEnvio {
+            RegistroParaEnvio {
+                id_registro: format!("id-anul-{num}"),
+                tipo: "ANULACION".into(),
+                ..registro(num)
             }
         }
 
@@ -1104,6 +1134,67 @@ mod tests {
             assert_eq!(por_id("id-A").1, "ACEPTADO");
             assert_eq!(por_id("id-B").1, "ACEPTADO_CON_ERRORES");
             assert_eq!(por_id("id-C").1, "RECHAZADO");
+        }
+
+        #[test]
+        fn un_alta_y_su_ANULACION_no_se_cruzan_aunque_compartan_numero() {
+            // El caso que esto cierra es de todo menos raro: se cobra por error y se anula acto
+            // seguido, dentro del mismo ciclo de 60 s. Los dos registros van en el mismo envío y
+            // llevan el MISMO `NumSerieFactura`, porque el `IDFactura` de una anulación es el de la
+            // factura que anula.
+            //
+            // Casando sólo por número, `find` devolvía la primera línea para los dos. Aquí la AEAT
+            // acepta el alta y RECHAZA la anulación: si se cruzan, la anulación se anota como
+            // aceptada, `subsanar_rechazados` no la ve nunca y la factura sigue viva para Hacienda
+            // mientras el panel dice que todo salió bien.
+            let repo = RepoFalso::con(vec![registro("A"), registro_anulacion("A")]);
+            let aeat = AeatFalso::ok(
+                vec![
+                    linea("A", "Correcto", None),
+                    linea_anulacion("A", "Incorrecto", Some(1150)),
+                ],
+                Some("CSV1"),
+                Some(60),
+            );
+
+            let r = correr(&repo, &aeat).unwrap().unwrap();
+            assert_eq!(r.aceptados, 1);
+            assert_eq!(r.rechazados, 1, "la anulación fue rechazada y tiene que contarse");
+
+            let a = repo.anotado.lock().unwrap();
+            let por_id = |id: &str| {
+                a.resultados
+                    .iter()
+                    .find(|(i, ..)| i == id)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("falta {id}"))
+            };
+            assert_eq!(por_id("id-A").1, "ACEPTADO", "el alta la aceptaron");
+            assert_eq!(
+                por_id("id-anul-A").1,
+                "RECHAZADO",
+                "la anulación la rechazaron: anotarla como aceptada la deja sin subsanar para siempre",
+            );
+        }
+
+        #[test]
+        fn una_anulacion_sin_su_linea_se_queda_pendiente_en_vez_de_coger_la_del_alta() {
+            // La otra mitad de lo mismo. Si la AEAT sólo contesta por el alta, la anulación no tiene
+            // respuesta — y «no tiene respuesta» es PENDIENTE, no «lo que le pasó al alta».
+            let repo = RepoFalso::con(vec![registro("A"), registro_anulacion("A")]);
+            let aeat = AeatFalso::ok(vec![linea("A", "Correcto", None)], None, Some(60));
+
+            correr(&repo, &aeat).unwrap().unwrap();
+
+            let a = repo.anotado.lock().unwrap();
+            assert!(
+                a.resultados.iter().all(|(i, ..)| i != "id-anul-A"),
+                "la anulación no puede quedar anotada con el resultado del alta",
+            );
+            assert!(
+                a.intentos.iter().any(|i| i == "id-anul-A"),
+                "tiene que quedar como intento para reintentarla",
+            );
         }
 
         #[test]

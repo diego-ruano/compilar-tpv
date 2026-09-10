@@ -409,14 +409,24 @@ pub fn leer_respuesta(xml: &str) -> Result<RespuestaRemision, String> {
     // que se mandaron, pero se casan por `NumSerieFactura` y no por posición: si la AEAT omitiera
     // una línea, casar por índice desplazaría todos los estados una posición y marcaría como
     // aceptado un registro rechazado.
+    //
+    // ⚠️ Y el número **no basta**: una anulación lleva el mismo que su alta. Lo que las separa es la
+    // FORMA del `IDFactura` que devuelve la AEAT — `NumSerieFacturaAnulada` en la anulación,
+    // `NumSerieFactura` en el alta —, así que se conserva cuál de las dos era. Aquí es el único
+    // sitio donde ese dato existe; más arriba ya sólo hay un booleano.
+    //
+    // Ojo al buscar: `rango_de` busca la cadena `"NumSerieFactura>"`, que NO aparece dentro de
+    // `<…:NumSerieFacturaAnulada>` (ahí detrás de `Factura` viene una `A`, no un `>`). Por eso el
+    // primer `extraer` devuelve `None` en una anulación y el `or_else` es lo que decide.
     let mut lineas = Vec::new();
     let mut desde = 0usize;
     while let Some((ini, fin)) = rango_de(xml, "RespuestaLinea", desde) {
         let bloque = &xml[ini..fin];
+        let alta = extraer(bloque, "NumSerieFactura");
+        let anulada = extraer(bloque, "NumSerieFacturaAnulada");
         lineas.push(LineaRespuesta {
-            num_serie_factura: extraer(bloque, "NumSerieFactura")
-                .or_else(|| extraer(bloque, "NumSerieFacturaAnulada"))
-                .unwrap_or_default(),
+            anulacion: alta.is_none() && anulada.is_some(),
+            num_serie_factura: alta.or(anulada).unwrap_or_default(),
             estado: extraer(bloque, "EstadoRegistro").unwrap_or_default(),
             codigo_error: extraer(bloque, "CodigoErrorRegistro").and_then(|s| s.trim().parse().ok()),
             descripcion_error: extraer(bloque, "DescripcionErrorRegistro").filter(|s| !s.is_empty()),
@@ -434,6 +444,9 @@ pub fn leer_respuesta(xml: &str) -> Result<RespuestaRemision, String> {
 }
 
 #[cfg(test)]
+// Algún nombre de test usa MAYUSCULAS para enfatizar la afirmacion que fija
+// (`..._su_ANULACION_...`). Es deliberado y no es snake case.
+#[allow(non_snake_case)]
 mod tests {
     use super::*;
 
@@ -774,6 +787,40 @@ mod tests {
         assert_eq!(r.lineas[1].estado, "AceptadoConErrores");
         assert_eq!(r.lineas[1].codigo_error, Some(2000));
         assert!(r.lineas[1].descripcion_error.as_deref().unwrap().contains("huella"));
+    }
+
+    #[test]
+    fn distingue_el_alta_de_su_ANULACION_aunque_lleven_el_MISMO_numero() {
+        // El `IDFactura` de una anulación es el de la factura que anula, así que las dos líneas
+        // traen `2027/000001`. Lo único que las separa es la FORMA: `NumSerieFacturaAnulada` en la
+        // anulación. Aquí es el único sitio del programa donde ese dato existe — si se pierde,
+        // `remitir_ciclo` casa las dos con la misma línea y anota un rechazo como aceptado.
+        //
+        // Y va con la anulación PRIMERO a propósito: si el parser mirase sólo por posición o
+        // devolviese siempre el primer número que encuentra, este orden lo delataría.
+        let xml = r#"<env:Envelope xmlns:env="x"><env:Body><r:Resp xmlns:r="y">
+          <r:EstadoEnvio>ParcialmenteCorrecto</r:EstadoEnvio>
+          <r:RespuestaLinea>
+            <s:IDFactura><s:NumSerieFacturaAnulada>2027/000001</s:NumSerieFacturaAnulada></s:IDFactura>
+            <r:EstadoRegistro>Incorrecto</r:EstadoRegistro>
+            <r:CodigoErrorRegistro>1150</r:CodigoErrorRegistro>
+          </r:RespuestaLinea>
+          <r:RespuestaLinea>
+            <s:IDFactura><s:NumSerieFactura>2027/000001</s:NumSerieFactura></s:IDFactura>
+            <r:EstadoRegistro>Correcto</r:EstadoRegistro>
+          </r:RespuestaLinea>
+        </r:Resp></env:Body></env:Envelope>"#;
+
+        let r = leer_respuesta(xml).unwrap();
+        assert_eq!(r.lineas.len(), 2);
+
+        assert_eq!(r.lineas[0].num_serie_factura, "2027/000001");
+        assert!(r.lineas[0].anulacion, "la primera es la de la ANULACIÓN");
+        assert_eq!(r.lineas[0].estado, "Incorrecto");
+
+        assert_eq!(r.lineas[1].num_serie_factura, "2027/000001");
+        assert!(!r.lineas[1].anulacion, "la segunda es la del ALTA");
+        assert_eq!(r.lineas[1].estado, "Correcto");
     }
 
     #[test]
