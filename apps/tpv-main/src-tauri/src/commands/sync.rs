@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 use tpv_application::use_cases::sync as uc;
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, OutboxEntry,
-    SyncHealth,
+    OutboxFallo, SyncHealth,
 };
 use tpv_infra_licensing::PairingAdapter;
 
@@ -53,6 +53,22 @@ pub async fn sync_outbox_mark_sent(
     let repo = state.sync_repo().await?;
     uc::outbox_mark_sent(repo.as_ref(), &op_id, seq).await?;
     Ok(())
+}
+
+/// SYNC-20: la nube RECHAZÓ una operación del outbox (`apply_ack` con `ok:false`).
+///
+/// Devuelve si la operación se aparta, para que el drenado sepa si seguir con la siguiente o
+/// esperar. Antes de esto no había a quién preguntárselo: el drenado paraba siempre, y una
+/// operación que la nube no puede aplicar detenía la cola entera sin decírselo a nadie.
+#[tauri::command]
+pub async fn sync_outbox_mark_failed(
+    state: State<'_, AppState>,
+    op_id: String,
+    error: String,
+    permanente: bool,
+) -> Result<OutboxFallo, AppErrorDto> {
+    let repo = state.sync_repo().await?;
+    Ok(uc::outbox_mark_failed(repo.as_ref(), &op_id, &error, permanente).await?)
 }
 
 /// SYNC-18: la nube aceptó estas operaciones en su cola (`bulk_ack`, o un `apply_ack` que llegó

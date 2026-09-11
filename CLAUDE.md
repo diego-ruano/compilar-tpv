@@ -78,6 +78,12 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 │
 └── packages/                  # CÓDIGO JS COMPARTIDO
     ├── database/              # migrations/*.sql (esquema ÚNICO; runner Rust include_dir! + worker tenantMigrations.ts)
+    │                          #   §16 del 0001 = andamiaje LOCAL del dispositivo (_Sync_*, _Jobs_State,
+    │                          #   _Verifactu_*, _Recovery_State, _Backfill_Historico). Antes lo creaban a
+    │                          #   mano dos funciones de db.rs: eran un segundo esquema sin versión, sin
+    │                          #   hash y fuera del snapshot anti-drift. Que esas tablas se creen también
+    │                          #   en el tenant de Turso es deliberado — quedan vacías, y el volcado de
+    │                          #   recuperación descarta todo lo que empieza por `_`.
     │                          #   Hoy SOLO 0001_inicial.sql: mientras no haya clientes en producción,
     │                          #   un cambio de esquema se edita ahí y se resetean TANTO data.db
     │                          #   COMO los tenants Turso de desarrollo que ya tengan su hash —
@@ -480,6 +486,7 @@ no sólo en dev.
 | Pieza | Archivo | Rol |
 |---|---|---|
 | Captura del outbox | `crates/tpv-infra-sqlite/src/db.rs` | Cada escritura local (Main) se serializa a JSON en `_Sync_Outbox` |
+| Cuarentena de subida | `tenantHub.errores.ts` + `infra-sqlite/src/sync.rs::outbox_mark_failed` | SYNC-20: un rechazo definitivo aparta la operación en vez de detener la cola |
 | Determinismo temporal | `db.rs:114-122` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
 | WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
 | Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
@@ -535,6 +542,27 @@ no sólo en dev.
     tras dos latidos sin respuesta; además se reconecta al instante ante `online`/`focus`/
     `visibilitychange`. Sin ambos, un TCP medio-abierto se quedaba mudo para siempre.
 - **Sin conexión:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al recuperarla.
+- **Un rechazo de subida no puede parar la cola (SYNC-20).** El outbox está ordenado, así que el
+  drenado sube una operación y no pasa a la siguiente hasta que la nube confirma. Mientras el
+  `apply_ack` sólo llevaba un texto de error, el cliente no podía distinguir «no ha salido» de «no
+  va a salir» y hacía lo único prudente: parar y reintentar — **para siempre, con un día de ventas
+  detenido detrás y sin decírselo a nadie**. Reglas al tocarlo:
+  - **Quien clasifica es el DO**, que tiene la excepción delante (`tenantHub.errores.ts`), y el
+    veredicto viaja en el ack (`permanente`). El cliente **no** compara textos de error: los
+    mensajes de libsql cambian de redacción entre versiones y esa comparación se pudre sin que nada
+    falle de forma visible.
+  - **Se falla hacia TRANSITORIO.** Apartar deja a la nube divergente en esa fila; reintentar de más
+    sólo cuesta tiempo, y un error desconocido se apartará igual al agotar `MAX_SUBIDA_ATTEMPTS`.
+  - **Una apartada no se borra ni se reintenta luego.** Es lo único que queda de un dato que la nube
+    no tiene, y reaplicar más tarde un `UPDATE` viejo por encima de uno nuevo no repara el dato: lo
+    corrompe. Por eso `asegurar_reemplazo_seguro` **sí** la sigue contando (restaurar la borraría).
+  - **Se cuenta aparte de lo pendiente.** `outbox_pending` es lo que todavía puede subir; sumarle
+    las apartadas dejaría ese número clavado para siempre, que es el síntoma mudo que esto arregla.
+  - **Es la misma política que el DO ya aplicaba a su cola de entrada** (`_Cola_Muerta`, SYNC-18).
+    Lo que faltaba era el camino **en vivo**, que es por donde va un TPV al día.
+  - **El aviso va a dos sitios distintos a propósito.** A Sentry, el diagnóstico (op_id, comando y
+    error de la nube — nunca las sentencias: llevan datos de negocio y PII); al cliente, sólo la
+    consecuencia, porque un `op_id` no lo puede usar quien está delante del TPV.
 - **Volcado del atraso (SYNC-18):** cuando la Main conecta con **más de 100 operaciones**
   acumuladas, no las sube de una en una: las manda por trozos (`bulk_apply`) a una **cola durable
   en el SQLite del propio DO** y termina en cuanto sube la última, sin esperar a que se apliquen.

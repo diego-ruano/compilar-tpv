@@ -20,7 +20,7 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_contracts::sync::{
     AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
-    OutboxEntry, SqlStatement, SyncChange, SyncHealth,
+    OutboxEntry, OutboxFallo, SqlStatement, SyncChange, SyncHealth,
 };
 
 use crate::db::Db;
@@ -61,6 +61,16 @@ const PURGE_TTL_MS: i64 = 72 * 60 * 60 * 1000;
 /// transitorios sin descartar datos a la primera. Agotados, la op se salta para no bloquear el
 /// resto de la sincronización indefinidamente.
 const MAX_APPLY_ATTEMPTS: i64 = 5;
+
+/// Reintentos de una op Main→nube antes de APARTARLA (SYNC-20). Es el espejo de
+/// `MAX_APPLY_ATTEMPTS` para la dirección contraria, y existe por el mismo motivo: el outbox es
+/// una cola **ordenada**, así que una operación que la nube rechaza siempre no se quedaba
+/// reintentando sola — dejaba detenido todo lo que viniera detrás, que es un día de ventas.
+///
+/// Es más generoso que el de bajada a propósito. Un fallo de subida se reintenta en cada pasada
+/// del drenado, que puede dispararse varias veces por minuto (el evento `outbox:pending`), no una
+/// vez por ciclo de catch-up. Con 5 se apartaría una operación por un bache de red de segundos.
+const MAX_SUBIDA_ATTEMPTS: i64 = 20;
 
 /// Convierte un escalar JSON al `Value` de libsql para enlazarlo como argumento.
 fn json_to_value(v: &serde_json::Value) -> Value {
@@ -420,11 +430,18 @@ impl SyncRepository for SqliteSyncRepository {
         // SYNC-18: se excluyen las que la nube ya aceptó en su cola. Siguen en el outbox (su prueba
         // de aplicación es volver por el catch-up), pero reenviarlas mientras tanto sería repetir
         // trabajo en cada ciclo de drenado.
+        //
+        // SYNC-20: y se excluyen las APARTADAS. Una operación que la nube rechaza de forma
+        // permanente no vuelve a ofrecerse: si volviera, el drenado la reintentaría, fallaría otra
+        // vez y pararía ahí — que es exactamente el atasco que la cuarentena existe para romper.
+        // Su fila NO se borra (es lo único que queda de un dato que la nube no tiene), sólo deja
+        // de bloquear a las de detrás.
         let mut rows = conn
             .query(
                 "SELECT Seq, Op_Id, Command_Name, Statements_Json \
                  FROM _Sync_Outbox \
-                 WHERE Op_Id NOT IN (SELECT Op_Id FROM _Sync_Encoladas) \
+                 WHERE Cuarentena = 0 \
+                   AND Op_Id NOT IN (SELECT Op_Id FROM _Sync_Encoladas) \
                  ORDER BY Seq ASC LIMIT ?1;",
                 vec![Value::Integer(limit)],
             )
@@ -497,6 +514,71 @@ impl SyncRepository for SqliteSyncRepository {
                 Err(e)
             }
         }
+    }
+
+    async fn outbox_mark_failed(
+        &self,
+        op_id: &str,
+        error: &str,
+        permanente: bool,
+    ) -> AppResult<OutboxFallo> {
+        // Espejo de `bump_failure`/`quarantine` (la cuarentena de bajada) para la dirección
+        // contraria. Va por `raw()`: `_Sync_Outbox` es andamiaje local y capturarlo como escritura
+        // de negocio replicaría a la nube el estado de la cola que le estamos ocultando.
+        let w = self.db.write().await;
+        let conn = w.raw();
+        let err_trunc: String = error.chars().take(500).collect();
+
+        conn.execute(
+            "UPDATE _Sync_Outbox \
+                SET Intentos = Intentos + 1, Ultimo_Error = ?1, Ultimo_Intento_Ms = ?2 \
+              WHERE Op_Id = ?3;",
+            vec![
+                Value::Text(err_trunc),
+                Value::Integer(now_ms()),
+                Value::Text(op_id.to_string()),
+            ],
+        )
+        .await
+        .map_err(db_err)?;
+
+        let mut rows = conn
+            .query(
+                "SELECT Intentos, Command_Name FROM _Sync_Outbox WHERE Op_Id = ?1 LIMIT 1;",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        let (intentos, command_name) = match rows.next().await.map_err(db_err)? {
+            Some(r) => (
+                v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(1),
+                match r.get_value(1).map_err(db_err)? {
+                    Value::Text(s) => s,
+                    _ => "main_op".to_string(),
+                },
+            ),
+            // La fila ya no está: otra pasada la subió o la apartó. No hay nada que decidir.
+            None => return Ok(OutboxFallo::default()),
+        };
+
+        // Un rechazo PERMANENTE se aparta a la primera y sin agotar intentos. Repetir una
+        // sentencia que la nube no sabe aplicar da el mismo resultado las veinte veces, y cada
+        // vuelta es un minuto más con las ventas de detrás paradas.
+        let apartar = permanente || intentos >= MAX_SUBIDA_ATTEMPTS;
+        if apartar {
+            conn.execute(
+                "UPDATE _Sync_Outbox SET Cuarentena = 1 WHERE Op_Id = ?1;",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        }
+
+        Ok(OutboxFallo {
+            intentos,
+            apartada: apartar,
+            command_name,
+        })
     }
 
     async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()> {
@@ -582,7 +664,12 @@ impl SyncRepository for SqliteSyncRepository {
             }
         }
 
-        let outbox_pending = count(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
+        // SYNC-20: "pendiente" es lo que todavía puede subir. Una operación apartada ya no está en
+        // camino y sumarla aquí haría que este número no bajara nunca — que es justo el síntoma
+        // mudo que se está arreglando. Se cuenta aparte, que es lo que permite decir la verdad:
+        // "quedan 3 por subir" y "hay 1 que no va a subir" son dos frases distintas.
+        let outbox_pending =
+            count(conn, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0;").await?;
         let last_seq = checkpoint(conn).await?;
         let quarantined = count(
             conn,
@@ -594,12 +681,23 @@ impl SyncRepository for SqliteSyncRepository {
             "SELECT COUNT(*) FROM _Sync_Failed WHERE Quarantined = 0;",
         )
         .await?;
+        let subida_en_cuarentena =
+            count(conn, "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 1;").await?;
+        // "Fallando" es una op que ya se ha llevado algún rechazo pero aún no ha agotado sus
+        // intentos: sigue en camino. Es el aviso temprano, antes de que se aparte.
+        let subida_fallando = count(
+            conn,
+            "SELECT COUNT(*) FROM _Sync_Outbox WHERE Cuarentena = 0 AND Intentos > 0;",
+        )
+        .await?;
 
         Ok(SyncHealth {
             outbox_pending,
             last_seq,
             quarantined,
             failing,
+            subida_fallando,
+            subida_en_cuarentena,
         })
     }
 
@@ -1183,6 +1281,116 @@ mod tests_encoladas {
         // Con el plazo vencido, vuelve a estar disponible.
         assert_eq!(repo.liberar_encoladas_caducadas(0).await.unwrap(), 1);
         assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string()]);
+    }
+
+    /* ===== SYNC-20: la cola no se queda parada detrás de un rechazo ===== */
+
+    #[tokio::test]
+    async fn un_rechazo_permanente_aparta_la_op_y_la_cola_sigue() {
+        // ESTE es el bug. El outbox es una cola ordenada, así que el drenado sube la primera y no
+        // pasa a la segunda hasta que la nube confirma. Con una operación que la nube NO puede
+        // aplicar —una columna que su esquema no tiene—, eso significaba que `op-2` y `op-3`
+        // (ventas) no subían nunca. Sin error, sin aviso: sólo un `last_seq` que no avanzaba.
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        encolar_en_outbox(&db, "op-2").await;
+        encolar_en_outbox(&db, "op-3").await;
+
+        let fallo = repo
+            .outbox_mark_failed("op-1", "no such column: Razon_Social", true)
+            .await
+            .unwrap();
+
+        // Un rechazo definitivo no gasta los 20 intentos: se aparta a la primera.
+        assert!(fallo.apartada, "un rechazo permanente debe apartar a la primera");
+        assert_eq!(fallo.intentos, 1);
+
+        // Y lo que había detrás sigue subiendo, que es el objetivo entero.
+        assert_eq!(
+            ids_pendientes(&repo).await,
+            vec!["op-2".to_string(), "op-3".to_string()],
+        );
+    }
+
+    #[tokio::test]
+    async fn un_fallo_transitorio_no_aparta_nada_y_reintenta() {
+        // La otra mitad, y la que impide que el arreglo se convierta en una forma nueva de perder
+        // datos: un corte de red no puede apartar una venta. Se reintenta, y sólo al agotar los
+        // intentos se da por imposible.
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+
+        for intento in 1..MAX_SUBIDA_ATTEMPTS {
+            let fallo = repo
+                .outbox_mark_failed("op-1", "fetch failed", false)
+                .await
+                .unwrap();
+            assert_eq!(fallo.intentos, intento);
+            assert!(!fallo.apartada, "no puede apartarse en el intento {intento}");
+            // Mientras tanto sigue en la cola, esperando su turno.
+            assert_eq!(ids_pendientes(&repo).await, vec!["op-1".to_string()]);
+        }
+
+        let ultimo = repo
+            .outbox_mark_failed("op-1", "fetch failed", false)
+            .await
+            .unwrap();
+        assert_eq!(ultimo.intentos, MAX_SUBIDA_ATTEMPTS);
+        assert!(ultimo.apartada, "agotados los intentos, se aparta");
+        assert!(ids_pendientes(&repo).await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn una_op_apartada_no_se_borra_ni_desaparece_de_la_salud() {
+        // Apartar no es olvidar. Esa fila es lo único que queda de un dato que la nube no tiene:
+        // borrarla convertiría el arreglo del atasco en una pérdida silenciosa, y es además lo que
+        // hace que la guardia de restauración (`asegurar_reemplazo_seguro`) se siga negando.
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        encolar_en_outbox(&db, "op-2").await;
+        repo.outbox_mark_failed("op-1", "no such table: X", true)
+            .await
+            .unwrap();
+
+        let salud = repo.health().await.unwrap();
+        // "Pendiente" es lo que todavía puede subir: sumar la apartada dejaría este número clavado
+        // para siempre, que es justo el síntoma mudo que se está arreglando.
+        assert_eq!(salud.outbox_pending, 1, "sólo op-2 sigue en camino");
+        assert_eq!(salud.subida_en_cuarentena, 1, "y op-1 se cuenta aparte");
+
+        // La fila sigue ahí, con su motivo escrito.
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query(
+                "SELECT Ultimo_Error FROM _Sync_Outbox WHERE Op_Id = 'op-1';",
+                Vec::<Value>::new(),
+            )
+            .await
+            .unwrap();
+        let fila = rows.next().await.unwrap().expect("la fila no se borra");
+        match fila.get_value(0).unwrap() {
+            Value::Text(s) => assert!(s.contains("no such table")),
+            v => panic!("se esperaba el motivo del rechazo, no {v:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn la_salud_avisa_de_un_rechazo_antes_de_apartarlo() {
+        // El aviso temprano. Mientras la op sigue reintentándose no está apartada, pero tampoco va
+        // bien: `subida_fallando` es lo que separa "hay cola" de "hay cola y algo va mal".
+        let (repo, db, _dir) = repo_temporal().await;
+        encolar_en_outbox(&db, "op-1").await;
+        assert_eq!(repo.health().await.unwrap().subida_fallando, 0);
+
+        repo.outbox_mark_failed("op-1", "timeout", false)
+            .await
+            .unwrap();
+
+        let salud = repo.health().await.unwrap();
+        assert_eq!(salud.subida_fallando, 1);
+        assert_eq!(salud.subida_en_cuarentena, 0);
+        assert_eq!(salud.outbox_pending, 1, "sigue en camino");
     }
 }
 

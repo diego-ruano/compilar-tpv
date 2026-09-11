@@ -425,6 +425,11 @@ pub async fn asegurar_reemplazo_seguro(db: &Db) -> AppResult<()> {
     if scalar_i64(conn, "SELECT COUNT(*) FROM Usuarios;").await? == 0 {
         return Ok(());
     }
+    // SYNC-20: esto cuenta el outbox ENTERO, apartadas incluidas, y es deliberado. Para el drenado
+    // una operación en cuarentena ya no está en camino; para esta guardia sigue siendo exactamente
+    // lo que protege: un dato de este equipo que la nube NO tiene. Restaurar vacía las tablas y las
+    // rellena con lo que hay arriba, así que descontarlas aquí convertiría el arreglo del atasco en
+    // una forma nueva de perder datos — y en silencio, que es peor.
     let outbox = scalar_i64(conn, "SELECT COUNT(*) FROM _Sync_Outbox;").await?;
     if outbox > 0 {
         return Err(AppError::conflict(format!(

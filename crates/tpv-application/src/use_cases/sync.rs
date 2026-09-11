@@ -4,7 +4,7 @@ use serde_json::json;
 
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
-    HistoricoPagina, OutboxEntry, SyncHealth,
+    HistoricoPagina, OutboxEntry, OutboxFallo, SyncHealth,
 };
 
 use crate::error::{AppError, AppResult};
@@ -40,6 +40,24 @@ pub async fn outbox_pending(repo: &dyn SyncRepository, limit: i64) -> AppResult<
 /// que la nube le asignó (0 si no lo pudo devolver); se usa para ascender el anti-eco a su Seq real.
 pub async fn outbox_mark_sent(repo: &dyn SyncRepository, op_id: &str, seq: i64) -> AppResult<()> {
     repo.outbox_mark_sent(op_id, seq).await
+}
+
+/// SYNC-20: la nube rechazó una operación del outbox. Devuelve si se aparta (y el drenado debe
+/// seguir con la siguiente) o si se sigue reintentando.
+///
+/// Un `op_id` vacío no se acepta: sin él no hay fila que anotar y el contador de intentos nunca
+/// subiría, así que la operación se reintentaría eternamente — justo el atasco que esto arregla,
+/// pero con la cuarentena puesta y sin funcionar.
+pub async fn outbox_mark_failed(
+    repo: &dyn SyncRepository,
+    op_id: &str,
+    error: &str,
+    permanente: bool,
+) -> AppResult<OutboxFallo> {
+    if op_id.trim().is_empty() {
+        return Err(AppError::Validation("op_id vacío".into()));
+    }
+    repo.outbox_mark_failed(op_id, error, permanente).await
 }
 
 /// Purga de mantenimiento de `_Sync_Applied_Ops` (solo lo ya subido a la nube). Se invoca cuando el
@@ -207,6 +225,9 @@ mod tests {
         }
         async fn outbox_mark_sent(&self, _: &str, _: i64) -> AppResult<()> {
             Ok(())
+        }
+        async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
+            Ok(OutboxFallo::default())
         }
         async fn outbox_mark_encolada(&self, _: &[String]) -> AppResult<()> {
             Ok(())

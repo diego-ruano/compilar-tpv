@@ -6,6 +6,7 @@ import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
 import { estaRevocado } from "../lib/deviceAuth";
 import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 import { ingestToAxiom } from "../observability/axiom";
+import { esRechazoPermanente } from "./tenantHub.errores";
 
 import type {
 	AnyMsg,
@@ -1905,11 +1906,17 @@ export class TenantHub {
 							seq,
 						});
 					} catch (e: any) {
+						// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
+						// delante es este DO; el cliente no puede deducirlo del texto sin acabar
+						// comparando mensajes de libsql, que cambian de redacción entre versiones.
+						// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
+						// esquema del tenant no admite paraba la cola entera para siempre.
 						this.send(ws, {
 							type: "apply_ack",
 							opId,
 							ok: false,
 							error: String(e?.message || e),
+							permanente: esRechazoPermanente(e),
 						});
 					}
 				})(),

@@ -22,8 +22,8 @@
 import { $, expect } from "@wdio/globals";
 
 import { estrenarEquipo } from "../helpers/arranque.js";
-import { CATEGORIA, NEGOCIO, PIN } from "../helpers/copias.js";
-import { descartarAvisoDatosFiscales } from "../helpers/fiscal.js";
+import { CATEGORIA, NEGOCIO, NIF, PIN, RAZON_SOCIAL } from "../helpers/copias.js";
+import { declararDatosFiscales } from "../helpers/fiscal.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
 import { esperarNubeAlDia } from "../helpers/nube.js";
 import { conTexto, irA, leerDeLaApp, pulsar } from "../helpers/ui.js";
@@ -34,17 +34,15 @@ describe("Copias de seguridad · antes de la avería", () => {
     it("1 · estrena el equipo con la nube encendida", async () => {
         await estrenarEquipo(NEGOCIO, PIN);
 
-        // Y se quita de en medio el aviso de FIS-01 («este TPV todavía no puede cobrar»), que en un
-        // equipo recién estrenado sale al entrar y tapa el menú entero.
+        // Y declara quién factura. No es andamiaje: desde FIS-01 un equipo que no lo sabe no puede
+        // cobrar, y lo avisa al entrar con un modal a pantalla completa que tapa el menú entero.
         //
-        // ⚠️ Se DESCARTA en vez de rellenarlo, y eso es un apaño con fecha de caducidad: declarar
-        // los datos sería más fiel a lo que hace un bar, pero ese `UPDATE Business_Settings … 
-        // Razon_Social` **atasca el outbox** contra el worker desplegado, que embebe un esquema
-        // anterior a FISCAL-01 y no tiene esa columna. Como la cola está ordenada, se lleva por
-        // delante toda la replicación posterior — que es justo lo que este recorrido necesita.
-        // Ver SYNC-20 en `docs/analisis/HALLAZGOS.md`: cuando el worker se despliegue, esto vuelve
-        // a ser `declararDatosFiscales`.
-        await descartarAvisoDatosFiscales();
+        // Este paso es además el que CAZÓ SYNC-20: ese `UPDATE Business_Settings … Razon_Social`
+        // atascaba el outbox contra un worker cuyo esquema embebido era anterior a FISCAL-01, y con
+        // la cola ordenada eso paraba toda la replicación posterior en silencio. Que este recorrido
+        // lo escriba y luego espere a que la nube se ponga al día es lo que vuelve a detectarlo si
+        // el esquema del worker se queda atrás otra vez.
+        await declararDatosFiscales(RAZON_SOCIAL, NIF);
     });
 
     it("2 · crea algo que merezca la pena recuperar", async () => {

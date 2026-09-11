@@ -7,6 +7,11 @@ const healthy = (overrides: Record<string, number> = {}) => ({
 	last_seq: 42,
 	quarantined: 0,
 	failing: 0,
+	// SYNC-20: la salud también mira la dirección de SUBIDA. La reconciliación no se ramifica por
+	// estos dos (su condición de salida es el outbox a cero y el checkpoint alcanzado), pero el
+	// doble tiene que ser un `SyncHealth` entero o deja de comprobar el contrato de verdad.
+	subida_fallando: 0,
+	subida_en_cuarentena: 0,
 	...overrides,
 });
 

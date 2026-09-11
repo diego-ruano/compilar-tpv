@@ -245,6 +245,22 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 					este dispositivo pueden diferir en esos registros; contacta con soporte.
 				</div>
 			)}
+
+			{/*
+			  SYNC-20 · el mismo aviso para la dirección contraria, que hasta ahora no tenía ninguno.
+			  Se dice la CONSECUENCIA y no la causa: el `op_id` y el error de SQL no los puede usar
+			  quien está delante del TPV, y lo que sí necesita saber es que hay algo suyo que la nube
+			  no tiene — o sea, que una recuperación no lo devolvería. Quien puede arreglarlo se
+			  entera por Sentry, sin que aquí nadie tenga que mirar nada (ver `useMainSocket`).
+			*/}
+			{health && health.subida_en_cuarentena > 0 && (
+				<div className="mt-3 rounded-xl border border-danger/40 bg-danger/10 p-3 text-xs text-danger">
+					Hay {health.subida_en_cuarentena} cambio(s) de este equipo que la nube ha rechazado y
+					que ya no se van a subir. El resto sigue copiándose con normalidad, pero esos datos
+					solo están aquí: si perdieras este equipo hoy, no volverían. Ya se ha avisado
+					automáticamente; contacta con soporte.
+				</div>
+			)}
 		</Panel>
 	);
 }

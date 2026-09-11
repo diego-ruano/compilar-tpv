@@ -8,7 +8,7 @@ use async_trait::async_trait;
 
 use tpv_contracts::sync::{
     AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
-    OutboxEntry, SyncChange, SyncHealth,
+    OutboxEntry, OutboxFallo, SyncChange, SyncHealth,
 };
 
 use crate::error::AppResult;
@@ -33,6 +33,19 @@ pub trait SyncRepository: Send + Sync {
     /// Si la nube no pudo devolver un `seq` (p. ej. cache-hit de idempotencia sin log), llega `0`
     /// y el anti-eco se queda en `Seq=0` (lo retirará la purga TTL una vez subido).
     async fn outbox_mark_sent(&self, op_id: &str, seq: i64) -> AppResult<()>;
+
+    /// SYNC-20: anota que la nube RECHAZÓ una operación del outbox y decide si se aparta.
+    ///
+    /// `permanente` lo dice la nube en el `apply_ack`: un error de SQL contra el esquema del
+    /// tenant no se arregla reintentando, mientras que un corte o un timeout sí. Sin esa
+    /// distinción el drenado sólo podía hacer una cosa —parar y volver a intentarlo— y una
+    /// operación irreparable detenía la cola entera, en silencio y para siempre.
+    async fn outbox_mark_failed(
+        &self,
+        op_id: &str,
+        error: &str,
+        permanente: bool,
+    ) -> AppResult<OutboxFallo>;
 
     /// Purga de mantenimiento de `_Sync_Applied_Ops` que SOLO retira lo ya confirmado en la nube:
     /// registros antiguos (TTL) cuyo `Op_Id` ya no está pendiente en el outbox. Pensada para

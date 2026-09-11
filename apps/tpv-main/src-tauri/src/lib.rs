@@ -2288,6 +2288,7 @@ pub fn run() {
             // sincronización Main → nube (outbox de escrituras locales)
             commands::sync::sync_outbox_pending,
             commands::sync::sync_outbox_mark_sent,
+            commands::sync::sync_outbox_mark_failed,
             commands::sync::sync_outbox_mark_encolada,
             commands::sync::sync_liberar_encoladas,
             commands::sync::sync_purge_applied_ops,

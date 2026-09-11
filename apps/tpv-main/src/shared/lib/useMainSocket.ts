@@ -22,7 +22,7 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import type { AplicacionSync, LicenseLocalState } from "@tpv/contracts";
+import type { AplicacionSync, LicenseLocalState, OutboxFallo } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 
 import { useEstadoSync } from "../stores/useEstadoSync";
@@ -216,7 +216,14 @@ export function useMainSocket() {
 		let drainTimer: number | null = null;
 		const acks = new Map<
 			string,
-			(ok: boolean, error?: string, seq?: number, encolada?: boolean) => void
+			(
+				ok: boolean,
+				error?: string,
+				seq?: number,
+				encolada?: boolean,
+				// SYNC-20: la nube dice si su rechazo es definitivo. Ver `tenantHub.errores.ts`.
+				permanente?: boolean,
+			) => void
 		>();
 		// SYNC-18: sólo hay un volcado en curso a la vez (el bucle es secuencial), así que basta un
 		// hueco en vez de un mapa.
@@ -286,12 +293,19 @@ export function useMainSocket() {
 		function sendApply(
 			socket: WebSocket,
 			entry: OutboxEntry,
-		): Promise<{ ok: boolean; error?: string; seq?: number; encolada?: boolean }> {
+		): Promise<{
+			ok: boolean;
+			error?: string;
+			seq?: number;
+			encolada?: boolean;
+			permanente?: boolean;
+		}> {
 			return new Promise<{
 				ok: boolean;
 				error?: string;
 				seq?: number;
 				encolada?: boolean;
+				permanente?: boolean;
 			}>((resolve) => {
 				if (socket.readyState !== WebSocket.OPEN) {
 					resolve({ ok: false, error: "socket_not_open" });
@@ -302,10 +316,10 @@ export function useMainSocket() {
 					resolve({ ok: false, error: "ack_timeout" });
 				}, ACK_TIMEOUT_MS);
 
-				acks.set(entry.op_id, (ok, error, seq, encolada) => {
+				acks.set(entry.op_id, (ok, error, seq, encolada, permanente) => {
 					window.clearTimeout(timer);
 					acks.delete(entry.op_id);
-					resolve({ ok, error, seq, encolada });
+					resolve({ ok, error, seq, encolada, permanente });
 				});
 
 				socket.send(
@@ -413,6 +427,54 @@ export function useMainSocket() {
 			}
 		}
 
+		/**
+		 * SYNC-20: anota en el outbox que la nube rechazó esta operación, y decide si se aparta.
+		 *
+		 * Aquí vive además el único aviso que sirve de algo. Un rechazo de subida NO lo puede
+		 * arreglar quien está delante del TPV: es un bug nuestro o un desajuste entre el esquema
+		 * del tenant y la sentencia. Decirle al camarero «no se pudo subir la operación
+		 * 8f3a-…» sería ruido que aprende a ignorar. Lo que hace falta es que se entere **quien
+		 * puede arreglarlo**, sin que nadie tenga que mirar nada: por eso una operación apartada
+		 * va a Sentry con lo justo para diagnosticarla.
+		 *
+		 * ⚠️ Va el NOMBRE del comando, nunca sus sentencias ni sus argumentos: por ahí pasan datos
+		 * del negocio y la PII del personal (cifrada, pero no es sitio para mandarla). Para saber
+		 * qué arreglar basta con qué comando y qué dijo la nube.
+		 */
+		async function anotarFalloDeSubida(
+			entry: OutboxEntry,
+			error?: string,
+			permanente?: boolean,
+			): Promise<OutboxFallo | null> {
+			try {
+				const fallo = await invoke<OutboxFallo>("sync_outbox_mark_failed", {
+					opId: entry.op_id,
+					error: error ?? "sin detalle",
+					permanente: Boolean(permanente),
+				});
+				if (fallo.apartada) {
+					console.error(
+						`[outbox] op APARTADA tras ${fallo.intentos} rechazo(s): ${entry.op_id}`,
+						error,
+					);
+					captureException(new Error("outbox_op_apartada"), {
+						fase: "drain_outbox",
+						op_id: entry.op_id,
+						command_name: fallo.command_name,
+						intentos: fallo.intentos,
+						permanente: Boolean(permanente),
+						error_nube: error ?? "sin detalle",
+					});
+				}
+				return fallo;
+			} catch (e) {
+				// Que no se pueda anotar el fallo no puede convertirse en un fallo distinto: se cae
+				// al comportamiento de siempre (parar y reintentar luego), que es seguro.
+				console.warn("sync_outbox_mark_failed falló:", e);
+				return null;
+			}
+		}
+
 		// Drena el outbox local en orden: por cada op pendiente, la envía y, si la nube confirma
 		// (apply_ack ok), la marca como enviada. Si una falla/expira, para y reintenta más tarde.
 		async function drainOutbox(socket: WebSocket, strict = false) {
@@ -435,7 +497,7 @@ export function useMainSocket() {
 					let progressed = false;
 					for (const entry of pending) {
 						if (cancelled || socket.readyState !== WebSocket.OPEN) break;
-						const { ok, error, seq, encolada } = await sendApply(socket, entry);
+						const { ok, error, seq, encolada, permanente } = await sendApply(socket, entry);
 						if (!ok) {
 							console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
 							if (strict) {
@@ -445,6 +507,16 @@ export function useMainSocket() {
 								throw new Error(
 									`La nube rechazó una operación local (${entry.op_id}): ${error ?? "sin detalle"}`,
 								);
+							}
+							// SYNC-20: antes aquí sólo había un `break`, o sea "paro y lo reintento
+							// luego", para siempre y sin contárselo a nadie. Como el outbox es una cola
+							// ordenada, una operación que la nube no puede aplicar dejaba detenido todo
+							// lo de detrás — que es un día de ventas. Ahora se anota el rechazo y, si la
+							// operación se aparta, el drenado SIGUE con la siguiente.
+							const fallo = await anotarFalloDeSubida(entry, error, permanente);
+							if (fallo?.apartada) {
+								progressed = true;
+								continue;
 							}
 							break;
 						}
@@ -923,6 +995,8 @@ export function useMainSocket() {
 							Boolean(msg.ok),
 							msg.ok ? undefined : String(msg.error ?? "unknown"),
 							Number(msg.seq ?? 0),
+							false,
+							Boolean(msg.permanente),
 						);
 					return;
 				}

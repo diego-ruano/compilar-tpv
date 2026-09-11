@@ -81,6 +81,34 @@ pub struct SyncHealth {
     /// Operaciones que están fallando pero aún NO en cuarentena (reintentándose).
     #[ts(type = "number")]
     pub failing: i64,
+    /// SYNC-20 · dirección SUBIDA: operaciones del outbox que ya se han llevado algún rechazo de
+    /// la nube pero siguen en camino. Es el aviso temprano, antes de que se aparten.
+    ///
+    /// Los cuatro campos de arriba miran sólo la dirección nube→Main. Mientras fue así, un TPV
+    /// cuyo outbox estaba parado porque la nube rechazaba su primera operación enseñaba un panel
+    /// de salud impecable: `failing: 0`, `quarantined: 0`. El único síntoma era que `last_seq` no
+    /// subía, y eso no lo mira nadie.
+    #[ts(type = "number")]
+    pub subida_fallando: i64,
+    /// SYNC-20 · dirección SUBIDA: operaciones APARTADAS. La nube no las tiene y no va a tenerlas
+    /// sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
+    #[ts(type = "number")]
+    pub subida_en_cuarentena: i64,
+}
+
+/// Lo que el drenado necesita saber tras un `apply_ack` fallido (SYNC-20): si esta operación se
+/// aparta o se sigue reintentando, y con qué contexto contarlo.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct OutboxFallo {
+    /// Rechazos acumulados por esta operación.
+    #[ts(type = "number")]
+    pub intentos: i64,
+    /// `true` si acaba de apartarse: el drenado debe SEGUIR con la siguiente, no parar.
+    pub apartada: bool,
+    /// Para el informe de telemetría. El `Statements_Json` NO sale de aquí: lleva datos del
+    /// negocio y PII, y lo que hace falta para diagnosticar es qué comando falló, no con qué datos.
+    pub command_name: String,
 }
 
 /* ===== Bootstrap: reconstrucción de la BD local desde la nube ===== */

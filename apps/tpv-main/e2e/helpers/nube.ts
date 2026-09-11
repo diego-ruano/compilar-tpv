@@ -18,13 +18,23 @@ export type Salud = {
     last_seq: number;
     failing: number;
     quarantined: number;
+    /** SYNC-20 · dirección de SUBIDA: rechazos acumulados que aún se reintentan. */
+    subida_fallando: number;
+    /** SYNC-20 · dirección de SUBIDA: operaciones que la nube no va a aceptar nunca. */
+    subida_en_cuarentena: number;
 };
 
 /**
- * Espera a que no quede nada por subir ni nada en cuarentena.
+ * Espera a que no quede nada por subir ni nada en cuarentena, **en las dos direcciones**.
  *
  * Que el outbox llegue a cero es además la única señal que el IPC ofrece de que el WebSocket está
  * conectado de verdad: el estado de la conexión vive en un store de React, no en un comando.
+ *
+ * ⚠️ `subida_en_cuarentena` NO es opcional aquí, y es lo que impide que SYNC-20 debilite este
+ * recorrido sin que se note. Desde que una operación rechazada se aparta en vez de atascar la cola,
+ * `outbox_pending` puede llegar a cero **rindiéndose**: la nube no tendría ese dato y el test daría
+ * verde igual. Comprobar las dos cosas es la diferencia entre "la nube está al día" y "ya no queda
+ * nadie intentándolo".
  */
 export async function esperarNubeAlDia(timeout = 180_000): Promise<Salud> {
     let ultima: Salud | null = null;
@@ -33,7 +43,11 @@ export async function esperarNubeAlDia(timeout = 180_000): Promise<Salud> {
         .waitUntil(
             async () => {
                 ultima = await leerDeLaApp<Salud>("sync_health");
-                return ultima.outbox_pending === 0 && ultima.quarantined === 0;
+                return (
+                    ultima.outbox_pending === 0 &&
+                    ultima.quarantined === 0 &&
+                    ultima.subida_en_cuarentena === 0
+                );
             },
             { timeout },
         )
