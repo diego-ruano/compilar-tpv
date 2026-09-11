@@ -176,17 +176,29 @@ Detrás de ella se acumulaban la categoría y cuatro notificaciones. **La cola e
 propósito —sus operaciones se apoyan unas en otras— así que una que no pasa detiene TODA la
 replicación posterior, para siempre y en silencio.**
 
-### La primera hipótesis era falsa, y merece quedar escrita
+### La causa: desfase de despliegue, y cómo quedó la comprobación
 
-Parecía que el worker desplegado iba por detrás del esquema (`tenantMigrations.ts` importa el
-`0001` en tiempo de compilación, así que un worker viejo aprovisiona tenants viejos). **Se desplegó
-el worker y el atasco siguió igual**, con un tenant recién creado. Descartado: el worker importa el
-fichero canónico, no una copia, así que su esquema siempre es el del despliegue.
+La hipótesis era que el worker desplegado iba por detrás del esquema: `tenantMigrations.ts` importa
+el `0001` **en tiempo de compilación**, así que un worker desplegado hace meses aprovisiona sus
+tenants con el esquema de aquel día. `Razon_Social` entró el 2026-09-08, y el `UPDATE` que atascaba
+la cola es justo el primero que la toca.
 
-O sea que la causa concreta de aquellas 6 operaciones **sigue sin confirmarse**. Y eso es
-exactamente el problema: *no se puede confirmar*, porque el motivo del rechazo no se guardaba en
-ningún sitio. Tres minutos de espera, una consulta a mano al SQLite del recorrido y una hipótesis
-equivocada — por un error que la nube sí había dicho y que nadie escuchaba.
+**Tras desplegar, `copias-1` pasa sus 4 pasos en 9 segundos** (2026-09-11), donde antes agotaba 3
+minutos y fallaba. Y pasa **de verdad**: `esperarNubeAlDia` exige ahora también cuarentena de subida
+cero, así que no puede dar verde rindiéndose. La operación sube.
+
+⚠️ **Lo que NO se puede afirmar es cuál de los dos despliegues lo arregló.** Hubo una tanda
+intermedia que volvió a fallar con la misma firma exacta (`outbox_pending: 6, last_seq: 0`), y en su
+momento se leyó como «el despliegue no era la causa». Pero esa tanda corrió con el despliegue
+recién hecho y no hay forma de saber si ya había propagado: los seis recorridos se pisan el mismo
+AppData, así que la evidencia (el `_Sync_Outbox` de ese equipo) la sobrescribieron los tramos
+siguientes antes de poder leerla.
+
+Queda escrito porque la lección es la del hallazgo entero: **el motivo del rechazo no se guardaba en
+ningún sitio**, así que dos días de diagnóstico se fueron en deducir por eliminación algo que la
+nube estaba diciendo en cada intento. Con lo que ahora hay —`Ultimo_Error` en la fila y el evento en
+Sentry— esto se habría resuelto leyendo una línea. Es también parte del porqué de TEST-03: si cada
+recorrido no compartiera equipo, la evidencia de un fallo sobreviviría a la tanda.
 
 ### Lo que se ha arreglado, que es la clase de fallo y no el caso
 
