@@ -53,12 +53,59 @@ export type BloqueFiscal = {
     entorno_pruebas: boolean;
 };
 
+/**
+ * El aviso que sale al entrar cuando faltan el NIF y la razón social (FIS-01).
+ *
+ * Se ancla a su encabezado y no a un `data-testid` por lo mismo que el resto del recorrido: ese
+ * texto es parte del producto, no del test.
+ */
+const BOTON_RELLENAR_AHORA =
+    '//h3[contains(normalize-space(.), "Este TPV todavía no puede cobrar")]' +
+    '/ancestor::div[1]//button[contains(normalize-space(.), "Rellenarlo ahora")]';
+
 /** El panel de Configuración → Fiscal donde se declaran los datos del obligado. */
 const PANEL_OBLIGADO =
     '//section[.//h2[normalize-space(text())="Datos fiscales del negocio"]]';
 
-/** Abre Configuración y se planta en la sección Fiscal. */
+/**
+ * Abre Configuración y se planta en la sección Fiscal.
+ *
+ * ⚠️ **Primero mira si está el aviso de «este TPV todavía no puede cobrar»** (FIS-01), porque en un
+ * equipo recién estrenado lo está: sale al entrar, es un `fixed inset-0` y tapa el menú entero. El
+ * recorrido no lo esquiva — lo **usa**, que es lo que hace una persona y de paso comprueba que ese
+ * botón lleva de verdad a donde dice. Descartarlo con «Ahora no» habría probado lo contrario: que
+ * se puede seguir sin rellenar nada.
+ *
+ * Si el aviso no está (ya reconocido, o los datos ya puestos), se navega por el menú como siempre.
+ */
 export async function irASeccionFiscal(): Promise<void> {
+    // Se espera al BOTÓN, con margen, y no se decide por lo que diga el backend.
+    //
+    // La versión anterior preguntaba `datos_fiscales_completos` y, si faltaban, daba por hecho que
+    // el aviso estaría. Falla en el caso más normal de todos: llamar a este helper **dos veces**.
+    // La primera pulsa «Rellenarlo ahora», que **cierra** el aviso (queda reconocido para la
+    // sesión); la segunda seguía viendo que faltan los datos y se quedaba esperando un botón que
+    // ya no va a volver.
+    //
+    // El margen es lo que cubre la carrera que motivó aquello: el aviso sale cuando el store recibe
+    // su primera respuesta, y eso puede pasar después de entrar aquí. Ocho segundos son de sobra
+    // para una llamada local; si en ese tiempo no ha salido, es que no va a salir.
+    const hayAviso = await $(BOTON_RELLENAR_AHORA)
+        .waitForClickable({ timeout: 8_000 })
+        .then(
+            () => true,
+            () => false,
+        );
+
+    if (hayAviso) {
+        await pulsarXPath(
+            BOTON_RELLENAR_AHORA,
+            'botón "Rellenarlo ahora" del aviso de datos fiscales',
+        );
+        await $(PANEL_OBLIGADO).waitForDisplayed({ timeout: 30_000 });
+        return;
+    }
+
     await irA("/Configuracion");
 
     // Anclado al `div` del título dentro del botón de la barra lateral: un `contains(., "Fiscal")`

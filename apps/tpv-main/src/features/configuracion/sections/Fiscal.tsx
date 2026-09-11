@@ -31,6 +31,7 @@ import { toAppError } from "@tpv/client";
 
 import { Panel } from "../ui/Panel";
 import { Field } from "../ui/Field";
+import { useEstadoFiscal } from "../../../shared/stores/useEstadoFiscal";
 import { TextInput } from "../ui/Inputs";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { cn } from "../utils";
@@ -153,7 +154,28 @@ export function Fiscal({
         verifactuEstado()
             .then(setEstado)
             .catch(() => setEstado(null));
+
+        // Y se avisa al store que usa el RESTO de la aplicación. Sin esto, el aviso bloqueante de
+        // «este TPV todavía no puede cobrar» (FIS-01) se quedaba en pantalla hasta el siguiente
+        // poll del store —**dos minutos**— después de haber rellenado los datos: el usuario guarda,
+        // ve que se ha guardado, y la aplicación sigue tapada diciéndole que no puede cobrar.
+        //
+        // Va aquí y no sólo en el guardado porque desde esta pantalla cambian tres cosas que ese
+        // store mira (el obligado, el modo formación y el certificado), y una regla que hay que
+        // acordarse de repetir en cada botón nuevo es una regla que se rompe con el siguiente.
+        void useEstadoFiscal.getState().refrescar();
     }, []);
+
+    /**
+     * Guarda el obligado y **vuelve a preguntar el estado**.
+     *
+     * El `onSave` que llega por props sólo persiste; quien tiene que enterarse de que ya no faltan
+     * los datos es el estado fiscal, aquí y en el store global (ver `refrescarEstado`).
+     */
+    const guardarObligado = useCallback(async () => {
+        await onSave();
+        refrescarEstado();
+    }, [onSave, refrescarEstado]);
 
     const [cerrandoFormacion, setCerrandoFormacion] = useState(false);
 
@@ -356,7 +378,7 @@ export function Fiscal({
                 title="Datos fiscales del negocio"
                 subtitle="Quién factura. Sin esto no se puede cobrar."
                 right={
-                    <PrimaryButton onClick={onSave} disabled={!dirty || saving}>
+                    <PrimaryButton onClick={guardarObligado} disabled={!dirty || saving}>
                         {saving ? "Guardando…" : "Guardar"}
                     </PrimaryButton>
                 }
