@@ -118,6 +118,13 @@ restaurante/dispositivo/versión.
 - **Errores de dispositivo**: tasa de `level == "ERROR"` en `tpv-device-logs` por `tenant_id`.
 - **Backlog de subida**: si un `device_id` deja de mandar lotes durante > X (puede estar offline o
   con la cola atascada).
+- ⚠️ **Operación apartada (SYNC-20)**: el issue `outbox_op_apartada` en **Sentry** (no en Axiom: lo
+  emite el TPV, no el worker). Es la alarma que hay que mirar: significa que un equipo tiene un dato
+  que la nube **no va a tener nunca** y que una recuperación no devolvería. Trae `op_id`,
+  `command_name`, `intentos`, `permanente` y `error_nube` — lo justo para reproducirlo, y a
+  propósito **sin** las sentencias ni sus args (datos de negocio y PII). Su contrapartida en el
+  worker es el `apply_error` de esa misma `op_id`: los dos lados de la misma historia.
+  El aviso al cliente NO es éste: él sólo ve la consecuencia, en Configuración → Conectividad.
 - **Dispositivo rechazado**: N eventos `device_auth_rechazado` del mismo `device_id` en 5 min. Un
   rechazo suelto es normal (token caducado, reloj desviado); una racha significa que ese TPV **no
   puede trabajar contra la nube** y nadie se ha enterado todavía. Estos rechazos NO van a Sentry a
