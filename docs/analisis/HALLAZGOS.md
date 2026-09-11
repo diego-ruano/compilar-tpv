@@ -22,6 +22,7 @@
 | FIS-03 | 🟠 | Las facturas de prueba de diciembre **no se anulan nunca** | ✅ Hecho (2026-09-10) |
 | FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
+| SYNC-20 | 🔴 | El worker desplegado lleva un esquema **anterior a FISCAL-01**: declarar los datos fiscales atasca el outbox para siempre | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
 | CFG-01 | 🟡 | `R2_PUBLIC_BASE_URL` apunta a **otro bucket** que la CSP y la app | Sin empezar |
@@ -153,6 +154,55 @@ entonces el subtítulo hay que cambiarlo, porque hoy dice que hace algo que no h
 se amplía, la decisión de fondo es qué significa «deshacer» una venta que ya descontó stock: lo más
 probable es que sea anular los cobros por el camino de CUENTA-07 (`ClaseBaja::Error`), que ya revierte
 stock y gasto y ya emite el registro de anulación.
+
+## SYNC-20 🔴 · El worker desplegado va por detrás del esquema, y eso atasca el outbox entero
+
+**Lo encontró el E2E, y no lo habría encontrado nada más.** `copias-1` empezó a fallar esperando a
+que la nube se pusiera al día: `{"outbox_pending":6,"last_seq":0}` durante los 3 minutos de espera.
+
+Leyendo `_Sync_Outbox` de la base del recorrido, el diagnóstico es exacto: **las operaciones 1 a 4
+se drenaron** (ya no están) y la cola se para en la 5, que es la primera que toca una columna de
+FISCAL-01:
+
+```sql
+UPDATE Business_Settings SET Business_Name = ?, …, Razon_Social = ?, Updated_At = '…' WHERE ID = 1;
+```
+
+Detrás de ella se acumulan la categoría y cuatro notificaciones. **La cola está ordenada a propósito
+—sus operaciones se apoyan unas en otras— así que una que no pasa detiene TODA la replicación
+posterior, para siempre y en silencio**: `sync_health` no lo marca como fallo (`failing` cuenta los
+cambios de ENTRADA en cuarentena, no los de salida), y `drainOutbox` se limita a un `console.warn` y
+a salir del bucle.
+
+**La causa.** `tenantMigrations.ts` del worker importa `0001_inicial.sql` **en tiempo de
+compilación** (`import m0001 from "…/0001_inicial.sql"`, por la regla `type: "Text"` de
+`wrangler.json`). O sea que el worker **desplegado** aprovisiona los tenants con el esquema que tenía
+el fichero el día que se desplegó. `Razon_Social` entró el **2026-09-08** (`41ebcde`, tramo 1/8 de
+Veri\*factu) y el fichero se siguió tocando hasta el 09-09; si no se ha desplegado desde entonces,
+todo tenant nuevo nace sin esas columnas y el `UPDATE` de arriba falla en Turso.
+
+> ⚠️ **No lo he confirmado del todo**, y la confirmación toca producción: hay que desplegar el worker
+> (o consultar el esquema de un tenant), y eso es una decisión tuya, no mía. Lo que sí está
+> confirmado es el síntoma —la cola se para exactamente en la primera sentencia con una columna de
+> FISCAL-01, con las anteriores ya drenadas— y que `licencia.e2e.ts`, que también espera a la nube
+> pero nunca escribe `Business_Settings`, sincroniza sin problema.
+
+**Por qué importa más de lo que parece.** No es un fallo del área fiscal: es que **declarar los datos
+del obligado deja al equipo sin replicar nada más**. Y como FIS-01 ahora empuja a todo el mundo a
+rellenarlos nada más estrenar, sería lo primero que haría cualquier instalación nueva. El equipo
+seguiría vendiendo (es Local-First) pero la nube se quedaría en el día uno: sin Handy, sin catch-up y
+sin nada que restaurar el día de la avería.
+
+**Qué hacer.** Desplegar el worker (`pnpm --filter tpv-api exec wrangler deploy`) y **resetear los
+tenants de desarrollo** que ya tengan grabado el hash anterior — el runner rechaza con
+`migration_altered` una migración ya aplicada cuyo hash cambie (CLAUDE.md §3). Después, `copias-1`
+vuelve a `declararDatosFiscales` en vez de descartar el aviso (el comentario del recorrido lo dice).
+
+**Y hay una lección aparte**, que conviene arreglar aunque el despliegue lo resuelva: una operación
+que la nube rechaza **para siempre** debería verse. Hoy no sale en `sync_health`, ni en el panel de
+Conectividad, ni en ningún sitio: el único síntoma es que `last_seq` no sube. Un contador de
+«operaciones rechazadas al subir» con el `Op_Id` y el error convertiría tres minutos de espera y una
+consulta a mano en una línea en pantalla.
 
 ## CAJA-01 🟠 · Editar un apunte comprueba el periodo de origen, no el de destino
 
