@@ -1304,3 +1304,182 @@ INSERT OR IGNORE INTO Alergenos (ID_Alergeno, Nombre, Nombre_Imagen, Ruta_Imagen
 -- (Antes se sembraban una zona y una mesa "BARRA" como ancla de la venta rapida. Ya no hacen falta:
 --  los tickets de venta rapida son Comandas con Canal='BARRA' y sin mesa. Ver la nota de la tabla
 --  Comandas en §6.)
+
+/* =========================================================
+   16. Andamiaje LOCAL del dispositivo (prefijo `_`)
+
+   Estado que describe lo que le pasa a ESTE equipo: que le falta por subir, que se
+   trajo, cuando corrio cada job, como va el envio a la AEAT. Nada de esto es un dato
+   de negocio y nada de esto viaja: sus escrituras van por `WriteGuard::raw()`, que no
+   captura en `_Sync_Outbox`.
+
+   VIVE AQUI, EN EL ESQUEMA UNICO, Y NO EN CODIGO. Antes lo creaban a mano dos funciones
+   de `crates/tpv-infra-sqlite/src/db.rs` (`init_sync_tables` / `init_jobs_table`), y eso
+   era tener dos esquemas: uno declarado y versionado, y otro imperativo que no pasaba
+   por `_migrations`, no entraba en el snapshot anti-drift y solo se podia leer
+   ejecutandolo mentalmente. Un cambio en aquel no dejaba rastro en ningun sitio.
+
+   Que estas tablas se creen tambien en el tenant de Turso es DELIBERADO y no molesta:
+   se quedan vacias, como ya dice la cabecera de este fichero. El volcado de recuperacion
+   no las mira (`esRestaurable` descarta todo lo que empieza por `_`, ver
+   domains/sync/bootstrap.ventana.ts), asi que no viajan ni de vuelta.
+========================================================= */
+
+-- Lo que esta Main ha escrito y todavia no ha confirmado la nube. Es una COLA ORDENADA:
+-- sus operaciones se apoyan unas en otras (una linea necesita su comanda), asi que se
+-- sube por `Seq` y no en cualquier orden.
+--
+-- Intentos / Ultimo_Error / Ultimo_Intento_Ms / Cuarentena (SYNC-20): una operacion que
+-- la nube RECHAZA no es lo mismo que una que no ha podido salir. Sin estas columnas el
+-- drenado no sabia distinguirlas y hacia lo unico que podia: parar y reintentar, en
+-- silencio y para siempre, con todas las ventas de detras detenidas tambien. Es la misma
+-- politica que el DO ya aplicaba a su cola de entrada (`_Cola_Muerta` en tenantHub.ts),
+-- traida al camino en vivo, que es por donde va un TPV al dia.
+CREATE TABLE IF NOT EXISTS _Sync_Outbox (
+    Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    Op_Id TEXT NOT NULL UNIQUE,
+    Command_Name TEXT NOT NULL,
+    Statements_Json TEXT NOT NULL,
+    Created_At_Ms INTEGER NOT NULL,
+    Intentos INTEGER NOT NULL DEFAULT 0,
+    Ultimo_Error TEXT,
+    Ultimo_Intento_Ms INTEGER,
+    Cuarentena INTEGER NOT NULL DEFAULT 0
+);
+
+-- El drenado pide siempre lo pendiente NO apartado, por orden. Sin este indice, una
+-- cuarentena vieja obliga a recorrer la cola entera en cada pasada.
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pendientes
+ON _Sync_Outbox(Cuarentena, Seq);
+
+-- Anti-eco de las escrituras propias + gate de idempotencia del catch-up.
+-- Reparto (ver §10): la NUBE usa `Applied_Operations`; la MAIN usa esta.
+CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
+    Op_Id TEXT PRIMARY KEY,
+    Seq INTEGER NOT NULL,
+    Applied_At_Ms INTEGER NOT NULL
+);
+
+-- SYNC-18: operaciones que la nube ya ha ACEPTADO en su cola pero aun no ha confirmado
+-- aplicadas. Su fila sigue en `_Sync_Outbox` a proposito: mientras no vuelva por el
+-- catch-up (que es la prueba de que se aplico de verdad), esta Main conserva su copia y
+-- puede reenviarla. Lo que hace esta tabla es que no se reenvie MIENTRAS TANTO.
+CREATE TABLE IF NOT EXISTS _Sync_Encoladas (
+    Op_Id TEXT PRIMARY KEY,
+    Encolada_En_Ms INTEGER NOT NULL
+);
+
+-- Hasta donde ha leido esta Main el log de cambios de la nube.
+CREATE TABLE IF NOT EXISTS _Sync_State (
+    Id INTEGER PRIMARY KEY CHECK (Id = 1),
+    Last_Seq INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
+
+-- Cuarentena de BAJADA: cambios remotos que esta Main no ha sabido aplicar. Tras 5
+-- intentos se apartan y el checkpoint AVANZA, para que el resto siga convergiendo.
+CREATE TABLE IF NOT EXISTS _Sync_Failed (
+    Op_Id TEXT PRIMARY KEY,
+    Seq INTEGER NOT NULL,
+    Statements_Json TEXT NOT NULL,
+    Attempts INTEGER NOT NULL,
+    Quarantined INTEGER NOT NULL DEFAULT 0,
+    Last_Error TEXT,
+    First_Failed_At_Ms INTEGER NOT NULL,
+    Last_Failed_At_Ms INTEGER NOT NULL
+);
+
+-- Estado local y persistente del protocolo de recuperacion. Vive dentro de la BD para que
+-- restaurar el fichero y marcarlo como "todavia bloqueado" pueda hacerse antes de abrirlo
+-- al resto de la aplicacion, sin una ventana de login accidental tras un reinicio.
+CREATE TABLE IF NOT EXISTS _Recovery_State (
+    Id INTEGER PRIMARY KEY CHECK (Id = 1),
+    Reconciliation_Pending INTEGER NOT NULL DEFAULT 0
+);
+INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0);
+
+-- SYNC-19 - fase 2: el historico que la ventana del bootstrap dejo fuera. La siembra
+-- `bootstrap_restaurar` (una fila por tabla que el worker marco `parcial`) y la va
+-- avanzando el job `backfill_historico`. Con esto el backfill es reanudable por
+-- construccion: apagar el TPV a media descarga no pierde nada, y volver a pedir una
+-- pagina ya aplicada es inocuo (`INSERT OR IGNORE`).
+--
+-- `Orden` conserva el que dio el worker: padres primero. Cada pagina es su propia
+-- transaccion, asi que `defer_foreign_keys` no cubre a una hija insertada antes que su
+-- padre; sin ese orden la fase 2 fallaria fila a fila y no terminaria nunca.
+CREATE TABLE IF NOT EXISTS _Backfill_Historico (
+    Tabla TEXT PRIMARY KEY,
+    Orden INTEGER NOT NULL DEFAULT 0,
+    Cursor INTEGER NOT NULL DEFAULT 0,
+    Filas_Traidas INTEGER NOT NULL DEFAULT 0,
+    Completada INTEGER NOT NULL DEFAULT 0,
+    Ultimo_Intento_Ms INTEGER,
+    Ultimo_Error TEXT
+);
+
+-- FISCAL-01 (Veri*factu): estado del envio a la AEAT.
+--
+-- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad
+-- no esta en nuestra nube sino en la AEAT, a la que se le puede preguntar
+-- (ConsultaFactuSistemaFacturacion). Replicarlo daria una respuesta que parece buena y no
+-- lo es.
+--
+-- Estado:
+--   PENDIENTE              -> generado, aun no aceptado por la AEAT.
+--   ACEPTADO               -> EstadoRegistro 'Correcto' (o duplicado: ya lo teniamos alli).
+--   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
+--   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
+CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
+    ID_Registro       TEXT PRIMARY KEY,
+    Estado            TEXT NOT NULL,
+    Intentos          INTEGER NOT NULL DEFAULT 0,
+    Ultimo_Intento_Ms INTEGER,
+    Codigo_Error      TEXT,
+    Descripcion_Error TEXT,
+    CSV               TEXT,
+    Creado_En_Ms      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_verifactu_envios_estado
+ON _Verifactu_Envios(Estado);
+
+-- Anomalias de la cadena detectadas por la comprobacion previa del art. 7.i) de la Orden
+-- HAC/1177/2024. Es estado LOCAL de diagnostico: describe lo que le ha pasado a ESTE
+-- equipo.
+--
+-- No es el "registro de eventos" del RRSIF: ese solo es obligatorio para los SIF que pueden
+-- actuar en modalidad NO VERI*FACTU, y este es SOLO VERI*FACTU (lo confirma la NOTA 1 del
+-- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
+-- una anomalia no se quede solo en un log que nadie abre.
+CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
+    ID_Anomalia     TEXT PRIMARY KEY,
+    Clase           TEXT NOT NULL,
+    Mensaje         TEXT NOT NULL,
+    ID_Registro     TEXT,
+    Detectada_En_Ms INTEGER NOT NULL,
+    Reconocida      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_verifactu_anomalias_pend
+ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
+
+-- Control de flujo obligatorio (art. 16.2 Orden HAC/1177/2024): el siguiente envio no puede
+-- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
+-- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
+-- en cada respuesta (`TiempoEsperaEnvio`).
+CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
+    ID               INTEGER PRIMARY KEY CHECK (ID = 1),
+    Espera_Segundos  INTEGER NOT NULL DEFAULT 60,
+    Ultimo_Envio_Ms  INTEGER
+);
+INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
+
+-- Estado de los jobs periodicos (jobs/mod.rs). `Last_Ok_Ms` es su razon de ser: permite
+-- decidir el vencimiento en reloj de pared (si ha pasado el intervalo desde el ultimo
+-- exito) en vez de por tiempo de proceso, de modo que un job de 6 h se ejecute igualmente
+-- en un equipo que se apaga cada noche.
+CREATE TABLE IF NOT EXISTS _Jobs_State (
+    Nombre TEXT PRIMARY KEY,
+    Last_Run_Ms INTEGER,
+    Last_Ok_Ms INTEGER,
+    Last_Error TEXT,
+    Fallos INTEGER NOT NULL DEFAULT 0
+);

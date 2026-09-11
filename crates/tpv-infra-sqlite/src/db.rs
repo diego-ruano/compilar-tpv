@@ -537,13 +537,12 @@ impl Db {
 
         // Esquema = migraciones embebidas (ya no hay schema.sql). Construye desde cero en BDs
         // nuevas y pone al día las existentes. Ver `migrations.rs`.
+        //
+        // Aquí ya NO se crea nada más a mano. El andamiaje local del dispositivo (`_Sync_*`,
+        // `_Jobs_State`, `_Verifactu_*`, `_Recovery_State`, `_Backfill_Historico`) vive en §16 del
+        // `0001`, con el resto del esquema: dos funciones que creaban tablas por su cuenta eran un
+        // segundo esquema, sin versión, sin hash y fuera del snapshot anti-drift.
         crate::migrations::run(&write_conn).await?;
-
-        // Tablas de control de la sincronización (locales; no forman parte del esquema compartido).
-        init_sync_tables(&write_conn).await?;
-
-        // Estado de los jobs periódicos (también local; ver `init_jobs_table`).
-        init_jobs_table(&write_conn).await?;
 
         // Pool de lectura.
         let mut read_conns = Vec::with_capacity(READ_POOL_SIZE);
@@ -620,169 +619,6 @@ impl Db {
             _lock: lock,
         }
     }
-}
-
-/// Crea (idempotente) las tablas de control de la sincronización **locales de la Main**. NO forman
-/// parte del esquema compartido (las migraciones) y no existen en la nube.
-///
-/// Reparto de idempotencia (ver §10 de `0001_inicial.sql`): la NUBE usa `Applied_Operations`
-/// (tabla del esquema compartido) como gate por `Op_Id`; la MAIN usa `_Sync_Applied_Ops` (aquí)
-/// para el anti-eco de sus propias escrituras y para el catch-up al reconectar. `Applied_Operations`
-/// también se crea en la BD local (esquema único) pero queda vacía: la Main no la usa.
-async fn init_sync_tables(conn: &Connection) -> Result<(), LibsqlError> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS _Sync_Outbox (
-            Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-            Op_Id TEXT NOT NULL UNIQUE,
-            Command_Name TEXT NOT NULL,
-            Statements_Json TEXT NOT NULL,
-            Created_At_Ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS _Sync_Applied_Ops (
-            Op_Id TEXT PRIMARY KEY,
-            Seq INTEGER NOT NULL,
-            Applied_At_Ms INTEGER NOT NULL
-        );
-        -- SYNC-18: operaciones que la nube ya ha ACEPTADO en su cola pero aún no ha confirmado
-        -- aplicadas. Su fila sigue en `_Sync_Outbox` a propósito: mientras no vuelva por el
-        -- catch-up (que es la prueba de que se aplicó de verdad), esta Main conserva su copia y
-        -- puede reenviarla. Lo que hace esta tabla es que no se reenvíe MIENTRAS TANTO.
-        CREATE TABLE IF NOT EXISTS _Sync_Encoladas (
-            Op_Id TEXT PRIMARY KEY,
-            Encolada_En_Ms INTEGER NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS _Sync_State (
-            Id INTEGER PRIMARY KEY CHECK (Id = 1),
-            Last_Seq INTEGER NOT NULL
-        );
-        INSERT OR IGNORE INTO _Sync_State (Id, Last_Seq) VALUES (1, 0);
-        CREATE TABLE IF NOT EXISTS _Sync_Failed (
-            Op_Id TEXT PRIMARY KEY,
-            Seq INTEGER NOT NULL,
-            Statements_Json TEXT NOT NULL,
-            Attempts INTEGER NOT NULL,
-            Quarantined INTEGER NOT NULL DEFAULT 0,
-            Last_Error TEXT,
-            First_Failed_At_Ms INTEGER NOT NULL,
-            Last_Failed_At_Ms INTEGER NOT NULL
-        );
-        -- Estado local y persistente del protocolo de recuperación. Vive dentro de la BD para que
-        -- restaurar el fichero y marcarlo como "todavía bloqueado" pueda hacerse antes de abrirlo
-        -- al resto de la aplicación, sin una ventana de login accidental tras un reinicio.
-        CREATE TABLE IF NOT EXISTS _Recovery_State (
-            Id INTEGER PRIMARY KEY CHECK (Id = 1),
-            Reconciliation_Pending INTEGER NOT NULL DEFAULT 0
-        );
-        INSERT OR IGNORE INTO _Recovery_State (Id, Reconciliation_Pending) VALUES (1, 0);
-        -- SYNC-19 · fase 2: el histórico que la ventana del bootstrap dejó fuera.
-        --
-        -- La siembra `bootstrap_restaurar` (una fila por tabla que el worker marcó `parcial`) y la
-        -- va avanzando el job `backfill_historico`. Con esto el backfill es reanudable por
-        -- construcción: apagar el TPV a media descarga no pierde nada, y volver a pedir una página
-        -- ya aplicada es inocuo (`INSERT OR IGNORE`).
-        --
-        -- `Orden` conserva el que dio el worker: padres primero. Cada página es su propia
-        -- transacción, así que `defer_foreign_keys` no cubre a una hija insertada antes que su
-        -- padre; sin este orden la fase 2 fallaría fila a fila y no terminaría nunca.
-        --
-        -- Es tabla de control LOCAL (prefijo `_`, como el resto del andamiaje): no está en las
-        -- migraciones, no existe en la nube y no viaja. ⚠️ Sus escrituras van por
-        -- `WriteGuard::raw()`, o cada página del backfill se replicaría a la nube de vuelta.
-        -- ── FISCAL-01 (Veri*factu): estado del envio a la AEAT ────────────────────────────────
-        --
-        -- Es estado LOCAL del equipo y NO SE REPLICA A PROPOSITO. Tras una restauracion la verdad
-        -- no esta en nuestra nube sino en la AEAT, a la que se le puede preguntar
-        -- (ConsultaFactuSistemaFacturacion). Replicarlo daria una respuesta que parece buena y no
-        -- lo es.
-        --
-        -- ⚠️ Sus escrituras van por `WriteGuard::raw()`: por `execute()` cada intento de envio se
-        -- capturaria en `_Sync_Outbox` y se replicaria a la nube.
-        --
-        -- Estado:
-        --   PENDIENTE              -> generado, aun no aceptado por la AEAT.
-        --   ACEPTADO               -> EstadoRegistro 'Correcto' (o duplicado: ya lo teniamos alli).
-        --   ACEPTADO_CON_ERRORES   -> esta en la AEAT pero hay que SUBSANARLO (errores 2000-2008).
-        --   RECHAZADO              -> NO esta en la AEAT. Se subsana (Subsanacion=S, RechazoPrevio=X).
-        CREATE TABLE IF NOT EXISTS _Verifactu_Envios (
-            ID_Registro       TEXT PRIMARY KEY,
-            Estado            TEXT NOT NULL,
-            Intentos          INTEGER NOT NULL DEFAULT 0,
-            Ultimo_Intento_Ms INTEGER,
-            Codigo_Error      TEXT,
-            Descripcion_Error TEXT,
-            CSV               TEXT,
-            Creado_En_Ms      INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_verifactu_envios_estado
-            ON _Verifactu_Envios(Estado);
-        -- Control de flujo obligatorio (art. 16.2 Orden HAC/1177/2024): el siguiente envio no puede
-        -- salir hasta que pasen `Espera_Segundos` desde el anterior O hasta acumular 1000 registros
-        -- (maximo por envio), lo que ocurra primero. El valor inicial es 60 y la AEAT lo actualiza
-        -- en cada respuesta (`TiempoEsperaEnvio`).
-        -- Anomalias de la cadena detectadas por la comprobacion previa del art. 7.i) de la Orden
-        -- HAC/1177/2024. Es estado LOCAL de diagnostico (por eso el prefijo `_`): describe lo que le
-        -- ha pasado a ESTE equipo, no forma parte del esquema compartido y no se replica.
-        --
-        -- No es el "registro de eventos" del RRSIF: ese solo es obligatorio para los SIF que pueden
-        -- actuar en modalidad NO VERI*FACTU, y este es SOLO VERI*FACTU (lo confirma la NOTA 1 del
-        -- apartado 15 del FAQ de desarrolladores de la AEAT). Esto es la parte util de aquello: que
-        -- una anomalia no se quede solo en un log que nadie abre.
-        CREATE TABLE IF NOT EXISTS _Verifactu_Anomalias (
-            ID_Anomalia     TEXT PRIMARY KEY,
-            Clase           TEXT NOT NULL,
-            Mensaje         TEXT NOT NULL,
-            ID_Registro     TEXT,
-            Detectada_En_Ms INTEGER NOT NULL,
-            Reconocida      INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE INDEX IF NOT EXISTS idx_verifactu_anomalias_pend
-            ON _Verifactu_Anomalias(Reconocida, Detectada_En_Ms);
-        CREATE TABLE IF NOT EXISTS _Verifactu_Flujo (
-            ID               INTEGER PRIMARY KEY CHECK (ID = 1),
-            Espera_Segundos  INTEGER NOT NULL DEFAULT 60,
-            Ultimo_Envio_Ms  INTEGER
-        );
-        INSERT OR IGNORE INTO _Verifactu_Flujo (ID, Espera_Segundos) VALUES (1, 60);
-        CREATE TABLE IF NOT EXISTS _Backfill_Historico (
-            Tabla TEXT PRIMARY KEY,
-            Orden INTEGER NOT NULL DEFAULT 0,
-            Cursor INTEGER NOT NULL DEFAULT 0,
-            Filas_Traidas INTEGER NOT NULL DEFAULT 0,
-            Completada INTEGER NOT NULL DEFAULT 0,
-            Ultimo_Intento_Ms INTEGER,
-            Ultimo_Error TEXT
-        );
-        "#,
-    )
-    .await
-    .map(|_| ())
-}
-
-/// Crea (idempotente) la tabla de estado de los **jobs periódicos**. Igual que las `_Sync_*`: es
-/// estado LOCAL del dispositivo (cuándo corrió por última vez cada job en ESTE equipo), no forma
-/// parte del esquema compartido y no existe en la nube.
-///
-/// `Last_Ok_Ms` es la razón de ser de la tabla: permite decidir el vencimiento en reloj de pared
-/// ("¿ha pasado el intervalo desde el último éxito?") en vez de por tiempo de proceso, de modo que
-/// un job de 6 h se ejecute igualmente en un equipo que se apaga cada noche.
-///
-/// ⚠️ Las escrituras deben ir por `WriteGuard::raw()`: por `execute()` se capturarían en el outbox
-/// y cada tick de cada job acabaría replicándose a la nube.
-async fn init_jobs_table(conn: &Connection) -> Result<(), LibsqlError> {
-    conn.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS _Jobs_State (
-            Nombre TEXT PRIMARY KEY,
-            Last_Run_Ms INTEGER,
-            Last_Ok_Ms INTEGER,
-            Last_Error TEXT,
-            Fallos INTEGER NOT NULL DEFAULT 0
-        );
-        "#,
-    )
-    .await
-    .map(|_| ())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

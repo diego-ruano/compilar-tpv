@@ -43,9 +43,10 @@ use sha2::{Digest, Sha256};
 ///
 /// ⚠️ Cargo no vigila ese directorio, así que **editar una migración no basta para que se recompile
 /// esto**: hay que tocar además este fichero, o `include_dir!` seguirá sirviendo la copia vieja y
-/// los tests pasarán contra un esquema que ya no existe. Última vez: FISCAL-01 (Veri*factu:
-/// Registros_Facturacion, Serie_Facturacion, datos fiscales de Business_Settings/Clientes y
-/// Exento/Causa_Exencion en Productos y Detalle_Comanda, Pagos.Motivo_Baja).
+/// los tests pasarán contra un esquema que ya no existe. Última vez: SYNC-20 (§16 del 0001, el
+/// andamiaje local del dispositivo — `_Sync_*`, `_Jobs_State`, `_Verifactu_*`, `_Recovery_State`,
+/// `_Backfill_Historico` — que hasta ahora creaba a mano `db.rs`, más las columnas de cuarentena
+/// de subida en `_Sync_Outbox`).
 static MIGRATIONS_DIR: Dir = include_dir!("$CARGO_MANIFEST_DIR/../../packages/database/migrations");
 
 type BoxErr = Box<dyn std::error::Error + Send + Sync>;
