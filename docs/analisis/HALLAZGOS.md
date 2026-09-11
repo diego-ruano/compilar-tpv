@@ -11,9 +11,11 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Estado (2026-09-10, tarde):** los cinco puntos del área fiscal que bloqueaban un piloto están
-> resueltos (FIS-01 a FIS-04) más HIG-01, HIG-03 y TEST-02. Lo que queda no impide entrar en un bar:
-> CAJA-01 es el siguiente por severidad, y FIS-05 conviene decidirlo (es alcance, no bug).
+> **Estado (2026-09-11):** los cuatro puntos del área fiscal que bloqueaban un piloto están
+> resueltos (FIS-01 a FIS-04), más HIG-01, HIG-03, TEST-02 y SYNC-20. Lo que queda no impide entrar
+> en un bar: **OBS-05 es el siguiente** —no es un bug, pero mientras siga así el resto se descubre
+> tarde y a mano, como pasó con SYNC-20—, luego CAJA-01 por severidad, y FIS-05 conviene decidirlo
+> (es alcance, no bug). SYNC-21 y TEST-03 salieron de arreglar SYNC-20.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
@@ -23,6 +25,9 @@
 | FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | SYNC-20 | 🔴 | Una operación que la nube rechaza detenía **toda** la replicación, en silencio y para siempre | ✅ Hecho (2026-09-11) |
+| SYNC-21 | 🟡 | Una operación apartada sólo se ve si alguien **abre el panel**: no hay notificación | Sin empezar |
+| OBS-05 | 🟠 | La observabilidad del sync está construida y **apagada**: faltan las variables de Axiom | Sin empezar |
+| TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
 | CFG-01 | 🟡 | `R2_PUBLIC_BASE_URL` apunta a **otro bucket** que la CSP y la app | Sin empezar |
@@ -227,6 +232,76 @@ versión, sin hash, fuera de `_migrations` y **fuera del snapshot anti-drift**. 
 `0001` con todo lo demás; el snapshot ganó 14 líneas que antes no vigilaba nadie. Que esas tablas se
 creen también en el tenant de Turso es deliberado y no molesta: se quedan vacías, y el volcado de
 recuperación descarta todo lo que empieza por `_`.
+
+## OBS-05 🟠 · La observabilidad del sync está construida y APAGADA
+
+`emitSyncEvent` (tenantHub.ts) sale por la puerta en la primera línea si falta `AXIOM_TOKEN` o
+`AXIOM_DATASET_SYNC`, y **ninguna de las dos está configurada**: no aparecen en `wrangler.json` ni en
+`wrangler secret list` del worker desplegado (comprobado el 2026-09-11, tras el despliegue).
+
+O sea que los seis eventos que el worker ya emite —`apply_error`, `main_online`, `main_offline`,
+`cola_apartada`, `cola_volcado_inicio/fin`, `device_auth_rechazado`— **no llegan a ninguna parte**
+desde que se escribieron. `docs/observability.md` §6 recomienda cuatro monitores sobre un dataset que
+no existe.
+
+**Cómo se notó, que es lo que le da la severidad.** Al diagnosticar SYNC-20 hacía falta saber por qué
+la nube rechazaba una operación. El worker **ya lo estaba diciendo** —`apply_error` lleva
+`command_name`, `op_id`, `tenant_id` y el error de Turso— y no lo escuchaba nadie. El resultado
+fueron tres minutos de espera, una consulta a mano al SQLite del recorrido y una hipótesis
+equivocada (ver SYNC-20).
+
+**Qué hacer.** Crear el dataset en Axiom y poner las dos variables:
+`pnpm --filter tpv-api exec wrangler secret put AXIOM_TOKEN` y `AXIOM_DATASET_SYNC` como var en
+`wrangler.json`. Luego los monitores que ya están escritos en `docs/observability.md` §6.
+
+> El Sentry del escritorio **sí** está cableado: `release.yml` pasa `TPV_SENTRY_DSN` al compilar. Es
+> sólo la mitad del worker la que está muda. Aun así conviene comprobar que ese secreto de GitHub
+> existe de verdad, porque `option_env!` sin valor deja el cliente en no-op **sin avisar**.
+
+## SYNC-21 🟡 · Una operación apartada sólo se ve si alguien abre el panel
+
+Lo que quedó fuera de SYNC-20 a propósito, para no ampliar aquel cambio, y que es justo la mitad que
+falta de «esto tiene que funcionar solo»:
+
+1. **No hay notificación.** Una operación apartada pinta un aviso en Configuración → Conectividad, y
+   ahí se queda. Nadie abre ese panel salvo cuando ya sospecha algo. El repo tiene el sistema de
+   notificaciones (NOTIF-01) y la escalera de avisos de Veri\*factu como patrón: un aviso al
+   Administrador con dedupe es exactamente esta forma. Vale para las dos direcciones — la cuarentena
+   de BAJADA (`quarantined`, SYNC-01) lleva desde que existe sin notificar tampoco.
+2. **`_Cola_Muerta` es de sólo escritura.** El DO aparta ahí las operaciones del volcado que agotan
+   sus intentos y emite `cola_apartada`… y **nadie la lee nunca**: no hay ruta, ni endpoint, ni
+   panel. El único `SELECT` del repo está en `test/colaEntrada.test.ts`. Escribir en un buzón que no
+   abre nadie es la misma clase de silencio que SYNC-20, un piso más arriba.
+3. **El volcado no usa el clasificador.** `anotarFallo` gasta sus cinco intentos incluso con un error
+   que ya se sabe definitivo. `esRechazoPermanente` está escrito y probado; es pasárselo.
+
+Ninguna de las tres deja hoy el sistema atascado —para eso está SYNC-20—; lo que hacen es que
+enterarse siga dependiendo de que alguien mire.
+
+## TEST-03 🟡 · Cada recorrido E2E estrena su equipo, y son seis
+
+`wdio.conf.ts` prepara el equipo por receta en `beforeSession`, así que cada uno de los seis ficheros
+de recorrido monta su AppData, activa su licencia y **crea su tenant de Turso**. Son seis bases por
+tanda que no se borran solas, y el arranque completo se repite cinco veces para probar cinco cosas
+distintas que podrían compartirlo.
+
+**Qué haría falta.** Mover la preparación del equipo del `beforeSession` al `describe`, y encadenar
+dentro los pasos que hoy son ficheros distintos. No todos pueden agruparse, y conviene saber cuáles
+antes de empezar:
+
+- **Sí pueden**: `venta` y `fiscal` estrenan los dos un equipo limpio, sin nube, y hacen recorridos
+  contiguos (vender y cobrar / mirar la factura de ese cobro).
+- **Los tres de copias YA son uno partido en tres**, y lo están por una razón que no se puede
+  deshacer: en medio hay que **apagar la aplicación** (en Windows la base no se reemplaza con SQLite
+  teniéndola abierta). Agruparlos es unificar su receta y su licencia, no sus `describe`.
+- **`licencia` no puede**: necesita anular y caducar su propia licencia, así que compartirla con otro
+  recorrido lo rompería.
+
+⚠️ **El aislamiento no es negociable** y es lo que hay que vigilar al agruparlos: cada recorrido
+estrena su licencia (y por tanto su tenant) **a propósito** — CLAUDE.md §16 explica que con una
+licencia fija el catch-up arrastra lo que dejaron las tandas anteriores, y eso se vio como un fichaje
+que la app rechazaba unas veces sí y otras no. Agrupar tiene que reducir el número de tenants
+compartiendo uno **dentro** de un grupo, no reutilizando uno **entre** tandas.
 
 ## CAJA-01 🟠 · Editar un apunte comprueba el periodo de origen, no el de destino
 
