@@ -211,3 +211,63 @@ pub struct BootstrapResultado {
     pub tablas_restauradas: Vec<String>,
     pub tablas_desconocidas: Vec<String>,
 }
+
+/* ===== SYNC-24: contrastar la nube contra la Main ===== */
+
+/// `COUNT(*)` de una tabla ENTERA en la nube. Es lo único que ve una fila perdida fuera de la
+/// ventana, y cuesta un agregado por tabla.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ConteoTabla {
+    pub nombre: String,
+    #[ts(type = "number")]
+    pub filas: i64,
+}
+
+/// Respuesta de `/v1/sync/verificar`: la foto con la que se contrasta.
+///
+/// `ventana` reusa `BootstrapTabla` porque es exactamente la misma forma y la construye la misma
+/// sentencia del worker: tener dos formas para el mismo volcado sería tener dos que pueden divergir.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct VerificacionNube {
+    pub conteos: Vec<ConteoTabla>,
+    pub ventana: Vec<BootstrapTabla>,
+    /// La ventana no cabía y sólo vienen los conteos. Media comprobación es mejor que ninguna.
+    #[serde(default)]
+    pub ventana_omitida: bool,
+    /// Límite inferior de la ventana que usó el worker (informativo).
+    #[serde(default)]
+    pub desde: String,
+}
+
+/// Lo que no cuadra en una tabla.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct DescuadreTabla {
+    pub tabla: String,
+    /// Filas que la Main tiene y la nube no. Sale de comparar los `COUNT(*)`, así que se sabe
+    /// CUÁNTAS pero no cuáles: para eso haría falta la ventana local, y la definición de la ventana
+    /// vive en el worker a propósito (una sola fuente). Las que importan de verdad —las de una
+    /// operación apartada— ya las repara SYNC-22 en el momento, sin esperar a este contraste.
+    #[ts(type = "number")]
+    pub faltan: i64,
+    /// Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir, y **no se repara
+    /// por estado**: la ausencia de una fila no es una fila que mandar (SYNC-23).
+    #[ts(type = "number")]
+    pub sobran: i64,
+    /// Filas que están en los dos sitios con contenido distinto. Éstas SÍ se reparan.
+    #[ts(type = "number")]
+    pub distintas: i64,
+}
+
+/// Lo que dejó una pasada de verificación.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ResultadoVerificacion {
+    pub descuadres: Vec<DescuadreTabla>,
+    /// Filas cuya reparación se ha encolado en esta pasada.
+    #[ts(type = "number")]
+    pub reparadas: i64,
+    pub ventana_omitida: bool,
+}

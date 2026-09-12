@@ -294,6 +294,12 @@ fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<Denomin
 
 export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
 
+/**
+ * `COUNT(*)` de una tabla ENTERA en la nube. Es lo único que ve una fila perdida fuera de la
+ * ventana, y cuesta un agregado por tabla.
+ */
+export type ConteoTabla = { nombre: string, filas: number, };
+
 export type CopySemanaInput = { from_monday: string, to_monday: string, overwrite?: boolean, };
 
 /**
@@ -339,6 +345,27 @@ export type DeleteGastoInput = { id_gasto: string, };
 export type DenominacionDto = { valor: number, unidades: number, };
 
 export type DenominacionInput = { valor: number, unidades: number, };
+
+/**
+ * Lo que no cuadra en una tabla.
+ */
+export type DescuadreTabla = { tabla: string, 
+/**
+ * Filas que la Main tiene y la nube no. Sale de comparar los `COUNT(*)`, así que se sabe
+ * CUÁNTAS pero no cuáles: para eso haría falta la ventana local, y la definición de la ventana
+ * vive en el worker a propósito (una sola fuente). Las que importan de verdad —las de una
+ * operación apartada— ya las repara SYNC-22 en el momento, sin esperar a este contraste.
+ */
+faltan: number, 
+/**
+ * Filas que la nube tiene y la Main no. Es un borrado que no llegó a subir, y **no se repara
+ * por estado**: la ausencia de una fila no es una fila que mandar (SYNC-23).
+ */
+sobran: number, 
+/**
+ * Filas que están en los dos sitios con contenido distinto. Éstas SÍ se reparan.
+ */
+distintas: number, };
 
 /**
  * Datos del cliente para emitir **factura completa** (FISCAL-02).
@@ -953,6 +980,15 @@ export type ReservasStatsArgs = { range: StatsRange, turno: StatsTurno, };
 export type ReservasStatsResponse = { total_reservas: number, cancelaciones: number, mesas_turno: ReservasMesasTurno, reservas_por_bucket: ChartSeriesI64, estado: ChartSeriesI64, franjas: ChartSeriesI64, };
 
 /**
+ * Lo que dejó una pasada de verificación.
+ */
+export type ResultadoVerificacion = { descuadres: Array<DescuadreTabla>, 
+/**
+ * Filas cuya reparación se ha encolado en esta pasada.
+ */
+reparadas: number, ventana_omitida: boolean, };
+
+/**
  * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
  * rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
  */
@@ -1194,6 +1230,22 @@ export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, No
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
  */
 IVA_Percent?: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
+
+/**
+ * Respuesta de `/v1/sync/verificar`: la foto con la que se contrasta.
+ *
+ * `ventana` reusa `BootstrapTabla` porque es exactamente la misma forma y la construye la misma
+ * sentencia del worker: tener dos formas para el mismo volcado sería tener dos que pueden divergir.
+ */
+export type VerificacionNube = { conteos: Array<ConteoTabla>, ventana: Array<BootstrapTabla>, 
+/**
+ * La ventana no cabía y sólo vienen los conteos. Media comprobación es mejor que ninguna.
+ */
+ventana_omitida: boolean, 
+/**
+ * Límite inferior de la ventana que usó el worker (informativo).
+ */
+desde: string, };
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 

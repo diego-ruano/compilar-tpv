@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import type { Env } from "../../env";
 import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
+import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 import { getTenantDbRow } from "../../server/db/tenantDb";
@@ -372,5 +373,134 @@ syncRoutes.post("/initialize-empty", async (c) => {
 	}
 
 	await provisionTenantDatabase(central, c.env, tenantId);
+	return c.json({ ok: true });
+});
+
+/* ===== SYNC-24: comprobar que la nube y la Main dicen lo mismo ===== */
+
+/**
+ * Foto para CONTRASTAR, no para restaurar.
+ *
+ * Devuelve dos cosas y cada una cubre lo que la otra no:
+ *
+ * - `conteos`: `COUNT(*)` de **todas** las tablas de negocio, enteras. Es baratísimo (un agregado
+ *   por tabla) y es lo único que ve una fila que falta o que sobra fuera de la ventana.
+ * - `ventana`: el contenido de los últimos `VENTANA_DIAS`, con las MISMAS sentencias que el
+ *   bootstrap. Es lo que ve un VALOR distinto — el caso que nos mordió (un `UPDATE` de
+ *   `Razon_Social` que no llegó a subir) y que ningún contador detecta, porque la fila está en los
+ *   dos sitios.
+ *
+ * El histórico viejo se queda fuera a propósito: ya no cambia, así que volver a leerlo cada ciclo
+ * es pagar lecturas de Turso por comprobar datos inmutables. Si algo se descuadró ahí, se descuadró
+ * cuando estaba dentro de la ventana.
+ *
+ * ⚠️ NO abre transacción ni devuelve `Seq`, y ésa es la diferencia con `/bootstrap`. Aquí una foto
+ * ligeramente movida no hace daño: lo peor que produce es un descuadre que al ciclo siguiente ya no
+ * está. Pagar una transacción de lectura sobre toda la ventana, en cambio, sí compite con quien
+ * está vendiendo.
+ */
+syncRoutes.post("/verificar", async (c) => {
+	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const clientNow = c.req.header("x-client-now");
+
+	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		const rsTablas = await db.execute({
+			sql: `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC;`,
+			args: [],
+		});
+		const tablas = rows(rsTablas)
+			.map((r: any) => String(r.name ?? r.NAME ?? ""))
+			.filter(esTablaDeNegocio);
+
+		const rsCierre = await db.execute({
+			sql: `SELECT Fecha_Hora FROM Cierres_Caja WHERE Reabierto_En IS NULL
+			      ORDER BY Fecha_Hora DESC LIMIT 1;`,
+			args: [],
+		});
+		const ultimoCierre = (rows(rsCierre)[0] as any)?.Fecha_Hora ?? null;
+		const desde = limiteVentana(clientNow, ultimoCierre ? String(ultimoCierre) : null);
+
+		// Conteos de tabla ENTERA (no de la ventana): es lo que delata una fila perdida en el
+		// histórico, que la ventana no mira.
+		const rsConteos = await db.batch(
+			tablas.map((t) => ({ sql: `SELECT COUNT(*) AS n FROM "${t}";`, args: [] })),
+			"read",
+		);
+		const conteos = tablas.map((nombre, i) => ({
+			nombre,
+			filas: Number((rsConteos[i]?.rows?.[0] as any)?.n ?? 0),
+		}));
+
+		// Guardia de tamaño sobre lo que se va a construir de verdad, igual que en el bootstrap.
+		// Si la ventana no cabe, se devuelven los conteos igualmente: media comprobación es mejor
+		// que ninguna, y es justo el caso en el que más falta hace saber que algo va mal.
+		const rsVentanaN = await db.batch(
+			tablas.map((t) => sentenciaConteo(t, desde)),
+			"read",
+		);
+		const filasVentana = rsVentanaN.reduce(
+			(acc, rs) => acc + Number((rs.rows?.[0] as any)?.n ?? 0),
+			0,
+		);
+		if (filasVentana > BOOTSTRAP_MAX_FILAS) {
+			return { conteos, ventana: [], ventana_omitida: true as const, desde };
+		}
+
+		const rsVolcado = await db.batch(
+			tablas.map((t) => sentenciaVolcado(t, desde)),
+			"read",
+		);
+		const ventana = tablas.map((nombre, i) => {
+			const rs = rsVolcado[i];
+			const columnas: string[] = (rs?.columns ?? []).map((x: any) => String(x));
+			return {
+				nombre,
+				columnas,
+				filas: (rs?.rows ?? []).map((r: any) => columnas.map((c) => r[c] ?? null)),
+			};
+		});
+
+		return { conteos, ventana, ventana_omitida: false as const, desde };
+	});
+
+	return c.json(resultado);
+});
+
+/**
+ * El TPV cuenta cómo está su sincronización. NADIE MIRA ESTO A MANO: va a Axiom.
+ *
+ * Existe porque el aviso útil de un descuadre no es para quien está delante del TPV —un `op_id` y
+ * un error de SQL no los puede usar un camarero, y un aviso que no se puede atender se aprende a
+ * ignorar— sino para quien puede arreglarlo. El equipo se chiva solo y aquí no hay interfaz que
+ * abrir.
+ *
+ * Es **best-effort por diseño**: si esto falla, el TPV sigue exactamente igual. Nada de lo que
+ * rodea a la observabilidad puede afectar a vender ni a replicar.
+ */
+syncRoutes.post("/salud", async (c) => {
+	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const cuerpo = await c.req.json().catch(() => ({}) as any);
+	const descuadres = Array.isArray(cuerpo?.descuadres) ? cuerpo.descuadres.slice(0, 50) : [];
+
+	emitirSalud(c.env, {
+		tenant_id: c.get("tenantId"),
+		device_id: c.get("deviceId"),
+		// Se recorta lo que llega: es un informe, no un canal de datos. Sin esto, un bug del
+		// cliente podría mandar filas enteras de negocio a un dataset de observabilidad.
+		descuadres: descuadres.map((d: any) => ({
+			tabla: String(d?.tabla ?? "").slice(0, 64),
+			faltan: Number(d?.faltan ?? 0),
+			sobran: Number(d?.sobran ?? 0),
+			distintas: Number(d?.distintas ?? 0),
+		})),
+		apartadas: Number(cuerpo?.apartadas ?? 0),
+		reparadas: Number(cuerpo?.reparadas ?? 0),
+		ventana_omitida: Boolean(cuerpo?.ventana_omitida),
+	});
+
 	return c.json({ ok: true });
 });

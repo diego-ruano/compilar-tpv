@@ -378,3 +378,116 @@ pub async fn sentencia_de_reparacion(
         args: valores,
     }))
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SYNC-24: contrastar la foto de la nube contra la base local
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// ¿Son el mismo valor?
+///
+/// Comparar el JSON tal cual daría descuadres falsos a mansalva: la nube devuelve un entero como
+/// `1` y libsql local puede devolverlo como `1.0`, y un `4.0` frente a un `4` no es un descuadre,
+/// es la misma cifra escrita de dos maneras. Los números se comparan **como números**; el resto,
+/// por texto.
+///
+/// Fallar hacia "son iguales" es lo correcto aquí: un falso descuadre genera una reparación inútil
+/// y, sobre todo, una alarma que enseña a ignorar las alarmas.
+fn mismo_valor(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value as J;
+    match (a, b) {
+        (J::Null, J::Null) => true,
+        (J::Number(x), J::Number(y)) => match (x.as_f64(), y.as_f64()) {
+            (Some(p), Some(q)) => (p - q).abs() < 1e-9,
+            _ => x == y,
+        },
+        // Un número frente a su texto: pasa al cruzar dos drivers distintos.
+        (J::Number(x), J::String(s)) | (J::String(s), J::Number(x)) => {
+            match (x.as_f64(), s.parse::<f64>()) {
+                (Some(p), Ok(q)) => (p - q).abs() < 1e-9,
+                _ => false,
+            }
+        }
+        (J::Bool(x), J::Number(y)) | (J::Number(y), J::Bool(x)) => {
+            y.as_i64() == Some(if *x { 1 } else { 0 })
+        }
+        _ => a == b,
+    }
+}
+
+/// Convierte el valor de una columna local al JSON con el que se compara.
+pub fn valor_a_json(v: &Value) -> serde_json::Value {
+    match v {
+        Value::Null => serde_json::Value::Null,
+        Value::Integer(n) => json!(n),
+        Value::Real(f) => json!(f),
+        Value::Text(s) => json!(s),
+        Value::Blob(_) => serde_json::Value::Null,
+    }
+}
+
+/// Compara UNA fila que viene de la nube contra su gemela local.
+///
+/// Devuelve `None` si la fila no existe en local (la nube tiene algo que aquí no está), y
+/// `Some(true)` si existe pero con contenido distinto.
+pub async fn fila_difiere(
+    conn: &Connection,
+    tabla: &str,
+    columnas: &[String],
+    valores: &[serde_json::Value],
+    claves: &[String],
+) -> Result<Option<bool>, LibsqlError> {
+    if !nombre_aceptable(tabla) || claves.is_empty() {
+        return Ok(None);
+    }
+
+    let mut donde = Vec::new();
+    let mut args = Vec::new();
+    for (i, k) in claves.iter().enumerate() {
+        let pos = match columnas.iter().position(|c| c.eq_ignore_ascii_case(k)) {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        if !nombre_aceptable(k) {
+            return Ok(None);
+        }
+        donde.push(format!("\"{k}\" = ?{}", i + 1));
+        args.push(match valores.get(pos) {
+            Some(serde_json::Value::String(s)) => Value::Text(s.clone()),
+            Some(serde_json::Value::Number(n)) => Value::Text(n.to_string()),
+            _ => return Ok(None),
+        });
+    }
+
+    let cols = columnas
+        .iter()
+        .map(|c| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for c in columnas {
+        if !nombre_aceptable(c) {
+            return Ok(None);
+        }
+    }
+
+    let mut rows = conn
+        .query(
+            &format!(
+                "SELECT {cols} FROM \"{tabla}\" WHERE {} LIMIT 1;",
+                donde.join(" AND ")
+            ),
+            args,
+        )
+        .await?;
+
+    let Some(r) = rows.next().await? else {
+        return Ok(None);
+    };
+
+    for (i, esperado) in valores.iter().enumerate() {
+        let local = valor_a_json(&r.get_value(i as i32)?);
+        if !mismo_valor(&local, esperado) {
+            return Ok(Some(true));
+        }
+    }
+    Ok(Some(false))
+}

@@ -20,7 +20,8 @@ use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::sync::SyncRepository;
 use tpv_contracts::sync::{
     AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
-    OutboxEntry, OutboxFallo, SqlStatement, SyncChange, SyncHealth,
+    DescuadreTabla, OutboxEntry, OutboxFallo, ResultadoVerificacion, SqlStatement,
+    SyncChange, SyncHealth, VerificacionNube,
 };
 
 use crate::db::Db;
@@ -689,6 +690,15 @@ impl SyncRepository for SqliteSyncRepository {
             command_name,
             reparadas,
         })
+    }
+
+    async fn contrastar_con_la_nube(
+        &self,
+        foto: VerificacionNube,
+    ) -> AppResult<ResultadoVerificacion> {
+        // El cuerpo vive en un `impl` propio (más abajo) para no engordar el del trait: es lo más
+        // largo de este fichero y no comparte nada con el resto de la interfaz.
+        SqliteSyncRepository::contrastar_con_la_nube(self, foto).await
     }
 
     async fn outbox_mark_encolada(&self, op_ids: &[String]) -> AppResult<()> {
@@ -2461,5 +2471,389 @@ mod tests_reparacion {
         .await
         .unwrap();
         assert!(st.is_none());
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SYNC-24: contrastar la nube contra esta base, y reparar lo que se pueda
+// ──────────────────────────────────────────────────────────────────────────────
+
+impl SqliteSyncRepository {
+    /// Compara la foto que manda el worker contra la base local y encola la reparación de lo que
+    /// no cuadre.
+    ///
+    /// Lo que cada señal puede y no puede decir, porque confundirlo lleva a creer que se ha
+    /// comprobado más de lo que se ha comprobado:
+    ///
+    /// - **`faltan`** sale de restar los `COUNT(*)`, así que dice CUÁNTAS filas tiene esta Main de
+    ///   más, no cuáles. Saber cuáles exigiría reproducir aquí la definición de la ventana, que
+    ///   vive en el worker **a propósito** (una sola fuente; ver `bootstrap.ventana.ts`). No es un
+    ///   agujero: las filas que de verdad importan —las de una operación apartada— ya las repara
+    ///   SYNC-22 en el momento, sin esperar a esta pasada.
+    /// - **`sobran`** son filas que la nube tiene y aquí no. Es un borrado que no llegó a subir, y
+    ///   **no se toca**: la ausencia de una fila no es un estado que se pueda mandar, y borrar
+    ///   arriba por iniciativa propia se llevaría por delante una fila recién creada por la Handy
+    ///   que esta Main todavía no ha recibido. Se cuenta y se informa (SYNC-23).
+    /// - **`distintas`** son las que están en los dos sitios con contenido distinto. Éstas sí se
+    ///   reparan: la Main es el escritor único, así que su versión es la buena.
+    pub async fn contrastar_con_la_nube(
+        &self,
+        foto: VerificacionNube,
+    ) -> AppResult<ResultadoVerificacion> {
+        use crate::sync_reparacion as rep;
+
+        let mut descuadres: Vec<DescuadreTabla> = Vec::new();
+        let mut a_reparar: Vec<rep::FilaAfectada> = Vec::new();
+
+        {
+            let r = self.db.read().await;
+            let conn = r.conn();
+
+            // 1) Conteos de tabla entera.
+            for c in &foto.conteos {
+                let local = match contar_tabla(conn, &c.nombre).await? {
+                    Some(n) => n,
+                    // La tabla no existe aquí: es otra versión del programa, no un descuadre.
+                    None => continue,
+                };
+                if local > c.filas {
+                    descuadres.push(DescuadreTabla {
+                        tabla: c.nombre.clone(),
+                        faltan: local - c.filas,
+                        ..Default::default()
+                    });
+                }
+            }
+
+            // 2) Contenido de la ventana, fila a fila.
+            for t in &foto.ventana {
+                let claves = rep::claves_primarias(conn, &t.nombre)
+                    .await
+                    .unwrap_or_default();
+                if claves.is_empty() {
+                    continue;
+                }
+                let mut sobran = 0i64;
+                let mut distintas = 0i64;
+
+                for fila in &t.filas {
+                    match rep::fila_difiere(conn, &t.nombre, &t.columnas, fila, &claves).await {
+                        Ok(None) => sobran += 1,
+                        Ok(Some(true)) => {
+                            distintas += 1;
+                            if let Some(f) = clave_de(&t.nombre, &t.columnas, fila, &claves) {
+                                a_reparar.push(f);
+                            }
+                        }
+                        Ok(Some(false)) => {}
+                        Err(e) => {
+                            tracing::warn!("verificacion: {} no se pudo comparar: {e}", t.nombre);
+                        }
+                    }
+                }
+
+                if sobran > 0 || distintas > 0 {
+                    match descuadres.iter_mut().find(|d| d.tabla == t.nombre) {
+                        Some(d) => {
+                            d.sobran = sobran;
+                            d.distintas = distintas;
+                        }
+                        None => descuadres.push(DescuadreTabla {
+                            tabla: t.nombre.clone(),
+                            faltan: 0,
+                            sobran,
+                            distintas,
+                        }),
+                    }
+                }
+            }
+        }
+
+        // 3) Reparar. En su propio guard de escritura, ya soltado el de lectura.
+        let mut reparadas = 0i64;
+        if !a_reparar.is_empty() {
+            let w = self.db.write().await;
+            let conn = w.raw();
+            let mut sentencias = Vec::new();
+            for f in &a_reparar {
+                if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
+                    sentencias.push(st);
+                }
+            }
+            if !sentencias.is_empty() {
+                reparadas = sentencias.len() as i64;
+                let op = uuid::Uuid::new_v4().to_string();
+                let ahora = now_ms();
+                conn.execute(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+                     VALUES (?1, ?2, ?3, ?4);",
+                    vec![
+                        Value::Text(op.clone()),
+                        Value::Text(rep::COMANDO_REPARACION.to_string()),
+                        Value::Text(
+                            serde_json::to_string(&sentencias).unwrap_or_else(|_| "[]".into()),
+                        ),
+                        Value::Integer(ahora),
+                    ],
+                )
+                .await
+                .map_err(db_err)?;
+                conn.execute(
+                    "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) \
+                     VALUES (?1, 0, ?2);",
+                    vec![Value::Text(op), Value::Integer(ahora)],
+                )
+                .await
+                .map_err(db_err)?;
+            }
+        }
+
+        Ok(ResultadoVerificacion {
+            descuadres,
+            reparadas,
+            ventana_omitida: foto.ventana_omitida,
+        })
+    }
+}
+
+/// `COUNT(*)` local. `None` = la tabla no existe aquí (una versión con menos tablas), que no es un
+/// descuadre sino otra versión del programa.
+async fn contar_tabla(conn: &Connection, tabla: &str) -> AppResult<Option<i64>> {
+    if tabla.is_empty()
+        || tabla.len() > 64
+        || !tabla.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Ok(None);
+    }
+    let mut existe = conn
+        .query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1;",
+            vec![Value::Text(tabla.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    if existe.next().await.map_err(db_err)?.is_none() {
+        return Ok(None);
+    }
+    let mut rows = conn
+        .query(&format!("SELECT COUNT(*) FROM \"{tabla}\";"), ())
+        .await
+        .map_err(db_err)?;
+    Ok(match rows.next().await.map_err(db_err)? {
+        Some(r) => Some(v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0)),
+        None => Some(0),
+    })
+}
+
+/// Extrae la clave primaria de una fila que llega de la nube.
+fn clave_de(
+    tabla: &str,
+    columnas: &[String],
+    fila: &[serde_json::Value],
+    claves: &[String],
+) -> Option<crate::sync_reparacion::FilaAfectada> {
+    let mut clave = Vec::new();
+    for k in claves {
+        let pos = columnas.iter().position(|c| c.eq_ignore_ascii_case(k))?;
+        let v = match fila.get(pos)? {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            _ => return None,
+        };
+        clave.push((k.clone(), v));
+    }
+    Some(crate::sync_reparacion::FilaAfectada {
+        tabla: tabla.to_string(),
+        clave,
+    })
+}
+
+#[cfg(test)]
+mod tests_verificacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! SYNC-24 — contrastar la nube contra esta base.
+    //!
+    //! La asimetría que esto cubre: la Handy no tiene base local y lee de la nube, así que una fila
+    //! que se quedó distinta arriba no es "falta un dato en una copia" — es que el camarero y el TPV
+    //! ven cosas distintas. Y hasta ahora no lo comprobaba nadie.
+
+    use std::sync::Arc;
+
+    use tpv_contracts::sync::{BootstrapTabla, ConteoTabla, VerificacionNube};
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("verificacion");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sql: &str) {
+        let w = db.write().await;
+        w.raw().execute_batch(sql).await.unwrap();
+    }
+
+    fn ventana_zonas(filas: Vec<Vec<serde_json::Value>>) -> BootstrapTabla {
+        BootstrapTabla {
+            nombre: "Zonas".into(),
+            columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+            filas,
+            parcial: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn un_VALOR_distinto_se_detecta_y_se_repara() {
+        // El caso que nos mordió: la fila está en los dos sitios, así que ningún contador la ve.
+        // Sólo comparar el contenido la encuentra.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');").await;
+
+        let foto = VerificacionNube {
+            conteos: vec![ConteoTabla { nombre: "Zonas".into(), filas: 1 }],
+            // La nube se quedó con el nombre viejo.
+            ventana: vec![ventana_zonas(vec![vec![
+                serde_json::json!("z1"),
+                serde_json::json!("Salón"),
+            ]])],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        let d = r.descuadres.iter().find(|d| d.tabla == "Zonas").expect("descuadre en Zonas");
+        assert_eq!(d.distintas, 1);
+        assert_eq!(d.sobran, 0);
+        assert_eq!(r.reparadas, 1, "la fila distinta se repara");
+
+        // Y lo encolado lleva el valor de la MAIN, que es el escritor único.
+        let pend = repo.outbox_pending(100).await.unwrap();
+        let rep = pend
+            .iter()
+            .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
+            .expect("tiene que haberse encolado la reparación");
+        let args = serde_json::to_string(&rep.statements[0].args).unwrap();
+        assert!(args.contains("Terraza"), "args: {args}");
+    }
+
+    #[tokio::test]
+    async fn lo_que_YA_coincide_no_genera_ruido() {
+        // Si esto fallara, cada pasada encolaría reparaciones inútiles y llenaría Axiom de avisos
+        // que no significan nada. Un panel que siempre grita es un panel apagado.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');").await;
+
+        let foto = VerificacionNube {
+            conteos: vec![ConteoTabla { nombre: "Zonas".into(), filas: 1 }],
+            ventana: vec![ventana_zonas(vec![vec![
+                serde_json::json!("z1"),
+                serde_json::json!("Terraza"),
+            ]])],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        assert!(r.descuadres.is_empty(), "no hay nada que reportar: {:?}", r.descuadres);
+        assert_eq!(r.reparadas, 0);
+    }
+
+    #[tokio::test]
+    async fn un_4_y_un_4_punto_0_NO_son_un_descuadre() {
+        // Dos drivers distintos escriben el mismo número de formas distintas. Sin esto, cada pasada
+        // "encontraría" descuadrada toda tabla con una columna numérica — y el aviso que de verdad
+        // importa se perdería entre cientos de falsos.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c1','Bebidas');\
+             INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) \
+             VALUES ('p1','c1','Caña', 2.5);",
+        )
+        .await;
+
+        let foto = VerificacionNube {
+            conteos: vec![],
+            ventana: vec![BootstrapTabla {
+                nombre: "Productos".into(),
+                columnas: vec!["ID_Producto".into(), "Precio_Venta".into()],
+                // La nube lo devuelve como "2.50" en texto: mismo precio, otra grafía.
+                filas: vec![vec![serde_json::json!("p1"), serde_json::json!("2.50")]],
+                parcial: false,
+            }],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        assert!(r.descuadres.is_empty(), "2.5 y \"2.50\" son el mismo precio: {:?}", r.descuadres);
+    }
+
+    #[tokio::test]
+    async fn una_fila_que_la_nube_tiene_y_aqui_NO_se_cuenta_pero_NO_se_borra() {
+        // Es un borrado que no llegó a subir… o una fila que acaba de crear la Handy y esta Main
+        // todavía no ha recibido. No se puede distinguir, así que borrarla arriba por iniciativa
+        // propia se llevaría por delante una comanda recién abierta. Se cuenta y se informa.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(&db, "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');").await;
+
+        let foto = VerificacionNube {
+            conteos: vec![],
+            ventana: vec![ventana_zonas(vec![
+                vec![serde_json::json!("z1"), serde_json::json!("Terraza")],
+                vec![serde_json::json!("z-fantasma"), serde_json::json!("Otra")],
+            ])],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        let d = r.descuadres.iter().find(|d| d.tabla == "Zonas").expect("descuadre en Zonas");
+        assert_eq!(d.sobran, 1);
+        assert_eq!(r.reparadas, 0, "un borrado no se puede reparar por estado");
+        // Y sobre todo: no se ha encolado NADA que borre en la nube.
+        let pend = repo.outbox_pending(100).await.unwrap();
+        assert!(pend.is_empty(), "no puede salir ninguna operación: {pend:?}");
+    }
+
+    #[tokio::test]
+    async fn una_fila_que_falta_ARRIBA_se_ve_por_los_conteos() {
+        // El contador es lo único que ve una fila perdida fuera de la ventana.
+        let (repo, db, _dir) = repo_temporal().await;
+        sembrar(
+            &db,
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','A'),('z2','B');",
+        )
+        .await;
+
+        let foto = VerificacionNube {
+            conteos: vec![ConteoTabla { nombre: "Zonas".into(), filas: 1 }],
+            ventana: vec![],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        let d = r.descuadres.iter().find(|d| d.tabla == "Zonas").expect("descuadre en Zonas");
+        assert_eq!(d.faltan, 1, "la Main tiene una fila que la nube no");
+    }
+
+    #[tokio::test]
+    async fn una_tabla_que_esta_version_no_conoce_no_es_un_descuadre() {
+        // Un TPV con una versión por detrás no puede llenar el panel de falsos positivos por una
+        // tabla que su esquema todavía no tiene. Es la misma regla del bootstrap.
+        let (repo, _db, _dir) = repo_temporal().await;
+        let foto = VerificacionNube {
+            conteos: vec![ConteoTabla { nombre: "Tabla_Del_Futuro".into(), filas: 9 }],
+            ventana: vec![],
+            ventana_omitida: false,
+            desde: String::new(),
+        };
+        let r = repo.contrastar_con_la_nube(foto).await.unwrap();
+        assert!(r.descuadres.is_empty());
     }
 }

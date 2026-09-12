@@ -84,6 +84,15 @@ const PURGA_SYNC_INTERVAL_SECS: u64 = 24 * 60 * 60;
 /// lectura de una tabla vacía.
 const BACKFILL_INTERVAL_SECS: u64 = 5 * 60;
 
+/// SYNC-24: cada cuánto se contrasta la nube contra esta base.
+///
+/// Una vez al día, y no más. Cada pasada se descarga la ventana de 30 días del tenant, y esas
+/// lecturas de Turso se facturan: comprobar cada hora costaría 24 veces más para encontrar lo mismo
+/// —un descuadre no se arregla solo, así que sigue ahí mañana—. Lo que sí se detecta al instante es
+/// lo que importa de verdad: SYNC-22 repara en el momento en que una operación se aparta, sin
+/// esperar a esta pasada. Esto es la red de debajo, no la primera línea.
+const VERIFICAR_NUBE_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
 /// Una instantánea coherente al día y las siete últimas: suficiente para errores humanos o del
 /// disco local sin convertir cada escritura del TPV en trabajo de backup.
 const BACKUP_LOCAL_INTERVAL_SECS: u64 = 24 * 60 * 60;
@@ -208,6 +217,19 @@ pub(crate) fn catalogo() -> Vec<Job> {
             // con la fase 1 ni retrasa el desbloqueo del login.
             requiere: Requiere::MainOperativa,
             ejecutar: tarea(backfill_historico),
+        },
+        Job {
+            nombre: "verificar_nube",
+            cada: Duration::from_secs(VERIFICAR_NUBE_INTERVAL_SECS),
+            // Tarde en el arranque: el catch-up del principio todavía está aplicando lo que llegó
+            // mientras el equipo estaba apagado, y comparar contra una base a medio poner al día
+            // sacaría descuadres que se arreglan solos treinta segundos después. Un aluvión de
+            // avisos falsos enseña a ignorar precisamente la alarma que no hay que ignorar.
+            retardo_inicial: Duration::from_secs(10 * 60),
+            // `MainOperativa` excluye una reconciliación en curso, que es cuando la base local
+            // está por definición incompleta.
+            requiere: Requiere::MainOperativa,
+            ejecutar: tarea(verificar_nube),
         },
         Job {
             nombre: "cifrado_pii",
@@ -548,6 +570,43 @@ async fn backfill_historico(app: AppHandle) -> Result<(), String> {
             pendientes = estado.tablas_pendientes,
             completadas = estado.tablas_completadas,
             "histórico: página(s) traída(s)"
+        );
+    }
+    Ok(())
+}
+
+/// SYNC-24: comprueba que la nube y esta base dicen lo mismo, repara lo que pueda y lo informa.
+///
+/// Existe porque el sistema tenía una asimetría incómoda: si una operación no llegaba a subir, la
+/// Handy —que no tiene base local y lee de la nube— enseñaba al camarero un mundo distinto del que
+/// veía la Main, y nada lo comprobaba nunca. SYNC-22 arregla el caso conocido (una operación
+/// apartada) en el momento; esto es la red para el que no se conoce.
+///
+/// El informe NO va al usuario. Un descuadre no lo puede atender quien está delante del TPV, así
+/// que avisarle sería un mensaje que aprende a descartar; va al worker y de ahí a Axiom, donde lo
+/// ve quien puede arreglarlo sin tener que mirar nada.
+async fn verificar_nube(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let repo = state.sync_repo().await?;
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Error obteniendo AppData: {e}"))?;
+
+    let r = uc_sync::verificar_contra_la_nube(&PairingAdapter::new(dir), repo.as_ref()).await?;
+
+    if r.descuadres.is_empty() {
+        tracing::debug!(target: "tpv::jobs", "verificación: la nube y la base local coinciden");
+    } else {
+        // A nivel WARN y con el detalle: esto es lo que alguien lee cuando un cliente dice que la
+        // tablet enseña otra cosa.
+        tracing::warn!(
+            target: "tpv::jobs",
+            tablas = r.descuadres.len(),
+            reparadas = r.reparadas,
+            ventana_omitida = r.ventana_omitida,
+            detalle = ?r.descuadres,
+            "verificación: la nube NO coincide con la base local"
         );
     }
     Ok(())

@@ -8,7 +8,8 @@ use async_trait::async_trait;
 
 use tpv_contracts::sync::{
     AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
-    OutboxEntry, OutboxFallo, SyncChange, SyncHealth,
+    OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncChange, SyncHealth,
+    VerificacionNube,
 };
 
 use crate::error::AppResult;
@@ -61,6 +62,18 @@ pub trait SyncRepository: Send + Sync {
     /// idempotente por `Op_Id`), y es la red que impide que una operación se quede en el limbo si
     /// la nube la descartó o el ack se perdió.
     async fn liberar_encoladas_caducadas(&self, antiguedad_ms: i64) -> AppResult<i64>;
+
+    /// SYNC-24: contrasta la foto de la nube contra esta base y encola la reparación de lo que no
+    /// cuadre. Devuelve qué se ha encontrado, para poder informarlo.
+    ///
+    /// Sólo lee y encola: no borra nada arriba ni aplica nada aquí. La Main es el escritor único,
+    /// así que ante una diferencia su versión es la buena — pero "la nube tiene una fila que aquí
+    /// no está" NO se resuelve borrándola: podría ser una fila recién creada por la Handy que esta
+    /// Main todavía no ha recibido.
+    async fn contrastar_con_la_nube(
+        &self,
+        foto: VerificacionNube,
+    ) -> AppResult<ResultadoVerificacion>;
 
     async fn purge_applied_ops(&self) -> AppResult<()>;
 

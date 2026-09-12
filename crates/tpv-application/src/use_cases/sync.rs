@@ -4,7 +4,8 @@ use serde_json::json;
 
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
-    HistoricoPagina, OutboxEntry, OutboxFallo, SyncHealth,
+    HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncHealth,
+    VerificacionNube,
 };
 
 use crate::error::{AppError, AppResult};
@@ -193,6 +194,48 @@ pub async fn inicializar_tenant_vacio(
     bootstrap_desde_nube(nube, repo).await
 }
 
+/// SYNC-24: contrasta la nube contra esta base, repara lo que se pueda y **se chiva solo**.
+///
+/// Los tres pasos van juntos a propósito. Separar "comprobar" de "contar lo que se ha encontrado"
+/// deja la puerta abierta a que alguien llame a lo primero sin lo segundo, y entonces el descuadre
+/// vuelve a existir sin que nadie lo sepa — que es exactamente el estado del que se viene.
+///
+/// El informe va al worker y de ahí a Axiom, **no al usuario**: un `op_id` y un error de SQL no los
+/// puede atender quien está delante del TPV, y un aviso que no se puede atender enseña a ignorar
+/// los avisos. Quien está delante sólo ve la consecuencia, en Conectividad.
+///
+/// Se informa SIEMPRE, también cuando todo cuadra: un silencio no distingue "va bien" de "este
+/// equipo lleva tres semanas sin comprobarse". Lo que se vigila es la serie, no el evento suelto.
+pub async fn verificar_contra_la_nube(
+    nube: &dyn PairingService,
+    repo: &dyn SyncRepository,
+) -> AppResult<ResultadoVerificacion> {
+    let bruto = nube
+        .tpv_server_post_json("tpv", "/v1/sync/verificar", json!({}))
+        .await?;
+    let foto: VerificacionNube = serde_json::from_value(bruto).map_err(|e| {
+        AppError::Internal(format!("respuesta de /v1/sync/verificar ilegible: {e}"))
+    })?;
+
+    let resultado = repo.contrastar_con_la_nube(foto).await?;
+
+    let informe = json!({
+        "descuadres": resultado.descuadres,
+        "apartadas": resultado.descuadres.iter().map(|d| d.sobran).sum::<i64>(),
+        "reparadas": resultado.reparadas,
+        "ventana_omitida": resultado.ventana_omitida,
+    });
+    // Best-effort, y el error se descarta A SABIENDAS. Dos razones: que el informe no salga no
+    // puede deshacer la reparación que ya está encolada, y sobre todo que no se pierde información
+    // — un descuadre no se arregla solo por no haberlo contado, así que la pasada siguiente vuelve
+    // a encontrarlo y a informarlo. Lo que se vigila en Axiom es la serie, no el evento suelto.
+    let _ = nube
+        .tpv_server_post_json("tpv", "/v1/sync/salud", informe)
+        .await;
+
+    Ok(resultado)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,6 +271,12 @@ mod tests {
         }
         async fn outbox_mark_failed(&self, _: &str, _: &str, _: bool) -> AppResult<OutboxFallo> {
             Ok(OutboxFallo::default())
+        }
+        async fn contrastar_con_la_nube(
+            &self,
+            _: VerificacionNube,
+        ) -> AppResult<ResultadoVerificacion> {
+            Ok(ResultadoVerificacion::default())
         }
         async fn outbox_mark_encolada(&self, _: &[String]) -> AppResult<()> {
             Ok(())

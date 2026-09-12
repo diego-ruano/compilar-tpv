@@ -89,3 +89,51 @@ export function reportarRechazoDeDispositivo(
 		/* nunca afecta a la respuesta */
 	}
 }
+
+/**
+ * SYNC-24: el TPV informa de cómo va su sincronización con la nube.
+ *
+ * Hermano de `reportarRechazoDeDispositivo` y por el mismo motivo: la señal existía y no quedaba
+ * en ningún sitio. Un equipo cuya copia de la nube se ha quedado distinta de su base local no lo
+ * puede arreglar quien está delante del TPV, así que decírselo a él sería un aviso que aprende a
+ * ignorar; quien tiene que enterarse es quien puede actuar, y sin mirar nada.
+ *
+ * La alerta que esto habilita: `event == "tenant_salud_sync"` con `descuadres` no vacío, agrupado
+ * por `tenant_id`. Un descuadre suelto que desaparece al ciclo siguiente es ruido (la foto de la
+ * nube se toma sin transacción); lo que hay que vigilar es el que persiste.
+ *
+ * Best-effort y sin `await`, como todo lo de aquí.
+ */
+export function reportarSaludDeSync(
+	env: Env,
+	campos: {
+		tenant_id?: string;
+		device_id?: string;
+		descuadres: { tabla: string; faltan: number; sobran: number; distintas: number }[];
+		apartadas: number;
+		reparadas: number;
+		ventana_omitida: boolean;
+	},
+): void {
+	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
+	if (!env.AXIOM_TOKEN || !dataset) return;
+
+	try {
+		void ingestToAxiom(env, dataset, [
+			{
+				_time: new Date().toISOString(),
+				service: "tpv-api",
+				event: "tenant_salud_sync",
+				// Agregados para poder alertar sin desplegar el detalle.
+				tablas_descuadradas: campos.descuadres.length,
+				filas_descuadradas: campos.descuadres.reduce(
+					(n, d) => n + d.faltan + d.sobran + d.distintas,
+					0,
+				),
+				...campos,
+			},
+		]);
+	} catch {
+		/* nunca afecta a la respuesta */
+	}
+}
