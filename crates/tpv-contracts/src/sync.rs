@@ -239,6 +239,18 @@ pub struct VerificacionNube {
     /// Límite inferior de la ventana que usó el worker (informativo).
     #[serde(default)]
     pub desde: String,
+    /// SYNC-25: hasta qué `Seq` del log de la nube llega esta foto, **leído después de las filas**.
+    ///
+    /// Es lo que permite borrar arriba sin peligro. Si el checkpoint local llega hasta aquí, esta
+    /// Main ya ha visto todo lo que viaja en la foto, así que una fila que le falte no puede ser
+    /// «algo que acaba de escribir la Handy y todavía no me ha llegado»: es un borrado suyo que no
+    /// llegó a subir. Si no llega, no se borra nada y se espera al ciclo siguiente.
+    ///
+    /// `#[serde(default)]` = 0 con un worker anterior, y 0 nunca alcanza al checkpoint local salvo
+    /// en una base recién estrenada (donde tampoco hay nada que borrar). Falla cerrado.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub hasta_seq: i64,
 }
 
 /// Lo que no cuadra en una tabla.
@@ -270,4 +282,50 @@ pub struct ResultadoVerificacion {
     #[ts(type = "number")]
     pub reparadas: i64,
     pub ventana_omitida: bool,
+    /// SYNC-25: tablas cuyo contador no cuadra y de las que hay que pedir las claves para saber
+    /// **cuáles** filas bailan, no sólo cuántas. Vacío = todo cuadra y no hay segunda fase.
+    #[serde(default)]
+    pub tablas_a_examinar: Vec<TablaAExaminar>,
+    /// Filas de más en la nube cuyo borrado se ha encolado.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub borradas: i64,
+    /// SYNC-25: había filas de más arriba pero NO se ha tocado nada, porque esta Main no podía
+    /// afirmar que estuviera al día (checkpoint por detrás de la foto, o cuarentena de bajada).
+    /// Se informa: es la diferencia entre «no sobra nada» y «sobra y no me atrevo».
+    #[serde(default)]
+    pub borrado_aplazado: bool,
+}
+
+/// Una tabla de la que hay que pedir las claves, con las columnas que la forman.
+///
+/// Las columnas las decide la MAIN leyendo su propio esquema y viajan en la petición. El esquema es
+/// el mismo en los dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean dos
+/// sitios distintos, porque entonces pueden discrepar.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct TablaAExaminar {
+    pub nombre: String,
+    pub claves: Vec<String>,
+}
+
+/// Las claves de una tabla en la nube (SYNC-25).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ClavesTabla {
+    pub nombre: String,
+    pub columnas: Vec<String>,
+    #[ts(type = "Array<Array<unknown>>")]
+    pub claves: Vec<Vec<serde_json::Value>>,
+    /// La tabla pasó del tope y la lista no viaja. Se dice en vez de mandar media: media lista se
+    /// leería como «te sobran 400.000 filas» y provocaría un borrado masivo.
+    #[serde(default)]
+    pub truncada: bool,
+}
+
+/// Respuesta de `/v1/sync/verificar-claves`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct VerificacionClaves {
+    pub tablas: Vec<ClavesTabla>,
 }

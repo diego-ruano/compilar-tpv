@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use tpv_contracts::sync::{
     AplicacionSync, BackfillEstado, BootstrapResultado, BootstrapSnapshot, HistoricoPagina,
     OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncChange, SyncHealth,
-    VerificacionNube,
+    VerificacionClaves, VerificacionNube,
 };
 
 use crate::error::AppResult;
@@ -74,6 +74,18 @@ pub trait SyncRepository: Send + Sync {
         &self,
         foto: VerificacionNube,
     ) -> AppResult<ResultadoVerificacion>;
+
+    /// SYNC-25 · segunda fase: con las claves de la nube delante, resta los dos conjuntos.
+    ///
+    /// Devuelve `(descuadres, reparadas, borradas, borrado_aplazado)`. Lo que falta arriba se
+    /// repara por estado; lo que sobra se borra **sólo** si esta Main puede afirmar que está al
+    /// día — si no, se informa y se espera al ciclo siguiente, que es lo que impide que un dato
+    /// recién creado en la Handy se borre por llegar tarde.
+    async fn contrastar_claves(
+        &self,
+        respuesta: VerificacionClaves,
+        hasta_seq: i64,
+    ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)>;
 
     async fn purge_applied_ops(&self) -> AppResult<()>;
 

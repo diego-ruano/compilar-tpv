@@ -241,6 +241,16 @@ export type CierreListarArgs = { limite?: bigint, };
 export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: number, contado: number, descuadre: number, retirado: number, motivo?: string, reabierto_en?: string, };
 
 /**
+ * Las claves de una tabla en la nube (SYNC-25).
+ */
+export type ClavesTabla = { nombre: string, columnas: Array<string>, claves: Array<Array<unknown>>, 
+/**
+ * La tabla pasó del tope y la lista no viaja. Se dice en vez de mandar media: media lista se
+ * leería como «te sobran 400.000 filas» y provocaría un borrado masivo.
+ */
+truncada: boolean, };
+
+/**
  * Datos del formulario de edición de un cliente.
  */
 export type ClienteForm = { nombre: string, email: string | null, telefono: string | null, notas: string | null, };
@@ -986,7 +996,22 @@ export type ResultadoVerificacion = { descuadres: Array<DescuadreTabla>,
 /**
  * Filas cuya reparación se ha encolado en esta pasada.
  */
-reparadas: number, ventana_omitida: boolean, };
+reparadas: number, ventana_omitida: boolean, 
+/**
+ * SYNC-25: tablas cuyo contador no cuadra y de las que hay que pedir las claves para saber
+ * **cuáles** filas bailan, no sólo cuántas. Vacío = todo cuadra y no hay segunda fase.
+ */
+tablas_a_examinar: Array<TablaAExaminar>, 
+/**
+ * Filas de más en la nube cuyo borrado se ha encolado.
+ */
+borradas: number, 
+/**
+ * SYNC-25: había filas de más arriba pero NO se ha tocado nada, porque esta Main no podía
+ * afirmar que estuviera al día (checkpoint por detrás de la foto, o cuarentena de bajada).
+ * Se informa: es la diferencia entre «no sobra nada» y «sobra y no me atrevo».
+ */
+borrado_aplazado: boolean, };
 
 /**
  * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
@@ -1094,6 +1119,15 @@ subida_fallando: number,
  * sin que alguien arregle la causa; el resto de la cola sigue subiendo por encima de ellas.
  */
 subida_en_cuarentena: number, };
+
+/**
+ * Una tabla de la que hay que pedir las claves, con las columnas que la forman.
+ *
+ * Las columnas las decide la MAIN leyendo su propio esquema y viajan en la petición. El esquema es
+ * el mismo en los dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean dos
+ * sitios distintos, porque entonces pueden discrepar.
+ */
+export type TablaAExaminar = { nombre: string, claves: Array<string>, };
 
 export type TableInput = { id: string, name: string, x: number, y: number, width: number, height: number, radius: number | null, seats: number, shape: string, };
 
@@ -1232,6 +1266,11 @@ export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, No
 IVA_Percent?: number, Estado_Cocina: string, Pagado: number, Notas: string | null, };
 
 /**
+ * Respuesta de `/v1/sync/verificar-claves`.
+ */
+export type VerificacionClaves = { tablas: Array<ClavesTabla>, };
+
+/**
  * Respuesta de `/v1/sync/verificar`: la foto con la que se contrasta.
  *
  * `ventana` reusa `BootstrapTabla` porque es exactamente la misma forma y la construye la misma
@@ -1245,7 +1284,19 @@ ventana_omitida: boolean,
 /**
  * Límite inferior de la ventana que usó el worker (informativo).
  */
-desde: string, };
+desde: string, 
+/**
+ * SYNC-25: hasta qué `Seq` del log de la nube llega esta foto, **leído después de las filas**.
+ *
+ * Es lo que permite borrar arriba sin peligro. Si el checkpoint local llega hasta aquí, esta
+ * Main ya ha visto todo lo que viaja en la foto, así que una fila que le falte no puede ser
+ * «algo que acaba de escribir la Handy y todavía no me ha llegado»: es un borrado suyo que no
+ * llegó a subir. Si no llega, no se borra nada y se espera al ciclo siguiente.
+ *
+ * `#[serde(default)]` = 0 con un worker anterior, y 0 nunca alcanza al checkpoint local salvo
+ * en una base recién estrenada (donde tampoco hay nada que borrar). Falla cerrado.
+ */
+hasta_seq: number, };
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 

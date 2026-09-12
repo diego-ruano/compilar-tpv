@@ -491,3 +491,32 @@ pub async fn fila_difiere(
     }
     Ok(Some(false))
 }
+
+/// La sentencia que quita de la nube una fila que aquí ya no existe (SYNC-25).
+///
+/// No lleva contenido, sólo la clave: borrar es lo único que no se puede expresar como estado.
+/// Quién decide que es seguro mandarla NO es esta función —ella sólo la escribe— sino
+/// `puede_borrar_arriba`, que comprueba que esta Main esté realmente al día. Separarlo es
+/// deliberado: construir la sentencia es inocuo, decidir mandarla no lo es.
+pub fn sentencia_de_borrado(fila: &FilaAfectada) -> Option<SqlStatement> {
+    if !nombre_aceptable(&fila.tabla) || fila.clave.is_empty() {
+        return None;
+    }
+    let mut donde = Vec::new();
+    let mut args = Vec::new();
+    for (i, (c, v)) in fila.clave.iter().enumerate() {
+        if !nombre_aceptable(c) {
+            return None;
+        }
+        donde.push(format!("\"{c}\" = ?{}", i + 1));
+        args.push(json!(v));
+    }
+    Some(SqlStatement {
+        sql: format!(
+            "DELETE FROM \"{}\" WHERE {};",
+            fila.tabla,
+            donde.join(" AND ")
+        ),
+        args,
+    })
+}

@@ -444,8 +444,32 @@ syncRoutes.post("/verificar", async (c) => {
 			(acc, rs) => acc + Number((rs.rows?.[0] as any)?.n ?? 0),
 			0,
 		);
+		// El `Seq` se lee DESPUES de todo lo demas, y eso NO es un detalle de implementacion.
+		//
+		// La Main lo usa para decidir si puede borrar arriba lo que aqui sobra: solo se atreve si su
+		// marcapaginas llega hasta aqui, porque entonces ya ha visto todo lo que hay en esta foto y
+		// una fila que le falte no puede ser "algo de la Handy que aun no me ha llegado".
+		//
+		// Leyendolo ANTES, una escritura que entrara a mitad de la lectura acabaria en la foto con
+		// un Seq mayor del que se apunto: la Main se creeria al dia y borraria una comanda que
+		// acaban de abrir. Leyendolo al final, el numero es siempre >= al de cualquier fila que
+		// viaje, asi que la comparacion falla del lado que no destruye nada.
+		const leerHastaSeq = async () => {
+			const rs = await db.execute({
+				sql: "SELECT COALESCE(MAX(Seq), 0) AS seq FROM Sync_Changes;",
+				args: [],
+			});
+			return Number((rows(rs)[0] as any)?.seq ?? 0);
+		};
+
 		if (filasVentana > BOOTSTRAP_MAX_FILAS) {
-			return { conteos, ventana: [], ventana_omitida: true as const, desde };
+			return {
+				conteos,
+				ventana: [],
+				ventana_omitida: true as const,
+				desde,
+				hasta_seq: await leerHastaSeq(),
+			};
 		}
 
 		const rsVolcado = await db.batch(
@@ -462,7 +486,95 @@ syncRoutes.post("/verificar", async (c) => {
 			};
 		});
 
-		return { conteos, ventana, ventana_omitida: false as const, desde };
+		return {
+			conteos,
+			ventana,
+			ventana_omitida: false as const,
+			desde,
+			hasta_seq: await leerHastaSeq(),
+		};
+	});
+
+	return c.json(resultado);
+});
+
+/**
+ * Las CLAVES de una tabla, sin su contenido (SYNC-25).
+ *
+ * Con `/verificar` a secas, la Main sólo puede preguntar en una dirección: «esta fila que tienes,
+ * ¿está igual en mi base?». La contraria —«esta fila que tengo yo, ¿está en la tuya?»— no puede
+ * hacerla, porque para recorrer *sus* filas de la ventana tendría que reproducir la definición de
+ * la ventana, que vive aquí a propósito (una sola fuente, con sus CTEs de comandas e hijas).
+ * Copiarla a Rust serían dos definiciones que acabarían divergiendo.
+ *
+ * Con la lista de claves delante no hace falta reproducir nada: la Main resta los dos conjuntos y
+ * sabe EXACTAMENTE cuáles faltan arriba y cuáles sobran, en vez de saber sólo cuántas.
+ *
+ * Sobre la tabla ENTERA y no sobre la ventana: una clave ocupa poco, y así se ve también lo que se
+ * haya descuadrado en el histórico.
+ *
+ * ⚠️ **Esto no se pide nunca salvo que algo ya no cuadre.** La Main compara primero los `COUNT(*)`,
+ * que cuestan un agregado por tabla, y sólo pide las claves de las tablas cuyo contador no encaja.
+ * El caso normal —todo cuadra— no paga nada de esto; la parte cara se paga el día que hay un
+ * problema, que es cuando merece la pena pagarla.
+ *
+ * Las columnas de la clave las manda la MAIN y no se deducen aquí. El esquema es el mismo en los
+ * dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean **dos sitios
+ * distintos**, porque entonces pueden discrepar.
+ */
+syncRoutes.post("/verificar-claves", async (c) => {
+	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
+	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+
+	const cuerpo = await c.req.json().catch(() => ({}) as any);
+	const pedidas: { nombre: string; claves: string[] }[] = Array.isArray(cuerpo?.tablas)
+		? cuerpo.tablas.slice(0, 60)
+		: [];
+
+	// Nombre e identificadores se interpolan en el SQL (no se pueden enlazar con `?`), así que se
+	// filtran igual que en el bootstrap: sólo lo que puede ser un identificador nuestro.
+	const aceptable = (n: unknown) =>
+		typeof n === "string" && /^[A-Za-z0-9_]{1,64}$/.test(n) && !n.startsWith("_");
+
+	const validas = pedidas.filter(
+		(t) =>
+			aceptable(t?.nombre) &&
+			esTablaDeNegocio(t.nombre) &&
+			Array.isArray(t?.claves) &&
+			t.claves.length > 0 &&
+			t.claves.length <= 4 &&
+			t.claves.every(aceptable),
+	);
+	if (!validas.length) return c.json({ tablas: [] });
+
+	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		// Tope por tabla. Una lista de claves crece con la tabla, y sin techo una base con años de
+		// histórico devolvería decenas de megas por una petición de diagnóstico. Si no cabe se dice
+		// (`truncada`) en vez de mandar media lista, que se leería como "te sobran 400.000 filas".
+		const TOPE = 200_000;
+
+		const rs = await db.batch(
+			validas.map((t) => ({
+				sql: `SELECT ${t.claves.map((k) => `"${k}"`).join(", ")} FROM "${t.nombre}" LIMIT ${TOPE + 1};`,
+				args: [],
+			})),
+			"read",
+		);
+
+		return {
+			tablas: validas.map((t, i) => {
+				const filas = rs[i]?.rows ?? [];
+				const truncada = filas.length > TOPE;
+				return {
+					nombre: t.nombre,
+					columnas: t.claves,
+					claves: truncada
+						? []
+						: filas.map((r: any) => t.claves.map((k) => r[k] ?? null)),
+					truncada,
+				};
+			}),
+		};
 	});
 
 	return c.json(resultado);

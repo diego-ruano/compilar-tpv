@@ -5,7 +5,7 @@ use serde_json::json;
 use tpv_contracts::sync::{
     AplicacionSync, ApplySyncChangesArgs, BackfillEstado, BootstrapResultado, BootstrapSnapshot,
     HistoricoPagina, OutboxEntry, OutboxFallo, ResultadoVerificacion, SyncHealth,
-    VerificacionNube,
+    VerificacionClaves, VerificacionNube,
 };
 
 use crate::error::{AppError, AppResult};
@@ -217,12 +217,50 @@ pub async fn verificar_contra_la_nube(
         AppError::Internal(format!("respuesta de /v1/sync/verificar ilegible: {e}"))
     })?;
 
-    let resultado = repo.contrastar_con_la_nube(foto).await?;
+    // Se guarda ANTES de ceder la foto: es lo que decide si se puede borrar arriba.
+    let hasta_seq = foto.hasta_seq;
+    let mut resultado = repo.contrastar_con_la_nube(foto).await?;
+
+    // SYNC-25 · segunda fase, y **sólo si hace falta**: un contador que no cuadra dice que algo
+    // baila, no qué. Las claves lo dicen exactamente, pero pesan, así que se piden únicamente de
+    // las tablas que ya se sabe que están mal. El caso normal —todo cuadra— no paga nada de esto.
+    if !resultado.tablas_a_examinar.is_empty() {
+        let bruto = nube
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/sync/verificar-claves",
+                json!({ "tablas": resultado.tablas_a_examinar }),
+            )
+            .await?;
+        let claves: VerificacionClaves = serde_json::from_value(bruto).map_err(|e| {
+            AppError::Internal(format!("respuesta de /v1/sync/verificar-claves ilegible: {e}"))
+        })?;
+
+        let (mas_descuadres, reparadas, borradas, aplazado) =
+            repo.contrastar_claves(claves, hasta_seq).await?;
+
+        // La segunda fase sabe CUÁLES, así que su cuenta manda sobre la estimación por contadores
+        // de la primera. Dejar las dos sumaría el mismo descuadre dos veces.
+        for d in mas_descuadres {
+            match resultado.descuadres.iter_mut().find(|x| x.tabla == d.tabla) {
+                Some(x) => {
+                    x.faltan = d.faltan;
+                    x.sobran = d.sobran;
+                }
+                None => resultado.descuadres.push(d),
+            }
+        }
+        resultado.reparadas += reparadas;
+        resultado.borradas = borradas;
+        resultado.borrado_aplazado = aplazado;
+    }
 
     let informe = json!({
         "descuadres": resultado.descuadres,
         "apartadas": resultado.descuadres.iter().map(|d| d.sobran).sum::<i64>(),
         "reparadas": resultado.reparadas,
+        "borradas": resultado.borradas,
+        "borrado_aplazado": resultado.borrado_aplazado,
         "ventana_omitida": resultado.ventana_omitida,
     });
     // Best-effort, y el error se descarta A SABIENDAS. Dos razones: que el informe no salga no
@@ -277,6 +315,13 @@ mod tests {
             _: VerificacionNube,
         ) -> AppResult<ResultadoVerificacion> {
             Ok(ResultadoVerificacion::default())
+        }
+        async fn contrastar_claves(
+            &self,
+            _: VerificacionClaves,
+            _: i64,
+        ) -> AppResult<(Vec<tpv_contracts::sync::DescuadreTabla>, i64, i64, bool)> {
+            Ok((Vec::new(), 0, 0, false))
         }
         async fn outbox_mark_encolada(&self, _: &[String]) -> AppResult<()> {
             Ok(())
