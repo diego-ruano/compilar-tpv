@@ -66,45 +66,18 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 | `AXIOM_DATASET` | Dataset de logs de dispositivo (por defecto `tpv-device-logs`) |
 | `AXIOM_DATASET_SYNC` | Dataset de eventos de salud del sync (TenantHub) |
 
-> **Hoy las dos apuntan al MISMO dataset (`tpv-sync`), y es deliberado.** El plan gratuito de Axiom
-> permite tres datasets y uno ya lo ocupa `cloudflare-logpush`; separar los logs de dispositivo
-> gastaría el último hueco a cambio de nada, porque **cada evento ya viene etiquetado con su
-> origen** y el filtro es de una línea:
+> **Tres datasets, uno por origen, y separados a propósito.** `cloudflare-logpush` (lo empuja
+> Cloudflare), `tpv-sync` (nuestros eventos del worker y del TenantHub) y `tpv-device-logs` (los
+> logs de la app de escritorio).
 >
-> | `service` | Qué es | De dónde sale |
-> |---|---|---|
-> | `tpv-device` | Logs internos de un TPV | El equipo, vía `/v1/telemetry` |
-> | `tpv-sync` | Eventos del TenantHub (Main online/offline, cola, apply) | El Durable Object |
-> | `tpv-api` | Rechazos de dispositivo y salud del contraste | Las rutas del worker |
+> El motivo de no juntarlos es la **retención**, que es propiedad del dataset y **no se puede
+> aplicar hacia atrás**. Los volúmenes son muy distintos —la app genera mucho más que el sync—, así
+> que juntarlos obligaría a elegir entre caducar antes lo que quieres conservar o pagar el volumen
+> alto a la retención larga. La correlación que se pierde al separarlos se recupera siempre: son dos
+> consultas en vez de una.
 >
-> ```
-> ['tpv-sync'] | where service == "tpv-device" | sort by _time desc
-> ```
->
-> Lo que sí comparten al juntarlos es **la retención**, que es propiedad del dataset. Si algún día
-> los logs de dispositivo crecen y conviene caducarlos antes que los eventos de sync, ese es el
-> momento de separarlos: son dos variables distintas justo para poder hacerlo sin tocar código.
-| `AXIOM_DOMAIN` | **Dominio del edge deployment.** Hoy `eu-central-1.aws.edge.axiom.co` |
-
-- Crea los datasets en **región UE**.
-- El token es **ingest-only** y vive sólo en el Worker.
-
-> ⚠️ **`AXIOM_DOMAIN` no es `api.axiom.co`, y equivocarse no da ningún error.**
->
-> `api.axiom.co/v1/datasets/<ds>/ingest` es el endpoint **legacy**, y la documentación de Axiom dice
-> que «ingiere datos en el edge deployment de **US East 1**». Nuestra organización vive en EU Central
-> 1, así que por ahí los eventos se iban a otra región: respuesta correcta, nada en el dataset.
-> Cada deployment tiene su dominio y el suyo se consulta en **Axiom → Settings → General → Edge
-> deployment**; se fija al crear la organización y **no se puede cambiar después**.
->
-> Lo correcto es `https://<AXIOM_DOMAIN>/v1/ingest/<dataset>`.
-
-> ⚠️ **Y la entrega hay que mantenerla viva.** En Cloudflare Workers, al devolver la respuesta el
-> runtime **cancela** el trabajo pendiente que no esté registrado con `waitUntil()`. Los reporteros
-> de `observability/axiom.ts` **devuelven** su promesa justo para obligar a decidirlo en cada sitio:
-> `c.executionCtx.waitUntil` en rutas y middleware de Hono, `this.state.waitUntil` en el Durable
-> Object, y `await` donde no hay contexto de ejecución (caminos de error, la latencia da igual).
-> Un `void ingestToAxiom(...)` se lanza y se muere a medio vuelo, sin error y sin log.
+> Cada evento lleva además su origen en `service` (`tpv-device` · `tpv-sync` · `tpv-api`), así que
+> dentro de cualquier dataset se filtra en una línea.
 
 **Cómo comprobar que la ingesta funciona, sin esperar a que pase algo:** cualquier petición sin
 autenticar a una ruta de tenant emite un `device_auth_rechazado` por la misma tubería.
