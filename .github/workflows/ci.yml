@@ -30,9 +30,27 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.91.1
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
+      # Por `cargo nextest` y NO por `cargo test`, que es lo que manda CLAUDE.md §6 y lo que este
+      # job no hacía. Con `cargo test` todos los tests comparten UN proceso, y eso rompe dos cosas:
+      #
+      # - Los tests que dependen de estado global de proceso. `tests_identidad_del_productor` inyecta
+      #   el bloque del productor en un `OnceLock`, así que el test que lo quiere VACÍO falla si el que
+      #   lo rellena corre antes en el mismo proceso. Pasaba o fallaba según el orden de los hilos:
+      #   medido, 3 de cada 5 tandas en rojo. Añadir tests a la crate cambia ese orden, y así saltó.
+      # - El crash nativo de libsql al crear muchas bases en un proceso, que tumba la tanda entera
+      #   sin decir en qué test.
+      #
+      # `--profile ci` es el de `.config/nextest.toml`: reintentos para el crash de libsql (salen
+      # como FLAKY, no desaparecen) y `fail-fast = false` para ver todos los rojos de una vez.
+      #
+      # ⚠️ nextest NO ejecuta doctests. Hoy no hay ninguno en estas crates; si alguien añade uno,
+      # hace falta un paso `cargo test --doc -p …` aparte o no lo comprobará nadie.
       - name: Tests de dominio, casos de uso y persistencia
-        run: cargo test -p tpv-domain -p tpv-application -p tpv-infra-sqlite
+        run: cargo nextest run --profile ci -p tpv-domain -p tpv-application -p tpv-infra-sqlite
 
       # INFRA-04. Va aquí y no en un job propio porque este ya compila estas crates y tiene la
       # caché caliente: en uno aparte se pagaría el build entero otra vez para lo mismo.
