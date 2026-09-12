@@ -192,6 +192,101 @@ async fn purge_by_cursor(conn: &Connection, last_seq: i64) -> AppResult<()> {
     Ok(())
 }
 
+/// SYNC-22: encola la reparación de las filas que tocaba una operación apartada, y devuelve
+/// cuántas se han encolado.
+///
+/// No reintenta la sentencia rechazada: lee cómo está **ahora** cada fila en la Main —que es el
+/// escritor único, o sea la autoridad— y encola un `INSERT OR REPLACE` con su contenido actual. Eso
+/// no depende del orden, se puede repetir sin daño y converge; reaplicar la sentencia vieja, en
+/// cambio, devolvería la fila a un valor que ya no es cierto.
+///
+/// Va por `raw()` y escribe directamente en `_Sync_Outbox`: esta sentencia se fabrica **para**
+/// replicarse, no es una escritura de negocio que haya que capturar. Y NO se aplica en local: la
+/// fila ya está bien aquí, lo que está mal es la copia de la nube.
+async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> {
+    use crate::sync_reparacion as rep;
+
+    let mut rows = conn
+        .query(
+            "SELECT Statements_Json FROM _Sync_Outbox WHERE Op_Id = ?1 LIMIT 1;",
+            vec![Value::Text(op_id.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    let Some(fila) = rows.next().await.map_err(db_err)? else {
+        return Ok(0);
+    };
+    let json = match fila.get_value(0).map_err(db_err)? {
+        Value::Text(s) => s,
+        _ => return Ok(0),
+    };
+    let stmts: Vec<SqlStatement> = serde_json::from_str(&json).unwrap_or_default();
+    if stmts.is_empty() {
+        return Ok(0);
+    }
+
+    // Las claves primarias se leen del esquema, no de una lista escrita a mano: ocho tablas las
+    // tienen compuestas y una lista paralela se queda vieja en cuanto alguien añada la novena.
+    let mut cache: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for st in &stmts {
+        for palabra in st.sql.split(|c: char| !c.is_ascii_alphanumeric() && c != '_') {
+            if !palabra.is_empty() && !cache.contains_key(palabra) {
+                let pks = rep::claves_primarias(conn, palabra).await.unwrap_or_default();
+                cache.insert(palabra.to_string(), pks);
+            }
+        }
+    }
+    let analisis = rep::analizar(&stmts, &|t: &str| cache.get(t).cloned().unwrap_or_default());
+
+    if analisis.incierto {
+        tracing::warn!(
+            "op {op_id}: hay sentencias cuya fila no se ha sabido identificar; esa parte NO se repara"
+        );
+    }
+    for t in &analisis.borrados {
+        // Un borrado no se puede expresar como estado: la ausencia de una fila no es una fila.
+        tracing::warn!("op {op_id}: borrado en {t} sin reparación posible por estado (SYNC-23)");
+    }
+
+    let mut sentencias: Vec<SqlStatement> = Vec::new();
+    for f in &analisis.filas {
+        if let Ok(Some(st)) = rep::sentencia_de_reparacion(conn, f).await {
+            sentencias.push(st);
+        }
+    }
+    if sentencias.is_empty() {
+        return Ok(0);
+    }
+
+    let n = sentencias.len() as i64;
+    let nuevo_op = uuid::Uuid::new_v4().to_string();
+    let ahora = now_ms();
+    conn.execute(
+        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+         VALUES (?1, ?2, ?3, ?4);",
+        vec![
+            Value::Text(nuevo_op.clone()),
+            Value::Text(rep::COMANDO_REPARACION.to_string()),
+            Value::Text(serde_json::to_string(&sentencias).unwrap_or_else(|_| "[]".into())),
+            Value::Integer(ahora),
+        ],
+    )
+    .await
+    .map_err(db_err)?;
+    // Anti-eco, igual que cualquier escritura capturada: sin esto la reparación volvería por el
+    // catch-up y se aplicaría otra vez en local.
+    conn.execute(
+        "INSERT OR IGNORE INTO _Sync_Applied_Ops (Op_Id, Seq, Applied_At_Ms) VALUES (?1, 0, ?2);",
+        vec![Value::Text(nuevo_op), Value::Integer(ahora)],
+    )
+    .await
+    .map_err(db_err)?;
+
+    tracing::info!("op {op_id} apartada: encoladas {n} fila(s) de reparación");
+    Ok(n)
+}
+
 /// Registra (o incrementa) el fallo de una op en `_Sync_Failed` y devuelve el nº de intentos
 /// acumulados. Sirve de contador persistente entre ciclos de catch-up para decidir la cuarentena.
 async fn bump_failure(conn: &Connection, ch: &SyncChange, err: &str) -> AppResult<i64> {
@@ -574,10 +669,25 @@ impl SyncRepository for SqliteSyncRepository {
             .map_err(db_err)?;
         }
 
+        // SYNC-22: apartar evita el atasco, pero deja la nube distinta de la Main — y con la Handy
+        // leyendo de la nube, eso es que camarero y TPV ven cosas distintas. Así que en cuanto se
+        // aparta, se encola la reparación: no el reintento de la sentencia rechazada, sino el
+        // estado ACTUAL de las filas que tocaba. Ver `sync_reparacion`.
+        let mut reparadas = 0i64;
+        if apartar && command_name != crate::sync_reparacion::COMANDO_REPARACION {
+            reparadas = encolar_reparaciones(conn, op_id).await.unwrap_or_else(|e| {
+                // Que la reparación no salga no puede convertir esto en un fallo distinto: la
+                // cuarentena ya está puesta y la cola ya avanza, que es lo urgente.
+                tracing::warn!("no se pudo encolar la reparación de {op_id}: {e}");
+                0
+            });
+        }
+
         Ok(OutboxFallo {
             intentos,
             apartada: apartar,
             command_name,
+            reparadas,
         })
     }
 
@@ -2130,5 +2240,226 @@ mod tests_backfill {
         assert_eq!(e.filas_traidas, 0);
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod tests_reparacion {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! SYNC-22 — volver a igualar la fila que la nube no tiene igual.
+    //!
+    //! Lo que se fija aquí es que apartar una operación **no** deje la nube distinta para siempre.
+    //! Sin esto, la Handy —que lee de la nube y no tiene BD— enseñaría al camarero un precio, una
+    //! carta o una mesa distintos de los que ve la Main, y nadie se enteraría hasta el arqueo.
+
+    use std::sync::Arc;
+
+    use libsql::{Connection, Value};
+    use tpv_contracts::sync::SqlStatement;
+
+    use super::*;
+    use crate::db::Db;
+    use crate::sync_reparacion::{analizar, claves_primarias, sentencia_de_reparacion, FilaAfectada};
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("reparacion");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    /// Mete en el outbox una operación con las sentencias que se le den.
+    async fn encolar_con(db: &Arc<Db>, op_id: &str, stmts: &[SqlStatement]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        conn.execute(
+            "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+             VALUES (?1, 'main_op', ?2, ?3);",
+            vec![
+                Value::Text(op_id.to_string()),
+                Value::Text(serde_json::to_string(stmts).unwrap()),
+                Value::Integer(now_ms()),
+            ],
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn pks(db: &Arc<Db>, tabla: &str) -> Vec<String> {
+        let r = db.read().await;
+        claves_primarias(r.conn(), tabla).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn una_op_apartada_encola_el_estado_ACTUAL_de_la_fila() {
+        // El corazón del asunto. La nube rechazó el UPDATE que ponía el nombre a "Terraza". Lo que
+        // NO se hace es reintentar aquel UPDATE: para cuando alguien arregle la causa, esa fila
+        // puede haber cambiado otra vez y reaplicarlo la devolvería a un valor que ya no es cierto.
+        // Lo que se manda es cómo está AHORA.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Terraza');",
+                )
+                .await
+                .unwrap();
+        }
+        let stmt = SqlStatement {
+            sql: "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;".into(),
+            args: vec![serde_json::json!("Terraza"), serde_json::json!("z1")],
+        };
+        encolar_con(&db, "op-mala", &[stmt]).await;
+
+        // La fila cambia DESPUÉS de que aquella operación se quedara atrás.
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("UPDATE Zonas SET Nombre_Zona = 'Terraza de arriba' WHERE ID_Zona = 'z1';")
+                .await
+                .unwrap();
+        }
+
+        let fallo = repo
+            .outbox_mark_failed("op-mala", "no such column: Nombre_Zona", true)
+            .await
+            .unwrap();
+        assert!(fallo.apartada);
+        assert_eq!(fallo.reparadas, 1, "debe encolarse la reparación de esa fila");
+
+        // Lo encolado lleva el valor NUEVO, no el que llevaba la sentencia rechazada.
+        let pendientes = repo.outbox_pending(100).await.unwrap();
+        let rep = pendientes
+            .iter()
+            .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
+            .expect("la reparación tiene que estar en la cola");
+        let sql = &rep.statements[0].sql;
+        assert!(sql.contains("INSERT OR REPLACE INTO \"Zonas\""), "sql: {sql}");
+        let json = serde_json::to_string(&rep.statements[0].args).unwrap();
+        assert!(json.contains("Terraza de arriba"), "args: {json}");
+        assert!(!json.contains("\"Terraza\","), "no puede llevar el valor viejo: {json}");
+    }
+
+    #[tokio::test]
+    async fn una_reparacion_que_falla_NO_engendra_otra() {
+        // Sin este corte, una fila que la nube se niega a aceptar produciría una reparación nueva
+        // por cada intento: la cola crecería sola para siempre.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Barra');")
+                .await
+                .unwrap();
+        }
+        let w = db.write().await;
+        w.raw()
+            .execute(
+                "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+                 VALUES ('op-rep', ?1, ?2, ?3);",
+                vec![
+                    Value::Text(crate::sync_reparacion::COMANDO_REPARACION.to_string()),
+                    Value::Text(
+                        serde_json::to_string(&[SqlStatement {
+                            sql: "INSERT OR REPLACE INTO \"Zonas\" (\"ID_Zona\") VALUES (?1);".into(),
+                            args: vec![serde_json::json!("z1")],
+                        }])
+                        .unwrap(),
+                    ),
+                    Value::Integer(now_ms()),
+                ],
+            )
+            .await
+            .unwrap();
+        drop(w);
+
+        let fallo = repo
+            .outbox_mark_failed("op-rep", "no such table: Zonas", true)
+            .await
+            .unwrap();
+        assert!(fallo.apartada);
+        assert_eq!(fallo.reparadas, 0, "una reparación apartada no genera otra");
+    }
+
+    #[tokio::test]
+    async fn un_borrado_no_se_repara_y_se_dice() {
+        // La ausencia de una fila no es una fila que mandar. Lo importante no es que no se repare
+        // —no se puede— sino que quede CONTADO, para que no se confunda con "ya está igualado".
+        let (_repo, db, _dir) = repo_temporal().await;
+        let claves = pks(&db, "Zonas").await;
+        let a = analizar(
+            &[SqlStatement {
+                sql: "DELETE FROM Zonas WHERE ID_Zona = ?1;".into(),
+                args: vec![serde_json::json!("z1")],
+            }],
+            &|t: &str| if t == "Zonas" { claves.clone() } else { vec![] },
+        );
+        assert_eq!(a.borrados, vec!["Zonas".to_string()]);
+        assert!(a.filas.is_empty());
+        assert!(!a.incierto, "un DELETE se entiende perfectamente: lo que no se puede es repararlo");
+    }
+
+    #[tokio::test]
+    async fn una_clave_COMPUESTA_no_repara_la_fila_equivocada() {
+        // Ocho tablas del esquema tienen clave compuesta. Tratarlas como si tuvieran una sola
+        // columna repararía otra fila — y sin error, que es la peor forma de fallar.
+        let (_repo, db, _dir) = repo_temporal().await;
+        let claves = pks(&db, "Pago_Detalles").await;
+        assert_eq!(claves, vec!["ID_Pago".to_string(), "ID_Detalle".to_string()]);
+
+        let a = analizar(
+            &[SqlStatement {
+                sql: "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES (?1, ?2);".into(),
+                args: vec![serde_json::json!("p1"), serde_json::json!("d9")],
+            }],
+            &|t: &str| if t == "Pago_Detalles" { claves.clone() } else { vec![] },
+        );
+        assert_eq!(
+            a.filas,
+            vec![FilaAfectada {
+                tabla: "Pago_Detalles".into(),
+                clave: vec![
+                    ("ID_Pago".into(), "p1".into()),
+                    ("ID_Detalle".into(), "d9".into()),
+                ],
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn lo_que_no_se_sabe_leer_se_declara_incierto() {
+        // El heurístico reconoce de menos a propósito: una fila que no se identifica NO se repara,
+        // así que callárselo sería dejar un descuadre creyendo que está arreglado.
+        let (_repo, _db, _dir) = repo_temporal().await;
+        let a = analizar(
+            &[SqlStatement {
+                sql: "UPDATE Productos SET Stock = Stock - 1 WHERE ID_Categoria IN (SELECT x FROM y);"
+                    .into(),
+                args: vec![],
+            }],
+            &|_: &str| vec!["ID_Producto".to_string()],
+        );
+        assert!(a.incierto);
+        assert!(a.filas.is_empty());
+    }
+
+    #[tokio::test]
+    async fn una_fila_ya_borrada_no_produce_sentencia() {
+        // Si la fila ya no está en local, no hay estado que mandar. Devolver una sentencia con
+        // NULLs la "repararía" dejándola vacía en la nube, que es peor que no tocarla.
+        let (_repo, db, _dir) = repo_temporal().await;
+        let r = db.read().await;
+        let st = sentencia_de_reparacion(
+            r.conn(),
+            &FilaAfectada {
+                tabla: "Zonas".into(),
+                clave: vec![("ID_Zona".into(), "no-existe".into())],
+            },
+        )
+        .await
+        .unwrap();
+        assert!(st.is_none());
     }
 }

@@ -65,6 +65,7 @@ pub mod reservas;
 pub mod stats;
 pub mod stock_alertas;
 pub mod sync;
+pub mod sync_reparacion;
 pub mod tareas;
 pub mod trabajadores;
 pub mod venta_rapida;

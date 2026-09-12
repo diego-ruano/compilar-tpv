@@ -109,6 +109,12 @@ pub struct OutboxFallo {
     /// Para el informe de telemetría. El `Statements_Json` NO sale de aquí: lleva datos del
     /// negocio y PII, y lo que hace falta para diagnosticar es qué comando falló, no con qué datos.
     pub command_name: String,
+    /// SYNC-22: filas cuya reparación se ha encolado al apartar esta operación. Cero puede
+    /// significar dos cosas distintas y las dos importan: que no había nada que reparar, o que las
+    /// sentencias no se supieron leer (queda en el log). Nunca significa "ya está igualado": eso
+    /// sólo lo prueba que la reparación llegue a subir.
+    #[ts(type = "number")]
+    pub reparadas: i64,
 }
 
 /* ===== Bootstrap: reconstrucción de la BD local desde la nube ===== */
