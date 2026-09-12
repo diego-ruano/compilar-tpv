@@ -77,7 +77,7 @@ pub trait SyncRepository: Send + Sync {
 
     /// SYNC-25 · segunda fase: con las claves de la nube delante, resta los dos conjuntos.
     ///
-    /// Devuelve `(descuadres, reparadas, borradas, borrado_aplazado)`. Lo que falta arriba se
+    /// Devuelve `(descuadres, reparadas, borradas, aplazado)`. Lo que falta arriba se
     /// repara por estado; lo que sobra se borra **sólo** si esta Main puede afirmar que está al
     /// día — si no, se informa y se espera al ciclo siguiente, que es lo que impide que un dato
     /// recién creado en la Handy se borre por llegar tarde.

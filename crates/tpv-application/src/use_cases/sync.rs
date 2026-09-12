@@ -252,7 +252,7 @@ pub async fn verificar_contra_la_nube(
         }
         resultado.reparadas += reparadas;
         resultado.borradas = borradas;
-        resultado.borrado_aplazado = aplazado;
+        resultado.aplazado = resultado.aplazado || aplazado;
     }
 
     let informe = json!({
@@ -260,7 +260,7 @@ pub async fn verificar_contra_la_nube(
         "apartadas": resultado.descuadres.iter().map(|d| d.sobran).sum::<i64>(),
         "reparadas": resultado.reparadas,
         "borradas": resultado.borradas,
-        "borrado_aplazado": resultado.borrado_aplazado,
+        "aplazado": resultado.aplazado,
         "ventana_omitida": resultado.ventana_omitida,
     });
     // Best-effort, y el error se descarta A SABIENDAS. Dos razones: que el informe no salga no

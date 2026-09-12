@@ -1007,11 +1007,17 @@ tablas_a_examinar: Array<TablaAExaminar>,
  */
 borradas: number, 
 /**
- * SYNC-25: había filas de más arriba pero NO se ha tocado nada, porque esta Main no podía
+ * SYNC-26: se encontraron diferencias pero NO se ha tocado nada, porque esta Main no podía
  * afirmar que estuviera al día (checkpoint por detrás de la foto, o cuarentena de bajada).
- * Se informa: es la diferencia entre «no sobra nada» y «sobra y no me atrevo».
+ *
+ * Cubre las dos operaciones y no sólo el borrado, que fue el error inicial: si la Main va
+ * atrasada, una fila «distinta» puede serlo porque la Handy acaba de escribirla y aquí
+ * todavía no ha llegado. Repararla entonces pisaría lo nuevo con lo viejo — el mismo daño que
+ * borrar de más, sólo que más difícil de ver.
+ *
+ * Se informa: es la diferencia entre «no hay nada que arreglar» y «lo hay y no me atrevo».
  */
-borrado_aplazado: boolean, };
+aplazado: boolean, };
 
 /**
  * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el

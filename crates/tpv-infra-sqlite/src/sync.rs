@@ -2538,6 +2538,14 @@ impl SqliteSyncRepository {
         let mut a_reparar: Vec<rep::FilaAfectada> = Vec::new();
         let mut a_examinar: Vec<TablaAExaminar> = Vec::new();
 
+        // SYNC-26: la misma guardia que protege los borrados protege las ACTUALIZACIONES, y por el
+        // mismo motivo. Si esta Main va por detrás de la foto, una fila «distinta» puede serlo
+        // porque la Handy acaba de escribirla y aquí todavía no ha llegado: repararla entonces
+        // pisaría lo nuevo con lo viejo. Y esto no es un caso raro — el job va por REST, así que
+        // corre igual con el WebSocket caído, que es justo cuando la Main está más atrasada.
+        let seguro = self.puede_borrar_arriba(foto.hasta_seq).await?;
+        let mut aplazado = false;
+
         {
             let r = self.db.read().await;
             let conn = r.conn();
@@ -2592,8 +2600,12 @@ impl SqliteSyncRepository {
                         Ok(None) => sobran += 1,
                         Ok(Some(true)) => {
                             distintas += 1;
-                            if let Some(f) = clave_de(&t.nombre, &t.columnas, fila, &claves) {
-                                a_reparar.push(f);
+                            if seguro {
+                                if let Some(f) = clave_de(&t.nombre, &t.columnas, fila, &claves) {
+                                    a_reparar.push(f);
+                                }
+                            } else {
+                                aplazado = true;
                             }
                         }
                         Ok(Some(false)) => {}
@@ -2665,7 +2677,7 @@ impl SqliteSyncRepository {
             ventana_omitida: foto.ventana_omitida,
             tablas_a_examinar: a_examinar,
             borradas: 0,
-            borrado_aplazado: false,
+            aplazado,
         })
     }
 }
@@ -2746,9 +2758,16 @@ mod tests_verificacion {
         (SqliteSyncRepository::new(db.clone()), db, dir)
     }
 
+    /// Siembra datos y deja el checkpoint por delante de la foto: sin eso, la verificación se
+    /// declara «no estoy al día» y no toca nada, que es lo correcto pero no es lo que estos tests
+    /// quieren comprobar. El caso de ir atrasado tiene sus propios tests.
     async fn sembrar(db: &Arc<Db>, sql: &str) {
         let w = db.write().await;
         w.raw().execute_batch(sql).await.unwrap();
+        w.raw()
+            .execute_batch("UPDATE _Sync_State SET Last_Seq = 1000 WHERE Id = 1;")
+            .await
+            .unwrap();
     }
 
     fn ventana_zonas(filas: Vec<Vec<serde_json::Value>>) -> BootstrapTabla {
@@ -2776,7 +2795,7 @@ mod tests_verificacion {
             ]])],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
@@ -2810,7 +2829,7 @@ mod tests_verificacion {
             ]])],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
@@ -2843,7 +2862,7 @@ mod tests_verificacion {
             }],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
@@ -2866,7 +2885,7 @@ mod tests_verificacion {
             ])],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
@@ -2893,7 +2912,7 @@ mod tests_verificacion {
             ventana: vec![],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
 
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
@@ -2911,7 +2930,7 @@ mod tests_verificacion {
             ventana: vec![],
             ventana_omitida: false,
             desde: String::new(),
-            hasta_seq: 0,
+            hasta_seq: 1,
         };
         let r = repo.contrastar_con_la_nube(foto).await.unwrap();
         assert!(r.descuadres.is_empty());
@@ -3708,6 +3727,98 @@ mod tests_cierre_del_aviso {
             repo.health().await.unwrap().subida_en_cuarentena,
             1,
             "la apartada sigue ahí: nadie ha reparado nada",
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests_main_atrasada {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! SYNC-26 — una Main que va por detrás no decide nada.
+    //!
+    //! El job de verificación va por REST, así que corre igual con el WebSocket caído — que es
+    //! justo cuando esta Main está más atrasada respecto de lo que la Handy ha ido escribiendo. Si
+    //! en ese estado se "reparase" lo que ve distinto, estaría pisando con datos viejos todo lo que
+    //! el camarero acaba de hacer desde la tablet. Y sin error, que es lo peor.
+
+    use std::sync::Arc;
+
+    use libsql::Value;
+    use tpv_contracts::sync::{BootstrapTabla, VerificacionNube};
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("atrasada");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    /// La misma foto en los dos tests: la nube dice "Salón", aquí pone "Terraza".
+    fn foto(hasta_seq: i64) -> VerificacionNube {
+        VerificacionNube {
+            conteos: vec![],
+            ventana: vec![BootstrapTabla {
+                nombre: "Zonas".into(),
+                columnas: vec!["ID_Zona".into(), "Nombre_Zona".into()],
+                filas: vec![vec![serde_json::json!("z1"), serde_json::json!("Salón")]],
+                parcial: false,
+            }],
+            ventana_omitida: false,
+            desde: String::new(),
+            hasta_seq,
+        }
+    }
+
+    async fn preparar(db: &Arc<Db>, checkpoint: i64) {
+        let w = db.write().await;
+        w.raw()
+            .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Terraza');")
+            .await
+            .unwrap();
+        w.raw()
+            .execute(
+                "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1;",
+                vec![Value::Integer(checkpoint)],
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn al_dia_SI_repara() {
+        // El control: con el marcapáginas al día, la diferencia es real y se arregla.
+        let (repo, db, _dir) = repo_temporal().await;
+        preparar(&db, 500).await;
+
+        let r = repo.contrastar_con_la_nube(foto(500)).await.unwrap();
+        assert_eq!(r.reparadas, 1);
+        assert!(!r.aplazado);
+    }
+
+    #[tokio::test]
+    async fn ATRASADA_ve_la_diferencia_pero_no_la_toca() {
+        // Mismo escenario, una sola cosa cambia: el marcapáginas va por detrás de la foto. Ese
+        // "Salón" de la nube puede ser un cambio de la Handy que aquí todavía no ha llegado, así
+        // que mandar el "Terraza" local lo borraría del mapa.
+        let (repo, db, _dir) = repo_temporal().await;
+        preparar(&db, 499).await;
+
+        let r = repo.contrastar_con_la_nube(foto(500)).await.unwrap();
+
+        assert_eq!(
+            r.descuadres.iter().map(|d| d.distintas).sum::<i64>(),
+            1,
+            "la diferencia se VE y se informa...",
+        );
+        assert_eq!(r.reparadas, 0, "...pero no se toca");
+        assert!(r.aplazado, "y se dice que se ha aplazado");
+        assert!(
+            repo.outbox_pending(100).await.unwrap().is_empty(),
+            "no puede salir nada hacia la nube",
         );
     }
 }
