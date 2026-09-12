@@ -65,6 +65,25 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 | `AXIOM_TOKEN` | Token de ingesta (secreto). `wrangler secret put AXIOM_TOKEN` |
 | `AXIOM_DATASET` | Dataset de logs de dispositivo (por defecto `tpv-device-logs`) |
 | `AXIOM_DATASET_SYNC` | Dataset de eventos de salud del sync (TenantHub) |
+
+> **Hoy las dos apuntan al MISMO dataset (`tpv-sync`), y es deliberado.** El plan gratuito de Axiom
+> permite tres datasets y uno ya lo ocupa `cloudflare-logpush`; separar los logs de dispositivo
+> gastaría el último hueco a cambio de nada, porque **cada evento ya viene etiquetado con su
+> origen** y el filtro es de una línea:
+>
+> | `service` | Qué es | De dónde sale |
+> |---|---|---|
+> | `tpv-device` | Logs internos de un TPV | El equipo, vía `/v1/telemetry` |
+> | `tpv-sync` | Eventos del TenantHub (Main online/offline, cola, apply) | El Durable Object |
+> | `tpv-api` | Rechazos de dispositivo y salud del contraste | Las rutas del worker |
+>
+> ```
+> ['tpv-sync'] | where service == "tpv-device" | sort by _time desc
+> ```
+>
+> Lo que sí comparten al juntarlos es **la retención**, que es propiedad del dataset. Si algún día
+> los logs de dispositivo crecen y conviene caducarlos antes que los eventos de sync, ese es el
+> momento de separarlos: son dos variables distintas justo para poder hacerlo sin tocar código.
 | `AXIOM_DOMAIN` | **Dominio del edge deployment.** Hoy `eu-central-1.aws.edge.axiom.co` |
 
 - Crea los datasets en **región UE**.
