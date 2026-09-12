@@ -14,6 +14,20 @@ import { getDb } from "../server/db";
 import { SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
 import { reportarRechazoDeDispositivo } from "../observability/axiom";
+
+/**
+ * Mantiene viva una entrega de observabilidad más allá de la respuesta.
+ *
+ * El `try` es por los tests y por cualquier contexto sin `executionCtx`: ahí `c.executionCtx`
+ * lanza. Perder un aviso nunca puede tumbar una petición.
+ */
+function retenerEnvio(c: { executionCtx: ExecutionContext }, p: Promise<unknown>): void {
+	try {
+		c.executionCtx.waitUntil(p);
+	} catch {
+		void p;
+	}
+}
 import { unauthorized } from "../server/utils/response";
 
 export type TenantVars = {
@@ -106,11 +120,14 @@ export const tenantAuth: MiddlewareHandler<{
 
 		// Que un dispositivo no pueda autenticarse deja rastro (agregable en Axiom). Sin esto, un
 		// TPV rechazado es invisible para nosotros hasta que su dueño llama por teléfono.
-		reportarRechazoDeDispositivo(c.env, {
+		// `waitUntil` y no `void`: al devolver la respuesta, el runtime de Workers CANCELA lo que
+		// quede pendiente sin registrar. Con `void`, este aviso se lanzaba y se moría a medio
+		// vuelo — sin error y sin log, simplemente no llegaba nunca a Axiom.
+		retenerEnvio(c, reportarRechazoDeDispositivo(c.env, {
 			motivo,
 			ruta: new URL(c.req.url).pathname,
 			metodo: c.req.method,
-		});
+		}));
 
 		// Por `unauthorized` y no por `c.json` a pelo: así la respuesta lleva el `code` del
 		// catálogo compartido (ARCH-05) además del `error` de siempre. Es lo que permite al

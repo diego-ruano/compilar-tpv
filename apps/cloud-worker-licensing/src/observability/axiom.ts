@@ -9,6 +9,22 @@
 
 import type { Env } from "../env";
 
+/*
+ * ⚠️ REGLA DE ESTE FICHERO: los reporteros DEVUELVEN la promesa de la entrega, y quien los llama
+ * tiene que mantenerla viva.
+ *
+ * En Cloudflare Workers, cuando el manejador devuelve su `Response` el runtime **cancela el
+ * trabajo pendiente** que no esté registrado con `waitUntil()`. Un `void ingestToAxiom(...)` se
+ * lanza y se mata a medio vuelo: no hay error, no hay log, simplemente no aparece nada en Axiom.
+ * Estuvo así desde que se escribió este fichero — se emitía y no llegaba.
+ *
+ * Devolver la promesa obliga a decidir en cada sitio, que es lo correcto porque no todos pueden
+ * hacer lo mismo:
+ *   · ruta o middleware de Hono  → `c.executionCtx.waitUntil(...)`  (sin latencia)
+ *   · Durable Object             → `this.state.waitUntil(...)`
+ *   · sin contexto de ejecución  → `await` (vale: son caminos de error, no el camino caliente)
+ */
+
 /**
  * Ingesta `events` (array de objetos JSON) en el `dataset` de Axiom.
  *
@@ -61,7 +77,8 @@ export async function ingestToAxiom(
  * consola de un desarrollador. Con esto se puede montar una alerta del tipo "N rechazos del mismo
  * dispositivo en 5 minutos", que es justo la señal que faltaba.
  *
- * Best-effort y sin `await`: la observabilidad no puede añadir latencia ni fallar la petición.
+ * Best-effort, pero la promesa que devuelve HAY que mantenerla viva (ver la regla de arriba):
+ * sin eso el runtime la cancela al responder y no llega nada.
  */
 export function reportarRechazoDeDispositivo(
 	env: Env,
@@ -72,12 +89,12 @@ export function reportarRechazoDeDispositivo(
 		tenant_id?: string;
 		device_id?: string;
 	},
-): void {
+): Promise<unknown> {
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
-	if (!env.AXIOM_TOKEN || !dataset) return;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
 
 	try {
-		void ingestToAxiom(env, dataset, [
+		return ingestToAxiom(env, dataset, [
 			{
 				_time: new Date().toISOString(),
 				service: "tpv-api",
@@ -87,6 +104,7 @@ export function reportarRechazoDeDispositivo(
 		]);
 	} catch {
 		/* nunca afecta a la respuesta */
+		return Promise.resolve();
 	}
 }
 
@@ -102,7 +120,8 @@ export function reportarRechazoDeDispositivo(
  * por `tenant_id`. Un descuadre suelto que desaparece al ciclo siguiente es ruido (la foto de la
  * nube se toma sin transacción); lo que hay que vigilar es el que persiste.
  *
- * Best-effort y sin `await`, como todo lo de aquí.
+ * Best-effort y sin bloquear la respuesta, como todo lo de aquí — pero con la entrega
+ * retenida, o el runtime la cancelaría al responder.
  */
 export function reportarSaludDeSync(
 	env: Env,
@@ -114,26 +133,27 @@ export function reportarSaludDeSync(
 		reparadas: number;
 		ventana_omitida: boolean;
 	},
-): void {
+): Promise<unknown> {
 	const dataset = env.AXIOM_DATASET_SYNC || env.AXIOM_DATASET;
-	if (!env.AXIOM_TOKEN || !dataset) return;
+	if (!env.AXIOM_TOKEN || !dataset) return Promise.resolve();
 
 	try {
-		void ingestToAxiom(env, dataset, [
-			{
-				_time: new Date().toISOString(),
-				service: "tpv-api",
-				event: "tenant_salud_sync",
-				// Agregados para poder alertar sin desplegar el detalle.
-				tablas_descuadradas: campos.descuadres.length,
-				filas_descuadradas: campos.descuadres.reduce(
-					(n, d) => n + d.faltan + d.sobran + d.distintas,
-					0,
-				),
+		return ingestToAxiom(env, dataset, [
+				{
+					_time: new Date().toISOString(),
+					service: "tpv-api",
+					event: "tenant_salud_sync",
+					// Agregados para poder alertar sin desplegar el detalle.
+					tablas_descuadradas: campos.descuadres.length,
+					filas_descuadradas: campos.descuadres.reduce(
+						(n, d) => n + d.faltan + d.sobran + d.distintas,
+						0,
+					),
 				...campos,
 			},
 		]);
 	} catch {
 		/* nunca afecta a la respuesta */
+		return Promise.resolve();
 	}
 }

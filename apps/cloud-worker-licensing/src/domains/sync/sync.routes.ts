@@ -598,21 +598,24 @@ syncRoutes.post("/salud", async (c) => {
 	const cuerpo = await c.req.json().catch(() => ({}) as any);
 	const descuadres = Array.isArray(cuerpo?.descuadres) ? cuerpo.descuadres.slice(0, 50) : [];
 
-	emitirSalud(c.env, {
-		tenant_id: c.get("tenantId"),
-		device_id: c.get("deviceId"),
-		// Se recorta lo que llega: es un informe, no un canal de datos. Sin esto, un bug del
-		// cliente podría mandar filas enteras de negocio a un dataset de observabilidad.
-		descuadres: descuadres.map((d: any) => ({
-			tabla: String(d?.tabla ?? "").slice(0, 64),
-			faltan: Number(d?.faltan ?? 0),
-			sobran: Number(d?.sobran ?? 0),
-			distintas: Number(d?.distintas ?? 0),
-		})),
-		apartadas: Number(cuerpo?.apartadas ?? 0),
-		reparadas: Number(cuerpo?.reparadas ?? 0),
-		ventana_omitida: Boolean(cuerpo?.ventana_omitida),
-	});
+	// `waitUntil`: sin él, el runtime cancela la entrega en cuanto se responde el `{ok:true}`.
+	c.executionCtx.waitUntil(
+		emitirSalud(c.env, {
+			tenant_id: c.get("tenantId"),
+			device_id: c.get("deviceId"),
+			// Se recorta lo que llega: es un informe, no un canal de datos. Sin esto, un bug del
+			// cliente podría mandar filas enteras de negocio a un dataset de observabilidad.
+			descuadres: descuadres.map((d: any) => ({
+				tabla: String(d?.tabla ?? "").slice(0, 64),
+				faltan: Number(d?.faltan ?? 0),
+				sobran: Number(d?.sobran ?? 0),
+				distintas: Number(d?.distintas ?? 0),
+			})),
+			apartadas: Number(cuerpo?.apartadas ?? 0),
+			reparadas: Number(cuerpo?.reparadas ?? 0),
+			ventana_omitida: Boolean(cuerpo?.ventana_omitida),
+		}),
+	);
 
 	return c.json({ ok: true });
 });

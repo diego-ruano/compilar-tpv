@@ -48,7 +48,10 @@ export async function buildTenantContext(
 	} catch (e: any) {
 		// Mismo rastro que en `tenantAuth`: por aquí pasan pairing, revoke y el listado de
 		// dispositivos, que es justo donde un TPV rechazado se queda sin poder emparejar nada.
-		reportarRechazoDeDispositivo(env, {
+		// Se ESPERA a propósito: aquí no hay `executionCtx` al que agarrar la entrega, y sin
+		// esperarla el runtime la cancelaría al responder. Es un camino de error (el dispositivo
+		// ya no va a poder operar), así que unos milisegundos no le importan a nadie.
+		await reportarRechazoDeDispositivo(env, {
 			motivo: String(e?.message || e),
 			ruta: new URL(req.url).pathname,
 			metodo: req.method,

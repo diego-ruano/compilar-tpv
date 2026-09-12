@@ -1168,7 +1168,10 @@ export class TenantHub {
 				main_connected: this.isMainConnected(),
 				...fields,
 			};
-			void ingestToAxiom(this.env, dataset, [event]);
+			// `state.waitUntil` y no `void`: un DO con hibernación puede evacuarse en cuanto deja de
+			// tener trabajo registrado, y entonces la entrega se cancela a medio vuelo. Es lo que
+			// hacía que estos eventos no llegaran nunca a Axiom.
+			this.state.waitUntil(ingestToAxiom(this.env, dataset, [event]));
 		} catch {
 			/* la salud de sync es best-effort; nunca afecta al sync */
 		}
