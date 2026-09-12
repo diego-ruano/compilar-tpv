@@ -487,6 +487,8 @@ no sólo en dev.
 |---|---|---|
 | Captura del outbox | `crates/tpv-infra-sqlite/src/db.rs` | Cada escritura local (Main) se serializa a JSON en `_Sync_Outbox` |
 | Cuarentena de subida | `tenantHub.errores.ts` + `infra-sqlite/src/sync.rs::outbox_mark_failed` | SYNC-20: un rechazo definitivo aparta la operación en vez de detener la cola |
+| Reparación por estado | `infra-sqlite/src/sync_reparacion.rs` | SYNC-22: reencola la fila APARTADA tal como está ahora, no la sentencia que fue rechazada |
+| Contraste con la nube | `sync.routes.ts::/verificar` + `sync.rs::contrastar_con_la_nube` + job `verificar_nube` | SYNC-24: comprueba a diario que las dos bases dicen lo mismo, repara e informa a Axiom |
 | Determinismo temporal | `db.rs:114-122` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
 | WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
 | Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
@@ -586,6 +588,23 @@ no sólo en dev.
   - **El `alarm` captura sus excepciones y se reprograma a mano**: el reintento automático se rinde
     a los 6 intentos y la cola se quedaría muerta en silencio. Y para si una vuelta no la reduce,
     para no girar en caliente (que además se factura).
+- **Una divergencia se repara por ESTADO, nunca reintentando la sentencia (SYNC-22/24).** Apartar
+  una operación evita el atasco pero deja la nube distinta, y la Handy —que no tiene BD local— pasa
+  entonces a enseñar otra cosa que la Main. Reglas:
+  - **Se manda cómo está la fila AHORA**, como `INSERT OR REPLACE`. Reaplicar la sentencia vieja no
+    repara el dato: lo devuelve a un valor que ya no es cierto. Lo de ahora es idempotente, no
+    depende del orden y converge.
+  - **Una reparación es una escritura más**: se encola en el outbox y sube por el camino de siempre.
+    No hay transporte nuevo que mantener. Pero **una reparación no se repara** (`Command_Name`
+    propio), o una fila que la nube rechaza generaría una por cada intento.
+  - **«La nube tiene una fila que aquí no está» NO se resuelve borrándola.** Es un borrado que no
+    subió, o una fila que acaba de crear la Handy y esta Main aún no ha recibido — indistinguibles.
+    Se cuenta y se informa (SYNC-23).
+  - **La comparación es tolerante con los números** (`2.5` vs `"2.50"`): dos drivers escriben la
+    misma cifra de dos maneras, y sin esa tolerancia cada pasada daría por descuadrada toda tabla
+    con una columna numérica. Un panel que siempre grita es un panel apagado.
+  - **El informe va a Axiom, no al usuario.** Un descuadre no lo puede atender quien está delante
+    del TPV. Él sólo ve la consecuencia, en Conectividad.
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el

@@ -25,7 +25,10 @@
 | FIS-04 | 🟠 | `remitir_ciclo` cruza el resultado de un ALTA con el de su ANULACIÓN | ✅ Hecho (2026-09-10) |
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | SYNC-20 | 🔴 | Una operación que la nube rechaza detenía **toda** la replicación, en silencio y para siempre | ✅ Hecho (2026-09-11) |
-| SYNC-21 | 🟡 | Una operación apartada sólo se ve si alguien **abre el panel**: no hay notificación | Sin empezar |
+| SYNC-21 | 🟡 | La cuarentena sólo se ve abriendo el panel (lo cubre en parte SYNC-24) | Parcial |
+| SYNC-22 | 🟠 | Una operación apartada dejaba la nube distinta: Handy y Main veían cosas distintas | ✅ Hecho (2026-09-12) |
+| SYNC-23 | 🟡 | Un borrado que no sube no se puede reparar por estado | Sin empezar |
+| SYNC-24 | 🟠 | Nadie comprobaba nunca que la nube y la base local dijeran lo mismo | ✅ Hecho (2026-09-12) |
 | OBS-05 | 🟠 | La observabilidad del sync está construida y **apagada**: faltan las variables de Axiom | Sin empezar |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
@@ -244,6 +247,93 @@ versión, sin hash, fuera de `_migrations` y **fuera del snapshot anti-drift**. 
 `0001` con todo lo demás; el snapshot ganó 14 líneas que antes no vigilaba nadie. Que esas tablas se
 creen también en el tenant de Turso es deliberado y no molesta: se quedan vacías, y el volcado de
 recuperación descarta todo lo que empieza por `_`.
+
+## SYNC-22 ✅ · Una operación apartada vuelve a igualar su fila (resuelto 2026-09-12)
+
+SYNC-20 evita el atasco, pero apartar una operación deja la nube distinta de la Main. Y como la
+**Handy no tiene BD y lee de la nube**, eso no es «falta un dato en una copia»: es que el camarero y
+el TPV ven cosas distintas —un precio, una carta, una mesa— y nadie se entera hasta el arqueo.
+
+**No se reintenta la sentencia rechazada.** Para cuando alguien arregla la causa, esa fila ya ha
+cambiado otras veces: reaplicar aquel `UPDATE` viejo por encima del nuevo no repara el dato, lo
+devuelve a un valor que ya no es cierto. Lo que sí se puede afirmar en cualquier momento es **cómo
+está la fila ahora** en la Main, que es el escritor único y por tanto la autoridad. Se manda eso,
+como `INSERT OR REPLACE`: no depende del orden, se repite sin daño y converge.
+
+**Y no hace falta transporte nuevo.** Una reparación es una escritura más: se encola en
+`_Sync_Outbox` y sube por el camino de siempre, con sus acks, su idempotencia por `Op_Id` y su
+cuarentena si vuelve a fallar. Va al final de la cola, que es donde tiene que ir: lleva el estado
+más reciente.
+
+Lo que no es negociable: una reparación **no se repara** (`Command_Name` propio, o una fila que la
+nube rechaza generaría una reparación nueva por cada intento); las claves primarias se leen del
+**esquema** y no de una lista a mano (ocho tablas las tienen compuestas); el análisis reconoce **de
+menos** y marca `incierto`, porque una fila que no se identifica no se repara y callárselo sería
+dejar un descuadre creyendo que está arreglado.
+
+## SYNC-24 ✅ · Contrastar la nube contra la Main, y chivarse solo (resuelto 2026-09-12)
+
+SYNC-22 repara lo que **se sabe** que se quedó atrás. Esto es la red para lo que no se sabe: nadie
+comprobaba nunca que las dos bases dijeran lo mismo.
+
+Un job diario pide una foto **para contrastar** (no para restaurar): `COUNT(*)` de todas las tablas
+enteras —lo único que ve una fila perdida fuera de la ventana— más el **contenido** de los últimos
+30 días, que es lo único que ve un *valor* distinto, el caso que nos mordió. El histórico viejo
+queda fuera a propósito: ya no cambia, así que releerlo cada ciclo es pagar lecturas de Turso por
+comprobar datos inmutables.
+
+Qué se hace con cada cosa, que no es lo mismo:
+
+| | Qué es | Qué se hace |
+|---|---|---|
+| `distintas` | En los dos sitios, con contenido distinto | **Se repara.** La Main es el escritor único |
+| `sobran` | La nube la tiene, aquí no | **Se cuenta y no se toca** (ver SYNC-23) |
+| `faltan` | Aquí está, arriba no | Se cuenta. Se sabe **cuántas**, no cuáles |
+
+`faltan` sale de restar contadores, así que no dice cuáles. Saberlo exigiría reproducir en Rust la
+definición de la ventana, que vive en el worker **a propósito** (una sola fuente). No es un agujero:
+las filas que importan de verdad ya las repara SYNC-22 en el momento.
+
+**El informe va a Axiom, no al usuario.** Un `op_id` y un error de SQL no los puede atender quien
+está delante del TPV, y un aviso que no se puede atender enseña a ignorar los avisos. Se informa
+**siempre**, también cuando todo cuadra: un silencio no distingue «va bien» de «lleva tres semanas
+sin comprobarse». ⚠️ Depende de **OBS-05**: hasta que las variables de Axiom estén puestas, esos
+eventos no llegan a ninguna parte.
+
+La comparación es **tolerante con los números** a propósito: dos drivers distintos escriben `2.5` y
+`"2.50"`, y sin eso cada pasada encontraría descuadrada toda tabla con una columna numérica — y el
+aviso que importa se perdería entre cientos de falsos.
+
+## SYNC-23 🟡 · Un borrado que no sube no se puede reparar por estado
+
+Lo que queda fuera de SYNC-22 y SYNC-24, y conviene tenerlo escrito porque **no es un descuido, es
+un límite del método**: la reparación por estado manda «así está esta fila». Un borrado no tiene
+estado que mandar — la ausencia de una fila no es una fila.
+
+Y detectarlo tampoco basta para arreglarlo. Cuando el contraste encuentra que la nube tiene una fila
+que aquí no está, hay **dos causas indistinguibles**:
+
+1. un `DELETE` local que no llegó a subir → habría que borrarla arriba;
+2. una fila que acaba de crear la **Handy** y que esta Main todavía no ha recibido por el catch-up →
+   borrarla arriba destruiría una comanda recién abierta.
+
+Por eso hoy se cuenta y se informa, y no se toca nada. Las salidas posibles, para cuando se decida:
+
+- **Tombstones**: una tabla local de borrados (`tabla`, clave, cuándo) que la reparación pueda
+  mandar. Es la solución estándar y la única exacta. Cuesta una tabla más, su política de retención,
+  y que todo borrado pase por ahí — un `ON DELETE CASCADE` no deja rastro, así que habría que
+  decidir qué se hace con las hijas.
+- **Acotarlo por propiedad de la tabla**: la Handy sólo escribe comandas y sus hijas. En las tablas
+  que la Main posee en exclusiva (catálogo, ajustes, trabajadores…) la ambigüedad no existe y el
+  borrado automático sería seguro. Cubre la mayoría de los casos con mucho menos trabajo, al precio
+  de una lista de tablas que hay que mantener.
+- **No repararlo nunca y dejarlo en el informe**: una fila de más en la nube es, casi siempre, menos
+  grave que una de menos. La Handy la enseñaría (un producto retirado que sigue apareciendo), así
+  que tampoco es inocuo.
+
+Mi recomendación cuando se aborde: la segunda, por la misma razón por la que la lista de comandos
+gateados de SEC-01 es corta — resuelve el 90 % sin construir un mecanismo nuevo que haya que
+mantener para siempre.
 
 ## OBS-05 🟠 · La observabilidad del sync está construida y APAGADA
 
