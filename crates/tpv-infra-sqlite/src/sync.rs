@@ -263,14 +263,19 @@ async fn encolar_reparaciones(conn: &Connection, op_id: &str) -> AppResult<i64> 
     let n = sentencias.len() as i64;
     let nuevo_op = uuid::Uuid::new_v4().to_string();
     let ahora = now_ms();
+    // Se anota de qué operación apartada viene: cuando esta reparación suba, aquélla deja de tener
+    // sentido y se retira (ver `outbox_mark_sent`). Sin el enlace, el aviso de cuarentena no se
+    // apagaría nunca aunque el problema ya estuviera resuelto.
     conn.execute(
-        "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
-         VALUES (?1, ?2, ?3, ?4);",
+        "INSERT INTO _Sync_Outbox \
+           (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Repara_Op_Id) \
+         VALUES (?1, ?2, ?3, ?4, ?5);",
         vec![
             Value::Text(nuevo_op.clone()),
             Value::Text(rep::COMANDO_REPARACION.to_string()),
             Value::Text(serde_json::to_string(&sentencias).unwrap_or_else(|_| "[]".into())),
             Value::Integer(ahora),
+            Value::Text(op_id.to_string()),
         ],
     )
     .await
@@ -593,6 +598,21 @@ impl SyncRepository for SqliteSyncRepository {
                 .await
                 .map_err(db_err)?;
             }
+            // SYNC-26: si lo que acaba de subir es una REPARACIÓN, la operación apartada que la
+            // motivó ya no dice nada — la nube tiene el dato. Se retira, y con ella su aviso.
+            //
+            // Va DENTRO de la misma transacción que borra la reparación, y no después: si el
+            // proceso muriera entre las dos, quedaría una cuarentena eterna por un problema ya
+            // resuelto, que es exactamente lo que esto arregla. Y se exige `Cuarentena = 1` para
+            // no retirar por error una operación que siguiera viva.
+            conn.execute(
+                "DELETE FROM _Sync_Outbox \
+                  WHERE Cuarentena = 1 \
+                    AND Op_Id = (SELECT Repara_Op_Id FROM _Sync_Outbox WHERE Op_Id = ?1);",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
             conn.execute(
                 "DELETE FROM _Sync_Outbox WHERE Op_Id = ?1;",
                 vec![Value::Text(op_id.to_string())],
@@ -2353,8 +2373,12 @@ mod tests_reparacion {
             .iter()
             .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
             .expect("la reparación tiene que estar en la cola");
+        // Upsert, NUNCA `INSERT OR REPLACE`: aquello borra la fila y la reinserta, disparando los
+        // `ON DELETE CASCADE` que la apuntan (SYNC-26).
         let sql = &rep.statements[0].sql;
-        assert!(sql.contains("INSERT OR REPLACE INTO \"Zonas\""), "sql: {sql}");
+        assert!(sql.contains("INSERT INTO \"Zonas\""), "sql: {sql}");
+        assert!(sql.contains("ON CONFLICT(\"ID_Zona\")"), "sql: {sql}");
+        assert!(!sql.contains("OR REPLACE"), "sql: {sql}");
         let json = serde_json::to_string(&rep.statements[0].args).unwrap();
         assert!(json.contains("Terraza de arriba"), "args: {json}");
         assert!(!json.contains("\"Terraza\","), "no puede llevar el valor viejo: {json}");
@@ -3291,7 +3315,11 @@ mod tests_claves {
             .iter()
             .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
             .expect("tiene que haberse encolado");
-        assert!(rep.statements[0].sql.contains("INSERT OR REPLACE"));
+        // Un upsert, NUNCA `INSERT OR REPLACE`: aquello borra la fila y la reinserta, disparando
+        // los `ON DELETE CASCADE` que la apuntan (SYNC-26).
+        let sql = &rep.statements[0].sql;
+        assert!(sql.contains("ON CONFLICT"), "sql: {sql}");
+        assert!(!sql.contains("OR REPLACE"), "sql: {sql}");
     }
 
     #[tokio::test]
@@ -3423,5 +3451,263 @@ mod tests_claves {
         let d = desc.iter().find(|d| d.tabla == "Pago_Detalles").expect("descuadre");
         assert_eq!(d.sobran, 2, "son DOS filas distintas, no una");
         assert_eq!(borradas, 2);
+    }
+}
+
+#[cfg(test)]
+mod tests_cascada {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! SYNC-26 — una reparación no puede llevarse por delante las filas hijas.
+    //!
+    //! Este esquema tiene DIECIOCHO `ON DELETE CASCADE`, y en SQLite un `INSERT OR REPLACE` **borra
+    //! la fila que hay y la reinserta**: repararla dispararía todas las cascadas que la apuntan. Con
+    //! `Zonas → Mesas` eso significa que arreglar el nombre de una zona dejaría el plano vacío en la
+    //! nube, y la Handy sin mesas que pulsar.
+    //!
+    //! No se comprueba leyendo el SQL: se APLICA la sentencia contra una base de verdad con las FK
+    //! encendidas, que es lo único que prueba que la cascada no salta.
+
+    use std::sync::Arc;
+
+    use libsql::Value;
+
+    use super::*;
+    use crate::db::Db;
+    use crate::sync_reparacion::{sentencia_de_reparacion, FilaAfectada};
+
+    async fn base() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("cascada");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn contar(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.conn().query(sql, ()).await.unwrap();
+        let f = rows.next().await.unwrap().unwrap();
+        v_i64(f.get_value(0).unwrap()).unwrap_or(-1)
+    }
+
+    #[tokio::test]
+    async fn reparar_una_ZONA_no_borra_sus_MESAS() {
+        let (db, _dir) = base().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Terraza');\
+                     INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m1','z1','1',4,10,10,'rect',60,60);\
+                     INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('m2','z1','2',2,80,10,'rect',60,60);",
+                )
+                .await
+                .unwrap();
+        }
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Mesas;").await, 2);
+
+        let fila = FilaAfectada {
+            tabla: "Zonas".into(),
+            clave: vec![("ID_Zona".into(), "z1".into())],
+        };
+        let st = {
+            let r = db.read().await;
+            sentencia_de_reparacion(r.conn(), &fila).await.unwrap().unwrap()
+        };
+
+        // La prueba: se aplica DE VERDAD, con las FK encendidas (las pone `tune()` al abrir), que es
+        // exactamente lo que hará el DO contra el tenant.
+        {
+            let w = db.write().await;
+            let args: Vec<Value> = st
+                .args
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::Null => Value::Null,
+                    serde_json::Value::Number(n) => match n.as_i64() {
+                        Some(i) => Value::Integer(i),
+                        None => Value::Real(n.as_f64().unwrap_or(0.0)),
+                    },
+                    serde_json::Value::String(s) => Value::Text(s.clone()),
+                    otro => Value::Text(otro.to_string()),
+                })
+                .collect();
+            w.raw().execute(&st.sql, args).await.unwrap();
+        }
+
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Mesas;").await,
+            2,
+            "las mesas de la zona NO pueden desaparecer al reparar la zona (sql: {})",
+            st.sql
+        );
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Zonas;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn la_reparacion_ACTUALIZA_el_valor_no_solo_lo_deja_estar() {
+        // El otro lado de la moneda: evitar la cascada no puede costar que la reparación no repare.
+        // Si el `DO UPDATE` no asignara las columnas, la fila de la nube se quedaría como estaba y
+        // el descuadre seguiría ahí — pero contado como arreglado, que es peor.
+        let (db, _dir) = base().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Nuevo');")
+                .await
+                .unwrap();
+        }
+        let st = {
+            let r = db.read().await;
+            sentencia_de_reparacion(
+                r.conn(),
+                &FilaAfectada {
+                    tabla: "Zonas".into(),
+                    clave: vec![("ID_Zona".into(), "z1".into())],
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap()
+        };
+
+        // Se simula "la nube tiene el valor viejo" y se aplica la reparación encima.
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("UPDATE Zonas SET Nombre_Zona = 'Viejo' WHERE ID_Zona = 'z1';")
+                .await
+                .unwrap();
+            let args: Vec<Value> = st
+                .args
+                .iter()
+                .map(|v| match v {
+                    serde_json::Value::String(s) => Value::Text(s.clone()),
+                    serde_json::Value::Null => Value::Null,
+                    otro => Value::Text(otro.to_string()),
+                })
+                .collect();
+            w.raw().execute(&st.sql, args).await.unwrap();
+        }
+
+        let r = db.read().await;
+        let mut rows = r
+            .conn()
+            .query("SELECT Nombre_Zona FROM Zonas WHERE ID_Zona = 'z1';", ())
+            .await
+            .unwrap();
+        let f = rows.next().await.unwrap().unwrap();
+        match f.get_value(0).unwrap() {
+            Value::Text(s) => assert_eq!(s, "Nuevo", "la reparación tiene que pisar el valor viejo"),
+            v => panic!("inesperado: {v:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_cierre_del_aviso {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
+    //! SYNC-26 — el aviso de cuarentena tiene que apagarse SOLO.
+    //!
+    //! La regla ya estaba escrita en este repo para la escalera fiscal: «un aviso que hay que
+    //! descartar a mano después de que el problema se arregle enseña a descartar avisos». Aquí
+    //! pasaba: una operación apartada se quedaba en cuarentena para siempre aunque su reparación
+    //! hubiera subido, así que Conectividad seguiría en rojo con el problema resuelto.
+
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::db::Db;
+
+    async fn repo_temporal() -> (SqliteSyncRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("cierre_aviso");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (SqliteSyncRepository::new(db.clone()), db, dir)
+    }
+
+    #[tokio::test]
+    async fn cuando_la_reparacion_sube_el_aviso_se_apaga_SOLO() {
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1','Terraza');")
+                .await
+                .unwrap();
+            w.raw()
+                .execute(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+                     VALUES ('op-mala', 'main_op', ?1, 1);",
+                    vec![Value::Text(
+                        serde_json::to_string(&[SqlStatement {
+                            sql: "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;".into(),
+                            args: vec![serde_json::json!("Terraza"), serde_json::json!("z1")],
+                        }])
+                        .unwrap(),
+                    )],
+                )
+                .await
+                .unwrap();
+        }
+
+        // La nube la rechaza: se aparta y se encola su reparación.
+        let fallo = repo
+            .outbox_mark_failed("op-mala", "no such column", true)
+            .await
+            .unwrap();
+        assert!(fallo.apartada);
+        assert_eq!(fallo.reparadas, 1);
+        assert_eq!(
+            repo.health().await.unwrap().subida_en_cuarentena,
+            1,
+            "mientras no se repare, el aviso tiene que estar",
+        );
+
+        // La reparación sube.
+        let rep = repo
+            .outbox_pending(100)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
+            .expect("la reparación está en la cola");
+        repo.outbox_mark_sent(&rep.op_id, 7).await.unwrap();
+
+        // Y el aviso se apaga sin que nadie lo descarte.
+        let salud = repo.health().await.unwrap();
+        assert_eq!(
+            salud.subida_en_cuarentena, 0,
+            "con el dato ya en la nube, el aviso no puede seguir encendido",
+        );
+        assert_eq!(salud.outbox_pending, 0, "y no queda nada por subir");
+    }
+
+    #[tokio::test]
+    async fn subir_una_operacion_NORMAL_no_retira_ninguna_cuarentena() {
+        // El borrado va guiado por el enlace, no por "se ha subido algo". Sin esa precisión, la
+        // primera venta que subiera después de un rechazo borraría la prueba del rechazo.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch(
+                    "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms, Cuarentena) \
+                     VALUES ('apartada', 'main_op', '[]', 1, 1);\
+                     INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+                     VALUES ('normal', 'main_op', '[]', 2);",
+                )
+                .await
+                .unwrap();
+        }
+
+        repo.outbox_mark_sent("normal", 9).await.unwrap();
+
+        assert_eq!(
+            repo.health().await.unwrap().subida_en_cuarentena,
+            1,
+            "la apartada sigue ahí: nadie ha reparado nada",
+        );
     }
 }

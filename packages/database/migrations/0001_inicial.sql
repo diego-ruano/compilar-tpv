@@ -1344,7 +1344,14 @@ CREATE TABLE IF NOT EXISTS _Sync_Outbox (
     Intentos INTEGER NOT NULL DEFAULT 0,
     Ultimo_Error TEXT,
     Ultimo_Intento_Ms INTEGER,
-    Cuarentena INTEGER NOT NULL DEFAULT 0
+    Cuarentena INTEGER NOT NULL DEFAULT 0,
+    -- SYNC-26: si esta fila es una REPARACION, el Op_Id de la operacion apartada que la motivo.
+    --
+    -- Existe para poder cerrar el aviso. Sin el enlace, una operacion apartada se quedaba en
+    -- cuarentena para siempre aunque su reparacion hubiera subido: el panel seguiria diciendo
+    -- "hay cambios que la nube ha rechazado" con el problema ya resuelto, y un aviso que no se
+    -- apaga solo cuando el problema se arregla ensena a descartar avisos.
+    Repara_Op_Id TEXT
 );
 
 -- El drenado pide siempre lo pendiente NO apartado, por orden. Sin este indice, una

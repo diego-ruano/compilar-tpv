@@ -370,9 +370,40 @@ pub async fn sentencia_de_reparacion(
         .collect::<Vec<_>>()
         .join(", ");
 
+    // ⚠️ **NUNCA `INSERT OR REPLACE`.** En SQLite eso BORRA la fila que hay y la reinserta, así que
+    // dispara los `ON DELETE CASCADE` que la apuntan — y este esquema tiene DIECIOCHO. Reparar el
+    // nombre de una `Zona` se habría llevado por delante todas sus `Mesas` en la nube, y la Handy
+    // se habría quedado sin plano. Un `ON CONFLICT … DO UPDATE` actualiza en el sitio: no borra
+    // nada, no cascadea nada, y sigue insertando si la fila no estaba.
+    //
+    // El objetivo del conflicto son las columnas de la clave primaria; `excluded` es la fila que se
+    // intentaba insertar, o sea el estado que trae esta reparación.
+    let objetivo = fila
+        .clave
+        .iter()
+        .map(|(c, _)| format!("\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let claves: std::collections::HashSet<&str> =
+        fila.clave.iter().map(|(c, _)| c.as_str()).collect();
+    let asignaciones = columnas
+        .iter()
+        .filter(|c| !claves.contains(c.as_str()))
+        .map(|c| format!("\"{c}\" = excluded.\"{c}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // Una tabla que es TODA clave primaria (las de unión, como `Producto_Alergenos`) no tiene nada
+    // que actualizar: basta con que la fila exista.
+    let accion = if asignaciones.is_empty() {
+        "DO NOTHING".to_string()
+    } else {
+        format!("DO UPDATE SET {asignaciones}")
+    };
+
     Ok(Some(SqlStatement {
         sql: format!(
-            "INSERT OR REPLACE INTO \"{}\" ({cols}) VALUES ({marcas});",
+            "INSERT INTO \"{}\" ({cols}) VALUES ({marcas}) ON CONFLICT({objetivo}) {accion};",
             fila.tabla
         ),
         args: valores,
