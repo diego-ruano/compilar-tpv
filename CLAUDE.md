@@ -600,6 +600,17 @@ no sólo en dev.
   - **«La nube tiene una fila que aquí no está» NO se resuelve borrándola.** Es un borrado que no
     subió, o una fila que acaba de crear la Handy y esta Main aún no ha recibido — indistinguibles.
     Se cuenta y se informa (SYNC-23).
+  - ⚠️ **NUNCA `INSERT OR REPLACE`** para reparar. En SQLite eso BORRA la fila y la reinserta, así
+    que dispara los `ON DELETE CASCADE` que la apuntan — y este esquema tiene **dieciocho**.
+    Reparar una `Zona` se llevaba por delante todas sus `Mesas`. Va `ON CONFLICT(pk) DO UPDATE`.
+  - **Nada se toca si esta Main no puede afirmar que está al día** (checkpoint por detrás de la
+    foto, o cuarentena de bajada). Vale para borrar **y para actualizar**: si va atrasada, una fila
+    «distinta» puede serlo porque la Handy acaba de escribirla, y repararla mandaría lo viejo
+    encima de lo nuevo. El job va por REST, así que corre con el WebSocket caído — justo cuando más
+    atrasada está.
+  - **El aviso se apaga solo.** Al subir una reparación se retira la operación apartada que la
+    motivó (`Repara_Op_Id`), en la misma transacción. Un aviso que hay que descartar a mano cuando
+    el problema ya está resuelto enseña a descartar avisos.
   - **La comparación es tolerante con los números** (`2.5` vs `"2.50"`): dos drivers escriben la
     misma cifra de dos maneras, y sin esa tolerancia cada pasada daría por descuadrada toda tabla
     con una columna numérica. Un panel que siempre grita es un panel apagado.

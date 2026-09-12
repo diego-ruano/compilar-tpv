@@ -27,8 +27,10 @@
 | SYNC-20 | 🔴 | Una operación que la nube rechaza detenía **toda** la replicación, en silencio y para siempre | ✅ Hecho (2026-09-11) |
 | SYNC-21 | 🟡 | La cuarentena sólo se ve abriendo el panel (lo cubre en parte SYNC-24) | Parcial |
 | SYNC-22 | 🟠 | Una operación apartada dejaba la nube distinta: Handy y Main veían cosas distintas | ✅ Hecho (2026-09-12) |
-| SYNC-23 | 🟡 | Un borrado que no sube no se puede reparar por estado | Sin empezar |
+| SYNC-23 | 🔵 | Un borrado que no sube no se repara por estado (lo cubre SYNC-25 por otra vía) | Resuelto por SYNC-25 |
 | SYNC-24 | 🟠 | Nadie comprobaba nunca que la nube y la base local dijeran lo mismo | ✅ Hecho (2026-09-12) |
+| SYNC-25 | 🟠 | Se sabía **cuántas** filas bailaban, no cuáles, y las de más arriba no se quitaban | ✅ Hecho (2026-09-12) |
+| SYNC-26 | 🔴 | Reparar una fila **borraba sus hijas** en la nube (18 cascadas en el esquema) | ✅ Hecho (2026-09-12) |
 | OBS-05 | 🟠 | La observabilidad del sync está construida y **apagada**: faltan las variables de Axiom | Sin empezar |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
@@ -334,6 +336,74 @@ Por eso hoy se cuenta y se informa, y no se toca nada. Las salidas posibles, par
 Mi recomendación cuando se aborde: la segunda, por la misma razón por la que la lista de comandos
 gateados de SEC-01 es corta — resuelve el 90 % sin construir un mecanismo nuevo que haya que
 mantener para siempre.
+
+## SYNC-25 ✅ · Saber CUÁLES filas bailan, y borrar arriba sin peligro (resuelto 2026-09-12)
+
+Cierra los dos huecos que dejaba SYNC-24, uno por dirección. Desde la barra los dos se ven igual:
+la Handy enseña algo que ya no existe, o no enseña algo que sí está en la Main.
+
+**Saber cuáles.** El worker sólo mandaba el contenido de la ventana, así que la Main podía preguntar
+«esta fila que tienes, ¿está igual aquí?» pero no la contraria — para recorrer *sus* filas de la
+ventana tendría que reproducir la definición de la ventana, que vive en el worker a propósito. Lo
+único que quedaba era restar `COUNT(*)`, y un número no se puede reparar. Ahora hay una segunda
+fase, `/v1/sync/verificar-claves`, que devuelve **sólo las claves**: con eso la Main resta los dos
+conjuntos y sabe exactamente cuáles faltan y cuáles sobran, sobre la tabla entera.
+
+**No se pide nunca salvo que algo ya no cuadre**: primero los contadores (un agregado por tabla), y
+sólo las claves de las tablas cuyo contador no encaja. El caso normal no paga nada.
+
+**Borrar sin llevarse por delante una comanda recién abierta.** Una fila que la nube tiene y la Main
+no tenía dos causas indistinguibles: un `DELETE` local que no subió, o algo que acaba de escribir la
+Handy y aún no ha llegado. Deja de serlo mirando el reloj de la replicación: toda escritura de la
+Handy pasa por el DO y recibe un `Seq`, así que **si el checkpoint local alcanza el `Seq` de la
+foto, esta Main ya pasó por todo lo que hay en ella** y lo que le falte es basura.
+
+- El `Seq` se lee **después** de las filas. Leyéndolo antes, una escritura que entre a mitad de la
+  lectura acaba en la foto con un `Seq` mayor del apuntado y la Main la borraría creyéndose al día.
+- **Con cuarentena de bajada no se toca nada**: ahí el checkpoint avanzó sin aplicar (SYNC-01), así
+  que la Main *parece* al día y le falta la fila de verdad.
+- Un worker sin `hasta_seq` no borra nada: falla cerrado.
+- Una lista de claves truncada se salta entera. Media lista se leería como «te sobran 400.000
+  filas», que es el fallo que se lleva la base.
+
+## SYNC-26 ✅ · Tres fallos que encontró el repaso del área (resuelto 2026-09-12)
+
+Los tres estaban en código recién escrito de SYNC-22/24/25. Van juntos porque comparten la lección:
+**lo que falla en una replicación no avisa, sólo deja datos raros meses después.**
+
+**1 · `INSERT OR REPLACE` disparaba las cascadas.** En SQLite eso *borra* la fila y la reinserta, así
+que dispara los `ON DELETE CASCADE` que la apuntan — y este esquema tiene **dieciocho**. Reparar el
+nombre de una `Zona` se llevaba por delante todas sus `Mesas` en la nube y dejaba a la Handy sin
+plano. Ahora es `INSERT … ON CONFLICT(pk) DO UPDATE SET …`, que actualiza en el sitio. El test no
+lee el SQL: **aplica** la sentencia contra una base real con las FK encendidas y comprueba que las
+mesas siguen ahí (con la forma vieja pasan de 2 a 0).
+
+**2 · El aviso de cuarentena no se apagaba nunca.** Nada limpiaba `Cuarentena`, así que una operación
+apartada seguía contando aunque su reparación hubiera subido: Conectividad se quedaría en rojo con
+el problema resuelto. Es la regla que este repo ya tiene escrita para la escalera fiscal — *un aviso
+que hay que descartar a mano después de que el problema se arregle enseña a descartar avisos*.
+`_Sync_Outbox` gana `Repara_Op_Id`, y al subir la reparación se retira su origen **en la misma
+transacción**. El borrado va guiado por ese enlace y no por «se ha subido algo», o la primera venta
+que subiera tras un rechazo borraría la prueba del rechazo.
+
+**3 · La guardia de «estoy al día» sólo protegía los borrados.** Las actualizaciones corrían el mismo
+riesgo: si la Main va por detrás, una fila «distinta» puede serlo porque la Handy acaba de
+escribirla, y repararla manda el estado viejo encima del nuevo. Es peor de ver que un borrado
+—no desaparece nada, sólo retrocede— y **no es un caso raro**: el job va por REST, así que corre
+igual con el WebSocket caído, que es justo cuando la Main está más atrasada. La misma guardia cubre
+ahora las dos operaciones.
+
+### Lo que el repaso dejó comprobado y correcto
+
+- La idempotencia por `Op_Id` sigue cubriendo los tres caminos (vivo, catch-up y volcado), y las
+  operaciones de reparación llevan su anti-eco como cualquier otra.
+- Todo el andamiaje `_Sync_*` se escribe por `WriteGuard::raw()`: nada de esto se replica.
+- Las sentencias de reparación no llevan funciones de tiempo: los valores salen ya resueltos de la
+  base, así que el determinismo temporal (DB-15) no las afecta.
+- La PII del personal viaja cifrada también en una reparación: se cifra antes de la sentencia, así
+  que el `SELECT *` que construye la reparación lee ya el texto cifrado.
+- Las siete rutas de `/v1/sync/*` exigen dispositivo `tpv`.
+- **53 tests** sobre el área, en diez módulos.
 
 ## OBS-05 🟠 · La observabilidad del sync está construida y APAGADA
 
