@@ -58,6 +58,7 @@
 		"EMAIL_FROM_ADDRESS": "pedidos@altarialights.com",
 		"EMAIL_FROM_NAME": "TPV",
 		"R2_PUBLIC_BASE_URL": "https://pub-772c917409c148e3b39e41b7209e3b1d.r2.dev",
-		"AXIOM_DATASET_SYNC": "tpv-sync"
+		"AXIOM_DATASET_SYNC": "tpv-sync",
+		"AXIOM_DOMAIN": "eu-central-1.aws.edge.axiom.co"
 	}
 }

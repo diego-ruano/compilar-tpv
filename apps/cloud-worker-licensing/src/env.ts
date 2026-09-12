@@ -94,4 +94,8 @@ export interface Env {
 	AXIOM_DATASET?: string;
 	// Dataset de Axiom para los eventos de salud del sistema de sincronización (TenantHub).
 	AXIOM_DATASET_SYNC?: string;
+	// Dominio del EDGE DEPLOYMENT de Axiom (no `api.axiom.co`, que es el endpoint legacy y manda
+	// los datos a US East 1). El nuestro es `eu-central-1.aws.edge.axiom.co`. Se ve en
+	// Axiom → Settings → General → Edge deployment.
+	AXIOM_DOMAIN?: string;
 }

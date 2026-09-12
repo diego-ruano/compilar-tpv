@@ -42,7 +42,17 @@ export async function ingestToAxiom(
 ): Promise<boolean> {
 	if (!env.AXIOM_TOKEN || events.length === 0) return true;
 
-	const url = `https://api.axiom.co/v1/datasets/${encodeURIComponent(dataset)}/ingest`;
+	// ⚠️ El dominio NO es `api.axiom.co`, y esto costó un rato encontrarlo.
+	//
+	// `api.axiom.co/v1/datasets/<ds>/ingest` es el endpoint **legacy**, y su documentación dice que
+	// «ingiere datos en el edge deployment de US East 1». Nuestra organización vive en EU Central 1,
+	// así que por ahí los eventos se iban a otra región: la ingesta no daba error, simplemente no
+	// aparecían en el dataset. Cada deployment tiene su dominio propio y hay que usar el suyo.
+	//
+	// Cuál es el tuyo: Axiom → Settings → General → Edge deployment. Se fija al crear la
+	// organización y no se puede cambiar después.
+	const dominio = env.AXIOM_DOMAIN || "eu-central-1.aws.edge.axiom.co";
+	const url = `https://${dominio}/v1/ingest/${encodeURIComponent(dataset)}`;
 	try {
 		const resp = await fetch(url, {
 			method: "POST",
