@@ -65,9 +65,37 @@ Mientras falten estos valores, todo es **no-op** (sin errores).
 | `AXIOM_TOKEN` | Token de ingesta (secreto). `wrangler secret put AXIOM_TOKEN` |
 | `AXIOM_DATASET` | Dataset de logs de dispositivo (por defecto `tpv-device-logs`) |
 | `AXIOM_DATASET_SYNC` | Dataset de eventos de salud del sync (TenantHub) |
+| `AXIOM_DOMAIN` | **Dominio del edge deployment.** Hoy `eu-central-1.aws.edge.axiom.co` |
 
 - Crea los datasets en **región UE**.
 - El token es **ingest-only** y vive sólo en el Worker.
+
+> ⚠️ **`AXIOM_DOMAIN` no es `api.axiom.co`, y equivocarse no da ningún error.**
+>
+> `api.axiom.co/v1/datasets/<ds>/ingest` es el endpoint **legacy**, y la documentación de Axiom dice
+> que «ingiere datos en el edge deployment de **US East 1**». Nuestra organización vive en EU Central
+> 1, así que por ahí los eventos se iban a otra región: respuesta correcta, nada en el dataset.
+> Cada deployment tiene su dominio y el suyo se consulta en **Axiom → Settings → General → Edge
+> deployment**; se fija al crear la organización y **no se puede cambiar después**.
+>
+> Lo correcto es `https://<AXIOM_DOMAIN>/v1/ingest/<dataset>`.
+
+> ⚠️ **Y la entrega hay que mantenerla viva.** En Cloudflare Workers, al devolver la respuesta el
+> runtime **cancela** el trabajo pendiente que no esté registrado con `waitUntil()`. Los reporteros
+> de `observability/axiom.ts` **devuelven** su promesa justo para obligar a decidirlo en cada sitio:
+> `c.executionCtx.waitUntil` en rutas y middleware de Hono, `this.state.waitUntil` en el Durable
+> Object, y `await` donde no hay contexto de ejecución (caminos de error, la latencia da igual).
+> Un `void ingestToAxiom(...)` se lanza y se muere a medio vuelo, sin error y sin log.
+
+**Cómo comprobar que la ingesta funciona, sin esperar a que pase algo:** cualquier petición sin
+autenticar a una ruta de tenant emite un `device_auth_rechazado` por la misma tubería.
+
+```bash
+curl -X POST https://tpv-api.altarialights.workers.dev/v1/sync/verificar   -H "Authorization: Bearer sonda" -H "Content-Type: application/json" -d '{}'
+```
+
+Devuelve 401 (es lo correcto: el token no vale) y en el dataset debe aparecer el evento con
+`motivo: invalid_jwt`. Si aparece, la tubería entera está bien.
 
 #### Retención (configúrala en Axiom, no hay knob en código)
 

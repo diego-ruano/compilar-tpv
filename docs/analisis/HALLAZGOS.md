@@ -31,7 +31,7 @@
 | SYNC-24 | 🟠 | Nadie comprobaba nunca que la nube y la base local dijeran lo mismo | ✅ Hecho (2026-09-12) |
 | SYNC-25 | 🟠 | Se sabía **cuántas** filas bailaban, no cuáles, y las de más arriba no se quitaban | ✅ Hecho (2026-09-12) |
 | SYNC-26 | 🔴 | Reparar una fila **borraba sus hijas** en la nube (18 cascadas en el esquema) | ✅ Hecho (2026-09-12) |
-| OBS-05 | 🟠 | La observabilidad del sync está construida y **apagada**: faltan las variables de Axiom | Sin empezar |
+| OBS-05 | 🟠 | La observabilidad del sync estaba construida y **muda**: dos fallos encadenados | ✅ Hecho (2026-09-12) |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CAJA-01 | 🟠 | Editar un apunte comprueba el periodo de **origen**, no el de **destino** | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
@@ -405,7 +405,7 @@ ahora las dos operaciones.
 - Las siete rutas de `/v1/sync/*` exigen dispositivo `tpv`.
 - **53 tests** sobre el área, en diez módulos.
 
-## OBS-05 🟠 · La observabilidad del sync está construida y APAGADA
+## OBS-05 ✅ · La observabilidad del sync estaba construida y MUDA (resuelto 2026-09-12)
 
 `emitSyncEvent` (tenantHub.ts) sale por la puerta en la primera línea si falta `AXIOM_TOKEN` o
 `AXIOM_DATASET_SYNC`, y **ninguna de las dos está configurada**: no aparecen en `wrangler.json` ni en
@@ -429,6 +429,26 @@ equivocada (ver SYNC-20).
 > El Sentry del escritorio **sí** está cableado: `release.yml` pasa `TPV_SENTRY_DSN` al compilar. Es
 > sólo la mitad del worker la que está muda. Aun así conviene comprobar que ese secreto de GitHub
 > existe de verdad, porque `option_env!` sin valor deja el cliente en no-op **sin avisar**.
+
+### El desenlace: no faltaban sólo las variables
+
+Se pusieron (`AXIOM_TOKEN` como secreto, `AXIOM_DATASET_SYNC = tpv-sync`) y **seguía sin llegar
+nada**. Había dos fallos más, encadenados, y los dos invisibles:
+
+1. **La entrega se cancelaba antes de salir.** Las tres llamadas hacían `void ingestToAxiom(...)`, y
+   en Cloudflare Workers el runtime cancela el trabajo pendiente no registrado con `waitUntil()` en
+   cuanto el manejador responde. Lo delataba que la única tubería que sí funcionaba —la telemetría
+   de dispositivos— era la única que hacía `await`.
+2. **Y aunque saliera, iba a la región equivocada.** `api.axiom.co/v1/datasets/<ds>/ingest` es el
+   endpoint legacy y, según la documentación de Axiom, «ingiere datos en el edge deployment de US
+   East 1». La organización está en EU Central 1. Sin error, sin log, sin evento.
+
+Comprobado funcionando el 2026-09-12: tres sondas sin autenticar produjeron sus tres
+`device_auth_rechazado` con `motivo: invalid_jwt` en `tpv-sync`.
+
+**Lo que esto deja encendido**, además de los eventos de sync: la telemetría de los propios TPV
+(`AXIOM_DATASET`, por defecto `tpv-device-logs`), que compartía el mismo token y los mismos dos
+fallos. ⚠️ Ese dataset hay que crearlo en Axiom o su ingesta responderá error.
 
 ## SYNC-21 🟡 · Una operación apartada sólo se ve si alguien abre el panel
 
