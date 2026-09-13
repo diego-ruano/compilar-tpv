@@ -38,6 +38,22 @@ export function timingSafeEqualHex(a: string, b: string): boolean {
 	return out === 0;
 }
 
+/**
+ * CFG-03: sin secreto no hay firma, ni para firmar ni para verificar.
+ *
+ * Las dos mitades hacían `String(secret || "")`. Si `LICENSE_JWT_SECRET` faltaba o llegaba vacío,
+ * firmante y verificador usaban la MISMA clave vacía y el HMAC cuadraba: la puerta de
+ * `/internal/apply` quedaba abierta para cualquiera que alcanzara el DO. Una comprobación de
+ * seguridad tiene que fallar cerrando por sí misma, no depender de que el runtime rechace una
+ * clave de longitud cero.
+ */
+function exigirSecreto(secret: string): string {
+	if (typeof secret !== "string" || secret.trim().length === 0) {
+		throw new Error("internal_secret_missing");
+	}
+	return secret;
+}
+
 function buildInternalPayload(
 	ts: number,
 	method: string,
@@ -58,9 +74,10 @@ export async function signInternalWorkerRequest(
 	pathname: string,
 	rawBody: string,
 ): Promise<{ "x-internal-ts": string; "x-internal-sig": string }> {
+	const clave = exigirSecreto(secret);
 	const ts = Date.now();
 	const sig = await hmacSha256Hex(
-		String(secret || ""),
+		clave,
 		buildInternalPayload(ts, method, pathname, rawBody),
 	);
 	return { "x-internal-ts": String(ts), "x-internal-sig": sig };
@@ -68,14 +85,19 @@ export async function signInternalWorkerRequest(
 
 /**
  * Verifica una request interna firmada con el shared secret. Lanza un `Error`
- * con código de negocio (`missing_internal_auth`, `bad_internal_ts`,
- * `internal_ts_out_of_range`, `bad_internal_signature`) si no es válida.
+ * con código de negocio (`internal_secret_missing`, `missing_internal_auth`,
+ * `bad_internal_ts`, `internal_ts_out_of_range`, `bad_internal_signature`) si no
+ * es válida.
  */
 export async function verifyInternalWorkerRequest(
 	req: Request,
 	secret: string,
 	rawBody: string,
 ): Promise<void> {
+	// Lo primero: sin secreto no hay nada con lo que comparar, y seguir adelante sería aceptar la
+	// firma que cualquiera puede calcular con una clave vacía.
+	const clave = exigirSecreto(secret);
+
 	const tsStr = (req.headers.get("x-internal-ts") || "").trim();
 	const sigHex = (req.headers.get("x-internal-sig") || "").trim().toLowerCase();
 
@@ -89,7 +111,7 @@ export async function verifyInternalWorkerRequest(
 	}
 
 	const expected = await hmacSha256Hex(
-		String(secret || ""),
+		clave,
 		buildInternalPayload(ts, req.method, new URL(req.url).pathname, rawBody),
 	);
 
