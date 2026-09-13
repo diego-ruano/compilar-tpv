@@ -640,7 +640,13 @@ export default function MesaComandaModal({
         if (!syncTick) return;
         if (!open || !idComanda) return;
         const info = useSyncSignal.getState().comanda;
-        if (shouldReloadTicket(info, idComanda)) void reloadTicket();
+        if (shouldReloadTicket(info, idComanda)) {
+            // HIG-04: `reloadTicket` no captura. Es un refresco de fondo —el siguiente cambio lo
+            // vuelve a intentar—, así que basta con que el fallo quede a la vista y no se pierda.
+            reloadTicket().catch((e) =>
+                console.error("Fallo recargando el ticket tras un cambio remoto", e),
+            );
+        }
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [syncTick]);
 
@@ -769,7 +775,11 @@ export default function MesaComandaModal({
 
             try {
                 await removeOnePendingDetalle(idComanda, productoId);
-                void reloadTicket();
+                // HIG-04: el borrado ya salió bien. Si recargar falla se queda el estado optimista,
+                // que es el correcto, y sólo hace falta que el fallo no se pierda.
+                reloadTicket().catch((e) =>
+                    console.error("Línea quitada, pero no se pudo recargar el ticket", e),
+                );
             } catch (e) {
                 if (removed !== undefined) {
                     setTicket((prev) => [...prev, removed!]);
@@ -830,8 +840,17 @@ export default function MesaComandaModal({
         const line = ticket.find((t) => t.id === idDetalle);
         if (!line) return;
         if (line.pagado) return;
-        await deleteDetalleById(idDetalle);
-        await reloadTicket();
+        // HIG-04: la papelera de la línea llama a esto con `void`, así que un fallo no lo recogía
+        // nadie: la línea se quedaba en el ticket y el camarero no sabía por qué.
+        try {
+            await deleteDetalleById(idDetalle);
+        } catch (e) {
+            toast.error("No se pudo quitar la línea", toAppError(e).message);
+            return;
+        }
+        await reloadTicket().catch((e) =>
+            console.error("Línea quitada, pero no se pudo recargar el ticket", e),
+        );
     };
 
     /* ── FISCAL-02: la factura completa ───────────────────────────────────────
@@ -1086,8 +1105,15 @@ export default function MesaComandaModal({
                 onCancel={cerrarNota}
                 onSave={async (nota) => {
                     if (!notaTarget) return;
-                    await guardarNotaLinea(notaTarget.id, nota);
-                    cerrarNota();
+                    // HIG-04: el modal llama a esto con `void` (Ctrl+Enter) o soltando la promesa
+                    // (botón), así que un fallo no lo recogía nadie. Se avisa y el modal se queda
+                    // abierto con el texto, para poder volver a intentarlo.
+                    try {
+                        await guardarNotaLinea(notaTarget.id, nota);
+                        cerrarNota();
+                    } catch (e) {
+                        toast.error("No se pudo guardar la nota", toAppError(e).message);
+                    }
                 }}
             />
 

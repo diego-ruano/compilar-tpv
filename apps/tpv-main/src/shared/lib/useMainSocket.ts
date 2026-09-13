@@ -590,7 +590,15 @@ export function useMainSocket() {
 
 			if (atraso > UMBRAL_VOLCADO) {
 				console.log("[outbox] atraso grande: se vuelca a la cola de la nube");
-				await volcarOutbox(socket);
+				// HIG-04: `volcarOutbox` no captura sus `invoke`, y a esta función se llega con `void`.
+				// El drenado de una en una se protege a sí mismo; el volcado se quedaba a medias sin
+				// decirlo. No se pierde nada —lo que no llegó a marcarse sigue en el outbox y se
+				// reintenta al reconectar—, así que basta con que se vea, igual que en `drainOutbox`.
+				try {
+					await volcarOutbox(socket);
+				} catch (e) {
+					console.warn("volcado del outbox falló:", e);
+				}
 				return;
 			}
 			await drainOutbox(socket);

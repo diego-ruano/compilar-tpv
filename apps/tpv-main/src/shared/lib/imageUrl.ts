@@ -88,8 +88,17 @@ export async function resolveImageUrl(
     /* ignorado: el UI degrada al placeholder y reintenta en la próxima recarga */
   }
 
-  const baseDir = await appDataDir();
-  const url = convertFileSrc(await join(baseDir, r));
+  // HIG-04: esta función se promete best-effort, y la mayoría de quien la llama la espera dentro de
+  // un `void (async () => …)()` sin `catch`. Si resolver la carpeta de AppData fallara, la promesa
+  // rechazada se perdía y con ella la lista entera que se estaba pintando (proveedores, alérgenos),
+  // no sólo la imagen. Una imagen que no se puede resolver es "": el <img> ya sabe degradar.
+  let url: string;
+  try {
+    url = convertFileSrc(await join(await appDataDir(), r));
+  } catch (e) {
+    console.warn("[imageUrl] no se pudo resolver la ruta local de", r, e);
+    return "";
+  }
   // Solo memoizamos cuando el fichero ya está en disco: así, si aún no estaba, la próxima
   // resolución vuelve a intentar `images_ensure_local` (bajada de R2).
   if (present) urlCache.set(r, url);
