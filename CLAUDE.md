@@ -224,9 +224,9 @@ pnpm --filter @tpv/main test:e2e   # el recorrido del camino del dinero (TEST-01
 
 ### Los tests de Rust se corren con `cargo nextest`
 
-`cargo test` mete los 224 tests en **un solo proceso**, y libsql tiene un crash nativo
+`cargo test` mete todos los tests en **un solo proceso**, y libsql tiene un crash nativo
 (`STATUS_ACCESS_VIOLATION`) al crear bases de datos. En un proceso compartido eso mata la tanda
-entera: no dice en qué test fue ni deja veredicto de los otros 223. Con la suite completa pasaba
+entera: no dice en qué test fue ni deja veredicto del resto. Con la suite completa pasaba
 **una de cada tres ejecuciones**, que es lo mismo que no tener suite.
 
 `cargo nextest run` corre cada test en su propio proceso, así que ese fallo aborta un test y los
@@ -263,7 +263,7 @@ Leyenda: ✅ hecho · 🟡 en curso · ⬜ pendiente
 - ✅ Eliminada la capa `dualCall` antigua + auxiliares: frontend `net/*` (`dualCall`, `cloudSync`, `outboxSync`, `realtimeSocket`, `healthCheck`) y stores `useNet`/`useSync`; Rust `cloud_sync`/`sync_manager`/`fallback_local` + wiring y comandos `*_after_remote_ok`. Reemplazada por el sistema outbox + WebSocket + TenantHub (§9). Pairing Handy se conserva activo.
 - ✅ Conexión/seed de la BD movidos a `tpv-infra-sqlite::connection` (`init_main_db(app_data_dir)`); el esquema lo construyen las migraciones embebidas (`packages/database/migrations/`, ver `migrations.rs`), el shell (`lib.rs::run`) sólo aporta la ruta AppData.
 - ✅ Reestructuración del frontend a `app/ · features/ · shared/` (+ `assets/`). `pages/` y `layoutComponent` viven bajo `app/`; los dominios bajo `features/`; stores/ui/toast/ticket/lib bajo `shared/`. Entry `index.html` → `/src/app/main.tsx`.
-- ✅ Verificación final: `cargo build` (workspace completo) + `cargo test -p tpv-contracts` (176 ok) + `tsc` frontend + `pnpm generate-types` (turbo) OK. Reparado el pipeline turbo (claves `"//"` inline y `packageManager` ausente).
+- ✅ Verificación final: `cargo build` (workspace completo) + `cargo test -p tpv-contracts` + `tsc` frontend + `pnpm generate-types` (turbo) OK. Reparado el pipeline turbo (claves `"//"` inline y `packageManager` ausente).
 - ✅ **Compilación a Android** (modo Handy) operativa. La app se movió a la crate de librería `tpv_lib`
   (`lib.rs`) como **entry compartido escritorio+móvil**; el cdylib `libtpv_lib.so` arranca por
   `#[tauri::mobile_entry_point]`, y `main.rs` es un shim. Almacén de secretos por plataforma
@@ -489,7 +489,7 @@ no sólo en dev.
 | Cuarentena de subida | `tenantHub.errores.ts` + `infra-sqlite/src/sync.rs::outbox_mark_failed` | SYNC-20: un rechazo definitivo aparta la operación en vez de detener la cola |
 | Reparación por estado | `infra-sqlite/src/sync_reparacion.rs` | SYNC-22: reencola la fila APARTADA tal como está ahora, no la sentencia que fue rechazada |
 | Contraste con la nube | `sync.routes.ts::/verificar` + `sync.rs::contrastar_con_la_nube` + job `verificar_nube` | SYNC-24: comprueba a diario que las dos bases dicen lo mismo, repara e informa a Axiom |
-| Determinismo temporal | `db.rs:114-122` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
+| Determinismo temporal | `db.rs::rewrite_now_literals` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
 | WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
 | Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
@@ -907,7 +907,7 @@ dos, y el frontend pregunta el ancho a Rust (`printer_ticket_cols`) para no calc
   factura duplicada que la AEAT rechaza.
 - **El cajón se abre con la impresora.** El pulso va dentro del propio flujo del ticket (`ESC p`) o
   suelto (`DLE DC4`, que la impresora atiende aunque tenga cola). Toda apertura fuera de un cobro se
-  registra en `Aperturas_Cajon` (migración 0006) — un cajón que se abre sin venta es el descuadre que
+  registra en `Aperturas_Cajon` — un cajón que se abre sin venta es el descuadre que
   hay que poder investigar. Abrirlo no pide rol (el camarero lo necesita para dar cambio) pero sí
   **estar identificado**, y el nombre que se anota lo pone la sesión: con SEC-01, `printer_open_drawer`
   ya no acepta un `id_usuario` de la entrada.
@@ -1477,7 +1477,7 @@ usando `license_check_now` porque ahí no hay nada que esperar.
   renombra el ejecutable (el rename a `productName` ocurre al empaquetar), así que el build de E2E y
   el de producción escriben los dos en `target/release/tpv.exe`: dejarlo ahí es cuestión de tiempo
   que alguien compile la app de verdad y luego lance el test contra sus propios datos.
-  `construir.mjs` deja una copia en `target/e2e/tpv-e2e.exe` y `onPrepare` **abre el fichero y
+  `construir.ts` deja una copia en `target/e2e/tpv-e2e.exe` y `onPrepare` **abre el fichero y
   comprueba el identificador que lleva dentro** antes de tocar la carpeta de datos. La limpieza,
   además, se niega si la ruta no termina en `.e2e`.
 - **Un binario viejo no rompe: PASA, que es peor.** La comprobación del identificador dice que el
