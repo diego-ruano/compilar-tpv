@@ -28,7 +28,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `components: clippy` NO es opcional: esta acción instala el perfil mínimo, sin clippy. El
+      # paso de clippy de más abajo estuvo sin llegar a ejecutarse porque el de tests ya fallaba
+      # antes; en cuanto los tests pasaron, CI llegó a él y reventó con «cargo-clippy is not
+      # installed». Si se quita esta línea, el job vuelve a romperse en ese paso.
       - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
@@ -147,7 +153,7 @@ jobs:
 
       # ARCH-01 / CLI-05: qué comandos (escritura) y qué lecturas con doble implementación se han
       # quedado sin test de contrato. Los tests en sí ya corren arriba —los de Rust en el job de
-      # `cargo test -p tpv-infra-sqlite`, los del worker en `pnpm --filter tpv-api test`—; esto sólo
+      # `cargo nextest` de migrations-rust, los del worker en `pnpm --filter tpv-api test`—; esto sólo
       # mide el hueco.
       # AVISA, NO ROMPE: el script sale siempre con 0 y deja anotaciones `::warning::` + una tabla
       # en el resumen del job. `continue-on-error` es el cinturón sobre los tirantes, para que ni
