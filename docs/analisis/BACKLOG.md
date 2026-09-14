@@ -21,16 +21,12 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido.** Antes de entrar en un bar: nada pendiente (SEC-01, CUENTA-07 y SYNC-19 ✅ hechos). Antes de cobrar por
-> ello: FISCAL-01, FISCAL-02, LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato: TEST-01, OPS-02.
+> **Orden sugerido.** Antes de cobrar por ello: LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato:
+> OPS-02. Veri*factu (FISCAL-01 y FISCAL-02) ya está hecho: lo que le queda vive en
+> [VERIFACTU_PENDIENTES.md](../VERIFACTU_PENDIENTES.md).
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| FISCAL-01 | 🔴 | **No hay nada de Veri*factu / RD 1007/2023.** | 🟡 Planificado (2026-09-07) |
-| FISCAL-02 | 🟠 | **No se puede emitir factura completa con el NIF del cliente.** | 🟡 Planificado (2026-09-07) |
-| CUENTA-07 | 🔴 | **Anular un cobro borra la fila, y eso deja ciego al arqueo.** | ✅ Hecho (2026-09-05) |
-| SEC-01 | 🟠 | **Los permisos por rol son sólo de UI: ningún comando los comprueba.** | ✅ Hecho (2026-09-05) |
-| SYNC-19 | 🟠 | **El rescate desde la nube caduca por número de filas (~3 meses de uso).** | ✅ Hecho (2026-09-05) |
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
 | VENTA-01 | 🟠 | **No existen descuentos, invitaciones, propinas ni devoluciones.** | Sin empezar |
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
@@ -38,105 +34,7 @@
 | INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
 | OPS-01 | 🟠 | **Cero documentación de usuario y cero onboarding.** | Sin empezar |
 | OPS-02 | 🟡 | **«Contacta con soporte» sin canal ni forma de exportar un diagnóstico.** | Sin empezar |
-| TEST-01 | 🟡 | **43k líneas de frontend sin un solo test de componente ni E2E.** | ✅ Hecho (2026-09-06) |
 | SEC-02 | 🔵 | **`LICENSE_STORE_KEY` es un secreto global sin rotación ni custodia.** | Sin empezar |
-| INFRA-04 | 🔵 | **No hay linter en ningún lenguaje** (ni ESLint, ni clippy, ni fmt). | Baja prioridad |
-
-### FISCAL-01 🔴 · Veri*factu / RD 1007/2023
-
-Grep en todo el repo: cero referencias a Verifactu, TicketBAI o AEAT. Y
-[`0001_inicial.sql:541`](../../packages/database/migrations/0001_inicial.sql#L541) dice que la tabla
-`Facturas` se retiró por no usarse.
-
-Un TPV que emite facturas simplificadas en España es un **SIF** (Sistema Informático de Facturación).
-Del lado del software eso implica registros de facturación **encadenados por huella/hash**,
-**inalterables**, con **QR** y la mención correspondiente, más una **declaración responsable del
-productor**. ⚠️ **Los plazos concretos hay que confirmarlos con un asesor** — pero el fondo no
-depende de la fecha.
-
-**Por qué va el primero pese a ser el más caro:** es estructural. Registros inmutables y encadenados
-se diseñan al principio. La mitad del terreno ya está desbrozada — desde CUENTA-07 los cobros no se
-borran y existe `Movimientos_Caja`, que es la tabla que después llevará el encadenamiento por
-hash —, pero el resto sigue siendo trabajo de diseño con el reglamento delante.
-
-**Plan escrito (2026-09-07): [PLAN_VERIFACTU.md](../PLAN_VERIFACTU.md).** Los plazos ya están
-confirmados —**1 de enero de 2027** para contribuyentes de IS, 1 de julio de 2027 para el resto—
-y las decisiones de fondo, tomadas: modalidad VERI*FACTU, remite la propia Main con el certificado
-del local, un cobro es una factura simplificada, y sin conexión se sigue vendiendo. Dos cosas que
-esta ficha daba por sabidas y son falsas: **la anulación fiscal existe** (pero es excepcional, y
-una devolución es una rectificativa R5, no una anulación), y **`Movimientos_Caja` no es el sitio**
-para el encadenamiento — lleva gastos, que no son facturas.
-
-### FISCAL-02 🟠 · Factura completa con NIF del cliente
-
-`Business_Settings` guarda el CIF **del negocio** y nada más. No hay forma de emitir una factura con
-los datos fiscales del **cliente**, que es lo que pide cualquier comida de empresa. Encaja con
-FISCAL-01 y conviene diseñarlos juntos, no uno detrás de otro.
-
-**Dentro de [PLAN_VERIFACTU.md](../PLAN_VERIFACTU.md) §9**, con los dos caminos que hacen falta: `F1`
-en el momento del cobro (obligatoria además por encima de 3.000 €, que es el límite de la
-simplificada en hostelería) y `F3` **en sustitución** de la simplificada cuando el cliente vuelve
-con el ticket al día siguiente.
-
-### CUENTA-07 ✅ · Anular un cobro borraba la fila (resuelto 2026-09-05)
-
-Anular hacía `DELETE`. Y como el cierre de caja calcula `esperado = fondo + cobros en efectivo`, si
-alguien cobraba 40 € en efectivo, se los quedaba y anulaba el cobro, **el esperado bajaba 40 € y el
-arqueo cuadraba perfecto**. El único control de caja del producto era ciego justo ante la forma más
-común de sisa en un bar. No era un fallo de cálculo: era que no quedaba nada con lo que comparar.
-
-**Resuelto.** `Pagos` gana `Estado`, `Anulado_En`, `Anulado_Por` y `Motivo_Anulacion`; el motivo es
-obligatorio y quién anula sale de la sesión del backend (SEC-01). Se conservan también las líneas
-del cobro —lo que permite reimprimir el ticket anulado y devuelve las consumiciones a la mesa como
-pendientes—, así que «línea cobrada» pasa a significar «ligada a un pago ACTIVO»: eso vive en la
-vista `v_lineas_cobradas` y no repetido en las ~27 consultas que hacían esa pregunta. `esperado` y
-las estadísticas cuentan sólo cobros activos, y el arqueo enseña las anulaciones del periodo como
-línea informativa. `Movimientos_Caja` recoge el historial (cobro, anulación, gasto). Las reglas y
-sus porqués están en [CLAUDE.md §13](../../CLAUDE.md).
-
-### SEC-01 ✅ · Los permisos eran sólo de UI (resuelto 2026-09-05)
-
-`App.tsx` bloqueaba la ruta `/cuentas` y la NavBar escondía entradas, pero **ningún comando Tauri
-comprobaba el rol**: la regla vivía donde el usuario está sentado.
-
-**Resuelto.** `AppState` guarda ahora una sesión que establece `login_user` con el rol que devuelve
-el repositorio, y los comandos que importan la exigen. Además, el usuario que queda registrado en
-una fila (quién cerró la caja, quién abrió el cajón) lo pone el backend: `ConfirmarCierreInput`,
-`CierreIdInput` y `AbrirCajonArgs` perdieron su `id_usuario`. Qué está gateado, qué no, y hasta
-dónde llega la garantía: [permisos-y-sesion.md](transversal/permisos-y-sesion.md).
-
-Esto es lo que hace que **CUENTA-07** valga para algo: su `Anulado_Por` ya puede ser un dato
-establecido por el backend y no uno que le hayan contado.
-
-### SYNC-19 ✅ · El rescate desde la nube ya no caduca (2026-09-05)
-
-**Lo que había.** `BOOTSTRAP_MAX_FILAS = 300_000`, y un bar con ~200 tickets/día genera 3-4k
-filas/día sumando `Detalle_Comanda`, `Pagos`, `Pago_Detalles`, `Lote_Consumos` y
-`Movimientos_Stock`: **unos 3 meses** hasta cruzar el tope. Lo grave era cuándo fallaba — un 413
-justo el día que el cliente ha perdido su `data.db`, siendo la nube *"la única forma de volver a
-operar"* — y que `BootstrapTooLarge` existía sin que lo mirase nadie, así que se veía un error
-genérico.
-
-**Lo que hay.** Recuperación en dos fases: `/v1/sync/bootstrap` trae los maestros enteros y 30 días
-de lo transaccional (estirados hasta cubrir el periodo de caja abierto), y `/v1/sync/historico`
-rellena el resto en segundo plano con el bar ya vendiendo. Diseño y reglas en
-[CLAUDE.md §9](../../CLAUDE.md), *"La recuperación va en dos fases"*. El tope se queda como guardia
-de la fase 1, que es donde tiene sentido: ahí ya no lo hace crecer el histórico.
-
-**Cuatro cosas que el plan no había visto** y que se encontraron al implementarlo, por si sirven de
-aviso para el siguiente:
-
-1. La ventana no puede ser por fila. Un pago de hace cinco días de una comanda de hace cuarenta
-   entra sin su comanda, y esa FK se comprueba al COMMIT: aborta la restauración entera.
-2. "Lo que sigue vivo entra entero" hacía falta generalizarlo más allá del último cierre de caja
-   (comandas abiertas, notificaciones activas, pedidos en borrador, fichajes sin cerrar).
-3. `Movimientos_Caja` no estaba en ninguna de las dos listas: el plan es del 04-09 y CUENTA-07 se
-   cerró el 05-09.
-4. `_Backfill_Historico` es tabla de control local (prefijo `_`), así que no toca el esquema
-   compartido ni ninguno de los cinco sitios de una migración.
-
-**Lo que sigue abierto** es DB-14, que es la otra mitad: esto hace que recuperar no tenga techo, la
-retención hace que la base no crezca sin freno.
 
 ### DB-14 🟡 · Sin retención ni archivado
 
@@ -232,58 +130,11 @@ dice *"contacta con soporte"* sin definir cuál. Y hay telemetría muy buena (Se
 scrubbing + fichero local rotado) pero **ningún botón** para sacar un paquete de diagnóstico — que es
 justo lo que hace falta cuando el bar no tiene internet y la telemetría no ha salido.
 
-### TEST-01 🟡 · Sin E2E ni tests de componente — ✅ Hecho (2026-09-06)
-
-El diagnóstico seguía siendo bueno: los 83 tests del frontend son **lógica pura**, y el razonamiento
-de [`vitest.config.ts`](../../apps/tpv-main/vitest.config.ts) para no montar React es defendible.
-Lo que quedaba fuera era el flujo de venta, que son los tres ficheros más grandes del repo.
-
-Hay ahora **cinco** recorridos sobre la app compilada —`apps/tpv-main/e2e/`, WebdriverIO, 26 pasos
-en ~70 s— que estrenan el equipo como un cliente real:
-
-1. **El camino del dinero**: activa una licencia de verdad contra el worker, elige PIN, ficha
-   entrada, da de alta carta y salón, cobra una mesa en efectivo y cierra caja con descuadre 0.
-2. **Copias de seguridad**: guarda una copia con la nube al día, le machaca la `data.db`, comprueba
-   que la app arranca igual, rechaza una copia inservible, restaura la buena y espera a que la
-   reconciliación abra el login.
-3. **Volver sólo con la nube**: el volcado de SYNC-19, sin copia local. Aquí apareció que ese
-   camino **nunca había funcionado** (`totalFilas` contra `total_filas`).
-4. **La licencia deja de valer**: anulada, desanulada, caducada y renovada. Con la nube encendida,
-   porque el paso de la anulación comprueba que el bloqueo llega **solo y en segundos**, sin que el
-   test le pregunte nada a la aplicación.
-
-Se lanzan a mano antes de cada release (ver [RELEASING.md](../../RELEASING.md)); no van a CI porque
-emiten licencias reales con el token de administración. Detalle y trampas en
-[CLAUDE.md §16](../../CLAUDE.md).
-
-**Lo que encontró en su primera pasada** (que es el argumento entero a favor de tenerlo): la regla
-común de modales de `Global.css` capaba a 42 rem el modal de comanda, que pide 1500 px. El panel del
-ticket salía cortado y los botones del contador de efectivo se aplastaban a 12 px. Arreglado.
-**Lo que sigue fuera, a propósito:** cobertura de componentes, impresión (la cubren los tests de
-Rust con su mini-intérprete ESC/POS), modo Handy y recuperación de datos.
-
-**Y lo que encontró el recorrido de la licencia** (2026-09-07): anular una licencia no avisaba a
-nadie. El único pulso era el job `licencia`, cada 6 horas, así que un equipo con el socket abierto
-seguía vendiendo hasta medio día con una licencia muerta. Arreglado en el endpoint de administración
-(cierra el socket vía `TenantHub`, ver [CLAUDE.md §9](../../CLAUDE.md)); el resto de la cadena ya
-existía. Queda fuera, sin arreglo posible y sin importancia: un equipo apagado o sin red sigue
-dependiendo del job.
-
 ### SEC-02 🔵 · `LICENSE_STORE_KEY` es global
 
 Cifra en reposo las DEK de **todos** los tenants (`tenants.field_dek`). Perderla deja la PII de
 todo el mundo irrecuperable; filtrarla la expone toda. No hay rotación ni custodia documentadas.
 Riesgo bajo hoy (un tenant), crece con cada cliente.
-
-### INFRA-04 🔵 · Sin linter — *baja prioridad*
-
-No hay ESLint/Biome/Prettier, ni `cargo clippy`, ni `cargo fmt --check` en CI. `pnpm lint` es
-`tsc --noEmit` en tres packages y **la app ni siquiera entra**.
-
-**Decisión (2026-09-02): no es prioridad.** Anotado el matiz por si se retoma: de estos, el único que
-aporta señal *nueva* es **clippy**, que no es un formateador — avisa de cosas que compilan y están
-mal (un `await` dentro de un lock, un `clone()` en un bucle caliente, un `match` que se traga un
-`Err`). ESLint y fmt, con `tsc` estricto ya en verde, son sobre todo estética.
 
 ---
 
@@ -438,11 +289,3 @@ probar la **app** completa contra staging.
 | ID | Sev | Qué falta | Notas |
 |----|-----|-----------|-------|
 | LIC-02 | 🔵 | Sin **certificate pinning** del host de la API. | Prácticamente *moot* con LIC-01 resuelto: la firma pineada es más robusta que el pinning de transporte. Un MITM ya no puede falsificar el estado de licencia. |
-
-> **LIC-03** verificado como **no explotable** en pairing (todos los caminos firmados validan `ts` a
-> 2 min; `fetch-token` con nonce de un solo uso). **LIC-05** (SMTP al keyring) quedó **moot**: DB-04
-> eliminó el SMTP propio (correo por worker). **LIC-04** ✅ cerrado con SEC-01 (2026-09-05): el
-> modelo de amenaza del gate está escrito en
-> [permisos-y-sesion.md](transversal/permisos-y-sesion.md) §1, junto al de los permisos por rol —
-> que es el mismo problema visto dos veces.
-

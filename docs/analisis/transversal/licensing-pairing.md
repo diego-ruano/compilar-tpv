@@ -32,11 +32,3 @@ Ya no habilita ningún bypass: con LIC-01 resuelto, un MITM no puede falsificar 
 licencia (está firmado y la clave va pineada), y en pairing el impacto se limita a la
 confidencialidad del token (el handshake es ed25519 y el JWT va firmado). La firma pineada es más
 robusta que el pinning de transporte, así que esto queda como extra opcional.
-
-## Resueltos
-
-### LIC-04 ✅ Modelo de amenaza del gate
-El gate de licencia corre en el cliente, así que un bypass local siempre es posible en última
-instancia (parchear el binario). Eso **no era el hallazgo**: el hallazgo era darlo por supuesto sin
-decirlo. Escrito, junto al de los permisos por rol —que es el mismo problema visto dos veces— en
-[permisos-y-sesion.md](permisos-y-sesion.md) §1. Cerrado con SEC-01 (2026-09-05).

@@ -95,6 +95,10 @@ const INICIAL = {
     escalon: "ninguno" as EscalonFiscal,
     antiguedadMin: null as number | null,
     pendientes: 0,
+    // `true` al arrancar, al revés que casi todo en este repo, y a propósito (FIS-01): en una Handy
+    // el comando que lo comprueba falla —no tiene registros de facturación— y antes de la primera
+    // respuesta no se sabe nada. Un `false` sacaría el aviso bloqueante en equipos que no tienen el
+    // problema. Lo pesimista ya está donde importa: sin esos datos, el cobro se cancela igual.
     datosFiscalesCompletos: true,
     datosReconocidos: false,
     listo: false,

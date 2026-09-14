@@ -4,33 +4,14 @@
 > `tpv-api` + backend Rust hexagonal) buscando **bugs de correctitud, problemas de seguridad,
 > cuellos de rendimiento y deuda de calidad/consistencia**.
 >
-> **Estado (2026-09-10).** Repaso completo del repo con las suites en verde delante, ya con
-> Veri\*factu dentro: **[HALLAZGOS.md](HALLAZGOS.md)**. Doce puntos abiertos, dos de ellos
-> bloqueantes y los dos en el área fiscal, que es la más nueva. Es una lista viva y aparte de este
-> índice: éste recoge la auditoría por módulos, aquélla lo que salió del repaso del 10/09.
+> **Estado (2026-09-14).** Lo abierto vive en dos listas, aparte de este índice:
+> **[HALLAZGOS.md](HALLAZGOS.md)** —lo que salió del repaso completo del 10/09: quedan seis, ninguno
+> bloqueante— y **[BACKLOG.md](BACKLOG.md)** —lo aplazado, cada uno con su motivo—. Este índice
+> recoge la auditoría original por módulos, de la que no queda ningún bug abierto.
 >
-> **Antes (2026-08-25).** De los ~136 hallazgos del análisis original **quedan 4 abiertos, y
-> ninguno es un bug**. El 25/08 se cerró **CUENTA-06** implementando el cierre de caja (ver
-> [PLAN_CIERRE_CAJA.md](../PLAN_CIERRE_CAJA.md)).
->
-> **Antes (2026-08-24).** El 24/08 se montó el harness de contrato de **lectura**, se llevó su cobertura
-> al **100 % (61/61, sin exclusiones)** y se corrigió **todo** lo que destapó: **trece divergencias
-> reales** Main↔Handy que la revisión a mano de agosto no había visto. Cierra **CLI-05** y
-> **STAT-07**. Detalle en [tests/contract/README.md](../../tests/contract/README.md).
->
-> **Antes (2026-08-23).** La revisión del 22-23 de agosto fue hallazgo por hallazgo contra el código, y
-> sacó los **dos únicos fallos reales** que quedaban escondidos —los dos en el mismo sitio: el
-> camino de escritura de la Handy que el harness no contrastaba—, **ambos ya corregidos**:
-> **TRAB-07** (el fichaje se insertaba sin `ID_Fichaje`, que en SQLite no da error: deja la clave
-> NULL y la salida no cierra nunca) y **TRAB-08** (`copiar semana` generaba los ID con `randomblob`
-> **dentro** de la sentencia replicada, así que la Main los volvía a generar distintos).
->
-> Se cerraron además los 7 `-parity` de escritura que el harness sujeta (MESA-11, VR-05, INV-07,
-> RES-07, TAR-04, PROV-07, CONF-06), **TAR-05** (papelera de tareas), **LOGIN-05** (compatibilidad
-> del hash de PIN verificada en las dos direcciones) y **TRAB-06**. Y se retiraron por decisión del
-> responsable **MESA-14**, **RES-05**, **LOGIN-03**, **VR-07** y **STAT-06**. **Un hallazgo
-> corregido se borra de aquí**: la traza del arreglo vive en el código, no en un documento (ver
-> *Trazabilidad* abajo). Si buscas un ID que no aparece, está resuelto.
+> **Un hallazgo corregido se borra**, de aquí y de las otras dos listas: la traza del arreglo vive en
+> el código, no en un documento (ver *Trazabilidad* abajo). Si buscas un ID que no aparece, está
+> resuelto.
 
 ---
 
@@ -89,7 +70,7 @@ Ningún bug. Lo que queda son decisiones de producto aplazadas.
 |--------|----------|--------|
 | T5 Arquitectura | 1 | ARCH-01 🟠 (lo poco que queda excluido del harness de escritura, y el WASM de fondo) |
 | D11 Login | 1 | LOGIN-04 🔵 (keyspace del PIN) |
-| T3 Licensing | 2 | LIC-02 🔵 · LIC-04 🔵 |
+| T3 Licensing | 1 | LIC-02 🔵 |
 | D1 Mesas · D2 Venta rápida · D3 Cuentas · D4 Inventario · D5 Clientes · D6 Reservas · D7 Proveedores · D8 Tareas · D9 Trabajadores · D10 Configuración · D12 Estadísticas · T1 Esquema DB · T2 Sync · T4 Observabilidad | 0 | — |
 
 ### Nota importante sobre el recuento

@@ -94,7 +94,9 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
     │                          #   cambie. Al tocar o añadir una, regístrala TAMBIÉN en el worker
     │                          #   (tenantMigrations.ts) y en test/helpers/esquemaTenant.ts, toca
     │                          #   migrations.rs para que include_dir! no sirva la copia vieja, y
-    │                          #   rebendice el snapshot (BLESS_SCHEMA_SNAPSHOT=1).
+    │                          #   rebendice el snapshot (BLESS_SCHEMA_SNAPSHOT=1). Y redespliega el
+    │                          #   worker: lleva el esquema compilado dentro, y uno desplegado por
+    │                          #   detrás rechaza la primera escritura con una columna nueva (SYNC-20).
     ├── contracts/             # @tpv/contracts — tipos autogenerados (src/generated/bindings.ts)
     └── client/                # @tpv/client — invokeClient.ts (envoltura de invoke de Tauri)
 ```
@@ -600,9 +602,11 @@ no sólo en dev.
   - **Una reparación es una escritura más**: se encola en el outbox y sube por el camino de siempre.
     No hay transporte nuevo que mantener. Pero **una reparación no se repara** (`Command_Name`
     propio), o una fila que la nube rechaza generaría una por cada intento.
-  - **«La nube tiene una fila que aquí no está» NO se resuelve borrándola.** Es un borrado que no
-    subió, o una fila que acaba de crear la Handy y esta Main aún no ha recibido — indistinguibles.
-    Se cuenta y se informa (SYNC-23).
+  - **«La nube tiene una fila que aquí no está» sólo se borra arriba si esta Main está al día
+    (SYNC-25).** Hasta entonces es indistinguible de una fila que la Handy acaba de crear y todavía
+    no ha llegado. Las separa el reloj de la replicación: si el checkpoint local alcanza el `Seq` de
+    la foto —leído **después** de las filas—, lo que falte aquí es un borrado que no subió. Con una
+    lista de claves truncada no se borra nada: media lista se leería como «sobra todo».
   - ⚠️ **NUNCA `INSERT OR REPLACE`** para reparar. En SQLite eso BORRA la fila y la reinserta, así
     que dispara los `ON DELETE CASCADE` que la apuntan — y este esquema tiene **dieciocho**.
     Reparar una `Zona` se llevaba por delante todas sus `Mesas`. Va `ON CONFLICT(pk) DO UPDATE`.

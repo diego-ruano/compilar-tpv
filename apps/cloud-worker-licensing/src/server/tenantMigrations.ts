@@ -12,6 +12,11 @@
 // REGISTRO DE MIGRACIONES: el bundler del worker (esbuild) no soporta glob dinámico de ficheros,
 // así que cada migración se importa explícitamente y se añade a `MIGRATIONS` (en orden). Es la
 // única edición manual al añadir una migración (en Rust `include_dir!` las recoge solas).
+//
+// ⚠️ El esquema va COMPILADO dentro del worker: uno desplegado aprovisiona y migra sus tenants con
+// el `0001` del día en que se desplegó. Cambiar el esquema sin redesplegar deja la nube por detrás
+// de la Main, y la primera escritura que toque una columna nueva se rechaza (SYNC-20: así se paró la
+// cola con `Razon_Social`). Tras tocar una migración, redespliega antes de probar nada con nube.
 
 import type { Client } from "@libsql/client";
 
