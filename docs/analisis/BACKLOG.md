@@ -29,6 +29,7 @@
 |----|-----|----------|--------|
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
+| LEGAL-02 | 🟠 | **Reglamento de Ciberresiliencia: notificar vulnerabilidades y acompañar el producto de información de seguridad.** | Sin empezar |
 | INFRA-02 | 🟡 | **El instalador no va firmado (Authenticode).** | Aceptado a sabiendas |
 | INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
 | OPS-02 | 🟡 | **«Contacta con soporte» sin canal ni forma de exportar un diagnóstico.** | Sin empezar |
@@ -74,6 +75,52 @@ el ejercicio de derechos (exportar/borrar un cliente) y la política de retenci�
 Y ojo al matiz que se aclaró el 2026-09-02 (ver TRAB-03 en CLAUDE.md): el cifrado de la PII del
 personal **no** la pone fuera de tu alcance. El texto cifrado está en Turso y la DEK en el
 control-plane; tienes las dos mitades. Eso hay que declararlo, no esconderlo.
+
+**Lo que dice la norma sobre conservar y borrar** (sólo fuentes oficiales). Es el marco de la
+política de retención, y tiene dos lados: lo que obliga a borrar y lo que obliga a guardar.
+
+- **No guardar datos personales más tiempo del necesario** (RGPD, art. 5.1.e, principio de
+  limitación del plazo de conservación). En palabras de la AEPD: *«Una vez que esas finalidades se
+  han alcanzado, los datos deben ser borrados, bloqueados o, en su defecto, anonimizados»*
+  ([AEPD · principios](https://www.aepd.es/derechos-y-deberes/cumple-tus-deberes/principios)).
+- **Derecho de supresión** (RGPD, art. 17): el interesado puede pedir que se borren sus datos, entre
+  otros casos cuando ya no son necesarios para el fin con que se recogieron. **No procede** cuando
+  conservarlos es necesario para cumplir una obligación legal
+  ([AEPD · derecho de supresión](https://www.aepd.es/derechos-y-deberes/conoce-tus-derechos/derecho-de-supresion-al-olvido)).
+- **Suprimir empieza por bloquear** (LOPDGDD, art. 32): *«El responsable del tratamiento estará
+  obligado a bloquear los datos cuando proceda a su rectificación o supresión»*. Bloquear es
+  reservarlos impidiendo su tratamiento, incluida su visualización, salvo para ponerlos a disposición
+  de jueces y autoridades durante el plazo de prescripción
+  ([BOE-A-2018-16673](https://www.boe.es/buscar/act.php?id=BOE-A-2018-16673)).
+- **Plazos que obligan a conservar**, y que la retención no puede recortar:
+  - Libros, correspondencia, documentación y justificantes del negocio: **seis años** (Código de
+    Comercio, art. 30, [BOE-A-1885-6627](https://www.boe.es/buscar/act.php?id=BOE-A-1885-6627)).
+  - Registros de jornada, o sea los fichajes: **cuatro años**, a disposición de los trabajadores, sus
+    representantes y la Inspección (Estatuto de los Trabajadores, art. 34.9, añadido por el
+    [Real Decreto-ley 8/2019](https://www.boe.es/buscar/doc.php?id=BOE-A-2019-3481)).
+  - Facturación: la regla de DB-14 (`Registros_Facturacion` no se purga nunca).
+
+### LEGAL-02 🟠 · Reglamento de Ciberresiliencia (UE) 2024/2847
+
+El TPV es software instalable que se vende, así que entra en lo que el reglamento llama *productos con
+elementos digitales* ([texto oficial en el BOE](https://www.boe.es/buscar/doc.php?id=DOUE-L-2024-81720)).
+Tiene dos fechas, según la [Comisión Europea](https://digital-strategy.ec.europa.eu/en/policies/cra-summary):
+
+- **Desde el 11 de septiembre de 2026, o sea ya:** el fabricante tiene que notificar las
+  **vulnerabilidades explotadas activamente** y los **incidentes graves** que afecten al producto, al
+  CSIRT del país donde tenga su establecimiento principal (y a ENISA) por la plataforma única de
+  notificación. Plazos: **alerta temprana en 24 h**, notificación en **72 h**, e informe final a los
+  **14 días** de tener la corrección de una vulnerabilidad, o al **mes** de la notificación si es un
+  incidente grave
+  ([Comisión · obligaciones de notificación](https://digital-strategy.ec.europa.eu/en/policies/cra-reporting)).
+  A las microempresas y pequeñas empresas no se las multa por incumplir el plazo de 24 h.
+- **Desde el 11 de diciembre de 2027:** se aplica el reglamento entero, incluida la obligación de
+  acompañar el producto de la **información e instrucciones para el usuario** del Anexo II, que tiene
+  que ser clara y permitir instalarlo, usarlo y mantenerlo de forma segura.
+
+Falta: saber a qué CSIRT le toca y cómo se notifica en 24 h, y leer el Anexo II en el texto oficial
+antes de redactar esa información. Su lista de puntos no se ha contrastado en una fuente oficial, así
+que no se copia aquí.
 
 ### INFRA-02 🟡 · Instalador sin firmar — *aceptado a sabiendas*
 
