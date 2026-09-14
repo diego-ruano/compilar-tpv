@@ -266,9 +266,30 @@ fn tiempo_sin_fijar(sql_fijada: &str) -> Option<&'static str> {
         .find(|token| minus.contains(*token))
 }
 
+/// La sentencia sin el espacio ni los comentarios (`--` y `/* */`) que lleve delante.
+///
+/// Clasificar por la cabeza del texto sin quitarlos antes hacía que una escritura comentada no se
+/// reconociera como escritura, y entonces no entraba en `_Sync_Outbox`: se guardaba en el TPV y no
+/// llegaba nunca a la nube. Le pasaba al alta de un lote, así que su movimiento de stock y el primer
+/// cobro que gastaba de él se rechazaban arriba por la clave foránea (SYNC-27).
+///
+/// Lo que sube es también la sentencia recortada: en local se ejecuta la misma que sube (CFG-04), y
+/// el parser de Turso rechaza los comentarios de bloque (ver `tenantMigrations.ts`).
+fn sin_comentarios_iniciales(sql: &str) -> &str {
+    let mut resto = sql.trim_start();
+    loop {
+        if let Some(tras) = resto.strip_prefix("--") {
+            resto = tras.find('\n').map_or("", |i| tras[i + 1..].trim_start());
+        } else if let Some(tras) = resto.strip_prefix("/*") {
+            resto = tras.find("*/").map_or("", |i| tras[i + 2..].trim_start());
+        } else {
+            return resto;
+        }
+    }
+}
+
 fn is_write_sql(sql: &str) -> bool {
-    let head: String = sql
-        .trim_start()
+    let head: String = sin_comentarios_iniciales(sql)
         .chars()
         .take(6)
         .collect::<String>()
@@ -288,8 +309,7 @@ enum BatchKind {
 }
 
 fn batch_kind(sql: &str) -> BatchKind {
-    let head: String = sql
-        .trim_start()
+    let head: String = sin_comentarios_iniciales(sql)
         .chars()
         .take(8)
         .collect::<String>()
@@ -542,6 +562,7 @@ impl<'a> Writer for WriteGuard<'a> {
     ) -> impl Future<Output = Result<u64, LibsqlError>> + Send {
         let values = params.into_values();
         async move {
+            let sql = sin_comentarios_iniciales(sql);
             // Sentencias que no capturamos (no son escritura replicable): directas.
             if !is_write_sql(sql) {
                 return self.conn.execute(sql, values).await;
@@ -793,6 +814,71 @@ mod tests {
                 .unwrap()
                 .with_timezone(&chrono::Local),
         )
+    }
+
+    /// SYNC-27: una escritura con comentarios delante sigue siendo una escritura.
+    #[test]
+    fn los_comentarios_de_delante_no_esconden_una_escritura() {
+        assert!(is_write_sql("-- Alta pura\n  -- otra línea\nINSERT INTO Zonas VALUES (1);"));
+        assert!(is_write_sql("/* bloque */ UPDATE Zonas SET Nombre_Zona = 'x';"));
+        assert!(is_write_sql("\n  /* a */ -- b\n /* c\n d */ DELETE FROM Zonas;"));
+        assert!(!is_write_sql("-- INSERT en un comentario\nSELECT 1;"));
+        assert!(!is_write_sql("/* UPDATE */ SELECT 1;"));
+        assert!(!is_write_sql("-- sólo un comentario"));
+        assert!(!is_write_sql("/* sin cerrar INSERT"));
+        assert!(matches!(batch_kind("-- abre\nBEGIN;"), BatchKind::Begin));
+        assert!(matches!(batch_kind("/* cierra */ COMMIT;"), BatchKind::Commit));
+    }
+
+    #[test]
+    fn solo_se_quita_lo_de_delante() {
+        assert_eq!(
+            sin_comentarios_iniciales("  -- a\n/* b */ INSERT INTO t VALUES ('--', '/* */'); -- fin"),
+            "INSERT INTO t VALUES ('--', '/* */'); -- fin"
+        );
+        assert_eq!(sin_comentarios_iniciales("SELECT 1"), "SELECT 1");
+    }
+
+    /// Lo que fallaba de verdad: la escritura comentada se guardaba en el TPV y no entraba en el
+    /// outbox, así que no llegaba a la nube. Y lo que sube va sin el comentario, que Turso no
+    /// siempre acepta.
+    #[tokio::test]
+    async fn una_escritura_comentada_sube_a_la_nube_sin_el_comentario() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        {
+            let w = db.write().await;
+            w.execute(
+                "-- Alta de una zona\nINSERT INTO Zonas (ID_Zona, Nombre_Zona, Updated_At) \
+                 VALUES ('z1', 'Salon', datetime('now','localtime'));",
+                (),
+            )
+            .await
+            .unwrap();
+            w.execute_batch("BEGIN;").await.unwrap();
+            w.execute(
+                "/* dentro de una transacción */ INSERT INTO Zonas (ID_Zona, Nombre_Zona, Updated_At) \
+                 VALUES ('z2', 'Terraza', datetime('now','localtime'));",
+                (),
+            )
+            .await
+            .unwrap();
+            w.execute_batch("COMMIT;").await.unwrap();
+        }
+
+        let r = db.read().await;
+        let mut ops = r
+            .query("SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq;", ())
+            .await
+            .unwrap();
+        let mut subidas = Vec::new();
+        while let Some(f) = ops.next().await.unwrap() {
+            subidas.push(f.get::<String>(0).unwrap());
+        }
+        assert_eq!(subidas.len(), 2, "las dos escrituras tienen que subir: {subidas:?}");
+        for s in &subidas {
+            assert!(s.contains("INSERT INTO Zonas"), "{s}");
+            assert!(!s.contains("--") && !s.contains("/*"), "sube sin el comentario: {s}");
+        }
     }
 
     #[test]

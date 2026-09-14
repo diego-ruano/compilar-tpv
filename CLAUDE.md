@@ -508,6 +508,11 @@ no sólo en dev.
 ### Reglas del sistema
 
 - **Escritor único (Main):** todas las escrituras locales pasan por `db.rs` (no por `raw()`), que captura en `_Sync_Outbox`.
+  Qué es escritura lo decide la cabeza de la sentencia **después de quitarle los comentarios de
+  delante** (`sin_comentarios_iniciales`), y lo que sube va sin ellos. Antes un `INSERT` con un
+  comentario encima se guardaba en el TPV y no subía nunca: le pasó al alta de un lote (SYNC-27).
+  Lo que sigue sin reconocer es un `WITH … INSERT`; hoy no hay ninguno, y si hace falta hay que
+  enseñárselo a `is_write_sql`.
 - **Idempotencia:** `Op_Id` en la nube (`Applied_Operations`) + `_Sync_Applied_Ops` en la Main evitan duplicados en catch-up/live y ecos de las propias escrituras.
 - **IDs deterministas:** los `*.commands.ts` generan el UUID en un paso `kind:"value"` (`crypto.randomUUID()`) **antes** del INSERT, para que nube y Main tengan la misma fila. **Toda columna `TEXT PRIMARY KEY` debe seguir este patrón** (sin DEFAULT ni trigger en el esquema).
 - **La hora la pone quien escribe, nunca una base (CFG-04).** Una sentencia que viajara con su
