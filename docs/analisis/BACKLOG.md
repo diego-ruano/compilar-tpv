@@ -27,7 +27,7 @@
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
+| DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Decidido: archivo en R2, falta medir |
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
 | LEGAL-02 | 🟠 | **Reglamento de Ciberresiliencia: notificar vulnerabilidades y acompañar el producto de información de seguridad.** | Sin empezar |
 | INFRA-02 | 🟡 | **El instalador no va firmado (Authenticode).** | Aceptado a sabiendas |
@@ -65,6 +65,33 @@ pueden borrar). Lo que se archive tiene que ser lo que **no** sea registro fisca
   cerradas. El importe, la base, la cuota y el desglose ya viven **dentro** del registro fiscal
   (`Desglose_Json`, `Importe_Total`, `Cuota_Total`) y no se derivan de la comanda al leer: eso es lo
   que hace archivable la comanda.
+
+**Dónde irá lo archivado (decidido el 2026-09-14, a falta de medir).** Antes de construir nada se
+mide con un bar real cuánto genera al año: de esa cifra depende si hace falta archivar pronto o si
+basta con purgar.
+
+- **Lo que no vale nada se purga, sin archivar**: las notificaciones cerradas y el estado de cocina
+  de las comandas antiguas.
+- **Lo antiguo que hay que conservar va a R2**, en un bucket **privado y propio**. No puede ser el de
+  imágenes, que es público, y no necesita dominio. Irá **un fichero por negocio y por ejercicio**,
+  un SQLite comprimido, que se abre con cualquier herramienta sin nuestro código: es lo que pedirá un
+  inspector. En la base quedan los resúmenes que usan las estadísticas.
+- **Por qué no una base no relacional**: el dato ya es relacional y lo archivado casi no se lee.
+  - **KV no sirve**: está hecho para valores pequeños que se leen por clave, con un máximo de
+    25 MiB por valor y una escritura por segundo sobre la misma clave, y no se puede consultar.
+  - **D1 no aporta**: es SQL como Turso, con un máximo de 10 GB por base. Sería mover el problema a
+    otra base igual.
+- **Coste**, según la [tarifa oficial de R2](https://developers.cloudflare.com/r2/pricing/) a
+  2026-09-14:
+  - Almacenamiento: 0,015 $/GB al mes. En acceso poco frecuente, 0,01 $, con un mínimo de 30 días
+    y 0,01 $/GB al leer.
+  - La salida de datos es gratis, y los primeros 10 GB al mes también.
+  - Un bar genera pocos MB al año comprimidos.
+- **Lo legal manda también sobre el archivo** (ver LEGAL-01):
+  - Se conserva como mínimo los plazos que obligan.
+  - Lo personal que haya dentro sigue sujeto a bloqueo y supresión.
+  - Al vencer el plazo, se borra el fichero de ese ejercicio.
+  - `Registros_Facturacion` no sale de la base ni se purga.
 
 ### LEGAL-01 🟠 · RGPD
 
