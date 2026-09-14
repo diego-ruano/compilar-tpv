@@ -1859,14 +1859,13 @@ pub fn run() {
     // en el build vía `TPV_SENTRY_DSN`; si no está, el cliente queda DESHABILITADO (no-op) pero el
     // plugin se registra igualmente para que el Sentry de la Webview tenga transporte. El guard y el
     // de minidump deben vivir todo el proceso (por eso son locales de `run`, que bloquea en `.run()`).
+    //
+    // El contexto se genera aquí, y no al final en `.run()`, porque el entorno sale de él.
+    let context = tauri::generate_context!();
     let sentry_guard = tpv_telemetry::init_sentry(tpv_telemetry::SentryConfig {
         dsn: option_env!("TPV_SENTRY_DSN").map(|s| s.to_string()),
-        environment: if cfg!(debug_assertions) {
-            "dev"
-        } else {
-            "prod"
-        }
-        .to_string(),
+        environment: entorno_de_sentry(&context.config().identifier, cfg!(debug_assertions))
+            .to_string(),
         release: Some(env!("CARGO_PKG_VERSION").to_string()),
     });
     // Minidumps (crashes nativos) sólo con DSN real, para no lanzar el proceso crash-handler en vano.
@@ -2309,8 +2308,51 @@ pub fn run() {
             // correo electrónico (envío vía worker; ya no hay config SMTP local — DB-04)
             commands::email_config::email_enviar_pedido,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
+}
+
+/// Con qué entorno se etiquetan los errores que suben a Sentry.
+///
+/// El DSN se embebe en cualquier build que se compile con `TPV_SENTRY_DSN` puesta, también los de
+/// la máquina de desarrollo, así que el entorno es lo único que separa un error de un cliente de uno
+/// provocado a propósito. El E2E se compila en release y rompe la base de datos adrede: sin esto,
+/// sus errores llegaban como `prod`. Se decide por el identificador porque es lo que define ese
+/// build (§16 de CLAUDE.md), no por una variable que alguien pueda olvidar al compilar.
+fn entorno_de_sentry(identificador: &str, depuracion: bool) -> &'static str {
+    if identificador.ends_with(".e2e") {
+        "e2e"
+    } else if depuracion {
+        "dev"
+    } else {
+        "prod"
+    }
+}
+
+#[cfg(test)]
+mod tests_entorno_de_sentry {
+    use super::entorno_de_sentry;
+
+    #[test]
+    fn el_build_de_e2e_no_se_mezcla_con_los_clientes() {
+        assert_eq!(entorno_de_sentry("com.altarialights.tpv.e2e", false), "e2e");
+        assert_eq!(entorno_de_sentry("com.altarialights.tpv.e2e", true), "e2e");
+        assert_eq!(entorno_de_sentry("com.altarialights.tpv", true), "dev");
+        assert_eq!(entorno_de_sentry("com.altarialights.tpv", false), "prod");
+    }
+
+    /// Si alguien cambia el identificador de alguno de los dos builds, esto tiene que enterarse.
+    #[test]
+    fn los_identificadores_reales_caen_donde_toca() {
+        let leer = |fichero: &str| -> String {
+            let ruta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fichero);
+            let json: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(ruta).unwrap()).unwrap();
+            json["identifier"].as_str().unwrap().to_string()
+        };
+        assert_eq!(entorno_de_sentry(&leer("tauri.e2e.conf.json"), false), "e2e");
+        assert_eq!(entorno_de_sentry(&leer("tauri.conf.json"), false), "prod");
+    }
 }
 
 #[cfg(test)]

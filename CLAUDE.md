@@ -1606,3 +1606,7 @@ usando `license_check_now` porque ahí no hay nada que esperar.
   carpeta.
 - **Un fallo deja una captura** en `apps/tpv-main/e2e/fallos/` (no se versiona). Es lo que convirtió
   «algo tapa el botón» en «la regla común de modales capa esta modal a 42 rem».
+- **Sus errores llegan a Sentry como `e2e`, no como `prod`.** El DSN se embebe en cualquier build
+  compilado con `TPV_SENTRY_DSN` puesta, y el de E2E es un build de release que rompe la base a
+  propósito: sin separarlo, cada tanda dejaba en `prod` errores que parecían de un cliente. El
+  entorno lo decide el identificador (`lib.rs::entorno_de_sentry`), igual que el aislamiento.
