@@ -142,8 +142,8 @@ cuando falta dinero.
 > ⚠️ **Los comandos de recuperación NO pueden exigir sesión, nunca.** Esa pantalla existe
 > precisamente para el caso de **cero usuarios**: un equipo que ha perdido su `data.db` no tiene
 > con quién iniciar sesión. Ponerles el gate cierra la única salida que les queda — el callejón
-> sin salida que documenta [BUG_RECUPERACION_BLOQUEADA.md](../../BUG_RECUPERACION_BLOQUEADA.md) —
-> y lo hace **en silencio**, porque en un equipo sano no se nota.
+> sin salida en el que ya se quedó un equipo cuando recuperar de la nube era la única vía — y lo
+> hace **en silencio**, porque en un equipo sano no se nota.
 >
 > Es la hermana exacta de la regla que ya estaba escrita: *«todo lo que hay en ese camino tiene que
 > tolerar `state.db == None`»*. Añádele: **y tiene que tolerar `sesion == None`**.

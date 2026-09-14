@@ -2649,10 +2649,11 @@ mod tests_exenciones_del_gate {
     //!
     //! El caso grave es `recovery.rs`. Esa pantalla existe precisamente para el escenario de
     //! CERO USUARIOS: un equipo que ha perdido su `data.db` no tiene con quién iniciar sesión.
-    //! Ponerle el gate cierra la única salida que le queda —el callejón sin salida que documenta
-    //! `docs/BUG_RECUPERACION_BLOQUEADA.md`— y encima lo hace en silencio, porque en un equipo
-    //! sano no se nota. Es la hermana exacta de la regla que ya estaba escrita: *todo lo que hay
-    //! en ese camino tiene que tolerar `state.db == None`*. Añádele: **y `sesion == None`**.
+    //! Ponerle el gate cierra la única salida que le queda —el callejón sin salida en el que ya se
+    //! quedó un equipo cuando recuperar de la nube era la única vía— y encima lo hace en silencio,
+    //! porque en un equipo sano no se nota. Es la hermana exacta de la regla que ya estaba
+    //! escrita: *todo lo que hay en ese camino tiene que tolerar `state.db == None`*. Añádele:
+    //! **y `sesion == None`**.
 
     /// Ficheros cuyos comandos se alcanzan sin sesión, y por qué.
     const EXENTOS: &[(&str, &str, &str)] = &[(
