@@ -36,7 +36,6 @@ import {
 } from "./tenantHub.envelope";
 import {
 	allRowsFromResult,
-	DDL_TABLAS_DE_NUBE,
 	evalValueStep,
 	firstRowFromResult,
 	isUniqueOpIdViolation,
@@ -236,12 +235,10 @@ export class TenantHub {
 			sql: "SELECT 1 AS ok;",
 			args: [],
 		});
-		// Garantizamos las tablas que solo existen en la nube UNA vez al resolver la conexión
-		// (autocommit, caché de 6 h) en lugar de un CREATE TABLE IF NOT EXISTS por cada escritura.
-		// Persisten en Turso, así que las escrituras dentro del TTL ya las encuentran creadas.
-		for (const ddl of DDL_TABLAS_DE_NUBE) {
-			await db.execute(ddl);
-		}
+		// Las tablas que sólo existen en la nube (`Sync_Changes`, `Sync_Main_Checkpoints`) ya no se
+		// crean aquí: son una migración del tenant y las garantiza `ensureTenantMigrated`, el mismo
+		// guard que pasa el REST. Creadas aquí, una lectura por REST anterior a la primera escritura
+		// por el DO no las encontraba (SYNC-28).
 	}
 
 	private clearTenantDbCache() {

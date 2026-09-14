@@ -12,7 +12,7 @@ import { Hono } from "hono";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { DDL_TABLAS_DE_NUBE } from "../src/durableObjects/tenantHub.sentencias";
+import { DDL_TABLAS_DE_NUBE } from "../src/server/tablasDeNube";
 
 let clienteActual: any = null;
 let esTpv = true;

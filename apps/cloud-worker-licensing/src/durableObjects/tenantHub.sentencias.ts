@@ -111,27 +111,3 @@ export function isUniqueOpIdViolation(e: any): boolean {
 	const m = String(e?.message ?? e ?? "").toLowerCase();
 	return m.includes("unique constraint failed") && m.includes("op_id");
 }
-
-/**
- * Tablas que la NUBE añade a la BD del tenant (no están en las migraciones compartidas porque la
- * Main no las tiene): el log de cambios que alimenta el catch-up y el checkpoint por Main que hace
- * de suelo de la purga.
- *
- * Vive aquí, y no incrustado en `probeTenantDb`, para que los tests puedan levantar exactamente el
- * mismo esquema que producción en vez de una copia a mano que se desincronice.
- */
-export const DDL_TABLAS_DE_NUBE: string[] = [
-	`CREATE TABLE IF NOT EXISTS Sync_Changes (
-		Seq INTEGER PRIMARY KEY AUTOINCREMENT,
-		Op_Id TEXT NOT NULL,
-		Command_Name TEXT,
-		Statements_Json TEXT NOT NULL,
-		Device_Id TEXT,
-		Created_At_Ms INTEGER NOT NULL
-	);`,
-	`CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
-		Device_Id TEXT PRIMARY KEY,
-		Last_Seq INTEGER NOT NULL,
-		Updated_At_Ms INTEGER NOT NULL
-	);`,
-];
