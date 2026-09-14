@@ -114,10 +114,6 @@ propio.** Al hacerlo hay que tocar **tres** sitios, no uno:
    falla en el build.
 3. `docs/android/COMPILAR_ANDROID.md`, que documenta ese host.
 
-De paso: `R2_PUBLIC_BASE_URL` en
-[`wrangler.json:60`](../../apps/cloud-worker-licensing/wrangler.json#L60) apunta a un bucket
-**distinto** y **no la lee nadie** en todo `src/`. Config muerta: borrarla o cablearla.
-
 ### OPS-01 🟠 · Sin documentación de usuario
 
 Sin manual, sin onboarding, sin ayuda en la app, sin README en la raíz del repo. Instalas en un bar y
@@ -227,8 +223,8 @@ etiquetado como `prod` y es indistinguible de uno de un bar.
 **Lo que hay que montar, por orden de dependencia:**
 
 1. **Worker aparte.** Un bloque `env.staging` en `wrangler.json` con su propio `name`
-   (p. ej. `tpv-api-staging`) y sus `vars` (`ENVIRONMENT: "staging"` + los `TURSO_*`, `EMAIL_*` y
-   `R2_PUBLIC_BASE_URL` propios). Se despliega con `wrangler deploy --env staging`. Al ser otro
+   (p. ej. `tpv-api-staging`) y sus `vars` (`ENVIRONMENT: "staging"` + los `TURSO_*` y `EMAIL_*`
+   propios). Se despliega con `wrangler deploy --env staging`. Al ser otro
    worker, su **Durable Object `TenantHub` es otro namespace**: no comparte estado con producción.
 2. **Secretos propios.** Los secretos son **por entorno**: hay que repetir `wrangler secret put X
    --env staging` para todos (`SENTRY_DSN`, `AXIOM_TOKEN`, `LICENSE_JWT_SECRET`,
@@ -237,7 +233,8 @@ etiquetado como `prod` y es indistinguible de uno de un bar.
 3. **Turso aparte.** Otra BD de control (licencias, tenants) y otras BDs de tenant. **Es el punto
    crítico:** si staging comparte Turso con producción, escribe sobre datos de clientes reales y no
    sirve de nada.
-4. **R2 aparte.** Otro bucket de imágenes (o al menos otro prefijo) con su `R2_PUBLIC_BASE_URL`.
+4. **R2 aparte.** Otro bucket de imágenes (o al menos otro prefijo), y la URL pública de la app
+   configurable: hoy está clavada en `CDN_IMAGES_BASE` (`imageUrl.ts`) y en la CSP.
 5. **Stripe en modo test.** Claves `sk_test_`, un endpoint de webhook apuntando al worker de
    staging con su propio `whsec_`, y Prices de prueba con su `metadata.term_months`.
 6. **Cliente compilable contra staging.** Esto es lo que hoy **no se puede hacer sin tocar código**:

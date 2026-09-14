@@ -13,7 +13,7 @@
 >
 > **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar. FIS-05 y STOCK-01 son
 > decisiones de alcance (la segunda, junto con VENTA-01), SYNC-21 y TEST-03 salieron de arreglar
-> SYNC-20, y CFG-01 y CFG-04 son mantenimiento.
+> SYNC-20, y CFG-04 es mantenimiento.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
@@ -21,7 +21,6 @@
 | SYNC-21 | 🟡 | La cuarentena sólo se ve abriendo el panel (lo cubre en parte SYNC-24) | Parcial |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
-| CFG-01 | 🟡 | `R2_PUBLIC_BASE_URL` apunta a **otro bucket** que la CSP y la app | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
 
 ---
@@ -108,22 +107,6 @@ consumos vigentes. Pero cuando lo detecta el stock ya está mal y el aviso no ex
 lotes que ese cobro consumió. Lo primero es un cambio de esquema; lo segundo exige guardar algo que
 hoy no se guarda. Conviene decidirlo con VENTA-01 (devoluciones) delante, que va a tocar lo mismo.
 
-## CFG-01 🟡 · `R2_PUBLIC_BASE_URL` apunta a otro bucket
-
-[`wrangler.json:60`](../../apps/cloud-worker-licensing/wrangler.json#L60) declara
-`R2_PUBLIC_BASE_URL = https://pub-772c917409c148e3b39e41b7209e3b1d.r2.dev`. La app usa
-`https://pub-6814391221e444b8b1747ab67ce3c21f.r2.dev`, hardcodeado en
-[`imageUrl.ts:31`](../../apps/tpv-main/src/shared/lib/imageUrl.ts#L31) y repetido en las dos CSP de
-`tauri.conf.json`.
-
-La variable **no se usa en ninguna parte del código** (grep en el worker, en los crates y en el
-frontend: cero). No rompe nada hoy; el problema es lo que invita a hacer mañana. Alguien la lee como
-la fuente de verdad, «arregla» la CSP para que case con ella, y las imágenes del Handy dejan de
-cargar en el build empaquetado — donde, además, la CSP no se ve en `tauri dev` (§8 de CLAUDE.md).
-
-**Qué haría falta.** Borrar la variable, o —si algún día el worker tiene que componer URLs de
-imagen— dejarla con el valor bueno y que el frontend la reciba en vez de hardcodearla. Encaja con
-INFRA-03 del backlog (dominio propio para el bucket), que resolvería las dos cosas a la vez.
 
 ## CFG-04 🔵 · La guardia de fuentes de tiempo es un `debug_assert!`
 
