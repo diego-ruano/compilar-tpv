@@ -53,6 +53,7 @@ import {
   type ComandaBarraRow as ApiComandaBarraRow,
   type LineaComandaRow as ApiLineaComandaRow,
 } from "../../features/ventaRapida/ventaRapidaAPI";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================
    EVENTO GLOBAL
@@ -2061,7 +2062,7 @@ export default function VentaRapida() {
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
           <button
             type="button"
-            onClick={nuevoTicket}
+            onClick={conAviso(nuevoTicket)}
             className="inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer"
           >
             <Plus className="size-4" aria-hidden />
@@ -2070,7 +2071,7 @@ export default function VentaRapida() {
 
           <button
             type="button"
-            onClick={abrirVerTickets}
+            onClick={conAviso(abrirVerTickets)}
             className={cn(
               "inline-flex min-w-0 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
               loadingComandas && "opacity-60",
@@ -2193,9 +2194,9 @@ export default function VentaRapida() {
         categoriaPreseleccionadaId={
           categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null
         }
-        onSaved={async () => {
+        onSaved={conAviso(async () => {
           await onProductoGuardado();
-        }}
+        })}
       />
 
       <ProductDetailModal

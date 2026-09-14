@@ -192,7 +192,7 @@ function SaludSync({ darkMode }: { darkMode: boolean }) {
 			}
 		};
 		void tick();
-		const timer = window.setInterval(tick, 5000);
+		const timer = window.setInterval(() => void tick(), 5000);
 		return () => {
 			cancelled = true;
 			clearInterval(timer);
@@ -460,7 +460,7 @@ function TareasFondo({ darkMode }: { darkMode: boolean }) {
 		};
 		void tick();
 		// Los jobs se mueven despacio (minutos u horas): no hace falta refrescar más a menudo.
-		const timer = window.setInterval(tick, 30000);
+		const timer = window.setInterval(() => void tick(), 30000);
 		return () => {
 			cancelled = true;
 			clearInterval(timer);

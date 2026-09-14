@@ -13,6 +13,7 @@ import { cn } from "../utils";
 import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
 import type { DatosDelTicket } from "../../configuracion/api/printerApis";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export default function TicketPanel({
   ticket,
@@ -452,7 +453,7 @@ export default function TicketPanel({
                   : "bg-surface-2 text-fg-subtle cursor-not-allowed",
               )}
               disabled={!canCobrarMetodo}
-              onClick={onCobrarTarjeta}
+              onClick={conAviso(onCobrarTarjeta)}
               type="button"
             >
               Cobrar con tarjeta

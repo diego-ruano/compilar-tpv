@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { conAviso } from "../lib/conAviso";
 
 type UpdateInfo = {
     version: string;
@@ -95,7 +96,7 @@ export default function UpdateBanner() {
                     <div className="mt-3 flex gap-2">
                         <button
                             type="button"
-                            onClick={handleInstall}
+                            onClick={conAviso(handleInstall)}
                             disabled={installing}
                             className="rounded-xl bg-[#016FFC] px-3 py-1.5 text-sm font-semibold text-white transition hover:bg-[#2B81D4] disabled:opacity-50"
                         >

@@ -12,7 +12,7 @@
 // una regla, la pregunta no es «¿esto es mejor estilo?» sino «¿esta regla habría cazado un bug que
 // hemos tenido?».
 //
-// ── Por qué estas tres ───────────────────────────────────────────────────────────────────────
+// ── Por qué estas cuatro─────────────────────────────────────────────────────────────────────
 //
 // - `react-hooks/rules-of-hooks`: un hook dentro de un `if` corrompe el estado del componente de
 //   una forma que no se parece a su causa. No tiene falsos positivos.
@@ -23,6 +23,12 @@
 // - `@typescript-eslint/no-floating-promises`: una promesa rechazada sin `catch` es un fallo
 //   SILENCIOSO, y este repo está lleno de `async` disparados sin esperar. Es exactamente la forma
 //   del bug FIS-01 (pulsar «Confirmar cobro» y que no pase nada).
+// - `@typescript-eslint/no-misused-promises`: el agujero que deja la anterior. Ella ve la promesa
+//   que alguien suelta; no ve la que se ENTREGA a quien no la espera — `onClick={guardar}` con
+//   `guardar` asíncrono, `setTimeout(async …)`—. React la tira, y si rechaza sólo se entera Sentry:
+//   quien pulsó el botón ve que no pasa nada. Al encenderla había 119. Se arreglan con `conAviso`
+//   (`shared/lib/conAviso.ts`), que reporta y lo dice en pantalla, o con `() => void x()` cuando `x`
+//   no puede rechazar (navegar, un refetch de React Query) o ya captura por su cuenta.
 //
 // ── Alcance ──────────────────────────────────────────────────────────────────────────────────
 //
@@ -69,6 +75,7 @@ export default tseslint.config(
             "react-hooks/rules-of-hooks": "error",
             "react-hooks/exhaustive-deps": "warn",
             "@typescript-eslint/no-floating-promises": "error",
+            "@typescript-eslint/no-misused-promises": "error",
 
             // ── Lo que se apaga, y por qué ───────────────────────────────────────────────────
             //

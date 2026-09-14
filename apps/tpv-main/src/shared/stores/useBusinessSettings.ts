@@ -5,6 +5,7 @@ import {
     configPatchBusinessSettings,
     type BusinessSettings,
 } from "../../features/configuracion/api/configApis";
+import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: BusinessSettings = {
     businessName: "TPV",
@@ -82,21 +83,19 @@ export const useBusinessSettings = create<BusinessSettingsState>(
             // 2) acumular patch para DB
             pending = { ...pending, ...nextPatch };
 
-            // 3) debounce write
+            // 3) debounce write. Sin rollback —es autoguardado y la UI no debe dar saltos—, pero el
+            // fallo se AVISA: antes sólo iba a la consola, y un ajuste que parece guardado y no lo
+            // está se descubre mucho después (el guardado exige Administrador, por ejemplo).
             if (timer) window.clearTimeout(timer);
-            timer = window.setTimeout(async () => {
-                const toSave = pending;
-                pending = {};
-                timer = null;
-
-                try {
+            timer = window.setTimeout(
+                conAviso(async () => {
+                    const toSave = pending;
+                    pending = {};
+                    timer = null;
                     await configPatchBusinessSettings(toSave);
-                } catch (e) {
-                    console.error("Business_Settings save error:", e);
-                    // No rollback: autoguardado => mejor no “saltos” en UI.
-                    // (si quieres, puedes mostrar toast)
-                }
-            }, 400);
+                }, "No se han podido guardar los datos del negocio"),
+                400,
+            );
         },
 
         setBusinessName: (v) => get().setMany({ businessName: v }),

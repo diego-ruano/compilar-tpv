@@ -29,6 +29,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 // Tauri: guardar en ruta elegida por el usuario
 import { save, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================
    Helpers runtime
@@ -674,7 +675,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <>
                 <button
                   type="button"
-                  onClick={guardarPDF}
+                  onClick={conAviso(guardarPDF)}
                   className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                 >
@@ -683,7 +684,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
                 <button
                   type="button"
-                  onClick={copiarSemanaAnterior}
+                  onClick={conAviso(copiarSemanaAnterior)}
                   className={`${btnBase} border-accent text-accent hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                 >
@@ -692,7 +693,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
 
                 <button
                   type="button"
-                  onClick={establecerPredeterminado}
+                  onClick={conAviso(establecerPredeterminado)}
                   className={`${btnBase} border-border-strong text-fg hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed w-full sm:w-auto`}
                   disabled={loading}
                   title="Guarda como predeterminado la semana visible"
@@ -830,7 +831,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => borrarAsignacion(a.ID_Asignacion)}
+                                        onClick={conAviso(() => borrarAsignacion(a.ID_Asignacion))}
                                         className="text-[11px] border border-danger text-danger rounded-lg px-2 py-1 hover:bg-danger hover:text-white transition-all"
                                         title="Borrar"
                                       >
@@ -933,7 +934,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => borrarAsignacion(a.ID_Asignacion)}
+                                        onClick={conAviso(() => borrarAsignacion(a.ID_Asignacion))}
                                         className="text-xs border border-danger text-danger rounded-lg px-2 py-1 hover:bg-danger hover:text-white transition-all"
                                       >
                                         X
@@ -1108,7 +1109,7 @@ function HorarioSemanal({ trabajadores }: { trabajadores: TrabajadorRow[] }) {
               <button
                 type="button"
                 disabled={loading}
-                onClick={guardarModal}
+                onClick={conAviso(guardarModal)}
                 className="border-2 border-accent text-accent rounded-xl px-4 py-2 font-medium transition-all duration-300 hover:bg-accent hover:text-white disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {loading ? "Guardando..." : "Guardar"}
@@ -1235,7 +1236,7 @@ function Trabajadores() {
                   <div className="grid w-full grid-cols-2 gap-2 xs:w-auto xs:flex xs:flex-wrap xs:justify-center lg:justify-end">
                     <button
                       type="button"
-                      onClick={() => navigate(`/Trabajadores/editar/${t.ID_Trabajador}`)}
+                      onClick={() => void navigate(`/Trabajadores/editar/${t.ID_Trabajador}`)}
                       className="
                         min-w-0 w-full justify-center whitespace-normal break-words text-center leading-tight
                         border-2 border-accent text-accent rounded-xl

@@ -12,6 +12,7 @@ import {
     triggerImageUploadDrain,
 } from "../../../shared/lib/imageUrl";
 import { useToast } from "../../../shared/toast";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export function Negocio({
     darkMode,
@@ -125,7 +126,7 @@ export function Negocio({
                             type="file"
                             accept="image/*"
                             className="hidden"
-                            onChange={(e) => onLogoFile(e.target.files?.[0])}
+                            onChange={conAviso((e) => onLogoFile(e.target.files?.[0]))}
                         />
                     </div>
                 }
@@ -263,7 +264,7 @@ export function Negocio({
                             Descartar
                         </GhostButton>
                         <PrimaryButton
-                            onClick={onSave}
+                            onClick={conAviso(onSave)}
                             disabled={!dirty || saving || !bizHydrated}
                         >
                             {saving ? "Guardando…" : "Guardar cambios"}

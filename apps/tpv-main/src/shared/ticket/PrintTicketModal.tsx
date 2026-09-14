@@ -20,6 +20,7 @@ import {
 } from "../../features/configuracion/api/printerApis";
 import { verifactuBloqueTicket } from "../../features/configuracion/api/verifactuApis";
 import TicketPaper, { type TicketPaperFiscal } from "./TicketPaper";
+import { conAviso } from "../lib/conAviso";
 
 export type PrintableLine = {
     id: string;
@@ -285,7 +286,7 @@ export default function PrintTicketModal({
                             </div>
                             <button
                                 type="button"
-                                onClick={imprimir}
+                                onClick={conAviso(imprimir)}
                                 disabled={effectiveItems.length === 0 || printing}
                                 className={cn(
                                     "h-11 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm transition",

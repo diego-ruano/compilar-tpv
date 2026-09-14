@@ -79,6 +79,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 // Tauri: guardar en ruta elegida por el usuario
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
+import { conAviso } from "../../shared/lib/conAviso";
 
 function todayYMD() {
     const d = new Date();
@@ -1487,7 +1488,7 @@ export default function Cuentas() {
                                                             <div className="flex gap-2">
                                                                 <MiniIconButton
                                                                     title="Reimprimir ticket"
-                                                                    onClick={() => reimprimirTicket(e)}
+                                                                    onClick={conAviso(() => reimprimirTicket(e))}
                                                                 >
                                                                     <Printer className="size-4" aria-hidden />
                                                                 </MiniIconButton>
@@ -1535,7 +1536,7 @@ export default function Cuentas() {
                                                         <div className="col-span-3 flex justify-end gap-2">
                                                             <MiniIconButton
                                                                 title="Reimprimir ticket"
-                                                                onClick={() => reimprimirTicket(e)}
+                                                                onClick={conAviso(() => reimprimirTicket(e))}
                                                             >
                                                                 <Printer className="size-4" aria-hidden />
                                                             </MiniIconButton>
@@ -1605,7 +1606,7 @@ export default function Cuentas() {
                                     <h2 className="text-lg font-semibold text-fg">Salidas</h2>
                                     <p className="text-sm text-fg-muted">Gastos del negocio.</p>
                                 </div>
-                                <PrimaryButton onClick={abrirModalGasto} className="shrink-0">
+                                <PrimaryButton onClick={conAviso(abrirModalGasto)} className="shrink-0">
                                     Agregar gasto
                                 </PrimaryButton>
                             </div>
@@ -1648,7 +1649,7 @@ export default function Cuentas() {
                                                                     {euro(s.importe)}
                                                                 </div>
                                                                 <div className="flex gap-2">
-                                                                    <MiniIconButton title="Editar" onClick={() => abrirEditarGasto(s)}>
+                                                                    <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
                                                                         <Pencil className="size-4" aria-hidden />
                                                                     </MiniIconButton>
                                                                     <MiniIconButton
@@ -1677,7 +1678,7 @@ export default function Cuentas() {
                                                                 {euro(s.importe)}
                                                             </div>
                                                             <div className="col-span-3 flex justify-end gap-2">
-                                                                <MiniIconButton title="Editar" onClick={() => abrirEditarGasto(s)}>
+                                                                <MiniIconButton title="Editar" onClick={conAviso(() => abrirEditarGasto(s))}>
                                                                     <Pencil className="size-4" aria-hidden />
                                                                 </MiniIconButton>
                                                                 <MiniIconButton
@@ -1731,7 +1732,7 @@ export default function Cuentas() {
                 <div className="grid grid-cols-1 gap-3 sm:flex sm:items-center sm:justify-between">
                     <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap">
                         <button
-                            onClick={guardarPdf}
+                            onClick={conAviso(guardarPdf)}
                             disabled={savingPdf}
                             className={cn(
                                 "inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm font-semibold text-fg shadow-sm transition hover:bg-surface-2 active:scale-[0.98] cursor-pointer",
@@ -1761,7 +1762,7 @@ export default function Cuentas() {
                     </div>
 
                     <button
-                        onClick={sacarCuentaDelDia}
+                        onClick={conAviso(sacarCuentaDelDia)}
                         disabled={savingPdf}
                         className={cn(
                             "inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] sm:w-auto cursor-pointer",
@@ -2031,7 +2032,7 @@ export default function Cuentas() {
                             <button
                                 type="button"
                                 disabled={savingGasto}
-                                onClick={guardarGasto}
+                                onClick={conAviso(guardarGasto)}
                                 className={[
                                     "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
                                     "hover:bg-accent-hover active:scale-[0.97]",
@@ -2185,7 +2186,7 @@ export default function Cuentas() {
                             <button
                                 type="button"
                                 disabled={savingEditGasto}
-                                onClick={guardarEditarGasto}
+                                onClick={conAviso(guardarEditarGasto)}
                                 className={[
                                     "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
                                     "hover:bg-accent-hover active:scale-[0.97]",
@@ -2288,7 +2289,7 @@ export default function Cuentas() {
                             <button
                                 type="button"
                                 disabled={savingEditPago}
-                                onClick={guardarEditarPago}
+                                onClick={conAviso(guardarEditarPago)}
                                 className={[
                                     "h-10 px-5 rounded-xl border border-accent bg-accent text-sm font-bold text-white shadow-sm",
                                     "hover:bg-accent-hover active:scale-[0.97]",
@@ -2493,7 +2494,7 @@ export default function Cuentas() {
                                     <button
                                         type="button"
                                         disabled={bloqueado}
-                                        onClick={confirmarBorrado}
+                                        onClick={conAviso(confirmarBorrado)}
                                         className={[
                                             "h-10 px-5 rounded-xl border border-danger bg-danger text-sm font-bold text-white shadow-sm",
                                             "hover:opacity-90 active:scale-[0.97]",

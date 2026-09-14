@@ -9,6 +9,7 @@ import {
 } from "../ventaRapidaAPI";
 
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export type VentaRapidaComandaBarraRow = {
   ID_Comanda: string;
@@ -481,7 +482,7 @@ export default function VerTicketsModal({
 
                           <button
                             type="button"
-                            onClick={() => onCobrarTicket(String(c.ID_Comanda))}
+                            onClick={conAviso(() => onCobrarTicket(String(c.ID_Comanda)))}
                             className={cn(
                               "rounded-xl px-3 py-2 text-sm font-semibold transition",
                               totalPendiente > 0

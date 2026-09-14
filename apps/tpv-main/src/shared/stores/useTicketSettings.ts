@@ -5,6 +5,7 @@ import {
     configPatchTicketSettings,
     type TicketSettings,
 } from "../../features/configuracion/api/configApis";
+import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: TicketSettings = {
     showLogo: true,
@@ -66,17 +67,16 @@ function sanitizePatch(p: Partial<TicketSettings>): Partial<TicketSettings> {
 
 function scheduleFlush() {
     if (timer) window.clearTimeout(timer);
-    timer = window.setTimeout(async () => {
-        const toSave = pending;
-        pending = {};
-        timer = null;
-
-        try {
+    // Autoguardado sin rollback, pero el fallo se avisa (ver useBusinessSettings).
+    timer = window.setTimeout(
+        conAviso(async () => {
+            const toSave = pending;
+            pending = {};
+            timer = null;
             await configPatchTicketSettings(toSave);
-        } catch (e) {
-            console.error("Ticket_Settings save error:", e);
-        }
-    }, 250);
+        }, "No se ha podido guardar la configuración del ticket"),
+        250,
+    );
 }
 
 export const useTicketSettings = create<TicketSettingsState>((set, get) => ({

@@ -46,6 +46,7 @@ import { Badge, Button, Card, Input } from "../shared/ui";
 import Titlebar from "./layoutComponent/Titlebar";
 
 import LogoAltaria from "../assets/img/logo-altaria-azul-transparente.png";
+import { conAviso } from "../shared/lib/conAviso";
 
 /* =========================
    Pairing helpers
@@ -934,7 +935,7 @@ export default function AppBoot({ router }: { router: any }) {
                                     <button
                                         type="button"
                                         disabled={busy}
-                                        onClick={() => choose("tpv")}
+                                        onClick={conAviso(() => choose("tpv"))}
                                         className={cn(
                                             "group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
                                             "transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
@@ -980,7 +981,7 @@ export default function AppBoot({ router }: { router: any }) {
                                     <button
                                         type="button"
                                         disabled={busy}
-                                        onClick={() => choose("handy")}
+                                        onClick={conAviso(() => choose("handy"))}
                                         className={cn(
                                             "group flex min-h-[280px] flex-col rounded-2xl border border-border bg-surface p-5 text-left",
                                             "transition duration-200 hover:-translate-y-0.5 hover:border-accent hover:shadow-lg",
@@ -1094,7 +1095,7 @@ export default function AppBoot({ router }: { router: any }) {
                                         variant="secondary"
                                         size="sm"
                                         disabled={busy || handyPairBusy}
-                                        onClick={goBackToModePicker}
+                                        onClick={conAviso(goBackToModePicker)}
                                     >
                                         ← Volver
                                     </Button>
@@ -1363,7 +1364,7 @@ export default function AppBoot({ router }: { router: any }) {
                                         variant="secondary"
                                         size="sm"
                                         disabled={busy}
-                                        onClick={goBackToModePicker}
+                                        onClick={conAviso(goBackToModePicker)}
                                     >
                                         ← Volver
                                     </Button>
@@ -1457,7 +1458,7 @@ export default function AppBoot({ router }: { router: any }) {
                                         <RechazoPrevio motivo={gate.last_rejection ?? null} />
 
                                         <form
-                                            onSubmit={submitActivation}
+                                            onSubmit={conAviso(submitActivation)}
                                             className="mt-6 grid gap-5"
                                         >
                                             <div>
@@ -1636,7 +1637,7 @@ export default function AppBoot({ router }: { router: any }) {
 
                                                     <button
                                                         type="button"
-                                                        onClick={requestDeviceChangeCode}
+                                                        onClick={conAviso(requestDeviceChangeCode)}
                                                         disabled={otpSending}
                                                         className="mt-2 text-xs font-semibold text-accent hover:underline disabled:opacity-50"
                                                     >
@@ -1703,7 +1704,7 @@ export default function AppBoot({ router }: { router: any }) {
                     ) : !gate.allowed ? (
                         <BlockedScreen
                             reason={gate.reason}
-                            onRetry={() => refreshGate(true)}
+                            onRetry={conAviso(() => refreshGate(true))}
                             onClear={() => {
                                 invokeClient("license_clear_state")
                                     .catch((e: unknown) => setErr(toAppError(e).message))

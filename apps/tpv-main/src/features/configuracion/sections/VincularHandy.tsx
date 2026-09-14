@@ -14,6 +14,7 @@ import {
 	usePairPendientes,
 	useRevocarHandy,
 } from "../pairingQueries";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	// SYNC-17: la sección ya no se tapa (antes exigía el modo "online", que ya no existe). Vincular
@@ -498,7 +499,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 
 									<div className="shrink-0">
 										<GhostButton
-											onClick={() => revoke(d.deviceId)}
+											onClick={conAviso(() => revoke(d.deviceId))}
 											disabled={revokingId === d.deviceId}
 										>
 											{revokingId === d.deviceId

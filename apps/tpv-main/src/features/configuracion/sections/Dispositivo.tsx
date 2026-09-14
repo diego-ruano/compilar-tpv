@@ -12,6 +12,7 @@ import { confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
 import { Panel } from "../ui/Panel";
 import { GhostButton } from "../ui/Buttons";
 import { useMode } from "../../../shared/stores/useMode";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export function Dispositivo({ darkMode }: { darkMode: boolean }) {
 	const setMode = useMode((s) => s.setMode);
@@ -54,7 +55,7 @@ export function Dispositivo({ darkMode }: { darkMode: boolean }) {
 					</div>
 				) : null}
 
-				<GhostButton onClick={unpair} disabled={busy}>
+				<GhostButton onClick={conAviso(unpair)} disabled={busy}>
 					{busy ? "Desvinculando..." : "Desvincular este dispositivo"}
 				</GhostButton>
 

@@ -9,6 +9,7 @@ import { mesasKeys } from "../../../features/mesasComponents/mesasQueries";
 import { queryClient } from "../../../shared/lib/queryClient";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTheme } from "../../../shared/stores/useTheme";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 /**
  * Tipos
@@ -492,7 +493,7 @@ function useUnsavedGuard(enabled: boolean) {
     const guardedNavigate = (to: any, opts?: any) => {
         if (!enabled) return navigate(to, opts);
         setOpen(true);
-        pendingActionRef.current = () => navigate(to, opts);
+        pendingActionRef.current = () => void navigate(to, opts);
     };
 
     const confirmLeave = () => {
@@ -1262,7 +1263,7 @@ export default function EditTables() {
                             <IconButton
                                 icon="←"
                                 variant="neutral"
-                                onClick={() => guard.guardedNavigate("/Mesas")}
+                                onClick={() => void guard.guardedNavigate("/Mesas")}
                             >
                                 Volver
                             </IconButton>
@@ -1465,7 +1466,7 @@ export default function EditTables() {
                                 icon="💾"
                                 variant="primary"
                                 disabled={!activeSalon}
-                                onClick={async () => {
+                                onClick={conAviso(async () => {
                                     try {
                                         // Nombre de zona obligatorio: bloquear el guardado si alguna está vacía.
                                         const sinNombre = salonsRef.current.find(
@@ -1503,7 +1504,7 @@ export default function EditTables() {
                                         console.error("No se pudo guardar el layout:", e);
                                         alert(`No se pudo guardar el layout:\n${toAppError(e).message}`);
                                     }
-                                }}
+                                })}
                             >
                                 Guardar layout
                             </IconButton>

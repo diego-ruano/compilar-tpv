@@ -13,6 +13,7 @@ import {
   useUpsertProducto,
 } from "../../InventaryComponents/inventarioQueries";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 type CategoriaMini = { ID_Categoria: string; Nombre: string };
 type ProveedorMini = {
@@ -235,7 +236,7 @@ export default function AddProductModal({
   return (
     <Modal open={open} onClose={onClose} title="Añadir producto" maxWidthClass="max-w-[980px]">
       <form
-        onSubmit={handleSubmit}
+        onSubmit={conAviso(handleSubmit)}
         className="
           grid grid-cols-1 md:grid-cols-2
           gap-2 sm:gap-3

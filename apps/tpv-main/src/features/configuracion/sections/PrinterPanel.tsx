@@ -17,6 +17,7 @@ import {
     printerSetSelected,
     type PrinterInfo,
 } from "../api/printerApis";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 export function PrinterPanel() {
     const toast = useToast();
@@ -107,7 +108,7 @@ export function PrinterPanel() {
             title="Impresora de tickets"
             subtitle="Elige con qué impresora se imprimirán los tickets en este dispositivo."
             right={
-                <GhostButton onClick={cargar} disabled={loading}>
+                <GhostButton onClick={conAviso(cargar)} disabled={loading}>
                     {loading ? "Buscando…" : "Refrescar"}
                 </GhostButton>
             }
@@ -129,7 +130,7 @@ export function PrinterPanel() {
                             <button
                                 key={p.name}
                                 type="button"
-                                onClick={() => elegir(p.name)}
+                                onClick={conAviso(() => elegir(p.name))}
                                 className={cn(
                                     "flex items-center justify-between gap-3 rounded-xl border px-4 py-3 text-left transition",
                                     isSelected
@@ -178,11 +179,11 @@ export function PrinterPanel() {
                         : "Sin impresora seleccionada."}
                 </div>
                 <div className="flex gap-2">
-                    <GhostButton onClick={abrirCajon} disabled={!selected}>
+                    <GhostButton onClick={conAviso(abrirCajon)} disabled={!selected}>
                         Abrir cajón
                     </GhostButton>
                     <PrimaryButton
-                        onClick={imprimirPrueba}
+                        onClick={conAviso(imprimirPrueba)}
                         disabled={!selected || testing}
                     >
                         {testing ? "Imprimiendo…" : "Imprimir prueba"}

@@ -13,7 +13,7 @@ export default function NotFound() {
                 </p>
 
                 <button
-                    onClick={() => navigate("/", { replace: true })}
+                    onClick={() => void navigate("/", { replace: true })}
                     className="px-4 py-2 rounded-xl bg-verde text-white font-semibold w-fit"
                 >
                     Volver al menú principal

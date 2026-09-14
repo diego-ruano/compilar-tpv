@@ -17,6 +17,7 @@ import { useAuth } from "../../shared/stores/useAuth";
 import { useMode } from "../../shared/stores/useMode";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /**
  * Elegir el PIN del primer arranque. Se llega aqui de dos maneras:
@@ -355,7 +356,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                             fullWidth
                             loading={saving}
                             disabled={!canSave}
-                            onClick={onSave}
+                            onClick={conAviso(onSave)}
                             leftIcon={<ShieldCheck className="size-5" aria-hidden />}
                             className="mt-1"
                         >

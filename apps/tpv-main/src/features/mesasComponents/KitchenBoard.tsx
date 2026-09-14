@@ -4,6 +4,7 @@ import {
     cocinaSetLineaEstado,
     type KitchenRow,
 } from "./mesasApi";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type KitchenLine = {
     idDetalle: string;
@@ -276,14 +277,14 @@ export default function KitchenBoard({
                                                     disabled={
                                                         !idUsuarioCocinero
                                                     }
-                                                    onClick={() =>
+                                                    onClick={conAviso(() =>
                                                         marcarLinea(
                                                             l.idDetalle,
                                                             preparado
                                                                 ? "PENDIENTE"
                                                                 : "PREPARADO",
                                                         )
-                                                    }
+                                                    )}
                                                     className={cn(
                                                         "w-full rounded-xl border p-3 text-left transition flex items-center justify-between gap-3",
                                                         "border-border hover:bg-surface-2",

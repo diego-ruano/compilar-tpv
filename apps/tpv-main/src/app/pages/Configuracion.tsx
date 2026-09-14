@@ -33,6 +33,7 @@ import { Conectividad } from "../../features/configuracion/sections/Conectividad
 import { Dispositivo } from "../../features/configuracion/sections/Dispositivo";
 import { VincularHandy } from "../../features/configuracion/sections/VincularHandy";
 import { Actualizaciones } from "../../features/configuracion/sections/Actualizaciones";
+import { conAviso } from "../../shared/lib/conAviso";
 
 
 export default function Configuracion() {
@@ -725,7 +726,7 @@ export default function Configuracion() {
                                                 setContactPhone={setContactPhone}
                                                 loading={!contactReady}
                                                 saving={savingContact}
-                                                onSave={onSaveContact}
+                                                onSave={conAviso(onSaveContact)}
                                             />
                                         ) : null}
 

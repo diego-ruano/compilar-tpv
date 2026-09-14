@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertirABase64 } from "../utils/inventarioFormat";
 import { useCreateCategoria } from "../inventarioQueries";
 import { triggerImageUploadDrain } from "../../../shared/lib/imageUrl";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -136,7 +137,7 @@ export default function AddCategoryModal({
 
     return (
         <Modal open={open} onClose={handleClose} title="Añadir categoría">
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+            <form onSubmit={conAviso(handleSubmit)} className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
                     <label className="font-semibold text-fg">
                         Nombre <span className="text-danger">*</span>

@@ -33,6 +33,7 @@ import {
   useCreateCliente,
   useUpdateCliente,
 } from "../../features/ClientsComponents/clientesQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type Vista = "list" | "detail";
 
@@ -371,7 +372,7 @@ export default function Clientes() {
 
                 <button
                   type="button"
-                  onClick={() => recargarSegunFiltroManteniendoSeleccion()}
+                  onClick={conAviso(() => recargarSegunFiltroManteniendoSeleccion())}
                   className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg-muted transition hover:bg-surface-2 hover:text-fg"
                 >
                   <RefreshCw className={cn("size-4", loading && "animate-spin")} aria-hidden />
@@ -565,7 +566,7 @@ export default function Clientes() {
               <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2.5 font-semibold text-accent-fg shadow-sm transition hover:bg-accent-hover active:scale-[0.98] cursor-pointer sm:py-2"
-                  onClick={abrirEditarClienteModal}
+                  onClick={conAviso(abrirEditarClienteModal)}
                 >
                   <Pencil className="size-4" aria-hidden />
                   Editar
@@ -710,7 +711,7 @@ export default function Clientes() {
 
             <button
               type="button"
-              onClick={guardarCliente}
+              onClick={conAviso(guardarCliente)}
               disabled={loading}
               className={cn(
                 "w-full rounded-xl px-4 py-2 font-semibold transition sm:w-auto",

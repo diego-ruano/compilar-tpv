@@ -34,6 +34,7 @@ import {
     type DbUser,
     type PunchStatus,
 } from "../../features/login/loginApi";
+import { conAviso } from "../../shared/lib/conAviso";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -532,16 +533,16 @@ export default function Login() {
                 </div>
                 <div className="flex w-fit items-center gap-1 p-1 px-1.5">
                     <ThemeToggle size="sm" />
-                    <IconButton size="sm" label="Minimizar" onClick={() => ventana.minimize()}>
+                    <IconButton size="sm" label="Minimizar" onClick={conAviso(() => ventana.minimize())}>
                         <Minus className="size-4" aria-hidden />
                     </IconButton>
-                    <IconButton size="sm" label="Maximizar" onClick={() => ventana.toggleMaximize()}>
+                    <IconButton size="sm" label="Maximizar" onClick={conAviso(() => ventana.toggleMaximize())}>
                         <Square className="size-3.5" aria-hidden />
                     </IconButton>
                     <IconButton
                         size="sm"
                         label="Cerrar"
-                        onClick={() => ventana.close()}
+                        onClick={conAviso(() => ventana.close())}
                         className="hover:bg-danger-soft hover:text-danger"
                     >
                         <X className="size-4" aria-hidden />
@@ -738,7 +739,7 @@ export default function Login() {
                                             type="checkbox"
                                             className="h-4 w-4 rounded border-border accent-accent"
                                             checked={turnoPartido}
-                                            onChange={(e) => handleTurnoPartidoToggle(e.target.checked)}
+                                            onChange={conAviso((e) => handleTurnoPartidoToggle(e.target.checked))}
                                             disabled={!selectedUserId}
                                         />
                                         <span className="text-xs text-fg-muted">Partido</span>
@@ -748,7 +749,7 @@ export default function Login() {
                                 <Button
                                     variant={ficharTone === "action" ? "primary" : "secondary"}
                                     fullWidth
-                                    onClick={handlePunch}
+                                    onClick={conAviso(handlePunch)}
                                     disabled={ficharDisabled}
                                     className="mt-2"
                                 >
@@ -786,7 +787,7 @@ export default function Login() {
                                                     type="checkbox"
                                                     className="h-4 w-4 rounded border-border accent-accent"
                                                     checked={turnoPartido}
-                                                    onChange={(e) => handleTurnoPartidoToggle(e.target.checked)}
+                                                    onChange={conAviso((e) => handleTurnoPartidoToggle(e.target.checked))}
                                                     disabled={!selectedUserId}
                                                 />
                                                 <span className="text-sm text-fg-muted">Hoy tienes turno partido</span>
@@ -862,7 +863,7 @@ export default function Login() {
                                         variant={ficharTone === "action" ? "primary" : "secondary"}
                                         size="lg"
                                         fullWidth
-                                        onClick={handlePunch}
+                                        onClick={conAviso(handlePunch)}
                                         disabled={ficharDisabled}
                                     >
                                         {loadingPunch ? "Cargando..." : ficharLabel}
@@ -1031,7 +1032,7 @@ export default function Login() {
 
                             <button
                                 type="button"
-                                onClick={handleSubmit}
+                                onClick={conAviso(handleSubmit)}
                                 disabled={!canEnter}
                                 className={cn(
                                     "inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl sm:h-[clamp(2.75rem,7dvh,4rem)] sm:rounded-2xl",

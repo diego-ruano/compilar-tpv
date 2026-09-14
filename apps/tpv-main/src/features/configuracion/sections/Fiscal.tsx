@@ -47,6 +47,7 @@ import {
     type DeclaracionResponsable,
 } from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 /** `AAAA-MM-DD` de hoy en hora local (`toISOString` da UTC y en España adelanta el día por la noche). */
 function hoyISO(): string {
@@ -378,7 +379,7 @@ export function Fiscal({
                 title="Datos fiscales del negocio"
                 subtitle="Quién factura. Sin esto no se puede cobrar."
                 right={
-                    <PrimaryButton onClick={guardarObligado} disabled={!dirty || saving}>
+                    <PrimaryButton onClick={conAviso(guardarObligado)} disabled={!dirty || saving}>
                         {saving ? "Guardando…" : "Guardar"}
                     </PrimaryButton>
                 }
@@ -747,7 +748,7 @@ export function Fiscal({
                 title="Certificado electrónico"
                 subtitle="Con el que el equipo se identifica ante la AEAT."
                 right={
-                    <GhostButton onClick={cargarCertificados} disabled={cargandoCerts}>
+                    <GhostButton onClick={conAviso(cargarCertificados)} disabled={cargandoCerts}>
                         {cargandoCerts ? "Buscando…" : certs ? "Volver a buscar" : "Buscar"}
                     </GhostButton>
                 }
@@ -838,7 +839,7 @@ export function Fiscal({
                                     </div>
                                     <div className="flex shrink-0 items-center gap-2">
                                         <GhostButton
-                                            onClick={() => probar(c.huella)}
+                                            onClick={conAviso(() => probar(c.huella))}
                                             disabled={probando}
                                         >
                                             {probando ? "Probando…" : "Probar"}
@@ -848,7 +849,7 @@ export function Fiscal({
                                                 En uso
                                             </span>
                                         ) : (
-                                            <PrimaryButton onClick={() => elegir(c.huella)}>
+                                            <PrimaryButton onClick={conAviso(() => elegir(c.huella))}>
                                                 Usar este
                                             </PrimaryButton>
                                         )}

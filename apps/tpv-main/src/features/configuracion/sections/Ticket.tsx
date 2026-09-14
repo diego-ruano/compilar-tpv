@@ -9,6 +9,7 @@ import { Checkbox } from "../ui/Toggles";
 import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { PrinterPanel } from "./PrinterPanel";
 import { buildTicketPayload, printerPrintTicket } from "../api/printerApis";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 type TicketWidthOpt = {
     value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
@@ -325,7 +326,7 @@ export function Ticket({
 
                 <div className="mt-4 flex items-center justify-end gap-2">
                     <GhostButton
-                        onClick={onSaveBusiness}
+                        onClick={conAviso(onSaveBusiness)}
                         disabled={!canSaveBusiness}
                     >
                         {savingBiz ? "Guardando…" : "Guardar"}
@@ -344,7 +345,7 @@ export function Ticket({
                 open={previewOpen}
                 onClose={() => setPreviewOpen(false)}
                 items={previewItems}
-                onPrint={imprimirPreview}
+                onPrint={conAviso(imprimirPreview)}
             />
         </div>
     );

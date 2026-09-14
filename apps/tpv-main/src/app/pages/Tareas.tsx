@@ -17,6 +17,7 @@ import {
 import { useAuth } from "../../shared/stores/useAuth";
 import { esAdmin } from "../../shared/lib/permisos";
 import { ListChecks, Plus, X, Trash2, RotateCcw } from "lucide-react";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type TareaUI = {
   ID_Tarea: string;
@@ -490,7 +491,7 @@ export default function Tareas() {
                       title={t.Titulo}
                       subtitle={subtitle}
                       done={done}
-                      onClick={() => openDetalle(t)}
+                      onClick={conAviso(() => openDetalle(t))}
                     />
                   );
                 })
@@ -519,7 +520,7 @@ export default function Tareas() {
                       title={t.Titulo}
                       subtitle={subtitle}
                       done={done}
-                      onClick={() => openDetalle(t)}
+                      onClick={conAviso(() => openDetalle(t))}
                     />
                   );
                 })
@@ -606,7 +607,7 @@ export default function Tareas() {
               Cancelar
             </button>
             <button
-              onClick={crearTarea}
+              onClick={conAviso(crearTarea)}
               className="w-full rounded-xl bg-accent px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
               disabled={saving || !titulo.trim() || !idsAsignados.length}
             >
@@ -663,7 +664,7 @@ export default function Tareas() {
                     </button>
                   ) : (
                     <button
-                      onClick={finalizar}
+                      onClick={conAviso(finalizar)}
                       className="w-full rounded-xl bg-accent px-4 py-2.5 text-white hover:opacity-90 sm:w-auto sm:rounded-2xl"
                       disabled={!idTrabajador}
                     >
@@ -824,7 +825,7 @@ export default function Tareas() {
                         Cancelar
                       </button>
                       <button
-                        onClick={guardarCambiosAdmin}
+                        onClick={conAviso(guardarCambiosAdmin)}
                         className="w-full rounded-xl bg-accent px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
                         disabled={
                           adminSaving ||
@@ -874,7 +875,7 @@ export default function Tareas() {
             Cancelar
           </button>
           <button
-            onClick={confirmarBorrarTareaAdmin}
+            onClick={conAviso(confirmarBorrarTareaAdmin)}
             className="w-full rounded-xl bg-danger px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
             disabled={confirmando}
           >
@@ -982,10 +983,10 @@ export default function Tareas() {
             Cancelar
           </button>
           <button
-            onClick={async () => {
+            onClick={conAviso(async () => {
               await vaciarPapeleraM.mutateAsync();
               setConfirmVaciar(false);
-            }}
+            })}
             disabled={vaciarPapeleraM.isPending}
             className="w-full rounded-xl bg-danger px-4 py-2.5 text-white hover:opacity-90 disabled:opacity-60 sm:w-auto sm:rounded-2xl"
           >

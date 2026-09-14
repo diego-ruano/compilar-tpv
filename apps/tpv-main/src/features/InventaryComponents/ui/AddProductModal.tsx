@@ -18,6 +18,7 @@ import {
     useProveedoresMini,
     useUpsertProducto,
 } from "../inventarioQueries";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 type CategoriaMini = { ID_Categoria: string; Nombre: string };
 
@@ -393,7 +394,7 @@ export function AddProductModal({
             maxWidthClass="max-w-[980px]"
         >
             <div className="pr-1">
-                <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <form onSubmit={conAviso(handleSubmit)} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="md:col-span-2">
                         <label htmlFor="producto-nombre" className="block font-semibold">
                             Nombre *

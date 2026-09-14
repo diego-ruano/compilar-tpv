@@ -5,6 +5,7 @@ import LogoAltaria from "../../assets/img/logo-altaria-azul-transparente.png";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../../shared/lib/useImageUrl";
 import { IconButton, ThemeToggle } from "../../shared/ui";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /**
  * Barra de título reutilizable: zona de arrastre (logo + nombre del negocio),
@@ -39,16 +40,16 @@ function Titlebar() {
 
             <div className="flex w-fit items-center gap-1 p-1 px-1.5">
                 <ThemeToggle size="sm" />
-                <IconButton size="sm" label="Minimizar" onClick={() => ventana.minimize()}>
+                <IconButton size="sm" label="Minimizar" onClick={conAviso(() => ventana.minimize())}>
                     <Minus className="size-4" aria-hidden />
                 </IconButton>
-                <IconButton size="sm" label="Maximizar" onClick={() => ventana.toggleMaximize()}>
+                <IconButton size="sm" label="Maximizar" onClick={conAviso(() => ventana.toggleMaximize())}>
                     <Square className="size-3.5" aria-hidden />
                 </IconButton>
                 <IconButton
                     size="sm"
                     label="Cerrar"
-                    onClick={() => ventana.close()}
+                    onClick={conAviso(() => ventana.close())}
                     className="hover:bg-danger-soft hover:text-danger"
                 >
                     <X className="size-4" aria-hidden />

@@ -359,15 +359,16 @@ corren en CI — clippy dentro del job de tests de Rust, para no pagar el build 
 
 **No hay formateador y no debe haberlo.** No hay reglas de comillas, ni de punto y coma, ni de
 sangría: el código ya está escrito y reescribirlo entero en un commit sólo enterraría el historial.
-Las reglas que hay son de **análisis** — cazan lo que `tsc` no puede ver — y son **tres**:
+Las reglas que hay son de **análisis** — cazan lo que `tsc` no puede ver — y son **cuatro**:
 
 | Regla | Qué caza | Nivel |
 |---|---|---|
 | `react-hooks/rules-of-hooks` | un hook dentro de un `if`: corrompe el estado del componente | error |
 | `react-hooks/exhaustive-deps` | *stale closures*: un efecto que actúa sobre un valor caducado | aviso |
 | `@typescript-eslint/no-floating-promises` | una promesa rechazada sin `catch`, o sea un fallo **mudo** | error |
+| `@typescript-eslint/no-misused-promises` | la misma promesa entregada a quien no la espera (`onClick={guardar}`, `setTimeout(async …)`): React la tira | error |
 
-**Antes de añadir la cuarta**, la pregunta no es «¿esto es mejor estilo?» sino «¿esta regla habría
+**Antes de añadir la quinta**, la pregunta no es «¿esto es mejor estilo?» sino «¿esta regla habría
 cazado un bug que hemos tenido?». Es la misma razón por la que la lista de comandos gateados de
 SEC-01 es corta: un linter que grita se desactiva a la semana, y entonces no queda ni el linter ni
 la costumbre. Lo que se apaga está apagado **con su motivo escrito** en `eslint.config.mjs`; si vas
@@ -381,7 +382,9 @@ a encender algo, lee esos motivos primero.
   configuración y heredarán la regla de las promesas.
 - **`void` no es decoración.** Marca «esto es fuego y olvido, a sabiendas». Si lo que va detrás
   puede fallar de una forma que el usuario deba ver, `void` es la respuesta equivocada: lo correcto
-  es un `.catch` que lo cuente.
+  es un `.catch` que lo cuente. Si lo que se entrega es un manejador (`onClick`, `onSubmit`, un
+  `setTimeout`), ese `.catch` ya existe: `conAviso(fn)` (`shared/lib/conAviso.ts`) reporta a Sentry
+  y lo dice en pantalla.
 
 ### Capa de datos del frontend (TanStack Query)
 

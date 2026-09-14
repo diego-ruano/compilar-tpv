@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { invokeClient } from "@tpv/client";
 import { esPermisoDenegado } from "../../../shared/lib/permisos";
 import { useMode } from "../../../shared/stores/useMode";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 type Rol = {
   ID_Rol: string;
@@ -426,7 +427,7 @@ function EditTrabajador() {
 
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => void navigate(-1)}
             className="inline-flex w-full shrink-0 cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-semibold text-fg transition hover:bg-surface-2 xs:w-auto"
           >
             <ArrowLeft className="size-4" aria-hidden />
@@ -635,7 +636,7 @@ function EditTrabajador() {
         <div className="flex w-full flex-col-reverse items-stretch justify-end gap-3 pt-1 sm:flex-row sm:items-center">
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={() => void navigate(-1)}
             className="w-full cursor-pointer rounded-xl border border-border bg-surface px-4 py-2 font-semibold text-fg transition hover:bg-surface-2 sm:w-auto"
           >
             Cancelar
@@ -644,7 +645,7 @@ function EditTrabajador() {
           <button
             type="button"
             disabled={saving}
-            onClick={guardar}
+            onClick={conAviso(guardar)}
             className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent px-4 py-2 font-semibold text-white shadow-sm transition hover:bg-accent-hover active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             <Save className="size-4" aria-hidden />

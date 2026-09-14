@@ -23,6 +23,7 @@ import {
   useLotesByProducto,
   useProductoDetalle,
 } from "./inventarioQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type Props = {
   open: boolean;
@@ -481,10 +482,10 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                 }}
                 productId={productId}
                 loteToEdit={editingLote}
-                onSaved={async () => {
+                onSaved={conAviso(async () => {
                   // La mutación de creación de lote ya invalida la caché; refrescamos por si acaso.
                   await lotesQuery.refetch();
-                }}
+                })}
               />
 
             </>
@@ -520,7 +521,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                   <button
                     type="button"
                     disabled={deleting}
-                    onClick={async () => {
+                    onClick={conAviso(async () => {
                       if (!p) return;
                       setDeleting(true);
                       try {
@@ -530,7 +531,7 @@ export default function ProductDetailModal({ open, onClose, productId, onEdit, o
                       } finally {
                         setDeleting(false);
                       }
-                    }}
+                    })}
                     className="w-full cursor-pointer rounded-xl bg-danger px-4 py-2 font-extrabold text-danger-fg shadow-sm transition hover:opacity-90 disabled:opacity-60"
                   >
                     {deleting ? "Eliminando..." : "Eliminar"}

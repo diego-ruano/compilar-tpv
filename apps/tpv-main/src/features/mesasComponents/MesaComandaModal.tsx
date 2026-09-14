@@ -38,6 +38,7 @@ import {
     type CategoriaDTO,
     type ProductoDTO,
 } from "./mesasApi";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================
    Tipos
@@ -221,7 +222,7 @@ function NotaLineaModal({
 
                         <button
                             type="button"
-                            onClick={() => onSave(value)}
+                            onClick={conAviso(() => onSave(value))}
                             className="px-4 py-2 rounded-xl bg-accent text-white hover:bg-accent-hover text-sm font-semibold"
                         >
                             Guardar
@@ -708,7 +709,7 @@ export default function MesaComandaModal({
             }
         };
 
-        const t = window.setTimeout(run, 180);
+        const t = window.setTimeout(() => void run(), 180);
         return () => window.clearTimeout(t);
     }, [open, q]);
 
@@ -1157,7 +1158,7 @@ export default function MesaComandaModal({
                             <button
                                 type="button"
                                 className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-blue-600 text-blue-700 bg-surface hover:bg-blue-600 hover:text-white transition"
-                                onClick={async () => {
+                                onClick={conAviso(async () => {
                                     try {
                                         await reservaMarcarActivaAhora(reserva.idReserva);
                                         setEstadoReserva("ACTIVA");
@@ -1182,7 +1183,7 @@ export default function MesaComandaModal({
                                     } finally {
                                         setLoadingTicket(false);
                                     }
-                                }}
+                                })}
                             >
                                 ✅ Ha llegado ya el cliente
                             </button>
@@ -1192,7 +1193,7 @@ export default function MesaComandaModal({
                             <button
                                 type="button"
                                 className="shrink-0 px-4 py-2 rounded-xl font-semibold border-2 border-danger text-danger bg-surface hover:bg-danger hover:text-white transition"
-                                onClick={async () => {
+                                onClick={conAviso(async () => {
                                     try {
                                         await reservaFinalizar(reserva.idReserva);
                                         setEstadoReserva("FINALIZADA");
@@ -1201,7 +1202,7 @@ export default function MesaComandaModal({
                                     } catch (e) {
                                         console.error(e);
                                     }
-                                }}
+                                })}
                             >
                                 🧾 El cliente abandona la mesa
                             </button>
@@ -1312,7 +1313,7 @@ export default function MesaComandaModal({
                                                         : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                                 )}
                                                 disabled={diferencia < 0}
-                                                onClick={() => cobrar("efectivo")}
+                                                onClick={conAviso(() => cobrar("efectivo"))}
                                                 type="button"
                                                 title={
                                                     diferencia < 0
@@ -1403,8 +1404,8 @@ export default function MesaComandaModal({
                                                         key={p.ID_Producto}
                                                         p={p}
                                                         qty={countEnTicket(p.ID_Producto)}
-                                                        onAdd={addProductoToTicket}
-                                                        onRemove={removeProductoFromTicket}
+                                                        onAdd={conAviso(addProductoToTicket)}
+                                                        onRemove={conAviso(removeProductoFromTicket)}
                                                         onInfo={abrirDetalleProducto}
                                                     />
                                                 ))}
@@ -1448,8 +1449,8 @@ export default function MesaComandaModal({
                                                     key={p.ID_Producto}
                                                     p={p}
                                                     qty={countEnTicket(p.ID_Producto)}
-                                                    onAdd={addProductoToTicket}
-                                                    onRemove={removeProductoFromTicket}
+                                                    onAdd={conAviso(addProductoToTicket)}
+                                                    onRemove={conAviso(removeProductoFromTicket)}
                                                     onInfo={abrirDetalleProducto}
                                                 />
                                             ))}
@@ -1669,7 +1670,7 @@ export default function MesaComandaModal({
                                                 : "bg-surface-2 text-fg-subtle cursor-not-allowed",
                                         )}
                                         disabled={!puedeCobrar || !haySeleccion}
-                                        onClick={() => cobrar("tarjeta")}
+                                        onClick={conAviso(() => cobrar("tarjeta"))}
                                         type="button"
                                     >
                                         Cobrar con tarjeta

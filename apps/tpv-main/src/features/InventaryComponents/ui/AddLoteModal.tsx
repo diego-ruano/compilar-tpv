@@ -3,6 +3,7 @@ import Modal from "../ui/Modal";
 import { useToast } from "../../../shared/toast";
 import { type LoteRow } from "../api/inventarioAPI";
 import { useCreateLote, useUpdateLote } from "../inventarioQueries";
+import { conAviso } from "../../../shared/lib/conAviso";
 
 type Props = {
     open: boolean;
@@ -129,7 +130,7 @@ export default function AddLoteModal({ open, onClose, productId, loteToEdit = nu
 
     return (
         <Modal open={open} onClose={() => { if (!loading) { reset(); onClose(); } }} title={isEdit ? "Editar lote" : "Añadir lote"} maxWidthClass="max-w-[720px]">
-            <form onSubmit={guardar} className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <form onSubmit={conAviso(guardar)} className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="md:col-span-2">
                     <label className="text-sm font-semibold text-fg">Código de lote *</label>
                     <input

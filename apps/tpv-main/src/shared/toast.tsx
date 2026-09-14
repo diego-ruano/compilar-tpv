@@ -2,6 +2,7 @@ import React, {
     createContext,
     useCallback,
     useContext,
+    useEffect,
     useMemo,
     useRef,
     useState,
@@ -25,6 +26,14 @@ type ToastContextValue = {
 };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
+
+// Los avisos del `ToastProvider` montado, para quien avisa desde fuera de un componente y no puede
+// llamar a un hook (`shared/lib/conAviso.ts`). `null` mientras no haya ninguno montado.
+let avisosMontados: ToastContextValue | null = null;
+
+export function avisosFueraDeReact(): ToastContextValue | null {
+    return avisosMontados;
+}
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -132,6 +141,13 @@ export function ToastProvider({
         }),
         [push],
     );
+
+    useEffect(() => {
+        avisosMontados = api;
+        return () => {
+            if (avisosMontados === api) avisosMontados = null;
+        };
+    }, [api]);
 
     return (
         <ToastContext.Provider value={api}>

@@ -15,6 +15,7 @@ import { AddProductModal } from "../../features/InventaryComponents/ui/AddProduc
 import ProductDetailModal from "../../features/InventaryComponents/ProductDetailModal";
 
 import { useDeleteProducto } from "../../features/InventaryComponents/inventarioQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 export default function Inventario() {
     const toast = useToast();
@@ -112,13 +113,13 @@ export default function Inventario() {
                     }}
                     categoriaPreseleccionadaId={categoriaSeleccionada ? categoriaSeleccionada.ID_Categoria : null}
                     productIdToEdit={productIdToEdit}
-                    onSaved={async () => {
+                    onSaved={conAviso(async () => {
                         if (categoriaSeleccionada) {
                             await cargarProductos(categoriaSeleccionada.ID_Categoria);
                         } else {
                             await cargarResumenInventario();
                         }
-                    }}
+                    })}
                 />
 
                 <ProductDetailModal

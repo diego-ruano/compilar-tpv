@@ -4,6 +4,7 @@ import {
     configPatchContactSettings,
     type ContactSettings,
 } from "../../features/configuracion/api/configApis";
+import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: ContactSettings = {
     recoveryEmail: "",
@@ -38,15 +39,15 @@ export const useContactSettings = create<ContactSettingsState>((set, get) => ({
         set({ ...get(), ...patch });
         pending = { ...pending, ...patch };
         if (timer) window.clearTimeout(timer);
-        timer = window.setTimeout(async () => {
-            const toSave = pending;
-            pending = {};
-            timer = null;
-            try {
+        // Autoguardado sin rollback, pero el fallo se avisa (ver useBusinessSettings).
+        timer = window.setTimeout(
+            conAviso(async () => {
+                const toSave = pending;
+                pending = {};
+                timer = null;
                 await configPatchContactSettings(toSave);
-            } catch (e) {
-                console.error("Contact_Settings save error:", e);
-            }
-        }, 400);
+            }, "No se han podido guardar los datos de contacto"),
+            400,
+        );
     },
 }));

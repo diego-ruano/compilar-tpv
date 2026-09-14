@@ -31,6 +31,7 @@ import { useToast } from "../../shared/toast";
 // ✅ Modal + tipos del layout (MapCanvas)
 import ReservaMesaMapModal from "../../features/reservas/ReservaMesaMapModal";
 import type { Salon, MesaMeta } from "../../features/mesasComponents/types";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /* =========================
    Tipos
@@ -655,7 +656,7 @@ export default function Reservas() {
               {mostrarFormulario ? (
                 <div className="relative min-h-full">
                   <form
-                    onSubmit={guardarReserva}
+                    onSubmit={conAviso(guardarReserva)}
                     className="min-h-full rounded-xl border border-border bg-surface-2 p-3"
                   >
                     <div className="mb-2 text-xs font-extrabold tracking-widest text-fg-muted">
@@ -993,7 +994,7 @@ export default function Reservas() {
                   <button
                     type="button"
                     disabled={borrando || !confirmBorrar.reserva}
-                    onClick={async () => {
+                    onClick={conAviso(async () => {
                       const res = confirmBorrar.reserva;
                       if (!res) return;
 
@@ -1004,7 +1005,7 @@ export default function Reservas() {
                       } finally {
                         setBorrando(false);
                       }
-                    }}
+                    })}
                     className="rounded-lg bg-danger px-3 py-2 text-xs font-extrabold tracking-widest text-white hover:bg-danger disabled:opacity-60"
                   >
                     {borrando ? "BORRANDO..." : "BORRAR"}

@@ -34,6 +34,7 @@ import {
     resetCash,
     type CashCount,
 } from "./cuentasApis";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type Props = {
     open: boolean;
@@ -329,7 +330,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                     </button>
                     <button
                         type="button"
-                        onClick={confirmar}
+                        onClick={conAviso(confirmar)}
                         disabled={!puedeCerrar}
                         className={cn(
                             "h-10 rounded-xl bg-accent px-4 text-sm font-bold text-accent-fg shadow-sm transition active:scale-[0.98]",

@@ -42,6 +42,7 @@ import {
   usePapelera,
   useRestaurar,
 } from "../../features/notificaciones/notificacionesQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 /** Aspecto por severidad (icono + colores suaves, claro/oscuro). */
 const SEVERIDAD: Record<string, { icon: LucideIcon; className: string }> = {
@@ -133,7 +134,7 @@ export default function Notificaciones() {
         <div className="grid shrink-0 grid-cols-[auto_1fr] items-center gap-2 xs:flex">
           <button
             type="button"
-            onClick={() => notificaciones.refetch()}
+            onClick={() => void notificaciones.refetch()}
             aria-label="Recargar"
             title="Recargar"
             className="grid size-9 cursor-pointer place-items-center rounded-xl border border-border bg-surface text-fg-muted transition hover:bg-surface-2 hover:text-fg"
@@ -366,7 +367,7 @@ export default function Notificaciones() {
 
                         <button
                           type="button"
-                          onClick={() => onEliminar(n)}
+                          onClick={conAviso(() => onEliminar(n))}
                           disabled={ocupada}
                           aria-label="Eliminar para siempre"
                           title="Eliminar para siempre"

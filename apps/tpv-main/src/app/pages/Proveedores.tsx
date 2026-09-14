@@ -38,6 +38,7 @@ import {
   useSetVinculos,
   useCreateProducto,
 } from "../../features/proveedores/proveedoresQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type ProveedorUI = ProveedorRow & { urlImagen: string };
 type ProductoUI = ProductoRow & { urlImagen: string };
@@ -739,7 +740,7 @@ export default function Proveedores() {
 
                 <button
                   className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-surface py-2 font-semibold text-fg transition hover:bg-surface-2 cursor-pointer"
-                  onClick={abrirVincularProductos}
+                  onClick={conAviso(abrirVincularProductos)}
                 >
                   <Link2 className="size-4" aria-hidden />
                   Vincular productos
@@ -762,7 +763,7 @@ export default function Proveedores() {
 
               <button
                 type="button"
-                onClick={abrirVincularProductos}
+                onClick={conAviso(abrirVincularProductos)}
                 className="inline-flex min-w-0 shrink-0 cursor-pointer items-center justify-center gap-1.5 whitespace-normal break-words rounded-xl border border-border bg-surface px-3 py-2 text-center text-sm font-semibold leading-tight text-fg transition hover:bg-surface-2"
               >
                 <Link2 className="size-4" aria-hidden />
@@ -843,7 +844,7 @@ export default function Proveedores() {
                     type="file"
                     accept="image/*"
                     className="hidden"
-                    onChange={async (e) => {
+                    onChange={conAviso(async (e) => {
                       const file = e.target.files?.[0];
                       if (!file) return;
 
@@ -851,7 +852,7 @@ export default function Proveedores() {
                       setFotoNuevaPreview(previewUrl);
                       setFotoNuevaFile(file);
                       setFotoEliminar(false);
-                    }}
+                    })}
                   />
                 </label>
 
@@ -928,7 +929,7 @@ export default function Proveedores() {
 
           <button
             type="button"
-            onClick={guardarProveedor}
+            onClick={conAviso(guardarProveedor)}
             disabled={loading}
             className={cn(
               "rounded-xl px-4 py-2 font-semibold transition",
@@ -1087,7 +1088,7 @@ export default function Proveedores() {
 
           <button
             type="button"
-            onClick={guardarVinculos}
+            onClick={conAviso(guardarVinculos)}
             disabled={loading}
             className={cn(
               "rounded-xl px-4 py-2 font-semibold transition",
@@ -1150,7 +1151,7 @@ export default function Proveedores() {
 
           <button
             type="button"
-            onClick={crearProductoYSeleccionar}
+            onClick={conAviso(crearProductoYSeleccionar)}
             disabled={loading}
             className={cn(
               "rounded-xl px-4 py-2 font-semibold transition",
@@ -1188,9 +1189,9 @@ export default function Proveedores() {
         }}
         categoriaPreseleccionadaId={null}
         productIdToEdit={productIdToEdit}
-        onSaved={async () => {
+        onSaved={conAviso(async () => {
           await recargarProductosProveedor();
-        }}
+        })}
       />
 
       <Modal
@@ -1236,7 +1237,7 @@ export default function Proveedores() {
           <button
             type="button"
             disabled={confirmando}
-            onClick={confirmarAccionModal}
+            onClick={conAviso(confirmarAccionModal)}
             className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-2 font-semibold text-danger transition hover:opacity-90 disabled:opacity-60"
           >
             <Trash2 className="size-4" aria-hidden />

@@ -15,6 +15,7 @@ import {
   useCancelarPedido,
   useEnviarPedido,
 } from "./pedidosQueries";
+import { conAviso } from "../../shared/lib/conAviso";
 
 type Props = {
   proveedores: ProveedorRow[];
@@ -309,7 +310,7 @@ export default function PedidosSection({ proveedores }: Props) {
             {query.hasNextPage && (
               <button
                 type="button"
-                onClick={() => query.fetchNextPage()}
+                onClick={() => void query.fetchNextPage()}
                 disabled={query.isFetchingNextPage}
                 className="flex w-full cursor-pointer items-center justify-center border-t border-border px-3 py-2.5 text-sm font-medium text-accent transition hover:bg-surface-2 disabled:cursor-default disabled:opacity-60"
               >
@@ -325,9 +326,9 @@ export default function PedidosSection({ proveedores }: Props) {
         onClose={cerrarModal}
         pedido={pedidoAbierto}
         proveedores={proveedores}
-        onSave={handleSave}
-        onCancelarPedido={handleCancelar}
-        onMandarPedido={handleMandar}
+        onSave={conAviso(handleSave)}
+        onCancelarPedido={conAviso(handleCancelar)}
+        onMandarPedido={conAviso(handleMandar)}
         isBusy={isBusy}
       />
     </>
