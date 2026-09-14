@@ -204,8 +204,6 @@ pub(crate) struct DatosObligado {
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada. Configurable porque es
     /// un número que la norma puede mover.
     pub limite_simplif: f64,
-    /// Modo formación encendido: las facturas van a la serie `PRU<año>` y se anulan al terminar.
-    pub formacion: bool,
 }
 
 /// Lee y **valida** los datos fiscales del obligado.
@@ -217,7 +215,7 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
     let mut rows = conn
         .query(
             "SELECT CIF, Razon_Social, Descripcion_Op, Verifactu_Entorno, IVA_Percent, \
-                    Limite_Simplif, COALESCE(Verifactu_Formacion, 0) \
+                    Limite_Simplif \
              FROM Business_Settings WHERE ID = 1 LIMIT 1;",
             (),
         )
@@ -240,7 +238,6 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         &v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
     );
     let iva_general = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(10.0);
-    let formacion = v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0) != 0;
     let limite_simplif = v_f64(row.get_value(5).map_err(db_err)?)
         .filter(|v| *v > 0.0)
         .unwrap_or(vf::LIMITE_SIMPLIFICADA_HOSTELERIA);
@@ -274,7 +271,6 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         entorno,
         iva_general,
         limite_simplif,
-        formacion,
     })
 }
 
@@ -311,34 +307,6 @@ fn serie_rectificativas() -> String {
 fn es_rectificativa(tipo_factura: &str) -> bool {
     matches!(tipo_factura, "R1" | "R2" | "R3" | "R4" | "R5")
 }
-
-/// La serie de las facturas emitidas en **modo formación** (`PRU2027/000001`).
-///
-/// Sale del FAQ de desarrolladores de la AEAT (apartado 11), que sugiere literalmente *«numeración
-/// en una serie especial de tipo PRU 25 XXXX»* para poder distinguirlas. No es un capricho de
-/// formato: es lo que permite encontrarlas todas para anularlas, y lo que hace que en el libro se
-/// vean de un vistazo como lo que son.
-fn serie_formacion() -> String {
-    format!("{PREFIJO_SERIE_FORMACION}{}", serie_actual())
-}
-
-/// Prefijo de TODAS las series de formación, y el patrón `LIKE` con el que se las busca.
-///
-/// ⚠️ **Buscarlas por `Serie = serie_formacion()` era un agujero de calendario.** Esa función mira
-/// el año EN CURSO, así que unas pruebas hechas el 28 de diciembre y cerradas el 2 de enero
-/// buscaban `PRU2028`, no encontraban nada y **no anulaban ninguna**. El panel decía «0 sin anular»
-/// por el mismo motivo, así que ni siquiera avisaba: quedaban facturas de prueba vivas para
-/// Hacienda, que es exactamente lo que este modo existe para impedir.
-///
-/// Por prefijo no hay calendario que valga: se encuentran todas, sean del ejercicio que sean.
-const PREFIJO_SERIE_FORMACION: &str = "PRU";
-const PATRON_SERIE_FORMACION: &str = "PRU%";
-
-/// Lo que se antepone a la descripción de una factura de formación.
-///
-/// El FAQ pide *«describirlas visible y claramente como "de pruebas"»*, y la descripción es lo único
-/// del registro que viaja como texto libre a la AEAT.
-pub const PREFIJO_FORMACION: &str = "PRUEBAS/FORMACION - ";
 
 /// Reserva el siguiente número de la serie y lo devuelve formateado (`2027/000001`).
 ///
@@ -520,12 +488,7 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
     // art. 6.1.a) del RD 1619/2012 lo exige «en todo caso»; el resto —incluida la `F3`, que por el
     // art. 15.6 no es rectificativa— va a la del ejercicio.
     let rectificativa = es_rectificativa(&tipo_factura);
-    // El modo formación manda sobre el resto: sus facturas van a `PRU<año>` sean del tipo que sean,
-    // porque lo que las agrupa no es qué documentan sino que hay que anularlas todas al terminar.
-    // Una rectificativa emitida durante unas pruebas es también una factura de pruebas.
-    let serie = if obligado.formacion {
-        serie_formacion()
-    } else if rectificativa {
+    let serie = if rectificativa {
         serie_rectificativas()
     } else {
         serie_actual()
@@ -650,14 +613,7 @@ pub async fn emitir_alta(db: &WriteGuard<'_>, d: DatosFactura) -> AppResult<Bloq
             Value::Text(obligado.razon_social.clone()),
             Value::Text(tipo_factura.clone()),
             opt_text(d.tipo_rectificativa.clone()),
-            Value::Text(if obligado.formacion {
-                vf::sanear_texto(
-                    &format!("{PREFIJO_FORMACION}{}", obligado.descripcion_op),
-                    500,
-                )
-            } else {
-                obligado.descripcion_op.clone()
-            }),
+            Value::Text(obligado.descripcion_op.clone()),
             Value::Text(importe_txt.clone()),
             Value::Text(cuota_txt.clone()),
             Value::Text(desglose_json(&tramos)),
@@ -895,7 +851,13 @@ pub async fn emitir_cobro(
     numero_reservado: (String, i64),
     importe_pago: f64,
     destinatario: Option<vf::Destinatario>,
-) -> AppResult<BloqueFiscal> {
+) -> AppResult<Option<BloqueFiscal>> {
+    // MODO-PRUEBA (temporal): el número ya dice si el cobro se hizo en modo prueba —la serie se fija
+    // al reservarlo—, y un cobro de prueba no expide factura: ni registro, ni QR, ni datos fiscales.
+    // Se quita entero antes de que Veri*factu sea obligatorio.
+    if vf::es_numero_de_prueba(&numero_reservado.0) {
+        return Ok(None);
+    }
     let obligado = datos_obligado(db).await?;
 
     // Los datos del cliente se validan ANTES de tocar nada: un NIF con el dígito de control mal no
@@ -966,6 +928,7 @@ pub async fn emitir_cobro(
         },
     )
     .await
+    .map(Some)
 }
 
 /// El día de apertura de la comanda a la que pertenece un cobro, en `DD-MM-AAAA`.
@@ -1337,30 +1300,16 @@ pub async fn reservar_numero_factura(db: &WriteGuard<'_>) -> AppResult<(String, 
     reservar_numero(db, &serie_del_cobro(db).await?).await
 }
 
-/// La serie en la que numera **un cobro**: la del ejercicio, o la de formación si el modo está
-/// encendido.
+/// La serie en la que numera **un cobro**: la del ejercicio, o la del modo prueba.
 ///
-/// ## Por qué esto se pregunta AQUÍ y no se corrige después
-///
-/// El camino del cobro reserva el número antes del `INSERT INTO Pagos`, porque `Pagos.Numero_Ticket`
-/// guarda ese mismo valor. Si la serie se decidiera más tarde —en `emitir_alta`, que es donde se
-/// sabe el modo— habría que elegir entre dos males: usar el número reservado y numerar una factura
-/// de pruebas en la serie de ventas, o descartarlo y que el ticket lleve un número que **no
-/// corresponde a ningún registro**. Lo segundo es lo que pasaba: el papel salía sin QR (nadie
-/// encuentra `2027/000045` cuando el registro es `PRU2027/000001`), la reimpresión tampoco, y el
-/// contador de la serie real quedaba gastado — un hueco en el libro de ventas por cada prueba.
-///
-/// Preguntando antes de reservar no hay nada que corregir: el número nace en la serie correcta y
-/// `Pagos.Numero_Ticket` y `Num_Serie_Factura` vuelven a ser el mismo dato.
-///
-/// ## Por qué no hay carrera
-///
-/// Esto y `emitir_alta` corren dentro de la MISMA transacción del cobro, y `set_formacion` toma el
-/// `WriteGuard` (que serializa a todo escritor: sólo hay uno vivo a la vez). Así que el modo no
-/// puede cambiar entre la reserva y la emisión.
+/// Se pregunta AQUÍ, antes de reservar, porque `Pagos.Numero_Ticket` guarda ese mismo número: si se
+/// decidiera después habría que descartar el reservado y el contador de la serie real quedaría con
+/// un hueco. Y no hay carrera: esto y la emisión corren dentro de la misma transacción del cobro.
 async fn serie_del_cobro(db: &WriteGuard<'_>) -> AppResult<String> {
-    Ok(if en_formacion(db).await? {
-        serie_formacion()
+    // MODO-PRUEBA (temporal): los cobros de prueba numeran aparte, y ese número es lo que después
+    // dice —al emitir y al imprimir— que el cobro no expide factura.
+    Ok(if en_modo_prueba(db).await? {
+        vf::SERIE_MODO_PRUEBA.to_string()
     } else {
         serie_actual()
     })
@@ -1742,14 +1691,11 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
     .filter(|v| *v > 0);
     let antiguedad_pendiente_min = mas_viejo_ms.map(|ms| ((now_ms() - ms) / 60_000).max(0));
 
-    let datos_fiscales_completos = nif
-        .as_deref()
-        .map(vf::nif_valido)
-        .unwrap_or(false)
-        && razon_social.is_some();
-
-    let formacion = en_formacion(conn).await?;
-    let formacion_sin_anular = facturas_de_formacion_vivas(conn).await?;
+    // MODO-PRUEBA (temporal): con el modo prueba no hacen falta los datos fiscales para cobrar, así
+    // que no se dice que falten — el aviso de «este TPV no puede cobrar» sería falso.
+    let modo_prueba = en_modo_prueba(conn).await?;
+    let datos_fiscales_completos = modo_prueba
+        || (nif.as_deref().map(vf::nif_valido).unwrap_or(false) && razon_social.is_some());
 
     let anomalias_sin_reconocer = select_i64(
         conn,
@@ -1792,7 +1738,9 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         // arreglar nosotros. Faltando sus datos fiscales ni siquiera puede cobrar, así que es lo
         // que tiene delante de todos modos; decirle antes «llama a soporte» sería mandarlo a hacer
         // una llamada que no resuelve lo que le impide abrir.
-        motivo_no_remite: if !datos_fiscales_completos {
+        motivo_no_remite: if modo_prueba {
+            Some("modo_prueba".to_string())
+        } else if !datos_fiscales_completos {
             Some("sin_datos_fiscales".to_string())
         } else if !productor_configurado() {
             Some("sin_datos_del_productor".to_string())
@@ -1802,8 +1750,7 @@ pub async fn estado_fiscal<C: Reader>(conn: &C) -> AppResult<EstadoFiscal> {
         dias_para_caducar_certificado: None,
         anomalias_sin_reconocer,
         ultima_anomalia,
-        formacion,
-        formacion_sin_anular,
+        modo_prueba,
     })
 }
 
@@ -1994,11 +1941,11 @@ fn refs_desde_json(json: Option<&str>, clave: &str) -> Vec<RefFactura> {
         .unwrap_or_default()
 }
 
-/// ¿Está el negocio en modo formación ahora mismo?
-pub async fn en_formacion<C: Reader>(conn: &C) -> AppResult<bool> {
+/// MODO-PRUEBA (temporal): ¿está activado? Se quita entero antes de que Veri*factu sea obligatorio.
+pub async fn en_modo_prueba<C: Reader>(conn: &C) -> AppResult<bool> {
     Ok(select_i64(
         conn,
-        "SELECT COALESCE(Verifactu_Formacion, 0) FROM Business_Settings WHERE ID = 1;",
+        "SELECT COALESCE(Modo_Prueba, 0) FROM Business_Settings WHERE ID = 1;",
         vec![],
     )
     .await?
@@ -2006,110 +1953,17 @@ pub async fn en_formacion<C: Reader>(conn: &C) -> AppResult<bool> {
         != 0)
 }
 
-/// Cuántas facturas de formación quedan **sin anular**.
-///
-/// Es lo que hace que el modo no se pueda dejar a medias en silencio: aunque alguien apague el
-/// interruptor por otro camino, el panel sigue viendo lo que falta por cerrar.
-pub async fn facturas_de_formacion_vivas<C: Reader>(conn: &C) -> AppResult<i64> {
-    Ok(select_i64(
-        conn,
-        "SELECT COUNT(*) FROM Registros_Facturacion a \
-         WHERE a.Serie LIKE ?1 AND a.Tipo = 'ALTA' \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM Registros_Facturacion n \
-             WHERE n.Tipo = 'ANULACION' \
-               AND n.Num_Serie_Factura = a.Num_Serie_Factura \
-               AND n.NIF_Emisor = a.NIF_Emisor \
-           );",
-        vec![Value::Text(PATRON_SERIE_FORMACION.to_string())],
-    )
-    .await?
-    .unwrap_or(0))
-}
-
-/// Enciende o apaga el **modo formación**.
-///
-/// Apagarlo **anula todas las facturas de prueba que queden vivas** y devuelve cuántas anuló. Ése es
-/// el motivo de que esto exista: el FAQ de desarrolladores de la AEAT (apartado 11) dice que probar
-/// o enseñar un SIF operativo genera facturas *reales* —con su QR y su registro remitido— y que
-/// *«deberá procederse a la inmediata posterior anulación de ellas (para que no cuenten como facturas
-/// reales)»*. Dejar eso a que alguien se acuerde es dejar que el día que se le olvide quede una venta
-/// ficticia contada como real, y sin más salida que otro registro de anulación.
-///
-/// Por eso **apagar el modo ES la anulación**, no un paso aparte que se pueda saltar.
-///
-/// Todo ocurre en **una transacción**: si algo falla a mitad, no queda ni el interruptor cambiado ni
-/// media tanda anulada.
-pub async fn set_formacion(db: &Db, encendido: bool) -> AppResult<usize> {
+/// MODO-PRUEBA (temporal): lo activa o lo desactiva. Va por `execute` porque `Business_Settings`
+/// es esquema compartido y la nube tiene que saberlo como cualquier otro ajuste.
+pub async fn set_modo_prueba(db: &Db, encendido: bool) -> AppResult<()> {
     let g = db.write().await;
-    g.execute_batch("BEGIN IMMEDIATE;").await.map_err(db_err)?;
-
-    let resultado = async {
-        let mut anuladas = 0usize;
-
-        if !encendido {
-            // Se listan primero y se anulan después: `emitir_anulacion` inserta en la misma tabla
-            // que estamos recorriendo, y leer y escribir a la vez sobre un cursor abierto es la
-            // clase de cosa que funciona hasta que deja de funcionar.
-            let mut ids = Vec::new();
-            let mut rows = g
-                .query(
-                    "SELECT a.ID_Registro FROM Registros_Facturacion a \
-                     WHERE a.Serie LIKE ?1 AND a.Tipo = 'ALTA' \
-                       AND NOT EXISTS ( \
-                         SELECT 1 FROM Registros_Facturacion n \
-                         WHERE n.Tipo = 'ANULACION' \
-                           AND n.Num_Serie_Factura = a.Num_Serie_Factura \
-                           AND n.NIF_Emisor = a.NIF_Emisor \
-                       ) \
-                     ORDER BY a.Orden ASC;",
-                    vec![Value::Text(PATRON_SERIE_FORMACION.to_string())],
-                )
-                .await
-                .map_err(db_err)?;
-            while let Some(row) = rows.next().await.map_err(db_err)? {
-                if let Some(id) = v_string(row.get_value(0).map_err(db_err)?) {
-                    ids.push(id);
-                }
-            }
-            drop(rows);
-
-            // En orden de emisión: cada anulación se encadena con la anterior, así que el orden en
-            // que se generan es el orden en que quedan en la cadena.
-            for id in ids {
-                emitir_anulacion(&g, &id).await?;
-                anuladas += 1;
-            }
-        }
-
-        g.execute(
-            "UPDATE Business_Settings SET Verifactu_Formacion = ?1 WHERE ID = 1;",
-            vec![Value::Integer(i64::from(encendido))],
-        )
-        .await
-        .map_err(db_err)?;
-
-        Ok::<usize, AppError>(anuladas)
-    }
-    .await;
-
-    match resultado {
-        Ok(n) => {
-            g.execute_batch("COMMIT;").await.map_err(db_err)?;
-            if n > 0 {
-                tracing::warn!(
-                    target: "tpv::verifactu",
-                    anuladas = n,
-                    "modo formación cerrado: {n} factura(s) de prueba anuladas y encoladas para remitir"
-                );
-            }
-            Ok(n)
-        }
-        Err(e) => {
-            let _ = g.execute_batch("ROLLBACK;").await;
-            Err(e)
-        }
-    }
+    g.execute(
+        "UPDATE Business_Settings SET Modo_Prueba = ?1 WHERE ID = 1;",
+        vec![Value::Integer(i64::from(encendido))],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok(())
 }
 
 /// Marca como reconocidas todas las anomalías pendientes. Devuelve cuántas.
@@ -2414,338 +2268,65 @@ mod tests_subsanacion {
 }
 
 #[cfg(test)]
-mod tests_modo_formacion {
-    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
-
-    //! Probar o enseñar el TPV emite facturas **reales**, y la AEAT obliga a anularlas después.
-    //!
-    //! Lo que se prueba aquí no es que el modo «funcione»: es que **no se pueda quedar a medias**.
-    //! El día que a alguien se le olvide anular, queda una venta ficticia contada como real y sin
-    //! más salida que otro registro de anulación.
+mod tests_modo_prueba {
+    //! MODO-PRUEBA (temporal). Lo que tiene que cumplirse mientras exista: que un cobro de prueba no
+    //! deje ningún registro —ni pida los datos fiscales— y que no gaste número de la serie real.
 
     use super::*;
     use crate::db::Db;
     use std::sync::Arc;
 
-    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
-        let dir = crate::test_temp::dir_temporal("verifactu_formacion");
+    /// Sin NIF ni razón social: fuera del modo prueba, un cobro aquí se cortaría.
+    async fn db_sin_datos_fiscales() -> Arc<Db> {
+        let dir = crate::test_temp::dir_temporal("verifactu_modo_prueba");
         std::fs::create_dir_all(&dir).unwrap();
-        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
-        // Datos fiscales mínimos: sin ellos no se puede emitir.
+        Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn en_modo_prueba_un_cobro_no_emite_registro_ni_pide_el_nif() {
+        let db = db_sin_datos_fiscales().await;
+        set_modo_prueba(&db, true).await.unwrap();
+
         let g = db.write().await;
-        g.raw()
-            .execute(
-                "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar SL' WHERE ID = 1;",
-                Vec::<Value>::new(),
-            )
+        let numero = reservar_numero_factura(&g).await.unwrap();
+        assert!(vf::es_numero_de_prueba(&numero.0), "numera en la serie de prueba: {}", numero.0);
+
+        let bloque = emitir_cobro(&g, "pago-de-prueba", numero, 5.0, None).await.unwrap();
+        assert!(bloque.is_none(), "un cobro de prueba no expide factura");
+
+        let registros = select_i64(&g, "SELECT COUNT(*) FROM Registros_Facturacion;", vec![])
             .await
-            .unwrap();
-        drop(g);
-        (db, dir)
-    }
-
-    async fn emitir_una(db: &Arc<Db>) -> String {
-        let g = db.write().await;
-        emitir_alta(
-            &g,
-            DatosFactura {
-                lineas: vec![LineaTicket {
-                    total_con_iva: 11.0,
-                    tipo_iva: 10.0,
-                    exento: false,
-                    causa_exencion: None,
-                }],
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap()
-        .num_serie_factura
-    }
-
-    async fn cuenta(db: &Arc<Db>, sql: &str) -> i64 {
-        let r = db.read().await;
-        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
-        let row = rows.next().await.unwrap().unwrap();
-        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
-    }
-
-    /// Emite **por el camino del cobro**: reserva primero (como hacen `mesas` y `venta_rapida`) y
-    /// pasa ese número a `emitir_alta`. Devuelve `(numero_reservado, num_serie_factura_del_registro)`.
-    ///
-    /// Es LA diferencia con `emitir_una`, que pasa `numero_reservado: None`. Ese caso no ocurre
-    /// nunca al cobrar, y por pasar por él los tests de formación no veían que los dos números
-    /// habían dejado de ser el mismo.
-    async fn cobrar_una(db: &Arc<Db>) -> (String, String) {
-        let g = db.write().await;
-        let reservado = reservar_numero_factura(&g).await.unwrap();
-        let bloque = emitir_alta(
-            &g,
-            DatosFactura {
-                lineas: vec![LineaTicket {
-                    total_con_iva: 11.0,
-                    tipo_iva: 10.0,
-                    exento: false,
-                    causa_exencion: None,
-                }],
-                numero_reservado: Some(reservado.clone()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        (reservado.0, bloque.num_serie_factura)
+            .unwrap()
+            .unwrap_or(0);
+        assert_eq!(registros, 0);
     }
 
     #[tokio::test]
-    async fn en_formacion_el_numero_del_TICKET_y_el_de_la_FACTURA_son_el_mismo() {
-        // El fallo que esto cierra: el cobro reservaba en la serie del ejercicio y `emitir_alta`
-        // descartaba ese número para numerar en `PRU`. `Pagos.Numero_Ticket` se quedaba con
-        // `2027/000045` y el registro con `PRU2027/000001`, así que `verifactu_bloque_ticket` —que
-        // busca por `Num_Serie_Factura`— no encontraba nada y el papel salía SIN QR, en el cobro y
-        // en la reimpresión. Y sin una sola queja: esa lectura devuelve `null` a propósito.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-
-        let (ticket, factura) = cobrar_una(&db).await;
-
-        assert_eq!(ticket, factura, "el número del ticket ES el número de la factura");
-        let anyo = chrono::Local::now().format("%Y").to_string();
-        assert_eq!(factura, format!("PRU{anyo}/000001"));
-    }
-
-    #[tokio::test]
-    async fn una_venta_de_formacion_NO_gasta_numero_de_la_serie_de_ventas() {
-        // Por el camino del cobro, que es donde estaba el agujero: el contador de la serie real se
-        // incrementaba igual, así que cada prueba dejaba un hueco permanente en el libro de ventas.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        cobrar_una(&db).await;
-        set_formacion(&db, false).await.unwrap();
-
-        let (ticket, factura) = cobrar_una(&db).await;
-        let anyo = chrono::Local::now().format("%Y").to_string();
-        assert_eq!(factura, format!("{anyo}/000001"), "la venta real es la primera");
-        assert_eq!(ticket, factura);
-    }
-
-    #[tokio::test]
-    async fn un_numero_de_OTRA_serie_se_rechaza_en_vez_de_escribirse() {
-        // La red por debajo: si alguien añade un camino que reserve por su cuenta y se equivoque de
-        // serie, el síntoma sería otra vez un ticket sin QR. Aquí se para.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-
-        let g = db.write().await;
-        let e = emitir_alta(
-            &g,
-            DatosFactura {
-                lineas: vec![LineaTicket {
-                    total_con_iva: 11.0,
-                    tipo_iva: 10.0,
-                    exento: false,
-                    causa_exencion: None,
-                }],
-                // De la serie del ejercicio, estando en formación.
-                numero_reservado: Some((format!("{}/000001", chrono::Local::now().format("%Y")), 1)),
-                ..Default::default()
-            },
-        )
-        .await;
-
-        assert!(e.is_err(), "un número de otra serie no puede acabar en el registro");
-    }
-
-    #[tokio::test]
-    async fn las_pruebas_de_OTRO_ejercicio_tambien_se_anulan() {
-        // El agujero de calendario: se buscaban por `Serie = PRU<año actual>`, así que unas pruebas
-        // del 28 de diciembre cerradas el 2 de enero no las encontraba nadie — ni el barrido ni el
-        // contador del panel, que decía «0 sin anular». Quedaban vivas para Hacienda.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        cobrar_una(&db).await;
-
-        // Se reetiqueta a mano como si fuera de un ejercicio anterior. Es lo que habría en la base
-        // de un equipo que cruzó el fin de año con el modo abierto.
+    async fn al_apagarlo_la_serie_del_ejercicio_sigue_sin_huecos() {
+        let db = db_sin_datos_fiscales().await;
+        set_modo_prueba(&db, true).await.unwrap();
         {
             let g = db.write().await;
-            g.raw()
-                .execute(
-                    "UPDATE Registros_Facturacion SET Serie = 'PRU2019',                      Num_Serie_Factura = 'PRU2019/000001' WHERE Serie LIKE 'PRU%';",
-                    (),
-                )
-                .await
-                .unwrap();
+            reservar_numero_factura(&g).await.unwrap();
         }
+        set_modo_prueba(&db, false).await.unwrap();
 
-        let vivas = {
-            let r = db.read().await;
-            facturas_de_formacion_vivas(&r).await.unwrap()
-        };
-        assert_eq!(vivas, 1, "el panel tiene que seguir viéndolas");
-
-        let anuladas = set_formacion(&db, false).await.unwrap();
-        assert_eq!(anuladas, 1, "y el barrido tiene que anularlas");
-
-        let quedan = {
-            let r = db.read().await;
-            facturas_de_formacion_vivas(&r).await.unwrap()
-        };
-        assert_eq!(quedan, 0);
+        let g = db.write().await;
+        let numero = reservar_numero_factura(&g).await.unwrap();
+        assert_eq!(numero.0, format!("{}/000001", serie_actual()));
     }
 
     #[tokio::test]
-    async fn en_formacion_la_factura_va_a_la_serie_PRU() {
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-
-        let num = emitir_una(&db).await;
-
-        let anyo = chrono::Local::now().format("%Y").to_string();
-        assert_eq!(num, format!("PRU{anyo}/000001"));
-    }
-
-    #[tokio::test]
-    async fn la_factura_de_formacion_NO_gasta_numero_de_la_serie_de_ventas() {
-        // Es lo que se vería en el libro: un hueco en la numeración real que no corresponde a
-        // ninguna factura. Por eso la serie manda sobre el número que reservó el camino del cobro.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-        set_formacion(&db, false).await.unwrap();
-
-        let num = emitir_una(&db).await;
-        let anyo = chrono::Local::now().format("%Y").to_string();
-        assert_eq!(num, format!("{anyo}/000001"), "la venta real es la primera");
-    }
-
-    #[tokio::test]
-    async fn la_descripcion_dice_que_es_una_prueba() {
-        // El FAQ pide «describirlas visible y claramente como de pruebas», y la descripción es lo
-        // único del registro que viaja como texto libre a la AEAT.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
+    async fn en_modo_prueba_el_estado_no_dice_que_falten_datos_fiscales() {
+        let db = db_sin_datos_fiscales().await;
+        set_modo_prueba(&db, true).await.unwrap();
 
         let r = db.read().await;
-        let mut rows = r
-            .query(
-                "SELECT Descripcion_Operacion FROM Registros_Facturacion LIMIT 1;",
-                Vec::<Value>::new(),
-            )
-            .await
-            .unwrap();
-        let row = rows.next().await.unwrap().unwrap();
-        let desc = v_string(row.get_value(0).unwrap()).unwrap_or_default();
-        assert!(desc.starts_with(PREFIJO_FORMACION), "{desc}");
-    }
-
-    #[tokio::test]
-    async fn cerrar_el_modo_ANULA_todas_las_facturas_de_prueba() {
-        // El test que justifica la funcionalidad entera.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-        emitir_una(&db).await;
-        emitir_una(&db).await;
-
-        assert_eq!(facturas_de_formacion_vivas(&db.read().await).await.unwrap(), 3);
-
-        let anuladas = set_formacion(&db, false).await.unwrap();
-
-        assert_eq!(anuladas, 3);
-        assert_eq!(facturas_de_formacion_vivas(&db.read().await).await.unwrap(), 0);
-        assert_eq!(
-            cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo = 'ANULACION';").await,
-            3
-        );
-    }
-
-    #[tokio::test]
-    async fn las_anulaciones_se_encolan_para_remitir() {
-        // Anular sin remitir el registro de anulación deja la factura de prueba viva en la AEAT, que
-        // es exactamente el problema que esto viene a resolver.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-        set_formacion(&db, false).await.unwrap();
-
-        assert_eq!(
-            cuenta(&db, "SELECT COUNT(*) FROM _Verifactu_Envios WHERE Estado = 'PENDIENTE';").await,
-            2,
-            "el alta y su anulación, las dos"
-        );
-    }
-
-    #[tokio::test]
-    async fn cerrar_dos_veces_no_vuelve_a_anular() {
-        // El botón se puede pulsar dos veces, y una anulación de una anulación no existe.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-
-        assert_eq!(set_formacion(&db, false).await.unwrap(), 1);
-        assert_eq!(set_formacion(&db, false).await.unwrap(), 0);
-        assert_eq!(
-            cuenta(&db, "SELECT COUNT(*) FROM Registros_Facturacion WHERE Tipo = 'ANULACION';").await,
-            1
-        );
-    }
-
-    #[tokio::test]
-    async fn las_pruebas_NO_se_llevan_por_delante_las_ventas_reales() {
-        // Una venta real anterior no puede acabar anulada porque alguien haga pruebas después.
-        let (db, _dir) = db_temporal().await;
-        let real = emitir_una(&db).await;
-
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-        set_formacion(&db, false).await.unwrap();
-
-        let r = db.read().await;
-        let mut rows = r
-            .query(
-                "SELECT COUNT(*) FROM Registros_Facturacion \
-                 WHERE Tipo = 'ANULACION' AND Num_Serie_Factura = ?1;",
-                vec![Value::Text(real.clone())],
-            )
-            .await
-            .unwrap();
-        let row = rows.next().await.unwrap().unwrap();
-        assert_eq!(
-            v_i64(row.get_value(0).unwrap()).unwrap_or(0),
-            0,
-            "la venta real {real} sigue viva"
-        );
-    }
-
-    #[tokio::test]
-    async fn una_prueba_sin_cerrar_se_sigue_viendo_con_el_modo_APAGADO() {
-        // Es lo que impide que el ciclo se quede a medias en silencio: aunque el interruptor se
-        // apague por otro camino, el panel sigue contando lo que falta por anular.
-        let (db, _dir) = db_temporal().await;
-        set_formacion(&db, true).await.unwrap();
-        emitir_una(&db).await;
-
-        // Se apaga «por debajo», sin pasar por el cierre.
-        {
-            let g = db.write().await;
-            g.raw()
-                .execute(
-                    "UPDATE Business_Settings SET Verifactu_Formacion = 0 WHERE ID = 1;",
-                    Vec::<Value>::new(),
-                )
-                .await
-                .unwrap();
-        }
-
-        let r = db.read().await;
-        assert!(!en_formacion(&r).await.unwrap());
-        assert_eq!(
-            facturas_de_formacion_vivas(&r).await.unwrap(),
-            1,
-            "la factura de prueba sigue viva y hay que verla"
-        );
+        let e = estado_fiscal(&r).await.unwrap();
+        assert!(e.modo_prueba);
+        assert!(e.datos_fiscales_completos, "el aviso de «no puede cobrar» sería falso");
+        assert_eq!(e.motivo_no_remite.as_deref(), Some("modo_prueba"));
     }
 }
 

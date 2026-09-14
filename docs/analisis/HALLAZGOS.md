@@ -11,36 +11,15 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar. FIS-05 es una decisión de
-> alcance, TEST-03 salió de arreglar SYNC-20, y CFG-04 es mantenimiento.
+> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar: TEST-03 salió de arreglar
+> SYNC-20 y CFG-04 es mantenimiento.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
 
 ---
-
-## FIS-05 🟡 · El modo formación sólo limpia lo fiscal
-
-[`set_formacion(false)`](../../crates/tpv-infra-sqlite/src/verifactu.rs#L1998) emite las anulaciones
-de los registros y actualiza el interruptor. No toca nada más — y una venta de formación es una venta
-completa por todos los demás caminos:
-
-- deja su fila en `Pagos` con `Estado='ACTIVO'`, así que **cuenta en el `esperado` del arqueo** y en
-  las estadísticas;
-- consume stock real por FEFO;
-- cierra la comanda y libera la mesa.
-
-La pantalla, mientras tanto, promete lo contrario: *«Para formar a alguien sin dejar ventas de mentira
-en la contabilidad»* ([`Fiscal.tsx:666`](../../apps/tpv-main/src/features/configuracion/sections/Fiscal.tsx#L666)).
-
-Puede que el alcance sea deliberado —el modo nació para resolver una obligación fiscal concreta— pero
-entonces el subtítulo hay que cambiarlo, porque hoy dice que hace algo que no hace. Y si el alcance
-se amplía, la decisión de fondo es qué significa «deshacer» una venta que ya descontó stock: lo más
-probable es que sea anular los cobros por el camino de CUENTA-07 (`ClaseBaja::Error`), que ya revierte
-stock y gasto y ya emite el registro de anulación.
 
 
 ## TEST-03 🟡 · Cada recorrido E2E estrena su equipo, y son seis

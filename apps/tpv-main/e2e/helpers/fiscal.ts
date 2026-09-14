@@ -22,9 +22,8 @@ export type EstadoFiscal = {
     certificado_ok: boolean;
     motivo_no_remite?: string;
     anomalias_sin_reconocer: number;
-    formacion: boolean;
-    /** Facturas de prueba emitidas y todavía sin anular. */
-    formacion_sin_anular: number;
+    /** MODO-PRUEBA (temporal). */
+    modo_prueba: boolean;
 };
 
 /** Una fila del libro de registros de facturación. */
@@ -216,45 +215,3 @@ export async function bloqueDelTicket(numeroTicket: string): Promise<BloqueFisca
     return await leerDeLaApp<BloqueFiscal | null>("verifactu_bloque_ticket", { numeroTicket });
 }
 
-/** El panel de Configuración → Fiscal desde el que se abren y se cierran las pruebas. */
-const PANEL_FORMACION = '//section[.//h2[normalize-space(text())="Probar o enseñar el TPV"]]';
-
-/**
- * Enciende el **modo formación** desde la pantalla.
- *
- * No es una simulación y la pantalla lo dice: lo que se cobre a partir de aquí son facturas reales
- * de la serie `PRU<año>`, con su QR y su registro. Lo que el modo garantiza es el final que la
- * norma exige — que se anulen todas —, no que no existan.
- */
-export async function empezarPruebas(): Promise<void> {
-    await irASeccionFiscal();
-    await pulsarXPath(
-        `${PANEL_FORMACION}//button[contains(normalize-space(.), "Empezar pruebas")]`,
-        'botón "Empezar pruebas"',
-    );
-    await browser.waitUntil(async () => (await verifactuEstado()).formacion, {
-        timeout: 30_000,
-        timeoutMsg: "El modo formación no llegó a encenderse",
-    });
-}
-
-/**
- * Termina las pruebas, que **es** la anulación: apagar el interruptor y anular las facturas de
- * prueba son la misma operación y no dos, para que no se pueda dejar a medias.
- *
- * Espera a que no quede ninguna viva, que es lo único que prueba que el barrido corrió.
- */
-export async function terminarPruebas(): Promise<void> {
-    await irASeccionFiscal();
-    await pulsarXPath(
-        `${PANEL_FORMACION}//button[contains(normalize-space(.), "Terminar y anular")]`,
-        'botón "Terminar y anular las facturas de prueba"',
-    );
-    await browser.waitUntil(
-        async () => {
-            const e = await verifactuEstado();
-            return !e.formacion && e.formacion_sin_anular === 0;
-        },
-        { timeout: 60_000, timeoutMsg: "Al terminar quedaron facturas de prueba sin anular" },
-    );
-}

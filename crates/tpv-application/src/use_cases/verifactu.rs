@@ -683,7 +683,7 @@ pub async fn remitir_ciclo(
         //
         // El tipo no es un extra: un registro de anulación lleva el MISMO `NumSerieFactura` que el
         // alta que anula, y los dos pueden ir en el mismo envío — basta cobrar por error y anular
-        // dentro del mismo ciclo, o apagar el modo formación antes de que la cola se drene. Casando
+        // dentro del mismo ciclo. Casando
         // sólo por número, `find` devuelve la primera de las dos líneas para ambos registros.
         //
         // Lo que eso rompe no se ve: si la AEAT acepta el alta y rechaza la anulación, la anulación
@@ -1384,8 +1384,7 @@ mod tests_aviso_de_atraso {
             dias_para_caducar_certificado: Some(300),
             anomalias_sin_reconocer: 0,
             ultima_anomalia: None,
-            formacion: false,
-            formacion_sin_anular: 0,
+            modo_prueba: false,
         }
     }
 
@@ -1611,8 +1610,7 @@ mod tests_certificado {
             dias_para_caducar_certificado: None,
             anomalias_sin_reconocer: 0,
             ultima_anomalia: None,
-            formacion: false,
-            formacion_sin_anular: 0,
+            modo_prueba: false,
         }
     }
 

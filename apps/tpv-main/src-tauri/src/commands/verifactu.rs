@@ -96,28 +96,26 @@ fn dias_hasta(fecha: &str) -> Option<i64> {
     Some((d - chrono::Local::now().date_naive()).num_days())
 }
 
-/// Enciende o apaga el **modo formación**. Devuelve cuántas facturas de prueba se anularon.
-///
-/// **Apagarlo ES la anulación.** No es un paso aparte que se pueda saltar: el FAQ de desarrolladores
-/// de la AEAT (apartado 11) obliga a anular las facturas de prueba, y dejar eso a que alguien se
-/// acuerde es dejar que el día que se le olvide quede una venta ficticia contada como real.
+/// MODO-PRUEBA (temporal): activa o desactiva el modo prueba. Con él los cobros no emiten registro
+/// de facturación, no se remite nada y no hacen falta NIF ni certificado. Se quita entero antes de
+/// que Veri*factu sea obligatorio: `grep -rn MODO-PRUEBA` lista todo lo que hay que borrar.
 #[tauri::command]
-pub async fn verifactu_set_formacion(
+pub async fn verifactu_set_modo_prueba(
     app: AppHandle,
     state: State<'_, AppState>,
     encendido: bool,
-) -> Result<usize, AppErrorDto> {
+) -> Result<(), AppErrorDto> {
     state.exigir_rol(&[ADMIN]).await?;
     let db = {
         let guard = state.db.lock().await;
         guard.as_ref().cloned().ok_or_else(|| {
-            AppErrorDto::internal("El modo formación sólo existe en el TPV principal")
+            AppErrorDto::internal("El modo prueba sólo existe en el TPV principal")
         })?
     };
-    let n = tpv_infra_sqlite::verifactu::set_formacion(&db, encendido).await?;
+    tpv_infra_sqlite::verifactu::set_modo_prueba(&db, encendido).await?;
     // Que el panel y la barra de estado se enteren sin recargar.
     let _ = tauri::Emitter::emit(&app, "verifactu:cambio", ());
-    Ok(n)
+    Ok(())
 }
 
 /// Vuelve a mandar los registros que la AEAT **rechazó**, como subsanación. Devuelve cuántos.

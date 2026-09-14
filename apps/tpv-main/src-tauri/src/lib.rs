@@ -2253,7 +2253,7 @@ pub fn run() {
             commands::verifactu::verifactu_probar_conexion,
             commands::verifactu::verifactu_emitir_factura_de_ticket,
             commands::verifactu::verifactu_subsanar_rechazados,
-            commands::verifactu::verifactu_set_formacion,
+            commands::verifactu::verifactu_set_modo_prueba,
             commands::verifactu::verifactu_reconocer_anomalias,
             commands::verifactu::verifactu_exportar,
             commands::verifactu::verifactu_declaracion_responsable,

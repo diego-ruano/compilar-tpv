@@ -149,13 +149,7 @@ pub struct EstadoFiscal {
     #[ts(optional)]
     pub ultima_anomalia: Option<String>,
 
-    /// ¿Está encendido el **modo formación**? Mientras lo esté, cada cobro emite una factura de la
-    /// serie `PRU<año>` que se anulará al terminar.
-    pub formacion: bool,
-    /// Facturas de formación emitidas y **todavía sin anular**.
-    ///
-    /// Se enseña aunque el modo esté apagado: si quedan vivas, el ciclo no se cerró y eso hay que
-    /// verlo. Es lo que impide que el modo se quede a medias en silencio.
-    #[ts(type = "number")]
-    pub formacion_sin_anular: i64,
+    /// MODO-PRUEBA (temporal): los cobros no emiten registro ni se remite nada. Se quita entero
+    /// antes de que Veri*factu sea obligatorio.
+    pub modo_prueba: bool,
 }

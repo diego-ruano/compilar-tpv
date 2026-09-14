@@ -782,7 +782,7 @@ CREATE TABLE IF NOT EXISTS Pagos (
   -- FISCAL-01: POR QUE este cobro dejo de contar. Son dos instrumentos legales distintos y el
   -- registro de facturacion que genera cada uno es distinto:
   --
-  --   'ERROR'      -> la venta NO EXISTIO (ticket de prueba, formacion, mesa equivocada). Genera un
+  --   'ERROR'      -> la venta NO EXISTIO (ticket de prueba, mesa equivocada). Genera un
   --                   RF DE ANULACION (art. 11.1 RRSIF). La AEAT dice en su FAQ que estos casos
   --                   deben ser "MUY POCO FRECUENTES". Las lineas vuelven a la comanda.
   --   'DEVOLUCION' -> la venta SI EXISTIO y se devuelve el dinero. Genera una FACTURA
@@ -1008,14 +1008,12 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,
   -- porque produccion y pruebas se distinguen en tres caracteres (www1 / prewww1).
   Verifactu_Entorno TEXT NOT NULL DEFAULT 'produccion',
-  -- Modo FORMACION (FAQ de desarrolladores de la AEAT, apartado 11). Probar o enseñar un SIF
-  -- operativo genera facturas REALES -con su QR y su RF remitido-, asi que la norma obliga a
-  -- anularlas despues. Con este modo encendido las facturas van a una serie propia (PRU<año>), se
-  -- describen como de pruebas y se anulan TODAS al terminar, sin depender de que nadie se acuerde.
-  --
-  -- No es un "modo de mentira": las facturas son reales mientras existen. Lo que hace el modo es
-  -- garantizar el final que la norma exige.
-  Verifactu_Formacion INTEGER NOT NULL DEFAULT 0,
+  -- MODO-PRUEBA (temporal): con 1, los cobros numeran en la serie PRUEBA y NO emiten registro de
+  -- facturacion: sin QR, sin envio a la AEAT y sin necesitar NIF ni certificado. Sirve para probar
+  -- el programa mientras Veri*factu no es obligatorio, y antes del 1-1-2027 se quita entero (ver
+  -- docs/VERIFACTU_PENDIENTES.md): un interruptor que deja de declarar ventas no puede existir en un
+  -- TPV que se venda.
+  Modo_Prueba INTEGER NOT NULL DEFAULT 0,
   Updated_At TEXT DEFAULT (datetime('now','localtime')),
   CHECK (Verifactu_Entorno IN ('produccion','pruebas'))
 );

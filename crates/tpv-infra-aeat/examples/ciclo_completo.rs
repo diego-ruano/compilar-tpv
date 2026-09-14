@@ -11,14 +11,13 @@
 //!
 //! 1. Abre una base **dedicada** (`target/verifactu-pruebas/data.db`), no la del TPV instalado. Así
 //!    el equipo de desarrollo no se toca y «borrón y cuenta nueva» es borrar un fichero.
-//! 2. Enciende el **modo formación**. Las facturas van a la serie `PRU<año>` y quedan marcadas.
-//! 3. Emite dos altas encadenadas por el camino de verdad (`emitir_alta`), no por uno de mentira.
-//! 4. Las **remite** con el certificado del almacén de Windows y enseña la respuesta literal.
-//! 5. **Cierra el modo formación**, que anula las dos y encola las anulaciones.
-//! 6. Remite las anulaciones.
+//! 2. Emite dos altas encadenadas por el camino de verdad (`emitir_alta`), no por uno de mentira.
+//! 3. Las **remite** con el certificado del almacén de Windows y enseña la respuesta literal.
+//! 4. **Anula** las altas que queden vivas y encola las anulaciones.
+//! 5. Remite las anulaciones.
 //!
-//! Los pasos 5 y 6 no son adorno: la AEAT obliga a anular las facturas de prueba, y hacerlo aquí
-//! prueba la funcionalidad que existe justamente para eso.
+//! Los pasos 4 y 5 no son adorno: la AEAT obliga a anular las facturas de prueba, y hacerlo aquí
+//! prueba el camino de anulación entero.
 //!
 //! ## Lo que NO hace
 //!
@@ -92,11 +91,7 @@ fn main() {
             }
             println!("Entorno         : PRUEBAS (prewww1.aeat.es)\n");
 
-            // ── 2. Modo formación ─────────────────────────────────────────────────────────────
-            vfdb::set_formacion(&db, true).await.expect("encendiendo formación");
-            println!("[2] Modo formación ENCENDIDO: las facturas irán a la serie PRU y se anularán.");
-
-            // ── 3. Dos altas encadenadas ──────────────────────────────────────────────────────
+            // ── 2. Dos altas encadenadas ──────────────────────────────────────────────────────
             for i in 1..=2 {
                 let g = db.write().await;
                 let b = vfdb::emitir_alta(
@@ -113,27 +108,55 @@ fn main() {
                 )
                 .await
                 .expect("emitiendo");
-                println!("[3] Emitida {} · huella {}…", b.num_serie_factura, &b.huella[..16]);
+                println!("[2] Emitida {} · huella {}…", b.num_serie_factura, &b.huella[..16]);
                 let _ = b;
             }
 
             let repo = SqliteVerifactuRepository::new(db.clone());
             let cliente = crate_adapter();
 
-            // ── 4. Remitir ────────────────────────────────────────────────────────────────────
-            println!("\n[4] Remitiendo a la AEAT…");
+            // ── 3. Remitir ────────────────────────────────────────────────────────────────────
+            println!("\n[3] Remitiendo a la AEAT…");
             informar(uc::remitir_ciclo(&repo, &cliente, Some(&huella), ahora()).await);
             detalle(&db).await;
 
-            // ── 5. Cerrar formación (anula) ───────────────────────────────────────────────────
-            let n = vfdb::set_formacion(&db, false).await.expect("cerrando formación");
-            println!("\n[5] Modo formación CERRADO: {n} factura(s) de prueba anuladas.");
+            // ── 4. Anular lo que quede vivo ───────────────────────────────────────────────────
+            let n = {
+                use tpv_infra_sqlite::db::Reader;
+                let g = db.write().await;
+                let mut ids = Vec::new();
+                {
+                    let mut rows = g
+                        .query(
+                            "SELECT a.ID_Registro FROM Registros_Facturacion a \
+                             WHERE a.Tipo = 'ALTA' AND NOT EXISTS ( \
+                               SELECT 1 FROM Registros_Facturacion n \
+                               WHERE n.Tipo = 'ANULACION' \
+                                 AND n.Num_Serie_Factura = a.Num_Serie_Factura \
+                                 AND n.NIF_Emisor = a.NIF_Emisor) \
+                             ORDER BY a.Orden ASC;",
+                            Vec::<Value>::new(),
+                        )
+                        .await
+                        .expect("buscando las altas vivas");
+                    while let Some(row) = rows.next().await.expect("fila") {
+                        if let Ok(Value::Text(id)) = row.get_value(0) {
+                            ids.push(id);
+                        }
+                    }
+                }
+                for id in &ids {
+                    vfdb::emitir_anulacion(&g, id).await.expect("anulando");
+                }
+                ids.len()
+            };
+            println!("\n[4] {n} factura(s) de prueba anuladas.");
 
-            // ── 6. Remitir las anulaciones ────────────────────────────────────────────────────
+            // ── 5. Remitir las anulaciones ────────────────────────────────────────────────────
             // El control de flujo del art. 16.2 impone esperar entre envíos: la AEAT dice cuánto en
             // cada respuesta (60 s al principio). Se respeta, que para eso está.
             let espera = repo_espera(&repo).await;
-            println!("\n[6] Esperando {espera} s (control de flujo del art. 16.2)…");
+            println!("\n[5] Esperando {espera} s (control de flujo del art. 16.2)…");
             tokio::time::sleep(std::time::Duration::from_secs(espera as u64 + 2)).await;
             println!("    Remitiendo las anulaciones…");
             informar(uc::remitir_ciclo(&repo, &cliente, Some(&huella), ahora()).await);
@@ -146,7 +169,6 @@ fn main() {
             println!("  con avisos  : {}", e.aceptados_con_errores);
             println!("  rechazados  : {}", e.rechazados);
             println!("  pendientes  : {}", e.pendientes);
-            println!("  sin anular  : {}", e.formacion_sin_anular);
         });
     }
 }

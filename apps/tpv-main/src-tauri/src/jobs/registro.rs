@@ -399,6 +399,12 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let repo = state.verifactu_repo().await?;
 
+    // MODO-PRUEBA (temporal): con el modo prueba no hay nada que remitir ni de qué avisar. Se quita
+    // entero antes de que Veri*factu sea obligatorio.
+    if uc_verifactu::estado(repo.as_ref()).await.is_ok_and(|e| e.modo_prueba) {
+        return Ok(());
+    }
+
     let dir = app
         .path()
         .app_data_dir()

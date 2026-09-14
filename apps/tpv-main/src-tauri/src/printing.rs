@@ -808,6 +808,17 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
             esc_bold(&mut out, false);
             esc_align(&mut out, 0);
         }
+        // MODO-PRUEBA (temporal): un cobro de prueba no expide factura, y un papel sin QR que no lo
+        // dijera se leería como un ticket normal. Lo dice el número, así que una reimpresión de
+        // mañana también lo dice aunque el modo ya esté apagado.
+        if tpv_domain::verifactu::es_numero_de_prueba(p.numero_ticket.as_deref().unwrap_or("")) {
+            esc_align(&mut out, 1);
+            esc_bold(&mut out, true);
+            text_line(&mut out, "*** MODO PRUEBA ***");
+            text_line(&mut out, "SIN VALOR FISCAL");
+            esc_bold(&mut out, false);
+            esc_align(&mut out, 0);
+        }
     }
 
     sep(&mut out, cols);

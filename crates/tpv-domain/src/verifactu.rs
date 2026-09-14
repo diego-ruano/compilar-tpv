@@ -170,6 +170,22 @@ pub const QR_BASE_PRODUCCION: &str =
 /// Base de la URL de cotejo, entorno de **pruebas** (Portal de Pruebas Externas).
 pub const QR_BASE_PRUEBAS: &str = "https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR";
 
+/// MODO-PRUEBA (temporal): la serie de los cobros hechos en modo prueba (`PRUEBA/000001`).
+///
+/// Un cobro de prueba no expide factura, y lo que lo dice es **su número**: la serie se fija al
+/// reservarlo, así que la emisión y el papel —también una reimpresión de mañana, con el modo ya
+/// apagado— lo saben sin volver a mirar el interruptor. Se quita entero antes de que Veri\*factu sea
+/// obligatorio: `grep -rn MODO-PRUEBA` lista todo lo que hay que borrar.
+pub const SERIE_MODO_PRUEBA: &str = "PRUEBA";
+
+/// MODO-PRUEBA (temporal): ¿es éste el número de un cobro hecho en modo prueba?
+pub fn es_numero_de_prueba(numero: &str) -> bool {
+    numero
+        .trim()
+        .strip_prefix(SERIE_MODO_PRUEBA)
+        .is_some_and(|resto| resto.starts_with('/'))
+}
+
 /// Codifica un valor para la *query string* (`application/x-www-form-urlencoded` sobre UTF-8, pero
 /// con el espacio como `%20` y no como `+`, que es lo que hace `URLEncoder` en el ejemplo de la
 /// AEAT una vez corregido el `+`).
@@ -1129,5 +1145,20 @@ mod tests_comprobacion_previa {
         .mensaje();
         assert!(m.contains("90"), "{m}");
         assert!(m.contains("hacia atrás"), "{m}");
+    }
+}
+
+#[cfg(test)]
+mod tests_modo_prueba {
+    use super::*;
+
+    #[test]
+    fn solo_la_serie_de_prueba_es_de_prueba() {
+        assert!(es_numero_de_prueba("PRUEBA/000001"));
+        assert!(!es_numero_de_prueba("2027/000001"));
+        assert!(!es_numero_de_prueba("R2027/000001"));
+        // Un prefijo que se le parezca no basta: la barra separa la serie del número.
+        assert!(!es_numero_de_prueba("PRUEBAS/000001"));
+        assert!(!es_numero_de_prueba(""));
     }
 }

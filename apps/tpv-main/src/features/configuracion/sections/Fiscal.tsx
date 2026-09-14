@@ -42,7 +42,7 @@ import {
     verifactuEstado,
     verifactuExportar,
     verifactuReconocerAnomalias,
-    verifactuSetFormacion,
+    verifactuSetModoPrueba,
     verifactuSubsanarRechazados,
     type DeclaracionResponsable,
 } from "../api/verifactuApis";
@@ -162,7 +162,7 @@ export function Fiscal({
         // ve que se ha guardado, y la aplicación sigue tapada diciéndole que no puede cobrar.
         //
         // Va aquí y no sólo en el guardado porque desde esta pantalla cambian tres cosas que ese
-        // store mira (el obligado, el modo formación y el certificado), y una regla que hay que
+        // store mira (el obligado, el modo prueba y el certificado), y una regla que hay que
         // acordarse de repetir en cada botón nuevo es una regla que se rompe con el siguiente.
         void useEstadoFiscal.getState().refrescar();
     }, []);
@@ -178,31 +178,25 @@ export function Fiscal({
         refrescarEstado();
     }, [onSave, refrescarEstado]);
 
-    const [cerrandoFormacion, setCerrandoFormacion] = useState(false);
+    // MODO-PRUEBA (temporal): se quita entero antes de que Veri*factu sea obligatorio.
+    const [cambiandoModoPrueba, setCambiandoModoPrueba] = useState(false);
 
-    const cambiarFormacion = useCallback(
+    const cambiarModoPrueba = useCallback(
         async (encendido: boolean) => {
-            setCerrandoFormacion(true);
+            setCambiandoModoPrueba(true);
             try {
-                const anuladas = await verifactuSetFormacion(encendido);
+                await verifactuSetModoPrueba(encendido);
                 refrescarEstado();
-                if (encendido) {
-                    toast.info(
-                        "Modo formación encendido",
-                        "Lo que se cobre ahora son facturas de prueba y se anularán al terminar.",
-                    );
-                } else {
-                    toast.success(
-                        "Modo formación cerrado",
-                        anuladas === 0
-                            ? "No quedaba ninguna factura de prueba por anular."
-                            : `${anuladas} factura(s) de prueba anuladas y en cola para enviar a Hacienda.`,
-                    );
-                }
+                toast.info(
+                    encendido ? "Modo prueba activado" : "Modo prueba desactivado",
+                    encendido
+                        ? "Los cobros ya no emiten factura ni se envía nada a Hacienda."
+                        : "Los cobros vuelven a emitir factura.",
+                );
             } catch (e) {
-                toast.error("Modo formación", toAppError(e).message);
+                toast.error("Modo prueba", toAppError(e).message);
             } finally {
-                setCerrandoFormacion(false);
+                setCambiandoModoPrueba(false);
             }
         },
         [refrescarEstado, toast],
@@ -512,7 +506,12 @@ export function Fiscal({
 
                         {estado.motivo_no_remite ? (
                             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-                                {estado.motivo_no_remite === "sin_datos_fiscales" ? (
+                                {estado.motivo_no_remite === "modo_prueba" ? (
+                                    <>
+                                        No se remite: <strong>el modo prueba está activado</strong> y
+                                        los cobros no emiten factura.
+                                    </>
+                                ) : estado.motivo_no_remite === "sin_datos_fiscales" ? (
                                     <>No se puede remitir: faltan los datos fiscales del negocio.</>
                                 ) : estado.motivo_no_remite === "sin_certificado" ? (
                                     <>
@@ -681,62 +680,46 @@ export function Fiscal({
                 </div>
             </Panel>
 
-            {/* ── Modo formación ──────────────────────────────────────────────────────────
-                No es un "modo de mentira": mientras dura, las facturas son reales. Lo que hace el
-                modo es garantizar el final que la norma exige — anularlas todas. */}
+            {/* ── MODO-PRUEBA (temporal) ──────────────────────────────────────────────────
+                Para probar el programa sin datos fiscales ni certificado. Se quita entero antes de
+                que Veri*factu sea obligatorio: un interruptor que deja de declarar las ventas no
+                puede existir en un TPV que se venda. */}
             <Panel
-                title="Probar o enseñar el TPV"
-                subtitle="Para formar a alguien sin dejar ventas de mentira en la contabilidad."
+                title="Modo prueba"
+                subtitle="Para probar el programa sin datos fiscales ni certificado. Temporal."
             >
-                {estado?.formacion ? (
+                {estado?.modo_prueba ? (
                     <div className="rounded-2xl border border-amber-500/50 bg-amber-500/15 px-4 py-3">
                         <p className="font-semibold text-amber-700 dark:text-amber-300">
-                            MODO FORMACIÓN ENCENDIDO
+                            MODO PRUEBA ACTIVADO
                         </p>
                         <p className="mt-1 text-sm text-fg">
-                            Todo lo que se cobre ahora se está facturando de verdad, en la serie{" "}
-                            <code>PRU</code>, y <strong>se anulará al terminar</strong>. No es una
-                            simulación: son facturas reales mientras existan.
-                        </p>
-                        <p className="mt-2 text-sm text-fg-muted">
-                            Llevas <strong>{estado.formacion_sin_anular}</strong> factura(s) de prueba
-                            sin anular.
+                            Los cobros <strong>no emiten factura</strong>: no llevan QR, no se envía
+                            nada a Hacienda y no hacen falta el NIF ni el certificado. El ticket sale
+                            marcado «SIN VALOR FISCAL». No lo uses para vender de verdad.
                         </p>
                         <div className="mt-3">
                             <PrimaryButton
-                                onClick={() => void cambiarFormacion(false)}
-                                disabled={cerrandoFormacion}
+                                onClick={() => void cambiarModoPrueba(false)}
+                                disabled={cambiandoModoPrueba}
                             >
-                                {cerrandoFormacion
-                                    ? "Anulando…"
-                                    : "Terminar y anular las facturas de prueba"}
+                                Desactivar el modo prueba
                             </PrimaryButton>
                         </div>
                     </div>
                 ) : (
                     <>
-                        {estado && estado.formacion_sin_anular > 0 ? (
-                            <div className="mb-3 rounded-2xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm">
-                                <strong className="text-red-600 dark:text-red-400">
-                                    Quedan {estado.formacion_sin_anular} factura(s) de prueba sin
-                                    anular.
-                                </strong>{" "}
-                                Eso significa que unas pruebas anteriores no se cerraron. Vuelve a
-                                encender el modo y termínalo para que se anulen.
-                            </div>
-                        ) : null}
                         <p className="text-sm text-fg-muted">
-                            Enseñar el TPV o hacer una prueba emite facturas{" "}
-                            <strong>reales</strong>: llevan su QR y se envían a Hacienda igual que una
-                            venta. La ley obliga a anularlas después. Con este modo, el TPV lo hace
-                            solo: numera aparte, las marca como pruebas y las anula todas al terminar.
+                            Con el modo prueba los cobros funcionan igual, pero no emiten factura ni se
+                            envían a Hacienda: se puede probar el TPV sin NIF ni certificado. Las ventas
+                            cuentan como cualquier otra en la caja y en las estadísticas.
                         </p>
                         <div className="mt-3">
                             <GhostButton
-                                onClick={() => void cambiarFormacion(true)}
-                                disabled={cerrandoFormacion}
+                                onClick={() => void cambiarModoPrueba(true)}
+                                disabled={cambiandoModoPrueba}
                             >
-                                Empezar pruebas
+                                Activar el modo prueba
                             </GhostButton>
                         </div>
                     </>

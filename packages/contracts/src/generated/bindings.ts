@@ -497,17 +497,10 @@ anomalias_sin_reconocer: number,
  */
 ultima_anomalia?: string, 
 /**
- * ¿Está encendido el **modo formación**? Mientras lo esté, cada cobro emite una factura de la
- * serie `PRU<año>` que se anulará al terminar.
+ * MODO-PRUEBA (temporal): los cobros no emiten registro ni se remite nada. Se quita entero
+ * antes de que Veri*factu sea obligatorio.
  */
-formacion: boolean, 
-/**
- * Facturas de formación emitidas y **todavía sin anular**.
- *
- * Se enseña aunque el modo esté apagado: si quedan vivas, el ciclo no se cerró y eso hay que
- * verlo. Es lo que impide que el modo se quede a medias en silencio.
- */
-formacion_sin_anular: number, };
+modo_prueba: boolean, };
 
 export type FinalizarTareaInput = { id_tarea: string, id_trabajador: string, };
 

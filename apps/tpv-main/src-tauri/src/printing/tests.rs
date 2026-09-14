@@ -362,6 +362,26 @@ mod tests_identidad_del_ticket {
     }
 
     #[test]
+    fn un_ticket_del_modo_prueba_dice_que_no_tiene_valor_fiscal() {
+        // MODO-PRUEBA (temporal): sin QR y sin marca, se leería como un ticket de verdad.
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("PRUEBA/000001".into());
+        let bytes = build_ticket(&p, None);
+
+        assert!(contiene(&bytes, "MODO PRUEBA"));
+        assert!(contiene(&bytes, "SIN VALOR FISCAL"));
+    }
+
+    #[test]
+    fn un_ticket_normal_no_lleva_la_marca_de_prueba() {
+        let mut p = base(vec![linea()]);
+        p.numero_ticket = Some("2027/000001".into());
+        let bytes = build_ticket(&p, None);
+
+        assert!(!contiene(&bytes, "MODO PRUEBA"));
+    }
+
+    #[test]
     fn el_origen_y_el_metodo_salen_impresos() {
         let mut p = base(vec![linea()]);
         p.numero_ticket = Some("T-000007".into());
