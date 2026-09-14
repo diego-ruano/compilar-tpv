@@ -971,8 +971,8 @@ mod tests_borrado_de_producto {
         sembrar(&db, UNA_COMANDA_ABIERTA).await;
         sembrar(
             &db,
-            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
-                 VALUES ('lote', 'vendido', 'L-1', 10);"],
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+                 VALUES ('lote', 'vendido', 'L-1', 10, '2026-01-01 10:00:00');"],
         )
         .await;
         let repo = SqliteInventarioRepository::new(db.clone());
@@ -996,8 +996,8 @@ mod tests_borrado_de_producto {
         sembrar(&db, CATALOGO).await;
         sembrar(
             &db,
-            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
-                 VALUES ('lote', 'nuevo', 'L-1', 10);"],
+            &["INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+                 VALUES ('lote', 'nuevo', 'L-1', 10, '2026-01-01 10:00:00');"],
         )
         .await;
         let repo = SqliteInventarioRepository::new(db.clone());

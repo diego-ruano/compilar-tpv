@@ -33,6 +33,9 @@ const PERMANENTES = [
 	"too many sql variables",
 	"values were supplied", // "N values for M columns"
 	"readonly database",
+	// CFG-04: el DO rechaza una escritura que dejaría a Turso elegir la hora. Es el propio comando
+	// el que está mal escrito: repetirlo da el mismo rechazo.
+	"hora_no_determinista",
 ] as const;
 
 /**

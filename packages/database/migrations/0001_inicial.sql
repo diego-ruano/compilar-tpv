@@ -36,6 +36,12 @@
    - Excepciones que NO son ids de negocio y siguen siendo INTEGER:
      singletons de configuracion (Business_Settings / Ticket_Settings, ID=1)
      y la tabla interna Applied_Operations.
+
+   HORAS (CFG-04):
+   - Ninguna columna lleva DEFAULT de hora: la pone siempre quien inserta.
+     Un DEFAULT con la hora actual lo evaluaria cada base por su cuenta, y
+     en la nube eso es otro instante y en UTC. La fila de la Main y su copia
+     en Turso tienen que decir la misma hora. Lo vigila un test de db.rs.
 ========================================================= */
 
 -- NOTA: aqui NO va `PRAGMA foreign_keys = ON`. Seria un no-op: (1) es un ajuste
@@ -234,7 +240,7 @@ CREATE TABLE IF NOT EXISTS Lotes_Producto (
   ID_Lote TEXT PRIMARY KEY,
   ID_Producto TEXT NOT NULL,
   Codigo_Lote TEXT NOT NULL,
-  Fecha_Entrada DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+  Fecha_Entrada DATETIME NOT NULL,
   Caducidad DATE,
   Stock_Disponible REAL NOT NULL DEFAULT 0,
   Coste_Unitario REAL,
@@ -289,7 +295,7 @@ CREATE TABLE IF NOT EXISTS Pedidos_Proveedor (
   ID_Proveedor TEXT,
   Email_Destino TEXT,
   Estado TEXT NOT NULL DEFAULT 'borrador',
-  Fecha_Creacion TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+  Fecha_Creacion TEXT NOT NULL,
   Fecha_Envio TEXT,
   Notas TEXT,
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL,
@@ -369,7 +375,7 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Email TEXT,
   Notas TEXT,
   Total_Gastado REAL NOT NULL DEFAULT 0,
-  Created_At TEXT DEFAULT (datetime('now','localtime')),
+  Created_At TEXT,
   -- FISCAL-02: datos para emitir una factura COMPLETA (F1/F3) a este cliente. Son opcionales: la
   -- inmensa mayoria de los clientes de un bar no piden factura y nunca los tendran.
   --   NIF + Razon_Social -> van al REGISTRO de facturacion (bloque Destinatarios).
@@ -405,7 +411,7 @@ CREATE TABLE IF NOT EXISTS Reservas (
   Comensales INTEGER NOT NULL DEFAULT 1,
   Nota TEXT,
   Estado TEXT NOT NULL DEFAULT 'ACTIVA',
-  Created_At TEXT DEFAULT (datetime('now','localtime')),
+  Created_At TEXT,
   FOREIGN KEY (ID_Cliente) REFERENCES Clientes(ID_Cliente),
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa)
 );
@@ -700,7 +706,7 @@ CREATE TABLE IF NOT EXISTS Tareas (
   ID_Tarea TEXT PRIMARY KEY,
   Titulo TEXT NOT NULL,
   Descripcion TEXT,
-  Fecha_Creacion DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+  Fecha_Creacion DATETIME NOT NULL,
   Fecha_Limite DATE,
   Estado TEXT NOT NULL DEFAULT 'ABIERTA'
 );
@@ -708,7 +714,7 @@ CREATE TABLE IF NOT EXISTS Tareas (
 CREATE TABLE IF NOT EXISTS Tarea_Asignaciones (
   ID_Tarea TEXT NOT NULL,
   ID_Trabajador TEXT NOT NULL,
-  Asignada_At DATETIME NOT NULL DEFAULT (datetime('now','localtime')),
+  Asignada_At DATETIME NOT NULL,
   Estado TEXT NOT NULL DEFAULT 'PENDIENTE',
   Finalizada_At DATETIME,
   PRIMARY KEY (ID_Tarea, ID_Trabajador),
@@ -1014,7 +1020,7 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- docs/VERIFACTU_PENDIENTES.md): un interruptor que deja de declarar ventas no puede existir en un
   -- TPV que se venda.
   Modo_Prueba INTEGER NOT NULL DEFAULT 0,
-  Updated_At TEXT DEFAULT (datetime('now','localtime')),
+  Updated_At TEXT,
   CHECK (Verifactu_Entorno IN ('produccion','pruebas'))
 );
 
@@ -1040,7 +1046,7 @@ CREATE TABLE IF NOT EXISTS Ticket_Settings (
   Margin_Left_Mm REAL NOT NULL DEFAULT 0,
   Margin_Right_Mm REAL NOT NULL DEFAULT 0,
   Font_Scale REAL NOT NULL DEFAULT 1.0,
-  Updated_At TEXT DEFAULT (datetime('now','localtime')),
+  Updated_At TEXT,
   CHECK (Paper_Width_Mm IN (58, 80, 112)),
   CHECK (Paper_Dpi IN (203, 300)),
   CHECK (Chars_Per_Line >= 20 AND Chars_Per_Line <= 80),
@@ -1055,7 +1061,7 @@ CREATE TABLE IF NOT EXISTS Contact_Settings (
   Recovery_Email TEXT NOT NULL DEFAULT '',
   Contact_Email TEXT NOT NULL DEFAULT '',
   Contact_Phone TEXT NOT NULL DEFAULT '',
-  Updated_At TEXT DEFAULT (datetime('now','localtime'))
+  Updated_At TEXT
 );
 
 INSERT OR IGNORE INTO Contact_Settings (ID) VALUES (1);

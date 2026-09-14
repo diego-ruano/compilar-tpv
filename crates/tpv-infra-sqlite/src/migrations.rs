@@ -438,8 +438,8 @@ mod tests {
             "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('c1','Bebidas');
              INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
                VALUES ('p1','c1','Cerveza',2.5);
-             INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
-               VALUES ('l1','p1','L-1',3);
+             INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+               VALUES ('l1','p1','L-1',3, '2026-01-01 10:00:00');
              INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
                VALUES ('m1','l1','ALTA',10,10,'2026-01-01 00:00:00');",
         )

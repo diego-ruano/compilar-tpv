@@ -5,8 +5,8 @@
 		"UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL' WHERE ID = 1;",
 		"INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
 		"INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 2.0);",
-		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Stock_Disponible) VALUES ('lote-a', 'prod-1', 'LA', '2026-06-01', 5);",
-		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Stock_Disponible) VALUES ('lote-b', 'prod-1', 'LB', '2026-12-01', 5);",
+		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Stock_Disponible, Fecha_Entrada) VALUES ('lote-a', 'prod-1', 'LA', '2026-06-01', 5, '2026-01-01 10:00:00');",
+		"INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Caducidad, Stock_Disponible, Fecha_Entrada) VALUES ('lote-b', 'prod-1', 'LB', '2026-12-01', 5, '2026-01-01 10:00:00');",
 		"INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('comanda-1', 'BARRA', '2026-01-01 12:00:00', 'Abierta');",
 		"INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('detalle-1', 'comanda-1', 'prod-1', 8, 2.0);"
 	],

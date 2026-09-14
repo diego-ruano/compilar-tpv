@@ -942,8 +942,8 @@ mod tests_anulacion {
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
            VALUES ('prod', 'cat', 'Cerveza', 3.0, 7);",
-        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
-           VALUES ('lote', 'prod', 'L-1', 18);",
+        "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+           VALUES ('lote', 'prod', 'L-1', 18, '2026-01-01 10:00:00');",
         "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 50.0);",
         "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales)
            VALUES ('res', 'cli', 'mesa', '2026-01-02', '13:00', 'COMIDA', 2);",
@@ -997,8 +997,8 @@ mod tests_anulacion {
         sembrar(
             &db,
             &[
-                "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
-                   VALUES ('lote-viejo', 'prod', 'L-0', 5);",
+                "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
+                   VALUES ('lote-viejo', 'prod', 'L-0', 5, '2026-01-01 10:00:00');",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                                     Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja)
                    VALUES ('pago-viejo', 'com', '2026-01-02 12:30:00', 'Efectivo', 6.0, 'PARCIAL',

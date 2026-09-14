@@ -46,6 +46,7 @@ import {
 } from "./tenantHub.sentencias";
 import {
 	commandHasNowLiteral,
+	horaSinFijar,
 	parseClientNow,
 	rewriteCmdNowLiterals,
 	serverNowFixed,
@@ -443,6 +444,15 @@ export class TenantHub {
 			throw new Error("missing_client_now");
 		}
 		const cmd = rewriteCmdNowLiterals(params.cmd, parsedNow ?? serverNowFixed());
+
+		// CFG-04: lo que no se ha podido fijar lo pondría Turso, con su reloj y en UTC, y la fila de la
+		// nube diría otra hora que la del dispositivo. Se rechaza antes de ejecutar nada. Ningún
+		// comando lo hace hoy (lo vigila el scan de `*.commands.ts` en Rust): esto sólo salta con uno
+		// nuevo mal escrito, y es mejor que salte a que deje horas distintas.
+		const sinFijar = horaSinFijar(cmd);
+		if (sinFijar) {
+			throw new Error(`hora_no_determinista: ${sinFijar}`);
+		}
 
 		const op = opId.trim();
 		const command = commandName.trim();

@@ -14,6 +14,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 
 import {
 	commandHasNowLiteral,
+	horaSinFijar,
+	horaSinFijarEnSql,
 	parseClientNow,
 	rewriteCmdNowLiterals,
 	rewriteNowInSql,
@@ -129,24 +131,33 @@ describe("rewriteNowInSql", () => {
 		expect(out).not.toContain("'now'");
 	});
 
-	// Lo que NO debe tocarse: las variantes con modificador. Reescribirlas sería un error de
-	// cálculo silencioso (un `-2 days` que se convierte en la fecha de hoy).
-	it("no toca las formas con modificador", () => {
-		const conModificador = [
-			"datetime('now','localtime','-2 days')",
-			"date('now','localtime','+1 month')",
-			"datetime('now','start of month')",
-		];
+	// Las formas con modificador SE fijan, y el modificador se queda: la hora fija ocupa el lugar del
+	// `'now','localtime'` y el `-2 days` sigue restando dos días a esa hora. Lo que sí sería un error de
+	// cálculo silencioso es sustituir la expresión entera por la fecha de hoy (CFG-04).
+	it("fija la hora de las formas con modificador y conserva el modificador", () => {
+		expect(rewriteNowInSql("datetime('now','localtime','-2 days')", DT)).toBe(
+			`datetime('${DT}','-2 days')`,
+		);
+		expect(rewriteNowInSql("date('now', 'localtime', '+1 month')", DT)).toBe(
+			`date('${DT}', '+1 month')`,
+		);
+		expect(rewriteNowInSql("strftime('%H','NOW','localtime')", DT)).toBe(`strftime('%H','${DT}')`);
+	});
 
-		for (const sql of conModificador) {
-			expect(rewriteNowInSql(sql, DT), sql).toBe(sql);
-		}
+	// Un `'now'` sin `localtime` es UTC, y la hora del emisor es local: no hay con qué fijarlo. Se deja
+	// como está para que `horaSinFijar` lo rechace; no se le inventa una zona.
+	it("no se inventa la hora UTC de un 'now' sin localtime", () => {
+		const sql = "datetime('now','start of month')";
+		expect(rewriteNowInSql(sql, DT)).toBe(sql);
 	});
 
 	it("no toca un 'now' que sea un dato del usuario", () => {
 		// Una nota de comanda que diga "now" no puede acabar convertida en una fecha.
 		const sql = "INSERT INTO Notas (texto) VALUES ('now');";
 		expect(rewriteNowInSql(sql, DT)).toBe(sql);
+		// Ni aunque la siguiente diga "localtime": no son argumentos de una función de fecha.
+		const dos = "INSERT INTO Notas (a, b) VALUES ('now','localtime');";
+		expect(rewriteNowInSql(dos, DT)).toBe(dos);
 	});
 
 	it("deja intacto el SQL que no menciona 'now'", () => {
@@ -341,5 +352,52 @@ describe("la cadena completa", () => {
 		// devolviera una hora aunque fuese basura, se escribiría con una fecha inventada.
 		expect(parseClientNow("1999-01-01 00:00:00")).toBeNull();
 		expect(parseClientNow("no es una fecha")).toBeNull();
+	});
+});
+
+/* =========================================================
+   CFG-04: lo que la nube no puede fijar no se aplica
+========================================================= */
+
+describe("horaSinFijar", () => {
+	it("no ve nada en un comando ya fijado", () => {
+		const cmd = rewriteCmdNowLiterals(
+			tx([
+				"INSERT INTO A VALUES (datetime('now','localtime'));",
+				"UPDATE B SET f = datetime('now','localtime','start of day');",
+			]),
+			DT,
+		);
+		expect(horaSinFijar(cmd)).toBeNull();
+	});
+
+	it("rechaza la hora que tendría que elegir Turso", () => {
+		const casos: Array<[string, string]> = [
+			["INSERT INTO A VALUES (datetime('now'));", "'now'"],
+			["UPDATE A SET f = CURRENT_TIMESTAMP;", "CURRENT_*"],
+			["UPDATE A SET f = datetime(Fecha_Utc,'localtime');", "'localtime'"],
+			["UPDATE A SET f = datetime(?1,'utc');", "'utc'"],
+		];
+		for (const [sql, token] of casos) {
+			const cmd = rewriteCmdNowLiterals(exec(sql), DT);
+			expect(horaSinFijar(cmd), sql).toBe(token);
+		}
+	});
+
+	it("mira sólo lo que se escribe: una lectura dentro del comando no viaja", () => {
+		const cmd: InternalApplyCommand = {
+			type: "tenantDb.transaction",
+			payload: {
+				steps: [
+					{ kind: "value", sql: "SELECT CURRENT_TIMESTAMP", saveAs: "t" },
+					{ kind: "execute", sql: "UPDATE A SET x = 1;" },
+				],
+			},
+		};
+		expect(horaSinFijar(cmd)).toBeNull();
+	});
+
+	it("no confunde una columna que se llame parecido con CURRENT_TIMESTAMP", () => {
+		expect(horaSinFijarEnSql("UPDATE A SET Mi_Current_Time_X = 1;")).toBeNull();
 	});
 });

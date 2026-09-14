@@ -32,9 +32,10 @@
   (se salta, avanza el checkpoint y se señala), para no atascar la cola indefinidamente.
 - **Freeze:** si no hay Main (rol `tpv`) conectada, el DO rechaza escrituras con `main_offline` y las
   Handy bloquean su UI.
-- **Determinismo temporal:** el emisor fija la hora (`X-Client-Now`); el DO y el `WriteGuard`
-  reescriben `datetime('now','localtime')` a literal antes de ejecutar/replicar, y un guard en debug
-  revienta si una sentencia replicable usa cualquier otra fuente de tiempo.
+- **Determinismo temporal (CFG-04):** la hora la fija quien escribe, nunca una base. La Main
+  resuelve toda forma de «ahora» a literal con un instante por operación y ejecuta en local la misma
+  sentencia que sube; el DO resuelve con la hora del emisor (`X-Client-Now`) y rechaza lo que no
+  puede fijar (`hora_no_determinista`). El esquema no tiene `DEFAULT` de hora.
 - **Hibernación (SYNC-16):** el DO usa la **WebSocket Hibernation API**. Las conexiones siguen
   abiertas mientras el objeto está evacuado de memoria (no factura duración) y el runtime lo despierta
   al llegar un mensaje real; el latido se contesta en el edge sin despertarlo. Consecuencia de diseño:

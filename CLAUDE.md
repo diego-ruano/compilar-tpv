@@ -494,7 +494,7 @@ no sólo en dev.
 | Cuarentena de subida | `tenantHub.errores.ts` + `infra-sqlite/src/sync.rs::outbox_mark_failed` | SYNC-20: un rechazo definitivo aparta la operación en vez de detener la cola |
 | Reparación por estado | `infra-sqlite/src/sync_reparacion.rs` | SYNC-22: reencola la fila APARTADA tal como está ahora, no la sentencia que fue rechazada |
 | Contraste con la nube | `sync.routes.ts::/verificar` + `sync.rs::contrastar_con_la_nube` + job `verificar_nube` | SYNC-24: comprueba a diario que las dos bases dicen lo mismo, repara e informa a Axiom |
-| Determinismo temporal | `db.rs::rewrite_now_literals` + `durableObjects/tenantHub.tiempo.ts` | `datetime('now','localtime')` → literal antes de capturar/replicar. Con tests (`test/tenantHubTiempo.test.ts`) |
+| Determinismo temporal | `db.rs::rewrite_now_literals` + `durableObjects/tenantHub.tiempo.ts` | CFG-04: toda forma de «ahora» se fija a literal antes de ejecutar (la Main ejecuta en local la misma sentencia que sube) o de aplicar (el DO, con la hora del emisor). Con tests (`test/tenantHubTiempo.test.ts`) |
 | WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
 | Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
@@ -510,6 +510,23 @@ no sólo en dev.
 - **Escritor único (Main):** todas las escrituras locales pasan por `db.rs` (no por `raw()`), que captura en `_Sync_Outbox`.
 - **Idempotencia:** `Op_Id` en la nube (`Applied_Operations`) + `_Sync_Applied_Ops` en la Main evitan duplicados en catch-up/live y ecos de las propias escrituras.
 - **IDs deterministas:** los `*.commands.ts` generan el UUID en un paso `kind:"value"` (`crypto.randomUUID()`) **antes** del INSERT, para que nube y Main tengan la misma fila. **Toda columna `TEXT PRIMARY KEY` debe seguir este patrón** (sin DEFAULT ni trigger en el esquema).
+- **La hora la pone quien escribe, nunca una base (CFG-04).** Una sentencia que viajara con su
+  `datetime('now')` la evaluaría la nube al aplicarla —segundos después, o días si el TPV estuvo sin
+  conexión— y en UTC. Reglas al tocar esto:
+  - **Una operación, un instante.** La Main fija la hora al abrir la transacción (o al ejecutar una
+    escritura suelta) y resuelve con ella todas sus sentencias: `'now'` con `'localtime'`, con o sin
+    modificadores, pasa a la hora local fija; `'now'` sin él y `CURRENT_*`, a la UTC fija.
+  - **En local se ejecuta la misma sentencia que sube.** Si el TPV ejecutara la original y subiera
+    la reescrita, las dos horas podrían caer en segundos distintos.
+  - **El esquema no tiene `DEFAULT` de hora**, y lo vigila un test. Un `INSERT` que omitía la
+    columna dejaba la hora en manos de cada base, y Turso la rellenaba con su reloj y en UTC. Quien
+    inserta, la informa.
+  - **La nube sólo sabe fijar la hora local del emisor** (`X-Client-Now`). Un `'now'` en UTC o un
+    `CURRENT_*` en una escritura de la Handy no tienen con qué resolverse, y el DO los rechaza
+    (`hora_no_determinista`) en vez de dejar que Turso elija.
+  - **Lo que no puede fijar nadie es un `'localtime'` aplicado a un valor**
+    (`datetime(Fecha,'localtime')`): depende de la zona de quien lo ejecuta. En desarrollo revienta;
+    en el equipo del cliente no se bloquea la escritura —puede ser un cobro— pero queda anotado.
 - **Canal de la comanda:** una `Comandas` es un ticket y su origen lo marca `Canal` (`'MESA'` con
   `ID_Mesa`, `'BARRA'` = venta rápida **sin** mesa). El índice único `idx_comandas_una_abierta_por_mesa`
   garantiza una comanda abierta por mesa real; los tickets de barra no compiten entre sí porque en

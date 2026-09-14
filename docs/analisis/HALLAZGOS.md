@@ -11,23 +11,4 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar: CFG-04 es mantenimiento.
-
-| ID | Sev | Hallazgo | Estado |
-|----|-----|----------|--------|
-| CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
-
----
-
-
-## CFG-04 🔵 · La guardia de fuentes de tiempo es un `debug_assert!`
-
-[`db.rs:371`](../../crates/tpv-infra-sqlite/src/db.rs#L371) comprueba con `debug_assert!` que ningún
-SQL replicable lleve una fuente de tiempo no determinista fuera de las dos formas canónicas. En
-release no hace nada, así que una escritura nueva por un camino sin test viajaría al outbox con su
-`datetime('now')` sin resolver y la nube la reevaluaría en otro instante.
-
-Está decidido así («en release no penaliza») y la cobertura de contrato al 94 % cubre casi todo. Se
-anota por si algún día conviene convertirlo en un error devuelto en vez de en un panic de debug: la
-comprobación es una búsqueda de subcadenas sobre un SQL que ya se está recorriendo, así que el coste
-real de dejarla en release es difícil de medir.
+> **Estado (2026-09-14):** no queda abierto ningún hallazgo de este repaso.

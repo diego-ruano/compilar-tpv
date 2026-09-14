@@ -105,48 +105,165 @@ fn value_to_json(v: &Value) -> serde_json::Value {
     }
 }
 
-/// Sustituye en una sentencia **a replicar** las funciones de tiempo NO deterministas por el
-/// instante local del dispositivo ya resuelto a literal. Imprescindible para la replicación a
-/// nivel de sentencia: si la SQL viajara con `datetime('now')`, la nube (y un re-apply) la
-/// reevaluarían en otro instante/zona y la fila divergiría entre Main, nube y Handy.
-///
-/// Solo toca las formas exactas `datetime('now','localtime')` y `date('now','localtime')`. No son
-/// subcadena de las variantes con modificador (`…,'localtime','-2 days')`), que acaban en `,'…')`,
-/// así que el reemplazo literal es seguro y no las corrompe. La ejecución local ya ocurrió con la
-/// hora real del motor; aquí solo se ajusta la copia que se captura para el outbox.
-fn rewrite_now_literals(sql: &str) -> String {
-    if !sql.contains("('now'") {
-        return sql.to_string();
+/// El instante de una operación (CFG-04). Se toma UNO —al abrir la transacción, o al ejecutar una
+/// escritura suelta— y con él se fijan todas sus sentencias: la línea y el pago de un mismo cobro
+/// llevan la misma hora, en el TPV y en la nube.
+#[derive(Clone, Copy)]
+struct Instante(chrono::DateTime<chrono::Local>);
+
+impl Instante {
+    fn ahora() -> Self {
+        Self(chrono::Local::now())
     }
-    let dt = crate::util::now_local_datetime();
-    let d = crate::util::now_local_date();
-    sql.replace("datetime('now','localtime')", &format!("'{dt}'"))
-        .replace("date('now','localtime')", &format!("'{d}'"))
+
+    fn local(&self) -> String {
+        self.0.format("%Y-%m-%d %H:%M:%S").to_string()
+    }
+
+    fn fecha_local(&self) -> String {
+        self.0.format("%Y-%m-%d").to_string()
+    }
+
+    fn utc(&self, formato: &str) -> String {
+        self.0.with_timezone(&chrono::Utc).format(formato).to_string()
+    }
 }
 
-/// Las ÚNICAS formas de "hora actual" admitidas en SQL replicable: las que
-/// `rewrite_now_literals` (Main) y `resolveNowLiterals` (worker) saben resolver a literal.
-const ALLOWED_NOW_FORMS: [&str; 2] = ["datetime('now','localtime')", "date('now','localtime')"];
+/// Las funciones de fecha de SQLite. Un `'now'` sólo es «ahora» cuando es argumento de una de ellas:
+/// fuera de ellas es un texto como otro cualquiera, y una nota que diga "now" no es una hora.
+const FUNCIONES_DE_FECHA: [&str; 7] =
+    ["datetime", "date", "time", "julianday", "strftime", "unixepoch", "timediff"];
 
-/// Detecta una fuente de tiempo NO determinista en `sql` que NO esté cubierta por
-/// `rewrite_now_literals`. Devuelve el token infractor, o `None` si el SQL replicable es seguro.
-///
-/// Motivación (DB-15): `rewrite_now_literals` solo resuelve las dos formas canónicas. Cualquier otra
-/// (`datetime('now')` sin `localtime`, con modificadores `…,'-2 days'`, `strftime(…,'now')`,
-/// `julianday('now')`, `CURRENT_TIMESTAMP/DATE/TIME`) viajaría SIN resolver y la nube (o un re-apply)
-/// la reevaluaría en otro instante/zona → la fila divergiría. Restringimos a UNA forma canónica.
-///
-/// Se descuentan primero las formas permitidas; lo que quede con `'now'` o `CURRENT_*` es un fallo.
-/// Nota: los modificadores (`datetime('now','localtime','-2 days')`) NO contienen la forma canónica
-/// como subcadena (acaban en `,'…')`, no en `)`), así que se detectan igual.
-fn uncovered_time_source(sql: &str) -> Option<&'static str> {
-    let mut stripped = sql.to_string();
-    for form in ALLOWED_NOW_FORMS {
-        stripped = stripped.replace(form, "");
+fn es_de_identificador(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'_'
+}
+
+/// ¿El `'now'` que empieza en `i` es argumento de una función de fecha? Se busca hacia atrás el
+/// paréntesis que lo abre y el nombre que lleva delante. `b` es el SQL en minúsculas.
+fn es_argumento_de_fecha(b: &[u8], i: usize) -> bool {
+    let mut profundidad = 0usize;
+    let mut j = i;
+    while j > 0 {
+        j -= 1;
+        match b[j] {
+            b')' => profundidad += 1,
+            b'(' if profundidad > 0 => profundidad -= 1,
+            b'(' => {
+                let mut fin = j;
+                while fin > 0 && b[fin - 1].is_ascii_whitespace() {
+                    fin -= 1;
+                }
+                let mut ini = fin;
+                while ini > 0 && es_de_identificador(b[ini - 1]) {
+                    ini -= 1;
+                }
+                return FUNCIONES_DE_FECHA.iter().any(|f| b[ini..fin] == *f.as_bytes());
+            }
+            _ => {}
+        }
     }
-    ["'now'", "CURRENT_TIMESTAMP", "CURRENT_DATE", "CURRENT_TIME"]
+    false
+}
+
+/// Si tras el `'now'` que acaba en `pos` viene `, 'localtime'`, devuelve dónde acaba.
+fn tras_localtime(b: &[u8], mut pos: usize) -> Option<usize> {
+    while pos < b.len() && b[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    if b.get(pos) != Some(&b',') {
+        return None;
+    }
+    pos += 1;
+    while pos < b.len() && b[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    b[pos..]
+        .starts_with(b"'localtime'")
+        .then_some(pos + b"'localtime'".len())
+}
+
+/// `CURRENT_TIMESTAMP`, `CURRENT_DATE` o `CURRENT_TIME` en la posición `i`: su largo y el formato del
+/// literal UTC que lo sustituye. Tiene que ser la palabra entera, no parte de un nombre de columna.
+fn marca_current(b: &[u8], i: usize) -> Option<(usize, &'static str)> {
+    if i > 0 && es_de_identificador(b[i - 1]) {
+        return None;
+    }
+    [
+        ("current_timestamp", "%Y-%m-%d %H:%M:%S"),
+        ("current_date", "%Y-%m-%d"),
+        ("current_time", "%H:%M:%S"),
+    ]
+    .into_iter()
+    .find(|(palabra, _)| {
+        b[i..].starts_with(palabra.as_bytes())
+            && !matches!(b.get(i + palabra.len()), Some(c) if es_de_identificador(*c))
+    })
+    .map(|(palabra, formato)| (palabra.len(), formato))
+}
+
+/// Fija a literal TODA forma de «ahora» de una escritura replicable (DB-15, CFG-04).
+///
+/// Si la sentencia viajara con su `datetime('now')`, la nube la evaluaría al aplicarla —segundos
+/// después, o días si el TPV estuvo sin conexión— y en UTC. Así que la hora la pone el TPV:
+///
+///   - `datetime('now','localtime')` y `date('now','localtime')` pasan a ser el literal suelto.
+///   - `'now','localtime'` con modificadores detrás pasa a ser la hora local fija, y los
+///     modificadores se quedan: `datetime('2026-09-14 16:04:43','-2 days')` da lo mismo que antes.
+///   - un `'now'` sin `localtime` es UTC, y pasa a ser la hora UTC fija.
+///   - `CURRENT_TIMESTAMP`, `CURRENT_DATE` y `CURRENT_TIME`, que también son UTC, igual.
+///
+/// La sentencia fijada es la que se ejecuta en local **y** la que sube (ver `build_stmt`), así que
+/// el TPV y la nube guardan el mismo valor.
+fn rewrite_now_literals(sql: &str, t: &Instante) -> String {
+    let minus = sql.to_ascii_lowercase();
+    if !minus.contains("'now'") && !minus.contains("current_") {
+        return sql.to_string();
+    }
+    let sql = sql
+        .replace("datetime('now','localtime')", &format!("'{}'", t.local()))
+        .replace("date('now','localtime')", &format!("'{}'", t.fecha_local()));
+
+    // Todo lo que se busca es ASCII, así que las posiciones del SQL en minúsculas valen para el
+    // original, y cortar por ellas nunca parte un carácter.
+    let minus = sql.to_ascii_lowercase();
+    let b = minus.as_bytes();
+    let mut out = String::with_capacity(sql.len() + 32);
+    let mut copiado = 0;
+    let mut i = 0;
+    while i < b.len() {
+        let sustitucion = if b[i..].starts_with(b"'now'") && es_argumento_de_fecha(b, i) {
+            Some(match tras_localtime(b, i + 5) {
+                Some(fin) => (fin, t.local()),
+                None => (i + 5, t.utc("%Y-%m-%d %H:%M:%S")),
+            })
+        } else {
+            marca_current(b, i).map(|(largo, formato)| (i + largo, t.utc(formato)))
+        };
+        match sustitucion {
+            Some((fin, literal)) => {
+                out.push_str(&sql[copiado..i]);
+                out.push('\'');
+                out.push_str(&literal);
+                out.push('\'');
+                copiado = fin;
+                i = fin;
+            }
+            None => i += 1,
+        }
+    }
+    out.push_str(&sql[copiado..]);
+    out
+}
+
+/// Lo que ni siquiera el TPV puede fijar (CFG-04): un `'localtime'` o un `'utc'` aplicados a un
+/// VALOR —una columna, un parámetro—. La conversión depende de la zona horaria de quien ejecuta la
+/// sentencia, y la nube corre en UTC: el mismo `datetime(Fecha,'localtime')` da dos horas distintas.
+/// Aplicados a `'now'` no llegan aquí, porque `rewrite_now_literals` ya los ha resuelto.
+fn tiempo_sin_fijar(sql_fijada: &str) -> Option<&'static str> {
+    let minus = sql_fijada.to_ascii_lowercase();
+    ["'localtime'", "'utc'"]
         .into_iter()
-        .find(|pat| stripped.contains(pat))
+        .find(|token| minus.contains(*token))
 }
 
 fn is_write_sql(sql: &str) -> bool {
@@ -339,6 +456,9 @@ pub struct WriteGuard<'a> {
     /// Buffer de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK). Es LOCAL a este
     /// guard (solo hay uno vivo), así que no hay estado global compartido ni carreras.
     tx_buf: Mutex<Option<Vec<SqlStatement>>>,
+    /// El instante de la transacción en curso (Some entre BEGIN y COMMIT/ROLLBACK): todas sus
+    /// escrituras se fijan con él (CFG-04).
+    instante: StdMutex<Option<Instante>>,
     /// Notificador del outbox (ver `OutboxNotify`). Se dispara tras confirmar la operación.
     outbox_notify: OutboxNotify,
     _lock: tokio::sync::MutexGuard<'a, ()>,
@@ -358,20 +478,45 @@ impl<'a> WriteGuard<'a> {
         }
     }
 
-    /// Construye la copia REPLICABLE de una escritura: el tiempo resuelto a literal (determinismo)
-    /// y los args serializados a JSON. La ejecución local conserva su `datetime('now')` real; aquí
-    /// solo se prepara lo que viajará al outbox.
+    /// El instante de la operación en curso: el de su transacción, o uno nuevo si es suelta.
+    fn instante(&self) -> Instante {
+        self.instante
+            .lock()
+            .ok()
+            .and_then(|t| *t)
+            .unwrap_or_else(Instante::ahora)
+    }
+
+    /// Fija (o suelta, con `None`) el instante de la transacción. Es síncrono a propósito: el
+    /// cerrojo no puede quedar vivo a través de un `await`.
+    fn fijar_instante(&self, instante: Option<Instante>) {
+        if let Ok(mut t) = self.instante.lock() {
+            *t = instante;
+        }
+    }
+
+    /// Construye la escritura tal como se ejecuta en local y tal como sube a la nube: la misma
+    /// sentencia, con la hora ya fijada (CFG-04), y sus args serializados a JSON.
     fn build_stmt(&self, sql: &str, values: &[Value]) -> SqlStatement {
-        // Guard (DB-15): una escritura replicable NUNCA debe llevar una fuente de tiempo no
-        // determinista fuera de las dos formas canónicas (ver `uncovered_time_source`). En debug
-        // revienta para cazar el error en desarrollo/tests; en release no penaliza.
-        debug_assert!(
-            uncovered_time_source(sql).is_none(),
-            "SQL replicable con hora no determinista sin cubrir por rewrite_now_literals \
-             (usa datetime('now','localtime') o date('now','localtime')): {sql}"
-        );
+        let sql = rewrite_now_literals(sql, &self.instante());
+        if let Some(token) = tiempo_sin_fijar(&sql) {
+            // No se bloquea la escritura: podría ser un cobro, y nada de lo que rodea a una venta
+            // puede impedirla. Pero la nube haría esa conversión en su zona horaria, así que se
+            // grita: en desarrollo y en los tests revienta, y en el equipo del cliente queda anotado.
+            #[cfg(debug_assertions)]
+            panic!(
+                "SQL replicable con una hora que depende de la zona de quien la ejecuta ({token}): {sql}"
+            );
+            #[cfg(not(debug_assertions))]
+            tracing::error!(
+                target: "tpv::sync",
+                token,
+                sql = %sql,
+                "escritura con una hora que la nube convertiría a su zona horaria"
+            );
+        }
         SqlStatement {
-            sql: rewrite_now_literals(sql),
+            sql,
             args: values.iter().map(value_to_json).collect(),
         }
     }
@@ -422,8 +567,12 @@ impl<'a> Writer for WriteGuard<'a> {
                     // Dentro de una transacción (BEGIN..COMMIT): ejecutamos el negocio y
                     // ACUMULAMOS la captura en el buffer; se vuelca en el COMMIT dentro de la
                     // misma transacción → ya es atómico (negocio + outbox commitean juntos).
-                    let affected = self.conn.execute(sql, values.clone()).await?;
-                    v.push(self.build_stmt(sql, &values));
+                    //
+                    // Lo que se ejecuta es la sentencia con la hora ya fijada, no la original: así
+                    // queda en local exactamente lo que sube (CFG-04).
+                    let stmt = self.build_stmt(sql, &values);
+                    let affected = self.conn.execute(&stmt.sql, values).await?;
+                    v.push(stmt);
                     Ok(affected)
                 }
                 None => {
@@ -435,7 +584,7 @@ impl<'a> Writer for WriteGuard<'a> {
                     let stmt = self.build_stmt(sql, &values);
                     self.conn.execute_batch("BEGIN;").await?;
                     let res: Result<u64, LibsqlError> = async {
-                        let affected = self.conn.execute(sql, values.clone()).await?;
+                        let affected = self.conn.execute(&stmt.sql, values.clone()).await?;
                         write_op(self.conn, std::slice::from_ref(&stmt)).await?;
                         Ok(affected)
                     }
@@ -463,12 +612,16 @@ impl<'a> Writer for WriteGuard<'a> {
             match batch_kind(&sql) {
                 BatchKind::Begin => {
                     *self.tx_buf.lock().await = Some(Vec::new());
+                    // Una operación, un instante: todas las escrituras de esta transacción se fijan
+                    // con la hora de ahora, aunque la transacción dure más de un segundo (CFG-04).
+                    self.fijar_instante(Some(Instante::ahora()));
                     // libsql 0.9 devuelve `BatchRows` (las filas de cada sentencia del lote). Aquí
                     // no interesan: `execute_batch` se usa para DDL y control de transacción.
                     self.conn.execute_batch(&sql).await.map(|_| ())
                 }
                 BatchKind::Commit => {
                     let buffered = self.tx_buf.lock().await.take();
+                    self.fijar_instante(None);
                     let had_writes = buffered.as_ref().map(|v| !v.is_empty()).unwrap_or(false);
                     // Registrar la operación en el outbox DENTRO de la misma transacción (BEGIN
                     // ya enviado, COMMIT no aún). La captura es incondicional: el outbox acumula
@@ -497,6 +650,7 @@ impl<'a> Writer for WriteGuard<'a> {
                 }
                 BatchKind::Rollback => {
                     *self.tx_buf.lock().await = None;
+                    self.fijar_instante(None);
                     self.conn.execute_batch(&sql).await.map(|_| ())
                 }
                 BatchKind::Other => self.conn.execute_batch(&sql).await.map(|_| ()),
@@ -615,6 +769,7 @@ impl Db {
             conn: &self.write.conn,
             bloqueadas: &self.escrituras_bloqueadas,
             tx_buf: Mutex::new(None),
+            instante: StdMutex::new(None),
             outbox_notify: self.outbox_notify.clone(),
             _lock: lock,
         }
@@ -628,50 +783,195 @@ impl Db {
 mod tests {
     use super::*;
 
-    #[test]
-    fn rewrite_now_literals_resuelve_formas_canonicas() {
-        // Tras reescribir, no debe quedar ninguna fuente de tiempo sin resolver.
-        let sql =
-            "INSERT INTO T (a,b) VALUES (datetime('now','localtime'), date('now','localtime'));";
-        let out = rewrite_now_literals(sql);
-        assert!(
-            !out.contains("'now'"),
-            "las formas canónicas deben quedar resueltas: {out}"
-        );
-        assert!(uncovered_time_source(&out).is_none());
+    /// Un instante fijo: el 14 de septiembre de 2026 a las 14:04:43 UTC. La hora local depende de la
+    /// zona del equipo que corre el test, así que se compara contra `local()` y no contra un texto.
+    fn instante_fijo() -> Instante {
+        use chrono::TimeZone;
+        Instante(
+            chrono::Utc
+                .with_ymd_and_hms(2026, 9, 14, 14, 4, 43)
+                .unwrap()
+                .with_timezone(&chrono::Local),
+        )
     }
 
     #[test]
-    fn uncovered_time_source_acepta_solo_formas_canonicas() {
-        // Permitidas.
-        assert!(uncovered_time_source("SET x = datetime('now','localtime')").is_none());
-        assert!(uncovered_time_source("SET x = date('now','localtime')").is_none());
-        // Literales de texto normales no son 'now'.
-        assert!(
-            uncovered_time_source("Estado = 'Abierta', T = datetime('now','localtime')").is_none()
+    fn fija_las_formas_canonicas_como_siempre() {
+        let t = instante_fijo();
+        assert_eq!(
+            rewrite_now_literals(
+                "INSERT INTO T (a,b) VALUES (datetime('now','localtime'), date('now','localtime'));",
+                &t
+            ),
+            format!("INSERT INTO T (a,b) VALUES ('{}', '{}');", t.local(), t.fecha_local())
         );
-        // julianday/strftime sobre PARÁMETROS (no 'now') son deterministas → permitidos.
-        assert!(uncovered_time_source(
-            "CAST(julianday(date(?2)) - julianday(date(?1)) AS INTEGER)"
-        )
-        .is_none());
+    }
 
-        // Prohibidas (divergirían al replicar).
+    #[test]
+    fn fija_la_hora_local_y_conserva_los_modificadores() {
+        let t = instante_fijo();
         assert_eq!(
-            uncovered_time_source("VALUES (datetime('now'))"),
-            Some("'now'")
+            rewrite_now_literals("SET f = datetime('now','localtime','-2 days')", &t),
+            format!("SET f = datetime('{}','-2 days')", t.local())
+        );
+        // Con espacios, en mayúsculas y como segundo argumento: sigue siendo la hora actual.
+        assert_eq!(
+            rewrite_now_literals("SET h = strftime('%H', 'NOW' , 'LocalTime')", &t),
+            format!("SET h = strftime('%H', '{}')", t.local())
+        );
+    }
+
+    #[test]
+    fn un_now_sin_localtime_es_utc_y_se_fija_en_utc() {
+        let t = instante_fijo();
+        assert_eq!(
+            rewrite_now_literals("VALUES (datetime('now'), julianday('now'))", &t),
+            "VALUES (datetime('2026-09-14 14:04:43'), julianday('2026-09-14 14:04:43'))"
         );
         assert_eq!(
-            uncovered_time_source("datetime('now','localtime','-2 days')"),
-            Some("'now'"),
-            "las variantes con modificador NO están cubiertas por rewrite_now_literals"
+            rewrite_now_literals(
+                "SET a = CURRENT_TIMESTAMP, b = current_date, c = CURRENT_TIME",
+                &t
+            ),
+            "SET a = '2026-09-14 14:04:43', b = '2026-09-14', c = '14:04:43'"
         );
-        assert_eq!(uncovered_time_source("strftime('%H','now')"), Some("'now'"));
-        assert_eq!(uncovered_time_source("julianday('now')"), Some("'now'"));
+    }
+
+    #[test]
+    fn no_toca_lo_que_no_es_la_hora_actual() {
+        let t = instante_fijo();
+        for sql in [
+            // Un dato que dice "now" no es una hora, aunque vaya junto a otro que diga "localtime".
+            "INSERT INTO Notas (a, b) VALUES ('now', 'localtime')",
+            "CAST(julianday(date(?2)) - julianday(date(?1)) AS INTEGER)",
+            "UPDATE T SET Mi_CURRENT_TIMESTAMP_X = 1",
+            "UPDATE Mesas SET Estado = 'Libre' WHERE ID_Mesa = ?1",
+        ] {
+            assert_eq!(rewrite_now_literals(sql, &t), sql);
+        }
+    }
+
+    #[test]
+    fn un_localtime_sobre_un_valor_no_lo_puede_fijar_nadie() {
         assert_eq!(
-            uncovered_time_source("SET T = CURRENT_TIMESTAMP"),
-            Some("CURRENT_TIMESTAMP")
+            tiempo_sin_fijar("SET f = datetime(Fecha_Utc, 'localtime')"),
+            Some("'localtime'")
         );
+        assert_eq!(tiempo_sin_fijar("SET f = datetime(?1, 'utc')"), Some("'utc'"));
+        let t = instante_fijo();
+        assert_eq!(
+            tiempo_sin_fijar(&rewrite_now_literals(
+                "SET f = datetime('now','localtime','start of day')",
+                &t
+            )),
+            None
+        );
+    }
+
+    /// Lo que da sentido a todo lo anterior: la fila que queda en el TPV y la sentencia que sube dicen
+    /// la misma hora, y las dos escrituras de una misma operación la misma entre sí, aunque entre una y
+    /// otra pase más de un segundo.
+    #[tokio::test]
+    async fn en_local_queda_la_misma_hora_que_sube_a_la_nube() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        {
+            let w = db.write().await;
+            w.execute_batch("BEGIN;").await.unwrap();
+            w.execute(
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Updated_At) \
+                 VALUES ('z1', 'Salon', datetime('now','localtime'));",
+                (),
+            )
+            .await
+            .unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1100));
+            w.execute(
+                "INSERT INTO Zonas (ID_Zona, Nombre_Zona, Updated_At) \
+                 VALUES ('z2', 'Terraza', datetime('now','localtime'));",
+                (),
+            )
+            .await
+            .unwrap();
+            w.execute_batch("COMMIT;").await.unwrap();
+        }
+
+        let r = db.read().await;
+        let mut filas = r
+            .query("SELECT Updated_At FROM Zonas ORDER BY ID_Zona;", ())
+            .await
+            .unwrap();
+        let mut locales = Vec::new();
+        while let Some(f) = filas.next().await.unwrap() {
+            locales.push(f.get::<String>(0).unwrap());
+        }
+        let mut ops = r
+            .query(
+                "SELECT Statements_Json FROM _Sync_Outbox ORDER BY Seq DESC LIMIT 1;",
+                (),
+            )
+            .await
+            .unwrap();
+        let subida: String = ops.next().await.unwrap().unwrap().get(0).unwrap();
+
+        assert_eq!(locales.len(), 2);
+        assert_eq!(locales[0], locales[1], "una operación, un instante");
+        assert!(
+            subida.contains(&format!("'{}'", locales[0])),
+            "a la nube tiene que subir la misma hora que quedó en el TPV: {subida}"
+        );
+        assert!(!subida.to_ascii_lowercase().contains("'now'"));
+    }
+
+    /// CFG-04: ninguna columna del esquema elige su hora. Un `DEFAULT` de hora lo evalúa cada base por
+    /// su cuenta —la nube, en otro instante y en UTC—, así que la hora la pone quien inserta.
+    #[tokio::test]
+    async fn ninguna_columna_del_esquema_elige_su_hora() {
+        let (db, _dir) = crate::contract_comun::db_temporal().await;
+        let r = db.read().await;
+        let mut tablas = r
+            .query("SELECT name FROM sqlite_master WHERE type = 'table';", ())
+            .await
+            .unwrap();
+        let mut nombres = Vec::new();
+        while let Some(f) = tablas.next().await.unwrap() {
+            nombres.push(f.get::<String>(0).unwrap());
+        }
+        let mut con_hora = Vec::new();
+        for tabla in nombres {
+            let mut columnas = r
+                .query(&format!("PRAGMA table_info(\"{tabla}\");"), ())
+                .await
+                .unwrap();
+            while let Some(c) = columnas.next().await.unwrap() {
+                let defecto = crate::mapping::v_string(c.get_value(4).unwrap())
+                    .unwrap_or_default()
+                    .to_ascii_lowercase();
+                if defecto.contains("'now'") || defecto.contains("current_") {
+                    con_hora.push(format!("{tabla}.{}", c.get::<String>(1).unwrap()));
+                }
+            }
+        }
+        assert!(con_hora.is_empty(), "columnas con DEFAULT de hora: {con_hora:?}");
+    }
+
+    /// Espejo de lo que sabe fijar `tenantHub.tiempo.ts` con la hora del emisor: sólo el `'now'`
+    /// seguido de `'localtime'`. Un `'now'` en UTC o un `CURRENT_*` no se pueden fijar con una hora
+    /// local, y un `'localtime'` sobre un valor no lo puede fijar nadie: el DO los rechaza.
+    fn forma_que_la_nube_no_sabe_fijar(sql: &str) -> Option<&'static str> {
+        let minus = sql.to_ascii_lowercase();
+        let b = minus.as_bytes();
+        for i in 0..b.len() {
+            if b[i..].starts_with(b"'now'")
+                && es_argumento_de_fecha(b, i)
+                && tras_localtime(b, i + 5).is_none()
+            {
+                return Some("'now'");
+            }
+            if marca_current(b, i).is_some() {
+                return Some("CURRENT_*");
+            }
+        }
+        tiempo_sin_fijar(&rewrite_now_literals(sql, &Instante::ahora()))
     }
 
     fn collect_commands_ts(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -692,10 +992,10 @@ mod tests {
         }
     }
 
-    /// DB-15 (lado worker): los `*.commands.ts` construyen las sentencias REPLICABLES de la nube.
-    /// Deben usar SOLO las dos formas canónicas para la hora actual (las únicas que resuelve
-    /// `resolveNowLiterals` en el worker, espejo de `rewrite_now_literals`). Este scan lo garantiza
-    /// desde el harness de Rust (el worker no tiene runner de tests propio).
+    /// DB-15 (lado worker): los `*.commands.ts` construyen las sentencias REPLICABLES de la nube, y la
+    /// nube sólo sabe fijar la hora local del emisor (`'now','localtime'`, con o sin modificadores).
+    /// Lo que no puede fijar lo rechaza en tiempo de ejecución (`hora_no_determinista`); este scan lo
+    /// caza antes, en los tests de Rust.
     #[test]
     fn worker_commands_solo_usan_formas_canonicas_de_now() {
         let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -716,15 +1016,15 @@ mod tests {
         for f in &files {
             let content = std::fs::read_to_string(f).unwrap();
             for (i, line) in content.lines().enumerate() {
-                if let Some(tok) = uncovered_time_source(line) {
+                if let Some(tok) = forma_que_la_nube_no_sabe_fijar(line) {
                     violations.push(format!("{}:{} → {tok}", f.display(), i + 1));
                 }
             }
         }
         assert!(
             violations.is_empty(),
-            "Sentencias replicables (*.commands.ts) deben usar SOLO datetime('now','localtime') o \
-             date('now','localtime') para la hora actual. Violaciones:\n{}",
+            "Sentencias replicables (*.commands.ts) con una hora que la nube no sabe fijar (sólo sabe \
+             'now','localtime', con o sin modificadores). Violaciones:\n{}",
             violations.join("\n")
         );
     }

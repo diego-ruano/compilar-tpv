@@ -35,6 +35,11 @@ describe("un rechazo que NO se arregla reintentando", () => {
 		expect(esRechazoPermanente(new Error("CHECK constraint failed: Comandas"))).toBe(true);
 	});
 
+	it("una hora que tendría que elegir la nube tampoco se arregla reintentando", () => {
+		// CFG-04: el DO la rechaza antes de ejecutar nada, y el mismo comando da el mismo rechazo.
+		expect(esRechazoPermanente(new Error("hora_no_determinista: CURRENT_*"))).toBe(true);
+	});
+
 	it("no se deja engañar por el prefijo que antepone libsql", () => {
 		// Lo que llega no es el mensaje pelado de SQLite: viene envuelto.
 		expect(
