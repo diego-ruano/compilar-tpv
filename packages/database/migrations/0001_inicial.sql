@@ -977,6 +977,30 @@ ON Applied_Operations(Created_At_Ms);
 CREATE INDEX IF NOT EXISTS idx_applied_ops_command
 ON Applied_Operations(Command_Name);
 
+/* Log de replicacion de la NUBE (tambien vacias en la Main, por la misma politica):
+     - Sync_Changes: cada escritura aplicada por el TenantHub, con sus sentencias ya
+       resueltas. Alimenta el catch-up (/v1/sync/changes) y el broadcast.
+     - Sync_Main_Checkpoints: hasta donde ha confirmado cada Main; es el suelo de la
+       purga de Sync_Changes.
+   Antes las creaba el Durable Object al abrir su conexion, y un tenant recien
+   aprovisionado no las tenia hasta la primera escritura por el DO: el catch-up por
+   REST de una Main recien activada llegaba antes y fallaba con
+   `no such table: Sync_Changes` (SYNC-28). Aqui nacen con el tenant. */
+CREATE TABLE IF NOT EXISTS Sync_Changes (
+  Seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  Op_Id TEXT NOT NULL,
+  Command_Name TEXT,
+  Statements_Json TEXT NOT NULL,
+  Device_Id TEXT,
+  Created_At_Ms INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
+  Device_Id TEXT PRIMARY KEY,
+  Last_Seq INTEGER NOT NULL,
+  Updated_At_Ms INTEGER NOT NULL
+);
+
 /* =========================================================
    11. Configuración (singletons: ID=1, no son ids de negocio)
    (La antigua tabla Schema_Meta/schema_version se retiro: el versionado real del

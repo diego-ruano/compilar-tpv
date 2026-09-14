@@ -18,7 +18,6 @@ import { Hono } from "hono";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { DDL_TABLAS_DE_NUBE } from "../src/server/tablasDeNube";
 
 /** Cliente SQL del test en curso; lo lee el `tenantQuery` simulado. */
 let clienteActual: any = null;
@@ -61,10 +60,9 @@ async function pedirVolcado(
 ): Promise<{ status: number; body: any }> {
 	return enElHub(`bootstrap-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
-		// El esquema de negocio (las mismas migraciones que producción) + las tablas que sólo
-		// existen en la nube, que es justo lo que el volcado tiene que saber excluir.
+		// El esquema de las mismas migraciones que producción, que incluye las tablas que sólo
+		// usa la nube: justo lo que el volcado tiene que saber excluir.
 		crearEsquemaTenant(sql);
-		for (const ddl of DDL_TABLAS_DE_NUBE) sql.exec(ddl);
 		sembrar(sql);
 
 		clienteActual = clienteSobre(sql);

@@ -15,7 +15,6 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
-import { DDL_TABLAS_DE_NUBE } from "../src/server/tablasDeNube";
 
 const TENANT = "tenant-1";
 
@@ -65,7 +64,6 @@ function opRota(n: number) {
 function prepararHub(hub: any) {
 	const sql = hub.state.storage.sql;
 	crearEsquemaTenant(sql);
-	for (const ddl of DDL_TABLAS_DE_NUBE) sql.exec(ddl);
 	for (const s of SEMILLA) sql.exec(s);
 
 	const db = clienteSobre(sql, hub.state.storage);

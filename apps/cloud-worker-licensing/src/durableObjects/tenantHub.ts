@@ -235,10 +235,10 @@ export class TenantHub {
 			sql: "SELECT 1 AS ok;",
 			args: [],
 		});
-		// Las tablas que sólo existen en la nube (`Sync_Changes`, `Sync_Main_Checkpoints`) ya no se
-		// crean aquí: son una migración del tenant y las garantiza `ensureTenantMigrated`, el mismo
-		// guard que pasa el REST. Creadas aquí, una lectura por REST anterior a la primera escritura
-		// por el DO no las encontraba (SYNC-28).
+		// Las tablas que sólo usa la nube (`Sync_Changes`, `Sync_Main_Checkpoints`) ya no se crean
+		// aquí: van en `0001_inicial.sql` y las garantiza `ensureTenantMigrated`, el mismo guard que
+		// pasa el REST. Creadas aquí, una lectura por REST anterior a la primera escritura por el DO
+		// no las encontraba (SYNC-28).
 	}
 
 	private clearTenantDbCache() {

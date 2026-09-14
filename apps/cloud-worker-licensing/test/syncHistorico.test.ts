@@ -12,7 +12,6 @@ import { Hono } from "hono";
 import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
-import { DDL_TABLAS_DE_NUBE } from "../src/server/tablasDeNube";
 
 let clienteActual: any = null;
 let esTpv = true;
@@ -60,7 +59,6 @@ async function conTenant<R>(
 	return enElHub(`historico-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		crearEsquemaTenant(sql);
-		for (const ddl of DDL_TABLAS_DE_NUBE) sql.exec(ddl);
 		sembrar(sql);
 
 		clienteActual = clienteSobre(sql);

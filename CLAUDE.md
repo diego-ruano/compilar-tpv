@@ -514,14 +514,13 @@ no sólo en dev.
   Lo que sigue sin reconocer es un `WITH … INSERT`; hoy no hay ninguno, y si hace falta hay que
   enseñárselo a `is_write_sql`.
 - **Idempotencia:** `Op_Id` en la nube (`Applied_Operations`) + `_Sync_Applied_Ops` en la Main evitan duplicados en catch-up/live y ecos de las propias escrituras.
-- **Las tablas que sólo tiene la nube son una migración del tenant, no un efecto del DO (SYNC-28).**
-  `Sync_Changes` y `Sync_Main_Checkpoints` viven en `server/tablasDeNube.ts` y se aplican como
-  `nube_0001_replicacion` en `tenantMigrations.ts`, con su hash en `_migrations`. Así nacen al
-  aprovisionar y las garantiza `ensureTenantMigrated`, que pasan igual el DO y el REST. Antes las
-  creaba el DO al abrir su conexión, y el catch-up por REST de una Main recién activada llegaba
-  primero y reventaba con `no such table: Sync_Changes`. Cambiarlas sigue las reglas de una
-  migración: editar ese texto hace que el tenant se rechace (`migration_altered`), así que desde el
-  lanzamiento un cambio va en una migración de nube nueva.
+- **Las tablas que sólo usa la nube van en el esquema único, no las crea el DO (SYNC-28).**
+  `Applied_Operations`, `Sync_Changes` y `Sync_Main_Checkpoints` están en `0001_inicial.sql`, así
+  que también existen, vacías, en la Main. Nacen al aprovisionar el tenant y las garantiza
+  `ensureTenantMigrated`, que pasan igual el DO y el REST. Antes las dos últimas las creaba el DO al
+  abrir su conexión, y el catch-up por REST de una Main recién activada llegaba primero y reventaba
+  con `no such table: Sync_Changes`. Un volcado o una comparación que recorra tablas **tiene que
+  saltárselas** como andamiaje de la replicación, igual que las que empiezan por `_`.
 - **IDs deterministas:** los `*.commands.ts` generan el UUID en un paso `kind:"value"` (`crypto.randomUUID()`) **antes** del INSERT, para que nube y Main tengan la misma fila. **Toda columna `TEXT PRIMARY KEY` debe seguir este patrón** (sin DEFAULT ni trigger en el esquema).
 - **La hora la pone quien escribe, nunca una base (CFG-04).** Una sentencia que viajara con su
   `datetime('now')` la evaluaría la nube al aplicarla —segundos después, o días si el TPV estuvo sin

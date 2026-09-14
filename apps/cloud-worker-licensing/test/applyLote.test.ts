@@ -18,7 +18,6 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
-import { DDL_TABLAS_DE_NUBE } from "../src/server/tablasDeNube";
 
 /** Estado mínimo para poder insertar comandas y líneas. */
 const SEMILLA = [
@@ -69,10 +68,9 @@ function opRota(n: number) {
 	return op;
 }
 
-/** Levanta el esquema del tenant + las tablas que solo existen en la nube. */
+/** Levanta el esquema del tenant, que ya incluye las tablas que sólo usa la nube. */
 function prepararTenant(sql: any) {
 	crearEsquemaTenant(sql);
-	for (const ddl of DDL_TABLAS_DE_NUBE) sql.exec(ddl);
 	for (const s of SEMILLA) sql.exec(s);
 }
 

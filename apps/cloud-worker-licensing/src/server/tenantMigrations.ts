@@ -18,28 +18,16 @@
 // de la Main, y la primera escritura que toque una columna nueva se rechaza (SYNC-20: así se paró la
 // cola con `Razon_Social`). Tras tocar una migración, redespliega antes de probar nada con nube.
 //
-// MIGRACIONES DE NUBE: el tenant lleva además tablas que la Main no tiene (`tablasDeNube.ts`). Van
-// en su propia lista, detrás de las compartidas y con nombre sin `.sql` —no son ficheros de
-// packages/database, y `check-migration-registry.mjs` sólo cuadra esos—, pero con el mismo control
-// de hash y el mismo camino: así existen desde que el tenant se aprovisiona (SYNC-28).
+// Las tablas que sólo usa la nube (`Applied_Operations`, `Sync_Changes`, `Sync_Main_Checkpoints`)
+// van también en el esquema único: en la Main quedan vacías. Así nacen al aprovisionar el tenant y
+// no dependen de que el Durable Object abra antes su conexión (SYNC-28).
 
 import type { Client } from "@libsql/client";
 
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
-import { DDL_TABLAS_DE_NUBE } from "./tablasDeNube";
 
-const MIGRATIONS_COMPARTIDAS: { name: string; sql: string }[] = [
+const MIGRATIONS: { name: string; sql: string }[] = [
 	{ name: "0001_inicial.sql", sql: m0001 },
-];
-
-const MIGRACIONES_DE_NUBE: { name: string; sql: string }[] = [
-	{ name: "nube_0001_replicacion", sql: DDL_TABLAS_DE_NUBE.join("\n") },
-];
-
-/** Todas, en orden de aplicación. Exportada para los tests. */
-export const MIGRATIONS: { name: string; sql: string }[] = [
-	...MIGRATIONS_COMPARTIDAS,
-	...MIGRACIONES_DE_NUBE,
 ];
 
 /** Normaliza finales de línea (CRLF → LF) para que el hash sea estable entre sistemas. */
