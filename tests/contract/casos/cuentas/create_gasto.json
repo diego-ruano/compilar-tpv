@@ -1,5 +1,5 @@
 {
-  "descripcion": "Alta de un gasto de caja. El ID se pasa explícito (los dos lados lo aceptan y lo respetan: sólo lo generan si falta), así que aquí sí entra en el snapshot. La fecha pasa por date(), que normaliza a YYYY-MM-DD.",
+  "descripcion": "Alta de un gasto pagado con dinero del cajón. El ID se pasa explícito (los dos lados lo aceptan y lo respetan: sólo lo generan si falta), así que aquí sí entra en el snapshot. La fecha pasa por date(), que normaliza a YYYY-MM-DD. Pagado_Con_Caja entra en el snapshot porque es lo que resta del esperado del arqueo (CAJA-01).",
   "comando": "cuentas.create_gasto",
   "seed": [
     "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuciones SA');"
@@ -10,10 +10,11 @@
     "tipo_gasto": "Suministros",
     "concepto": "Cajas de servilletas",
     "importe": 42.75,
-    "proveedor_id": "prov-1"
+    "proveedor_id": "prov-1",
+    "pagado_con_caja": true
   },
   "snapshot": {
-    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor FROM Cuentas_Gastos",
+    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja FROM Cuentas_Gastos",
     "Movimientos_Caja": "SELECT Tipo, ID_Gasto, ID_Usuario, Importe, Motivo FROM Movimientos_Caja"
   }
 }

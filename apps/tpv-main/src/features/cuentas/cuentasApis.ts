@@ -5,6 +5,7 @@
 // helpers de caja (solo frontend / localStorage).
 
 import { invokeClient } from "@tpv/client";
+import type { CambioCajaInput, ImpactoCajaDto } from "@tpv/contracts";
 
 /* =========================
    Tipos UI
@@ -31,6 +32,8 @@ export type Salida = {
     concepto: string;
     importe: number;
     proveedorId?: string | null;
+    /** CAJA-01: el dinero salió del cajón, así que resta del esperado del arqueo. */
+    pagadoConCaja: boolean;
 };
 
 export type ProveedorMini = {
@@ -141,6 +144,7 @@ function mapSalida(r: any): Salida {
         proveedorId: toIdOrNull(
             r?.proveedorId ?? r?.proveedor_id ?? r?.id_proveedor ?? r?.ID_Proveedor,
         ),
+        pagadoConCaja: Boolean(r?.pagadoConCaja ?? r?.pagado_con_caja),
     };
 }
 
@@ -228,12 +232,18 @@ export async function cuentasGetResumen(params: {
    CRUD GASTOS
 ========================= */
 
+/**
+ * El motivo de la rectificación (CAJA-01) viaja fuera de `args` porque no es un dato del apunte: es
+ * de la corrección. Sólo hace falta cuando el cambio mueve el descuadre de un cierre ya hecho.
+ */
 export async function cuentasCreateGasto(payload: {
     fecha: string;
     tipoGasto: string;
     concepto: string;
     importe: number;
     proveedorId?: string | null;
+    pagadoConCaja?: boolean;
+    motivoRectificacion?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_create_gasto", {
         args: {
@@ -242,7 +252,9 @@ export async function cuentasCreateGasto(payload: {
             concepto: cleanString(payload.concepto),
             importe: Number(payload.importe ?? 0),
             proveedor_id: toIdOrNull(payload.proveedorId),
+            pagado_con_caja: Boolean(payload.pagadoConCaja),
         },
+        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
     });
     return typeof r === "boolean" ? r : true;
 }
@@ -254,6 +266,8 @@ export async function cuentasUpdateGasto(payload: {
     concepto: string;
     importe: number;
     proveedorId?: string | null;
+    pagadoConCaja?: boolean;
+    motivoRectificacion?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_update_gasto", {
         args: {
@@ -263,14 +277,20 @@ export async function cuentasUpdateGasto(payload: {
             concepto: cleanString(payload.concepto),
             importe: Number(payload.importe ?? 0),
             proveedor_id: toIdOrNull(payload.proveedorId),
+            pagado_con_caja: Boolean(payload.pagadoConCaja),
         },
+        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
     });
     return typeof r === "boolean" ? r : true;
 }
 
-export async function cuentasDeleteGasto(idGasto: string): Promise<boolean> {
+export async function cuentasDeleteGasto(payload: {
+    idGasto: string;
+    motivoRectificacion?: string | null;
+}): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_delete_gasto", {
-        args: { id_gasto: idGasto },
+        args: { id_gasto: payload.idGasto },
+        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
     });
     return typeof r === "boolean" ? r : true;
 }
@@ -284,6 +304,7 @@ export async function cuentasUpdatePago(payload: {
     fechaHora: string;
     metodo: "Tarjeta" | "Efectivo";
     importe: number;
+    motivoRectificacion?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_update_pago", {
         args: {
@@ -292,6 +313,7 @@ export async function cuentasUpdatePago(payload: {
             metodo: payload.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
             importe: Number(payload.importe ?? 0),
         },
+        motivoRectificacion: toIdOrNull(payload.motivoRectificacion),
     });
     return typeof r === "boolean" ? r : true;
 }
@@ -337,6 +359,15 @@ export async function cuentasAnularPago(payload: {
  * Y la que más se va a usar —la devolución— es justo la que no era una anulación.
  */
 export type ClaseBaja = "ERROR" | "DEVOLUCION";
+
+/**
+ * A qué cierres de caja ya hechos afectaría un cambio, y cómo quedarían (CAJA-01). No toca nada:
+ * la pantalla lo pide antes de guardar para avisar. Si `cierres` viene vacío, el apunte es del
+ * periodo abierto y no hay nada que avisar.
+ */
+export function cuentasPrevisualizarCambio(cambio: CambioCajaInput): Promise<ImpactoCajaDto> {
+    return invokeClient<ImpactoCajaDto>("cuentas_previsualizar_cambio", { args: cambio });
+}
 
 /* =========================================================
    Recuento de efectivo (lo usa el cierre de caja)

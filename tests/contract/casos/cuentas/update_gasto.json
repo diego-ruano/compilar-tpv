@@ -1,9 +1,9 @@
 {
-  "descripcion": "Edición de un gasto existente: cambia todos los campos, incluido el proveedor (que pasa a NULL).",
+  "descripcion": "Edición de un gasto existente: cambia todos los campos, incluido el proveedor (que pasa a NULL) y si salió del cajón (de sí a no).",
   "comando": "cuentas.update_gasto",
   "seed": [
     "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuciones SA');",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-1', '2026-01-01', 'Concepto viejo', 10.0, 'Otros', 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja) VALUES ('gasto-1', '2026-01-01', 'Concepto viejo', 10.0, 'Otros', 'prov-1', 1);",
     "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'No se toca', 5.5, 'Otros', NULL);"
   ],
   "entrada": {
@@ -12,9 +12,10 @@
     "tipo_gasto": "Personal",
     "concepto": "Concepto nuevo",
     "importe": 99.99,
-    "proveedor_id": null
+    "proveedor_id": null,
+    "pagado_con_caja": false
   },
   "snapshot": {
-    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor FROM Cuentas_Gastos"
+    "Cuentas_Gastos": "SELECT ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja FROM Cuentas_Gastos"
   }
 }

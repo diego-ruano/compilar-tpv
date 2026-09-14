@@ -29,6 +29,8 @@ export const createGastoSchema = z.object({
 	concepto: z.string().transform(clean).refine(Boolean, "concepto required"),
 	importe: money,
 	proveedor_id: idStr.optional().nullish(),
+	// CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
+	pagado_con_caja: z.boolean().nullish().transform((v) => v ?? false),
 });
 
 export const updateGastoSchema = createGastoSchema.omit({ id_gasto: true });

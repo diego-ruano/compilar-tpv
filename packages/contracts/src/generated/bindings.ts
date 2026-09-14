@@ -206,6 +206,14 @@ limite_simplif: number,
  */
 verifactu_entorno: string, };
 
+/**
+ * Un cambio de caja que todavía no se ha hecho, para saber a qué cierres afectaría (CAJA-01).
+ *
+ * Lleva sólo lo que le importa al arqueo de cada apunte: la fecha, el método y el importe, y si un
+ * gasto salió del cajón. El concepto o el proveedor no mueven ningún número.
+ */
+export type CambioCajaInput = { "tipo": "editar_pago", id_pago: string, fecha_hora: string, metodo: string, } | { "tipo": "anular_pago", id_pago: string, } | { "tipo": "crear_gasto", fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "editar_gasto", id_gasto: string, fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "borrar_gasto", id_gasto: string, };
+
 export type CategoriaInvDto = { ID_Categoria: string, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
 
 export type CategoriaProveedorDto = { id_categoria: string, nombre: string, nombre_imagen: string | null, ruta_imagen: string | null, };
@@ -220,6 +228,9 @@ export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
 
 /**
  * Un cierre completo, con su doble recuento. Lo que pinta la ficha del histórico.
+ *
+ * Las columnas de siempre son la **foto de esa noche** y no cambian nunca. Si después se corrige un
+ * apunte de su periodo, lo que el cierre marca hoy va en los `rect_*` (CAJA-01).
  */
 export type CierreDto = { id_cierre: string, fecha_hora: string, id_usuario?: string, 
 /**
@@ -227,9 +238,27 @@ export type CierreDto = { id_cierre: string, fecha_hora: string, id_usuario?: st
  */
 usuario_nombre?: string, fondo_inicial: number, ventas_efectivo: number, esperado: number, contado: number, descuadre: number, dejado: number, retirado: number, motivo?: string, 
 /**
- * `None` = el cierre sigue en pie y su periodo está bloqueado.
+ * `None` = el cierre sigue en pie (no se ha deshecho).
  */
-reabierto_en?: string, reabierto_por?: string, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, };
+reabierto_en?: string, reabierto_por?: string, 
+/**
+ * Desde cuándo cuenta este cierre (exclusivo): la hora del cierre anterior. `None` en el
+ * primero. Es lo que dice a qué cierre pertenece un apunte que se corrige después.
+ */
+periodo_desde?: string, 
+/**
+ * Gastos pagados con dinero del cajón durante el periodo, tal como estaban al cerrar.
+ */
+gastos_caja: number, 
+/**
+ * Lo que el cierre marca hoy tras corregir apuntes de su periodo. `None` = nunca se ha
+ * rectificado.
+ */
+rect_ventas_efectivo?: number, rect_gastos_caja?: number, rect_esperado?: number, rect_descuadre?: number, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, 
+/**
+ * Cada corrección que cambió sus números, de la más antigua a la más reciente.
+ */
+rectificaciones: Array<RectificacionDto>, };
 
 export type CierreIdInput = { id_cierre: string, };
 
@@ -238,7 +267,11 @@ export type CierreListarArgs = { limite?: bigint, };
 /**
  * Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha.
  */
-export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: number, contado: number, descuadre: number, retirado: number, motivo?: string, reabierto_en?: string, };
+export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: number, contado: number, descuadre: number, retirado: number, motivo?: string, reabierto_en?: string, 
+/**
+ * CAJA-01: lo que marca hoy si se ha rectificado.
+ */
+rect_esperado?: number, rect_descuadre?: number, };
 
 /**
  * Las claves de una tabla en la nube (SYNC-25).
@@ -327,7 +360,11 @@ payload?: string, clave_dedupe?: string, expira_en?: string, };
  */
 export type CreateClienteInput = { id_cliente?: string, nombre: string, email?: string, telefono?: string, notas?: string, };
 
-export type CreateGastoInput = { id_gasto?: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, };
+export type CreateGastoInput = { id_gasto?: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, 
+/**
+ * CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
+ */
+pagado_con_caja?: boolean, };
 
 export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
 
@@ -413,7 +450,7 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
 /**
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
-export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "periodo_cerrado" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida";
+export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida";
 
 /**
  * Resumen para el panel de Configuración → Fiscal y para la barra de estado.
@@ -497,6 +534,28 @@ export type HorariosSemanaArgs = { fecha_lunes: string, };
 export type IdCategoriaArgs = { id_categoria: string, };
 
 export type IdProductoArgs = { id_producto: string, };
+
+/**
+ * A qué cierres ya hechos afectaría un cambio de caja, para avisar antes de hacerlo.
+ */
+export type ImpactoCajaDto = { 
+/**
+ * Vacío = el apunte es del periodo abierto: no hay nada que avisar.
+ */
+cierres: Array<ImpactoCierreDto>, 
+/**
+ * Algún descuadre cambia, así que el cambio necesita un motivo.
+ */
+requiere_motivo: boolean, };
+
+/**
+ * Cómo quedaría un cierre ya hecho si se hace un cambio (CAJA-01).
+ */
+export type ImpactoCierreDto = { id_cierre: string, fecha_hora: string, 
+/**
+ * Lo que marca hoy: lo rectificado si lo hay, la foto de esa noche si no.
+ */
+esperado_antes: number, esperado_despues: number, descuadre_antes: number, descuadre_despues: number, };
 
 export type IndexRow = { ID_Comanda: string, Productos: string | null, NumLineas: number, Unidades: number, };
 
@@ -828,7 +887,11 @@ es_primer_cierre: boolean,
 /**
  * Lo que dejó el cierre anterior. En el primero es 0 y lo declara el usuario.
  */
-fondo_inicial: number, ventas_efectivo: number, esperado: number, 
+fondo_inicial: number, ventas_efectivo: number, 
+/**
+ * Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado.
+ */
+gastos_caja: number, esperado: number, 
 /**
  * Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
  */
@@ -927,6 +990,19 @@ export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: s
 export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending";
 
 export type RecoveryStatus = { state: RecoveryState, };
+
+/**
+ * Una corrección de un apunte que cambió los números de un cierre ya hecho (CAJA-01).
+ */
+export type RectificacionDto = { id_rectificacion: string, fecha_hora: string, 
+/**
+ * Nombre de quien corrigió, resuelto al leer.
+ */
+usuario_nombre?: string, 
+/**
+ * Qué se tocó, en una frase: «Cobro 2026/000045 de 12,50 €: Efectivo → Tarjeta».
+ */
+descripcion: string, motivo?: string, esperado_antes: number, esperado_despues: number, descuadre_antes: number, descuadre_despues: number, };
 
 /**
  * Una fila de `Registros_Facturacion` tal como la enseña el panel fiscal.
@@ -1038,7 +1114,11 @@ export type RoomPoly = { type: string, points: Array<number>, };
 /**
  * Fila de salidas (gastos).
  */
-export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: string | null, };
+export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: string | null, 
+/**
+ * El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
+ */
+pagado_con_caja: boolean, };
 
 export type SalonInput = { id: string, name: string, room: RoomPoly, tables: Array<TableInput>, };
 
@@ -1235,7 +1315,11 @@ export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto:
  */
 export type UpdateClienteInput = { id_cliente: string, nombre: string, email?: string, telefono?: string, notas?: string, };
 
-export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, };
+export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, 
+/**
+ * CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
+ */
+pagado_con_caja?: boolean, };
 
 export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
 

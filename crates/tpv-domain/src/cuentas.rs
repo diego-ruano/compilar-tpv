@@ -20,6 +20,8 @@ pub struct GastoData {
     pub concepto: String,
     pub importe: f64,
     pub proveedor_id: Option<String>,
+    /// El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
+    pub pagado_con_caja: bool,
 }
 
 /// Datos de actualización de un pago.
@@ -61,11 +63,10 @@ impl RechazoAnulacion {
 
 /// ¿Se puede anular este cobro? Devuelve el motivo ya recortado, listo para guardar.
 ///
-/// **El gate del periodo de caja NO está aquí a propósito.** Un cobro de un cierre ya hecho
-/// tampoco se anula, pero esa regla ya existe y ya cubre este comando
-/// (`cierre_caja::exigir_periodo_abierto`, delante de los cuatro que tocan caja). Escribirla otra
-/// vez aquí serían dos definiciones de «periodo cerrado» que alguien tiene que mantener iguales, y
-/// la segunda siempre acaba llegando tarde.
+/// **Que el cobro sea de un cierre ya hecho no importa aquí, y es a propósito** (CAJA-01): anular
+/// no se bloquea por fecha. Lo que le pasa a ese cierre —el aviso antes de confirmar y la
+/// rectificación después— vive en `use_cases::rectificacion_caja`, que es quien sabe a qué cierre
+/// pertenece cada apunte.
 pub fn puede_anularse(estado: &str, motivo: Option<&str>) -> Result<String, RechazoAnulacion> {
     if estado.trim().eq_ignore_ascii_case(ESTADO_ANULADO) {
         return Err(RechazoAnulacion::YaAnulado);

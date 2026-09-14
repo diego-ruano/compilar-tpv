@@ -1,6 +1,6 @@
 // src/features/cuentas/cierreApis.ts
 //
-// Cierre de caja (arqueo). CUENTA-06.
+// Cierre de caja (arqueo). CUENTA-06 · CAJA-01.
 //
 // El recuento se maneja en la UI como `CashCount` (un mapa etiqueta → unidades, que es lo que el
 // contador de monedas viene usando desde siempre) y se traduce a denominaciones al cruzar a Rust.
@@ -81,6 +81,10 @@ export function cierreDetalle(idCierre: string): Promise<CierreDto> {
     return invokeClient<CierreDto>("cierre_detalle", { idCierre });
 }
 
+/**
+ * Deshace el último cierre para volver a contar el cajón (CAJA-01). El comando conserva el nombre
+ * de cuando esto se llamaba «reabrir»: renombrarlo rompería en tiempo de ejecución sin avisar.
+ */
 export function cierreReabrir(idCierre: string): Promise<boolean> {
     return invokeClient<boolean>("cierre_reabrir", {
         args: { id_cierre: idCierre },
@@ -93,6 +97,9 @@ export function cierreReabrir(idCierre: string): Promise<boolean> {
  * Es un documento INTERNO: no gasta numero de ticket ni abre el cajon. Reutiliza los ajustes de
  * papel del ticket (ancho, DPI, margenes) porque sale por la misma impresora; lo que no reutiliza
  * es nada de su contenido fiscal.
+ *
+ * Si el cierre se rectificó después (CAJA-01), el papel lleva la foto de esa noche y, aparte, lo que
+ * marca hoy con cada corrección y su motivo.
  */
 export function cierreImprimir(c: CierreDto): Promise<string> {
     const t = useTicketSettings.getState().settings;
@@ -101,10 +108,11 @@ export function cierreImprimir(c: CierreDto): Promise<string> {
         payload: {
             business_name: b.businessName ?? "",
             fecha_hora: c.fecha_hora,
-            desde: null,
+            desde: c.periodo_desde ?? null,
             usuario: c.usuario_nombre ?? null,
             fondo_inicial: c.fondo_inicial,
             ventas_efectivo: c.ventas_efectivo,
+            gastos_caja: c.gastos_caja ?? 0,
             esperado: c.esperado,
             contado: c.contado,
             descuadre: c.descuadre,
@@ -112,6 +120,13 @@ export function cierreImprimir(c: CierreDto): Promise<string> {
             retirado: c.retirado,
             motivo: c.motivo ?? null,
             contado_denoms: (c.contado_denoms ?? []).map((d) => [d.valor, d.unidades]),
+            rect_esperado: c.rect_esperado ?? null,
+            rect_descuadre: c.rect_descuadre ?? null,
+            rectificaciones: (c.rectificaciones ?? []).map((r) => ({
+                fecha_hora: r.fecha_hora,
+                descripcion: r.descripcion,
+                motivo: r.motivo ?? null,
+            })),
             paper_width_mm: t.paperWidthMm,
             paper_dpi: t.paperDpi,
             chars_per_line: t.charsPerLine,

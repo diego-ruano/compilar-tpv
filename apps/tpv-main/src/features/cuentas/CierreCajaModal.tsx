@@ -91,7 +91,8 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     }, [prep, fondoInicial]);
 
     const esperado = useMemo(
-        () => Math.round((fondo + (prep?.ventas_efectivo ?? 0)) * 100) / 100,
+        () =>
+            Math.round((fondo + (prep?.ventas_efectivo ?? 0) - (prep?.gastos_caja ?? 0)) * 100) / 100,
         [fondo, prep],
     );
     const descuadre = useMemo(
@@ -175,7 +176,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                     ) : (
                         <>
                             {/* 1 · Qué debería haber */}
-                            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
                                 <Tarjeta titulo="Fondo de partida" valor={euro(fondo)}>
                                     {prep.es_primer_cierre
                                         ? "Es el primer cierre: dinos con cuánto empezaste."
@@ -184,8 +185,11 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 <Tarjeta titulo="Cobrado en efectivo" valor={euro(prep.ventas_efectivo)}>
                                     Desde el cierre anterior. La tarjeta la cuadra el banco.
                                 </Tarjeta>
+                                <Tarjeta titulo="Gastos pagados con caja" valor={euro(prep.gastos_caja)}>
+                                    Los gastos marcados como pagados con dinero del cajón.
+                                </Tarjeta>
                                 <Tarjeta titulo="Debería haber" valor={euro(esperado)} destacada>
-                                    Fondo más lo cobrado en efectivo.
+                                    Fondo más lo cobrado en efectivo, menos los gastos pagados con caja.
                                 </Tarjeta>
                             </div>
 
@@ -226,9 +230,9 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                             ) : null}
 
                             <Aviso tono="info">
-                                Esta caja sólo cuenta las <strong>ventas en efectivo</strong>. Si has sacado
-                                dinero del cajón para otra cosa, explícalo en el motivo: aquí saldrá como que
-                                falta.
+                                Esta caja cuenta las <strong>ventas en efectivo</strong> y los <strong>gastos pagados con
+                                dinero del cajón</strong>. Si has sacado dinero para otra cosa, apúntalo como gasto pagado
+                                con caja o explícalo en el motivo: si no, aquí saldrá como que falta.
                             </Aviso>
 
                             {/* 2 y 4 · Los dos recuentos */}

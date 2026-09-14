@@ -89,6 +89,7 @@ impl CuentasRepository for HttpCuentasRepository {
             "concepto": gasto.concepto,
             "importe": gasto.importe,
             "proveedor_id": gasto.proveedor_id,
+            "pagado_con_caja": gasto.pagado_con_caja,
         });
         let _: JsonValue = self.client.post_json("/v1/cuentas/gastos", &body).await?;
         Ok(true)
@@ -101,6 +102,7 @@ impl CuentasRepository for HttpCuentasRepository {
             "concepto": gasto.concepto,
             "importe": gasto.importe,
             "proveedor_id": gasto.proveedor_id,
+            "pagado_con_caja": gasto.pagado_con_caja,
         });
         let _: JsonValue = self
             .client

@@ -23,6 +23,7 @@
 > `Cierre_Denominaciones`, con fondo heredado, esperado, contado, descuadre, retirada y el doble
 > recuento por denominación. El periodo va de un cierre al siguiente —sin fechas de por medio, que es
 > lo único que sabe partir la jornada de un bar— y lo que se deja en el cajón es el fondo del
-> siguiente, así que se encadenan solos. Cerrar bloquea los cobros y gastos de ese periodo
-> (`periodo_cerrado`), y reabrir queda registrado. Diseño y porqués en
+> siguiente, así que se encadenan solos. Cerrar no bloquea nada (CAJA-01): corregir un apunte de un
+> cierre hecho avisa, pide motivo si mueve un descuadre y rectifica el cierre; deshacer, sólo el
+> último. Diseño y porqués en
 > [PLAN_CIERRE_CAJA.md](../../PLAN_CIERRE_CAJA.md).

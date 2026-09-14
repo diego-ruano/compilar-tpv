@@ -104,6 +104,7 @@ const salidasInner = (whereRango: string) => `
 		g.Concepto AS concepto,
 		g.Importe AS importe,
 		g.ID_Proveedor AS proveedor_id,
+		g.Pagado_Con_Caja AS pagado_con_caja,
 		IFNULL(pr.Nombre_Empresa, '') AS proveedor_nombre
 	FROM Cuentas_Gastos g
 	LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
@@ -151,7 +152,7 @@ export async function salidas(
 	const { qClause, limitClause } = applyFilters(args, q, SALIDAS_Q_EXPR, page, pageSize);
 	const rs = await db.execute({
 		sql: `
-			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id
+			SELECT id, fecha_hora, tipo_gasto, concepto, importe, proveedor_id, pagado_con_caja
 			FROM (${salidasInner(whereSql)}) AS g
 			${qClause}
 			ORDER BY fecha_hora DESC, id DESC
@@ -159,7 +160,8 @@ export async function salidas(
 		`,
 		args,
 	});
-	return rows(rs) as SalidaDto[];
+	// SQLite guarda el booleano como 0/1; la Main lo devuelve como `bool` y la lectura tiene que ser igual.
+	return rows(rs).map((r) => ({ ...r, pagado_con_caja: Number(r.pagado_con_caja ?? 0) !== 0 })) as SalidaDto[];
 }
 
 // Resumen agregado (totales por método + conteos) sobre TODO el rango + búsqueda, para que la
@@ -235,7 +237,13 @@ const CIERRE_COLS = `
 	c.Retirado AS retirado,
 	c.Motivo AS motivo,
 	c.Reabierto_En AS reabierto_en,
-	c.Reabierto_Por AS reabierto_por
+	c.Reabierto_Por AS reabierto_por,
+	c.Periodo_Desde AS periodo_desde,
+	c.Gastos_Caja AS gastos_caja,
+	c.Rect_Ventas_Efectivo AS rect_ventas_efectivo,
+	c.Rect_Gastos_Caja AS rect_gastos_caja,
+	c.Rect_Esperado AS rect_esperado,
+	c.Rect_Descuadre AS rect_descuadre
 `;
 
 /** Adjunta el desglose por denominación, separado en los dos momentos del recuento. */
@@ -256,7 +264,32 @@ async function conDenominaciones(db: Client, fila: any): Promise<CierreDto> {
 		if (String(r.momento ?? "") === "DEJADO") dejado.push(item);
 		else contado.push(item);
 	}
-	return { ...fila, contado_denoms: contado, dejado_denoms: dejado } as CierreDto;
+	// CAJA-01: las correcciones que cambiaron sus números, en el mismo orden que la Main.
+	const rr = await db.execute({
+		sql: `
+			SELECT
+				r.ID_Rectificacion AS id_rectificacion,
+				r.Fecha_Hora AS fecha_hora,
+				NULLIF(TRIM(COALESCE(u.Nombre,'') || CASE WHEN COALESCE(u.Apellido,'')='' THEN '' ELSE ' ' || u.Apellido END), '') AS usuario_nombre,
+				r.Descripcion AS descripcion,
+				r.Motivo AS motivo,
+				r.Esperado_Antes AS esperado_antes,
+				r.Esperado_Despues AS esperado_despues,
+				r.Descuadre_Antes AS descuadre_antes,
+				r.Descuadre_Despues AS descuadre_despues
+			FROM Cierre_Rectificaciones r
+			LEFT JOIN Usuarios u ON u.ID_Usuario = r.ID_Usuario
+			WHERE r.ID_Cierre = ?1
+			ORDER BY r.Fecha_Hora ASC, r.ID_Rectificacion ASC;
+		`,
+		args: [String(fila.id_cierre ?? "")],
+	});
+	return {
+		...fila,
+		contado_denoms: contado,
+		dejado_denoms: dejado,
+		rectificaciones: rows(rr),
+	} as CierreDto;
 }
 
 /**
@@ -290,7 +323,9 @@ export async function listarCierres(db: Client, limite: number): Promise<CierreR
 				c.Descuadre AS descuadre,
 				c.Retirado AS retirado,
 				c.Motivo AS motivo,
-				c.Reabierto_En AS reabierto_en
+				c.Reabierto_En AS reabierto_en,
+				c.Rect_Esperado AS rect_esperado,
+				c.Rect_Descuadre AS rect_descuadre
 			FROM Cierres_Caja c
 			LEFT JOIN Usuarios u ON u.ID_Usuario = c.ID_Usuario
 			ORDER BY c.Fecha_Hora DESC, c.ID_Cierre DESC

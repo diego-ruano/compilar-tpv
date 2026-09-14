@@ -25,7 +25,12 @@ import DatosFiscalesModal, {
     type DatosFiscales,
 } from "../../shared/ticket/DatosFiscalesModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import type { LineaTicketDto, TicketReimpresionDto } from "@tpv/contracts";
+import type {
+    CambioCajaInput,
+    ImpactoCajaDto,
+    LineaTicketDto,
+    TicketReimpresionDto,
+} from "@tpv/contracts";
 import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
@@ -46,6 +51,7 @@ import {
 } from "../../features/cuentas/cuentasApis";
 import { euro, moneyLabel } from "../../features/cuentas/formato";
 import CierreCajaModal from "../../features/cuentas/CierreCajaModal";
+import ImpactoCierreModal from "../../features/cuentas/ImpactoCierreModal";
 import {
     cierreDetalle,
     cierreImprimir,
@@ -65,7 +71,7 @@ import {
     useUpdatePago,
     useAnularPago,
 } from "../../features/cuentas/cuentasQueries";
-import { CUENTAS_PAGE_SIZE } from "../../features/cuentas/cuentasApis";
+import { CUENTAS_PAGE_SIZE, cuentasPrevisualizarCambio } from "../../features/cuentas/cuentasApis";
 
 // PDF
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
@@ -248,6 +254,7 @@ function mapSalidaUI(
         importe: Number(r?.importe ?? r?.Importe ?? 0),
         proveedorId,
         proveedorNombre,
+        pagadoConCaja: Boolean(r?.pagadoConCaja ?? r?.pagado_con_caja),
     };
 }
 
@@ -360,6 +367,7 @@ export default function Cuentas() {
     const [savingGasto, setSavingGasto] = useState(false);
     const savingGastoRef = useRef(false);
     const [errGasto, setErrGasto] = useState<string | null>(null);
+    const [gPagadoConCaja, setGPagadoConCaja] = useState(false);
 
     const [savingPdf, setSavingPdf] = useState(false);
     const [pdfError, setPdfError] = useState<string | null>(null);
@@ -373,6 +381,7 @@ export default function Cuentas() {
     const [egProveedorId, setEgProveedorId] = useState<string>("");
     const [savingEditGasto, setSavingEditGasto] = useState(false);
     const [errEditGasto, setErrEditGasto] = useState<string | null>(null);
+    const [egPagadoConCaja, setEgPagadoConCaja] = useState(false);
 
     const [openEditPago, setOpenEditPago] = useState(false);
     // Ticket que se está reimprimiendo (null = ninguno). Ver `reimprimirTicket`.
@@ -387,6 +396,19 @@ export default function Cuentas() {
     const [openCierre, setOpenCierre] = useState(false);
     const [cierres, setCierres] = useState<CierreResumenDto[]>([]);
     const [cierresError, setCierresError] = useState<string | null>(null);
+
+    /**
+     * CAJA-01: un cambio que toca un cierre de caja ya hecho se enseña antes de hacerlo. No se
+     * bloquea nada: es el «¿seguro?» con lo que va a cambiar delante, y el motivo si mueve un
+     * descuadre. `hacer` es el cambio de verdad, que se ejecuta al confirmar.
+     */
+    const [aviso, setAviso] = useState<{
+        impacto: ImpactoCajaDto;
+        motivoYaDado: boolean;
+        hacer: (motivo: string | null) => Promise<void>;
+    } | null>(null);
+    const [avisoGuardando, setAvisoGuardando] = useState(false);
+    const [avisoError, setAvisoError] = useState<string | null>(null);
 
     const denoms = DEFAULT_DENOMS;
 
@@ -411,17 +433,49 @@ export default function Cuentas() {
         }
     };
 
-    // Reabrir desbloquea el periodo para poder corregirlo. Lo puede hacer cualquiera -asi se
-    // decidio-, pero queda registrado quien y cuando: el valor esta en que tocar el pasado sea un
-    // acto deliberado y con nombre, no en impedirlo.
-    const reabrirCierre = async (idCierre: string) => {
+    // Deshacer un cierre es para volver a contar el cajón, y por eso sólo se ofrece en el último
+    // (CAJA-01): el de hace tres días ya no se puede contar otra vez. Corregir un apunte de un cierre
+    // ya hecho no necesita deshacer nada: se rectifica solo. Queda registrado quién y cuándo.
+    const idUltimoCierre = cierres.find((c) => !c.reabierto_en)?.id_cierre ?? null;
+    const deshacerCierre = async (idCierre: string) => {
         try {
             await cierreReabrir(idCierre);
             await recargarCierres();
-            void entradasQuery.refetch();
-            void salidasQuery.refetch();
         } catch (e) {
             setCierresError(toAppError(e).message);
+        }
+    };
+
+    /**
+     * Hace el cambio directamente si es del periodo abierto; si toca un cierre ya hecho, primero lo
+     * enseña y espera a que se confirme. Los errores del cambio hecho aquí suben al que llama; los
+     * del cambio confirmado desde el aviso se pintan en el aviso.
+     */
+    const conAvisoDeCierre = async (
+        cambio: CambioCajaInput,
+        hacer: (motivo: string | null) => Promise<void>,
+        motivoYaDado = false,
+    ) => {
+        const impacto = await cuentasPrevisualizarCambio(cambio);
+        if (impacto.cierres.length === 0) {
+            await hacer(null);
+            return;
+        }
+        setAvisoError(null);
+        setAviso({ impacto, motivoYaDado, hacer });
+    };
+
+    const confirmarAviso = async (motivo: string | null) => {
+        if (!aviso) return;
+        setAvisoGuardando(true);
+        setAvisoError(null);
+        try {
+            await aviso.hacer(motivo);
+            setAviso(null);
+        } catch (e) {
+            setAvisoError(toAppError(e).message);
+        } finally {
+            setAvisoGuardando(false);
         }
     };
 
@@ -466,6 +520,7 @@ export default function Cuentas() {
         setGConcepto("");
         setGImporte("");
         setGProveedorId("");
+        setGPagadoConCaja(false);
         await ensureProveedores();
         setOpenAddGasto(true);
     };
@@ -482,6 +537,7 @@ export default function Cuentas() {
                 ? String(s.proveedorId)
                 : "",
         );
+        setEgPagadoConCaja(Boolean(s.pagadoConCaja));
         await ensureProveedores();
         setOpenEditGasto(true);
     };
@@ -514,18 +570,26 @@ export default function Cuentas() {
 
             setSavingEditGasto(true);
 
-            const ok = await updateGasto.mutateAsync({
-                idGasto: editGastoId,
-                fecha,
-                tipoGasto: tipo,
-                concepto,
-                importe,
-                proveedorId: tipo === "Proveedor" ? proveedorId : null,
-            });
-
-            if (!ok) throw new Error("No se pudo actualizar el gasto.");
-
-            setOpenEditGasto(false);
+            const idGasto = editGastoId;
+            const pagadoConCaja = egPagadoConCaja;
+            await conAvisoDeCierre(
+                { tipo: "editar_gasto", id_gasto: idGasto, fecha, importe, pagado_con_caja: pagadoConCaja },
+                async (motivo) => {
+                    const ok = await updateGasto.mutateAsync({
+                        idGasto,
+                        fecha,
+                        tipoGasto: tipo,
+                        concepto,
+                        importe,
+                        proveedorId: tipo === "Proveedor" ? proveedorId : null,
+                        pagadoConCaja,
+                        motivoRectificacion: motivo,
+                    });
+                    if (!ok) throw new Error("No se pudo actualizar el gasto.");
+                    setOpenEditGasto(false);
+                    void recargarCierres();
+                },
+            );
         } catch (e: any) {
             console.error(e);
             setErrEditGasto(String(e?.message ?? "Error actualizando gasto"));
@@ -652,16 +716,23 @@ export default function Cuentas() {
 
             setSavingEditPago(true);
 
-            const ok = await updatePago.mutateAsync({
-                idPago: editPagoId,
-                fechaHora,
-                metodo: epMetodo,
-                importe,
-            });
-
-            if (!ok) throw new Error("No se pudo actualizar la entrada.");
-
-            setOpenEditPago(false);
+            const idPago = editPagoId;
+            const metodo = epMetodo;
+            await conAvisoDeCierre(
+                { tipo: "editar_pago", id_pago: idPago, fecha_hora: fechaHora, metodo },
+                async (motivo) => {
+                    const ok = await updatePago.mutateAsync({
+                        idPago,
+                        fechaHora,
+                        metodo,
+                        importe,
+                        motivoRectificacion: motivo,
+                    });
+                    if (!ok) throw new Error("No se pudo actualizar la entrada.");
+                    setOpenEditPago(false);
+                    void recargarCierres();
+                },
+            );
         } catch (e: any) {
             console.error(e);
             setErrEditPago(String(e?.message ?? "Error actualizando entrada"));
@@ -685,19 +756,30 @@ export default function Cuentas() {
 
         try {
             if (confirmAccion.tipo === "gasto") {
-                await deleteGasto.mutateAsync(confirmAccion.gasto.id);
-            } else {
-                await anularPago.mutateAsync({
-                    idPago: confirmAccion.entrada.id,
-                    motivo: motivoAnulacion,
-                    // El botón está deshabilitado hasta que se elige, así que aquí nunca es null.
-                    // El `?? "ERROR"` es el lado conservador si alguna vez lo fuera: una anulación
-                    // devuelve las líneas y el stock, que es reversible.
-                    clase: claseBaja ?? "ERROR",
+                const idGasto = confirmAccion.gasto.id;
+                await conAvisoDeCierre({ tipo: "borrar_gasto", id_gasto: idGasto }, async (motivo) => {
+                    await deleteGasto.mutateAsync({ idGasto, motivoRectificacion: motivo });
+                    setConfirmAccion(null);
+                    void recargarCierres();
                 });
+            } else {
+                const idPago = confirmAccion.entrada.id;
+                const motivo = motivoAnulacion;
+                // El botón está deshabilitado hasta que se elige, así que aquí nunca es null.
+                // El `?? "ERROR"` es el lado conservador si alguna vez lo fuera: una anulación
+                // devuelve las líneas y el stock, que es reversible.
+                const clase = claseBaja ?? "ERROR";
+                await conAvisoDeCierre(
+                    { tipo: "anular_pago", id_pago: idPago },
+                    async () => {
+                        await anularPago.mutateAsync({ idPago, motivo, clase });
+                        setConfirmAccion(null);
+                        void recargarCierres();
+                    },
+                    // Anular pide el motivo siempre, y ése es también el de la rectificación.
+                    true,
+                );
             }
-
-            setConfirmAccion(null);
         } catch (e: any) {
             console.error("Error en la operación de caja:", e);
             setConfirmError(toAppError(e).message);
@@ -735,17 +817,24 @@ export default function Cuentas() {
                 return;
             }
 
-            const ok = await createGasto.mutateAsync({
-                fecha,
-                tipoGasto: tipo,
-                concepto,
-                importe,
-                proveedorId: tipo === "Proveedor" ? proveedorId : null,
-            });
-
-            if (!ok) throw new Error("No se pudo guardar el gasto.");
-
-            setOpenAddGasto(false);
+            const pagadoConCaja = gPagadoConCaja;
+            await conAvisoDeCierre(
+                { tipo: "crear_gasto", fecha, importe, pagado_con_caja: pagadoConCaja },
+                async (motivo) => {
+                    const ok = await createGasto.mutateAsync({
+                        fecha,
+                        tipoGasto: tipo,
+                        concepto,
+                        importe,
+                        proveedorId: tipo === "Proveedor" ? proveedorId : null,
+                        pagadoConCaja,
+                        motivoRectificacion: motivo,
+                    });
+                    if (!ok) throw new Error("No se pudo guardar el gasto.");
+                    setOpenAddGasto(false);
+                    void recargarCierres();
+                },
+            );
         } catch (e: any) {
             console.error(e);
             setErrGasto(String(e?.message ?? "Error guardando gasto"));
@@ -1717,26 +1806,50 @@ export default function Cuentas() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {cierres.map((c) => (
+                                {cierres.map((c) => {
+                                    // CAJA-01: la foto de esa noche no cambia nunca; si se corrigió un apunte
+                                    // de su periodo, lo que marca hoy va debajo.
+                                    const esperadoHoy = c.rect_esperado ?? null;
+                                    const descuadreHoy = c.rect_descuadre ?? null;
+                                    const descuadreVigente = descuadreHoy ?? c.descuadre;
+                                    return (
                                     <tr key={c.id_cierre} className="border-t border-border">
                                         <td className="py-2 text-fg">
                                             {c.fecha_hora}
                                             {c.reabierto_en ? (
                                                 <span className="ml-2 rounded-full border border-border px-2 py-0.5 text-[11px] text-fg-muted">
-                                                    reabierto
+                                                    deshecho
+                                                </span>
+                                            ) : null}
+                                            {esperadoHoy !== null ? (
+                                                <span
+                                                    className="ml-2 rounded-full border border-warning/30 bg-warning-soft px-2 py-0.5 text-[11px] text-warning"
+                                                    title="Se corrigió un apunte de este cierre después de cerrarlo. Imprímelo para ver qué cambió, quién y por qué."
+                                                >
+                                                    rectificado
                                                 </span>
                                             ) : null}
                                         </td>
                                         <td className="py-2 text-fg-muted">{c.usuario_nombre ?? "—"}</td>
-                                        <td className="py-2 text-right text-fg-muted">{euro(c.esperado)}</td>
+                                        <td className="py-2 text-right text-fg-muted">
+                                            {euro(c.esperado)}
+                                            {esperadoHoy !== null ? (
+                                                <span className="block text-[11px]">hoy {euro(esperadoHoy)}</span>
+                                            ) : null}
+                                        </td>
                                         <td className="py-2 text-right text-fg">{euro(c.contado)}</td>
                                         <td
                                             className={cn(
                                                 "py-2 text-right font-semibold",
-                                                c.descuadre === 0 ? "text-success" : "text-danger",
+                                                descuadreVigente === 0 ? "text-success" : "text-danger",
                                             )}
                                         >
                                             {c.descuadre === 0 ? "—" : euro(c.descuadre)}
+                                            {descuadreHoy !== null ? (
+                                                <span className="block text-[11px] font-normal">
+                                                    hoy {descuadreHoy === 0 ? "cuadra" : euro(descuadreHoy)}
+                                                </span>
+                                            ) : null}
                                         </td>
                                         <td className="py-2 text-right text-fg-muted">{euro(c.retirado)}</td>
                                         <td className="py-2 text-fg-muted">{c.motivo ?? ""}</td>
@@ -1750,20 +1863,21 @@ export default function Cuentas() {
                                                 >
                                                     <Printer className="size-4" aria-hidden />
                                                 </button>
-                                                {c.reabierto_en ? null : (
+                                                {c.id_cierre === idUltimoCierre ? (
                                                     <button
                                                         type="button"
-                                                        onClick={() => void reabrirCierre(c.id_cierre)}
-                                                        title="Reabrir para poder corregir su periodo"
+                                                        onClick={() => void deshacerCierre(c.id_cierre)}
+                                                        title="Deshacer el cierre para volver a contar el cajón"
                                                         className="h-8 cursor-pointer rounded-lg border border-border bg-surface px-2.5 text-xs font-semibold text-fg transition hover:bg-surface-2"
                                                     >
-                                                        Reabrir
+                                                        Deshacer
                                                     </button>
-                                                )}
+                                                ) : null}
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -1877,6 +1991,20 @@ export default function Cuentas() {
                                     placeholder="Ej: 120.50"
                                     className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-subtle"
                                 />
+                            </label>
+                            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg">
+                                <input
+                                    type="checkbox"
+                                    checked={gPagadoConCaja}
+                                    onChange={(e) => setGPagadoConCaja(e.target.checked)}
+                                    className="mt-0.5 size-4 accent-accent"
+                                />
+                                <span>
+                                    <span className="font-semibold">Pagado con dinero del cajón</span>
+                                    <span className="block text-xs text-fg-muted">
+                                        Resta de lo que debería haber en el cierre de caja. Déjalo sin marcar si se pagó por banco o con tarjeta.
+                                    </span>
+                                </span>
                             </label>
 
                             {errGasto ? (
@@ -2017,6 +2145,20 @@ export default function Cuentas() {
                                     inputMode="decimal"
                                     className="mt-1 w-full rounded-2xl border border-border bg-surface px-3 py-2 text-sm text-fg outline-none"
                                 />
+                            </label>
+                            <label className="flex cursor-pointer items-start gap-2 rounded-2xl border border-border bg-surface-2 px-3 py-2 text-sm text-fg">
+                                <input
+                                    type="checkbox"
+                                    checked={egPagadoConCaja}
+                                    onChange={(e) => setEgPagadoConCaja(e.target.checked)}
+                                    className="mt-0.5 size-4 accent-accent"
+                                />
+                                <span>
+                                    <span className="font-semibold">Pagado con dinero del cajón</span>
+                                    <span className="block text-xs text-fg-muted">
+                                        Resta de lo que debería haber en el cierre de caja. Déjalo sin marcar si se pagó por banco o con tarjeta.
+                                    </span>
+                                </span>
                             </label>
 
                             {errEditGasto ? (
@@ -2163,8 +2305,8 @@ export default function Cuentas() {
                 open={openCierre}
                 onClose={() => setOpenCierre(false)}
                 onCerrado={() => {
-                    // Un cierre cambia lo que se puede editar (bloquea su periodo) y estrena el
-                    // historico, asi que se recarga todo lo que cuelga de el.
+                    // Un cierre estrena el histórico y decide a qué cierre pertenece cada apunte a
+                    // partir de ahora, así que se recarga todo lo que cuelga de él.
                     void recargarCierres();
                     void entradasQuery.refetch();
                     void salidasQuery.refetch();
@@ -2375,6 +2517,19 @@ export default function Cuentas() {
                         </div>
                     </div>
             </ModalShell>
+            ) : null}
+
+            {aviso ? (
+                <ImpactoCierreModal
+                    impacto={aviso.impacto}
+                    motivoYaDado={aviso.motivoYaDado}
+                    guardando={avisoGuardando}
+                    error={avisoError}
+                    onCancelar={() => {
+                        if (!avisoGuardando) setAviso(null);
+                    }}
+                    onConfirmar={(motivo) => void confirmarAviso(motivo)}
+                />
             ) : null}
 
             {/* FISCAL-02: el cliente vuelve con el ticket y pide factura. Se emite una F3 EN

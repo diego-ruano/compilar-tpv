@@ -72,6 +72,9 @@ pub struct SalidaDto {
     pub concepto: String,
     pub importe: f64,
     pub proveedor_id: Option<String>,
+    /// El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
+    #[serde(default)]
+    pub pagado_con_caja: bool,
 }
 
 /* ── Args/Inputs ── */
@@ -133,6 +136,10 @@ pub struct CreateGastoInput {
     #[serde(default)]
     #[ts(optional)]
     pub proveedor_id: Option<String>,
+    /// CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
+    #[serde(default)]
+    #[ts(optional)]
+    pub pagado_con_caja: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -146,6 +153,10 @@ pub struct UpdateGastoInput {
     #[serde(default)]
     #[ts(optional)]
     pub proveedor_id: Option<String>,
+    /// CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
+    #[serde(default)]
+    #[ts(optional)]
+    pub pagado_con_caja: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

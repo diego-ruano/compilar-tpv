@@ -7,6 +7,8 @@
     "id_cierre": "cierre-vigente",
     "motivo": null,
     "reabierto_en": null,
+    "rect_descuadre": null,
+    "rect_esperado": null,
     "retirado": 370.5,
     "usuario_nombre": "Ana Gomez"
   },
@@ -18,6 +20,8 @@
     "id_cierre": "cierre-reabierto",
     "motivo": "faltaba un billete",
     "reabierto_en": "2026-05-10 09:00:00",
+    "rect_descuadre": null,
+    "rect_esperado": null,
     "retirado": 240.0,
     "usuario_nombre": "Ana Gomez"
   }

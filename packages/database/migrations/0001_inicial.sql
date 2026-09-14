@@ -575,6 +575,9 @@ ON Suelto_Consumos(ID_Producto);
 --  fiscal, se re-anade en una migracion nueva.)
 
 -- Importe >= 0: validado en la capa de aplicacion (ver nota en Detalle_Comanda, DB-06).
+--
+-- Pagado_Con_Caja (CAJA-01): el dinero salio del cajon. Solo esos gastos restan del esperado del
+-- arqueo; una factura pagada por banco no ha tocado el cajon, y restarla haria "sobrar" ese dinero.
 CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT PRIMARY KEY,
   Fecha DATE NOT NULL,
@@ -582,6 +585,8 @@ CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   Importe REAL NOT NULL,
   Tipo_Gasto TEXT NOT NULL,
   ID_Proveedor TEXT NULL,
+  Pagado_Con_Caja INTEGER NOT NULL DEFAULT 0,
+  CHECK (Pagado_Con_Caja IN (0, 1)),
   FOREIGN KEY (ID_Proveedor) REFERENCES Proveedores(ID_Proveedor) ON DELETE SET NULL
 );
 
@@ -598,12 +603,14 @@ ON Cuentas_Gastos(ID_Proveedor);
 -- de 23:30 a 01:30 es un servicio, no dos dias- y porque un cierre automatico se inventaria el
 -- recuento: tendria el esperado, pero nadie habria contado el cajon.
 --
--- Los importes se GUARDAN, no se derivan al leer. Un arqueo es la foto de lo que se vio esa noche:
--- si manana alguien reabre el periodo y corrige un cobro, el arqueo de ayer no puede cambiar solo,
--- porque entonces dejaria de explicar por que faltaban 20 euros.
+-- Los importes se GUARDAN, no se derivan al leer. Un arqueo es la foto de lo que se vio esa noche.
+-- Si despues se corrige un apunte de su periodo (CAJA-01), la foto NO se toca: lo que el cierre
+-- marca hoy va en las columnas Rect_*, y cada correccion deja su fila en Cierre_Rectificaciones.
+-- Asi el cierre sigue explicando por que faltaban 20 euros esa noche, y ademas dice cuanto marca hoy.
 --
 -- Lo que se DEJA en el cajon es el Fondo_Inicial del cierre siguiente: asi se encadenan los
--- periodos sin que nadie tenga que declarar dos veces el mismo numero.
+-- periodos sin que nadie tenga que declarar dos veces el mismo numero. Y como lo dejado es dinero
+-- contado a mano, rectificar un cierre no mueve a los siguientes.
 CREATE TABLE IF NOT EXISTS Cierres_Caja (
   ID_Cierre TEXT PRIMARY KEY,
   Fecha_Hora DATETIME NOT NULL,
@@ -618,14 +625,45 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
   Motivo TEXT,
   Reabierto_En DATETIME,
   Reabierto_Por TEXT,
+  -- Desde cuando cuenta (exclusivo): la Fecha_Hora del cierre anterior; NULL en el primero. Es lo
+  -- que dice a que cierre pertenece un apunte que se corrige despues.
+  Periodo_Desde DATETIME,
+  -- Gastos pagados con dinero del cajon durante el periodo. Restan del esperado.
+  Gastos_Caja REAL NOT NULL DEFAULT 0,
+  -- Lo que el cierre marca HOY tras corregir apuntes de su periodo. NULL = nunca se ha rectificado.
+  Rect_Ventas_Efectivo REAL,
+  Rect_Gastos_Caja REAL,
+  Rect_Esperado REAL,
+  Rect_Descuadre REAL,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (Reabierto_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
 );
 
--- "Cual es el ultimo cierre" se pregunta al abrir la pantalla y en cada escritura de caja (el gate
--- del periodo bloqueado), asi que es la consulta caliente de esta tabla.
+-- "Cual es el ultimo cierre" se pregunta al abrir la pantalla y al preparar cada cierre, asi que es
+-- la consulta caliente de esta tabla.
 CREATE INDEX IF NOT EXISTS idx_cierres_fecha
 ON Cierres_Caja(Fecha_Hora DESC);
+
+-- Cada correccion de un apunte que cambio los numeros de un cierre ya hecho (CAJA-01): que se toco,
+-- quien, cuando y por que, con el esperado y el descuadre de antes y de despues. Es el rastro de las
+-- columnas Rect_* de Cierres_Caja: sin el, un cierre rectificado diria cuanto marca pero no por que.
+CREATE TABLE IF NOT EXISTS Cierre_Rectificaciones (
+  ID_Rectificacion TEXT PRIMARY KEY,
+  ID_Cierre TEXT NOT NULL,
+  Fecha_Hora DATETIME NOT NULL,
+  ID_Usuario TEXT,
+  Descripcion TEXT NOT NULL,
+  Motivo TEXT,
+  Esperado_Antes REAL NOT NULL,
+  Esperado_Despues REAL NOT NULL,
+  Descuadre_Antes REAL NOT NULL,
+  Descuadre_Despues REAL NOT NULL,
+  FOREIGN KEY (ID_Cierre) REFERENCES Cierres_Caja(ID_Cierre) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cierre_rectificaciones_cierre
+ON Cierre_Rectificaciones(ID_Cierre, Fecha_Hora);
 
 -- El recuento por monedas y billetes, del dinero contado y del que se deja. Sin esto un descuadre
 -- pasado solo dice cuanto falto: "faltan 50" y "falta un billete de 50" no se investigan igual.

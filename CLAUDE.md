@@ -782,7 +782,7 @@ Reglas al tocarlo:
   parámetro: cambiarla es cambiar ese número. Se eligió corta porque el resto llega solo y no tiene
   sentido hacer esperar al bar por datos que no necesita para abrir la persiana.
 - **La ventana se estira hasta cubrir el periodo de caja abierto.** El arqueo suma los cobros en
-  efectivo *desde el último cierre* (§12), así que un bar que lleve 40 días sin cerrar caja —pasa:
+  efectivo y los gastos pagados con caja *desde el último cierre* (§12), así que un bar que lleve 40 días sin cerrar caja —pasa:
   el aviso es una notificación, no una acción— perdería diez días de cobros y su primer arqueo tras
   recuperar saldría descuadrado por un dinero que sí está en el cajón.
 - **Lo que sigue vivo entra entero, caiga donde caiga.** Es la misma regla del último cierre,
@@ -1186,9 +1186,10 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
 | Pieza | Archivo | Rol |
 |---|---|---|
 | Aritmética | `crates/tpv-domain/src/cierre_caja.rs` | Recuento, esperado, descuadre, umbral del motivo. Sin BD ni reloj: aquí están los tests |
-| Persistencia | `crates/tpv-infra-sqlite/src/cierre_caja.rs` | `Cierres_Caja` + `Cierre_Denominaciones` |
-| Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | Preparar, confirmar, reabrir, el gate y el aviso |
-| Pantalla | `src/features/cuentas/CierreCajaModal.tsx` | El modal y el contador; el histórico vive en `pages/Cuentas.tsx` |
+| Persistencia | `crates/tpv-infra-sqlite/src/cierre_caja.rs` | `Cierres_Caja` + `Cierre_Denominaciones` + `Cierre_Rectificaciones` |
+| Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | Preparar, confirmar, deshacer y el aviso |
+| Rectificación | `tpv-application/src/use_cases/rectificacion_caja.rs` | Corregir un apunte de un cierre hecho: impacto, motivo y rectificación (CAJA-01) |
+| Pantalla | `src/features/cuentas/CierreCajaModal.tsx` · `ImpactoCierreModal.tsx` | El modal y el contador · el aviso antes de tocar un cierre hecho; el histórico vive en `pages/Cuentas.tsx` |
 | Papel | `src-tauri/src/printing.rs::build_arqueo` | Documento interno |
 | Aviso | `jobs/registro.rs::caja_sin_cerrar` | Notificación si lleva >20 h abierta |
 
@@ -1205,17 +1206,37 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
   demás no se acepta de la entrada, o cualquiera podría reescribir el punto de partida a posteriori y
   hacer desaparecer un descuadre.
 - **Los importes se guardan, no se derivan al leer.** Un arqueo es la foto de lo que se vio esa
-  noche. Si mañana se reabre el periodo y se corrige un cobro, el arqueo de ayer no puede cambiar
-  solo: dejaría de explicar por qué faltaban 20 €.
-- **Sólo se cuadra el efectivo, y sólo con ventas.** De esta caja no se paga a proveedores ni a
-  nómina, así que `esperado = fondo + cobros **activos** en efectivo` (CUENTA-07, §13). El hueco que
-  eso deja —sacar dinero para otra cosa sale como que falta— **se tapa diciéndolo en la pantalla**,
-  no con código. Y las anulaciones del periodo se enseñan al lado, sin entrar en el cálculo.
-- **Cerrar bloquea el periodo; reabrir deja rastro.** El bloqueo no tiene columna: se deduce
-  comparando la fecha del apunte con el último cierre no reabierto, que es un estado menos que
-  mantener sincronizado. El gate vive en los comandos, no en la UI, y la fecha se lee de la BD y no
-  de la entrada: en un borrado sólo llega el id. **Y el rastro tampoco se acepta de la entrada**
-  (SEC-01): quién cierra y quién reabre sale de la sesión del backend, así que `ConfirmarCierreInput`
+  noche. Si mañana se corrige un cobro de esa noche, la foto no cambia —dejaría de explicar por qué
+  faltaban 20 €—: lo que cambia es el **rectificado** (`Rect_*`), que se guarda al lado.
+- **Sólo se cuadra el efectivo.** `esperado = fondo + cobros **activos** en efectivo − gastos
+  pagados con caja` (CUENTA-07, §13; CAJA-01). Un gasto sólo resta si lleva `Pagado_Con_Caja`: el
+  que se paga por banco no ha tocado el cajón. Y las anulaciones del periodo se enseñan al lado, sin
+  entrar en el cálculo.
+- **Un gasto no tiene hora, y cae en el periodo a las 12:00 de su día** (`HORA_DE_UN_GASTO`, y la
+  misma expresión en el SQL de `totales_desde`). Un bar abre por la mañana y cierra de madrugada: el
+  mediodía cae dentro del servicio de ese día, así que el gasto de la tarde va al cierre de esa noche.
+  Si cambias la regla, cámbiala en los dos sitios o preparar y rectificar dejarán de coincidir.
+- **Cerrar NO bloquea nada; corregir el pasado rectifica** (CAJA-01). Antes un cierre bloqueaba su
+  periodo y se decidió lo contrario: cada uno usa el programa como quiera, y lo que hace el programa
+  es que tocar el pasado no pase desapercibido. Editar o anular un cobro y crear, editar o borrar un
+  gasto que caen en un cierre hecho —por su fecha de **origen** o por la de **destino**— pasan por
+  `rectificacion_caja`: la pantalla pregunta antes el impacto (`cuentas_previsualizar_cambio`) y lo
+  enseña, el motivo es obligatorio **sólo si cambia un descuadre**, y el cierre guarda lo que marca
+  ahora más una fila en `Cierre_Rectificaciones`. Reglas al tocarlo:
+  - **Rectificar un cierre no mueve a los siguientes.** Cada cierre arranca con lo que se *dejó*, que
+    es dinero contado, no con el esperado del anterior.
+  - ⚠️ **Se rectifica sumando el cambio a lo que el cierre ya dice, NUNCA volviendo a sumar su
+    periodo desde la BD.** Tras recuperar un equipo el histórico baja por partes (SYNC-19, fase 2) y
+    un cierre viejo sumado a mitad de descarga saldría descuadrado por cobros que aún no han llegado
+    — y la rectificación lo grabaría para siempre. De paso, lo que se enseña al confirmar es lo que
+    se guarda: las dos cosas hacen la misma cuenta.
+  - **La fecha de origen se lee de la BD, no de la entrada**: en un borrado sólo llega el id.
+  - **Si guardar el cambio va bien y rectificar falla, el cambio se queda** y el error lo dice. El
+    apunte es el dato; la rectificación, su explicación.
+- **Deshacer, sólo el último cierre.** Deshacer uno antiguo dejaría su dinero sin contar en ningún
+  periodo, porque los siguientes ya empezaron desde él. Es lo que queda de «reabrir»: un recuento mal
+  hecho, que la rectificación no arregla. **Y el rastro no se acepta de la entrada**
+  (SEC-01): quién cierra y quién deshace sale de la sesión del backend, así que `ConfirmarCierreInput`
   y `CierreIdInput` ya no llevan `id_usuario` — un arqueo firmado con el nombre que le pase la
   pantalla es una auditoría que da confianza sin merecerla.
 - **El papel es un documento interno.** No gasta número de ticket (dejaría huecos en la serie de
@@ -1238,7 +1259,7 @@ Un cobro anulado **no se borra**. Diseño y porqués abajo; el plan que lo intro
 | Persistencia | `crates/tpv-infra-sqlite/src/cuentas.rs::anular_pago` | Revierte stock y gasto, marca el pago, reabre la comanda |
 | «Línea cobrada» | vista `v_lineas_cobradas` (`0001_inicial.sql`) | Fila en `Pago_Detalles` **ligada a un pago ACTIVO** |
 | Historial | `crates/tpv-infra-sqlite/src/caja_movimientos.rs` → `Movimientos_Caja` | Una fila por hecho: cobro, anulación, gasto |
-| Comando | `commands/cuentas.rs::cuentas_anular_pago` | Administrador + gate de periodo; firma con la sesión |
+| Comando | `commands/cuentas.rs::cuentas_anular_pago` | Administrador; rectifica el cierre si el cobro es de uno hecho (§12); firma con la sesión |
 | Pantalla | `src/app/pages/Cuentas.tsx` | Lista los anulados marcados; pide el motivo |
 | Worker | `domains/cuentas/cuentas.commands.ts::anularPago` | Paridad; vetado a la Handy |
 
@@ -1247,7 +1268,7 @@ Un cobro anulado **no se borra**. Diseño y porqués abajo; el plan que lo intro
 - **El agujero que esto cierra.** El arqueo calcula `esperado = fondo + cobros en efectivo`, así que
   borrar la fila de una venta en efectivo bajaba el esperado **exactamente lo mismo** que faltaba en
   el cajón: el descuadre salía cero. Los números eran correctos; lo que no había era nada con lo que
-  compararlos. Consecuencia: **`ventas_efectivo_desde` filtra por `Estado='ACTIVO'`, y ese filtro es
+  compararlos. Consecuencia: **`totales_desde` filtra por `Estado='ACTIVO'`, y ese filtro es
   el plan entero**. Si alguien lo quita, el producto vuelve a ser ciego y ningún test de aritmética
   se entera.
 - **Las líneas vuelven a la comanda, no se esfuman.** Se conservan `Detalle_Comanda` y

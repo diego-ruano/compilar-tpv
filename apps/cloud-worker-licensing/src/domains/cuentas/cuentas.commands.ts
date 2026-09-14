@@ -35,6 +35,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 		concepto: input.concepto,
 		importe: input.importe,
 		proveedor_id: input.proveedor_id ?? null,
+		pagado_con_caja: Boolean(input.pagado_con_caja),
 	};
 	const steps = [
 		idStep(cloudPayload.id_gasto),
@@ -44,14 +45,15 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 		{
 			kind: "execute",
 			sql: `
-				INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor)
-				VALUES (?1, date(?2), ?3, ?4, ?5, ?6)
+				INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja)
+				VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7)
 				ON CONFLICT(ID_Gasto) DO UPDATE SET
 					Fecha = excluded.Fecha,
 					Concepto = excluded.Concepto,
 					Importe = excluded.Importe,
 					Tipo_Gasto = excluded.Tipo_Gasto,
-					ID_Proveedor = excluded.ID_Proveedor;
+					ID_Proveedor = excluded.ID_Proveedor,
+					Pagado_Con_Caja = excluded.Pagado_Con_Caja;
 			`,
 			args: [
 				REF_ID,
@@ -60,6 +62,7 @@ export function createGasto(input: CreateGastoInput): BuiltCommand {
 				cloudPayload.importe,
 				cloudPayload.tipo_gasto,
 				cloudPayload.proveedor_id,
+				cloudPayload.pagado_con_caja ? 1 : 0,
 			],
 		},
 		// Su fila en el historial de caja (CUENTA-07). Paridad con
@@ -96,7 +99,8 @@ export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltComm
 			payload: {
 				sql: `
 					UPDATE Cuentas_Gastos
-					SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6
+					SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6,
+						Pagado_Con_Caja = ?7
 					WHERE ID_Gasto = ?1;
 				`,
 				args: [
@@ -106,6 +110,7 @@ export function updateGasto(idGasto: string, input: UpdateGastoInput): BuiltComm
 					input.concepto,
 					input.importe,
 					input.proveedor_id ?? null,
+					input.pagado_con_caja ? 1 : 0,
 				],
 			},
 		},

@@ -231,6 +231,7 @@ fn gasto_del_caso(e: &Json) -> GastoData {
         concepto: s(&e["concepto"]),
         importe: e["importe"].as_f64().unwrap_or(0.0),
         proveedor_id: opt_str(&e["proveedor_id"]),
+        pagado_con_caja: e["pagado_con_caja"].as_bool().unwrap_or(false),
     }
 }
 

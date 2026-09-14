@@ -61,10 +61,6 @@ pub enum ErrorCode {
     LicenseNotFound,
     /// PIN incorrecto en login/fichaje.
     InvalidPin,
-    /// El cobro o el gasto que se quiere tocar pertenece a un periodo de caja ya cerrado
-    /// (CUENTA-06). La UI ramifica por él para ofrecer "reabrir el cierre" en vez de un mensaje
-    /// genérico: sin código propio, el usuario sólo vería "no se puede" y no sabría por qué.
-    PeriodoCerrado,
     /// El servidor confirma que el tenant no tiene base de datos aprovisionada. Sólo este caso
     /// permite ofrecer la creación de una base nueva; un timeout o un 500 genérico no.
     TenantDbNotProvisioned,
@@ -116,7 +112,6 @@ impl ErrorCode {
             ErrorCode::LicenseExpired => "La licencia ha caducado",
             ErrorCode::LicenseNotFound => "No hay una licencia activa",
             ErrorCode::InvalidPin => "PIN incorrecto",
-            ErrorCode::PeriodoCerrado => "El periodo de caja está cerrado",
             ErrorCode::TenantDbNotProvisioned => "No existe una base de datos en la nube",
             ErrorCode::BootstrapTooLarge => {
                 "La copia de la nube es demasiado grande para restaurarla automáticamente"
@@ -151,7 +146,6 @@ impl ErrorCode {
             ErrorCode::LicenseExpired => "license_expired",
             ErrorCode::LicenseNotFound => "license_not_found",
             ErrorCode::InvalidPin => "invalid_pin",
-            ErrorCode::PeriodoCerrado => "periodo_cerrado",
             ErrorCode::TenantDbNotProvisioned => "tenant_db_not_provisioned",
             ErrorCode::BootstrapTooLarge => "bootstrap_too_large",
             ErrorCode::TenantMigrationAltered => "tenant_migration_altered",
@@ -185,7 +179,6 @@ impl ErrorCode {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
-            ErrorCode::PeriodoCerrado,
             ErrorCode::TenantDbNotProvisioned,
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,
@@ -220,7 +213,6 @@ impl ErrorCode {
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,
             "no_active_license_for_tenant" | "license_not_found" => ErrorCode::LicenseNotFound,
             "invalid_pin" => ErrorCode::InvalidPin,
-            "periodo_cerrado" => ErrorCode::PeriodoCerrado,
             "validation_error" => ErrorCode::Validation,
             "not_found" => ErrorCode::NotFound,
             "tenant_db_not_provisioned" => ErrorCode::TenantDbNotProvisioned,
@@ -436,7 +428,6 @@ mod tests {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
-            ErrorCode::PeriodoCerrado,
             ErrorCode::TenantDbNotProvisioned,
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,
@@ -472,7 +463,6 @@ mod tests {
             ErrorCode::LicenseExpired,
             ErrorCode::LicenseNotFound,
             ErrorCode::InvalidPin,
-            ErrorCode::PeriodoCerrado,
             ErrorCode::TenantDbNotProvisioned,
             ErrorCode::BootstrapTooLarge,
             ErrorCode::TenantMigrationAltered,

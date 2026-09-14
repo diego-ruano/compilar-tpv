@@ -6,6 +6,7 @@
       "ID_Gasto": "gasto-1",
       "ID_Proveedor": null,
       "Importe": 99.99,
+      "Pagado_Con_Caja": 0,
       "Tipo_Gasto": "Personal"
     },
     {
@@ -14,6 +15,7 @@
       "ID_Gasto": "gasto-2",
       "ID_Proveedor": null,
       "Importe": 5.5,
+      "Pagado_Con_Caja": 0,
       "Tipo_Gasto": "Otros"
     }
   ]

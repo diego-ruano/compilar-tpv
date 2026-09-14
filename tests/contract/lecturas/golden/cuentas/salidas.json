@@ -4,6 +4,7 @@
     "fecha_hora": "2026-05-20",
     "id": "gasto-2",
     "importe": 90.55,
+    "pagado_con_caja": false,
     "proveedor_id": null,
     "tipo_gasto": "Suministros"
   },
@@ -12,6 +13,7 @@
     "fecha_hora": "2026-05-02",
     "id": "gasto-1",
     "importe": 150.0,
+    "pagado_con_caja": false,
     "proveedor_id": "prov-1",
     "tipo_gasto": "Compras"
   }

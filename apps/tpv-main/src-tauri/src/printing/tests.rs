@@ -2143,6 +2143,45 @@ mod tests_arqueo {
     }
 
     #[test]
+    fn los_gastos_de_caja_salen_restando_solo_si_los_hay() {
+        // CAJA-01. Restan del esperado, así que el papel tiene que decir de dónde sale la resta.
+        let mut p = arqueo();
+        p.gastos_caja = 18.0;
+        assert!(contiene(&build_arqueo(&p), "Gastos de caja"));
+        p.gastos_caja = 0.0;
+        assert!(!contiene(&build_arqueo(&p), "Gastos de caja"));
+    }
+
+    #[test]
+    fn un_cierre_rectificado_dice_lo_de_esa_noche_lo_de_hoy_y_por_que() {
+        let mut p = arqueo();
+        p.rect_esperado = Some(550.5);
+        p.rect_descuadre = Some(0.0);
+        p.rectificaciones = vec![RectificacionArqueo {
+            fecha_hora: "2026-05-11 10:00:00".into(),
+            descripcion: "Cobro 2026/000045 de 20,00 €: Efectivo → Tarjeta".into(),
+            motivo: Some("era con tarjeta".into()),
+        }];
+        for cpl in [20u32, 42] {
+            p.chars_per_line = cpl;
+            let bytes = build_arqueo(&p);
+            super::parser::trocear(&bytes).unwrap_or_else(|e| panic!("{cpl}col: {e}"));
+            assert!(contiene(&bytes, "FALTAN"), "la foto de esa noche sigue ahí");
+            assert!(contiene(&bytes, "RECTIFICADO"));
+            assert!(contiene(&bytes, "CUADRA"), "y lo que marca hoy");
+        }
+        p.chars_per_line = 42;
+        let bytes = build_arqueo(&p);
+        assert!(contiene(&bytes, "era con tarjeta"));
+        assert!(contiene(&bytes, "->"), "la flecha se escribe con lo que hay en CP858");
+    }
+
+    #[test]
+    fn sin_rectificar_no_sale_el_bloque() {
+        assert!(!contiene(&build_arqueo(&arqueo()), "RECTIFICADO"));
+    }
+
+    #[test]
     fn lleva_el_desglose_del_recuento() {
         // Es lo que convierte "faltan 50" en "falta un billete de 50".
         let bytes = build_arqueo(&arqueo());

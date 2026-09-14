@@ -116,8 +116,8 @@ const CTE_PAGOS = `sel_pagos AS (
 )`;
 
 /**
- * El último cierre NO reabierto entra aunque quede fuera de la ventana: es lo que define el
- * periodo de caja abierto y el gate que bloquea escribir sobre un periodo ya cerrado.
+ * El último cierre NO reabierto entra aunque quede fuera de la ventana: su hora es donde empieza
+ * el periodo de caja abierto, y su `Dejado` el fondo del arqueo siguiente.
  */
 const CTE_CIERRES = `sel_cierres AS (
 	SELECT ID_Cierre FROM Cierres_Caja
@@ -226,6 +226,12 @@ export const TRANSACCIONALES: Transaccional[] = [
 	},
 	{
 		nombre: "Cierre_Denominaciones",
+		ctes: [CTE_CIERRES],
+		donde: "ID_Cierre IN (SELECT ID_Cierre FROM sel_cierres)",
+	},
+	{
+		// CAJA-01. Van con su cierre: `ID_Cierre` es una FK suya.
+		nombre: "Cierre_Rectificaciones",
 		ctes: [CTE_CIERRES],
 		donde: "ID_Cierre IN (SELECT ID_Cierre FROM sel_cierres)",
 	},

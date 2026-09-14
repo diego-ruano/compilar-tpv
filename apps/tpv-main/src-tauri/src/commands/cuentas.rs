@@ -4,14 +4,18 @@
 //! del gate por gusto: `PLAN_CIERRE_CAJA.md` §8 ya lo decidió ("el gate por rol en la ruta del
 //! frontend y, sobre todo, en los comandos Tauri"), y hasta ahora sólo existía la mitad de UI.
 //! El libro de caja dice cuánto se factura y cuánto se gasta; esconderlo del menú no es
-//! esconderlo. En los que además tocan un apunte, el rol va ANTES del gate de periodo: no hay
-//! por qué consultar la BD por alguien que de todos modos no puede cambiar nada.
+//! esconderlo.
+//!
+//! CAJA-01: los que tocan un apunte ya no se niegan por fecha. Pasan por `rectificacion_caja`, que
+//! rectifica el cierre ya hecho al que pertenezca el apunte. El aviso previo lo pide la pantalla con
+//! `cuentas_previsualizar_cambio`, y el motivo llega aparte (`motivo_rectificacion`) porque no es un
+//! dato del apunte: es de la corrección.
 
 use tauri::State;
 
-use tpv_application::ports::cierre_caja::ApunteCaja;
-use tpv_application::use_cases::cierre_caja as cierre_uc;
 use tpv_application::use_cases::cuentas as uc;
+use tpv_application::use_cases::rectificacion_caja as rect;
+use tpv_contracts::cierre_caja::{CambioCajaInput, ImpactoCajaDto};
 use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, EntradaDto,
     ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
@@ -49,69 +53,92 @@ pub async fn cuentas_get_resumen(
     Ok(uc::get_resumen(repo.as_ref(), args).await?)
 }
 
+/// A qué cierres ya hechos afectaría un cambio y cómo quedarían. No toca nada.
+#[tauri::command]
+pub async fn cuentas_previsualizar_cambio(
+    state: State<'_, AppState>,
+    args: CambioCajaInput,
+) -> Result<ImpactoCajaDto, AppErrorDto> {
+    state.exigir_rol(&[ADMIN]).await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::previsualizar(cierres.as_ref(), &args).await?)
+}
+
 #[tauri::command]
 pub async fn cuentas_create_gasto(
     state: State<'_, AppState>,
     args: CreateGastoInput,
+    motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
     // Quién registra el gasto sale de la sesión: va al historial de caja (CUENTA-07).
     let sesion = state.exigir_rol(&[ADMIN]).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::create_gasto(repo.as_ref(), Some(&sesion.id_usuario), args).await?)
-}
-
-/// Gate del cierre de caja (CUENTA-06): un cobro o un gasto de un periodo ya cerrado no se toca.
-///
-/// Vive aquí, delante de los cuatro comandos que modifican caja, y no en la pantalla: un candado que
-/// sólo está en la interfaz no es un candado. La fecha se lee de la BD y no se acepta de la entrada,
-/// porque en un borrado sólo llega el id y porque fiarse de la fecha que manda quien quiere borrar
-/// es no tener gate.
-///
-/// Si el apunte no existe se deja pasar: no es cosa de este gate decidir eso, y el comando de abajo
-/// ya devuelve `false` cuando no encuentra la fila.
-async fn exigir_periodo_abierto(
-    state: &State<'_, AppState>,
-    tipo: ApunteCaja,
-    id: &str,
-) -> Result<(), AppErrorDto> {
-    let repo = state.cierre_caja_repo().await?;
-    if let Some(fecha) = repo.fecha_apunte(tipo, id).await? {
-        cierre_uc::exigir_periodo_abierto(repo.as_ref(), &fecha).await?;
-    }
-    Ok(())
+    let cuentas = state.cuentas_repo().await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::crear_gasto(
+        cuentas.as_ref(),
+        cierres.as_ref(),
+        &sesion.id_usuario,
+        args,
+        motivo_rectificacion,
+    )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn cuentas_update_gasto(
     state: State<'_, AppState>,
     args: UpdateGastoInput,
+    motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
-    exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::update_gasto(repo.as_ref(), args).await?)
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let cuentas = state.cuentas_repo().await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::editar_gasto(
+        cuentas.as_ref(),
+        cierres.as_ref(),
+        &sesion.id_usuario,
+        args,
+        motivo_rectificacion,
+    )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn cuentas_delete_gasto(
     state: State<'_, AppState>,
     args: DeleteGastoInput,
+    motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
     let sesion = state.exigir_rol(&[ADMIN]).await?;
-    exigir_periodo_abierto(&state, ApunteCaja::Gasto, &args.id_gasto).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::delete_gasto(repo.as_ref(), Some(&sesion.id_usuario), args).await?)
+    let cuentas = state.cuentas_repo().await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::borrar_gasto(
+        cuentas.as_ref(),
+        cierres.as_ref(),
+        &sesion.id_usuario,
+        args,
+        motivo_rectificacion,
+    )
+    .await?)
 }
 
 #[tauri::command]
 pub async fn cuentas_update_pago(
     state: State<'_, AppState>,
     args: UpdatePagoInput,
+    motivo_rectificacion: Option<String>,
 ) -> Result<bool, AppErrorDto> {
-    state.exigir_rol(&[ADMIN]).await?;
-    exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::update_pago(repo.as_ref(), args).await?)
+    let sesion = state.exigir_rol(&[ADMIN]).await?;
+    let cuentas = state.cuentas_repo().await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::editar_pago(
+        cuentas.as_ref(),
+        cierres.as_ref(),
+        &sesion.id_usuario,
+        args,
+        motivo_rectificacion,
+    )
+    .await?)
 }
 
 /// Anula un cobro (CUENTA-07). Antes lo borraba, y ése era el agujero: el arqueo calcula
@@ -126,9 +153,9 @@ pub async fn cuentas_anular_pago(
     args: AnularPagoInput,
 ) -> Result<bool, AppErrorDto> {
     let sesion = state.exigir_rol(&[ADMIN]).await?;
-    exigir_periodo_abierto(&state, ApunteCaja::Pago, &args.id_pago).await?;
-    let repo = state.cuentas_repo().await?;
-    Ok(uc::anular_pago(repo.as_ref(), &sesion.id_usuario, args).await?)
+    let cuentas = state.cuentas_repo().await?;
+    let cierres = state.cierre_caja_repo().await?;
+    Ok(rect::anular_pago(cuentas.as_ref(), cierres.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 /// Devuelve un ticket ya cobrado para volver a imprimirlo: mismo número, mismos tipos de IVA y las

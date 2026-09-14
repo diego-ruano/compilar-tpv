@@ -11,8 +11,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cierre_caja::{ApunteCaja, CierreCajaRepository, CierreNuevo};
+use tpv_application::ports::cierre_caja::{
+    ApunteCaja, ApunteGuardado, CierreCajaRepository, CierreNuevo, RectificacionNueva,
+};
 use tpv_contracts::cierre_caja::{CierreDto, CierreResumenDto};
+use tpv_domain::cierre_caja::TotalesCaja;
 
 use crate::CloudClient;
 
@@ -38,10 +41,6 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         self.client.get_json("/v1/cuentas/cierres/ultimo").await
     }
 
-    async fn corte_vigente(&self) -> AppResult<Option<String>> {
-        Ok(self.ultimo_cierre().await?.map(|c| c.fecha_hora))
-    }
-
     async fn listar(&self, limite: i64) -> AppResult<Vec<CierreResumenDto>> {
         self.client
             .get_query("/v1/cuentas/cierres", &[("limite", limite.to_string())])
@@ -54,13 +53,6 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
             .await
     }
 
-    /// Siempre `None`: el gate del periodo cerrado sólo corre antes de una escritura de caja, y
-    /// desde una Handy no hay ninguna que pueda llegar aquí. Devolver `None` no abre una puerta —
-    /// las escrituras fallan más abajo, y el worker las rechaza otra vez por su cuenta.
-    async fn fecha_apunte(&self, _tipo: ApunteCaja, _id: &str) -> AppResult<Option<String>> {
-        Ok(None)
-    }
-
     /// Siempre 0: el aviso de caja sin cerrar lo da la Main, que es la única que puede cerrarla.
     async fn horas_periodo_abierto(&self) -> AppResult<i64> {
         Ok(0)
@@ -68,7 +60,7 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
 
     // ── De aquí abajo, cosas de la Main ──────────────────────────────────────────
 
-    async fn ventas_efectivo_desde(&self, _desde: Option<&str>) -> AppResult<f64> {
+    async fn totales_desde(&self, _desde: Option<&str>) -> AppResult<TotalesCaja> {
         Err(solo_main("Preparar un cierre"))
     }
 
@@ -85,6 +77,18 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
     }
 
     async fn reabrir(&self, _id_cierre: &str, _id_usuario: Option<&str>) -> AppResult<bool> {
-        Err(solo_main("Reabrir un cierre"))
+        Err(solo_main("Deshacer un cierre"))
+    }
+
+    async fn cierre_de_momento(&self, _momento: &str) -> AppResult<Option<CierreDto>> {
+        Err(solo_main("Corregir un apunte de caja"))
+    }
+
+    async fn apunte(&self, _tipo: ApunteCaja, _id: &str) -> AppResult<Option<ApunteGuardado>> {
+        Err(solo_main("Corregir un apunte de caja"))
+    }
+
+    async fn guardar_rectificacion(&self, _r: RectificacionNueva) -> AppResult<()> {
+        Err(solo_main("Rectificar un cierre"))
     }
 }

@@ -953,6 +953,17 @@ pub fn build_abrir_cajon() -> Vec<u8> {
     vec![0x10, 0x14, 0x01, 0x00, 0x02]
 }
 
+/// Una corrección de un cierre ya hecho, tal como sale en el papel (CAJA-01).
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct RectificacionArqueo {
+    #[serde(default)]
+    pub fecha_hora: String,
+    #[serde(default)]
+    pub descripcion: String,
+    #[serde(default)]
+    pub motivo: Option<String>,
+}
+
 /// Lo que hace falta para imprimir un arqueo. CUENTA-06.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct PrintArqueoPayload {
@@ -982,6 +993,16 @@ pub struct PrintArqueoPayload {
     pub retirado: f64,
     #[serde(default)]
     pub motivo: Option<String>,
+    /// Gastos pagados con dinero del cajón (CAJA-01). Restan del esperado.
+    #[serde(default)]
+    pub gastos_caja: f64,
+    /// Lo que el cierre marca hoy, si se corrigió un apunte de su periodo (CAJA-01).
+    #[serde(default)]
+    pub rect_esperado: Option<f64>,
+    #[serde(default)]
+    pub rect_descuadre: Option<f64>,
+    #[serde(default)]
+    pub rectificaciones: Vec<RectificacionArqueo>,
     /// `(valor, unidades)` de lo contado, para el desglose.
     #[serde(default)]
     pub contado_denoms: Vec<(f64, i64)>,
@@ -1062,6 +1083,11 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
     sep(&mut out, cols);
     text_line(&mut out, &line_two("Fondo de partida", &fmt_eur(p.fondo_inicial), cols));
     text_line(&mut out, &line_two("Cobrado en efectivo", &fmt_eur(p.ventas_efectivo), cols));
+    // Sólo si los hay: una línea a cero en todos los arqueos de un bar que no paga nada con caja
+    // sería ruido en el papel que se lee buscando un descuadre.
+    if a_centimos(p.gastos_caja) != 0.0 {
+        text_line(&mut out, &line_two("Gastos de caja", &format!("-{}", fmt_eur(p.gastos_caja)), cols));
+    }
     esc_bold(&mut out, true);
     text_line(&mut out, &line_two("Deberia haber", &fmt_eur(p.esperado), cols));
     text_line(&mut out, &line_two("Contado", &fmt_eur(p.contado), cols));
@@ -1071,19 +1097,32 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
     // El descuadre es lo que se busca al coger este papel, así que va en grande y con su signo.
     esc_bold(&mut out, true);
     esc_size(&mut out, 0x01);
-    let etiqueta = if p.descuadre == 0.0 {
-        "CUADRA".to_string()
-    } else if p.descuadre < 0.0 {
-        format!("FALTAN {}", fmt_eur(-p.descuadre))
-    } else {
-        format!("SOBRAN {}", fmt_eur(p.descuadre))
-    };
+    let etiqueta = etiqueta_descuadre(p.descuadre);
     text_line(&mut out, &etiqueta);
     esc_size(&mut out, 0x00);
     esc_bold(&mut out, false);
 
     if let Some(m) = p.motivo.as_deref().filter(|m| !m.trim().is_empty()) {
         text_wrap(&mut out, &format!("Motivo: {}", m.trim()), cols);
+    }
+
+    // CAJA-01. Lo de arriba es la foto de esa noche y no cambia; si después se corrigió un apunte
+    // de su periodo, el papel dice aparte lo que marca hoy y por qué. La flecha de la descripción
+    // no está en CP858: se escribe con lo que la impresora sí sabe.
+    if let (Some(esperado), Some(descuadre)) = (p.rect_esperado, p.rect_descuadre) {
+        sep(&mut out, cols);
+        esc_bold(&mut out, true);
+        text_line(&mut out, "RECTIFICADO DESPUES");
+        esc_bold(&mut out, false);
+        text_line(&mut out, &line_two("Deberia haber hoy", &fmt_eur(esperado), cols));
+        text_line(&mut out, &line_two("Hoy", &etiqueta_descuadre(descuadre), cols));
+        for r in &p.rectificaciones {
+            let descripcion = r.descripcion.trim().replace('→', "->");
+            text_wrap(&mut out, &format!("{} {}", r.fecha_hora.trim(), descripcion), cols);
+            if let Some(m) = r.motivo.as_deref().filter(|m| !m.trim().is_empty()) {
+                text_wrap(&mut out, &format!("  Motivo: {}", m.trim()), cols);
+            }
+        }
     }
 
     sep(&mut out, cols);
@@ -1108,6 +1147,17 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
     esc_feed(&mut out, 4);
     esc_cut(&mut out);
     out
+}
+
+/// El descuadre en palabras: un número con signo se lee mal a las dos de la mañana.
+fn etiqueta_descuadre(descuadre: f64) -> String {
+    if a_centimos(descuadre) == 0.0 {
+        "CUADRA".to_string()
+    } else if descuadre < 0.0 {
+        format!("FALTAN {}", fmt_eur(-descuadre))
+    } else {
+        format!("SOBRAN {}", fmt_eur(descuadre))
+    }
 }
 
 /// Formatea un porcentaje sin decimales innecesarios (`10` en vez de `10,00`).

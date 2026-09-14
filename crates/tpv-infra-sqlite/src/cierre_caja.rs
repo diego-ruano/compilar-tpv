@@ -1,7 +1,8 @@
-//! Persistencia del **cierre de caja** (arqueo). CUENTA-06.
+//! Persistencia del **cierre de caja** (arqueo). CUENTA-06 · CAJA-01.
 //!
 //! Todo va por `execute()` y no por `raw()`: un cierre es un dato de negocio y se replica como
-//! cualquier otro (ver la regla del escritor único en CLAUDE.md §9).
+//! cualquier otro (ver la regla del escritor único en CLAUDE.md §9). Las rectificaciones también:
+//! la Handy tiene que ver en un cierre lo mismo que la Main.
 
 use std::sync::Arc;
 
@@ -9,11 +10,17 @@ use async_trait::async_trait;
 use libsql::{Row, Value};
 
 use tpv_application::error::{AppError, AppResult};
-use tpv_application::ports::cierre_caja::{ApunteCaja, CierreCajaRepository, CierreNuevo};
-use tpv_contracts::cierre_caja::{CierreDto, CierreResumenDto, DenominacionDto};
+use tpv_application::ports::cierre_caja::{
+    ApunteCaja, ApunteGuardado, CierreCajaRepository, CierreNuevo, RectificacionNueva,
+};
+use tpv_contracts::cierre_caja::{
+    CierreDto, CierreResumenDto, DenominacionDto, RectificacionDto,
+};
+use tpv_domain::cierre_caja::{TotalesCaja, HORA_DE_UN_GASTO};
 
 use crate::db::{Db, Reader, Writer};
 use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::util::new_id;
 
 pub struct SqliteCierreCajaRepository {
     db: Arc<Db>,
@@ -27,6 +34,22 @@ impl SqliteCierreCajaRepository {
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
+}
+
+fn texto_o_nulo(s: Option<&str>) -> Value {
+    match s {
+        Some(v) => Value::Text(v.to_string()),
+        None => Value::Null,
+    }
+}
+
+/// El instante con el que se compara un gasto contra un cierre, escrito en SQL.
+///
+/// Tiene que decir lo mismo que `tpv_domain::cierre_caja::momento_de_gasto`, y por eso las dos
+/// salen de la misma constante: si cada lado eligiera su hora, un gasto podría contar en el arqueo de
+/// un cierre y rectificar el de otro.
+fn momento_de_gasto_sql(columna: &str) -> String {
+    format!("datetime(date({columna}) || ' {HORA_DE_UN_GASTO}')")
 }
 
 /// Columnas de un cierre, en el orden que espera `map_cierre`. El nombre de quien cerró se resuelve
@@ -46,7 +69,13 @@ const COLS: &str = r#"
     c.Retirado,
     c.Motivo,
     c.Reabierto_En,
-    c.Reabierto_Por
+    c.Reabierto_Por,
+    c.Periodo_Desde,
+    c.Gastos_Caja,
+    c.Rect_Ventas_Efectivo,
+    c.Rect_Gastos_Caja,
+    c.Rect_Esperado,
+    c.Rect_Descuadre
 "#;
 
 fn map_cierre(row: &Row) -> AppResult<CierreDto> {
@@ -66,8 +95,15 @@ fn map_cierre(row: &Row) -> AppResult<CierreDto> {
         motivo: norm_opt_string(g(11)?),
         reabierto_en: norm_opt_string(g(12)?),
         reabierto_por: norm_opt_string(g(13)?),
+        periodo_desde: norm_opt_string(g(14)?),
+        gastos_caja: v_f64(g(15)?).unwrap_or(0.0),
+        rect_ventas_efectivo: v_f64(g(16)?),
+        rect_gastos_caja: v_f64(g(17)?),
+        rect_esperado: v_f64(g(18)?),
+        rect_descuadre: v_f64(g(19)?),
         contado_denoms: vec![],
         dejado_denoms: vec![],
+        rectificaciones: vec![],
     })
 }
 
@@ -97,27 +133,6 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         self.detalle(&id).await
     }
 
-    async fn corte_vigente(&self) -> AppResult<Option<String>> {
-        let db = self.db.read().await;
-        let mut rows = db
-            .query(
-                r#"
-                SELECT Fecha_Hora
-                FROM Cierres_Caja
-                WHERE Reabierto_En IS NULL
-                ORDER BY Fecha_Hora DESC, ID_Cierre DESC
-                LIMIT 1;
-                "#,
-                (),
-            )
-            .await
-            .map_err(db_err)?;
-        Ok(match rows.next().await.map_err(db_err)? {
-            Some(r) => norm_opt_string(r.get_value(0).map_err(db_err)?),
-            None => None,
-        })
-    }
-
     async fn horas_periodo_abierto(&self) -> AppResult<i64> {
         let db = self.db.read().await;
         let mut rows = db
@@ -145,28 +160,12 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         })
     }
 
-    async fn fecha_apunte(&self, tipo: ApunteCaja, id: &str) -> AppResult<Option<String>> {
-        let db = self.db.read().await;
-        let sql = match tipo {
-            ApunteCaja::Pago => "SELECT Fecha_Hora FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;",
-            ApunteCaja::Gasto => "SELECT Fecha FROM Cuentas_Gastos WHERE ID_Gasto = ?1 LIMIT 1;",
-        };
-        let mut rows = db
-            .query(sql, vec![Value::Text(id.to_string())])
-            .await
-            .map_err(db_err)?;
-        Ok(match rows.next().await.map_err(db_err)? {
-            Some(r) => norm_opt_string(r.get_value(0).map_err(db_err)?),
-            None => None,
-        })
-    }
-
-    async fn ventas_efectivo_desde(&self, desde: Option<&str>) -> AppResult<f64> {
+    async fn totales_desde(&self, desde: Option<&str>) -> AppResult<TotalesCaja> {
         let db = self.db.read().await;
 
-        // El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta' cuenta
-        // como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el lado
-        // seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
+        // COBROS. El método se normaliza igual que en el resto de caja: todo lo que no sea 'Tarjeta'
+        // cuenta como efectivo (CUENTA-03). Un método nuevo entra por defecto en el cajón, que es el
+        // lado seguro: aparecería como descuadre y se investigaría, en vez de desaparecer sin más.
         //
         // ⚠️ El `Estado = 'ACTIVO'` es LA consulta de CUENTA-07. Antes anular borraba la fila, así
         // que el esperado bajaba exactamente lo mismo que faltaba en el cajón y el descuadre salía
@@ -174,40 +173,47 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
         // sale como que falta.
         //
-        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES, sin tocar nada. El plan
-        // pedía que «una devolución en efectivo tiene que restar del esperado»; eso es exactamente
-        // lo que hace `Estado = 'ACTIVO'`, porque una devolución deja el cobro en 'ANULADO'
-        // (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual POR QUÉ salió el dinero: lo que
-        // cambia entre los dos instrumentos es el registro fiscal que se emite, no la aritmética.
+        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES, sin tocar nada: una
+        // devolución deja el cobro en 'ANULADO' (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual
+        // POR QUÉ salió el dinero: lo que cambia entre los dos instrumentos es el registro fiscal
+        // que se emite, no la aritmética.
         //
         // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
         // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
-        let (sql, params) = match desde {
-            Some(d) => (
-                r#"
-                SELECT ROUND(COALESCE(SUM(Importe_Total),0),2)
-                FROM Pagos
+        //
+        // GASTOS (CAJA-01). Sólo los que salieron del cajón, y comparados a mediodía de su día
+        // (`HORA_DE_UN_GASTO`): un gasto no guarda hora.
+        //
+        // Las mismas reglas, sumadas aquí, son las que usa `TotalesCaja::de_cobro`/`de_gasto` para
+        // previsualizar un cambio. Si una cambia, la otra también.
+        let gasto = momento_de_gasto_sql("Fecha");
+        let sql = format!(
+            r#"
+            SELECT
+              ROUND(COALESCE((
+                SELECT SUM(Importe_Total) FROM Pagos
                 WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
                   AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
-                  AND datetime(Fecha_Hora) > datetime(?1);
-                "#,
-                vec![Value::Text(d.to_string())],
-            ),
-            None => (
-                r#"
-                SELECT ROUND(COALESCE(SUM(Importe_Total),0),2)
-                FROM Pagos
-                WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
-                  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO';
-                "#,
-                vec![],
-            ),
-        };
+                  AND (?1 IS NULL OR datetime(Fecha_Hora) > datetime(?1))
+              ), 0), 2),
+              ROUND(COALESCE((
+                SELECT SUM(Importe) FROM Cuentas_Gastos
+                WHERE Pagado_Con_Caja = 1
+                  AND (?1 IS NULL OR {gasto} > datetime(?1))
+              ), 0), 2);
+            "#
+        );
 
-        let mut rows = db.query(sql, params).await.map_err(db_err)?;
+        let mut rows = db
+            .query(sql.as_str(), vec![texto_o_nulo(desde)])
+            .await
+            .map_err(db_err)?;
         Ok(match rows.next().await.map_err(db_err)? {
-            Some(r) => v_f64(r.get_value(0).map_err(db_err)?).unwrap_or(0.0),
-            None => 0.0,
+            Some(r) => TotalesCaja {
+                ventas_efectivo: v_f64(r.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                gastos_caja: v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+            },
+            None => TotalesCaja::default(),
         })
     }
 
@@ -273,27 +279,23 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         db.execute(
             r#"
             INSERT INTO Cierres_Caja (
-              ID_Cierre, Fecha_Hora, ID_Usuario, Fondo_Inicial, Ventas_Efectivo,
-              Esperado, Contado, Descuadre, Dejado, Retirado, Motivo
-            ) VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);
+              ID_Cierre, Fecha_Hora, ID_Usuario, Periodo_Desde, Fondo_Inicial, Ventas_Efectivo,
+              Gastos_Caja, Esperado, Contado, Descuadre, Dejado, Retirado, Motivo
+            ) VALUES (?1, datetime('now','localtime'), ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12);
             "#,
             vec![
                 Value::Text(c.id_cierre.clone()),
-                match c.id_usuario {
-                    Some(u) => Value::Text(u),
-                    None => Value::Null,
-                },
+                texto_o_nulo(c.id_usuario.as_deref()),
+                texto_o_nulo(c.periodo_desde.as_deref()),
                 Value::Real(c.fondo_inicial),
                 Value::Real(c.ventas_efectivo),
+                Value::Real(c.gastos_caja),
                 Value::Real(c.esperado),
                 Value::Real(c.contado),
                 Value::Real(c.descuadre),
                 Value::Real(c.dejado),
                 Value::Real(c.retirado),
-                match c.motivo {
-                    Some(m) => Value::Text(m),
-                    None => Value::Null,
-                },
+                texto_o_nulo(c.motivo.as_deref()),
             ],
         )
         .await
@@ -337,7 +339,9 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                   c.Descuadre,
                   c.Retirado,
                   c.Motivo,
-                  c.Reabierto_En
+                  c.Reabierto_En,
+                  c.Rect_Esperado,
+                  c.Rect_Descuadre
                 FROM Cierres_Caja c
                 LEFT JOIN Usuarios u ON u.ID_Usuario = c.ID_Usuario
                 ORDER BY c.Fecha_Hora DESC, c.ID_Cierre DESC
@@ -361,6 +365,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 retirado: v_f64(g(6)?).unwrap_or(0.0),
                 motivo: norm_opt_string(g(7)?),
                 reabierto_en: norm_opt_string(g(8)?),
+                rect_esperado: v_f64(g(9)?),
+                rect_descuadre: v_f64(g(10)?),
             });
         }
         Ok(out)
@@ -414,6 +420,46 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             }
         }
 
+        // CAJA-01. El `ID_Rectificacion` desempata dos correcciones del mismo segundo: es un UUIDv7,
+        // que se ordena por el momento en que se generó.
+        let mut rrows = db
+            .query(
+                r#"
+                SELECT
+                  r.ID_Rectificacion,
+                  r.Fecha_Hora,
+                  TRIM(COALESCE(u.Nombre,'') || CASE WHEN COALESCE(u.Apellido,'')='' THEN '' ELSE ' ' || u.Apellido END) AS Usuario_Nombre,
+                  r.Descripcion,
+                  r.Motivo,
+                  r.Esperado_Antes,
+                  r.Esperado_Despues,
+                  r.Descuadre_Antes,
+                  r.Descuadre_Despues
+                FROM Cierre_Rectificaciones r
+                LEFT JOIN Usuarios u ON u.ID_Usuario = r.ID_Usuario
+                WHERE r.ID_Cierre = ?1
+                ORDER BY r.Fecha_Hora ASC, r.ID_Rectificacion ASC;
+                "#,
+                vec![Value::Text(id_cierre.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+
+        while let Some(x) = rrows.next().await.map_err(db_err)? {
+            let g = |i: i32| x.get_value(i).map_err(db_err);
+            dto.rectificaciones.push(RectificacionDto {
+                id_rectificacion: v_string(g(0)?).unwrap_or_default(),
+                fecha_hora: v_string(g(1)?).unwrap_or_default(),
+                usuario_nombre: norm_opt_string(g(2)?),
+                descripcion: v_string(g(3)?).unwrap_or_default(),
+                motivo: norm_opt_string(g(4)?),
+                esperado_antes: v_f64(g(5)?).unwrap_or(0.0),
+                esperado_despues: v_f64(g(6)?).unwrap_or(0.0),
+                descuadre_antes: v_f64(g(7)?).unwrap_or(0.0),
+                descuadre_despues: v_f64(g(8)?).unwrap_or(0.0),
+            });
+        }
+
         Ok(Some(dto))
     }
 
@@ -430,17 +476,431 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                     Reabierto_Por = ?2
                 WHERE ID_Cierre = ?1 AND Reabierto_En IS NULL;
                 "#,
-                vec![
-                    Value::Text(id_cierre.to_string()),
-                    match id_usuario {
-                        Some(u) => Value::Text(u.to_string()),
-                        None => Value::Null,
-                    },
-                ],
+                vec![Value::Text(id_cierre.to_string()), texto_o_nulo(id_usuario)],
             )
             .await
             .map_err(db_err)?;
 
         Ok(n > 0)
+    }
+
+    async fn cierre_de_momento(&self, momento: &str) -> AppResult<Option<CierreDto>> {
+        let db = self.db.read().await;
+        // El periodo de un cierre es `(Periodo_Desde, Fecha_Hora]`: incluye el segundo del cierre,
+        // porque el cobro de ese segundo entró en su arqueo. Los deshechos no cuentan: su periodo lo
+        // contó el cierre siguiente.
+        let mut rows = db
+            .query(
+                r#"
+                SELECT c.ID_Cierre
+                FROM Cierres_Caja c
+                WHERE c.Reabierto_En IS NULL
+                  AND (c.Periodo_Desde IS NULL OR datetime(?1) > datetime(c.Periodo_Desde))
+                  AND datetime(?1) <= datetime(c.Fecha_Hora)
+                ORDER BY c.Fecha_Hora ASC, c.ID_Cierre ASC
+                LIMIT 1;
+                "#,
+                vec![Value::Text(momento.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+        let id = match rows.next().await.map_err(db_err)? {
+            Some(r) => v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
+            None => return Ok(None),
+        };
+        drop(rows);
+        drop(db);
+        self.detalle(&id).await
+    }
+
+    async fn apunte(&self, tipo: ApunteCaja, id: &str) -> AppResult<Option<ApunteGuardado>> {
+        let db = self.db.read().await;
+        let sql = match tipo {
+            ApunteCaja::Pago => {
+                r#"
+                SELECT COALESCE(Fecha_Hora,''), IFNULL(Importe_Total,0), COALESCE(Metodo_Pago,''),
+                       COALESCE(Estado,'ACTIVO'), Numero_Ticket
+                FROM Pagos WHERE ID_Pago = ?1 LIMIT 1;
+                "#
+            }
+            ApunteCaja::Gasto => {
+                r#"
+                SELECT COALESCE(Fecha,''), IFNULL(Importe,0), COALESCE(Pagado_Con_Caja,0),
+                       COALESCE(Concepto,'')
+                FROM Cuentas_Gastos WHERE ID_Gasto = ?1 LIMIT 1;
+                "#
+            }
+        };
+        let mut rows = db
+            .query(sql, vec![Value::Text(id.to_string())])
+            .await
+            .map_err(db_err)?;
+        let Some(r) = rows.next().await.map_err(db_err)? else {
+            return Ok(None);
+        };
+        let g = |i: i32| r.get_value(i).map_err(db_err);
+        Ok(Some(match tipo {
+            ApunteCaja::Pago => ApunteGuardado::Cobro {
+                fecha_hora: v_string(g(0)?).unwrap_or_default(),
+                importe: v_f64(g(1)?).unwrap_or(0.0),
+                metodo: v_string(g(2)?).unwrap_or_default(),
+                // Igual que el SQL de `totales`: activo es exactamente 'ACTIVO'.
+                activo: v_string(g(3)?).as_deref() == Some("ACTIVO"),
+                numero_ticket: norm_opt_string(g(4)?),
+            },
+            ApunteCaja::Gasto => ApunteGuardado::Gasto {
+                fecha: v_string(g(0)?).unwrap_or_default(),
+                importe: v_f64(g(1)?).unwrap_or(0.0),
+                pagado_con_caja: v_i64(g(2)?).unwrap_or(0) != 0,
+                concepto: v_string(g(3)?).unwrap_or_default(),
+            },
+        }))
+    }
+
+    async fn guardar_rectificacion(&self, r: RectificacionNueva) -> AppResult<()> {
+        let g = self.db.write().await;
+        let conn = &g;
+        // El id se genera ANTES del INSERT y viaja como valor: una `TEXT PRIMARY KEY` calculada
+        // dentro de la sentencia se re-evaluaría al replicar (CLAUDE.md §9).
+        let id_rectificacion = new_id();
+
+        // Las dos escrituras van juntas: un cierre que dice lo que marca hoy sin la fila que explica
+        // por qué sería exactamente el número sin explicación que esto existe para evitar.
+        conn.execute_batch("BEGIN;").await.map_err(db_err)?;
+        let res: AppResult<()> = async {
+            conn.execute(
+                r#"
+                UPDATE Cierres_Caja
+                SET Rect_Ventas_Efectivo = ?2,
+                    Rect_Gastos_Caja = ?3,
+                    Rect_Esperado = ?4,
+                    Rect_Descuadre = ?5
+                WHERE ID_Cierre = ?1;
+                "#,
+                vec![
+                    Value::Text(r.id_cierre.clone()),
+                    Value::Real(r.totales.ventas_efectivo),
+                    Value::Real(r.totales.gastos_caja),
+                    Value::Real(r.esperado),
+                    Value::Real(r.descuadre),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+
+            conn.execute(
+                r#"
+                INSERT INTO Cierre_Rectificaciones (
+                  ID_Rectificacion, ID_Cierre, Fecha_Hora, ID_Usuario, Descripcion, Motivo,
+                  Esperado_Antes, Esperado_Despues, Descuadre_Antes, Descuadre_Despues
+                ) VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, ?5, ?6, ?7, ?8, ?9);
+                "#,
+                vec![
+                    Value::Text(id_rectificacion),
+                    Value::Text(r.id_cierre.clone()),
+                    texto_o_nulo(r.id_usuario.as_deref()),
+                    Value::Text(r.descripcion.clone()),
+                    texto_o_nulo(r.motivo.as_deref()),
+                    Value::Real(r.esperado_antes),
+                    Value::Real(r.esperado),
+                    Value::Real(r.descuadre_antes),
+                    Value::Real(r.descuadre),
+                ],
+            )
+            .await
+            .map_err(db_err)?;
+            Ok(())
+        }
+        .await;
+
+        match res {
+            Ok(()) => {
+                conn.execute_batch("COMMIT;").await.map_err(db_err)?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;").await;
+                Err(e)
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! CAJA-01 contra una BD de verdad: que las sumas del periodo, el cierre al que pertenece un
+    //! apunte y la rectificación guardada digan lo mismo que prometen el dominio y el caso de uso.
+
+    use super::*;
+    use crate::cuentas::SqliteCuentasRepository;
+    use libsql::Connection;
+    use tpv_application::use_cases::{cierre_caja as cierre_uc, rectificacion_caja as rect};
+    use tpv_contracts::cierre_caja::CambioCajaInput;
+    use tpv_contracts::cuentas::CreateGastoInput;
+    use tpv_contracts::errors::ErrorCode;
+    use tpv_domain::cierre_caja::momento_de_gasto;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("cierre_caja");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    async fn contar(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().expect("sin filas");
+        v_i64(row.get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    /// Quien firma: `Reabierto_Por`, `Movimientos_Caja.ID_Usuario` y la rectificación son FK.
+    const USUARIO: &str = "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+        VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');";
+
+    /// Un cierre de las 23:00 que cuadró: 20 € cobrados en efectivo y 20 € contados.
+    const CIERRE_CUADRADO: &str = "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario,
+        Periodo_Desde, Fondo_Inicial, Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre,
+        Dejado, Retirado)
+        VALUES ('c1', '2026-05-10 23:00:00', 'u1', '2026-05-09 23:00:00', 0, 20, 0, 20, 20, 0, 0, 20);";
+
+    /// El cobro de ese cierre: 20 € en efectivo a las 21:30.
+    const COBRO: &[&str] = &[
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
+           VALUES ('com', 'BARRA', '2026-05-10 21:00:00', 'Pagada');",
+        "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+           VALUES ('p1', 'com', '2026-05-10 21:30:00', 'Efectivo', 20.0, 'TOTAL');",
+    ];
+
+    fn gasto(fecha: &str, importe: f64, pagado_con_caja: Option<bool>) -> CreateGastoInput {
+        CreateGastoInput {
+            id_gasto: None,
+            fecha: fecha.into(),
+            tipo_gasto: "Suministros".into(),
+            concepto: "Hielo".into(),
+            importe,
+            proveedor_id: None,
+            pagado_con_caja,
+        }
+    }
+
+    #[tokio::test]
+    async fn solo_restan_los_gastos_que_salieron_del_cajon() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, COBRO).await;
+        sembrar(
+            &db,
+            &["INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, Pagado_Con_Caja)
+                 VALUES ('g1', '2026-05-10', 'Hielo', 18, 'Suministros', 1),
+                        ('g2', '2026-05-10', 'Barril', 400, 'Proveedor', 0);"],
+        )
+        .await;
+
+        let t = SqliteCierreCajaRepository::new(db.clone()).totales_desde(None).await.unwrap();
+        assert_eq!(t, TotalesCaja { ventas_efectivo: 20.0, gastos_caja: 18.0 });
+    }
+
+    #[tokio::test]
+    async fn un_gasto_de_la_tarde_cae_en_el_cierre_de_esa_noche_aunque_se_cierre_de_madrugada() {
+        // El bar cierra a la 01:30 del día siguiente. El gasto del 10 es del servicio del 10, que
+        // se cierra la madrugada del 11 — no del de la madrugada del 10.
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora) VALUES ('a', '2026-05-10 01:30:00');",
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde)
+                   VALUES ('b', '2026-05-11 01:30:00', '2026-05-10 01:30:00');",
+            ],
+        )
+        .await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let de_gasto = momento_de_gasto("2026-05-10").unwrap();
+        let c = repo.cierre_de_momento(&de_gasto).await.unwrap().unwrap();
+        assert_eq!(c.id_cierre, "b");
+
+        let c = repo.cierre_de_momento("2026-05-10 01:00:00").await.unwrap().unwrap();
+        assert_eq!(c.id_cierre, "a", "lo de antes del primer cierre es del primero");
+
+        assert!(
+            repo.cierre_de_momento("2026-05-12 10:00:00").await.unwrap().is_none(),
+            "después del último cierre es el periodo abierto"
+        );
+    }
+
+    #[tokio::test]
+    async fn cambiar_de_metodo_un_cobro_de_un_cierre_hecho_se_ve_antes_de_hacerlo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        sembrar(&db, COBRO).await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let a_tarjeta = CambioCajaInput::EditarPago {
+            id_pago: "p1".into(),
+            fecha_hora: "2026-05-10 21:30:00".into(),
+            metodo: "Tarjeta".into(),
+        };
+        let imp = rect::previsualizar(&repo, &a_tarjeta).await.unwrap();
+        assert_eq!(imp.cierres.len(), 1);
+        let c = &imp.cierres[0];
+        assert_eq!((c.esperado_antes, c.descuadre_antes), (20.0, 0.0));
+        // Esa noche el cajón debería haber tenido 0 € y había 20: sobran 20.
+        assert_eq!((c.esperado_despues, c.descuadre_despues), (0.0, 20.0));
+        assert!(imp.requiere_motivo);
+
+        // Llevárselo al periodo abierto también descuadra el cierre del que sale.
+        let a_hoy = CambioCajaInput::EditarPago {
+            id_pago: "p1".into(),
+            fecha_hora: "2026-05-11 10:00".into(),
+            metodo: "Efectivo".into(),
+        };
+        let imp = rect::previsualizar(&repo, &a_hoy).await.unwrap();
+        assert_eq!(imp.cierres.len(), 1);
+        assert_eq!(imp.cierres[0].descuadre_despues, 20.0);
+
+        // Y previsualizar no toca nada.
+        assert!(repo.detalle("c1").await.unwrap().unwrap().rect_esperado.is_none());
+    }
+
+    #[tokio::test]
+    async fn un_gasto_de_caja_apuntado_tarde_rectifica_el_cierre_y_guarda_la_foto() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        sembrar(&db, COBRO).await;
+        let cierres = SqliteCierreCajaRepository::new(db.clone());
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+
+        let ok = rect::crear_gasto(
+            &cuentas,
+            &cierres,
+            "u1",
+            gasto("2026-05-10", 5.0, Some(true)),
+            Some("  el hielo de la tarde  ".into()),
+        )
+        .await
+        .unwrap();
+        assert!(ok);
+
+        let c = cierres.detalle("c1").await.unwrap().unwrap();
+        // La foto de esa noche no se toca…
+        assert_eq!((c.esperado, c.descuadre), (20.0, 0.0));
+        // …y al lado queda lo que marca hoy.
+        assert_eq!(c.rect_gastos_caja, Some(5.0));
+        assert_eq!(c.rect_esperado, Some(15.0));
+        assert_eq!(c.rect_descuadre, Some(5.0));
+
+        assert_eq!(c.rectificaciones.len(), 1);
+        let r = &c.rectificaciones[0];
+        assert_eq!((r.descuadre_antes, r.descuadre_despues), (0.0, 5.0));
+        assert_eq!(r.motivo.as_deref(), Some("el hielo de la tarde"));
+        assert_eq!(r.usuario_nombre.as_deref(), Some("Marta"));
+        assert!(r.descripcion.contains("Hielo"), "{}", r.descripcion);
+
+        let lista = cierres.listar(10).await.unwrap();
+        assert_eq!(lista[0].rect_descuadre, Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn si_cambia_un_descuadre_sin_motivo_no_se_toca_nada() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        let cierres = SqliteCierreCajaRepository::new(db.clone());
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+
+        let e = rect::crear_gasto(&cuentas, &cierres, "u1", gasto("2026-05-10", 5.0, Some(true)), None)
+            .await
+            .unwrap_err();
+        assert_eq!(e.code(), ErrorCode::Validation);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM Cuentas_Gastos;").await, 0);
+    }
+
+    #[tokio::test]
+    async fn un_gasto_pagado_por_banco_no_rectifica_ni_pide_motivo() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        let cierres = SqliteCierreCajaRepository::new(db.clone());
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+
+        assert!(rect::crear_gasto(&cuentas, &cierres, "u1", gasto("2026-05-10", 400.0, None), None)
+            .await
+            .unwrap());
+
+        let c = cierres.detalle("c1").await.unwrap().unwrap();
+        assert!(c.rect_esperado.is_none());
+        assert!(c.rectificaciones.is_empty());
+    }
+
+    #[tokio::test]
+    async fn con_el_historico_a_medias_se_rectifica_con_lo_que_dice_el_cierre() {
+        // Tras recuperar un equipo, los cobros antiguos bajan por partes (SYNC-19, fase 2). Aquí el
+        // cierre dice que cobró 20 € en efectivo pero su cobro todavía no ha llegado. Un gasto de caja
+        // de 5 € apuntado tarde tiene que dejarlo en 15 € de esperado: si se volviera a sumar el
+        // periodo desde la BD saldría -5 €, y la rectificación grabaría un descuadre de 25 € falso.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        let cierres = SqliteCierreCajaRepository::new(db.clone());
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+
+        rect::crear_gasto(&cuentas, &cierres, "u1", gasto("2026-05-10", 5.0, Some(true)), Some("hielo".into()))
+            .await
+            .unwrap();
+
+        let c = cierres.detalle("c1").await.unwrap().unwrap();
+        assert_eq!(c.rect_ventas_efectivo, Some(20.0));
+        assert_eq!(c.rect_esperado, Some(15.0));
+        assert_eq!(c.rect_descuadre, Some(5.0));
+    }
+
+    #[tokio::test]
+    async fn la_segunda_correccion_parte_de_la_primera() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO, CIERRE_CUADRADO]).await;
+        let cierres = SqliteCierreCajaRepository::new(db.clone());
+        let cuentas = SqliteCuentasRepository::new(db.clone());
+
+        for importe in [5.0, 3.0] {
+            rect::crear_gasto(&cuentas, &cierres, "u1", gasto("2026-05-10", importe, Some(true)), Some("x".into()))
+                .await
+                .unwrap();
+        }
+
+        let c = cierres.detalle("c1").await.unwrap().unwrap();
+        assert_eq!(c.rect_gastos_caja, Some(8.0));
+        assert_eq!(c.rect_esperado, Some(12.0));
+        assert_eq!(c.rectificaciones.len(), 2);
+        // Cada fila dice de dónde partía ella, no la foto de esa noche.
+        assert_eq!(c.rectificaciones[1].descuadre_antes, 5.0);
+        assert_eq!(c.rectificaciones[1].descuadre_despues, 8.0);
+    }
+
+    #[tokio::test]
+    async fn solo_se_deshace_el_ultimo_cierre() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                USUARIO,
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora) VALUES ('a', '2026-05-10 23:00:00');",
+                "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, Periodo_Desde)
+                   VALUES ('b', '2026-05-11 23:00:00', '2026-05-10 23:00:00');",
+            ],
+        )
+        .await;
+        let repo = SqliteCierreCajaRepository::new(db.clone());
+
+        let e = cierre_uc::reabrir(&repo, "a", Some("u1")).await.unwrap_err();
+        assert_eq!(e.code(), ErrorCode::Conflict);
+        assert!(cierre_uc::reabrir(&repo, "b", Some("u1")).await.unwrap());
     }
 }

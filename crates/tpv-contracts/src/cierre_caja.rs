@@ -1,4 +1,4 @@
-//! DTOs del **cierre de caja** (arqueo). CUENTA-06.
+//! DTOs del **cierre de caja** (arqueo). CUENTA-06 · CAJA-01.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -12,7 +12,29 @@ pub struct DenominacionDto {
     pub unidades: i64,
 }
 
+/// Una corrección de un apunte que cambió los números de un cierre ya hecho (CAJA-01).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct RectificacionDto {
+    pub id_rectificacion: String,
+    pub fecha_hora: String,
+    /// Nombre de quien corrigió, resuelto al leer.
+    #[ts(optional)]
+    pub usuario_nombre: Option<String>,
+    /// Qué se tocó, en una frase: «Cobro 2026/000045 de 12,50 €: Efectivo → Tarjeta».
+    pub descripcion: String,
+    #[ts(optional)]
+    pub motivo: Option<String>,
+    pub esperado_antes: f64,
+    pub esperado_despues: f64,
+    pub descuadre_antes: f64,
+    pub descuadre_despues: f64,
+}
+
 /// Un cierre completo, con su doble recuento. Lo que pinta la ficha del histórico.
+///
+/// Las columnas de siempre son la **foto de esa noche** y no cambian nunca. Si después se corrige un
+/// apunte de su periodo, lo que el cierre marca hoy va en los `rect_*` (CAJA-01).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CierreDto {
@@ -32,13 +54,33 @@ pub struct CierreDto {
     pub retirado: f64,
     #[ts(optional)]
     pub motivo: Option<String>,
-    /// `None` = el cierre sigue en pie y su periodo está bloqueado.
+    /// `None` = el cierre sigue en pie (no se ha deshecho).
     #[ts(optional)]
     pub reabierto_en: Option<String>,
     #[ts(optional)]
     pub reabierto_por: Option<String>,
+    /// Desde cuándo cuenta este cierre (exclusivo): la hora del cierre anterior. `None` en el
+    /// primero. Es lo que dice a qué cierre pertenece un apunte que se corrige después.
+    #[ts(optional)]
+    pub periodo_desde: Option<String>,
+    /// Gastos pagados con dinero del cajón durante el periodo, tal como estaban al cerrar.
+    #[serde(default)]
+    pub gastos_caja: f64,
+    /// Lo que el cierre marca hoy tras corregir apuntes de su periodo. `None` = nunca se ha
+    /// rectificado.
+    #[ts(optional)]
+    pub rect_ventas_efectivo: Option<f64>,
+    #[ts(optional)]
+    pub rect_gastos_caja: Option<f64>,
+    #[ts(optional)]
+    pub rect_esperado: Option<f64>,
+    #[ts(optional)]
+    pub rect_descuadre: Option<f64>,
     pub contado_denoms: Vec<DenominacionDto>,
     pub dejado_denoms: Vec<DenominacionDto>,
+    /// Cada corrección que cambió sus números, de la más antigua a la más reciente.
+    #[serde(default)]
+    pub rectificaciones: Vec<RectificacionDto>,
 }
 
 /// Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha.
@@ -57,6 +99,11 @@ pub struct CierreResumenDto {
     pub motivo: Option<String>,
     #[ts(optional)]
     pub reabierto_en: Option<String>,
+    /// CAJA-01: lo que marca hoy si se ha rectificado.
+    #[ts(optional)]
+    pub rect_esperado: Option<f64>,
+    #[ts(optional)]
+    pub rect_descuadre: Option<f64>,
 }
 
 /// Lo que la pantalla necesita saber **antes** de que nadie cuente nada.
@@ -72,6 +119,8 @@ pub struct PreparacionCierreDto {
     /// Lo que dejó el cierre anterior. En el primero es 0 y lo declara el usuario.
     pub fondo_inicial: f64,
     pub ventas_efectivo: f64,
+    /// Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado.
+    pub gastos_caja: f64,
     pub esperado: f64,
     /// Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
     #[ts(type = "number")]
@@ -84,6 +133,29 @@ pub struct PreparacionCierreDto {
     #[ts(type = "number")]
     pub anulaciones: i64,
     pub anulaciones_importe: f64,
+}
+
+/// Cómo quedaría un cierre ya hecho si se hace un cambio (CAJA-01).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ImpactoCierreDto {
+    pub id_cierre: String,
+    pub fecha_hora: String,
+    /// Lo que marca hoy: lo rectificado si lo hay, la foto de esa noche si no.
+    pub esperado_antes: f64,
+    pub esperado_despues: f64,
+    pub descuadre_antes: f64,
+    pub descuadre_despues: f64,
+}
+
+/// A qué cierres ya hechos afectaría un cambio de caja, para avisar antes de hacerlo.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ImpactoCajaDto {
+    /// Vacío = el apunte es del periodo abierto: no hay nada que avisar.
+    pub cierres: Vec<ImpactoCierreDto>,
+    /// Algún descuadre cambia, así que el cambio necesita un motivo.
+    pub requiere_motivo: bool,
 }
 
 /* =========================================================
@@ -125,4 +197,36 @@ pub struct CierreListarArgs {
     #[serde(default)]
     #[ts(optional)]
     pub limite: Option<i64>,
+}
+
+/// Un cambio de caja que todavía no se ha hecho, para saber a qué cierres afectaría (CAJA-01).
+///
+/// Lleva sólo lo que le importa al arqueo de cada apunte: la fecha, el método y el importe, y si un
+/// gasto salió del cajón. El concepto o el proveedor no mueven ningún número.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+#[serde(tag = "tipo", rename_all = "snake_case")]
+pub enum CambioCajaInput {
+    EditarPago {
+        id_pago: String,
+        fecha_hora: String,
+        metodo: String,
+    },
+    AnularPago {
+        id_pago: String,
+    },
+    CrearGasto {
+        fecha: String,
+        importe: f64,
+        pagado_con_caja: bool,
+    },
+    EditarGasto {
+        id_gasto: String,
+        fecha: String,
+        importe: f64,
+        pagado_con_caja: bool,
+    },
+    BorrarGasto {
+        id_gasto: String,
+    },
 }

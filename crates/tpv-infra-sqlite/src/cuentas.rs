@@ -153,6 +153,7 @@ fn salidas_inner(del: Option<String>, al: Option<String>) -> (String, Vec<Value>
           g.Concepto AS concepto,
           g.Importe AS importe,
           g.ID_Proveedor AS proveedorId,
+          g.Pagado_Con_Caja AS pagadoConCaja,
           IFNULL(pr.Nombre_Empresa, '') AS proveedorNombre
         FROM Cuentas_Gastos g
         LEFT JOIN Proveedores pr ON pr.ID_Proveedor = g.ID_Proveedor
@@ -212,7 +213,7 @@ impl CuentasRepository for SqliteCuentasRepository {
         let q_clause = q_filter(&mut params, filtro.q, SALIDAS_Q_EXPR);
         let limit_clause = paginacion(&mut params, filtro.page, filtro.page_size);
         let sql = format!(
-            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId FROM ({inner}) AS g \
+            "SELECT id, fechaHora, tipoGasto, concepto, importe, proveedorId, pagadoConCaja FROM ({inner}) AS g \
              {q_clause} ORDER BY fechaHora DESC, id DESC {limit_clause};"
         );
 
@@ -226,6 +227,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             let concepto = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
             let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
             let prov = norm_opt_string(row.get_value(5).map_err(db_err)?);
+            let pagado_con_caja = v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0) != 0;
             out.push(SalidaDto {
                 id,
                 fecha_hora: fecha.chars().take(10).collect(),
@@ -233,6 +235,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 concepto,
                 importe,
                 proveedor_id: prov,
+                pagado_con_caja,
             });
         }
         Ok(out)
@@ -328,14 +331,15 @@ impl CuentasRepository for SqliteCuentasRepository {
         let db = self.db.write().await;
         db.execute(
                 r#"
-                INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor)
-                VALUES (?1, date(?2), ?3, ?4, ?5, ?6)
+                INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja)
+                VALUES (?1, date(?2), ?3, ?4, ?5, ?6, ?7)
                 ON CONFLICT(ID_Gasto) DO UPDATE SET
                   Fecha = excluded.Fecha,
                   Concepto = excluded.Concepto,
                   Importe = excluded.Importe,
                   Tipo_Gasto = excluded.Tipo_Gasto,
-                  ID_Proveedor = excluded.ID_Proveedor;
+                  ID_Proveedor = excluded.ID_Proveedor,
+                  Pagado_Con_Caja = excluded.Pagado_Con_Caja;
                 "#,
                 vec![
                     Value::Text(id_gasto),
@@ -347,6 +351,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         Some(id) => Value::Text(id),
                         None => Value::Null,
                     },
+                    Value::Integer(i64::from(g.pagado_con_caja)),
                 ],
             )
             .await
@@ -376,7 +381,8 @@ impl CuentasRepository for SqliteCuentasRepository {
             .execute(
                 r#"
                 UPDATE Cuentas_Gastos
-                SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6
+                SET Fecha = date(?2), Tipo_Gasto = ?3, Concepto = ?4, Importe = ?5, ID_Proveedor = ?6,
+                    Pagado_Con_Caja = ?7
                 WHERE ID_Gasto = ?1;
                 "#,
                 vec![
@@ -389,6 +395,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         Some(id) => Value::Text(id),
                         None => Value::Null,
                     },
+                    Value::Integer(i64::from(g.pagado_con_caja)),
                 ],
             )
             .await
@@ -1286,7 +1293,7 @@ mod tests_anulacion {
         for importe in [12.5, 13.0] {
             r.crear_gasto(
                 Some("g1".into()),
-                GastoData {
+                GastoData { pagado_con_caja: false,
                     fecha: "2026-01-02".into(),
                     tipo_gasto: "Otro".into(),
                     concepto: "Hielo".into(),
@@ -1313,7 +1320,7 @@ mod tests_anulacion {
 
         r.crear_gasto(
             Some("g1".into()),
-            GastoData {
+            GastoData { pagado_con_caja: false,
                 fecha: "2026-01-02".into(),
                 tipo_gasto: "Otro".into(),
                 concepto: "Hielo".into(),
@@ -1513,7 +1520,7 @@ mod tests_arqueo_ciego {
         sembrar(&db, DOS_COBROS_EN_EFECTIVO).await;
         let caja = SqliteCierreCajaRepository::new(db.clone());
 
-        assert_eq!(caja.ventas_efectivo_desde(None).await.unwrap(), 50.0);
+        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, 50.0);
 
         SqliteCuentasRepository::new(db.clone())
             .anular_pago(AnularPagoArgs {
@@ -1528,7 +1535,7 @@ mod tests_arqueo_ciego {
             .unwrap();
 
         assert_eq!(
-            caja.ventas_efectivo_desde(None).await.unwrap(),
+            caja.totales_desde(None).await.unwrap().ventas_efectivo,
             20.0,
             "el cobro anulado deja de ser una venta…"
         );

@@ -36,7 +36,6 @@ const NEGOCIO: Record<string, ErrorCode> = {
 	no_active_license_for_tenant: "license_not_found",
 	license_not_found: "license_not_found",
 	invalid_pin: "invalid_pin",
-	periodo_cerrado: "periodo_cerrado",
 	tenant_db_not_provisioned: "tenant_db_not_provisioned",
 	bootstrap_demasiado_grande: "bootstrap_too_large",
 	bootstrap_too_large: "bootstrap_too_large",

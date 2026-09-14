@@ -76,6 +76,7 @@ pub async fn create_gasto(
         concepto,
         importe: input.importe,
         proveedor_id,
+        pagado_con_caja: input.pagado_con_caja.unwrap_or(false),
     };
     let id = input
         .id_gasto
@@ -103,6 +104,7 @@ pub async fn update_gasto(
         concepto,
         importe: input.importe,
         proveedor_id,
+        pagado_con_caja: input.pagado_con_caja.unwrap_or(false),
     };
     repo.actualizar_gasto(&input.id_gasto, gasto).await
 }
