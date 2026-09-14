@@ -21,14 +21,13 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Orden sugerido.** Antes de cobrar por ello: LEGAL-01, VENTA-01, INFRA-02. En paralelo y barato:
+> **Orden sugerido.** Antes de cobrar por ello: LEGAL-01, INFRA-02. En paralelo y barato:
 > OPS-02. Veri*factu (FISCAL-01 y FISCAL-02) ya está hecho: lo que le queda vive en
 > [VERIFACTU_PENDIENTES.md](../VERIFACTU_PENDIENTES.md).
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
 | DB-14 | 🟡 | **No hay retención ni archivado de datos de negocio.** | Sin empezar |
-| VENTA-01 | 🟠 | **No existen descuentos, invitaciones, propinas ni devoluciones.** | Sin empezar |
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
 | INFRA-02 | 🟡 | **El instalador no va firmado (Authenticode).** | Aceptado a sabiendas |
 | INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
@@ -66,20 +65,6 @@ pueden borrar). Lo que se archive tiene que ser lo que **no** sea registro fisca
   cerradas. El importe, la base, la cuota y el desglose ya viven **dentro** del registro fiscal
   (`Desglose_Json`, `Importe_Total`, `Cuota_Total`) y no se derivan de la comanda al leer: eso es lo
   que hace archivable la comanda.
-
-### VENTA-01 🟠 · Faltan descuentos, invitaciones, propinas y devoluciones
-
-Verificado por grep: cero apariciones en sentido de venta. Los precios salen del catálogo y no son
-editables por línea. Hoy la única forma de invitar una ronda es **borrar líneas**, que destruye el
-registro — y volverá a chocar con FISCAL-01.
-
-Un bar pide descuento e invitación la primera semana. La devolución/abono, en cuanto alguien pague
-de más.
-
-**Decisión (responsable, 2026-09-06): la INVITACIÓN sale del alcance.** No se considera un caso
-normal; se retomará sólo si varios clientes la piden. El resto de VENTA-01 sigue en pie, y la
-**devolución** con más motivo: es la que choca con FISCAL-01 y las dos hay que diseñarlas juntas,
-porque un abono cambia qué contiene un registro de facturación.
 
 ### LEGAL-01 🟠 · RGPD
 
