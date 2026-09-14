@@ -130,24 +130,20 @@ export function exigirBinarioAlDia(): void {
 }
 
 /**
- * Deja el equipo del test como recién instalado, con la nube encendida o apagada según pida el
- * recorrido (ver las recetas de `wdio.conf.ts`).
+ * Deja el equipo del test como recién instalado: sin carpeta de datos, que es como llega a un bar.
  *
  * Se niega a borrar si la ruta no termina en `.e2e`: sin esa comprobación, un identificador mal
  * escrito convierte esta función en un borrado de los datos de trabajo.
  *
- * Lo de poder apagar la nube no es un atajo. Un AppData borrado sobre un tenant que ya tiene
- * historia NO es un equipo nuevo: al conectar el WebSocket, la Main se trae por catch-up lo que
- * dejaron las tandas anteriores —el fichaje abierto de ayer, la zona con el mismo nombre—. El
- * primer síntoma fue un fichaje que la app rechazaba con "tienes un fichaje abierto" unas veces sí
- * y otras no, según quién ganara la carrera. Los recorridos que sí necesitan la nube lo resuelven
- * por el otro lado: estrenando también el tenant, con una licencia recién emitida.
- *
- * `connectivity: "off"` es la palanca de emergencia de SYNC-17 (ver CLAUDE.md §9), no una puerta
- * de atrás del test: apaga sólo el WebSocket. La activación de licencia sigue saliendo a internet
- * —que es lo que el recorrido de la venta quiere probar— y el outbox sigue capturando en local.
+ * Y con la nube encendida, que es lo que hace la app cuando nadie le dice otra cosa. Hubo un tiempo
+ * en que la venta nacía con `connectivity: "off"`, y no era un atajo: la licencia era fija, y un
+ * AppData borrado sobre un tenant que ya tiene historia NO es un equipo nuevo — al conectar, la
+ * Main se traía por catch-up lo que dejaron las tandas anteriores, y se vio como un fichaje que la
+ * app rechazaba con "tienes un fichaje abierto" unas veces sí y otras no. Con una licencia recién
+ * emitida por tanda el tenant también es nuevo, y apagar la nube ya sólo servía para probar un
+ * equipo distinto del que se vende.
  */
-export function limpiarDatosE2E(nube: boolean): string {
+export function limpiarDatosE2E(): string {
     const dir = dirDatosE2E();
 
     if (!dir.endsWith(".e2e")) {
@@ -157,14 +153,6 @@ export function limpiarDatosE2E(nube: boolean): string {
     }
 
     fs.rmSync(dir, { recursive: true, force: true });
-
-    // `set_device_mode` hace load → modificar → save, así que respeta lo que ya haya aquí.
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-        path.join(dir, "device_config.json"),
-        JSON.stringify({ connectivity: nube ? "auto" : "off" }, null, 2),
-        "utf8",
-    );
 
     return dir;
 }
@@ -222,15 +210,15 @@ export function plantarCopiaCorrupta(): void {
 }
 
 /**
- * La clave que debe usar el recorrido que está corriendo. La pone `beforeSession` según la receta
- * del recorrido: la fija del `.env` para la venta, una recién emitida para copias y licencia.
+ * La clave de la licencia de la tanda. La emite `onPrepare` y la comparten todos los recorridos,
+ * porque comparten equipo (ver las recetas de `wdio.conf.ts`).
  */
 export function licenciaDelRecorrido(): string {
     const clave = (process.env.TPV_E2E_LICENCIA ?? "").trim();
     if (!clave) {
         throw new Error(
-            "No hay licencia para este recorrido. La reparte `beforeSession` desde la receta de\n" +
-                "wdio.conf.ts; si falta, o no se emitió la de la tanda o el recorrido no tiene receta.",
+            "No hay licencia para este recorrido. La emite `onPrepare` al empezar la tanda: si falta,\n" +
+                "es que no llegó a emitirse (el motivo sale al principio del informe).",
         );
     }
     return clave;

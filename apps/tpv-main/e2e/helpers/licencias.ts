@@ -1,15 +1,15 @@
 // El API de administración de licencias, visto desde el E2E.
 //
-// Dos recorridos necesitan una licencia **suya**, no la fija del `.env`:
+// La tanda emite UNA licencia al empezar (`onPrepare`) y la comparten todos los recorridos, porque
+// comparten equipo. No sirve una fija del `.env`: el catch-up desde `Last_Seq = 0` reproduciría las
+// ejecuciones anteriores contra tablas con `UNIQUE` en el nombre —la reconciliación acabaría en
+// cuarentena y el login no se desbloquearía nunca—, y en cuanto `0001_inicial.sql` cambia, su
+// tenant deja de migrar. El recorrido de la licencia, además, la revoca y la caduca a propósito:
+// por eso va el último.
 //
-//   · el de copias, porque activa contra la nube y el catch-up desde `Last_Seq = 0` reproduciría
-//     las ejecuciones anteriores contra tablas con `UNIQUE` en el nombre. Cada tanda necesita un
-//     tenant limpio o la reconciliación acaba en cuarentena y el login no se desbloquea nunca.
-//   · el de licencias, porque la revoca y la caduca a propósito. Hacerle eso a la licencia fija
-//     dejaría el recorrido de la venta roto para la siguiente tanda.
-//
-// Al terminar la tanda se revocan (`onComplete`): quedan marcadas y no se confunden con una de
-// verdad. La base Turso que crea cada activación no se borra sola — es el precio de esta prueba.
+// Al terminar la tanda se revoca (`onComplete`): queda marcada y no se confunde con una de verdad.
+// La base Turso que crea su activación no se borra sola — es el precio de esta prueba, y por eso es
+// una por tanda y no una por recorrido.
 
 const BASE = process.env.TPV_API_BASE || "https://tpv-api.altarialights.workers.dev";
 

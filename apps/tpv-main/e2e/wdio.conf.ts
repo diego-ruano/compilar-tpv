@@ -29,57 +29,35 @@ import {
 import { emitirLicencia, revocar } from "./helpers/licencias.js";
 
 /**
- * Qué equipo necesita cada recorrido, y en qué orden corren.
+ * Qué hay que hacerle al equipo antes de arrancar cada recorrido.
  *
- * Cada uno prepara el suyo en `beforeSession` en vez de compartir una preparación única, porque no
- * quieren lo mismo: la venta quiere un equipo recién instalado y sin nube; las copias necesitan la
- * nube encendida (la reconciliación es lo que desbloquea el login) y un tenant limpio; el segundo
- * tramo de copias necesita justo lo contrario de una limpieza — el equipo del tramo anterior, con
- * la base rota; y la licencia la necesita encendida porque lo que prueba es que anular le CORTA el
- * WebSocket al equipo, y sin socket abierto no hay nada que cortar.
+ * La tanda estrena UN equipo y lo va pasando de recorrido en recorrido, en el orden de `specs`: la
+ * venta lo estrena, los tres tramos de copias le rompen la base y lo recuperan, y el de la licencia
+ * se la anula y la caduca al final. Antes cada recorrido estrenaba el suyo, con su licencia y por
+ * tanto con su base de Turso: eran cuatro bases por tanda, que no se borran solas, para probar
+ * cosas que podían compartir equipo (TEST-03).
  *
- * `licencia` dice cuál de las emitidas para esta tanda le toca (ver `onPrepare`). Los dos tramos
- * de copias comparten la suya porque comparten equipo, y por tanto tienen que compartir tenant.
+ * Lo que sigue siendo de cada recorrido es lo que hay que hacerle al equipo con la app CERRADA
+ * —estrenarlo o romperle la base—, porque con la app abierta no se puede: en Windows SQLite tiene
+ * la base cogida. Por eso vive aquí, en `beforeSession`, y no dentro de los recorridos.
  */
 type Receta = {
     equipo: "nuevo" | "el de antes" | "el de antes, roto";
-    nube: boolean;
-    licencia: Licencia;
     /** Deja además una copia inservible entre las buenas. Sólo la quiere el tramo que la prueba. */
     copiaMala?: boolean;
 };
 
-/**
- * Cada recorrido usa una licencia recién emitida, no una fija guardada en el `.env`.
- *
- * Se intentó lo otro y no aguanta: activar provisiona el tenant y le graba el hash de
- * `0001_inicial.sql`, así que en cuanto esa migración cambia —cosa permitida mientras no haya
- * clientes en producción— el tenant viejo deja de migrar y la activación falla con
- * `migration_altered`. Una licencia por tanda hace el recorrido hermético y deja el `.env` con una
- * sola cosa dentro: el token de administración.
- */
-type Licencia = "venta" | "fiscal" | "copias" | "licencia";
-
-const LICENCIAS: Licencia[] = ["venta", "fiscal", "copias", "licencia"];
-
 const RECETAS: Record<string, Receta> = {
-    "venta.e2e.ts": { equipo: "nuevo", nube: false, licencia: "venta" },
-    // Sin nube, como la venta y por lo mismo: el recorrido cuenta registros de facturación, y un
-    // catch-up traería los que dejaron las ejecuciones anteriores del mismo tenant.
-    "fiscal.e2e.ts": { equipo: "nuevo", nube: false, licencia: "fiscal" },
-    "copias-1-copia.e2e.ts": { equipo: "nuevo", nube: true, licencia: "copias" },
-    "copias-2-recuperar.e2e.ts": {
-        equipo: "el de antes, roto",
-        nube: true,
-        licencia: "copias",
-        copiaMala: true,
-    },
-    "copias-3-nube.e2e.ts": { equipo: "el de antes, roto", nube: true, licencia: "copias" },
-    "licencia.e2e.ts": { equipo: "nuevo", nube: true, licencia: "licencia" },
+    "venta.e2e.ts": { equipo: "nuevo" },
+    "copias-1-copia.e2e.ts": { equipo: "el de antes" },
+    "copias-2-recuperar.e2e.ts": { equipo: "el de antes, roto", copiaMala: true },
+    "copias-3-nube.e2e.ts": { equipo: "el de antes, roto" },
+    // El último, y tiene que serlo: anula y caduca la licencia con la que funciona todo el equipo.
+    "licencia.e2e.ts": { equipo: "el de antes" },
 };
 
-/** Las licencias emitidas para esta tanda, para revocarlas al terminar. */
-const emitidas: Array<{ nombre: string; licenseId: string }> = [];
+/** La licencia emitida para esta tanda, para revocarla al terminar. */
+let emitida: { licenseId: string } | null = null;
 
 function receta(specs: string[]): { nombre: string; receta: Receta } {
     const nombre = path.basename(specs[0] ?? "");
@@ -100,10 +78,9 @@ export const config: WebdriverIO.Config = {
 
     tsConfigPath: "./tsconfig.json",
 
-    // En orden explícito y no por glob: `copias-2` recupera el equipo que deja `copias-1`.
+    // En orden explícito y no por glob: cada recorrido recibe el equipo que deja el anterior.
     specs: [
         "./specs/venta.e2e.ts",
-        "./specs/fiscal.e2e.ts",
         "./specs/copias-1-copia.e2e.ts",
         "./specs/copias-2-recuperar.e2e.ts",
         "./specs/copias-3-nube.e2e.ts",
@@ -147,8 +124,10 @@ export const config: WebdriverIO.Config = {
     // depuración (ver `beforeSuite`), y son cientos de líneas que dicen algo que ya sabemos.
     logLevel: "error",
 
-    // Un recorrido que falla no invalida los demás: cada uno prepara su equipo y prueba una cosa
-    // distinta. Lo que sí se corta es el recorrido por dentro (`mochaOpts.bail`).
+    // La tanda no se para en el primer recorrido rojo: los tramos de copias rompen y recuperan el
+    // equipo por su cuenta, así que uno puede fallar y el siguiente seguir diciendo algo. Pero van
+    // encadenados, y un fallo suele arrastrar a los de detrás: en un informe rojo, lee el PRIMERO.
+    // Lo que sí se corta es el recorrido por dentro (`mochaOpts.bail`).
     bail: 0,
 
     waitforTimeout: 20_000,
@@ -232,18 +211,21 @@ export const config: WebdriverIO.Config = {
         console.log(`\n[e2e] binario   ${BINARIO}`);
         console.log(`[e2e] identidad ${APP_ID_E2E}\n`);
 
-        // Las licencias de la tanda. Se emiten aquí, una vez, porque los dos tramos de copias
-        // comparten equipo y por tanto tienen que compartir tenant. `process.env` lo heredan los
-        // procesos de cada recorrido, que es como les llega.
-        for (const nombre of LICENCIAS) {
-            const lic = await emitirLicencia(`E2E ${nombre} ${new Date().toISOString()}`);
-            process.env[`TPV_E2E_LICENCIA_${nombre.toUpperCase()}`] = lic.key;
-            // El id, además de la clave: el recorrido de licencia necesita poder revocarla y
-            // caducarla desde el API de administración.
-            process.env[`TPV_E2E_LICENCIA_ID_${nombre.toUpperCase()}`] = lic.licenseId;
-            emitidas.push({ nombre, licenseId: lic.licenseId });
-            console.log(`[e2e] licencia ${nombre}: ${lic.licenseId}`);
-        }
+        // La licencia de la tanda: UNA, recién emitida, y la misma para todos los recorridos porque
+        // comparten equipo. No sirve una fija guardada en el `.env`: activar provisiona el tenant y
+        // le graba el hash de `0001_inicial.sql`, así que en cuanto esa migración cambia —cosa
+        // permitida mientras no haya clientes en producción— el tenant viejo deja de migrar y la
+        // activación falla con `migration_altered`. Y un tenant que ya tiene historia arrastraría
+        // por catch-up lo que dejó la tanda anterior. `process.env` lo heredan los procesos de cada
+        // recorrido, que es como les llega.
+        const lic = await emitirLicencia(`E2E ${new Date().toISOString()}`);
+        process.env.TPV_E2E_LICENCIA = lic.key;
+        // El id, además de la clave: el recorrido de licencia necesita poder revocarla y caducarla
+        // desde el API de administración.
+        process.env.TPV_E2E_LICENCIA_ID = lic.licenseId;
+        emitida = { licenseId: lic.licenseId };
+        console.log(`[e2e] licencia  ${lic.licenseId}`);
+
         void capabilities;
     },
 
@@ -252,29 +234,24 @@ export const config: WebdriverIO.Config = {
         const { nombre, receta: r } = receta(specs as string[]);
 
         if (r.equipo === "nuevo") {
-            limpiarDatosE2E(r.nube);
+            limpiarDatosE2E();
         } else if (r.equipo === "el de antes, roto") {
             romperBaseDeDatos();
             if (r.copiaMala) plantarCopiaCorrupta();
         }
 
-        process.env.TPV_E2E_LICENCIA =
-            process.env[`TPV_E2E_LICENCIA_${r.licencia.toUpperCase()}`] ?? "";
-
-        console.log(
-            `\n[e2e] ${nombre} · equipo ${r.equipo} · nube ${r.nube ? "encendida" : "apagada"}\n`,
-        );
+        console.log(`\n[e2e] ${nombre} · equipo ${r.equipo}\n`);
     },
 
     /**
-     * Las licencias de la tanda se revocan al terminar: quedan marcadas y no se confunden con una
-     * de verdad en el panel. Best-effort — que falle esto no puede tumbar una tanda que ha pasado.
+     * La licencia de la tanda se revoca al terminar: queda marcada y no se confunde con una de
+     * verdad en el panel. Best-effort — que falle esto no puede tumbar una tanda que ha pasado.
      */
     async onComplete() {
-        for (const { nombre, licenseId } of emitidas) {
-            await revocar(licenseId).catch((e: unknown) => {
-                console.log(`[e2e] no se pudo revocar la licencia ${nombre} (${licenseId}): ${e}`);
-            });
-        }
+        if (!emitida) return;
+        const { licenseId } = emitida;
+        await revocar(licenseId).catch((e: unknown) => {
+            console.log(`[e2e] no se pudo revocar la licencia de la tanda (${licenseId}): ${e}`);
+        });
     },
 };

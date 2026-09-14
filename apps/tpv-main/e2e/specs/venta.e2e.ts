@@ -1,4 +1,4 @@
-// TEST-01 · Un E2E del camino del dinero.
+// TEST-01 · El camino del dinero, y la factura que expide cada cobro.
 //
 // Un solo recorrido, en orden, sobre la app COMPILADA: React → IPC de Tauri → comandos Rust →
 // SQLite → y vuelta. No cubre el frontend ni lo pretende: comprueba que esa costura aguanta, que
@@ -7,12 +7,20 @@
 // Los pasos 1-4 (activación, PIN, login) parecen andamiaje y no lo son: son el estreno de un
 // cliente real, y tampoco los prueba nadie.
 //
-// El recorrido está pensado para que la última cifra lo verifique todo: si algo se rompe entre
-// React y SQLite, el arqueo del paso 9 deja de cuadrar.
+// Lleva dentro lo que antes era un recorrido aparte, la factura de cada cobro (FISCAL-01): los dos
+// estrenaban un equipo idéntico para vender lo mismo (TEST-03). Los pasos 9 y 10 son su corazón. El
+// registro de facturación se emite DENTRO de la transacción del cobro, en Rust, y de él salen el
+// número del papel y la URL del QR. Hay ~100 tests de Rust sobre la huella y la persistencia, y ni
+// uno solo que recorra React → IPC → cobro → registro → vuelta al papel, que es justo la costura
+// donde vive lo que se rompe sin que nadie se entere: el papel sale sin QR y ya está.
 //
-// Los gestos de montar la carta, abrir la mesa y cobrar viven en `helpers/vender.ts` porque los
-// comparte con `fiscal.e2e.ts`. Un recorrido NO puede importar a otro —importar un spec lo
-// EJECUTA—, así que lo común va en `helpers/`.
+// Y termina con la cifra que lo verifica todo: si algo se rompe entre React y SQLite, el arqueo
+// del paso 13 deja de cuadrar.
+//
+// El equipo que deja es el que usan los recorridos siguientes (ver las recetas de `wdio.conf.ts`),
+// así que el negocio y el PIN viven en `helpers/equipo.ts`. Los gestos de montar la carta, abrir la
+// mesa y cobrar viven en `helpers/vender.ts`. Un recorrido NO puede importar a otro —importar un
+// spec lo EJECUTA—, así que lo común va en `helpers/`.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -26,7 +34,16 @@ import {
     ficharYEntrar,
 } from "../helpers/arranque.js";
 import { APP_ID_E2E, cargarDotEnv, dirDatosE2E } from "../helpers/entorno.js";
-import { declararDatosFiscales } from "../helpers/fiscal.js";
+import { NEGOCIO, NIF, PIN, RAZON_SOCIAL } from "../helpers/equipo.js";
+import {
+    avisoDeDatosFiscalesVisible,
+    bloqueDelTicket,
+    declararDatosFiscales,
+    irASeccionFiscal,
+    verifactuEstado,
+    verifactuListar,
+    type RegistroFiscal,
+} from "../helpers/fiscal.js";
 import { conTexto, irA, leerDeLaApp, literalXPath, pulsar, pulsarXPath } from "../helpers/ui.js";
 import {
     abrirMesa,
@@ -46,15 +63,20 @@ cargarDotEnv();
 
 /* ── Los datos del recorrido ──────────────────────────────────────────────────
    Elegidos para que las cuentas salgan redondas y un descuadre se vea a simple
-   vista: 2 × 5,00 € = 10,00 €, que se paga con UN billete de 10 y se cuenta con
-   UN billete de 10. Con fondo de partida 0, lo que debería haber en el cajón es
-   exactamente lo cobrado.                                                     */
-const NEGOCIO = "Bar E2E TEST-01";
-const PIN = "4321"; // distinto del 1234 del seed: así el login prueba el PIN elegido, no el sembrado
+   vista: 2 × 5,00 € = 10,00 €, que se paga con UN billete de 10. Se vende dos
+   veces, así que con fondo de partida 0 lo que debería haber en el cajón son
+   20,00 €, exactamente lo cobrado, y se cuenta con dos billetes de 10.
+
+   El 10 % tampoco es casual: la base se redondea a 9,09 € y la cuota es LO QUE
+   FALTA para llegar al total, 0,91 €. Redondeando las dos por separado saldría
+   0,92 y el papel diría que 9,09 + 0,92 = 10,00, que es un documento mal
+   emitido.                                                                    */
 const ZONA = "Salón E2E";
 const MESA = "M1";
 const UNIDADES = 2;
+const BILLETE = "10€";
 const TOTAL = "10,00";
+const EN_EL_CAJON = "20,00";
 
 const PRODUCTO: Producto = {
     categoria: "Bebidas E2E",
@@ -63,8 +85,10 @@ const PRODUCTO: Producto = {
     iva: "10",
 };
 
-/** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 5b. */
+/** El id de la mesa creada por el test (UUID de la BD). Lo rellena el paso 6b. */
 let idMesa = "";
+/** El registro de la primera venta, para comparar la cadena en el paso 11. */
+let primero: RegistroFiscal | null = null;
 
 describe("El camino del dinero", () => {
     it("1 · arranca en un equipo recién instalado", async () => {
@@ -96,13 +120,28 @@ describe("El camino del dinero", () => {
         await ficharYEntrar(PIN);
     });
 
-    it("5 · declara quién factura, sin lo cual no se puede cobrar", async () => {
+    it("5 · un equipo recién estrenado no sabe quién factura, lo dice, y se declara", async () => {
         // Desde FISCAL-01 cada cobro expide una factura, y una factura necesita saber quién la
         // emite: sin NIF ni razón social, `emitir_cobro` corta la transacción del cobro. La
-        // activación NO los rellena (su "nombre legal" va a la licencia), así que esto es parte del
-        // estreno de un equipo, no andamiaje del test. Lo que prueba de verdad es lo de siempre:
-        // que el camino del dinero funciona de punta a punta, y ahora ese camino pasa por aquí.
-        await declararDatosFiscales("Bar E2E TEST-01 SL", "B12345674");
+        // activación pide el nombre del negocio y el nombre legal, pero eso va a la LICENCIA: el
+        // obligado tributario de `Business_Settings` nace vacío. Declararlo es parte del estreno
+        // tanto como elegir el PIN, y lo que se comprueba es que la pantalla basta para salir de ahí.
+        const antes = await verifactuEstado();
+        expect(antes.datos_fiscales_completos).toBe(false);
+        expect(antes.total_registros).toBe(0);
+
+        await irASeccionFiscal();
+        expect(await avisoDeDatosFiscalesVisible()).toBe(true);
+
+        await declararDatosFiscales(RAZON_SOCIAL, NIF);
+
+        const despues = await verifactuEstado();
+        expect(despues.datos_fiscales_completos).toBe(true);
+        expect(despues.razon_social).toBe(RAZON_SOCIAL);
+        // El entorno por defecto es PRODUCCIÓN, y es lo correcto: un registro emitido contra
+        // pruebas y creído bueno es una factura que la AEAT no tiene.
+        expect(despues.entorno_pruebas).toBe(false);
+        expect(despues.modo_prueba).toBe(false);
     });
 
     it("6a · crea una categoría y un producto con precio, IVA y stock", async () => {
@@ -127,7 +166,7 @@ describe("El camino del dinero", () => {
 
     it("8 · cobra en efectivo, con el importe exacto", async () => {
         // Un billete de 10 € para 10,00 €: cambio 0.
-        await cobrarTodoEnEfectivo("10€");
+        await cobrarTodoEnEfectivo(BILLETE);
 
         await cerrarElModalDeLaMesa(MESA);
 
@@ -135,21 +174,141 @@ describe("El camino del dinero", () => {
         // comando con el que lo pinta la app.
         await esperarMesaLibre(idMesa);
 
-        // Y el cobro salió con número de ticket. No se pinta en ninguna pantalla —viaja al
-        // ESC/POS—, así que se lee por el mismo comando que usa la reimpresión de Cuentas.
         const entradas = await entradasDeCaja();
         expect(entradas.length).toBe(1);
         expect(entradas[0].metodo).toBe("Efectivo");
         expect(entradas[0].importe).toBeCloseTo(10, 2);
+    });
 
+    it("9 · el cobro expidió su factura, y su número ES el número del ticket", async () => {
+        const entradas = await entradasDeCaja();
+
+        // El número de ticket no se pinta en ninguna pantalla —viaja al ESC/POS—, así que se lee por
+        // el mismo comando que usa la reimpresión de Cuentas.
         const ticket = await leerDeLaApp<{ numero_ticket: string | null }>(
             "cuentas_ticket_para_reimprimir",
             { idPago: entradas[0].id },
         );
         expect(ticket.numero_ticket).toBeTruthy();
+
+        const registros = await verifactuListar();
+        expect(registros.length).toBe(1);
+
+        const alta = registros[0];
+        expect(alta.tipo).toBe("ALTA");
+        // `F2` es la simplificada: el ticket de toda la vida. Sale del importe y de que no haya
+        // datos del cliente, no del camino que llamó.
+        expect(alta.tipo_factura).toBe("F2");
+        expect(alta.id_pago).toBe(entradas[0].id);
+        expect(alta.orden).toBe(1);
+
+        // LA comprobación de la parte fiscal. `Pagos.Numero_Ticket` es lo que se imprime y lo que
+        // busca la reimpresión; `Num_Serie_Factura` es la identidad de la factura ante la AEAT. En
+        // cuanto dejan de ser el mismo dato, el papel deja de poder atarse a su registro.
+        expect(alta.num_serie_factura).toBe(ticket.numero_ticket);
+
+        // Los importes se guardan como TEXTO, ya formateados, porque entran en la cadena que se
+        // hashea: recomputarlos al leer daría otra huella. La cuota es «lo que falta» para llegar
+        // al total, no un redondeo aparte — 9,09 + 0,91 = 10,00 exactos.
+        expect(alta.importe_total).toBe("10.00");
+        expect(alta.cuota_total).toBe("0.91");
+
+        // 64 hexadecimales en mayúsculas: SHA-256 de la cadena, sin firma. En Veri*factu lo que
+        // garantiza la integridad es el encadenamiento, no un XAdES.
+        expect(alta.huella).toMatch(/^[0-9A-F]{64}$/);
+
+        // Emitido y encolado, pero no enviado: el equipo del test no tiene certificado. Nada se
+        // pierde — el registro ya existe, que es lo que exige el art. 9.
+        expect(alta.estado_envio).toBe("PENDIENTE");
+
+        primero = alta;
     });
 
-    it("9 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
+    it("10 · el ticket lleva su QR, y una reimpresión saca exactamente el mismo", async () => {
+        const numero = primero!.num_serie_factura;
+
+        // Este es el camino literal de `PrintTicketModal`: busca por el número del ticket. Si
+        // devolviera `null`, el papel saldría sin QR y la aplicación no diría nada.
+        const bloque = await bloqueDelTicket(numero);
+        if (!bloque) throw new Error(`El ticket ${numero} no tiene bloque fiscal: saldría sin QR.`);
+
+        expect(bloque.num_serie_factura).toBe(numero);
+        expect(bloque.huella).toBe(primero!.huella);
+        expect(bloque.tipo_factura).toBe("F2");
+        expect(bloque.entorno_pruebas).toBe(false);
+
+        // La URL de cotejo lleva los cuatro parámetros del art. 20, y sólo esos. El número va
+        // percent-encoded porque una barra sin escapar parte la URL y el cotejo devuelve un error
+        // de campo.
+        expect(bloque.qr_url.startsWith("https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?")).toBe(true);
+        expect(bloque.qr_url).toContain(`nif=${NIF}`);
+        expect(bloque.qr_url).toContain(`numserie=${encodeURIComponent(numero)}`);
+        expect(bloque.qr_url).toContain(`fecha=${primero!.fecha_expedicion}`);
+        expect(bloque.qr_url).toContain("importe=10.00");
+        // El parámetro que la especificación prohíbe expresamente en el QR de una factura.
+        expect(bloque.qr_url).not.toContain("formato=json");
+
+        // Una copia con otra huella no es una copia: los tres datos se LEEN de la fila, no se
+        // recalculan (recalcular daría otra hora de generación y por tanto otra huella).
+        const otraVez = await bloqueDelTicket(numero);
+        expect(otraVez).toEqual(bloque);
+    });
+
+    it("11 · la segunda venta avanza la cadena, y la cadena está sana", async () => {
+        await abrirMesa(MESA);
+        await anadirLineas(PRODUCTO, UNIDADES);
+        await esperarTotalPendiente(TOTAL);
+        await cobrarTodoEnEfectivo(BILLETE);
+        await cerrarElModalDeLaMesa(MESA);
+        await esperarMesaLibre(idMesa);
+
+        const registros = await verifactuListar();
+        expect(registros.length).toBe(2);
+
+        const segundo = registros.find((r) => r.orden === 2);
+        if (!segundo) throw new Error("La segunda venta no dejó un registro con Orden 2.");
+
+        // Número correlativo y huella distinta. La huella cambia aunque el importe sea idéntico
+        // porque entran en ella la hora de generación y la huella del eslabón anterior — que es
+        // exactamente lo que hace la cadena una cadena.
+        expect(segundo.num_serie_factura).not.toBe(primero!.num_serie_factura);
+        expect(segundo.huella).not.toBe(primero!.huella);
+        expect(segundo.tipo).toBe("ALTA");
+
+        // Y la prueba de que el eslabón anterior era bueno la da la propia app: antes de generar un
+        // registro comprueba que el último esté bien encadenado y que su fecha no vaya por delante
+        // del reloj (art. 7.i). Una anomalía no impide facturar —nunca puede—, se anota. Cero
+        // anomalías tras la segunda emisión significa que la primera pasó esa comprobación.
+        const estado = await verifactuEstado();
+        expect(estado.anomalias_sin_reconocer).toBe(0);
+    });
+
+    it("12 · las dos facturas están en la cola, y el panel dice por qué no han salido", async () => {
+        const estado = await verifactuEstado();
+
+        expect(estado.total_registros).toBe(2);
+        expect(estado.pendientes).toBe(2);
+        expect(estado.aceptados).toBe(0);
+        expect(estado.rechazados).toBe(0);
+
+        // Nada ha salido, y la aplicación DICE por qué. Eso es lo que fija este paso: una cola que
+        // crece sin explicación es el fallo que deja a un bar sin remitir durante semanas.
+        //
+        // No se fija CUÁL de los dos motivos, y no es pereza. Hoy sale `sin_datos_del_productor`
+        // —el NIF del productor del software sigue pendiente, ver `docs/VERIFACTU_PENDIENTES.md`—
+        // y el día que se rellene pasará a `sin_certificado`, porque el equipo del test tampoco
+        // tiene certificado. El orden entre ellos es deliberado (`estado_fiscal`): primero lo que
+        // puede arreglar el bar, después lo que sólo podemos arreglar nosotros. Atar el test a uno
+        // concreto lo convertiría en rojo el día que se resuelva, que es justo al revés.
+        expect(estado.certificado_ok).toBe(false);
+        expect(["sin_datos_del_productor", "sin_certificado"]).toContain(estado.motivo_no_remite);
+
+        // Y que no dé la lata todavía: por debajo de una hora, no remitir es funcionamiento normal
+        // —la propia norma impone una espera entre envíos—, así que la escalera de avisos calla.
+        expect(estado.escalon_aviso).toBe("ninguno");
+    });
+
+    it("13 · cierra caja: lo que debería haber es lo cobrado, y el descuadre es 0", async () => {
         await irA("/Cuentas");
         await pulsar("Cerrar caja");
 
@@ -164,13 +323,14 @@ describe("El camino del dinero", () => {
         // El valor de la tarjeta, no la tarjeta entera: el texto del contenedor arrastra las otras
         // cifras del arqueo y una comprobación así pasaría por casualidad.
         const deberiaHaber = $('//p[contains(., "Debería haber")]/following-sibling::p[1]');
-        await browser.waitUntil(async () => (await deberiaHaber.getText()).includes(TOTAL), {
+        await browser.waitUntil(async () => (await deberiaHaber.getText()).includes(EN_EL_CAJON), {
             timeout: 20_000,
-            timeoutMsg: `"Debería haber" no mostró ${TOTAL} €`,
+            timeoutMsg: `"Debería haber" no mostró ${EN_EL_CAJON} €`,
         });
 
-        // Se cuenta el cajón: un billete de 10, lo mismo que entró.
-        await contarEnElCajon("10€");
+        // Se cuenta el cajón: un billete de 10 por cada cobro, lo mismo que entró.
+        await contarEnElCajon(BILLETE);
+        await contarEnElCajon(BILLETE);
 
         // La cifra que justifica el test entero.
         await conTexto("p", "Cuadra").waitForDisplayed({ timeout: 20_000 });

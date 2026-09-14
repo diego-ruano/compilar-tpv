@@ -11,41 +11,13 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar: TEST-03 salió de arreglar
-> SYNC-20 y CFG-04 es mantenimiento.
+> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar: CFG-04 es mantenimiento.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
-| TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
 
 ---
-
-
-## TEST-03 🟡 · Cada recorrido E2E estrena su equipo, y son seis
-
-`wdio.conf.ts` prepara el equipo por receta en `beforeSession`, así que cada uno de los seis ficheros
-de recorrido monta su AppData, activa su licencia y **crea su tenant de Turso**. Son seis bases por
-tanda que no se borran solas, y el arranque completo se repite cinco veces para probar cinco cosas
-distintas que podrían compartirlo.
-
-**Qué haría falta.** Mover la preparación del equipo del `beforeSession` al `describe`, y encadenar
-dentro los pasos que hoy son ficheros distintos. No todos pueden agruparse, y conviene saber cuáles
-antes de empezar:
-
-- **Sí pueden**: `venta` y `fiscal` estrenan los dos un equipo limpio, sin nube, y hacen recorridos
-  contiguos (vender y cobrar / mirar la factura de ese cobro).
-- **Los tres de copias YA son uno partido en tres**, y lo están por una razón que no se puede
-  deshacer: en medio hay que **apagar la aplicación** (en Windows la base no se reemplaza con SQLite
-  teniéndola abierta). Agruparlos es unificar su receta y su licencia, no sus `describe`.
-- **`licencia` no puede**: necesita anular y caducar su propia licencia, así que compartirla con otro
-  recorrido lo rompería.
-
-⚠️ **El aislamiento no es negociable** y es lo que hay que vigilar al agruparlos: cada recorrido
-estrena su licencia (y por tanto su tenant) **a propósito** — CLAUDE.md §16 explica que con una
-licencia fija el catch-up arrastra lo que dejaron las tandas anteriores, y eso se vio como un fichaje
-que la app rechazaba unas veces sí y otras no. Agrupar tiene que reducir el número de tenants
-compartiendo uno **dentro** de un grupo, no reutilizando uno **entre** tandas.
 
 
 ## CFG-04 🔵 · La guardia de fuentes de tiempo es un `debug_assert!`

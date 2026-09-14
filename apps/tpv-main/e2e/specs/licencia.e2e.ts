@@ -6,8 +6,9 @@
 // romperle la licencia a alguien (anulación).
 //
 // Los dos casos se provocan por el API de administración: `shorten` mueve la caducidad al pasado y
-// `revoke`/`unrevoke` anulan y deshacen. La licencia es de esta tanda, así que romperla no le hace
-// nada a los demás recorridos.
+// `revoke`/`unrevoke` anulan y deshacen. La licencia es la de la tanda y el equipo es el que dejaron
+// los recorridos anteriores, así que éste va el ÚLTIMO: romperle la licencia deja inservible el
+// equipo que comparten todos.
 //
 // Hay DOS pulsos que enteran al equipo de que su licencia ha cambiado, y el recorrido usa los dos:
 //
@@ -23,21 +24,19 @@
 
 import { $, browser, expect } from "@wdio/globals";
 
-import { activarLicencia, estrenarEquipo, ficharYEntrar } from "../helpers/arranque.js";
+import { activarLicencia, ficharYEntrar } from "../helpers/arranque.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
+import { NEGOCIO, PIN } from "../helpers/equipo.js";
 import { acortar, alargar, desrevocar, revocar } from "../helpers/licencias.js";
 import { esperarNubeAlDia } from "../helpers/nube.js";
 import { conTexto, leerDeLaApp, pulsar } from "../helpers/ui.js";
 
 cargarDotEnv();
 
-const NEGOCIO = "Bar E2E licencia";
-const PIN = "9012";
-
 /** El id de la licencia de esta tanda, para poder manipularla desde el API de administración. */
 function idLicencia(): string {
-    const id = process.env.TPV_E2E_LICENCIA_ID_LICENCIA;
-    if (!id) throw new Error("Falta TPV_E2E_LICENCIA_ID_LICENCIA (lo pone onPrepare).");
+    const id = process.env.TPV_E2E_LICENCIA_ID;
+    if (!id) throw new Error("Falta TPV_E2E_LICENCIA_ID (lo pone onPrepare).");
     return id;
 }
 
@@ -59,8 +58,8 @@ async function comprobarLicencia(): Promise<Gate> {
 }
 
 describe("La licencia deja de valer", () => {
-    it("1 · estrena el equipo con una licencia buena, y conectado", async () => {
-        await estrenarEquipo(NEGOCIO, PIN);
+    it("1 · vuelve a entrar en el equipo, con la licencia buena y conectado", async () => {
+        await ficharYEntrar(PIN);
 
         // Que el outbox llegue a cero prueba que el WebSocket está abierto, que es la premisa del
         // paso siguiente. Sin esta espera, un equipo que nunca llegó a conectarse se bloquearía

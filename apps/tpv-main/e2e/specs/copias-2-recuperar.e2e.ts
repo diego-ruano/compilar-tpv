@@ -18,7 +18,8 @@ import { $, browser, expect } from "@wdio/globals";
 
 import { ficharYEntrar } from "../helpers/arranque.js";
 import { cargarDotEnv } from "../helpers/entorno.js";
-import { CATEGORIA, PIN } from "../helpers/copias.js";
+import { CATEGORIA } from "../helpers/copias.js";
+import { PIN } from "../helpers/equipo.js";
 import { conTexto, leerDeLaApp, pulsar, pulsarXPath } from "../helpers/ui.js";
 
 cargarDotEnv();

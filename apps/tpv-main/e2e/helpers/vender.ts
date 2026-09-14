@@ -1,8 +1,9 @@
 // Montar la carta, abrir una mesa y cobrarla.
 //
-// Vive aquí y no dentro de un recorrido porque lo quieren dos: el del camino del dinero y el de la
-// factura. Y un recorrido NO puede importar a otro —importar un fichero de spec lo EJECUTA, sus
-// `describe` se registran en quien lo importa—, así que el sitio de lo compartido es `helpers/`.
+// Vive aquí y no dentro del recorrido de la venta para que ése se lea como una secuencia de pasos
+// y no como una lista de selectores. Y un recorrido NO puede importar a otro —importar un fichero
+// de spec lo EJECUTA, sus `describe` se registran en quien lo importa—, así que si otro llega a
+// necesitarlo, el sitio de lo compartido ya es `helpers/`.
 //
 // Son gestos, no aserciones: cada recorrido comprueba lo suyo. Lo único que estas funciones
 // garantizan es haber dejado la aplicación donde dicen.

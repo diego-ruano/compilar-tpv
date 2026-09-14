@@ -57,24 +57,28 @@ App (al arrancar) ──GET /v1/update/{target}/{arch}/{version}──► tpv-ap
 ## 0-bis. Antes de tagear: pasar los E2E (TEST-01)
 
 CI corre los tests de Rust, del worker y el anti-drift del esquema, pero **ninguno arranca la
-aplicación**. Los cinco recorridos que sí la arrancan van a mano, porque emiten licencias reales
+aplicación**. Los cinco recorridos que sí la arrancan van a mano, porque emiten una licencia real
 con el token de administración y eso no se mete en CI.
 
 ```bash
 pnpm --filter @tpv/main build:e2e     # compila el binario aislado (identificador propio)
-pnpm --filter @tpv/main test:e2e      # ~70 s: 26 pasos en cinco recorridos
+pnpm --filter @tpv/main test:e2e      # 31 pasos en cinco recorridos, sobre un mismo equipo
 ```
 
-Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro y arqueo con descuadre 0), las
-**copias de seguridad** (copia → se machaca la `data.db` → se rechaza una copia inservible →
-recuperación → reconciliación → login), **volver sólo con la nube** (el volcado de SYNC-19, sin
-copia local) y **la licencia** (anulada, desanulada, caducada, renovada).
+Qué cubren: el **camino del dinero** (estreno, carta, venta, cobro, su factura con el QR y arqueo
+con descuadre 0), las **copias de seguridad** (copia → se machaca la `data.db` → se rechaza una copia
+inservible → recuperación → reconciliación → login), **volver sólo con la nube** (el volcado de
+SYNC-19, sin copia local) y **la licencia** (anulada, desanulada, caducada, renovada).
 
 Requisitos, una sola vez por máquina: `cargo install tauri-driver --locked` y `ADMIN_API_TOKEN` en
-el `.env` de la raíz. Las licencias las emite y revoca la propia tanda.
+el `.env` de la raíz. La licencia la emite y la revoca la propia tanda.
 
-⚠️ **Cada tanda crea tres bases Turso** (una por licencia) que no se borran solas. Conviene pasar
-la escoba de vez en cuando por las licencias `E2E …` que salen en `pnpm license:list`.
+⚠️ **Cada tanda crea una base Turso** (la de su licencia) que no se borra sola. Conviene pasar la
+escoba de vez en cuando por las licencias `E2E …` que salen en `pnpm license:list`.
+
+⚠️ **Redespliega el worker antes si ha cambiado el esquema.** La tanda activa contra el `tpv-api`
+desplegado, que lleva el esquema compilado dentro: con uno por detrás, la nube rechaza las
+escrituras con columnas nuevas y lo que falla son las copias, no la venta.
 
 **Si sale rojo, no tagees.** Un fallo deja una captura en `apps/tpv-main/e2e/fallos/`. Ojo a la
 excepción legítima: la activación sale a internet contra `tpv-api`, así que un fallo ahí puede ser

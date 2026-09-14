@@ -1,8 +1,10 @@
 // El estreno de un equipo: elegir modo, activar la licencia, elegir PIN y entrar.
 //
-// Lo comparten tres recorridos porque es literalmente el mismo camino —el de un cliente que abre
-// la caja por primera vez— y tenerlo escrito tres veces garantizaba que las tres copias acabaran
-// divergiendo en cuanto alguien tocara una pantalla del arranque.
+// Es literalmente el camino de un cliente que abre la caja por primera vez. Lo recorre entero la
+// venta, que estrena el equipo de la tanda, pero sus piezas las reutilizan los demás: todos vuelven
+// a entrar con `ficharYEntrar`, y el de la licencia reactiva con `activarLicencia`. Tenerlo escrito
+// una sola vez es lo que evita que las copias diverjan en cuanto alguien toque una pantalla del
+// arranque.
 
 import { $, $$, browser } from "@wdio/globals";
 
@@ -141,19 +143,4 @@ export async function ficharYEntrar(pin: string): Promise<void> {
 
     // Dentro: el menú lateral sólo existe con sesión.
     await $('a[href="/Inventario"]').waitForDisplayed({ timeout: 60_000 });
-}
-
-/** El estreno completo, de la primera pantalla al menú. */
-export async function estrenarEquipo(negocio: string, pin: string): Promise<void> {
-    await elegirModoTpv();
-
-    const destino = await activarLicencia(negocio);
-    if (destino !== "setup") {
-        throw new Error(
-            `Un equipo recién instalado tiene que pedir el PIN tras activar, y ha ido a "${destino}".`,
-        );
-    }
-
-    await elegirPin(pin);
-    await ficharYEntrar(pin);
 }

@@ -1404,7 +1404,8 @@ cosas**, que es la única forma de comprobar el trabajo de impresión sin una im
 
 ## 16. Los E2E sobre la app compilada (TEST-01)
 
-**Seis** recorridos sobre la app **compilada** que prueban la costura que no mira nadie: React →
+**Cinco** recorridos sobre la app **compilada**, encadenados sobre un mismo equipo, que prueban la
+costura que no mira nadie: React →
 IPC de Tauri → comandos Rust → SQLite → y vuelta. No cubre el frontend ni lo pretende (la cobertura de
 componentes sigue descartada a propósito, ver `vitest.config.ts`). Vive en `apps/tpv-main/e2e/`,
 sobre **WebdriverIO + `@wdio/tauri-service`**, y tarda algo más de un minuto.
@@ -1415,34 +1416,32 @@ pnpm --filter @tpv/main build:e2e            # compila el binario aislado y lo v
 pnpm --filter @tpv/main test:e2e             # el recorrido
 ```
 
-**El camino del dinero** (10 pasos): equipo nuevo → modo TPV → **activar una licencia de verdad**
-contra `tpv-api` → elegir PIN → fichar entrada y entrar → **declarar quién factura** → categoría y
-producto con precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** →
-**cierre de caja con descuadre 0**. La última cifra es la que lo justifica entero: si algo se rompe
-entre la interfaz y SQLite, deja de cuadrar.
+**El camino del dinero** (14 pasos): equipo nuevo → modo TPV → **activar una licencia de verdad**
+contra `tpv-api` → elegir PIN → fichar entrada y entrar → un equipo recién estrenado **no sabe quién
+factura**, la pantalla lo grita y se declara por Configuración → Fiscal → categoría y producto con
+precio, IVA y lote → zona y mesa → dos líneas → **cobro en efectivo exacto** → el registro de
+facturación existe, es `F2`, y **su número ES el número del ticket** → el ticket lleva su QR y una
+reimpresión saca exactamente el mismo → una segunda venta avanza la cadena sin anomalías → las dos
+quedan en la cola diciendo por qué no han salido → **cierre de caja con descuadre 0**. La última
+cifra es la que lo justifica entero: si algo se rompe entre la interfaz y SQLite, deja de cuadrar.
 
 El paso de los datos fiscales no es andamiaje del test: desde FISCAL-01 cada cobro expide una
 factura, y `emitir_cobro` corta la transacción si faltan el NIF y la razón social. La activación de
 la licencia **no** los rellena (su «nombre legal» va a la licencia, no a `Business_Settings`), así
 que declararlos es parte del estreno de un equipo real.
 
-**La factura de cada cobro** (8 pasos): estreno → un equipo recién estrenado **no sabe quién
-factura** y la pantalla lo grita → se declara por Configuración → Fiscal → venta y cobro → el
-registro de facturación existe, es `F2`, y **su número ES el número del ticket** → el ticket lleva
-su QR y una reimpresión saca exactamente el mismo → una segunda venta avanza la cadena sin
-anomalías → las dos quedan en la cola diciendo por qué no han salido.
+Los pasos 9 y 10 son el corazón de la parte fiscal: hay ~100 tests de Rust sobre la huella y la
+persistencia, y ninguno recorría React → IPC → cobro → registro → vuelta al papel. Si esa cadena se
+parte la aplicación no protesta — el papel sale sin QR y ya está. Hasta TEST-03 fue un recorrido
+aparte, que estrenaba un equipo idéntico para vender lo mismo.
 
-Los pasos 5 y 6 son el corazón: hay ~100 tests de Rust sobre la huella y la persistencia, y ninguno
-recorría React → IPC → cobro → registro → vuelta al papel. Si esa cadena se parte la aplicación no
-protesta — el papel sale sin QR y ya está.
-
-**Las copias de seguridad** (4+5+3 pasos, en tres ficheros): con la nube encendida se estrena el
-equipo, se crea algo, se espera a que la nube lo tenga todo y se guarda una copia → **se le machaca
-la `data.db`** → la app arranca igual y ofrece recuperar → se restaura la copia → la reconciliación
-converge y el login se abre. Por el camino se le ofrece primero una copia **inservible**, que la
-pantalla tiene que rechazar diciendo por qué y dejando elegir otra. Va en dos ficheros porque en
-medio hay que apagar la aplicación: en Windows la base no se reemplaza con SQLite teniéndola
-abierta, y reiniciar es además lo que pasa de verdad.
+**Las copias de seguridad** (4+5+3 pasos, en tres ficheros): sobre el equipo que deja la venta —con
+sus cobros, sus facturas y su arqueo dentro— se crea algo más, se espera a que la nube lo tenga todo
+y se guarda una copia → **se le machaca la `data.db`** → la app arranca igual y ofrece recuperar →
+se restaura la copia → la reconciliación converge y el login se abre. Por el camino se le ofrece
+primero una copia **inservible**, que la pantalla tiene que rechazar diciendo por qué y dejando
+elegir otra. Va en varios ficheros porque en medio hay que apagar la aplicación: en Windows la base
+no se reemplaza con SQLite teniéndola abierta, y reiniciar es además lo que pasa de verdad.
 
 Y un tercer tramo rompe la base **otra vez** para probar el otro botón de esa pantalla:
 **«Recuperar el estado actual de la nube»**, que es el que de verdad importa —la copia local sólo
@@ -1467,7 +1466,8 @@ Lo que NO sube a E2E de las copias, y por qué —para no volver a intentarlo—
   política ya está probada donde es barata y exacta: `test/estadoSync.test.ts` y
   `test/recoverySync.test.ts`, sin React ni DOM.
 
-**La licencia deja de valer** (5 pasos): se anula → el TPV deja de trabajar y vuelve a pedir la
+**La licencia deja de valer** (5 pasos, y va la última porque le rompe la licencia a todo el equipo
+de la tanda): se anula → el TPV deja de trabajar y vuelve a pedir la
 licencia → se desanula y la misma clave vuelve a activar, sin perder los datos → se caduca → sale la
 pantalla de bloqueo → se renueva y el propio botón de reintentar la desbloquea. Los dos estados se
 provocan por el API de administración; sin `shorten` no había forma de ensayar una caducidad sin
@@ -1482,13 +1482,13 @@ usando `license_check_now` porque ahí no hay nada que esperar.
 
 | Pieza | Archivo | Rol |
 |---|---|---|
-| El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, carta, venta, cobro y arqueo |
-| La factura de cada cobro | `e2e/specs/fiscal.e2e.ts` | Datos del obligado, registro, QR del ticket y cadena |
+| El camino del dinero | `e2e/specs/venta.e2e.ts` | Estreno, datos del obligado, carta, venta, cobro, su factura con el QR y arqueo |
 | Copias de seguridad | `e2e/specs/copias-1-copia.e2e.ts` · `copias-2-recuperar.e2e.ts` | Copia, avería, restauración y reconciliación |
 | Volver sólo con la nube | `e2e/specs/copias-3-nube.e2e.ts` | El volcado de SYNC-19, sin copia local |
 | La licencia deja de valer | `e2e/specs/licencia.e2e.ts` | Anulada, desanulada, caducada y renovada |
+| El equipo de la tanda | `e2e/helpers/equipo.ts` | Negocio, PIN y obligado: los comparten todos los recorridos |
 | Arranque compartido | `e2e/helpers/arranque.ts` | Modo, activación, PIN y login |
-| Vender por mesa | `e2e/helpers/vender.ts` | Carta, plano, líneas y cobro: lo que comparten venta y fiscal |
+| Vender por mesa | `e2e/helpers/vender.ts` | Carta, plano, líneas y cobro |
 | Lo fiscal | `e2e/helpers/fiscal.ts` | Declarar el obligado y leer el registro, el estado y el bloque del ticket |
 | Licencias de la tanda | `e2e/helpers/licencias.ts` | Emitir, revocar, desrevocar, acortar |
 | Aislamiento del equipo | `e2e/helpers/entorno.ts` | Verifica el binario, prepara el AppData, rompe la base |
@@ -1525,26 +1525,31 @@ usando `license_check_now` porque ahí no hay nada que esperar.
   huella, licencia) terminan el proceso ahí mismo. WDIO se limita a registrar el error de un hook y
   **continúa**, así que sin eso arrancaba la app igual y el motivo real salía un minuto después
   disfrazado del fallo de un paso.
-- **El equipo del test nace sin nube, y no es un atajo.** Borrar el AppData no deja un equipo nuevo:
-  la licencia de pruebas es siempre la misma, o sea el mismo tenant, así que al abrir el WebSocket
-  la Main se traería por catch-up lo que dejaron las ejecuciones anteriores —el fichaje abierto de
-  ayer, la zona con el mismo nombre, las ventas ya cobradas—. Se vio como un fichaje que la app
-  rechazaba *"tienes un fichaje abierto"* unas veces sí y otras no, según quién ganara la carrera.
-  El test escribe `connectivity: "off"` (la palanca de SYNC-17, §9) en `device_config.json`: apaga
-  **sólo** el WebSocket, así que la activación de licencia sigue saliendo a internet, que es lo que
-  se quiere probar. La replicación queda fuera, como el Handy y la recuperación.
-- **Cada recorrido estrena su licencia, y por tanto su tenant.** Se emiten al empezar la tanda y se
-  revocan al terminar. Se probó con una licencia fija guardada en el `.env` y no aguanta: activar
-  graba en el tenant el hash de `0001_inicial.sql`, así que en cuanto esa migración cambia —cosa
-  permitida mientras no haya clientes— el tenant viejo deja de migrar y la activación falla con
-  `migration_altered`. Emitir por tanda hace los recorridos herméticos y deja el `.env` con una sola
-  cosa dentro: `ADMIN_API_TOKEN`. El precio es una base Turso por licencia, que no se borra sola.
+- **La tanda estrena UN equipo y UNA licencia, y los recorridos se lo van pasando** (TEST-03). La
+  venta lo estrena, los tramos de copias le rompen la base y lo recuperan, y el de la licencia se la
+  anula al final — por eso va el último. Antes cada recorrido estrenaba el suyo, y eran cuatro bases
+  de Turso por tanda que no se borran solas para probar cosas que podían compartir equipo. El precio
+  es que un fallo arrastra a los de detrás: en un informe rojo, el que importa es el **primero**.
+- **La licencia se emite por tanda, nunca fija.** Se probó con una guardada en el `.env` y no
+  aguanta por dos lados. Activar graba en el tenant el hash de `0001_inicial.sql`, así que en cuanto
+  esa migración cambia —cosa permitida mientras no haya clientes— el tenant viejo deja de migrar y la
+  activación falla con `migration_altered`. Y un tenant con historia no deja un equipo nuevo aunque
+  se borre el AppData: al abrir el WebSocket la Main se trae por catch-up lo que dejaron las tandas
+  anteriores —se vio como un fichaje que la app rechazaba *"tienes un fichaje abierto"* unas veces sí
+  y otras no—. Emitir por tanda deja el `.env` con una sola cosa dentro: `ADMIN_API_TOKEN`.
+- **El equipo corre con la nube encendida, de principio a fin**, que es como se vende. Mientras la
+  licencia fue fija, la venta tenía que nacer con `connectivity: "off"` para no traerse otras tandas;
+  con un tenant nuevo por tanda eso sólo servía para probar un equipo distinto del real. Una
+  consecuencia que conviene tener presente: **con el worker desplegado por detrás del esquema, la
+  tanda falla** (en las copias, que esperan a que suba todo), así que antes de lanzarla tras un
+  cambio de esquema hay que redesplegar.
 - **La licencia es real y sale a internet.** Un fallo en la activación puede ser la red y no el
   código: el mensaje del test recoge lo que dijo la pantalla para distinguirlos.
-- **Cada recorrido declara qué equipo necesita**, en las recetas de `wdio.conf.ts`, y se lo prepara
-  `beforeSession`. No todos quieren lo mismo: el segundo tramo de copias necesita justo lo contrario
-  de una limpieza —el equipo que dejó el tramo anterior, con la base rota—, y borrar por defecto se
-  lo llevaría por delante.
+- **Cada recorrido declara qué hay que hacerle al equipo antes de arrancar**, en las recetas de
+  `wdio.conf.ts`, y se lo hace `beforeSession`: estrenarlo, dejarlo como está o romperle la base.
+  Tiene que ser ahí y no dentro del recorrido, porque con la app abierta SQLite tiene la base cogida;
+  y declararlo es obligatorio porque borrar por defecto se llevaría por delante el equipo que dejó el
+  recorrido anterior.
 - ⚠️ **Un recorrido no importa a otro.** Importar un fichero de recorrido lo EJECUTA: sus `describe`
   se registran en quien lo importa. El segundo tramo de copias acabó corriendo los pasos del primero
   contra un equipo ya estrenado, y el síntoma —"no aparece la pantalla de primer inicio"— no se
