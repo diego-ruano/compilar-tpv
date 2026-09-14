@@ -12,13 +12,12 @@
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
 > **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar. FIS-05 y STOCK-01 son
-> decisiones de alcance (la segunda, junto con VENTA-01), SYNC-21 y TEST-03 salieron de arreglar
+> decisiones de alcance (la segunda, junto con VENTA-01), TEST-03 salió de arreglar
 > SYNC-20, y CFG-04 es mantenimiento.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
-| SYNC-21 | 🟡 | La cuarentena sólo se ve abriendo el panel (lo cubre en parte SYNC-24) | Parcial |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
 | STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
@@ -45,25 +44,6 @@ se amplía, la decisión de fondo es qué significa «deshacer» una venta que y
 probable es que sea anular los cobros por el camino de CUENTA-07 (`ClaseBaja::Error`), que ya revierte
 stock y gasto y ya emite el registro de anulación.
 
-## SYNC-21 🟡 · Una operación apartada sólo se ve si alguien abre el panel
-
-Lo que quedó fuera de SYNC-20 a propósito, para no ampliar aquel cambio, y que es justo la mitad que
-falta de «esto tiene que funcionar solo»:
-
-1. **No hay notificación.** Una operación apartada pinta un aviso en Configuración → Conectividad, y
-   ahí se queda. Nadie abre ese panel salvo cuando ya sospecha algo. El repo tiene el sistema de
-   notificaciones (NOTIF-01) y la escalera de avisos de Veri\*factu como patrón: un aviso al
-   Administrador con dedupe es exactamente esta forma. Vale para las dos direcciones — la cuarentena
-   de BAJADA (`quarantined`, SYNC-01) lleva desde que existe sin notificar tampoco.
-2. **`_Cola_Muerta` es de sólo escritura.** El DO aparta ahí las operaciones del volcado que agotan
-   sus intentos y emite `cola_apartada`… y **nadie la lee nunca**: no hay ruta, ni endpoint, ni
-   panel. El único `SELECT` del repo está en `test/colaEntrada.test.ts`. Escribir en un buzón que no
-   abre nadie es la misma clase de silencio que SYNC-20, un piso más arriba.
-3. **El volcado no usa el clasificador.** `anotarFallo` gasta sus cinco intentos incluso con un error
-   que ya se sabe definitivo. `esRechazoPermanente` está escrito y probado; es pasárselo.
-
-Ninguna de las tres deja hoy el sistema atascado —para eso está SYNC-20—; lo que hacen es que
-enterarse siga dependiendo de que alguien mire.
 
 ## TEST-03 🟡 · Cada recorrido E2E estrena su equipo, y son seis
 
