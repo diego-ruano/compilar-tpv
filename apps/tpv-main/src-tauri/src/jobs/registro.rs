@@ -393,6 +393,15 @@ async fn caja_sin_cerrar(app: AppHandle) -> Result<(), String> {
 /// **No** lo es para «faltan los datos fiscales» ni para «no hay certificado»: eso no se arregla
 /// esperando, es una tarea del dueño, y tratarlo como avería llenaría el panel de rojo por algo que
 /// el propio panel ya explica mejor en su sección. Esos casos devuelven `Ok` y se anotan en el log.
+/// Si ya se ha contado en este arranque que falta la identidad del productor.
+static PRODUCTOR_SIN_IDENTIDAD_AVISADO: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// `true` sólo la primera vez que se pregunta por esa marca.
+fn primera_vez(marca: &std::sync::atomic::AtomicBool) -> bool {
+    !marca.swap(true, std::sync::atomic::Ordering::Relaxed)
+}
+
 async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     use tpv_application::use_cases::verifactu::{self as uc_verifactu, SinEnviar};
 
@@ -423,11 +432,17 @@ async fn verifactu_remitir(app: AppHandle) -> Result<(), String> {
     // `sin_datos_del_productor` y la escalera de avisos mandará a soporte en vez de a mirar el
     // router.
     if !tpv_infra_sqlite::verifactu::productor_configurado() {
-        tracing::error!(
-            target: "tpv::verifactu",
-            "no se remite: falta la identidad del productor del software (PRODUCTOR_NIF). \
-             Los registros quedan PENDIENTE y se corregirán solos en cuanto la versión la traiga."
-        );
+        // Una vez por arranque, no una por vuelta: el job corre cada minuto y el error sube a
+        // Sentry, así que un equipo abierto una tarde dejaba cientos de eventos iguales que no
+        // dicen nada más que el primero. La constante no cambia sin recompilar, así que tampoco
+        // hay nada nuevo que contar hasta el siguiente arranque.
+        if primera_vez(&PRODUCTOR_SIN_IDENTIDAD_AVISADO) {
+            tracing::error!(
+                target: "tpv::verifactu",
+                "no se remite: falta la identidad del productor del software (PRODUCTOR_NIF). \
+                 Los registros quedan PENDIENTE y se corregirán solos en cuanto la versión la traiga."
+            );
+        }
         // Se evalúa el aviso igualmente: el bar tiene derecho a saber que lleva sin remitir.
         if let Ok(notifier) = state.notifier().await {
             let _ = uc_verifactu::avisar_de_atraso(repo.as_ref(), notifier.as_ref()).await;
@@ -682,4 +697,19 @@ async fn cifrado_pii(app: AppHandle) -> Result<(), String> {
 #[cfg(desktop)]
 async fn updater(app: AppHandle) -> Result<(), String> {
     crate::check_and_announce(&app).await.map(|_| ())
+}
+
+#[cfg(test)]
+mod tests_primera_vez {
+    use super::primera_vez;
+    use std::sync::atomic::AtomicBool;
+
+    /// El aviso de que falta la identidad del productor sale una vez por arranque, no cada minuto.
+    #[test]
+    fn solo_la_primera_vuelta_avisa() {
+        let marca = AtomicBool::new(false);
+        assert!(primera_vez(&marca));
+        assert!(!primera_vez(&marca));
+        assert!(!primera_vez(&marca));
+    }
 }
