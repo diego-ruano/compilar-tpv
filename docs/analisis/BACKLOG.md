@@ -31,7 +31,6 @@
 | LEGAL-01 | 🟠 | **RGPD: falta el papeleo de encargado del tratamiento.** | Sin empezar |
 | INFRA-02 | 🟡 | **El instalador no va firmado (Authenticode).** | Aceptado a sabiendas |
 | INFRA-03 | 🟡 | **Las imágenes del Handy salen por una URL `r2.dev`.** | Decidido: dominio propio |
-| OPS-01 | 🟠 | **Cero documentación de usuario y cero onboarding.** | Sin empezar |
 | OPS-02 | 🟡 | **«Contacta con soporte» sin canal ni forma de exportar un diagnóstico.** | Sin empezar |
 | SEC-02 | 🔵 | **`LICENSE_STORE_KEY` es un secreto global sin rotación ni custodia.** | Sin empezar |
 
@@ -98,11 +97,6 @@ propio.** Al hacerlo hay que tocar **tres** sitios, no uno:
 2. `csp` **y** `devCsp` en `tauri.conf.json` (`img-src`) — si sólo se toca una, funciona en dev y
    falla en el build.
 3. `docs/android/COMPILAR_ANDROID.md`, que documenta ese host.
-
-### OPS-01 🟠 · Sin documentación de usuario
-
-Sin manual, sin onboarding, sin ayuda en la app, sin README en la raíz del repo. Instalas en un bar y
-la formación eres tú, por teléfono, cada vez.
 
 ### OPS-02 🟡 · Soporte sin canal ni diagnóstico exportable
 
