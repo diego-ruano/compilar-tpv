@@ -1022,8 +1022,12 @@ mod tests_borrado_de_producto {
         sembrar(&db, UNA_VENTA_COBRADA).await;
         sembrar(
             &db,
-            &["INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
-                 VALUES ('det', 'vendido', 2);"],
+            &[
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 2.6, 'TOTAL');",
+                "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
+                   VALUES ('det', 'vendido', 'pago', 2);",
+            ],
         )
         .await;
         let repo = SqliteInventarioRepository::new(db.clone());

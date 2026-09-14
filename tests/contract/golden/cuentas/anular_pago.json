@@ -43,13 +43,24 @@
     {
       "Cantidad": 2.0,
       "ID_Detalle": "det-cobrado-lote",
-      "ID_Lote": "lote-1"
+      "ID_Lote": "lote-1",
+      "ID_Pago": "pago-1"
+    },
+    {
+      "Cantidad": 2.0,
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Lote": "lote-0",
+      "ID_Pago": "pago-0"
     }
   ],
   "Lotes_Producto": [
     {
       "ID_Lote": "lote-1",
       "Stock_Disponible": 20.0
+    },
+    {
+      "ID_Lote": "lote-0",
+      "Stock_Disponible": 5.0
     }
   ],
   "Movimientos_Caja": [
@@ -70,6 +81,10 @@
     {
       "ID_Detalle": "det-cobrado-suelto",
       "ID_Pago": "pago-1"
+    },
+    {
+      "ID_Detalle": "det-cobrado-lote",
+      "ID_Pago": "pago-0"
     }
   ],
   "Pagos": [
@@ -78,6 +93,12 @@
       "Estado": "ANULADO",
       "ID_Pago": "pago-1",
       "Motivo_Anulacion": "cobro duplicado"
+    },
+    {
+      "Anulado_Por": "user-1",
+      "Estado": "ANULADO",
+      "ID_Pago": "pago-0",
+      "Motivo_Anulacion": "mesa equivocada"
     }
   ],
   "Productos": [
@@ -90,6 +111,7 @@
     {
       "Cantidad": 1.0,
       "ID_Detalle": "det-cobrado-suelto",
+      "ID_Pago": "pago-1",
       "ID_Producto": "prod-1"
     }
   ]

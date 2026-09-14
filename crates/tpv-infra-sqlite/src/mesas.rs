@@ -238,13 +238,14 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
 
 /// Consumo de stock FEFO (best-effort) para las líneas cobradas de una venta en mesa/barra.
 /// Descuenta de los lotes por caducidad/entrada y registra la traza en `Lote_Consumos`
-/// por `ID_Detalle`. Es **best-effort**: si no hay stock suficiente NO aborta el cobro
+/// por línea y **por cobro** (STOCK-01: anular devuelve sólo lo que consumió ese cobro). Es **best-effort**: si no hay stock suficiente NO aborta el cobro
 /// (un cobro de mesa no se bloquea por inventario); consume lo disponible y para. Cada
 /// `UPDATE Lotes_Producto` es por `ID_Lote` con la cantidad como literal → la sentencia
 /// es determinista al replicarse en la nube. Unifica el descuento de stock que hasta ahora
 /// solo hacía el mostrador (`venta_rapida`) con las ventas en mesa (MESA-01).
 async fn consumir_stock_fefo<C: Writer>(
     db: &C,
+    id_pago: &str,
     charged: &[(String, String, f64)],
 ) -> AppResult<()> {
     for (id_detalle, producto_id, cantidad) in charged {
@@ -301,13 +302,14 @@ async fn consumir_stock_fefo<C: Writer>(
 
             db.execute(
                 r#"
-                INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
-                VALUES (?1, ?2, ?3)
-                ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+                INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+                VALUES (?1, ?2, ?3, ?4)
+                ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
                 "#,
                 vec![
                     Value::Text(id_detalle.clone()),
                     Value::Text(id_lote),
+                    Value::Text(id_pago.to_string()),
                     Value::Real(take),
                 ],
             )
@@ -1265,9 +1267,6 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
 
-            // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién vendidas.
-            consumir_stock_fefo(db, &charged).await?;
-
             // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
             // para que una reimpresion saque el mismo papel.
             // El número se reserva DENTRO de la transacción: si el cobro hace ROLLBACK, no se gasta
@@ -1362,6 +1361,11 @@ impl MesasRepository for SqliteMesasRepository {
                 .await
                 .map_err(db_err)?;
             }
+
+            // MESA-01: descuento de stock/lotes (FEFO) de las líneas recién vendidas. Va DESPUÉS del
+            // pago y no antes (STOCK-01): cada consumo apunta al cobro que lo hizo, y esa FK se
+            // comprueba sentencia a sentencia — también al replicarla en la nube.
+            consumir_stock_fefo(db, &id_pago, &charged).await?;
 
             // FISCAL-01. El registro de facturación se crea AQUÍ, dentro de la misma transacción
             // que el pago y después de enlazar las líneas (de las que sale el desglose). Es el
@@ -2127,7 +2131,7 @@ impl MesasRepository for SqliteMesasRepository {
                     }
                 }
             }
-            consumir_stock_fefo(db, &charged).await?;
+            consumir_stock_fefo(db, &id_pago, &charged).await?;
 
             // FISCAL-01. Dentro de la transacción del cobro y después de enlazar `Pago_Detalles`,
             // que es de donde sale el desglose de IVA del registro.

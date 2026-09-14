@@ -40,15 +40,16 @@ fn db_err(e: impl std::fmt::Display) -> AppError {
 /// `SUM(movimientos) - SUM(consumos)`: el alta y los ajustes suman (o restan) y cada línea de
 /// comanda cobrada resta lo suyo.
 ///
-/// ⚠️ **Un consumo deja de contar cuando TODOS los pagos que cubrían su línea están anulados.**
-/// Antes esto no hacía falta porque anular borraba la fila de `Lote_Consumos` y la resta
+/// ⚠️ **Un consumo deja de contar cuando su stock volvió al lote: cuando SU cobro se anuló por
+/// error.** Antes esto no hacía falta porque anular borraba la fila de `Lote_Consumos` y la resta
 /// desaparecía sola. Desde CUENTA-07 el pago se conserva y la traza también —es lo que da
 /// trazabilidad por lote al ticket anulado—, así que sin este filtro el stock habría vuelto al
 /// lote pero la resta seguiría contando: «faltan N unidades», cada día, para siempre.
 ///
-/// La condición se escribe «tiene un pago activo **o** no tiene ninguno» y no simplemente «tiene un
-/// pago activo» porque los dos extremos son consumos vigentes: uno que nunca llegó a ligarse a un
-/// cobro sigue habiendo salido del lote, y una línea anulada y vuelta a cobrar también.
+/// Se mira el cobro **del consumo** y no los de su línea (STOCK-01): una línea anulada y vuelta a
+/// cobrar tiene un consumo por cobro, y mirando la línea el del cobro anulado seguía restando. Y una
+/// **devolución** no devuelve el stock —el cliente se llevó la consumición—, así que su consumo sí
+/// cuenta. Un `Motivo_Baja` vacío es una anulación de antes de FISCAL-01, que siempre devolvía.
 const SQL_LOTES: &str = r#"
     SELECT id_lote, codigo_lote, producto, guardado, calculado
     FROM (
@@ -63,14 +64,10 @@ const SQL_LOTES: &str = r#"
             - COALESCE((
                 SELECT SUM(c.Cantidad)
                 FROM Lote_Consumos c
+                JOIN Pagos p ON p.ID_Pago = c.ID_Pago
                 WHERE c.ID_Lote = l.ID_Lote
-                  AND (
-                    EXISTS (
-                      SELECT 1 FROM v_lineas_cobradas pd WHERE pd.ID_Detalle = c.ID_Detalle
-                    )
-                    OR NOT EXISTS (
-                      SELECT 1 FROM Pago_Detalles pd WHERE pd.ID_Detalle = c.ID_Detalle
-                    )
+                  AND NOT (
+                    p.Estado = 'ANULADO' AND COALESCE(p.Motivo_Baja, 'ERROR') = 'ERROR'
                   )
             ), 0)                         AS calculado
         FROM Lotes_Producto l
@@ -278,7 +275,10 @@ mod tests {
             &db,
             &[
                 "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
-                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det', 'lote', 3);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 7.5, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago', 3);",
             ],
         )
         .await;
@@ -390,11 +390,11 @@ mod tests {
            VALUES ('com', 'mesa', 'res', 'MESA', '2026-01-02 13:00:00', 'Abierta');",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
            VALUES ('det', 'com', 'prod', 3, 2.5);",
-        // El stock volvió al lote al anular, pero la traza del consumo se conserva.
-        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det', 'lote', 3);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion)
            VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 7.5, 'TOTAL', 'ANULADO', '2026-01-02 15:00:00', 'u1', 'error de cobro');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
+        // El stock volvió al lote al anular, pero la traza del consumo se conserva.
+        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago', 3);",
     ];
 
     #[tokio::test]
@@ -409,6 +409,57 @@ mod tests {
         let out = repo.lotes_descuadrados(0.001).await.unwrap();
 
         assert!(out.is_empty(), "un consumo de un cobro anulado no resta: {out:?}");
+    }
+
+    /// STOCK-01. La línea se cobró (3 del lote), se anuló por error (vuelven: 10) y se cobró otra vez
+    /// de un lote nuevo. El consumo del primer cobro ya no resta; el del segundo, sí.
+    #[tokio::test]
+    async fn una_linea_vuelta_a_cobrar_de_otro_lote_cuadra_en_los_dos() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Stock_Disponible)
+                   VALUES ('lote-2', 'prod', 'L-2', '2026-01-02 16:00:00', 7);",
+                "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
+                   VALUES ('mov-2', 'lote-2', 'ALTA', 10, 10, '2026-01-02 16:00:00');",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
+                   VALUES ('pago-2', 'com', '2026-01-02 17:00:00', 'Efectivo', 7.5, 'TOTAL');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2', 'det');",
+                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+                   VALUES ('det', 'lote-2', 'pago-2', 3);",
+            ],
+        )
+        .await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        let out = repo.lotes_descuadrados(0.001).await.unwrap();
+
+        assert!(out.is_empty(), "cada consumo cuenta según su propio cobro: {out:?}");
+    }
+
+    /// Una devolución no devuelve el stock —el cliente se llevó la consumición—, así que su consumo
+    /// sigue restando aunque el cobro esté anulado.
+    #[tokio::test]
+    async fn el_consumo_de_una_devolucion_sigue_contando() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, SEMILLA_LOTE).await;
+        sembrar(&db, VENTA_ANULADA).await;
+        sembrar(
+            &db,
+            &[
+                "UPDATE Pagos SET Motivo_Baja = 'DEVOLUCION' WHERE ID_Pago = 'pago';",
+                "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
+            ],
+        )
+        .await;
+
+        let repo = SqliteReconciliacionRepository::new(db);
+        let out = repo.lotes_descuadrados(0.001).await.unwrap();
+
+        assert!(out.is_empty(), "10 de alta - 3 que se llevó el cliente = 7: {out:?}");
     }
 
     #[tokio::test]
@@ -454,9 +505,9 @@ mod tests {
 
     #[tokio::test]
     async fn una_linea_anulada_y_vuelta_a_cobrar_si_resta_del_lote() {
-        // El otro extremo del filtro. Si la condición fuera «no tiene ningún pago anulado», este
-        // consumo —que sigue vigente, porque el segundo cobro volvió a descontarlo— dejaría de
-        // contar y el lote saldría descuadrado al revés: «sobran 3».
+        // El otro extremo del filtro: el segundo cobro vuelve a descontar del mismo lote y deja SU
+        // propio consumo (STOCK-01). El del cobro anulado no resta; el del nuevo, sí. Si contara
+        // ninguno, el lote saldría descuadrado al revés: «sobran 3».
         let (db, _dir) = db_temporal().await;
         sembrar(&db, SEMILLA_LOTE).await;
         sembrar(&db, VENTA_ANULADA).await;
@@ -467,6 +518,7 @@ mod tests {
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
                    VALUES ('pago2', 'com', '2026-01-02 16:00:00', 'Efectivo', 7.5, 'TOTAL');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago2', 'det');",
+                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago2', 3);",
             ],
         )
         .await;

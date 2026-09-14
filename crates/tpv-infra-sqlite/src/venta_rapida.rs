@@ -1012,11 +1012,16 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
                     db.execute(
                         r#"
-                        INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
-                        VALUES (?1, ?2, ?3)
-                        ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+                        INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+                        VALUES (?1, ?2, ?3, ?4)
+                        ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
                         "#,
-                        vec![Value::Text(id_detalle.clone()), Value::Text(id_lote), Value::Real(take)],
+                        vec![
+                            Value::Text(id_detalle.clone()),
+                            Value::Text(id_lote),
+                            Value::Text(id_pago_final.clone()),
+                            Value::Real(take),
+                        ],
                     )
                     .await
                     .map_err(db_err)?;
@@ -1042,17 +1047,18 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     // sería inventar stock.
                     db.execute(
                         r#"
-                        INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
-                        SELECT ?1, ?2, ?3
+                        INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
+                        SELECT ?1, ?2, ?3, ?4
                         WHERE EXISTS (
                             SELECT 1 FROM Productos
                             WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
                         )
-                        ON CONFLICT(ID_Detalle, ID_Producto) DO NOTHING;
+                        ON CONFLICT(ID_Detalle, ID_Producto, ID_Pago) DO NOTHING;
                         "#,
                         vec![
                             Value::Text(id_detalle.clone()),
                             Value::Text(producto_id.clone()),
+                            Value::Text(id_pago_final.clone()),
                             Value::Real(remaining),
                         ],
                     )

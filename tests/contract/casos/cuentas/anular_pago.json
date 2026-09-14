@@ -1,5 +1,5 @@
 {
-  "descripcion": "Anulacion de un cobro (CUENTA-07): el caso mas grande de cuentas. El pago YA NO SE BORRA -se marca Estado='ANULADO' con quien y por que-, se devuelve el stock consumido (por lote y suelto), se resta el importe del Total_Gastado del cliente ligado por la reserva, y la comanda se reabre porque sus lineas vuelven a estar pendientes (Opcion A: se conservan Detalle_Comanda y Pago_Detalles, y 'cobrada' pasa a significar 'ligada a un pago ACTIVO'). La comanda de la mesa-2 esta ahi para comprobar que reabrir NO pisa a otra comanda abierta de OTRA mesa.",
+  "descripcion": "Anulacion de un cobro (CUENTA-07): el caso mas grande de cuentas. El pago YA NO SE BORRA -se marca Estado='ANULADO' con quien y por que-, se devuelve el stock consumido (por lote y suelto), se resta el importe del Total_Gastado del cliente ligado por la reserva, y la comanda se reabre porque sus lineas vuelven a estar pendientes (Opcion A: se conservan Detalle_Comanda y Pago_Detalles, y 'cobrada' pasa a significar 'ligada a un pago ACTIVO'). La comanda de la mesa-2 esta ahi para comprobar que reabrir NO pisa a otra comanda abierta de OTRA mesa. STOCK-01: la linea det-cobrado-lote ya se habia cobrado antes con pago-0 (anulado por error, de lote-0). Anular pago-1 devuelve SOLO lo que consumio pago-1: lote-0 no se toca.",
   "comando": "cuentas.anular_pago",
   "seed": [
     "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) VALUES ('user-1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
@@ -9,6 +9,7 @@
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto) VALUES ('prod-1', 'cat-1', 'Cerveza', 3.0, 7.0);",
     "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-1', 'prod-1', 'L1', 18);",
+    "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible) VALUES ('lote-0', 'prod-1', 'L0', 5);",
     "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana', 50.0);",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales) VALUES ('res-1', 'cli-1', 'mesa-1', '2026-01-01', '13:00', 'COMIDA', 2);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda) VALUES ('comanda-1', 'MESA', 'mesa-1', 'res-1', '2026-01-01 12:00:00', '2026-01-01 13:00:00', 'Pagada', 12.0);",
@@ -16,11 +17,14 @@
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-cobrado-lote', 'comanda-1', 'prod-1', 2, 3.0);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-cobrado-suelto', 'comanda-1', 'prod-1', 1, 3.0);",
     "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-pendiente', 'comanda-1', 'prod-1', 1, 3.0);",
-    "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det-cobrado-lote', 'lote-1', 2);",
-    "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det-cobrado-suelto', 'prod-1', 1);",
     "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'comanda-1', '2026-01-01 13:00:00', 'Efectivo', 9.0, 'parcial');",
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-cobrado-lote');",
-    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-cobrado-suelto');"
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-cobrado-suelto');",
+    "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-cobrado-lote', 'lote-1', 'pago-1', 2);",
+    "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES ('det-cobrado-suelto', 'prod-1', 'pago-1', 1);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja) VALUES ('pago-0', 'comanda-1', '2026-01-01 12:30:00', 'Efectivo', 6.0, 'parcial', 'ANULADO', '2026-01-01 12:40:00', 'user-1', 'mesa equivocada', 'ERROR');",
+    "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-0', 'det-cobrado-lote');",
+    "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-cobrado-lote', 'lote-0', 'pago-0', 2);"
   ],
   "entrada": {
     "id_pago": "pago-1",
@@ -34,8 +38,8 @@
     "Comandas": "SELECT ID_Comanda, Estado, Total_Comanda, Fecha_Hora_Cierre FROM Comandas",
     "Lotes_Producto": "SELECT ID_Lote, Stock_Disponible FROM Lotes_Producto",
     "Productos": "SELECT ID_Producto, Stock_Suelto FROM Productos",
-    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, Cantidad FROM Lote_Consumos",
-    "Suelto_Consumos": "SELECT ID_Detalle, ID_Producto, Cantidad FROM Suelto_Consumos",
+    "Lote_Consumos": "SELECT ID_Detalle, ID_Lote, ID_Pago, Cantidad FROM Lote_Consumos",
+    "Suelto_Consumos": "SELECT ID_Detalle, ID_Producto, ID_Pago, Cantidad FROM Suelto_Consumos",
     "Clientes": "SELECT ID_Cliente, Total_Gastado FROM Clientes",
     "Movimientos_Caja": "SELECT Tipo, ID_Pago, ID_Usuario, Importe, Metodo_Pago, Motivo FROM Movimientos_Caja"
   }

@@ -206,8 +206,8 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 		// una TEXT PRIMARY KEY calculada en SQL se re-evaluaría al replicar y la nube y la Main
 		// acabarían con dos filas distintas para el mismo hecho.
 		idStep(null),
-		// 1) Devolver el stock consumido por los detalles del pago. La traza (`Lote_Consumos`) se
-		//    CONSERVA: ya no es ella la que impide el doble abono, sino el `Estado` del pago.
+		// 1) Devolver el stock que consumió ESTE pago: por el pago del consumo y no por sus líneas
+		//    (STOCK-01). La traza (`Lote_Consumos`) se CONSERVA: el doble abono lo impide el `Estado`.
 		//
 		//    SÓLO si la venta no existió (FISCAL-01). En una devolución el cliente se llevó la
 		//    consumición: abonar el stock inventaría unidades que no están en la estantería.
@@ -218,14 +218,12 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
 				    SELECT IFNULL(SUM(lc.Cantidad),0)
 				    FROM Lote_Consumos lc
-				    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
-				    WHERE pd.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
+				    WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
 				)
 				WHERE ID_Lote IN (
 				    SELECT lc.ID_Lote
 				    FROM Lote_Consumos lc
-				    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
-				    WHERE pd.ID_Pago = ?1
+				    WHERE lc.ID_Pago = ?1
 				)
 				  AND (SELECT COALESCE(Estado,'ACTIVO') FROM Pagos WHERE ID_Pago = ?1) = 'ACTIVO';
 			`,
@@ -239,14 +237,12 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
 				    SELECT IFNULL(SUM(sc.Cantidad),0)
 				    FROM Suelto_Consumos sc
-				    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
-				    WHERE pd.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
+				    WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
 				)
 				WHERE ID_Producto IN (
 				    SELECT sc.ID_Producto
 				    FROM Suelto_Consumos sc
-				    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
-				    WHERE pd.ID_Pago = ?1
+				    WHERE sc.ID_Pago = ?1
 				)
 				  AND (SELECT COALESCE(Estado,'ACTIVO') FROM Pagos WHERE ID_Pago = ?1) = 'ACTIVO';
 			`,

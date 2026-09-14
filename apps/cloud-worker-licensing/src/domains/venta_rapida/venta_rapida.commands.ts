@@ -358,11 +358,11 @@ export function cobrarFraccionado(
 			steps.push({
 				kind: "execute",
 				sql: `
-					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
-					VALUES (?1, ?2, ?3)
-					ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+					VALUES (?1, ?2, ?3, ?4)
+					ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
 				`,
-				args: [a.id_detalle, a.id_lote, a.take],
+				args: [a.id_detalle, a.id_lote, plan.id_pago, a.take],
 			});
 		}
 	}
@@ -387,15 +387,15 @@ export function cobrarFraccionado(
 			steps.push({
 				kind: "execute",
 				sql: `
-					INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad)
-					SELECT ?1, ?2, ?3
+					INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
+					SELECT ?1, ?2, ?3, ?4
 					WHERE EXISTS (
 						SELECT 1 FROM Productos
 						WHERE ID_Producto = ?2 AND Stock_Suelto IS NOT NULL
 					)
-					ON CONFLICT(ID_Detalle, ID_Producto) DO NOTHING;
+					ON CONFLICT(ID_Detalle, ID_Producto, ID_Pago) DO NOTHING;
 				`,
-				args: [s.id_detalle, s.id_producto, s.take],
+				args: [s.id_detalle, s.id_producto, plan.id_pago, s.take],
 			});
 		}
 	}

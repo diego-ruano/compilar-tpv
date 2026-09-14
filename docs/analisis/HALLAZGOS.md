@@ -11,15 +11,13 @@
 >
 > Severidad: 🔴 bloqueante · 🟠 alta · 🟡 media · 🔵 baja
 >
-> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar. FIS-05 y STOCK-01 son
-> decisiones de alcance (la segunda, junto con VENTA-01), TEST-03 salió de arreglar
-> SYNC-20, y CFG-04 es mantenimiento.
+> **Estado (2026-09-14):** nada de lo que queda impide entrar en un bar. FIS-05 es una decisión de
+> alcance, TEST-03 salió de arreglar SYNC-20, y CFG-04 es mantenimiento.
 
 | ID | Sev | Hallazgo | Estado |
 |----|-----|----------|--------|
 | FIS-05 | 🟡 | El modo formación sólo limpia lo fiscal: caja, stock y estadísticas quedan sucios | Sin empezar |
 | TEST-03 | 🟡 | Cada recorrido E2E estrena su equipo y su tenant: seis bases de Turso por tanda | Sin empezar |
-| STOCK-01 | 🟡 | Doble abono cruzado de lotes al anular un cobro re-cobrado | Sin empezar |
 | CFG-04 | 🔵 | La guardia de fuentes de tiempo es un `debug_assert!`: en release no protege | Sin empezar |
 
 ---
@@ -69,23 +67,6 @@ estrena su licencia (y por tanto su tenant) **a propósito** — CLAUDE.md §16 
 licencia fija el catch-up arrastra lo que dejaron las tandas anteriores, y eso se vio como un fichaje
 que la app rechazaba unas veces sí y otras no. Agrupar tiene que reducir el número de tenants
 compartiendo uno **dentro** de un grupo, no reutilizando uno **entre** tandas.
-
-## STOCK-01 🟡 · Doble abono cruzado de lotes al anular
-
-[`anular_pago`](../../crates/tpv-infra-sqlite/src/cuentas.rs#L685) devuelve stock uniendo
-`Lote_Consumos ⋈ Pago_Detalles` **por `ID_Detalle`**, sin filtrar por qué cobro generó cada consumo.
-Y `consumir_stock_fefo` inserta con `ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING`, así que una línea
-cobrada → anulada → re-cobrada **desde otro lote** acaba con dos filas de `Lote_Consumos` para el
-mismo `ID_Detalle`. La segunda anulación abona **los dos** lotes.
-
-El guardia por `Estado` que el código documenta impide anular dos veces el mismo pago; no impide
-esto. La secuencia hace falta que sea justo ésa (que el lote original se agote entre las dos ventas),
-así que es raro — y la reconciliación lo detecta, porque compara `Stock_Disponible` contra los
-consumos vigentes. Pero cuando lo detecta el stock ya está mal y el aviso no explica por qué.
-
-**Qué haría falta.** Que `Lote_Consumos` sepa de qué cobro viene, o que el abono se limite a los
-lotes que ese cobro consumió. Lo primero es un cambio de esquema; lo segundo exige guardar algo que
-hoy no se guarda. Conviene decidirlo con VENTA-01 (devoluciones) delante, que va a tocar lo mismo.
 
 
 ## CFG-04 🔵 · La guardia de fuentes de tiempo es un `debug_assert!`

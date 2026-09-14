@@ -556,6 +556,8 @@ export function updateDetalleNota(idDetalle: string, nota: string | null): Built
 // en el route handler. Cada UPDATE lleva el ID_Lote y la cantidad como literales.
 function stockConsumoSteps(
 	allocations: { id_lote: string; take: number; id_detalle: string | null }[],
+	// STOCK-01: el cobro que hace el consumo. Los pasos van DESPUÉS del INSERT del pago (FK).
+	idPago: typeof REF_ID_PAGO,
 ) {
 	const steps: any[] = [];
 	for (const a of allocations) {
@@ -572,11 +574,11 @@ function stockConsumoSteps(
 			steps.push({
 				kind: "execute",
 				sql: `
-					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad)
-					VALUES (?1, ?2, ?3)
-					ON CONFLICT(ID_Detalle, ID_Lote) DO NOTHING;
+					INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+					VALUES (?1, ?2, ?3, ?4)
+					ON CONFLICT(ID_Detalle, ID_Lote, ID_Pago) DO NOTHING;
 				`,
-				args: [a.id_detalle, a.id_lote, a.take],
+				args: [a.id_detalle, a.id_lote, idPago, a.take],
 			});
 		}
 	}
@@ -686,7 +688,7 @@ export function cobrarDetalles(
 						args: [REF_ID_PAGO, input.id_comanda, ...input.detalle_ids],
 					},
 					// MESA-01: descuento de stock/lotes (FEFO) de las lineas cobradas.
-					...stockConsumoSteps(plan.allocations),
+					...stockConsumoSteps(plan.allocations, REF_ID_PAGO),
 					{
 						kind: "execute",
 						sql: `

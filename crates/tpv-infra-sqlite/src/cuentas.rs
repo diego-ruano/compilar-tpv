@@ -685,22 +685,22 @@ impl CuentasRepository for SqliteCuentasRepository {
             // Lo que hacen igual las dos es dejar de contar como venta, y por eso comparten
             // `Estado = 'ANULADO'`: al cajón le da igual por qué salió el dinero.
             if clase.devuelve_las_lineas() {
-            // 2) Devolver el stock de lotes consumido por las líneas de este pago. La traza
-            //    (`Lote_Consumos`) se CONSERVA: ya no es ella la que impide el doble abono.
+            // 2) Devolver el stock de lotes que consumió ESTE cobro. Se busca por el cobro del
+            //    consumo y no por sus líneas (STOCK-01): una línea anulada y vuelta a cobrar tiene un
+            //    consumo por cobro, y por la línea se devolvía también el del cobro anulado antes,
+            //    que ya había vuelto. La traza se CONSERVA: el doble abono lo impide el `Estado`.
             conn.execute(
                 r#"
                 UPDATE Lotes_Producto
                 SET Stock_Disponible = COALESCE(Stock_Disponible,0) + (
                     SELECT IFNULL(SUM(lc.Cantidad),0)
                     FROM Lote_Consumos lc
-                    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
-                    WHERE pd.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
+                    WHERE lc.ID_Pago = ?1 AND lc.ID_Lote = Lotes_Producto.ID_Lote
                 )
                 WHERE ID_Lote IN (
                     SELECT lc.ID_Lote
                     FROM Lote_Consumos lc
-                    JOIN Pago_Detalles pd ON pd.ID_Detalle = lc.ID_Detalle
-                    WHERE pd.ID_Pago = ?1
+                    WHERE lc.ID_Pago = ?1
                 );
                 "#,
                 vec![Value::Text(id_pago.clone())],
@@ -715,14 +715,12 @@ impl CuentasRepository for SqliteCuentasRepository {
                 SET Stock_Suelto = COALESCE(Stock_Suelto,0) + (
                     SELECT IFNULL(SUM(sc.Cantidad),0)
                     FROM Suelto_Consumos sc
-                    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
-                    WHERE pd.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
+                    WHERE sc.ID_Pago = ?1 AND sc.ID_Producto = Productos.ID_Producto
                 )
                 WHERE ID_Producto IN (
                     SELECT sc.ID_Producto
                     FROM Suelto_Consumos sc
-                    JOIN Pago_Detalles pd ON pd.ID_Detalle = sc.ID_Detalle
-                    WHERE pd.ID_Pago = ?1
+                    WHERE sc.ID_Pago = ?1
                 );
                 "#,
                 vec![Value::Text(id_pago.clone())],
@@ -957,12 +955,12 @@ mod tests_anulacion {
            VALUES ('det-suelto', 'com', 'prod', 1, 3.0);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
            VALUES ('det-pendiente', 'com', 'prod', 1, 3.0);",
-        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, Cantidad) VALUES ('det-lote', 'lote', 2);",
-        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det-suelto', 'prod', 1);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
            VALUES ('pago', 'com', '2026-01-02 13:00:00', 'Efectivo', 9.0, 'PARCIAL');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-lote');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-suelto');",
+        "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-lote', 'lote', 'pago', 2);",
+        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad) VALUES ('det-suelto', 'prod', 'pago', 1);",
     ];
 
     fn repo(db: &Arc<Db>) -> SqliteCuentasRepository {
@@ -986,6 +984,47 @@ mod tests_anulacion {
         let row = rows.next().await.unwrap()?;
         crate::mapping::v_string(row.get_value(0).unwrap())
     }
+
+    /* ── STOCK-01 ─────────────────────────────────────────────────────────────────────────── */
+
+    /// Una línea cobrada, anulada y vuelta a cobrar de OTRO lote —porque el primero se agotó entre
+    /// medias— tiene un consumo por cobro. Anular el segundo cobro devuelve sólo lo suyo: lo del
+    /// primero ya volvió a su lote cuando se anuló aquél, y devolverlo otra vez inventaría stock.
+    #[tokio::test]
+    async fn anular_devuelve_solo_lo_que_consumio_ese_cobro() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, VENTA_DE_MESA).await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible)
+                   VALUES ('lote-viejo', 'prod', 'L-0', 5);",
+                "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
+                                    Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja)
+                   VALUES ('pago-viejo', 'com', '2026-01-02 12:30:00', 'Efectivo', 6.0, 'PARCIAL',
+                           'ANULADO', '2026-01-02 12:40:00', 'u1', 'mesa equivocada', 'ERROR');",
+                "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-viejo', 'det-lote');",
+                "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
+                   VALUES ('det-lote', 'lote-viejo', 'pago-viejo', 2);",
+            ],
+        )
+        .await;
+
+        assert!(repo(&db).anular_pago(args("pago")).await.unwrap());
+
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote';").await,
+            20.0,
+            "lo que consumió este cobro vuelve a su lote"
+        );
+        assert_eq!(
+            escalar(&db, "SELECT Stock_Disponible FROM Lotes_Producto WHERE ID_Lote='lote-viejo';")
+                .await,
+            5.0,
+            "lo del cobro que se anuló antes ya había vuelto: no se devuelve dos veces"
+        );
+    }
+
 
     /* ── Lo que ya no se destruye ─────────────────────────────────────────────────────── */
 
@@ -2254,7 +2293,6 @@ mod tests_anular_vs_devolver {
            VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Pagada', 3.0);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
            VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
-        "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, Cantidad) VALUES ('det', 'prod', 1);",
     ];
 
     /// Cobra por el camino real (para que se emita el registro fiscal) y devuelve el `ID_Pago`.

@@ -536,12 +536,22 @@ ON Detalle_Comanda(ID_Producto);
 CREATE TABLE IF NOT EXISTS Lote_Consumos (
   ID_Detalle TEXT NOT NULL,
   ID_Lote TEXT NOT NULL,
+  -- STOCK-01: el COBRO que hizo este consumo. Una linea cobrada, anulada y vuelta a cobrar deja un
+  -- consumo por cobro, y de lotes distintos si el primero se agoto entre medias. Sin saber de que
+  -- cobro es cada uno, anular el segundo devolvia tambien lo del primero, que ya habia vuelto a su
+  -- lote: stock fantasma. Anular devuelve SOLO lo de su cobro. Se inserta DESPUES del pago: la FK
+  -- se comprueba sentencia a sentencia, tambien al replicarla en la nube.
+  ID_Pago TEXT NOT NULL,
   Cantidad REAL NOT NULL,
-  PRIMARY KEY (ID_Detalle, ID_Lote),
+  PRIMARY KEY (ID_Detalle, ID_Lote, ID_Pago),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
   FOREIGN KEY (ID_Lote) REFERENCES Lotes_Producto(ID_Lote),
+  FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE CASCADE,
   CHECK (Cantidad > 0)
 );
+
+CREATE INDEX IF NOT EXISTS idx_lote_consumos_pago
+ON Lote_Consumos(ID_Pago);
 
 CREATE INDEX IF NOT EXISTS idx_lote_consumos_lote
 ON Lote_Consumos(ID_Lote);
@@ -561,11 +571,17 @@ ON Lote_Consumos(ID_Lote);
 CREATE TABLE IF NOT EXISTS Suelto_Consumos (
   ID_Detalle  TEXT NOT NULL,
   ID_Producto TEXT NOT NULL,
+  -- STOCK-01: el cobro que hizo este consumo, por lo mismo que en Lote_Consumos.
+  ID_Pago     TEXT NOT NULL,
   Cantidad    REAL NOT NULL,
-  PRIMARY KEY (ID_Detalle, ID_Producto),
+  PRIMARY KEY (ID_Detalle, ID_Producto, ID_Pago),
   FOREIGN KEY (ID_Detalle) REFERENCES Detalle_Comanda(ID_Detalle) ON DELETE CASCADE,
+  FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE CASCADE,
   CHECK (Cantidad > 0)
 );
+
+CREATE INDEX IF NOT EXISTS idx_suelto_consumos_pago
+ON Suelto_Consumos(ID_Pago);
 
 CREATE INDEX IF NOT EXISTS idx_suelto_consumos_producto
 ON Suelto_Consumos(ID_Producto);

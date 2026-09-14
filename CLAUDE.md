@@ -1292,12 +1292,18 @@ Un cobro anulado **no se borra**. Diseño y porqués abajo; el plan que lo intro
   anulación no abonaba nada. Ahora esas trazas se conservan, así que lo único que impide abonar el
   stock dos veces —y descontar el gasto del cliente dos veces— es que `anular_pago` salga antes si
   el pago ya está `ANULADO`. Es el punto donde más fácil es meter un bug silencioso.
-- **La reconciliación cuenta un consumo salvo que TODOS los pagos de su línea estén anulados.** No
-  «si tiene un pago activo»: un consumo que nunca llegó a ligarse a un cobro sigue habiendo salido
-  del lote, y una línea anulada y vuelta a cobrar también. Y de las tres consultas,
-  `recalcular_gasto` **escribe** (por `execute`, así que sale por el outbox): sin el filtro, el aviso
-  falso de descuadre inducía a pulsar «recalcular» y grabar un total que incluye el cobro anulado,
-  en local y en la nube.
+- **Cada consumo de stock sabe qué cobro lo hizo (STOCK-01)**, y lo que lo devuelve o lo cuenta
+  mira ESE cobro, nunca la línea. Una línea cobrada, anulada y vuelta a cobrar tiene un consumo por
+  cobro —de lotes distintos si el primero se agotó entre medias—, y buscando por la línea, anular el
+  segundo cobro devolvía también lo del primero, que ya había vuelto: stock fantasma. Reglas:
+  - **Anular devuelve sólo lo de su cobro** (`Lote_Consumos.ID_Pago`, `Suelto_Consumos.ID_Pago`).
+  - **La reconciliación cuenta un consumo salvo que su cobro se anulara POR ERROR.** Una devolución
+    no devuelve el stock —el cliente se llevó la consumición—, así que su consumo sigue restando.
+  - **El consumo se escribe DESPUÉS del pago.** La FK se comprueba sentencia a sentencia, también al
+    replicarla en la nube: al revés, el cobro revienta.
+  - De las tres consultas de la reconciliación, `recalcular_gasto` **escribe** (por `execute`, así
+    que sale por el outbox): un aviso falso de descuadre inducía a pulsar «recalcular» y grabar un
+    total malo, en local y en la nube.
 - **`Pago_Detalles.ID_Detalle` va con `ON DELETE CASCADE`.** Una línea devuelta a la mesa tiene que
   poder quitarse; si la FK lo impidiera quedaría visible y congelada, que es peor que el
   comportamiento que esto arregla. No se pierde auditoría: lo que prueba la anulación es la fila de
