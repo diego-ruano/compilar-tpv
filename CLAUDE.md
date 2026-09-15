@@ -495,7 +495,7 @@ no sólo en dev.
 | Reparación por estado | `infra-sqlite/src/sync_reparacion.rs` | SYNC-22: reencola la fila APARTADA tal como está ahora, no la sentencia que fue rechazada |
 | Contraste con la nube | `sync.routes.ts::/verificar` + `sync.rs::contrastar_con_la_nube` + job `verificar_nube` | SYNC-24: comprueba a diario que las dos bases dicen lo mismo, repara e informa a Axiom |
 | Determinismo temporal | `db.rs::rewrite_now_literals` + `durableObjects/tenantHub.tiempo.ts` | CFG-04: toda forma de «ahora» se fija a literal antes de ejecutar (la Main ejecuta en local la misma sentencia que sube) o de aplicar (el DO, con la hora del emisor). Con tests (`test/tenantHubTiempo.test.ts`) |
-| WS Main | `shared/lib/useMainSocket.ts` | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`) |
+| WS Main | `shared/lib/socketMain.ts` (lo arranca el hook `useMainSocket.ts`) | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`). Vive fuera de React para probarlo con un socket y un reloj falsos (`test/socketMain.test.ts`); el hook sólo le avisa de que vuelve la red, del foco y del `pulso` |
 | Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
 | WS Handy | `shared/lib/useHandySocket.ts` | Solo recibe `change` y dispara refetch (sin BD local) |
 | Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
@@ -686,7 +686,7 @@ catálogo se crearon el primer día.
 | Panel de copias | `features/configuracion/sections/Conectividad.tsx` | Verlas y sacarlas **antes** de necesitarlas (ahí no se restaura) |
 | Base que no abre | `lib.rs::run` (arranque sin `Db`) + `commands/recovery.rs::asegurar_base_para_recuperar` | Arrancar igual y apartar el fichero ilegible para reconstruir |
 | Bloqueo del login | `_Recovery_State.Reconciliation_Pending` (en la propia `data.db`) | Restaurado ≠ utilizable |
-| Reconciliación | `shared/lib/recoverySync.ts` + `useMainSocket` | catch-up → outbox → catch-up, hasta converger |
+| Reconciliación | `shared/lib/recoverySync.ts` + `socketMain.ts` | catch-up → outbox → catch-up, hasta converger |
 | Desbloqueo | `commands/recovery.rs::recovery_complete` | Última barrera: outbox 0, checkpoint ≥ high-water |
 | Pantalla | `src/app/pages/RecuperarDatos.tsx` | Único sitio desde el que se dispara |
 
@@ -893,7 +893,7 @@ tras un fallo parcial).
 ### Qué NO va aquí (a propósito)
 
 - **Ciclo de vida del WebSocket** (ping, drenado del outbox, reconexión): es una máquina de estados
-  de la conexión, no un pulso periódico. Vive en `useMainSocket` (§9).
+  de la conexión, no un pulso periódico. Vive en `socketMain.ts` (§9).
 - **Ciclo de vida de una pantalla** (polling de un panel abierto, cuentas atrás, debounces): ahí el
   montaje/desmontaje del componente ya es la política correcta.
 - **Telemetría**: mantiene su hilo propio y su spool con backoff; su drenado (1 s) es una cola
