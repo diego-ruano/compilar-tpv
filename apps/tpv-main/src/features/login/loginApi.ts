@@ -4,7 +4,7 @@
 // Sustituye dualCall/op_id/outbox/afterRemoteOk. Conserva tipos, mappers y firmas.
 
 import { invokeClient } from "@tpv/client";
-import type { LocalBackupInfo, RecoveryStatus } from "@tpv/contracts";
+import type { CodigoPinEnviado, LocalBackupInfo, RecoveryStatus } from "@tpv/contracts";
 
 export type DbUser = {
     id_usuario: string;
@@ -305,6 +305,38 @@ export async function uploadInitialSetupToCloud(params: {
             id_usuario: params.idUsuario,
             email: String(params.email ?? ""),
             pin: String(params.pin ?? ""),
+        },
+    });
+}
+
+/* =========================================================
+   Recuperar el PIN de un administrador (LOGIN-07)
+========================================================= */
+
+/** Manda un código al correo de la licencia. Sólo en la Main y sólo para administradores. */
+export async function solicitarCodigoPin(
+    idUsuario: string,
+): Promise<{ emailHint: string; minutos: number }> {
+    const r = await invokeClient<CodigoPinEnviado>("login_recuperar_pin_solicitar", {
+        args: { id_usuario: idUsuario },
+    });
+    return { emailHint: r.email_hint, minutos: r.minutos };
+}
+
+/**
+ * Verifica el código y, si vale, guarda el PIN nuevo. Es UN comando a propósito: verificar y
+ * guardar por separado dejaría llamar sólo a lo segundo.
+ */
+export async function confirmarCodigoPin(params: {
+    idUsuario: string;
+    codigo: string;
+    pinNuevo: string;
+}): Promise<void> {
+    await invokeClient<string>("login_recuperar_pin_confirmar", {
+        args: {
+            id_usuario: params.idUsuario,
+            codigo: params.codigo,
+            pin_nuevo: params.pinNuevo,
         },
     });
 }

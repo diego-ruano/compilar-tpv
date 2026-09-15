@@ -1,7 +1,8 @@
 // src/domains/licensing/licenseEmails.ts
 //
-// Los tres correos del ciclo de vida de una licencia. Backend: Cloudflare Email Service
-// (binding `EMAIL`), el mismo que usa el envío de pedidos a proveedores — sin claves de API.
+// Los correos del ciclo de vida de una licencia, más los de recuperar el PIN de un administrador
+// (LOGIN-07), que van al mismo buzón: el del titular. Backend: Cloudflare Email Service (binding
+// `EMAIL`), el mismo que usa el envío de pedidos a proveedores — sin claves de API.
 //
 // Ninguno de estos envíos puede tumbar la operación que los dispara: si el correo falla, se
 // registra y se sigue. Emitir una licencia y cobrarla es lo importante; el email es entrega.
@@ -191,6 +192,61 @@ export async function sendDeviceChangedNoticeEmail(
 	return enviar(env, {
 		to: args.to,
 		subject: "Tu TPV se ha activado en un equipo nuevo",
+		html,
+		text,
+	});
+}
+
+/* ============================================================
+   4. Recuperar el PIN de un administrador (LOGIN-07)
+============================================================ */
+
+export async function sendPinRecoveryCodeEmail(
+	env: Env,
+	args: { to: string; code: string; minutes: number },
+): Promise<boolean> {
+	const html = layout(
+		"Código para recuperar el PIN del TPV",
+		`<p>Alguien (esperamos que tú) ha pedido desde tu TPV recuperar el PIN de un administrador. Escribe este código en la pantalla del TPV:</p>
+     ${destacado(args.code)}
+     <p style="font-size:14px;color:#6b7280">Caduca en ${args.minutes} minutos y solo sirve en el TPV desde el que se pidió.</p>
+     <p style="font-size:14px;color:#b91c1c"><strong>¿No lo has pedido tú?</strong> No lo compartas con nadie: sin este código
+     no se puede cambiar el PIN. Si te siguen llegando, alguien está intentándolo desde tu TPV.</p>`,
+	);
+
+	const text = `Código para recuperar el PIN del TPV:
+
+    ${args.code}
+
+Escríbelo en la pantalla del TPV. Caduca en ${args.minutes} minutos y solo sirve en el TPV desde el que se pidió.
+
+¿No lo has pedido tú? No lo compartas con nadie: sin este código no se puede cambiar el PIN.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Código para recuperar el PIN del TPV",
+		html,
+		text,
+	});
+}
+
+export async function sendPinChangedNoticeEmail(
+	env: Env,
+	args: { to: string },
+): Promise<boolean> {
+	const html = layout(
+		"Se ha cambiado el PIN de un administrador",
+		`<p>Se acaba de usar un código enviado a este correo para cambiar el PIN de un administrador de tu TPV.</p>
+     <p style="font-size:14px;color:#b91c1c"><strong>¿No has sido tú?</strong> Responde a este correo cuanto antes.</p>`,
+	);
+
+	const text = `Se acaba de usar un código enviado a este correo para cambiar el PIN de un administrador de tu TPV.
+
+¿No has sido tú? Responde a este correo cuanto antes.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Se ha cambiado el PIN de un administrador",
 		html,
 		text,
 	});

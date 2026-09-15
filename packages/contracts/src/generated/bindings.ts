@@ -309,6 +309,15 @@ export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_re
 
 export type CobroVRItem = { producto_id: string, precio: number, };
 
+/**
+ * El código ya va de camino. Sólo la pista del correo: el correo entero no sale de la nube.
+ */
+export type CodigoPinEnviado = { 
+/**
+ * `a***@bar.com`.
+ */
+email_hint: string, minutos: number, };
+
 export type ComandaBarraListItem = { id_comanda: string, fecha_hora_apertura: string, estado: string, total_pendiente: number, total_comanda: number, pendientes_cocina: number, pendientes_pago: number, };
 
 export type ComandaBarraRow = { ID_Comanda: string, Fecha_Hora_Apertura: string, Estado: string, Total_Pendiente: number, Total_Comanda: number, Pendientes_Cocina: number, Pendientes_Pago: number, };
@@ -334,6 +343,12 @@ export type ConfirmarCierreInput = {
  * ignora, para que nadie pueda reescribir el punto de partida a posteriori.
  */
 fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, };
+
+/**
+ * Código y PIN nuevo van JUNTOS, en un solo comando: si verificar el código y guardar el PIN
+ * fueran dos llamadas, cualquiera con el IPC podría hacer sólo la segunda.
+ */
+export type ConfirmarCodigoPinInput = { id_usuario: string, codigo: string, pin_nuevo: string, };
 
 export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
 
@@ -1139,6 +1154,8 @@ export type SetupPendiente = { pendiente: boolean,
 requiere_recuperacion: boolean, id_usuario?: string, nombre?: string, email?: string, };
 
 export type SigB64 = { sigB64: string, };
+
+export type SolicitarCodigoPinInput = { id_usuario: string, };
 
 /**
  * Una sentencia de escritura ya resuelta. `args` son escalares JSON (string/number/bool/null)

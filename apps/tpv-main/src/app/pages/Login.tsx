@@ -34,7 +34,9 @@ import {
     type DbUser,
     type PunchStatus,
 } from "../../features/login/loginApi";
+import RecuperarPinModal from "../../features/login/RecuperarPinModal";
 import { conAviso } from "../../shared/lib/conAviso";
+import { ROL_ADMIN } from "../../shared/lib/permisos";
 
 function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
@@ -97,6 +99,12 @@ export default function Login() {
 
     // Solo visual: mostrar/ocultar el PIN en el display (no afecta a la lógica).
     const [showPin, setShowPin] = useState(false);
+
+    // LOGIN-07: recuperar el PIN por correo. Sólo administradores y sólo en la Main: a los demás
+    // se lo cambia un administrador desde Trabajadores, y la Handy no guarda PINs.
+    const [recuperandoPin, setRecuperandoPin] = useState(false);
+    const puedeRecuperarPin =
+        deviceMode !== "handy" && selectedUser?.nombre_rol === ROL_ADMIN;
 
     // Solo visual: consejo rotativo del panel del PIN.
     const [tipIndex, setTipIndex] = useState(0);
@@ -431,6 +439,8 @@ export default function Login() {
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
             if (!selectedUser) return;
+            // Con el modal abierto, el teclado es suyo: Enter no puede intentar entrar ni fichar.
+            if (recuperandoPin) return;
 
             const el = document.activeElement as HTMLElement | null;
             const tag = el?.tagName?.toLowerCase();
@@ -482,7 +492,7 @@ export default function Login() {
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedUser, isSubmitting, hasEntrada1]);
+    }, [selectedUser, isSubmitting, hasEntrada1, recuperandoPin]);
 
     const mobileFichajeResumen = useMemo(() => {
         if (!selectedUser) return "Selecciona un usuario";
@@ -1047,6 +1057,17 @@ export default function Login() {
                             </button>
                         </div>
 
+                        {puedeRecuperarPin ? (
+                            <button
+                                type="button"
+                                onClick={() => setRecuperandoPin(true)}
+                                disabled={isSubmitting}
+                                className="mt-3 shrink-0 cursor-pointer self-center text-sm font-medium text-accent hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                ¿Has olvidado el PIN?
+                            </button>
+                        ) : null}
+
                         {/* Consejos rotativos (rellenan el espacio inferior del panel) */}
                         <div className="mt-3 hidden min-h-fit shrink-0 items-end sm:flex lg:mt-[clamp(0.5rem,1.5dvh,0.75rem)]">
                             <div className="w-full rounded-2xl border border-border bg-surface-2 p-4">
@@ -1068,6 +1089,19 @@ export default function Login() {
                     </div>
                 </div>
             </div>
+
+            {recuperandoPin && selectedUser ? (
+                <RecuperarPinModal
+                    usuario={selectedUser}
+                    onCerrar={() => setRecuperandoPin(false)}
+                    onRecuperado={() => {
+                        setRecuperandoPin(false);
+                        pinRef.current = "";
+                        setPin("");
+                        toast.success("PIN cambiado", "Ya puedes entrar con tu PIN nuevo.");
+                    }}
+                />
+            ) : null}
         </div>
     );
 }

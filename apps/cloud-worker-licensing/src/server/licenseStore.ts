@@ -98,6 +98,27 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
     `,
 	);
 
+	// LOGIN-07: código para recuperar el PIN de un administrador. Uno por equipo (no por usuario),
+	// para que el tope de envíos no se multiplique recorriendo ids. Ver `recuperarPin.ts`.
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS pin_recovery_codes (
+      tenant_id         TEXT NOT NULL,
+      device_id         TEXT NOT NULL,
+      id_usuario        TEXT NOT NULL,
+      code_hash         TEXT NOT NULL,
+      attempts          INTEGER NOT NULL DEFAULT 0,
+      expires_at_ms     INTEGER NOT NULL,
+      consumed_at_ms    INTEGER,
+      created_at_ms     INTEGER NOT NULL,
+      sends_in_window   INTEGER NOT NULL DEFAULT 1,
+      window_started_ms INTEGER NOT NULL,
+      PRIMARY KEY (tenant_id, device_id)
+    );
+    `,
+	);
+
 	await exec(
 		db,
 		`
@@ -929,6 +950,152 @@ export async function consumeDeviceOtp(
 		[Date.now(), licenseId, newDeviceId],
 	);
 	return (r.rows?.length ?? 0) > 0;
+}
+
+/* ============================================================
+   Código de recuperación del PIN (LOGIN-07)
+============================================================ */
+
+export type PinRecoveryCodeRow = {
+	tenant_id: string;
+	device_id: string;
+	id_usuario: string;
+	code_hash: string;
+	attempts: number;
+	expires_at_ms: number;
+	consumed_at_ms: number | null;
+	created_at_ms: number;
+	sends_in_window: number;
+	window_started_ms: number;
+};
+
+export async function getPinRecoveryCode(
+	db: Client,
+	tenantId: string,
+	deviceId: string,
+): Promise<PinRecoveryCodeRow | null> {
+	const r = await exec(
+		db,
+		`SELECT * FROM pin_recovery_codes WHERE tenant_id=? AND device_id=? LIMIT 1;`,
+		[tenantId, deviceId],
+	);
+	const row = r.rows?.[0] as any;
+	if (!row) return null;
+	return {
+		tenant_id: String(row.tenant_id),
+		device_id: String(row.device_id),
+		id_usuario: String(row.id_usuario),
+		code_hash: String(row.code_hash),
+		attempts: Number(row.attempts ?? 0),
+		expires_at_ms: Number(row.expires_at_ms ?? 0),
+		consumed_at_ms: row.consumed_at_ms == null ? null : Number(row.consumed_at_ms),
+		created_at_ms: Number(row.created_at_ms ?? 0),
+		sends_in_window: Number(row.sends_in_window ?? 0),
+		window_started_ms: Number(row.window_started_ms ?? 0),
+	};
+}
+
+/** Guarda el código (sólo su HMAC). Pedir otro sustituye al anterior y reinicia los intentos. */
+export async function putPinRecoveryCode(
+	db: Client,
+	args: {
+		tenantId: string;
+		deviceId: string;
+		idUsuario: string;
+		codeHash: string;
+		expiresAtMs: number;
+		nowMs: number;
+		sendsInWindow: number;
+		windowStartedMs: number;
+	},
+): Promise<void> {
+	await exec(
+		db,
+		`
+    INSERT INTO pin_recovery_codes (
+      tenant_id, device_id, id_usuario, code_hash, attempts, expires_at_ms, consumed_at_ms,
+      created_at_ms, sends_in_window, window_started_ms
+    ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?, ?)
+    ON CONFLICT(tenant_id, device_id) DO UPDATE SET
+      id_usuario=excluded.id_usuario,
+      code_hash=excluded.code_hash,
+      attempts=0,
+      expires_at_ms=excluded.expires_at_ms,
+      consumed_at_ms=NULL,
+      created_at_ms=excluded.created_at_ms,
+      sends_in_window=excluded.sends_in_window,
+      window_started_ms=excluded.window_started_ms;
+    `,
+		[
+			args.tenantId,
+			args.deviceId,
+			args.idUsuario,
+			args.codeHash,
+			args.expiresAtMs,
+			args.nowMs,
+			args.sendsInWindow,
+			args.windowStartedMs,
+		],
+	);
+}
+
+/**
+ * Reserva un intento ANTES de comparar el código, en una sola sentencia: devuelve el número de
+ * intento reservado, o `null` si ya no quedan (o el código está consumido). Comprobar primero y
+ * sumar después dejaría pasar a la vez a todas las peticiones concurrentes.
+ */
+export async function reservePinRecoveryAttempt(
+	db: Client,
+	tenantId: string,
+	deviceId: string,
+	maxAttempts: number,
+): Promise<number | null> {
+	const r = await exec(
+		db,
+		`
+    UPDATE pin_recovery_codes
+    SET attempts = attempts + 1
+    WHERE tenant_id=? AND device_id=? AND consumed_at_ms IS NULL AND attempts < ?
+    RETURNING attempts;
+    `,
+		[tenantId, deviceId, maxAttempts],
+	);
+	const row = r.rows?.[0] as any;
+	return row ? Number(row.attempts) : null;
+}
+
+/** Consumo atómico: sólo consume si sigue sin consumir. */
+export async function consumePinRecoveryCode(
+	db: Client,
+	tenantId: string,
+	deviceId: string,
+	nowMs: number,
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`
+    UPDATE pin_recovery_codes
+    SET consumed_at_ms = ?
+    WHERE tenant_id=? AND device_id=? AND consumed_at_ms IS NULL
+    RETURNING tenant_id;
+    `,
+		[nowMs, tenantId, deviceId],
+	);
+	return (r.rows?.length ?? 0) > 0;
+}
+
+/** Deja el código inservible sin borrar la fila: el tope de envíos por hora vive en ella. */
+export async function voidPinRecoveryCode(
+	db: Client,
+	tenantId: string,
+	deviceId: string,
+	nowMs: number,
+): Promise<void> {
+	await exec(
+		db,
+		`UPDATE pin_recovery_codes SET consumed_at_ms=? WHERE tenant_id=? AND device_id=?;`,
+		[nowMs, tenantId, deviceId],
+	);
 }
 
 /* ============================================================

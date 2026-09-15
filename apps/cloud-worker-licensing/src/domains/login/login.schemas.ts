@@ -8,6 +8,7 @@ import type {
 	LoginUserArgs,
 	PunchInput as ContractPunchInput,
 	SetTurnoPartidoInput as ContractSetTurnoPartidoInput,
+	SolicitarCodigoPinInput,
 } from "@tpv/contracts";
 
 const idStr = z.string().trim().min(1);
@@ -42,6 +43,18 @@ export const syncInitialSetupSchema = z.object({
 	id_usuario: idStr,
 	email: z.string().trim().email("email invalid"),
 	pin: z.string().trim().min(4, "PIN demasiado corto"),
+});
+
+// LOGIN-07: recuperar el PIN de un administrador. El PIN nuevo NO viaja: la nube sólo dice si el
+// código vale y el PIN lo guarda la Main. Por eso `verificar` no tiene contrapartida exacta en Rust
+// (el DTO de la Main lleva además `pin_nuevo`) y no lleva drift-guard; `solicitar` sí.
+export const solicitarCodigoPinSchema = z.object({
+	id_usuario: idStr,
+});
+
+export const verificarCodigoPinSchema = z.object({
+	id_usuario: idStr,
+	codigo: z.string().trim().min(1, "codigo required"),
 });
 
 export const punchSchema = z.object({
@@ -79,3 +92,4 @@ type _GLoginUser = Assert<SameKeys<z.infer<typeof loginUserSchema>, LoginUserInp
 type _GSetTurnoPartido = Assert<SameKeys<z.infer<typeof setTurnoPartidoSchema>, SetTurnoPartidoInput>>;
 type _GCompleteInitialSetup = Assert<SameKeys<z.infer<typeof completeInitialSetupSchema>, CompleteInitialSetupInput>>;
 type _GPunch = Assert<SameKeys<z.infer<typeof punchSchema>, PunchInput>>;
+type _GSolicitarCodigoPin = Assert<SameKeys<z.infer<typeof solicitarCodigoPinSchema>, SolicitarCodigoPinInput>>;

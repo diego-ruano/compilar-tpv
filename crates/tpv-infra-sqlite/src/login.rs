@@ -727,6 +727,56 @@ impl LoginRepository for SqliteLoginRepository {
         exec_apply_initial_setup(&db, id_usuario, email_nuevo.to_string(), new_hash).await
     }
 
+    /// LOGIN-07. Esto no pide PIN actual, así que no puede servir para cambiárselo a otro rol aunque
+    /// alguien lo llame mal: el filtro de administrador activo va aquí, no sólo en el caso de uso.
+    async fn restablecer_pin_admin(&self, id_usuario: &str, pin_nuevo: &str) -> AppResult<()> {
+        let hash = hash_pin(pin_nuevo).map_err(AppError::validation)?;
+
+        {
+            let db = self.db.write().await;
+
+            // Se comprueba ANTES de escribir, y no mirando las filas que tocó el `UPDATE`: una
+            // escritura que no cambia nada se captura igual en el outbox y subiría a la nube como
+            // una sentencia vacía. Dentro del mismo cerrojo, así que nadie cambia el rol entre medias.
+            let mut rows = db
+                .query(
+                    r#"
+                    SELECT 1
+                    FROM Usuarios u
+                    JOIN Roles r ON r.ID_Rol = u.ID_Rol
+                    WHERE u.ID_Usuario = ?1 AND u.Estado = 'Activo' AND r.Nombre_Rol = 'Administrador'
+                    LIMIT 1;
+                    "#,
+                    vec![Value::Text(id_usuario.to_string())],
+                )
+                .await
+                .map_err(db_err)?;
+            if rows.next().await.map_err(db_err)?.is_none() {
+                return Err(AppError::not_found("No hay ningún administrador activo con ese usuario"));
+            }
+
+            // Por `execute` y no por `raw()`: el hash tiene que subir por el outbox, o la Handy
+            // seguiría entrando con el PIN viejo. El filtro se repite como segunda red.
+            db.execute(
+                r#"
+                UPDATE Usuarios
+                SET Password_Hash = ?2
+                WHERE ID_Usuario = ?1
+                  AND Estado = 'Activo'
+                  AND ID_Rol IN (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador');
+                "#,
+                vec![Value::Text(id_usuario.to_string()), Value::Text(hash)],
+            )
+            .await
+            .map_err(db_err)?;
+        }
+
+        // Quien acaba de demostrar que es el titular no puede seguir bloqueado por los intentos
+        // fallidos que le han traído hasta aquí. Best-effort, como en el login.
+        let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
+        Ok(())
+    }
+
     async fn punch(
         &self,
         id_usuario: &str,
@@ -780,5 +830,97 @@ impl LoginRepository for SqliteLoginRepository {
         .map_err(db_err)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_restablecer_pin {
+    //! LOGIN-07: fijar un PIN sin pedir el actual. Lo que no puede pasar es que sirva para otro rol
+    //! o para un usuario dado de baja, que se quede sin subir a la nube, o que el administrador que
+    //! lo recupera siga bloqueado por los intentos fallidos que le trajeron hasta aquí.
+
+    use super::*;
+    use libsql::Connection;
+
+    async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("login_pin");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        (db, dir)
+    }
+
+    /// El estado de partida va por `raw()`: no es una escritura de negocio y no debe ir al outbox.
+    async fn sembrar(db: &Arc<Db>, sentencias: &[&str]) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in sentencias {
+            conn.execute(sql, Vec::<Value>::new())
+                .await
+                .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+        }
+    }
+
+    async fn texto(db: &Db, sql: &str) -> String {
+        let g = db.read().await;
+        let mut rows = g.query(sql, Vec::<Value>::new()).await.unwrap();
+        match rows.next().await.unwrap().unwrap().get_value(0).unwrap() {
+            Value::Text(s) => s,
+            otro => panic!("se esperaba texto en {sql}: {otro:?}"),
+        }
+    }
+
+    async fn contar(db: &Db, sql: &str) -> i64 {
+        let g = db.read().await;
+        let mut rows = g.query(sql, Vec::<Value>::new()).await.unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    async fn hash_de(db: &Db, id: &str) -> String {
+        texto(db, &format!("SELECT Password_Hash FROM Usuarios WHERE ID_Usuario = '{id}';")).await
+    }
+
+    #[tokio::test]
+    async fn solo_cambia_el_pin_de_un_administrador_activo_lo_sube_y_lo_desbloquea() {
+        let (db, _dir) = db_temporal().await;
+        sembrar(
+            &db,
+            &[
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado)
+                 VALUES ('admin', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'),
+                         'admin@bar.test', 'viejo', 'Ana', 'Activo');",
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado)
+                 VALUES ('baja', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'),
+                         'baja@bar.test', 'viejo', 'Luis', 'Inactivo');",
+                "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado)
+                 VALUES ('camarero', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol <> 'Administrador' LIMIT 1),
+                         'camarero@bar.test', 'viejo', 'Eva', 'Activo');",
+                "INSERT INTO Intentos_Login (ID_Usuario, Intentos_Fallidos, Bloqueado_Hasta_Ms)
+                 VALUES ('admin', 7, 9999999999999);",
+            ],
+        )
+        .await;
+        let repo = SqliteLoginRepository::new(db.clone());
+
+        for otro in ["camarero", "baja", "no-existe"] {
+            assert!(
+                matches!(repo.restablecer_pin_admin(otro, "4321").await, Err(AppError::NotFound(_))),
+                "{otro} no debería poder recibir un PIN sin el actual"
+            );
+        }
+        assert_eq!(hash_de(&db, "camarero").await, "viejo");
+        assert_eq!(hash_de(&db, "baja").await, "viejo");
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
+
+        repo.restablecer_pin_admin("admin", "4321").await.unwrap();
+
+        assert!(verify_pin("4321", &hash_de(&db, "admin").await).is_ok());
+        assert!(
+            contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await > 0,
+            "el PIN nuevo tiene que subir por el outbox, o la Handy seguiría con el viejo"
+        );
+        assert_eq!(
+            contar(&db, "SELECT COUNT(*) FROM Intentos_Login WHERE ID_Usuario = 'admin';").await,
+            0
+        );
     }
 }

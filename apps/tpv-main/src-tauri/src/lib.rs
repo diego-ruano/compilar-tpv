@@ -2095,6 +2095,8 @@ pub fn run() {
             commands::login::punch,
             commands::login::complete_initial_setup,
             commands::login::set_turno_partido_hoy,
+            commands::recuperacion_pin::login_recuperar_pin_solicitar,
+            commands::recuperacion_pin::login_recuperar_pin_confirmar,
             // recuperación local
             commands::recovery::recovery_status,
             commands::recovery::recovery_list_backups,
@@ -2698,11 +2700,18 @@ mod tests_exenciones_del_gate {
     //! **y `sesion == None`**.
 
     /// Ficheros cuyos comandos se alcanzan sin sesión, y por qué.
-    const EXENTOS: &[(&str, &str, &str)] = &[(
-        "commands/recovery.rs",
-        include_str!("commands/recovery.rs"),
-        "la recuperación existe para el caso de cero usuarios: no hay con quién iniciar sesión",
-    )];
+    const EXENTOS: &[(&str, &str, &str)] = &[
+        (
+            "commands/recovery.rs",
+            include_str!("commands/recovery.rs"),
+            "la recuperación existe para el caso de cero usuarios: no hay con quién iniciar sesión",
+        ),
+        (
+            "commands/recuperacion_pin.rs",
+            include_str!("commands/recuperacion_pin.rs"),
+            "recuperar el PIN es para el administrador que no puede iniciar sesión (LOGIN-07)",
+        ),
+    ];
 
     /// Marcas de que alguien ha metido el gate donde no puede estar.
     const SENALES_DE_GATE: &[&str] = &["exigir_rol", "state.sesion()"];

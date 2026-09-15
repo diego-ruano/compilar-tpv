@@ -111,6 +111,36 @@ pub struct SetupPendiente {
     pub email: Option<String>,
 }
 
+/* =========================================================
+   Recuperar el PIN de un administrador (LOGIN-07)
+========================================================= */
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct SolicitarCodigoPinInput {
+    pub id_usuario: String,
+}
+
+/// El código ya va de camino. Sólo la pista del correo: el correo entero no sale de la nube.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct CodigoPinEnviado {
+    /// `a***@bar.com`.
+    pub email_hint: String,
+    #[ts(type = "number")]
+    pub minutos: i64,
+}
+
+/// Código y PIN nuevo van JUNTOS, en un solo comando: si verificar el código y guardar el PIN
+/// fueran dos llamadas, cualquiera con el IPC podría hacer sólo la segunda.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ConfirmarCodigoPinInput {
+    pub id_usuario: String,
+    pub codigo: String,
+    pub pin_nuevo: String,
+}
+
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct PunchInput {

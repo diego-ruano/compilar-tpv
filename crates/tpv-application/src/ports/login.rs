@@ -9,7 +9,7 @@ use async_trait::async_trait;
 
 use tpv_contracts::login::{LoginOk, PunchStatus, SetupPendiente, UserListItem};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 #[async_trait]
 pub trait LoginRepository: Send + Sync {
@@ -50,6 +50,14 @@ pub trait LoginRepository: Send + Sync {
         fecha: Option<String>,
         hora_evento: Option<String>,
     ) -> AppResult<PunchStatus>;
+
+    /// Fija un PIN nuevo a un **administrador activo** tras recuperar el acceso por correo
+    /// (LOGIN-07). No pide el PIN actual: quien autoriza es el código que la nube acaba de dar por
+    /// bueno. Sólo tiene sentido donde el PIN se guarda, que es la Main; por defecto falla, y eso es
+    /// lo que hace la Handy.
+    async fn restablecer_pin_admin(&self, _id_usuario: &str, _pin_nuevo: &str) -> AppResult<()> {
+        Err(AppError::validation("El PIN se recupera desde el TPV principal"))
+    }
 
     /// Fija el turno partido del día (no requiere PIN).
     async fn set_turno_partido(

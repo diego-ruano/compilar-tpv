@@ -1421,6 +1421,30 @@ que cierra también el modelo de amenaza de LIC-04.
   invocar comandos por el IPC. Cubre a un camarero con el TPV delante, no a un atacante; lo que de
   verdad importa lo valida además el worker, que corre donde el usuario no manda.
 
+### Recuperar el PIN de un administrador (LOGIN-07)
+
+| Pieza | Archivo | Rol |
+|---|---|---|
+| La lógica | `worker/src/domains/login/recuperarPin.ts` | Envía y verifica el código. Los porqués largos, en su cabecera |
+| El código | `server/licenseStore.ts` → `pin_recovery_codes` (control-plane) | HMAC, intentos, caducidad y tope de envíos |
+| Caso de uso | `use_cases/recuperacion_pin.rs` | Sólo administradores; valida en local antes de gastar el código |
+| Comandos | `commands/recuperacion_pin.rs` | Sin sesión, y por eso en `tests_exenciones_del_gate` |
+| Pantalla | `features/login/RecuperarPinModal.tsx` | Desde el login, sólo si el usuario elegido es administrador |
+
+- **Un código que llega al correo y se escribe en el TPV; nunca un enlace.** Hacen falta el buzón y
+  la Main a la vez, porque la petición va firmada con la clave del equipo. Un enlace se abre en
+  cualquier sitio, y los filtros de correo lo abren antes que la persona y gastan uno de un solo uso.
+- **El PIN nuevo no sale del equipo.** La nube sólo dice si el código vale; la Main guarda el PIN y
+  lo sube por el outbox. Verificar y guardar son **un** comando: separados, bastaría llamar al segundo.
+- **Va al correo de la compra** (`licenses.customer_email` de la licencia del token), el mismo del
+  cambio de equipo. El `tenants.email` que se escribe al activar no interviene.
+- **Sólo administradores.** A los demás se lo cambia un administrador desde Trabajadores. El
+  `UPDATE` filtra por rol además del caso de uso: sin PIN actual, no puede servir para otro rol.
+- **Consultar la base central desde una ruta de tenant no rompe el aislamiento**, porque el tenant
+  sale del token firmado y nunca del cuerpo. Es lo que hay que conservar al añadir otra ruta así.
+- **Sin internet no hay recuperación por correo**, y está asumido: la salida entonces es otro
+  administrador.
+
 ---
 
 ## 15. Notas del generador de tickets

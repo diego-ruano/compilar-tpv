@@ -34,10 +34,12 @@ use serde_json::Value as JsonValue;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
+use tpv_application::ports::recuperacion_pin::RecuperacionPinService;
 use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
 };
+use tpv_contracts::login::CodigoPinEnviado;
 use tpv_domain::licensing::{
     self as dom, AssertionVerificada, Concesion, EstadoLicencia, EstadoVerificado, FalloConsulta,
     ResultadoActivacion, SolicitudActivacion,
@@ -940,6 +942,54 @@ impl CloudSyncService for PairingAdapter {
         let _ = self
             .tpv_server_post_json("tpv", "/v1/login/sync-initial-setup", body)
             .await?;
+        Ok(())
+    }
+}
+
+/// Un fallo de transporte (sin red, DNS, timeout) llega como `External` con el texto de reqwest;
+/// lo que contesta el worker llega como `Coded`, con su mensaje ya escrito para quien está delante.
+/// Se distinguen por la variante, no por el texto. Recuperar el PIN es lo único del login que
+/// necesita internet, así que hay que decirlo con esas palabras.
+fn sin_conexion(e: AppError) -> AppError {
+    match e {
+        AppError::External(detalle) => AppError::external(format!(
+            "No se ha podido contactar con el servidor. Recuperar el PIN necesita conexión a internet. ({detalle})"
+        )),
+        otro => otro,
+    }
+}
+
+#[async_trait]
+impl RecuperacionPinService for PairingAdapter {
+    async fn solicitar_codigo(&self, id_usuario: &str) -> AppResult<CodigoPinEnviado> {
+        // Firmado como `tpv`: el tenant lo saca el worker del token y comprueba que es la Main.
+        let resp = self
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/login/recuperar-pin/solicitar",
+                serde_json::json!({ "id_usuario": id_usuario }),
+            )
+            .await
+            .map_err(sin_conexion)?;
+
+        Ok(CodigoPinEnviado {
+            email_hint: resp
+                .get("emailHint")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            minutos: resp.get("minutos").and_then(|v| v.as_i64()).unwrap_or(10),
+        })
+    }
+
+    async fn verificar_codigo(&self, id_usuario: &str, codigo: &str) -> AppResult<()> {
+        self.tpv_server_post_json(
+            "tpv",
+            "/v1/login/recuperar-pin/verificar",
+            serde_json::json!({ "id_usuario": id_usuario, "codigo": codigo }),
+        )
+        .await
+        .map_err(sin_conexion)?;
         Ok(())
     }
 }

@@ -17,6 +17,7 @@ pub mod pairing;
 pub mod pedidos_proveedor;
 pub mod proveedores;
 pub mod recovery;
+pub mod recuperacion_pin;
 pub mod reservas;
 pub mod stats;
 pub mod sync;
