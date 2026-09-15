@@ -14,15 +14,14 @@ import type { LicenseLocalState } from "@tpv/contracts";
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
 import { CorreoRecuperacion } from "./CorreoRecuperacion";
-
-const DAY_MS = 24 * 60 * 60 * 1000;
+import { diasNaturalesHasta } from "../../../shared/lib/diasNaturales";
 
 type Tono = "ok" | "warn" | "danger" | "muted";
 
 const ESTADO: Record<string, { label: string; tono: Tono }> = {
 	active: { label: "Activa", tono: "ok" },
 	warn: { label: "Activa · caduca pronto", tono: "warn" },
-	expiry_grace: { label: "Caducada · periodo de gracia", tono: "danger" },
+	expiry_grace: { label: "Caducada · renuévala ya", tono: "danger" },
 	expired: { label: "Caducada", tono: "danger" },
 	revoked: { label: "Revocada", tono: "danger" },
 	device_replaced: { label: "Trasladada a otro equipo", tono: "muted" },
@@ -47,10 +46,6 @@ function formatFecha(ms: number): string {
 		month: "long",
 		year: "numeric",
 	});
-}
-
-function diasRestantes(expiresAtMs: number): number {
-	return Math.ceil((expiresAtMs - Date.now()) / DAY_MS);
 }
 
 function Fila({ label, children }: { label: string; children: React.ReactNode }) {
@@ -98,7 +93,8 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 	const info = ESTADO[statusCode] ?? { label: statusCode, tono: "muted" as Tono };
 
 	const expiresMs = state.expires_at_ms ?? null;
-	const dias = expiresMs != null ? diasRestantes(expiresMs) : null;
+	// Días de calendario, no horas redondeadas: caducar a las 23:00 es «hoy» a las 08:00.
+	const dias = expiresMs != null ? diasNaturalesHasta(expiresMs) : null;
 
 	// Texto de los días restantes según cómo esté de cerca la caducidad.
 	let diasTexto: string | null = null;
@@ -145,7 +141,7 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 					>
 						{statusCode === "warn"
 							? "Tu licencia caduca pronto. Renuévala para no perder el acceso: vuelve a comprarla con el mismo correo y se extenderá sola."
-							: "Tu licencia ha caducado y estás en el periodo de gracia. Renuévala cuanto antes para no quedarte sin TPV."}
+							: "Tu licencia ha caducado y la aplicación puede bloquearse en cualquier momento. Renuévala cuanto antes con el mismo correo de compra."}
 					</div>
 				) : null}
 			</Panel>

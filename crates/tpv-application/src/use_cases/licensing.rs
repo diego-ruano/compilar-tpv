@@ -12,6 +12,7 @@ use tpv_domain::licensing::{
     self as dom, AccionEstado, Concesion, EstadoVerificado, Motivo, Resolucion,
     ResultadoActivacion, SolicitudActivacion, Veredicto,
 };
+use chrono::{Local, TimeZone};
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::{AppError, AppResult};
@@ -20,9 +21,6 @@ use crate::ports::notificaciones::Notifier;
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const HORA_MS: i64 = 60 * 60 * 1000;
-/// Días de gracia tras caducar la licencia (para el texto del aviso). DEBE coincidir con
-/// `GRACE_DAYS` del worker (`licensing.helpers.ts`), que es quien decide el estado real.
-const GRACIA_LICENCIA_DIAS: i64 = 3;
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -103,7 +101,7 @@ pub async fn gate(
 ) -> AppResult<LicenseGateResult> {
     let res = comprobar(svc, false).await?;
     if let Some(notifier) = notifier {
-        avisar_estado_licencia(notifier, &res, now_ms()).await;
+        avisar_estado_licencia(notifier, &res, now_ms(), &Local).await;
     }
     Ok(res)
 }
@@ -117,7 +115,14 @@ pub async fn check_now(svc: &dyn LicensingService) -> AppResult<LicenseGateResul
 /// Emite (best-effort) avisos a los administradores según el veredicto del gate. Dedupe temporal:
 /// avisos de licencia una vez al DÍA; el de gracia offline una vez cada 4 H (recordatorio insistente
 /// para no jugársela a que se olvide). El estado real (permitir/bloquear) NO se toca aquí.
-async fn avisar_estado_licencia(notifier: &dyn Notifier, res: &LicenseGateResult, ahora_ms: i64) {
+///
+/// `zona` es la del equipo (`Local`): «hoy» y «mañana» son fechas de quien lee el aviso.
+async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
+    notifier: &dyn Notifier,
+    res: &LicenseGateResult,
+    ahora_ms: i64,
+    zona: &Tz,
+) {
     let Some(state) = res.state.as_ref() else {
         return;
     };
@@ -126,14 +131,22 @@ async fn avisar_estado_licencia(notifier: &dyn Notifier, res: &LicenseGateResult
     match res.reason.as_str() {
         // Licencia por caducar (estado firmado `warn` del servidor).
         "warn" => {
-            let dias = dias_ceil(state.expires_at_ms.map(|e| e - ahora_ms).unwrap_or(0));
+            let cuando = match state
+                .expires_at_ms
+                .and_then(|e| dias_naturales_hasta(zona, e, ahora_ms))
+            {
+                Some(d) if d <= 0 => "hoy".to_string(),
+                Some(1) => "mañana".to_string(),
+                Some(d) => format!("en {d} días"),
+                None => "pronto".to_string(),
+            };
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "licencia_por_expirar".to_string(),
                     severidad: Severidad::Aviso,
                     titulo: "Licencia por caducar".to_string(),
                     cuerpo: Some(format!(
-                        "Tu licencia caduca en {dias} día(s). Renuévala para evitar el bloqueo."
+                        "Tu licencia caduca {cuando}. Renuévala para evitar el bloqueo."
                     )),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_licencia".to_string()),
@@ -143,21 +156,18 @@ async fn avisar_estado_licencia(notifier: &dyn Notifier, res: &LicenseGateResult
                 })
                 .await;
         }
-        // Caducada pero dentro de los 3 días de gracia (estado firmado `expiry_grace`): sigue funcionando.
+        // Caducada, pero el servidor todavía la deja funcionar (estado firmado `expiry_grace`). Ese
+        // margen es un por si acaso, no un plazo con el que contar: el aviso no dice cuánto queda.
         "expiry_grace" => {
-            let bloqueo_ms = state
-                .expires_at_ms
-                .map(|e| e + GRACIA_LICENCIA_DIAS * DAY_MS)
-                .unwrap_or(ahora_ms);
-            let dias = dias_ceil(bloqueo_ms - ahora_ms);
             let _ = notifier
                 .emitir(NuevaNotificacion {
                     tipo: "licencia_caducada".to_string(),
                     severidad: Severidad::Error,
                     titulo: "Licencia caducada".to_string(),
-                    cuerpo: Some(format!(
-                        "Tu licencia ha caducado. Te quedan {dias} día(s) para renovar antes de que la app se bloquee."
-                    )),
+                    cuerpo: Some(
+                        "Tu licencia ha caducado. Renuévala cuanto antes: la aplicación puede bloquearse en cualquier momento."
+                            .to_string(),
+                    ),
                     destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
                     accion: Some("ver_licencia".to_string()),
                     payload: None,
@@ -192,12 +202,16 @@ async fn avisar_estado_licencia(notifier: &dyn Notifier, res: &LicenseGateResult
     }
 }
 
-fn dias_ceil(ms: i64) -> i64 {
-    if ms <= 0 {
-        0
-    } else {
-        (ms + DAY_MS - 1) / DAY_MS
-    }
+/// Días de CALENDARIO entre hoy y la fecha de `fecha_ms` en `zona`: 0 es hoy, negativo ya pasó.
+///
+/// No es la diferencia en milisegundos redondeada hacia arriba. Con esa cuenta, una licencia que
+/// caducaba a las 23:00 decía a las 08:00 que caducaba «mañana»: quince horas redondeadas son un
+/// día. «Hoy» y «mañana» son fechas, no horas que faltan. Gemela de `diasNaturalesHasta` en el
+/// frontend (`shared/lib/diasNaturales.ts`), que pinta el mismo aviso en el banner.
+fn dias_naturales_hasta<Tz: TimeZone>(zona: &Tz, fecha_ms: i64, ahora_ms: i64) -> Option<i64> {
+    let fecha = zona.timestamp_millis_opt(fecha_ms).single()?.date_naive();
+    let hoy = zona.timestamp_millis_opt(ahora_ms).single()?.date_naive();
+    Some((fecha - hoy).num_days())
 }
 
 fn horas_ceil(ms: i64) -> i64 {
@@ -349,18 +363,19 @@ mod tests {
     #[tokio::test]
     async fn avisa_segun_el_motivo_del_gate() {
         let ahora = 1_000 * DAY_MS;
+        let zona = chrono::Utc;
         let n = FakeNotifier::default();
 
-        avisar_estado_licencia(&n, &result("warn", state_con_expiry(Some(ahora + 3 * DAY_MS))), ahora).await;
-        avisar_estado_licencia(&n, &result("expiry_grace", state_con_expiry(Some(ahora - DAY_MS))), ahora).await;
+        avisar_estado_licencia(&n, &result("warn", state_con_expiry(Some(ahora + 3 * DAY_MS))), ahora, &zona).await;
+        avisar_estado_licencia(&n, &result("expiry_grace", state_con_expiry(Some(ahora - DAY_MS))), ahora, &zona).await;
 
         let mut s = state_con_expiry(None);
         s.last_check_ok_ms = Some(ahora - HORA_MS);
         s.activated_at_ms = ahora - HORA_MS;
-        avisar_estado_licencia(&n, &result("offline_grace", s), ahora).await;
+        avisar_estado_licencia(&n, &result("offline_grace", s), ahora, &zona).await;
 
         // Estado sano: no emite.
-        avisar_estado_licencia(&n, &result("ok", state_con_expiry(None)), ahora).await;
+        avisar_estado_licencia(&n, &result("ok", state_con_expiry(None)), ahora, &zona).await;
 
         let e = n.emitidas.lock().unwrap();
         assert_eq!(e.len(), 3);
@@ -371,6 +386,61 @@ mod tests {
         assert_eq!(e[2].tipo, "gracia_offline");
         assert!(e[2].clave_dedupe.as_deref().unwrap().starts_with("gracia_offline:"));
         assert!(e.iter().all(|n| n.destino == Destino::Rol(ADMIN_ROL_ID.to_string())));
+    }
+
+    /// El cuerpo del aviso de una licencia que caduca en `caducidad`, visto en `ahora`. Las dos
+    /// son (día de septiembre de 2026, hora, minuto) en `zona`.
+    async fn aviso_por_caducar(
+        zona: &chrono::FixedOffset,
+        ahora: (u32, u32, u32),
+        caducidad: (u32, u32, u32),
+    ) -> String {
+        let ms = |(dia, h, m): (u32, u32, u32)| {
+            zona.with_ymd_and_hms(2026, 9, dia, h, m, 0).unwrap().timestamp_millis()
+        };
+        let n = FakeNotifier::default();
+        let res = result("warn", state_con_expiry(Some(ms(caducidad))));
+        avisar_estado_licencia(&n, &res, ms(ahora), zona).await;
+        let cuerpo = n.emitidas.lock().unwrap()[0].cuerpo.clone().unwrap();
+        cuerpo
+    }
+
+    #[tokio::test]
+    async fn el_aviso_de_caducidad_cuenta_dias_de_calendario_y_no_horas() {
+        // Madrid en verano.
+        let zona = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        for (ahora, caducidad, esperado) in [
+            // Quince horas: redondeadas hacia arriba eran «mañana», y es hoy.
+            ((15, 8, 0), (15, 23, 0), "Tu licencia caduca hoy."),
+            ((15, 0, 5), (15, 23, 59), "Tu licencia caduca hoy."),
+            // Cuarenta y cinco minutos, pero pasada la medianoche: es mañana.
+            ((15, 23, 45), (16, 0, 30), "Tu licencia caduca mañana."),
+            ((15, 8, 0), (16, 23, 59), "Tu licencia caduca mañana."),
+            ((15, 23, 0), (18, 1, 0), "Tu licencia caduca en 3 días."),
+        ] {
+            let cuerpo = aviso_por_caducar(&zona, ahora, caducidad).await;
+            assert!(cuerpo.starts_with(esperado), "{ahora:?} → {caducidad:?}: {cuerpo}");
+        }
+    }
+
+    #[tokio::test]
+    async fn la_fecha_es_la_de_la_zona_del_equipo_y_no_la_utc() {
+        // A las 00:30 del 16 en Madrid todavía es el 15 en UTC. Una caducidad a las 23:00 del 16
+        // es «hoy» para quien lo lee; contando en UTC saldría «mañana».
+        let zona = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let cuerpo = aviso_por_caducar(&zona, (16, 0, 30), (16, 23, 0)).await;
+        assert!(cuerpo.starts_with("Tu licencia caduca hoy."), "{cuerpo}");
+    }
+
+    #[tokio::test]
+    async fn caducada_no_anuncia_cuanto_margen_queda() {
+        let ahora = 1_000 * DAY_MS;
+        let n = FakeNotifier::default();
+        let res = result("expiry_grace", state_con_expiry(Some(ahora - DAY_MS)));
+        avisar_estado_licencia(&n, &res, ahora, &chrono::Utc).await;
+        let cuerpo = n.emitidas.lock().unwrap()[0].cuerpo.clone().unwrap();
+        assert!(!cuerpo.chars().any(|c| c.is_ascii_digit()), "{cuerpo}");
+        assert!(!cuerpo.contains("día"), "{cuerpo}");
     }
 
     #[test]

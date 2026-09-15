@@ -38,6 +38,7 @@ import { useCorreoRecuperacionPendiente } from "../shared/stores/useCorreoRecupe
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
+import { diasNaturalesHasta } from "../shared/lib/diasNaturales";
 import { useMainSocket } from "../shared/lib/useMainSocket";
 import { useHandySocket } from "../shared/lib/useHandySocket";
 import { queryClient } from "../shared/lib/queryClient";
@@ -208,11 +209,9 @@ function BlockedScreen({
     );
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 // Banner de aviso de caducidad. Se muestra por encima de la app cuando el gate deja pasar pero la
-// licencia está en la ventana de aviso (`warn`) o en la gracia posterior a caducar
-// (`expiry_grace`). No bloquea: informa. La cuenta de días sale del `expires_at_ms` firmado.
+// licencia está en la ventana de aviso (`warn`) o ya caducada dentro del margen del servidor
+// (`expiry_grace`). No bloquea: informa. La fecha sale del `expires_at_ms` firmado.
 function LicenseExpiryBanner({
     reason,
     expiresAtMs,
@@ -220,23 +219,23 @@ function LicenseExpiryBanner({
     reason: "warn" | "expiry_grace";
     expiresAtMs: number | null;
 }) {
-    const dias =
-        expiresAtMs != null ? Math.ceil((expiresAtMs - Date.now()) / DAY_MS) : null;
-
     const grace = reason === "expiry_grace";
 
     let texto: string;
     if (grace) {
-        const restantes = dias != null ? Math.max(dias, 0) : null;
-        texto =
-            restantes != null
-                ? `Tu licencia ha caducado. Te ${restantes === 1 ? "queda 1 día" : `quedan ${restantes} días`} de margen antes del bloqueo.`
-                : "Tu licencia ha caducado. Estás en el periodo de gracia antes del bloqueo.";
+        // Ese margen es un por si acaso, no un plazo con el que contar: no se anuncia cuánto queda.
+        texto = "Tu licencia ha caducado y la aplicación puede bloquearse en cualquier momento.";
     } else {
+        // Días de calendario, no horas redondeadas: caducar a las 23:00 es «hoy» a las 08:00.
+        const dias = expiresAtMs != null ? diasNaturalesHasta(expiresAtMs) : null;
         texto =
-            dias != null && dias > 0
-                ? `Tu licencia caduca ${dias === 1 ? "mañana" : `en ${dias} días`}.`
-                : "Tu licencia caduca hoy.";
+            dias == null
+                ? "Tu licencia caduca pronto."
+                : dias <= 0
+                  ? "Tu licencia caduca hoy."
+                  : dias === 1
+                    ? "Tu licencia caduca mañana."
+                    : `Tu licencia caduca en ${dias} días.`;
     }
 
     return (
