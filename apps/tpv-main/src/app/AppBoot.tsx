@@ -174,10 +174,13 @@ function RechazoPrevio({ motivo }: { motivo: string | null }) {
 
 function BlockedScreen({
     reason,
+    error,
     onRetry,
     onClear,
 }: {
     reason: string;
+    /** Lo que falló al borrar la licencia. Sin esto, el botón fallaba y la pantalla no decía nada. */
+    error: string | null;
     onRetry: () => void;
     onClear: () => void;
 }) {
@@ -202,6 +205,12 @@ function BlockedScreen({
                         Borrar y volver a activar
                     </button>
                 </div>
+
+                {error ? (
+                    <p className="mt-4 text-sm text-red-600" role="alert">
+                        {error}
+                    </p>
+                ) : null}
 
                 <p className="mt-4 font-mono text-xs text-slate-400">{reason}</p>
             </div>
@@ -1731,8 +1740,10 @@ export default function AppBoot({ router }: { router: any }) {
                     ) : !gate.allowed ? (
                         <BlockedScreen
                             reason={gate.reason}
+                            error={err}
                             onRetry={conAviso(() => refreshGate(true))}
                             onClear={() => {
+                                setErr(null);
                                 invokeClient("license_clear_state")
                                     .catch((e: unknown) => setErr(toAppError(e).message))
                                     .finally(() => {
