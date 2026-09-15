@@ -333,6 +333,16 @@ la lógica/SQL vive en `crates/*`.
   - **Que la DEK persista arriba es lo que hace recuperable la PII**, incluso en un equipo nuevo.
     El precio es que `LICENSE_STORE_KEY` es un secreto **global**: perderlo deja las DEK de todos
     los tenants indescifrables y la PII irrecuperable en todas partes.
+- **Los errores no salen con datos personales (OBS-01).** Antes de mandar un error a Sentry o un
+  evento a Axiom se sustituye por un marcador lo que tenga forma de dato personal o de secreto:
+  DNI, NIE, IBAN, número de la Seguridad Social, teléfono, tarjeta, correo, PIN, tokens. Hay **tres
+  copias** de las reglas porque no pueden compartir código —la Webview
+  (`shared/observability/scrub.ts`), el core de Rust (`tpv-telemetry/src/scrub.rs`, que vuelve a
+  filtrar todo lo que sale de la Main) y el worker (`observability/scrub.ts`)—, y lo que las mantiene
+  iguales es `crates/tpv-telemetry/src/scrub_casos.json`, la tabla de casos que leen los tests de las
+  tres: una regla nueva lleva su caso ahí, o las otras copias no se enteran. Lo que no hace, y hay que
+  saberlo: no reconoce nombres ni direcciones (un mensaje de error no se compone con ellos), y no toca
+  el log local del equipo, que es del propio cliente y no de un tercero.
 - **El NOMBRE de un comando Tauri no lo comprueba nadie.** Los tipos que cruzan la frontera sí están
   cerrados (ts-rs genera `bindings.ts` desde los DTO), pero el nombre es una cadena: renombrar un
   `#[tauri::command]` compila en Rust, compila en TypeScript y revienta en tiempo de ejecución con

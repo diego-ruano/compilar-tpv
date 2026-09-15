@@ -35,9 +35,8 @@ pub fn init_sentry(cfg: SentryConfig) -> SentryGuard {
         // Nunca PII por defecto (datos de clientes/ventas). GDPR.
         send_default_pii: false,
         // Scrubbing (OBS-01): además de anular usuario y hostname (que puede llevar el nombre del
-        // equipo), redactamos el CONTENIDO libre que compone el desarrollador —mensajes de
-        // excepción, breadcrumbs y logentry—, donde `send_default_pii=false` no llega. Así un
-        // `error!`/panic con un email o una contraseña no sale en claro a Sentry.
+        // equipo), redactamos el CONTENIDO libre del evento, donde `send_default_pii=false` no llega.
+        // Ver `scrub_event` para qué campos y por qué.
         before_send: Some(Arc::new(|mut event: sentry::protocol::Event<'static>| {
             event.user = None;
             event.server_name = None;
@@ -50,23 +49,116 @@ pub fn init_sentry(cfg: SentryConfig) -> SentryGuard {
     sentry::init((dsn, options))
 }
 
-/// Redacta el contenido libre de un evento Sentry antes de enviarlo (OBS-01): mensaje, valores de
-/// excepción y mensajes de breadcrumb. Reutiliza el mismo scrubber que la cola de Axiom.
+/// Redacta el contenido libre de un evento Sentry antes de enviarlo (OBS-01). Reutiliza el mismo
+/// filtro que la cola de Axiom.
+///
+/// No basta con el mensaje y las excepciones, porque los datos entran también sin que nadie los
+/// escriba en un mensaje:
+///
+/// - la integración de `tracing` guarda los **campos** de un `error!` en `contexts` (y los que tienen
+///   forma de etiqueta en `tags`), y los de un breadcrumb en su `data`;
+/// - lo que reporta la Webview por el plugin llega con su contexto en `extra`;
+/// - un `logentry` lleva sus parámetros aparte del mensaje.
+///
+/// Lo que no se toca son los contextos tipados que rellena el SDK (sistema, dispositivo, traza): no
+/// llevan datos de nadie, y un identificador de traza redactado deja el evento inservible.
 fn scrub_event(event: &mut sentry::protocol::Event<'static>) {
+    use crate::scrub::{scrub, scrub_value};
+    use sentry::protocol::Context;
+
     if let Some(msg) = event.message.as_mut() {
-        *msg = crate::scrub::scrub(msg);
+        *msg = scrub(msg);
     }
     if let Some(le) = event.logentry.as_mut() {
-        le.message = crate::scrub::scrub(&le.message);
+        le.message = scrub(&le.message);
+        le.params.iter_mut().for_each(scrub_value);
     }
     for exc in event.exception.values.iter_mut() {
         if let Some(v) = exc.value.as_mut() {
-            *v = crate::scrub::scrub(v);
+            *v = scrub(v);
         }
     }
     for bc in event.breadcrumbs.values.iter_mut() {
         if let Some(m) = bc.message.as_mut() {
-            *m = crate::scrub::scrub(m);
+            *m = scrub(m);
         }
+        bc.data.values_mut().for_each(scrub_value);
+    }
+    event.extra.values_mut().for_each(scrub_value);
+    for v in event.tags.values_mut() {
+        *v = scrub(v);
+    }
+    for ctx in event.contexts.values_mut() {
+        if let Context::Other(campos) = ctx {
+            campos.values_mut().for_each(scrub_value);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sentry::protocol::{Breadcrumb, Context, Event, Exception, LogEntry};
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn el_evento_sale_sin_datos_personales_en_ninguno_de_sus_campos() {
+        let mut campos_tracing = BTreeMap::new();
+        campos_tracing.insert("dni".to_string(), Value::from("12.345.678-Z"));
+        let mut contexts = BTreeMap::new();
+        contexts.insert("Rust Tracing Fields".to_string(), Context::Other(campos_tracing));
+
+        let mut datos_breadcrumb = BTreeMap::new();
+        datos_breadcrumb.insert("iban".to_string(), Value::from("ES91 2100 0418 4502 0005 1332"));
+
+        let mut extra = BTreeMap::new();
+        extra.insert("destino".to_string(), serde_json::json!({ "correo": "ana@example.com" }));
+
+        let mut tags = BTreeMap::new();
+        tags.insert("clave".to_string(), "password=hunter2".to_string());
+
+        let mut event = Event {
+            message: Some("aviso a ana@example.com".into()),
+            logentry: Some(LogEntry {
+                message: "trabajador con DNI {}".into(),
+                params: vec![Value::from("x1234567l")],
+            }),
+            exception: vec![Exception {
+                ty: "AppError".into(),
+                value: Some("NSS 28/12345678/40 duplicado".into()),
+                ..Default::default()
+            }]
+            .into(),
+            breadcrumbs: vec![Breadcrumb {
+                message: Some("tel 612 345 678".into()),
+                data: datos_breadcrumb,
+                ..Default::default()
+            }]
+            .into(),
+            extra,
+            tags,
+            contexts,
+            ..Default::default()
+        };
+
+        scrub_event(&mut event);
+
+        let todo = serde_json::to_string(&event).expect("el evento se serializa");
+        for dato in [
+            "ana@example.com",
+            "12.345.678-Z",
+            "x1234567l",
+            "ES91 2100 0418 4502 0005 1332",
+            "28/12345678/40",
+            "612 345 678",
+            "hunter2",
+        ] {
+            assert!(!todo.contains(dato), "«{dato}» sigue en el evento: {todo}");
+        }
+        // Lo que sirve para diagnosticar se queda.
+        assert_eq!(event.exception.values[0].ty, "AppError");
+        assert_eq!(event.exception.values[0].value.as_deref(), Some("NSS [nss] duplicado"));
+        assert_eq!(event.logentry.as_ref().map(|l| l.message.as_str()), Some("trabajador con DNI {}"));
     }
 }

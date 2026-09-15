@@ -1,9 +1,23 @@
-//! Depuración de contenido (scrubbing) antes de enviar telemetría a **terceros** (Axiom vía el
+//! Filtro de datos personales (scrubbing) antes de enviar telemetría a **terceros** (Axiom vía el
 //! spool, Sentry). Es la red de seguridad de OBS-01: `send_default_pii=false` sólo cubre el contexto
 //! automático de Sentry (usuario/request), NO las cadenas que compone el desarrollador con
-//! `tracing::error!`/`warn!` ni los campos estructurados. Aquí redactamos patrones sensibles
-//! (emails, IBAN, DNI/NIE, teléfonos, JWT, secretos `clave=valor`, números tipo tarjeta) para que un
-//! `error!("fallo SMTP para {email}: {pass}")` no salga en claro a un servicio externo.
+//! `tracing::error!`/`warn!` ni los campos estructurados. Un registro de errores no necesita el DNI,
+//! el IBAN, el número de la Seguridad Social, el teléfono ni el correo de nadie, así que lo que tenga
+//! forma de dato personal —o de secreto— se sustituye por un marcador.
+//!
+//! **Tres copias.** Estas reglas existen también en la Webview
+//! (`apps/tpv-main/src/shared/observability/scrub.ts`) y en el worker
+//! (`apps/cloud-worker-licensing/src/observability/scrub.ts`), porque no pueden compartir código. Lo
+//! que las mantiene iguales es `scrub_casos.json`, la tabla de casos que leen los tests de las tres:
+//! si cambias una regla, añade ahí el caso y las otras copias fallarán hasta que las iguales.
+//!
+//! **Por qué `(?-u:\b)` y `[0-9]`.** Por defecto, en el crate `regex` `\b` y `\d` son de Unicode, y en
+//! JavaScript son ASCII. La diferencia se nota justo donde no debe: en «nº12345678Z» la `º` es una
+//! letra para Unicode, así que Rust no veía frontera y dejaba el DNI en claro mientras las copias de
+//! TypeScript lo quitaban. Con la frontera ASCII las tres copias deciden igual.
+//!
+//! **Lo que no puede hacer:** reconocer un nombre o una dirección. Por eso un mensaje de error no se
+//! compone con ellos; esto es la red, no la regla.
 //!
 //! **Alcance:** sólo el camino a la nube. El fichero local rotado (`<AppData>/logs/tpv.log`) es la
 //! fuente de verdad para soporte y conserva el detalle completo sin depurar (es el propio equipo del
@@ -27,64 +41,42 @@ struct Rule {
 fn rules() -> &'static [Rule] {
     static RULES: OnceLock<Vec<Rule>> = OnceLock::new();
     RULES.get_or_init(|| {
-        // Orden importante: los más específicos (secreto clave=valor, JWT) antes que los genéricos.
+        let regla = |patron: &str, with: &'static str| Rule {
+            re: Regex::new(patron).unwrap_or_else(|e| panic!("regex del filtro «{patron}»: {e}")),
+            with,
+        };
+        // El orden importa: primero lo específico, para que una regla genérica no se quede media
+        // coincidencia.
         vec![
             // Cabecera de autorización: consume el valor entero, incluido el esquema (`Bearer <tok>`),
             // no sólo el primer token (si no, se redactaría "Bearer" y el token quedaría en claro).
-            Rule {
-                re: Regex::new(r"(?i)\b(authorization|auth)\b\s*[:=]\s*\S+(?:\s+\S+)?")
-                    .expect("regex cabecera authorization"),
-                with: "$1=[redacted]",
-            },
-
+            regla(r"(?i)(?-u:\b)(authorization|auth)(?-u:\b)\s*[:=]\s*\S+(?:\s+\S+)?", "$1=[redacted]"),
             // Esquemas de credencial sueltos (`Bearer <tok>` / `Basic <tok>`) sin clave delante.
-            Rule {
-                re: Regex::new(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}")
-                    .expect("regex esquema bearer/basic"),
-                with: "[redacted]",
-            },
-
-            // Secretos con forma `clave = valor` / `clave: valor` (password, token, api_key…). Se
-            // preserva la clave y se redacta sólo el valor, para no perder la pista del "qué".
-            Rule {
-                re: Regex::new(
-                    r"(?i)\b(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey)\b\s*[:=]\s*\S+",
-                )
-                .expect("regex secreto clave=valor"),
-                with: "$1=[redacted]",
-            },
-
-            // JWT / tokens con forma header.payload.signature (base64url).
-            Rule {
-                re: Regex::new(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
-                    .expect("regex jwt"),
-                with: "[jwt]",
-            },
-
-            // Emails.
-            Rule {
-                re: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}").expect("regex email"),
-                with: "[email]",
-            },
-
-            // IBAN (2 letras país + 2 dígitos control + 10..30 alfanum).
-            Rule {
-                re: Regex::new(r"\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b").expect("regex iban"),
-                with: "[iban]",
-            },
-
-            // Teléfonos: prefijo internacional opcional + 9..15 dígitos, admitiendo espacios/guiones.
-            Rule {
-                re: Regex::new(r"\+?\d(?:[\s\-]?\d){8,14}").expect("regex telefono/numero largo"),
-                with: "[num]",
-            },
-
-            // DNI/NIE español (7-8 dígitos + letra, con prefijo X/Y/Z opcional para NIE).
-            Rule {
-                re: Regex::new(r"\b[XYZ]?\d{7,8}[A-Za-z]\b").expect("regex dni/nie"),
-                with: "[id]",
-            },
-
+            regla(r"(?i)(?-u:\b)(?:bearer|basic)\s+[A-Za-z0-9._~+/=\-]{4,}", "[redacted]"),
+            // Secretos con forma `clave = valor` / `clave: valor`. Se preserva la clave, que dice «qué».
+            regla(
+                r"(?i)(?-u:\b)(password|passwd|pwd|contrase(?:n|ñ)a|secret|token|api[_-]?key|apikey|pin|otp)(?-u:\b)\s*[:=]\s*\S+",
+                "$1=[redacted]",
+            ),
+            // JWT / tokens con forma cabecera.carga.firma (base64url).
+            regla(r"(?-u:\b)eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", "[jwt]"),
+            // Correos.
+            regla(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", "[email]"),
+            // IBAN español, en cualquier caja, junto o agrupado con espacios o guiones.
+            regla(r"(?i)(?-u:\b)ES[0-9]{2}(?:[ \-]?[0-9]{4}){5}(?-u:\b)", "[iban]"),
+            // IBAN de cualquier país, en mayúsculas. Sólo en mayúsculas a propósito: en minúsculas, un
+            // hash o un identificador hexadecimal que empiece por dos letras tendría su forma.
+            regla(
+                r"(?-u:\b)[A-Z]{2}[0-9]{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,4})?(?-u:\b)",
+                "[iban]",
+            ),
+            // Número de afiliación a la Seguridad Social: 2 + 8 + 2 cifras, juntas o separadas.
+            regla(r"(?-u:\b)[0-9]{2}[ /\-]?[0-9]{8}[ /\-]?[0-9]{2}(?-u:\b)", "[nss]"),
+            // DNI y NIE, con puntos, guiones o espacios, en cualquier caja. Un CIF (letra delante y
+            // cifras pegadas) no encaja a propósito: es de una empresa, no de una persona.
+            regla(r"(?i)(?-u:\b)(?:[XYZ][ \-]?)?[0-9]{1,2}(?:[. ]?[0-9]{3}){2}[ \-]?[A-Z](?-u:\b)", "[id]"),
+            // Teléfonos, tarjetas y cualquier otra secuencia de 9 a 19 cifras.
+            regla(r"\+?[0-9](?:[ .\-]?[0-9]){8,18}", "[num]"),
         ]
     })
 }
@@ -133,38 +125,46 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    #[test]
-    fn redacta_email() {
-        assert_eq!(scrub("cliente ana@example.com pidió"), "cliente [email] pidió");
+    /// La tabla que comparten las tres copias del filtro.
+    fn casos() -> Value {
+        serde_json::from_str(include_str!("scrub_casos.json")).expect("scrub_casos.json no es JSON válido")
+    }
+
+    fn texto(v: &Value) -> &str {
+        v.as_str().expect("un caso tiene que ser una cadena")
     }
 
     #[test]
-    fn redacta_secreto_clave_valor() {
-        assert_eq!(scrub("SMTP password=Sup3rSecreta!"), "SMTP password=[redacted]");
-        assert_eq!(scrub("contraseña: hunter2"), "contraseña=[redacted]");
-        assert_eq!(
-            scrub("Authorization: Bearer abc.def"),
-            "Authorization=[redacted]"
-        );
+    fn redacta_cada_caso_de_la_tabla_compartida() {
+        let casos = casos();
+        let pares = casos["redacta"].as_array().expect("falta «redacta»");
+        assert!(!pares.is_empty());
+        let mut fallos = Vec::new();
+        for par in pares {
+            let (entrada, salida) = (texto(&par[0]), texto(&par[1]));
+            let obtenida = scrub(entrada);
+            if obtenida != salida {
+                fallos.push(format!("{entrada:?} → {obtenida:?}, esperaba {salida:?}"));
+            }
+        }
+        assert!(fallos.is_empty(), "casos que no coinciden con las otras copias:\n{}", fallos.join("\n"));
     }
 
     #[test]
-    fn redacta_jwt() {
-        let jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig-nature_00";
-        assert_eq!(scrub(&format!("token {jwt} ok")), "token [jwt] ok");
+    fn deja_tal_cual_lo_que_hace_falta_para_diagnosticar() {
+        let casos = casos();
+        for t in casos["no_toca"].as_array().expect("falta «no_toca»") {
+            assert_eq!(scrub(texto(t)), texto(t));
+        }
     }
 
     #[test]
-    fn redacta_iban_y_telefono() {
-        assert_eq!(scrub("IBAN ES9121000418450200051332"), "IBAN [iban]");
-        assert_eq!(scrub("tel +34 612 345 678 fin"), "tel [num] fin");
-    }
-
-    #[test]
-    fn deja_pasar_texto_inocuo() {
-        let s = "op 12 aplicada seq=34 en 5ms";
-        // No debe redactar identificadores/contadores cortos ni el texto normal.
-        assert_eq!(scrub(s), s);
+    fn aplicarlo_dos_veces_da_lo_mismo() {
+        let casos = casos();
+        for par in casos["redacta"].as_array().unwrap() {
+            let una = scrub(texto(&par[0]));
+            assert_eq!(scrub(&una), una, "{:?}", texto(&par[0]));
+        }
     }
 
     #[test]
@@ -172,7 +172,7 @@ mod tests {
         let mut v = json!({
             "email": "b@c.io",
             "nota": "sin datos",
-            "lista": ["x@y.es", 42],
+            "lista": ["x@y.es", 42, {"dni": "12.345.678-Z"}],
             "n": 7
         });
         scrub_value(&mut v);
@@ -180,6 +180,7 @@ mod tests {
         assert_eq!(v["nota"], json!("sin datos"));
         assert_eq!(v["lista"][0], json!("[email]"));
         assert_eq!(v["lista"][1], json!(42));
+        assert_eq!(v["lista"][2]["dni"], json!("[id]"));
         assert_eq!(v["n"], json!(7));
     }
 }

@@ -8,6 +8,7 @@
 // desplegar antes de que exista el proyecto en Sentry.
 
 import type { Env } from "../env";
+import { scrubEvent, type EventoSentry } from "./scrub";
 
 export function sentryOptions(env: Env) {
 	return {
@@ -19,5 +20,15 @@ export function sentryOptions(env: Env) {
 		tracesSampleRate: 0,
 		// Nunca enviar PII por defecto (datos de clientes/ventas). GDPR.
 		sendDefaultPii: false,
+		// OBS-01: `sendDefaultPii` no llega al mensaje de una excepción ni a los breadcrumbs. Esto
+		// sí (ver `scrub.ts`).
+		beforeSend: <E extends EventoSentry>(event: E): E | null => {
+			try {
+				return scrubEvent(event);
+			} catch {
+				// Si el filtro fallara, es más seguro NO enviar que enviar sin depurar.
+				return null;
+			}
+		},
 	};
 }
