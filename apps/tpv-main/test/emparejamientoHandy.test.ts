@@ -194,6 +194,45 @@ describe("emparejar un Handy", () => {
 		}
 	});
 
+	it("sus propios fallos los explica con una frase, no con un código interno", async () => {
+		// Lo que se lanza aquí acaba tal cual en la pantalla de vinculación, delante del camarero.
+		const codigoInterno = /\b[a-z]+_[a-z0-9_]+\b/;
+		const mensajes: string[] = [];
+
+		{
+			const { estado, deps } = crearDobles();
+			estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
+			const resultado = arrancar(deps);
+			await vi.advanceTimersByTimeAsync(ESPERA_MAXIMA_APROBACION_MS + ESPERA_ENTRE_CONSULTAS_MS);
+			mensajes.push(((await resultado).error as Error).message);
+		}
+		{
+			const { estado, deps } = crearDobles();
+			estado.identidad = { deviceId: "", devicePubkeyB64: CLAVE };
+			mensajes.push(((await arrancar(deps)).error as Error).message);
+		}
+		{
+			const { estado, deps } = crearDobles();
+			estado.respuestaClaim = {};
+			mensajes.push(((await arrancar(deps)).error as Error).message);
+		}
+		{
+			const { estado, deps } = crearDobles();
+			estado.pendientesAntesDeAprobar = 0;
+			estado.respuestaToken = { token: "jwt" };
+			const resultado = arrancar(deps);
+			await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS);
+			mensajes.push(((await resultado).error as Error).message);
+		}
+
+		for (const mensaje of mensajes) {
+			expect(mensaje, mensaje).not.toMatch(codigoInterno);
+			expect(mensaje.length, mensaje).toBeGreaterThan(20);
+		}
+		// El de la espera dice qué hacer: aprobarla en la Main.
+		expect(mensajes[0]).toContain("TPV principal");
+	});
+
 	it("entiende los nombres de campo en snake_case que manda Rust o el worker", async () => {
 		const { estado, deps } = crearDobles();
 		estado.identidad = { device_id: "h1", device_pubkey_b64: CLAVE };

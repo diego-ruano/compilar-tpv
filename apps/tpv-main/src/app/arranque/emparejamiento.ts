@@ -14,6 +14,16 @@ export const ESPERA_ENTRE_CONSULTAS_MS = 1500;
 /** Cuánto se espera la aprobación antes de rendirse. */
 export const ESPERA_MAXIMA_APROBACION_MS = 3 * 60 * 1000;
 
+// Los fallos que genera el propio emparejamiento. Acaban tal cual en la pantalla de vinculación,
+// delante de quien está vinculando el Handy, así que dicen qué hacer y no llevan códigos internos:
+// antes salía, por ejemplo, `pair_timeout_waiting_approval` cuando la Main no aprobaba a tiempo.
+const SIN_IDENTIDAD =
+	"Este dispositivo todavía no tiene su identidad preparada. Cierra la aplicación, vuelve a abrirla e inténtalo de nuevo.";
+const RESPUESTA_INESPERADA =
+	"La nube ha respondido algo inesperado al vincular. Inténtalo de nuevo y, si se repite, genera un código nuevo en el TPV principal.";
+const SIN_APROBACION =
+	"El TPV principal no ha aprobado la vinculación en tres minutos. Vuelve a pulsar «Vincular dispositivo» y apruébala en el TPV principal.";
+
 export type CodigoDeVinculacion = { pairCode: string; pairSecret: string };
 
 /**
@@ -73,8 +83,7 @@ export async function identidadDelDispositivo(invoke: Invocar): Promise<Identida
 		r.devicePubkeyB64 ?? r.device_pubkey_b64 ?? r.devicePubKeyB64 ?? r.device_pub_key_b64 ?? "",
 	).trim();
 
-	if (!deviceId) throw new Error("handy_missing_deviceId");
-	if (!pub || pub.length < 40) throw new Error(`handy_missing_pubkey_len_${pub.length}`);
+	if (!deviceId || !pub || pub.length < 40) throw new Error(SIN_IDENTIDAD);
 
 	return { deviceId, devicePubKeyB64: pub };
 }
@@ -82,7 +91,7 @@ export async function identidadDelDispositivo(invoke: Invocar): Promise<Identida
 async function firmar(invoke: Invocar, payload: string): Promise<string> {
 	const r = (await invoke("device_sign_b64", { args: { payload } })) as any;
 	const sig = String(r.sigB64 ?? r.sig_b64 ?? r.signature ?? "").trim();
-	if (!sig) throw new Error("handy_missing_signature");
+	if (!sig) throw new Error(SIN_IDENTIDAD);
 	return sig;
 }
 
@@ -91,7 +100,7 @@ async function firmar(invoke: Invocar, payload: string): Promise<string> {
  *
  * Devuelve el emparejamiento ya guardado (el token queda en el keyring vía `handy_set_token`), o
  * `null` si la pantalla se desmontó mientras esperaba. «Todavía sin aprobar» no es un fallo: se sigue
- * preguntando. Cualquier otro error corta en el acto.
+ * preguntando. Cualquier otro error corta en el acto; los de la nube llegan tal como los da el IPC.
  */
 export async function emparejarHandy(
 	codigo: CodigoDeVinculacion,
@@ -112,7 +121,7 @@ export async function emparejarHandy(
 	const nonceExpiresAtMs = Number(claim.nonceExpiresAtMs ?? claim.nonce_expires_at_ms ?? 0);
 
 	if (!nonceB64 || !Number.isFinite(nonceExpiresAtMs)) {
-		throw new Error("bad_pair_claim_response");
+		throw new Error(RESPUESTA_INESPERADA);
 	}
 
 	deps.alQuedarPendiente({ pairCode, pairSecret, nonceB64, nonceExpiresAtMs });
@@ -139,7 +148,7 @@ export async function emparejarHandy(
 			const token = String(ft.token ?? "");
 
 			if (!tenantId || !token) {
-				throw new Error("bad_pair_token_response");
+				throw new Error(RESPUESTA_INESPERADA);
 			}
 
 			await deps.invoke("handy_set_token", { args: { token, tenant_id: tenantId } });
@@ -154,5 +163,5 @@ export async function emparejarHandy(
 	}
 
 	if (!deps.sigueVivo()) return null;
-	throw new Error("pair_timeout_waiting_approval");
+	throw new Error(SIN_APROBACION);
 }
