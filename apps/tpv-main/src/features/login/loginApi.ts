@@ -316,11 +316,11 @@ export async function uploadInitialSetupToCloud(params: {
 /** Manda un código al correo de la licencia. Sólo en la Main y sólo para administradores. */
 export async function solicitarCodigoPin(
     idUsuario: string,
-): Promise<{ emailHint: string; minutos: number }> {
+): Promise<{ emailHint: string; minutos: number; reenvioSegundos: number }> {
     const r = await invokeClient<CodigoEnviado>("login_recuperar_pin_solicitar", {
         args: { id_usuario: idUsuario },
     });
-    return { emailHint: r.email_hint, minutos: r.minutos };
+    return { emailHint: r.email_hint, minutos: r.minutos, reenvioSegundos: r.reenvio_segundos };
 }
 
 /**

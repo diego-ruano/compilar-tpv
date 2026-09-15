@@ -14,6 +14,7 @@ import { toAppError } from "@tpv/client";
 
 import { Button, Input } from "../../../shared/ui";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { formatoCuentaAtras, useCuentaAtras } from "../../../shared/lib/useCuentaAtras";
 import { Panel } from "../ui/Panel";
 import {
 	correoRecuperacionConfirmar,
@@ -35,6 +36,8 @@ export function CorreoRecuperacion() {
 	const [ocupado, setOcupado] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [hecho, setHecho] = useState<string | null>(null);
+	const [reenvioHasta, setReenvioHasta] = useState<number | null>(null);
+	const espera = useCuentaAtras(reenvioHasta);
 
 	useEffect(() => {
 		let vivo = true;
@@ -76,7 +79,14 @@ export function CorreoRecuperacion() {
 
 	const pedirCodigo = () =>
 		ejecutar(async () => {
-			setEnviado(await correoRecuperacionSolicitar(correo));
+			const r = await correoRecuperacionSolicitar(correo);
+			if (r.sinCambios) {
+				volverAVer();
+				setHecho("Ese ya es el correo de recuperación.");
+				return;
+			}
+			setEnviado(r);
+			setReenvioHasta(Date.now() + r.reenvioSegundos * 1000);
 			setCodigo("");
 			setPaso("codigo");
 		});
@@ -196,8 +206,14 @@ export function CorreoRecuperacion() {
 								>
 									Confirmar
 								</Button>
-								<Button variant="secondary" disabled={ocupado} onClick={conAviso(pedirCodigo)}>
-									Enviar otro código
+								<Button
+									variant="secondary"
+									disabled={ocupado || espera > 0}
+									onClick={conAviso(pedirCodigo)}
+								>
+									{espera > 0
+										? `Enviar otro código (${formatoCuentaAtras(espera)})`
+										: "Enviar otro código"}
 								</Button>
 								<Button variant="secondary" disabled={ocupado} onClick={volverAVer}>
 									Cancelar

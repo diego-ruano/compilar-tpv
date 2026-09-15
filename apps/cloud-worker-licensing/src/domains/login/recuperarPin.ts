@@ -92,7 +92,15 @@ export async function solicitarCodigoPin(
 		);
 	}
 
-	return { status: 200, body: { ok: true, emailHint: emailHint(correo), minutos: emitido.minutos } };
+	return {
+		status: 200,
+		body: {
+			ok: true,
+			emailHint: emailHint(correo),
+			minutos: emitido.minutos,
+			reenvioSegundos: emitido.reenvioSegundos,
+		},
+	};
 }
 
 export async function verificarCodigoPin(

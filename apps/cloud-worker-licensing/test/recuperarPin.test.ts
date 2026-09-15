@@ -246,12 +246,22 @@ describe("recuperar el PIN · el código", () => {
 });
 
 describe("recuperar el PIN · el buzón del titular no es un cañón", () => {
-	it("no reenvía antes de un minuto", async () => {
+	it("no reenvía hasta pasados cinco minutos, y dice cuánto falta", async () => {
 		await escenario(async (e) => {
-			expect((await solicitarCodigoPin(e.db, e.env, e.ctx())).status).toBe(200);
-			const otra = await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: T0 + 1_000 }));
-			expect(otra.status).toBe(429);
+			expect(REENVIO_MIN_MS).toBe(5 * 60_000);
+
+			const primero = await solicitarCodigoPin(e.db, e.env, e.ctx());
+			expect(primero.status).toBe(200);
+			expect(primero.body.reenvioSegundos).toBe(300);
+
+			const pronto = await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: T0 + REENVIO_MIN_MS - 1 }));
+			expect(pronto.status).toBe(429);
+			expect(String(pronto.body.message)).toContain("1 minuto");
 			expect(e.correos).toHaveLength(1);
+
+			const luego = await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: T0 + REENVIO_MIN_MS }));
+			expect(luego.status).toBe(200);
+			expect(e.correos).toHaveLength(2);
 		});
 	});
 

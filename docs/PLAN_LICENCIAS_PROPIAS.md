@@ -488,13 +488,13 @@ viejo** y **no hace falta soporte**: basta con su clave y con el buzón al que s
    → 'device_replaced' → borra su estado local y se bloquea. Un solo escritor, invariante intacto.
 ```
 
-> **Ojo — los datos no viajan con la licencia.** El cambio de dispositivo recupera la **licencia y
-> el tenant**, no necesariamente el contenido: la BD del tenant en Turso solo está poblada si ese
-> cliente trabajaba en **modo online** (el outbox replica a la nube). Un cliente en modo offline
-> que pierde el PC recupera su licencia, pero su TPV nuevo arranca **vacío**. Pendiente de
-> resolver (ver [§15](#15-pendientes-futuros)).
+> **Los datos vuelven por la recuperación, no por la licencia.** El cambio de dispositivo devuelve
+> la **licencia y el tenant**; el contenido lo trae la pantalla de recuperación desde la BD del
+> tenant en Turso (§9 de [CLAUDE.md](../CLAUDE.md), *Perder la BD local*). Como la Main sincroniza
+> siempre que tiene conexión (SYNC-17), la nube tiene todo lo que llegó a subir. Lo único que no
+> vuelve es lo que se quedó en el outbox del equipo perdido sin salir.
 
-### 6.5 Gate (arranque + cada 6 h + al activar modo online)
+### 6.5 Gate (arranque + cada 6 h)
 
 ```
 1. license_gate → GET /v1/license/status (device-proof firmado).
@@ -780,22 +780,6 @@ activación) y no aporta seguridad *adicional* frente al OTP por email —el buz
 raíz de confianza en ambos casos—. Cuando se haga, el `customer_email` ya obligatorio de `licenses`
 es la clave de unión: se añade una tabla `accounts` y la licencia pasa a referenciarla, sin tocar
 la activación ni el gate.
-
-### 15.2 Recuperación de datos al cambiar de dispositivo (offline → online)
-
-El cambio de dispositivo (§6.4) devuelve **licencia y tenant**, pero los **datos** solo están en la
-nube si el cliente trabajaba en **modo online**. Un cliente en offline que pierde el PC recupera la
-licencia con la BD vacía.
-
-La solución obvia —“que active el modo online y se suba todo”— **no es viable tal cual**: un negocio
-con un año de operación acumula un `_Sync_Outbox` enorme y el primer drenado reventaría (miles de
-sentencias por WebSocket, sin control de lotes ni de memoria en el DO). Hace falta diseñar un
-**bootstrap masivo** distinto del sync incremental: snapshot comprimido de la BD local → subida en
-partes → carga en Turso, con reanudación y sin pasar por el TenantHub.
-
-Mientras tanto: la pantalla de cambio de dispositivo debe **decir la verdad** (“recuperarás tu
-licencia; tus datos solo si tenías la sincronización activada”), y conviene empujar el modo online
-como recomendado, no como opcional.
 
 ---
 

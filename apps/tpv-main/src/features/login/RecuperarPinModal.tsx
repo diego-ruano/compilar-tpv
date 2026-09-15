@@ -15,6 +15,7 @@ import { toAppError } from "@tpv/client";
 
 import { Button, Input, ModalShell } from "../../shared/ui";
 import { conAviso } from "../../shared/lib/conAviso";
+import { formatoCuentaAtras, useCuentaAtras } from "../../shared/lib/useCuentaAtras";
 import { confirmarCodigoPin, solicitarCodigoPin, type DbUser } from "./loginApi";
 
 type Props = {
@@ -32,6 +33,8 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
     const [pin2, setPin2] = useState("");
     const [ocupado, setOcupado] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [reenvioHasta, setReenvioHasta] = useState<number | null>(null);
+    const espera = useCuentaAtras(reenvioHasta);
 
     const cerrar = () => {
         if (!ocupado) onCerrar();
@@ -41,7 +44,9 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
         setOcupado(true);
         setError(null);
         try {
-            setEnviado(await solicitarCodigoPin(usuario.id_usuario));
+            const r = await solicitarCodigoPin(usuario.id_usuario);
+            setEnviado(r);
+            setReenvioHasta(Date.now() + r.reenvioSegundos * 1000);
             setCodigo("");
         } catch (e) {
             setError(toAppError(e).message);
@@ -185,10 +190,12 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
                         <>
                             <Button
                                 variant="secondary"
-                                disabled={ocupado}
+                                disabled={ocupado || espera > 0}
                                 onClick={conAviso(pedirCodigo)}
                             >
-                                Enviar otro código
+                                {espera > 0
+                                    ? `Enviar otro código (${formatoCuentaAtras(espera)})`
+                                    : "Enviar otro código"}
                             </Button>
                             <Button
                                 loading={ocupado}

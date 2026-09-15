@@ -15,7 +15,9 @@
 //     correo no vale para cambiar un PIN, ni al revés.
 //   · El intento se RESERVA antes de comparar, en una sola sentencia. Comprobar el contador y
 //     sumarlo después dejaría pasar a la vez a todas las peticiones concurrentes.
-//   · Un minuto entre envíos y un tope por hora: el botón no puede ser un cañón contra un buzón.
+//   · Cinco minutos entre envíos y un tope por hora: el botón no puede ser un cañón contra un buzón.
+//     La espera viaja en la respuesta (`reenvioSegundos`) para que la pantalla cuente atrás, pero
+//     quien la hace cumplir es esto.
 
 import type { Client } from "@libsql/client/web";
 
@@ -32,8 +34,8 @@ import {
 } from "../../server/licenseStore";
 import { generateOtpCode, OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "../licensing/licensing.helpers";
 
-/** Entre dos envíos del mismo equipo y propósito. */
-export const REENVIO_MIN_MS = 60_000;
+/** Entre dos envíos del mismo equipo y propósito. El código dura el doble, así que da tiempo. */
+export const REENVIO_MIN_MS = 5 * 60_000;
 /** Tope de envíos por equipo y propósito dentro de esta ventana, se usen o no. */
 export const VENTANA_ENVIOS_MS = 60 * 60_000;
 export const MAX_ENVIOS_POR_VENTANA = 5;
@@ -71,7 +73,7 @@ function sinSecreto(env: Env): RespuestaCodigo | null {
 }
 
 export type CodigoEmitido =
-	| { ok: true; codigo: string; minutos: number }
+	| { ok: true; codigo: string; minutos: number; reenvioSegundos: number }
 	| { ok: false; respuesta: RespuestaCodigo };
 
 /**
@@ -91,12 +93,13 @@ export async function emitirCodigo(
 	const previo = await getEmailCode(db, k);
 
 	if (previo && !previo.consumed_at_ms && ahora - previo.created_at_ms < REENVIO_MIN_MS) {
+		const minutos = Math.ceil((REENVIO_MIN_MS - (ahora - previo.created_at_ms)) / 60_000);
 		return {
 			ok: false,
 			respuesta: fallo(
 				429,
 				"espera_reenvio",
-				"Acabamos de enviarte un código. Espera un minuto antes de pedir otro.",
+				`Acabamos de enviarte un código. Podrás pedir otro en ${minutos} ${minutos === 1 ? "minuto" : "minutos"}.`,
 			),
 		};
 	}
@@ -124,7 +127,12 @@ export async function emitirCodigo(
 		windowStartedMs: previo && ventanaViva ? previo.window_started_ms : ahora,
 	});
 
-	return { ok: true, codigo, minutos: Math.round(OTP_TTL_MS / 60_000) };
+	return {
+		ok: true,
+		codigo,
+		minutos: Math.round(OTP_TTL_MS / 60_000),
+		reenvioSegundos: Math.round(REENVIO_MIN_MS / 1000),
+	};
 }
 
 /**

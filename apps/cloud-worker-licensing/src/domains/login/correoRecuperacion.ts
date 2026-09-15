@@ -137,8 +137,14 @@ export async function solicitarCambioCorreo(
 	if (!pareceCorreo(nuevo)) {
 		return fallo(400, "correo_invalido", "Ese correo no parece válido. Revísalo.");
 	}
+	// Pedir el que ya es no es un error: no hay nada que demostrar, así que ni se manda código ni se
+	// pide confirmar. Pasa sobre todo al activar, cuando alguien desmarca «usar el de la compra» y
+	// escribe justo ése.
 	if (normalizar(await correoDeRecuperacion(db, l.lic)) === nuevo) {
-		return fallo(400, "mismo_correo", "Ese ya es el correo de recuperación.");
+		return {
+			status: 200,
+			body: { ok: true, sinCambios: true, emailHint: emailHint(nuevo), minutos: 0, reenvioSegundos: 0 },
+		};
 	}
 
 	const emitido = await emitirCodigo(db, env, clave(ctx), nuevo, ctx.ahora);
@@ -159,7 +165,15 @@ export async function solicitarCambioCorreo(
 		);
 	}
 
-	return { status: 200, body: { ok: true, emailHint: emailHint(nuevo), minutos: emitido.minutos } };
+	return {
+		status: 200,
+		body: {
+			ok: true,
+			emailHint: emailHint(nuevo),
+			minutos: emitido.minutos,
+			reenvioSegundos: emitido.reenvioSegundos,
+		},
+	};
 }
 
 export async function confirmarCambioCorreo(

@@ -317,7 +317,16 @@ export type CodigoEnviado = {
 /**
  * `a***@bar.com`.
  */
-email_hint: string, minutos: number, };
+email_hint: string, minutos: number, 
+/**
+ * Segundos hasta poder pedir otro. La pantalla cuenta atrás con esto; quien manda es el worker.
+ */
+reenvio_segundos: number, 
+/**
+ * Sólo al cambiar el correo de recuperación: el pedido ya era el actual, así que no se ha
+ * enviado nada ni hay que confirmar.
+ */
+sin_cambios: boolean, };
 
 export type ComandaBarraListItem = { id_comanda: string, fecha_hora_apertura: string, estado: string, total_pendiente: number, total_comanda: number, pendientes_cocina: number, pendientes_pago: number, };
 

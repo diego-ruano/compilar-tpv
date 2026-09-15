@@ -217,15 +217,22 @@ describe("correo de recuperación · lo que no se puede", () => {
 		});
 	});
 
-	it("no acepta un correo mal escrito, ni el que ya es", async () => {
+	it("no acepta un correo mal escrito", async () => {
 		await escenario(async (e) => {
 			for (const malo of ["no-es-un-correo", "a@b", "con espacio@bar.test"]) {
 				expect((await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: malo })).status).toBe(400);
 			}
-			const mismo = await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: COMPRA.toUpperCase() });
-			expect(mismo.status).toBe(400);
-			expect(mismo.body.error).toBe("mismo_correo");
 			expect(e.correos).toHaveLength(0);
+		});
+	});
+
+	it("pedir el que ya es no manda código ni pide confirmar", async () => {
+		await escenario(async (e) => {
+			const mismo = await solicitarCambioCorreo(e.db, e.env, { ...e.ctx(), correo: COMPRA.toUpperCase() });
+			expect(mismo.status).toBe(200);
+			expect(mismo.body.sinCambios).toBe(true);
+			expect(e.correos).toHaveLength(0);
+			expect(await getTenantRecoveryEmail(e.db, TENANT)).toBeNull();
 		});
 	});
 

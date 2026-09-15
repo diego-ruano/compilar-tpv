@@ -8,7 +8,7 @@ const reactSources = import.meta.glob("../../src/**/*.tsx", {
 
 describe("integridad de los archivos React", () => {
 	it("incluye en la batería todos los TSX del frontend", () => {
-		expect(Object.keys(reactSources)).toHaveLength(120);
+		expect(Object.keys(reactSources)).toHaveLength(121);
 	});
 
 	it.each(Object.entries(reactSources))("%s contiene código React completo", (path, source) => {

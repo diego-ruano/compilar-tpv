@@ -13,7 +13,9 @@ import {
     fetchSetupPendiente,
     uploadInitialSetupToCloud,
 } from "../../features/login/loginApi";
+import ConfirmarCorreoRecuperacion from "../../features/login/ConfirmarCorreoRecuperacion";
 import { useAuth } from "../../shared/stores/useAuth";
+import { useCorreoRecuperacionPendiente } from "../../shared/stores/useCorreoRecuperacionPendiente";
 import { useMode } from "../../shared/stores/useMode";
 import { Badge, Button, Card, Input } from "../../shared/ui";
 import Titlebar from "../layoutComponent/Titlebar";
@@ -37,6 +39,12 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     const emailPrev = useAuth((s) => s.email);
     const setSession = useAuth((s) => s.setSession);
     const role = useAuth((s) => s.role);
+
+    // LOGIN-08: el correo de recuperación elegido al activar, si falta confirmarlo. Se resuelve
+    // (confirmar o saltar) antes de guardar el PIN, porque al guardarlo se cierra la ventana en la
+    // que se puede confirmar sin sesión.
+    const correoPendiente = useCorreoRecuperacionPendiente((s) => s.correo);
+    const resolverCorreoPendiente = useCorreoRecuperacionPendiente((s) => s.fijar);
 
     // Sin sesion no hay de donde sacar el usuario: se pregunta al equipo quien tiene el setup
     // pendiente (el admin que siembra la BD al crearse).
@@ -88,6 +96,7 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
     const emailTrimmed = email.trim();
     const canSave =
         !saving &&
+        !correoPendiente &&
         !!idUsuario &&
         pinNuevo.length >= 4 &&
         pinNuevo === pinNuevo2 &&
@@ -259,6 +268,13 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                     </div>
 
                     <div className="mt-6 grid gap-5">
+                        {correoPendiente ? (
+                            <ConfirmarCorreoRecuperacion
+                                correo={correoPendiente}
+                                onResuelto={() => resolverCorreoPendiente(null)}
+                            />
+                        ) : null}
+
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                             <div>
                                 <label
@@ -364,7 +380,9 @@ export default function SetupInicial({ onCompletado }: { onCompletado?: () => vo
                         </Button>
 
                         <p className="text-center text-xs text-fg-subtle">
-                            Este paso es necesario para desbloquear el TPV.
+                            {correoPendiente
+                                ? "Antes, confirma el correo de recuperación o salta ese paso."
+                                : "Este paso es necesario para desbloquear el TPV."}
                         </p>
                     </div>
                 </section>

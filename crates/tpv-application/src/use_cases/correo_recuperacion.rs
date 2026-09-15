@@ -73,7 +73,12 @@ mod tests {
         }
         async fn solicitar_cambio(&self, correo: &str) -> AppResult<CodigoEnviado> {
             self.llamadas.lock().unwrap().push(format!("solicitar:{correo}"));
-            Ok(CodigoEnviado { email_hint: "e***@bar.test".into(), minutos: 10 })
+            Ok(CodigoEnviado {
+                email_hint: "e***@bar.test".into(),
+                minutos: 10,
+                reenvio_segundos: 300,
+                sin_cambios: false,
+            })
         }
         async fn confirmar_cambio(&self, codigo: &str) -> AppResult<EstadoCorreoRecuperacion> {
             self.llamadas.lock().unwrap().push(format!("confirmar:{codigo}"));

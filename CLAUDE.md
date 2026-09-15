@@ -1430,7 +1430,7 @@ que cierra también el modelo de amenaza de LIC-04.
 | El correo de recuperación | `worker/…/correoRecuperacion.ts` · `use_cases/correo_recuperacion.rs` | A dónde van los códigos; cambiarlo verifica el buzón nuevo |
 | En la base central | `server/licenseStore.ts` → `email_codes` · `tenant_recovery_emails` | Los códigos, y el correo propio si lo hay (sin fila = el de la compra) |
 | Comandos | `commands/recuperacion_pin.rs` (sin sesión) · `commands/correo_recuperacion.rs` (administrador) | El primero, en `tests_exenciones_del_gate` |
-| Pantallas | `features/login/RecuperarPinModal.tsx` · `configuracion/sections/CorreoRecuperacion.tsx` | Desde el login · desde Configuración → Licencia |
+| Pantallas | `features/login/RecuperarPinModal.tsx` · `configuracion/sections/CorreoRecuperacion.tsx` · `features/login/ConfirmarCorreoRecuperacion.tsx` | Desde el login · desde Configuración → Licencia · al estrenar el equipo |
 
 - **Un código que llega al correo y se escribe en el TPV; nunca un enlace.** Hacen falta el buzón y
   la Main a la vez, porque la petición va firmada con la clave del equipo. Un enlace se abre en
@@ -1438,7 +1438,15 @@ que cierra también el modelo de amenaza de LIC-04.
 - **El PIN nuevo no sale del equipo.** La nube sólo dice si el código vale; la Main guarda el PIN y
   lo sube por el outbox. Verificar y guardar son **un** comando: separados, bastaría llamar al segundo.
 - **Va al correo de recuperación, que es el de la compra** (`licenses.customer_email`) hasta que
-  alguien lo cambie. La activación ya no pregunta ningún correo.
+  alguien lo cambie.
+- **Al activar se puede elegir otro** (casilla «usar el de la compra», marcada por defecto). Se
+  confirma con su código en la pantalla del PIN, que no deja guardar hasta confirmar o **saltar**.
+  Hasta confirmarlo manda el de la compra, y si no se confirma nunca no cambia nada: el pendiente
+  vive en memoria (`useCorreoRecuperacionPendiente`), así que cerrar la app equivale a saltar. Para
+  eso pedir y confirmar funcionan **sin sesión mientras el PIN inicial esté por elegir**, la misma
+  ventana en la que `complete_initial_setup` ya deja poner PIN y correo sin sesión.
+- **Cinco minutos entre códigos** (`REENVIO_MIN_MS`), con cuenta atrás en los botones. La espera
+  la hace cumplir el worker; la pantalla sólo la enseña.
 - **Cambiarlo exige un código enviado al correo NUEVO, y avisa al anterior y al de la compra.** No
   se pide código al anterior, a propósito: el caso normal de cambiarlo es que ya no se tiene ese
   buzón. Volver al de la compra no pide código, porque ese buzón ya está demostrado.

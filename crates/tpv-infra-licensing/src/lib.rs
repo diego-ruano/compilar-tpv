@@ -957,6 +957,20 @@ fn sin_conexion(e: AppError) -> AppError {
     }
 }
 
+/// La respuesta de las rutas que mandan un código (`{ ok, emailHint, minutos, reenvioSegundos, sinCambios? }`).
+fn codigo_enviado(resp: &JsonValue) -> CodigoEnviado {
+    CodigoEnviado {
+        email_hint: resp
+            .get("emailHint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        minutos: resp.get("minutos").and_then(|v| v.as_i64()).unwrap_or(10),
+        reenvio_segundos: resp.get("reenvioSegundos").and_then(|v| v.as_i64()).unwrap_or(300),
+        sin_cambios: resp.get("sinCambios").and_then(|v| v.as_bool()).unwrap_or(false),
+    }
+}
+
 /// La respuesta de las rutas del correo de recuperación (`{ ok, emailHint, esElDeLaCompra }`).
 fn estado_correo(resp: &JsonValue) -> EstadoCorreoRecuperacion {
     EstadoCorreoRecuperacion {
@@ -995,14 +1009,7 @@ impl CorreoRecuperacionService for PairingAdapter {
             )
             .await
             .map_err(sin_conexion)?;
-        Ok(CodigoEnviado {
-            email_hint: resp
-                .get("emailHint")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            minutos: resp.get("minutos").and_then(|v| v.as_i64()).unwrap_or(10),
-        })
+        Ok(codigo_enviado(&resp))
     }
 
     async fn confirmar_cambio(&self, codigo: &str) -> AppResult<EstadoCorreoRecuperacion> {
@@ -1043,14 +1050,7 @@ impl RecuperacionPinService for PairingAdapter {
             .await
             .map_err(sin_conexion)?;
 
-        Ok(CodigoEnviado {
-            email_hint: resp
-                .get("emailHint")
-                .and_then(|v| v.as_str())
-                .unwrap_or_default()
-                .to_string(),
-            minutos: resp.get("minutos").and_then(|v| v.as_i64()).unwrap_or(10),
-        })
+        Ok(codigo_enviado(&resp))
     }
 
     async fn verificar_codigo(&self, id_usuario: &str, codigo: &str) -> AppResult<()> {

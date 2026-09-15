@@ -175,7 +175,12 @@ mod tests {
     impl RecuperacionPinService for FakeNube {
         async fn solicitar_codigo(&self, id: &str) -> AppResult<CodigoEnviado> {
             self.llamadas.lock().unwrap().push(format!("solicitar:{id}"));
-            Ok(CodigoEnviado { email_hint: "t***@bar.test".into(), minutos: 10 })
+            Ok(CodigoEnviado {
+                email_hint: "t***@bar.test".into(),
+                minutos: 10,
+                reenvio_segundos: 300,
+                sin_cambios: false,
+            })
         }
         async fn verificar_codigo(&self, id: &str, codigo: &str) -> AppResult<()> {
             self.llamadas.lock().unwrap().push(format!("verificar:{id}"));

@@ -130,6 +130,14 @@ pub struct CodigoEnviado {
     pub email_hint: String,
     #[ts(type = "number")]
     pub minutos: i64,
+    /// Segundos hasta poder pedir otro. La pantalla cuenta atrás con esto; quien manda es el worker.
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub reenvio_segundos: i64,
+    /// Sólo al cambiar el correo de recuperación: el pedido ya era el actual, así que no se ha
+    /// enviado nada ni hay que confirmar.
+    #[serde(default)]
+    pub sin_cambios: bool,
 }
 
 /// Código y PIN nuevo van JUNTOS, en un solo comando: si verificar el código y guardar el PIN

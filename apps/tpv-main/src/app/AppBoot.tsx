@@ -34,6 +34,7 @@ import { useMainPresence } from "../shared/stores/useMainPresence";
 import { useBusinessSettings } from "../shared/stores/useBusinessSettings";
 import { useImageUrl } from "../shared/lib/useImageUrl";
 import { useContactSettings } from "../shared/stores/useContactSettings";
+import { useCorreoRecuperacionPendiente } from "../shared/stores/useCorreoRecuperacionPendiente";
 import { useTicketSettings } from "../shared/stores/useTicketSettings";
 import { cloudPost } from "../shared/lib/cloudApi";
 import { deviceFingerprint } from "../shared/lib/deviceFingerprint";
@@ -366,6 +367,13 @@ export default function AppBoot({ router }: { router: any }) {
         country: "",
     });
 
+    // LOGIN-08: por defecto los códigos de recuperación van al correo de la compra. Si se desmarca,
+    // el correo escrito queda pendiente y se confirma con su código en la pantalla del PIN.
+    const [usarCorreoCompra, setUsarCorreoCompra] = useState(true);
+    const [correoRecuperacion, setCorreoRecuperacion] = useState("");
+    const fijarCorreoPendiente = useCorreoRecuperacionPendiente((s) => s.fijar);
+    const correoRecuperacionValido = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correoRecuperacion.trim());
+
     // Cambio de dispositivo (§6.4): si la licencia ya está en otro equipo, el servidor pide un
     // código de 6 dígitos que le llega al email. `hint` (p. ej. `a***@bar.com`) != null significa
     // que estamos en ese paso.
@@ -381,10 +389,11 @@ export default function AppBoot({ router }: { router: any }) {
             act.legal_name.trim().length > 0 &&
             act.business_name.trim().length > 0 &&
             act.phone.trim().length > 0 &&
-            act.country.trim().length > 0;
+            act.country.trim().length > 0 &&
+            (usarCorreoCompra || correoRecuperacionValido);
         // En el paso de cambio de dispositivo, además hace falta el código completo.
         return base && (!enDeviceChange || deviceChangeCode.trim().length === 6);
-    }, [act, enDeviceChange, deviceChangeCode]);
+    }, [act, enDeviceChange, deviceChangeCode, usarCorreoCompra, correoRecuperacionValido]);
 
     // HANDY pairing
     const [handyUriInput, setHandyUriInput] = useState("");
@@ -798,6 +807,9 @@ export default function AppBoot({ router }: { router: any }) {
 
             setDeviceChangeHint(null);
             setDeviceChangeCode("");
+            fijarCorreoPendiente(
+                usarCorreoCompra ? null : correoRecuperacion.trim().toLowerCase(),
+            );
             await refreshLicense();
             await refreshGate(true);
         } catch (e: any) {
@@ -1526,9 +1538,49 @@ export default function AppBoot({ router }: { router: any }) {
                                                 </div>
                                             </div>
 
-                                            {/* Sin correo, a propósito (LOGIN-08): los códigos para
-                                                recuperar el PIN van al correo de la compra, que ya
-                                                está demostrado. Se cambia en Configuración → Licencia. */}
+                                            {/* LOGIN-08: el correo de recuperación. Marcado, el de la
+                                                compra (ya demostrado). Desmarcado, uno escrito que se
+                                                confirma con un código en la pantalla del PIN. */}
+                                            <div className="rounded-2xl border border-border bg-surface-2 px-4 py-3">
+                                                <label
+                                                    htmlFor="activation-usar-correo-compra"
+                                                    className="flex cursor-pointer items-start gap-3"
+                                                >
+                                                    <input
+                                                        id="activation-usar-correo-compra"
+                                                        type="checkbox"
+                                                        checked={usarCorreoCompra}
+                                                        onChange={(e) => setUsarCorreoCompra(e.target.checked)}
+                                                        className="mt-0.5 h-4 w-4 rounded border-border accent-accent"
+                                                    />
+                                                    <span>
+                                                        <span className="block text-sm font-semibold text-fg">
+                                                            Usar el correo de la compra para recuperar el PIN
+                                                        </span>
+                                                        <span className="mt-0.5 block text-xs text-fg-muted">
+                                                            Si prefieres otro, desmárcalo y escríbelo: lo
+                                                            confirmarás con un código en el siguiente paso.
+                                                        </span>
+                                                    </span>
+                                                </label>
+
+                                                {!usarCorreoCompra ? (
+                                                    <Input
+                                                        id="activation-correo-recuperacion"
+                                                        type="email"
+                                                        value={correoRecuperacion}
+                                                        onChange={(e) => setCorreoRecuperacion(e.target.value)}
+                                                        invalid={
+                                                            correoRecuperacion.trim().length > 0 &&
+                                                            !correoRecuperacionValido
+                                                        }
+                                                        className="mt-3 h-12 px-4"
+                                                        placeholder="encargado@tubar.com"
+                                                        autoComplete="email"
+                                                    />
+                                                ) : null}
+                                            </div>
+
                                             <div className="grid gap-4 sm:grid-cols-2">
                                                 <div>
                                                     <label
@@ -1647,6 +1699,8 @@ export default function AppBoot({ router }: { router: any }) {
                                                         });
                                                         setDeviceChangeHint(null);
                                                         setDeviceChangeCode("");
+                                                        setUsarCorreoCompra(true);
+                                                        setCorreoRecuperacion("");
                                                     }}
                                                 >
                                                     Limpiar
