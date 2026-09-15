@@ -6,9 +6,8 @@
 //
 // Se prueba entero, sin React, con tres dobles:
 //
-//   · `SocketFalso`: un WebSocket que no conecta a nada. Como el de un navegador, `close()` no
-//     dispara `onclose` en el acto (el cierre termina cuando el test llama a `cerrar()`) y un
-//     mensaje que llega con el socket no abierto se descarta.
+//   · `SocketFalso` (`test/helpers/socketFalso.ts`, lo comparte con el test de la Handy): un
+//     WebSocket que no conecta a nada, que cierra y recibe como el de un navegador.
 //   · un backend de Tauri en memoria (`crearBackend`) que hace de outbox, checkpoint y worker.
 //   · el reloj de Vitest: los latidos, los reintentos y las esperas corren cuando el test lo dice.
 //
@@ -37,8 +36,7 @@ import { iniciarSocketMain, type EntradaSocketMain, type SocketMain } from "../s
 import { affectedFeatureKeys } from "../src/shared/lib/syncStatements";
 import { useEstadoSync } from "../src/shared/stores/useEstadoSync";
 import { useSyncSignal } from "../src/shared/stores/useSyncSignal";
-
-type Mensaje = Record<string, any>;
+import { asentar, avanzar, conPong, SocketFalso, ultimo, type Mensaje } from "./helpers/socketFalso";
 
 let seqNube = 100;
 /** La nube de un día normal: aplica todo lo que le llega. */
@@ -48,59 +46,6 @@ const nubeQueAcepta = (m: Mensaje): Mensaje | undefined =>
 		: m.type === "bulk_apply"
 			? { type: "bulk_ack", ok: true }
 			: undefined;
-
-class SocketFalso {
-	static readonly CONNECTING = 0;
-	static readonly OPEN = 1;
-	static readonly CLOSING = 2;
-	static readonly CLOSED = 3;
-	static creados: SocketFalso[] = [];
-	static nubePorDefecto: (m: Mensaje) => Mensaje | undefined = nubeQueAcepta;
-
-	readyState = SocketFalso.CONNECTING;
-	enviados: Mensaje[] = [];
-	/** Qué contesta la nube a cada mensaje enviado; `undefined` es que no contesta. */
-	nube = SocketFalso.nubePorDefecto;
-	onopen: (() => void) | null = null;
-	onmessage: ((ev: { data: string }) => unknown) | null = null;
-	onclose: (() => void) | null = null;
-	onerror: (() => void) | null = null;
-
-	constructor(readonly url: string) {
-		SocketFalso.creados.push(this);
-	}
-	send(data: string) {
-		const m = JSON.parse(data) as Mensaje;
-		this.enviados.push(m);
-		const respuesta = this.nube(m);
-		if (respuesta) setImmediate(() => void this.recibir(respuesta));
-	}
-	close() {
-		if (this.readyState < SocketFalso.CLOSING) this.readyState = SocketFalso.CLOSING;
-	}
-	abrir() {
-		this.readyState = SocketFalso.OPEN;
-		this.onopen?.();
-	}
-	async recibir(m: Mensaje) {
-		await this.recibirTexto(JSON.stringify(m));
-	}
-	async recibirTexto(texto: string) {
-		if (this.readyState !== SocketFalso.OPEN) return;
-		await this.onmessage?.({ data: texto });
-	}
-	cerrar() {
-		if (this.readyState === SocketFalso.CLOSED) return;
-		this.readyState = SocketFalso.CLOSED;
-		this.onclose?.();
-	}
-	tipos() {
-		return this.enviados.map((m) => m.type);
-	}
-	applies() {
-		return this.enviados.filter((m) => m.type === "apply").map((m) => m.opId);
-	}
-}
 
 type Op = { seq: number; op_id: string; command_name: string; statements: { sql: string; args: unknown[] }[] };
 /** Una escritura local en el outbox. */
@@ -195,19 +140,10 @@ function crearBackend() {
 }
 type Backend = ReturnType<typeof crearBackend>;
 
-/** Deja correr todo lo que no espera a un temporizador: promesas y respuestas de la nube. */
-const asentar = async () => {
-	for (let i = 0; i < 200; i++) await new Promise<void>((r) => setImmediate(r));
-};
-const avanzar = async (ms: number) => {
-	await vi.advanceTimersByTimeAsync(ms);
-	await asentar();
-};
 const estado = () => useEstadoSync.getState().estado;
 const cuenta = (b: Backend, cmd: string) => b.llamadas.filter((l) => l.cmd === cmd).length;
 const tickets = (b: Backend) =>
 	b.llamadas.filter((l) => l.cmd === "tpv_server_post_json" && l.args.args.path === "/v1/ws/ticket").length;
-const ultimo = () => SocketFalso.creados[SocketFalso.creados.length - 1];
 /** Lo que hace el TenantHub al aceptar un socket: pide la firma y, si vale, lo da por bueno. */
 async function conectar(s: SocketFalso) {
 	s.abrir();
@@ -215,11 +151,6 @@ async function conectar(s: SocketFalso) {
 	await s.recibir({ type: "hello_ok" });
 	await asentar();
 }
-const conPong = (s: SocketFalso) => {
-	const nube = s.nube;
-	s.nube = (m) => (m.type === "ping" ? { type: "pong" } : nube(m));
-};
-
 let arrancado: SocketMain | null = null;
 
 async function montar(entrada: Partial<EntradaSocketMain> = {}) {

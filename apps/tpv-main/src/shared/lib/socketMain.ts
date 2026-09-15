@@ -44,17 +44,8 @@ import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { captureException } from "../observability/sentry";
 import { reconcileRestoredDatabase, type RecoveryPhase } from "./recoverySync";
+import { crearEsperas, firmarHello, leerIdDispositivo, vigilarLatido } from "./socketComun";
 
-// SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
-// prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se resetea al autenticarse.
-const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
-const PING_MS = 30000;
-// SYNC-17: margen sin `pong` antes de dar el socket por muerto. Un TCP medio-abierto (la ruta se
-// cae sin FIN: cambio de red, NAT que expira, suspensión del equipo) NO dispara `onclose`, así que
-// sin este vigía la Main se queda con un socket que ni recibe cambios ni sube el outbox y nadie se
-// entera. Dos latidos de margen: un `pong` perdido suelto no cierra nada.
-const PONG_TIMEOUT_MS = PING_MS * 2 + 5000;
 // SYNC-17: esperas largas para los dos casos en los que reintentar rápido no arregla nada.
 // `sin_identidad` no llega ni a tocar la red (son dos `invoke` locales), pero repetirlo cada 3 s
 // en un TPV recién instalado solo llena la consola; el camino rápido de verdad es el `pulso` que
@@ -117,15 +108,6 @@ async function loadLicense(): Promise<{ tenantId: string } | null> {
 	}
 }
 
-async function loadDeviceId(): Promise<string> {
-	try {
-		const r = (await invoke<any>("device_get_identity")) as any;
-		return String(r?.deviceId ?? r?.device_id ?? "");
-	} catch {
-		return "";
-	}
-}
-
 /** Resultado de pedir el ticket: hay que distinguir "no hay red" de "el worker dice que no". */
 type ResultadoTicket =
 	| { ok: true; ticket: string }
@@ -153,17 +135,6 @@ async function loadWsTicket(mode: "tpv" | "handy"): Promise<ResultadoTicket> {
 			detalle: err.message || err.code,
 		};
 	}
-}
-
-async function signWsHello(
-	ts: number,
-	tenantId: string,
-	deviceId: string,
-	nonceB64: string,
-): Promise<string> {
-	const payload = `${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}`;
-	const r = (await invoke<any>("device_sign_b64", { args: { payload } })) as any;
-	return String(r?.sigB64 ?? r?.sig_b64 ?? "");
 }
 
 /** Lo que decide si se conecta y cómo: los valores de los stores de los que depende el hook. */
@@ -216,13 +187,11 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	let cancelled = false;
 	let ws: WebSocket | null = null;
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
-	let pingTimer: ReturnType<typeof setInterval> | null = null;
+	let latido: ReturnType<typeof vigilarLatido> | null = null;
 	let unlistenOutbox: (() => void) | null = null;
 	// Evita dos `open()` concurrentes: ahora la reconexión también la disparan eventos
 	// (`online`/`focus`/`visibilitychange`), que pueden llegar a la vez.
 	let opening = false;
-	// SYNC-17: último `pong` recibido (el DO lo contesta en el edge, sin despertarse).
-	let lastPongAt = 0;
 
 	// Estado de aplicación (compartido entre reconexiones mientras siga arrancado).
 	let caughtUp = false;
@@ -691,21 +660,15 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		return highWater;
 	}
 
-	// SYNC-09: retardo de reconexión con backoff exponencial (se resetea a base en `hello_ok`).
-	let reconnectDelay = RECONNECT_BASE_MS;
+	// SYNC-09: esperas entre reintentos (vuelven a la corta en `hello_ok`).
+	const esperas = crearEsperas();
 	/**
 	 * Programa el siguiente intento. `esperaFija` salta el backoff para los motivos que no se
 	 * arreglan reintentando deprisa (sin identidad, rechazo del worker).
 	 */
 	const scheduleReconnect = (esperaFija?: number) => {
 		if (cancelled || retryTimer || recuperacionBloqueada) return;
-		let delay: number;
-		if (esperaFija != null) {
-			delay = esperaFija + Math.random() * 1000;
-		} else {
-			delay = Math.min(reconnectDelay, RECONNECT_MAX_MS) + Math.random() * 1000;
-			reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
-		}
+		const delay = esperaFija != null ? esperaFija + Math.random() * 1000 : esperas.siguiente();
 		retryTimer = setTimeout(() => {
 			retryTimer = null;
 			void open();
@@ -724,10 +687,8 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	 * al socket anterior de un dispositivo en cuanto conecta uno nuevo, eso era un bucle.
 	 */
 	function soltarSocket() {
-		if (pingTimer) {
-			clearInterval(pingTimer);
-			pingTimer = null;
-		}
+		latido?.parar();
+		latido = null;
 		if (drainTimer) {
 			clearInterval(drainTimer);
 			drainTimer = null;
@@ -760,7 +721,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		// (licencia renovada) tiene derecho a saltarse la espera larga.
 		if (!forzar && useEstadoSync.getState().estado === "rechazado") return;
 
-		reconnectDelay = RECONNECT_BASE_MS;
+		esperas.reiniciar();
 		if (retryTimer) {
 			clearTimeout(retryTimer);
 			retryTimer = null;
@@ -806,7 +767,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		}
 
 		const lic = await loadLicense();
-		const deviceId = await loadDeviceId();
+		const deviceId = await leerIdDispositivo();
 		if (cancelled) return;
 		if (!lic || !deviceId) {
 			// TPV recién instalado (o licencia aún sin activar): no hay tenant al que conectarse.
@@ -842,25 +803,9 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		ws = socket;
 
 		socket.onopen = () => {
-			// El vigía cuenta desde la apertura: si el primer `pong` no llega, también cierra.
-			lastPongAt = Date.now();
-			if (pingTimer) clearInterval(pingTimer);
-			pingTimer = setInterval(() => {
-				if (socket.readyState !== WebSocket.OPEN) return;
-				// SYNC-17: antes de latir, comprobamos que el latido anterior tuvo respuesta. Sin
-				// esto se enviaban `ping` a un socket muerto para siempre (nadie lee el `pong`).
-				// Cerrar dispara `onclose` → backoff → reconexión limpia.
-				if (Date.now() - lastPongAt > PONG_TIMEOUT_MS) {
-					console.warn("[ws] sin pong en", PONG_TIMEOUT_MS, "ms: socket muerto, cerrando");
-					try {
-						socket.close();
-					} catch {
-						/* noop */
-					}
-					return;
-				}
-				socket.send(JSON.stringify({ type: "ping" }));
-			}, PING_MS);
+			// SYNC-17: latido con vigía, que cierra un socket medio muerto (ver `vigilarLatido`).
+			latido?.parar();
+			latido = vigilarLatido(socket);
 		};
 
 		socket.onmessage = async (ev) => {
@@ -876,7 +821,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			// DO (tenantHub.ts), así que llega aunque el hub esté hibernando: es justo lo que la
 			// convierte en una señal fiable de "la ruta hasta la nube sigue viva".
 			if (msg.type === "pong") {
-				lastPongAt = Date.now();
+				latido?.pong();
 				return;
 			}
 
@@ -892,7 +837,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			if (msg.type === "challenge") {
 				try {
 					const ts = Date.now();
-					const sigB64 = await signWsHello(ts, lic.tenantId, deviceId, String(msg.nonceB64 ?? ""));
+					const sigB64 = await firmarHello(ts, lic.tenantId, deviceId, String(msg.nonceB64 ?? ""));
 					if (!cancelled && socket.readyState === WebSocket.OPEN) {
 						socket.send(
 							JSON.stringify({
@@ -915,7 +860,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 				// subir a R2 las imágenes pendientes (canal aparte del outbox SQL).
 				authed = true;
 				marcar("conectado");
-				reconnectDelay = RECONNECT_BASE_MS; // SYNC-09: conexión sana → resetea el backoff
+				esperas.reiniciar(); // SYNC-09: conexión sana → vuelve a la espera corta
 				if (reconciliacionPendiente) {
 					if (recoveryRunning) return;
 					// Bloqueada: la reconciliación agotó sus intentos y ahora hace falta una decisión
