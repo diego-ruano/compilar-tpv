@@ -180,6 +180,44 @@ describe("conexión", () => {
 		expect(s.readyState).toBe(SocketFalso.OPEN);
 		expect(s.pings()).toBe(20);
 	});
+
+	it("un socket medio muerto —sin respuesta al latido— se cierra, y la Handy vuelve a conectar", async () => {
+		// Un TCP medio-abierto (suspensión del móvil, cambio de red) no dispara `onclose`: el socket
+		// sigue OPEN y la Main «confirmada», así que la Handy se da por sana, no reconecta ni al volver
+		// a primer plano y enseña datos viejos sin avisar. Es el caso que el vigía de SYNC-17 cubre en
+		// la Main.
+		crearBackend();
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+
+		await avanzar(60_000);
+		expect(s.readyState).toBe(SocketFalso.OPEN);
+		await avanzar(30_000);
+		expect(s.readyState).toBe(SocketFalso.CLOSING);
+
+		s.cerrar();
+		await avanzar(3_000);
+		expect(SocketFalso.creados).toHaveLength(2);
+	});
+
+	it("un pong perdido suelto no cierra nada", async () => {
+		crearBackend();
+		await montar();
+		const s = ultimo();
+		let responder = true;
+		s.nube = (m) => {
+			if (m.type !== "ping") return undefined;
+			const r = responder ? { type: "pong" } : undefined;
+			responder = false;
+			return r;
+		};
+		await conectar(s);
+		await avanzar(90_000);
+		expect(s.readyState).toBe(SocketFalso.OPEN);
+		await avanzar(30_000);
+		expect(s.readyState).toBe(SocketFalso.CLOSING);
+	});
 });
 
 describe("la presencia de la Main", () => {

@@ -584,7 +584,7 @@ no sólo en dev.
   - **Palanca de emergencia sin UI:** `connectivity: "auto" | "off"` en `device_config.json`
     (comandos `get/set_connection_mode`). Sirve para una red patológica o un cliente que no quiera
     nube. La captura del outbox NO depende de ella: al volver a `auto` se drena lo acumulado.
-  - **Socket medio-muerto:** el latido verifica el `pong` (el DO lo contesta en el edge) y cierra
+  - **Socket medio-muerto (Main y Handy, `socketComun.ts::vigilarLatido`):** el latido verifica el `pong` (el DO lo contesta en el edge) y cierra
     tras dos latidos sin respuesta; además se reconecta al instante ante `online`/`focus`/
     `visibilitychange`. Sin ambos, un TCP medio-abierto se quedaba mudo para siempre.
   - **Un socket abandonado no toca nada.** Quien reconecta sin esperar al cierre del anterior

@@ -11,8 +11,8 @@
 //
 // Vive fuera de React por lo mismo que el de la Main: dentro de un `useEffect` sólo se podía probar
 // montando el componente. El hook `useHandySocket` lo arranca y le avisa de lo que sólo sabe el
-// navegador. Lo que comparte con la Main (esperas entre reintentos, identidad y firma del saludo)
-// está en `socketComun.ts`.
+// navegador. Lo que comparte con la Main (esperas entre reintentos, latido con vigía, identidad y
+// firma del saludo) está en `socketComun.ts`.
 //
 // Presencia de la Main (freeze): el worker nos dice si hay una Main activa (`main_status` al
 // autenticarse, `main_online`/`main_offline` en vivo). Sin Main, el Handy se bloquea (AppBoot).
@@ -40,7 +40,7 @@ import {
 } from "./syncStatements";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
-import { crearEsperas, firmarHello, LATIDO_MS, leerIdDispositivo } from "./socketComun";
+import { crearEsperas, firmarHello, leerIdDispositivo, vigilarLatido } from "./socketComun";
 
 // Gracia antes de bloquear la UI ("Conectando con la Main…") al caerse el WS. Evita que caídas
 // transitorias parpadeen el bloqueo: si reconectamos y recibimos presencia (`main_status`/
@@ -90,7 +90,8 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 	let cancelled = false;
 	let ws: WebSocket | null = null;
 	let retryTimer: ReturnType<typeof setTimeout> | null = null;
-	let pingTimer: ReturnType<typeof setInterval> | null = null;
+	// SYNC-17: el latido del socket actual, con su vigía (ver `vigilarLatido`).
+	let latido: ReturnType<typeof vigilarLatido> | null = null;
 	// Timer de gracia: pone mainOnline=null (bloquea) solo si NO reconectamos a tiempo.
 	let blockTimer: ReturnType<typeof setTimeout> | null = null;
 	// Evita dos `open()` concurrentes (p. ej. si visibility + focus disparan a la vez).
@@ -150,6 +151,10 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 				/* noop */
 			}
 		}
+		// El latido del socket que se abandona se para ya: si no, su vigía seguiría corriendo hasta
+		// que abriera el siguiente.
+		latido?.parar();
+		latido = null;
 		ws = null;
 		void open();
 	};
@@ -178,12 +183,11 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 			ws = socket;
 
 			socket.onopen = () => {
-				if (pingTimer) clearInterval(pingTimer);
-				pingTimer = setInterval(() => {
-					if (socket.readyState === WebSocket.OPEN) {
-						socket.send(JSON.stringify({ type: "ping" }));
-					}
-				}, LATIDO_MS);
+				// SYNC-17: el latido con vigía, igual que la Main. Sin él, un TCP medio-abierto dejaba el
+				// socket OPEN y la Main «confirmada» para siempre: la Handy se daba por sana, no volvía a
+				// conectar ni al volver a primer plano y enseñaba datos viejos sin avisar a nadie.
+				latido?.parar();
+				latido = vigilarLatido(socket);
 			};
 
 			socket.onmessage = async (ev) => {
@@ -194,6 +198,13 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 					return;
 				}
 				if (!msg || typeof msg.type !== "string") return;
+
+				// SYNC-17: respuesta al latido. La contesta el edge sin despertar al DO, así que es la
+				// prueba de que la ruta hasta la nube sigue viva.
+				if (msg.type === "pong") {
+					latido?.pong();
+					return;
+				}
 
 				if (msg.type === "challenge") {
 					try {
@@ -275,10 +286,8 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 				// Ignora el cierre de un socket ya reemplazado por una reconexión más nueva: si no,
 				// pisaría el estado de la conexión sana (carrera → "Conectando" espurio).
 				if (ws !== socket) return;
-				if (pingTimer) {
-					clearInterval(pingTimer);
-					pingTimer = null;
-				}
+				latido?.parar();
+				latido = null;
 				ws = null;
 				// Gracia antes de bloquear: si reconectamos y confirmamos presencia antes de
 				// BLOCK_GRACE_MS, no se llega a mostrar "Conectando".
@@ -305,7 +314,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 		detener: () => {
 			cancelled = true;
 			if (retryTimer) clearTimeout(retryTimer);
-			if (pingTimer) clearInterval(pingTimer);
+			latido?.parar();
 			clearBlockTimer();
 			if (ws) {
 				try {
