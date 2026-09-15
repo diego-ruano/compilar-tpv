@@ -877,6 +877,55 @@ mod tests {
         assert!(!nif_valido(""));
     }
 
+    #[test]
+    fn nif_misma_tabla_que_la_pantalla() {
+        // Tabla repetida en `apps/tpv-main/test/nif.test.ts`. La pantalla valida el NIF al escribir y
+        // esto lo revalida: si la pantalla rechazara uno que aquí vale, el cliente se quedaría sin
+        // factura sin que la petición llegara nunca hasta aquí.
+        for nif in [
+            "12345678Z",
+            "89890001K",
+            "00000015S",
+            " 12345678z ",
+            "12345678-Z",
+            "12 345 678 Z",
+            "X1234567L",
+            "Y1234567X",
+            "Z1234567R",
+            "x-1234567-l",
+            "A58818501",
+            "A12345674",
+            "B12345674",
+            "Q2826000H",
+            "K1234567D",
+            "G12345674",
+            "G1234567D",
+        ] {
+            assert!(nif_valido(nif), "{nif:?} debería ser válido");
+        }
+
+        // Un espacio duro pegado de una web, y una «ſ» que `toUpperCase()` de JavaScript convierte en
+        // «S»: la pantalla los aceptaba y esto no.
+        let con_espacio_duro = format!("12345678{}Z", char::from(0xa0u8));
+        let con_s_larga = format!("00000015{}", char::from_u32(0x17f).unwrap());
+        for nif in [
+            "12345678A",
+            "1234567Z",
+            "12345678",
+            "12345678ZZ",
+            "",
+            "X1234567A",
+            "B12345670",
+            "A1234567D",
+            "K12345674",
+            "12345678\tZ",
+            con_espacio_duro.as_str(),
+            con_s_larga.as_str(),
+        ] {
+            assert!(!nif_valido(nif), "{nif:?} no debería ser válido");
+        }
+    }
+
     // ── Saneado ─────────────────────────────────────────────────────────────────────────────────
 
     #[test]
