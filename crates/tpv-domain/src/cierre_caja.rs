@@ -424,6 +424,26 @@ mod tests {
     }
 
     #[test]
+    fn el_redondeo_a_centimos_es_el_mismo_que_el_de_la_pantalla() {
+        // Tabla repetida en `apps/tpv-main/test/efectivo.test.ts`: la pantalla del cierre enseña el
+        // arqueo antes de confirmar y tiene que redondear igual que lo que se guarda. `f64::round`
+        // aleja la mitad del cero y el `Math.round` de JavaScript no (−12,5 → −12), así que si esto
+        // cambia, allí hay que cambiar `aCentimos`.
+        for (entrada, esperado) in [
+            (0.125, 0.13),
+            (-0.125, -0.13),
+            (0.005, 0.01),
+            (-0.005, -0.01),
+            (1.005, 1.0),
+            (2.675, 2.68),
+            (0.1 + 0.2, 0.3),
+            (-0.004, 0.0),
+        ] {
+            assert_eq!(a_centimos(entrada), esperado, "a_centimos({entrada})");
+        }
+    }
+
+    #[test]
     fn la_fecha_de_un_apunte_toma_la_forma_que_entiende_sqlite() {
         // Todas las maneras razonables de escribir el mismo instante acaban en el mismo texto.
         assert_eq!(fecha_de_apunte("2026-05-10").as_deref(), Some("2026-05-10"));

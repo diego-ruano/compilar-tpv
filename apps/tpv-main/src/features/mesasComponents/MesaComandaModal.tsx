@@ -39,6 +39,12 @@ import {
     type ProductoDTO,
 } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
+import {
+    cambioDelCobro,
+    DENOMS_COBRO,
+    sumaImportes,
+    totalRecuento,
+} from "../../shared/lib/efectivo";
 
 /* =========================
    Tipos
@@ -82,21 +88,6 @@ function eur(n: number) {
         currency: "EUR",
     }).format(n);
 }
-
-const DENOMS = [
-    { label: "200€", value: 200 },
-    { label: "100€", value: 100 },
-    { label: "50€", value: 50 },
-    { label: "20€", value: 20 },
-    { label: "10€", value: 10 },
-    { label: "5€", value: 5 },
-    { label: "2€", value: 2 },
-    { label: "1€", value: 1 },
-    { label: "0,50€", value: 0.5 },
-    { label: "0,20€", value: 0.2 },
-    { label: "0,10€", value: 0.1 },
-    { label: "0,05€", value: 0.05 },
-];
 
 function Modal({
     open,
@@ -796,17 +787,15 @@ export default function MesaComandaModal({
 
     const totalPendiente = useMemo(
         () =>
-            ticket
-                .filter((t) => !t.pagado)
-                .reduce((acc, t) => acc + t.precio, 0),
+            sumaImportes(ticket.filter((t) => !t.pagado).map((t) => t.precio)),
         [ticket],
     );
 
     const totalSeleccionado = useMemo(
         () =>
-            ticket
-                .filter((t) => !t.pagado && t.seleccionado)
-                .reduce((acc, t) => acc + t.precio, 0),
+            sumaImportes(
+                ticket.filter((t) => !t.pagado && t.seleccionado).map((t) => t.precio),
+            ),
         [ticket],
     );
 
@@ -974,24 +963,17 @@ export default function MesaComandaModal({
         }
     };
 
-    const totalEfectivo = useMemo(() => {
-        let sum = 0;
-        for (const d of DENOMS) {
-            const c = cashCount[d.label] || 0;
-            sum += d.value * c;
-        }
-        return Math.round(sum * 100) / 100;
-    }, [cashCount]);
+    const totalEfectivo = useMemo(() => totalRecuento(DENOMS_COBRO, cashCount), [cashCount]);
 
     const totalACobrar = useMemo(
         () => (haySeleccion ? totalSeleccionado : 0),
         [haySeleccion, totalSeleccionado],
     );
 
-    const diferencia = useMemo(() => {
-        const diff = totalEfectivo - totalACobrar;
-        return Math.round(diff * 100) / 100;
-    }, [totalEfectivo, totalACobrar]);
+    const diferencia = useMemo(
+        () => cambioDelCobro(totalEfectivo, totalACobrar),
+        [totalEfectivo, totalACobrar],
+    );
 
     const addCash = (label: string) =>
         setCashCount((p) => ({ ...p, [label]: (p[label] || 0) + 1 }));
@@ -1338,7 +1320,7 @@ export default function MesaComandaModal({
                                     </div>
 
                                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                                        {DENOMS.map((d) => {
+                                        {DENOMS_COBRO.map((d) => {
                                             const count = cashCount[d.label] || 0;
                                             return (
                                                 <div

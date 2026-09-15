@@ -31,7 +31,6 @@ import {
   ProductoDisplay,
   Paso,
   TicketItem,
-  DENOMS,
 } from "../../features/ventaRapida/types";
 import { cn, eur } from "../../features/ventaRapida/utils";
 
@@ -54,6 +53,12 @@ import {
   type LineaComandaRow as ApiLineaComandaRow,
 } from "../../features/ventaRapida/ventaRapidaAPI";
 import { conAviso } from "../../shared/lib/conAviso";
+import {
+  cambioDelCobro,
+  DENOMS_COBRO,
+  sumaImportes,
+  totalRecuento,
+} from "../../shared/lib/efectivo";
 
 /* =========================
    EVENTO GLOBAL
@@ -1269,7 +1274,7 @@ export default function VentaRapida() {
   );
 
   const totalPendiente = useMemo(
-    () => ticket.filter((t) => !t.pagado).reduce((acc, t) => acc + Number(t.precio || 0), 0),
+    () => sumaImportes(ticket.filter((t) => !t.pagado).map((t) => Number(t.precio))),
     [ticket],
   );
 
@@ -1280,9 +1285,9 @@ export default function VentaRapida() {
 
   const totalSeleccionado = useMemo(
     () =>
-      ticket
-        .filter((t) => !t.pagado && seleccionados.has(t.id))
-        .reduce((acc, t) => acc + Number(t.precio || 0), 0),
+      sumaImportes(
+        ticket.filter((t) => !t.pagado && seleccionados.has(t.id)).map((t) => Number(t.precio)),
+      ),
     [ticket, seleccionados],
   );
 
@@ -1583,10 +1588,7 @@ export default function VentaRapida() {
       // intent, porque una vez cobrado convertir el ticket en factura ya es otra operación (una F3
       // sustitutiva, desde Cuentas).
       if (quiereFactura && !destinatario) {
-        const importe =
-          Math.round(
-            seleccionadosItems.reduce((acc, it) => acc + Number(it.precio || 0), 0) * 100,
-          ) / 100;
+        const importe = sumaImportes(seleccionadosItems.map((it) => Number(it.precio)));
         setErrorFactura(null);
         setPideFactura({ clase: "voluntario", metodo: _metodo, importe });
         return;
@@ -1622,9 +1624,7 @@ export default function VentaRapida() {
           return;
         }
 
-        const importeTotal =
-          Math.round(seleccionadosItems.reduce((acc, it) => acc + Number(it.precio || 0), 0) * 100) /
-          100;
+        const importeTotal = sumaImportes(seleccionadosItems.map((it) => Number(it.precio)));
 
         const ticketItemIds = seleccionadosItems.map((it) => it.id);
 
@@ -1769,26 +1769,17 @@ export default function VentaRapida() {
     toast,
   ]);
 
-  const totalEfectivo = useMemo(() => {
-    let sum = 0;
-
-    for (const d of DENOMS) {
-      const c = cashCount[d.label] || 0;
-      sum += d.value * c;
-    }
-
-    return Math.round(sum * 100) / 100;
-  }, [cashCount]);
+  const totalEfectivo = useMemo(() => totalRecuento(DENOMS_COBRO, cashCount), [cashCount]);
 
   const totalACobrar = useMemo(() => (haySeleccion ? totalSeleccionado : 0), [
     haySeleccion,
     totalSeleccionado,
   ]);
 
-  const diferencia = useMemo(() => {
-    const diff = totalEfectivo - totalACobrar;
-    return Math.round(diff * 100) / 100;
-  }, [totalEfectivo, totalACobrar]);
+  const diferencia = useMemo(
+    () => cambioDelCobro(totalEfectivo, totalACobrar),
+    [totalEfectivo, totalACobrar],
+  );
 
   const addCash = useCallback((label: string) => {
     setCashCount((p) => ({ ...p, [label]: (p[label] || 0) + 1 }));
@@ -2117,7 +2108,7 @@ export default function VentaRapida() {
           <div className="flex-1 min-h-0 overflow-y-auto p-3">
             {paso === "efectivo" ? (
               <CashPanel
-                denoms={DENOMS}
+                denoms={DENOMS_COBRO}
                 cashCount={cashCount}
                 totalACobrar={totalACobrar}
                 totalEfectivo={totalEfectivo}

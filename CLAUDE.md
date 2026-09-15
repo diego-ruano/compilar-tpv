@@ -1222,6 +1222,7 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
 | Pieza | Archivo | Rol |
 |---|---|---|
 | Aritmética | `crates/tpv-domain/src/cierre_caja.rs` | Recuento, esperado, descuadre, umbral del motivo. Sin BD ni reloj: aquí están los tests |
+| Su espejo en pantalla | `apps/tpv-main/src/shared/lib/efectivo.ts` | Lo que el modal enseña antes de confirmar, y el cambio del cobro. Redondea la mitad lejos del cero como Rust (`Math.round` no lo hace) y sus tablas de test repiten las de allí |
 | Persistencia | `crates/tpv-infra-sqlite/src/cierre_caja.rs` | `Cierres_Caja` + `Cierre_Denominaciones` + `Cierre_Rectificaciones` |
 | Casos de uso | `tpv-application/src/use_cases/cierre_caja.rs` | Preparar, confirmar, deshacer y el aviso |
 | Rectificación | `tpv-application/src/use_cases/rectificacion_caja.rs` | Corregir un apunte de un cierre hecho: impacto, motivo y rectificación (CAJA-01) |

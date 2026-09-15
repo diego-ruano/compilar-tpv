@@ -370,21 +370,9 @@ export function cuentasPrevisualizarCambio(cambio: CambioCajaInput): Promise<Imp
 }
 
 /* =========================================================
-   Recuento de efectivo (lo usa el cierre de caja)
+   Recuento de efectivo (lo usa el cierre de caja). El total no
+   vive aquí: es `totalRecuento`, en `shared/lib/efectivo.ts`.
 ========================================================= */
-
-export function cashTotal(denoms: Denom[], count: CashCount): number {
-    let sum = 0;
-
-    for (const d of denoms) {
-        const n = Number(count?.[d.label] ?? 0);
-        if (Number.isFinite(n) && n > 0) {
-            sum += d.value * n;
-        }
-    }
-
-    return Math.round(sum * 100) / 100;
-}
 
 export function incCash(count: CashCount, label: string, step = 1): CashCount {
     const next = { ...(count ?? {}) };

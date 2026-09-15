@@ -27,7 +27,6 @@ import {
     type PreparacionCierreDto,
 } from "./cierreApis";
 import {
-    cashTotal,
     decCash,
     DEFAULT_DENOMS,
     incCash,
@@ -35,6 +34,12 @@ import {
     type CashCount,
 } from "./cuentasApis";
 import { conAviso } from "../../shared/lib/conAviso";
+import {
+    calcularArqueo,
+    exigeMotivo as descuadreExigeMotivo,
+    totalRecuento,
+    validarCierre,
+} from "../../shared/lib/efectivo";
 
 type Props = {
     open: boolean;
@@ -81,8 +86,8 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         };
     }, [open]);
 
-    const totalContado = useMemo(() => cashTotal(denoms, contado), [denoms, contado]);
-    const totalDejado = useMemo(() => cashTotal(denoms, dejado), [denoms, dejado]);
+    const totalContado = useMemo(() => totalRecuento(denoms, contado), [denoms, contado]);
+    const totalDejado = useMemo(() => totalRecuento(denoms, dejado), [denoms, dejado]);
 
     const fondo = useMemo(() => {
         if (!prep) return 0;
@@ -91,29 +96,26 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         return Number.isFinite(n) && n > 0 ? n : 0;
     }, [prep, fondoInicial]);
 
-    const esperado = useMemo(
+    // La misma cuenta que hará Rust al confirmar (`tpv_domain::cierre_caja::calcular`): lo que se
+    // enseña aquí es lo que se va a guardar.
+    const arqueo = useMemo(
         () =>
-            Math.round((fondo + (prep?.ventas_efectivo ?? 0) - (prep?.gastos_caja ?? 0)) * 100) / 100,
-        [fondo, prep],
+            calcularArqueo({
+                fondoInicial: fondo,
+                ventasEfectivo: prep?.ventas_efectivo ?? 0,
+                gastosCaja: prep?.gastos_caja ?? 0,
+                contado: totalContado,
+                dejado: totalDejado,
+            }),
+        [fondo, prep, totalContado, totalDejado],
     );
-    const descuadre = useMemo(
-        () => Math.round((totalContado - esperado) * 100) / 100,
-        [totalContado, esperado],
-    );
-    const retirado = useMemo(
-        () => Math.round((totalContado - totalDejado) * 100) / 100,
-        [totalContado, totalDejado],
-    );
+    const { esperado, descuadre, retirado } = arqueo;
 
     const umbral = prep?.umbral_descuadre ?? 5;
-    const exigeMotivo = Math.abs(descuadre) > umbral;
-    const dejaDeMas = totalDejado > totalContado;
+    const exigeMotivo = descuadreExigeMotivo(descuadre, umbral);
+    const dejaDeMas = arqueo.dejado > arqueo.contado;
 
-    const puedeCerrar =
-        !!prep &&
-        !guardando &&
-        !dejaDeMas &&
-        (!exigeMotivo || motivo.trim().length > 0);
+    const puedeCerrar = !!prep && !guardando && validarCierre(arqueo, motivo, umbral) === null;
 
     async function confirmar() {
         if (!puedeCerrar || !prep) return;

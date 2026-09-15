@@ -17,7 +17,7 @@ export default function CashPanel({
   onConfirm,
   onCancel,
 }: {
-  denoms: Denom[];
+  denoms: readonly Denom[];
   cashCount: Record<string, number>;
   totalACobrar: number;
   totalEfectivo: number;

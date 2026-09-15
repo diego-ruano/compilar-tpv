@@ -40,19 +40,4 @@ export type TicketItem = {
 
 export type Paso = "categorias" | "productos" | "metodo" | "efectivo";
 
-export type Denom = { label: string; value: number };
-
-export const DENOMS: Denom[] = [
-    { label: "200€", value: 200 },
-    { label: "100€", value: 100 },
-    { label: "50€", value: 50 },
-    { label: "20€", value: 20 },
-    { label: "10€", value: 10 },
-    { label: "5€", value: 5 },
-    { label: "2€", value: 2 },
-    { label: "1€", value: 1 },
-    { label: "0,50€", value: 0.5 },
-    { label: "0,20€", value: 0.2 },
-    { label: "0,10€", value: 0.1 },
-    { label: "0,05€", value: 0.05 },
-];
+export type { Denominacion as Denom } from "../../shared/lib/efectivo";

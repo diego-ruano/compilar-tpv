@@ -41,7 +41,6 @@ import {
     type Entrada,
     type Salida,
     DEFAULT_DENOMS,
-    cashTotal,
     incCash,
     decCash,
     resetCash,
