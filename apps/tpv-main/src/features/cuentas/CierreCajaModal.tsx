@@ -37,6 +37,7 @@ import { conAviso } from "../../shared/lib/conAviso";
 import {
     calcularArqueo,
     exigeMotivo as descuadreExigeMotivo,
+    leerImporte,
     totalRecuento,
     validarCierre,
 } from "../../shared/lib/efectivo";
@@ -89,12 +90,16 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const totalContado = useMemo(() => totalRecuento(denoms, contado), [denoms, contado]);
     const totalDejado = useMemo(() => totalRecuento(denoms, dejado), [denoms, dejado]);
 
+    // Sólo cuenta en el primer cierre. `null` es que lo escrito no se entiende como importe: antes eso
+    // valía 0 sin avisar y se guardaba como fondo, el primer eslabón de todos los cierres.
+    const fondoEscrito = useMemo(() => leerImporte(fondoInicial), [fondoInicial]);
+    const fondoIlegible = !!prep?.es_primer_cierre && fondoEscrito === null;
+
     const fondo = useMemo(() => {
         if (!prep) return 0;
         if (!prep.es_primer_cierre) return prep.fondo_inicial;
-        const n = Number(String(fondoInicial).replace(",", "."));
-        return Number.isFinite(n) && n > 0 ? n : 0;
-    }, [prep, fondoInicial]);
+        return fondoEscrito ?? 0;
+    }, [prep, fondoEscrito]);
 
     // La misma cuenta que hará Rust al confirmar (`tpv_domain::cierre_caja::calcular`): lo que se
     // enseña aquí es lo que se va a guardar.
@@ -115,7 +120,8 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const exigeMotivo = descuadreExigeMotivo(descuadre, umbral);
     const dejaDeMas = arqueo.dejado > arqueo.contado;
 
-    const puedeCerrar = !!prep && !guardando && validarCierre(arqueo, motivo, umbral) === null;
+    const puedeCerrar =
+        !!prep && !guardando && !fondoIlegible && validarCierre(arqueo, motivo, umbral) === null;
 
     async function confirmar() {
         if (!puedeCerrar || !prep) return;
@@ -180,7 +186,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                         <>
                             {/* 1 · Qué debería haber */}
                             <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                                <Tarjeta titulo="Fondo de partida" valor={euro(fondo)}>
+                                <Tarjeta titulo="Fondo de partida" valor={fondoIlegible ? "—" : euro(fondo)}>
                                     {prep.es_primer_cierre
                                         ? "Es el primer cierre: dinos con cuánto empezaste."
                                         : "Lo que dejaste en el último cierre."}
@@ -191,7 +197,11 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                 <Tarjeta titulo="Gastos pagados con caja" valor={euro(prep.gastos_caja)}>
                                     Los gastos marcados como pagados con dinero del cajón.
                                 </Tarjeta>
-                                <Tarjeta titulo="Debería haber" valor={euro(esperado)} destacada>
+                                <Tarjeta
+                                    titulo="Debería haber"
+                                    valor={fondoIlegible ? "—" : euro(esperado)}
+                                    destacada
+                                >
                                     Fondo más lo cobrado en efectivo, menos los gastos pagados con caja.
                                 </Tarjeta>
                             </div>
@@ -206,8 +216,18 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                         value={fondoInicial}
                                         onChange={(e) => setFondoInicial(e.target.value)}
                                         placeholder="150"
-                                        className="h-10 rounded-xl border border-border bg-surface px-3 text-sm text-fg outline-none focus:border-accent"
+                                        aria-invalid={fondoIlegible}
+                                        className={cn(
+                                            "h-10 rounded-xl border bg-surface px-3 text-sm text-fg outline-none focus:border-accent",
+                                            fondoIlegible ? "border-danger" : "border-border",
+                                        )}
                                     />
+                                    {fondoIlegible ? (
+                                        <span className="text-xs text-danger">
+                                            No se entiende «{fondoInicial.trim()}» como importe. Escríbelo
+                                            como 150, 150,50 o 1.500.
+                                        </span>
+                                    ) : null}
                                 </label>
                             ) : null}
 
@@ -279,14 +299,18 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                             descuadre === 0 ? "text-success" : "text-danger",
                                         )}
                                     >
-                                        {descuadre === 0
-                                            ? "Cuadra"
-                                            : descuadre < 0
-                                              ? `Faltan ${euro(Math.abs(descuadre))}`
-                                              : `Sobran ${euro(descuadre)}`}
+                                        {fondoIlegible
+                                            ? "—"
+                                            : descuadre === 0
+                                              ? "Cuadra"
+                                              : descuadre < 0
+                                                ? `Faltan ${euro(Math.abs(descuadre))}`
+                                                : `Sobran ${euro(descuadre)}`}
                                     </p>
                                     <p className="mt-2 text-xs text-fg-muted">
-                                        Contado {euro(totalContado)} frente a {euro(esperado)} esperados.
+                                        {fondoIlegible
+                                            ? "Falta saber con cuánto empezaste."
+                                            : `Contado ${euro(totalContado)} frente a ${euro(esperado)} esperados.`}
                                     </p>
                                 </div>
 

@@ -22,6 +22,7 @@ import {
     cambioDelCobro,
     DENOMS_COBRO,
     exigeMotivo,
+    leerImporte,
     sumaImportes,
     totalRecuento,
     validarCierre,
@@ -361,5 +362,83 @@ describe("validarCierre (igual que `validar` de Rust)", () => {
     it("dejar exactamente lo contado sí se puede", () => {
         const a = calcularArqueo({ fondoInicial: 100, ventasEfectivo: 200, gastosCaja: 0, contado: 300, dejado: 300 });
         expect(validarCierre(a, null, 5)).toBeNull();
+    });
+});
+
+describe("leerImporte: el fondo que se escribe en el primer cierre", () => {
+    // Antes se leía con `Number(texto.replace(",", "."))` y lo ilegible valía 0 sin avisar. Ese
+    // fondo encabeza la cadena de cierres, así que un error ahí se arrastra a todos los siguientes.
+
+    it.each([
+        ["", 0],
+        ["   ", 0],
+        ["0", 0],
+        ["150", 150],
+        ["0150", 150],
+        [" 150 ", 150],
+        ["150,50", 150.5],
+        ["150,5", 150.5],
+        ["0,05", 0.05],
+        ["150.50", 150.5],
+        ["150.5", 150.5],
+        // Un punto con tres cifras detrás agrupa miles, como se escribe en España.
+        ["1.500", 1500],
+        ["12.000", 12000],
+        ["150.555", 150555],
+        // Antes, estos tres valían 0.
+        ["1.234,56", 1234.56],
+        ["150 €", 150],
+        ["1 500", 1500],
+        ["1.234.567,89", 1234567.89],
+        ["1,234.56", 1234.56],
+        ["1 500,50", 1500.5],
+        ["150€", 150],
+        ["€150", 150],
+        ["€ 150", 150],
+        ["1.500,00\u00a0€", 1500],
+    ])("«%s» → %s", (texto, esperado) => {
+        expect(leerImporte(texto)).toBe(esperado);
+    });
+
+    it.each([
+        // Dos lecturas posibles: no se adivina.
+        ["1,500"],
+        ["0.500"],
+        // Más de dos decimales.
+        ["150,555"],
+        ["1.5000"],
+        // Separadores que no agrupan de tres en tres, o repetidos donde va el decimal.
+        ["1..5"],
+        ["1.2,5"],
+        ["12.34,5"],
+        ["1,2,3"],
+        ["1,234,56"],
+        ["150 50"],
+        // Media cifra.
+        ["150,"],
+        ["150."],
+        [",50"],
+        [".50"],
+        // Lo que no es un importe de un cajón.
+        ["-50"],
+        ["+50"],
+        ["abc"],
+        ["150€50"],
+        ["1e3"],
+        ["99999999999999999"],
+    ])("«%s» no se entiende, y no vale cero", (texto) => {
+        expect(leerImporte(texto)).toBeNull();
+    });
+
+    it("barrido: cualquier importe escrito como lo pinta la pantalla, o a mano, se lee exacto", () => {
+        for (let c = 0; c <= 2_000_000; c += 137) {
+            const v = c / 100;
+            const [euros, cent] = [Math.floor(c / 100), String(c % 100).padStart(2, "0")];
+            for (const escrito of [pantalla(v), `${euros},${cent}`, `${euros}.${cent}`, `${euros}`]) {
+                const esperado = escrito === `${euros}` ? euros : v;
+                const leido = leerImporte(escrito);
+                if (leido !== esperado) throw new Error(`«${escrito}» se lee ${leido}, no ${esperado}`);
+            }
+        }
     });
 });

@@ -170,3 +170,64 @@ export function validarCierre(
     if (exigeMotivo(arqueo.descuadre, umbral) && !hayMotivo) return "falta_motivo";
     return null;
 }
+
+/**
+ * Lee un importe escrito a mano, como se escribe en España. `null` si no se entiende.
+ *
+ * Existe por el fondo del primer cierre, que se leía con `Number(texto.replace(",", "."))`, y lo que
+ * no entendía valía **cero en silencio**: «1.234,56» o «150 €» se guardaban como un fondo de 0 €, y
+ * «1.500» como 1,50 €. Ese fondo encabeza la cadena de cierres —cada uno arranca con lo que dejó el
+ * anterior—, así que un número mal leído ahí no se arregla al día siguiente: se arrastra.
+ *
+ * Las reglas, y el porqué de las dudosas:
+ * - La coma es decimal; el punto y el espacio agrupan miles. Si aparecen coma y punto, el último de
+ *   los dos es el decimal («1,234.56» también vale): no admite otra lectura.
+ * - Un punto seguido de 1 o 2 cifras es decimal («150.50»); seguido de 3, agrupa miles («1.500»).
+ *   Un importe no tiene tres decimales, y en España «1.500» son mil quinientos.
+ * - Lo que admite dos lecturas no se adivina: «1,500» (¿1,50 o 1.500?) o «0.500» dan `null`.
+ * - Más de dos decimales, un signo o cualquier otro carácter dan `null`. Un fondo no es negativo.
+ * - El símbolo € delante o detrás se ignora, y un texto vacío es cero: no escribir nada es no haber
+ *   empezado con nada.
+ */
+export function leerImporte(texto: string): number | null {
+    const t = (texto ?? "")
+        .replace(/[\s\u00a0\u202f]+/g, " ")
+        .trim()
+        .replace(/^€ ?/, "")
+        .replace(/ ?€$/, "")
+        .trim();
+    if (t === "") return 0;
+    if (!/^[\d., ]+$/.test(t)) return null;
+
+    const ultimoPunto = t.lastIndexOf(".");
+    const ultimaComa = t.lastIndexOf(",");
+    let decimal = -1;
+    if (ultimoPunto >= 0 && ultimaComa >= 0) {
+        decimal = Math.max(ultimoPunto, ultimaComa);
+    } else if (ultimaComa >= 0) {
+        decimal = ultimaComa;
+    } else if (
+        ultimoPunto >= 0 &&
+        t.indexOf(".") === ultimoPunto &&
+        /^\d{1,2}$/.test(t.slice(ultimoPunto + 1))
+    ) {
+        decimal = ultimoPunto;
+    }
+
+    const entera = decimal >= 0 ? t.slice(0, decimal) : t;
+    const decimales = decimal >= 0 ? t.slice(decimal + 1) : "";
+    if (decimal >= 0 && !/^\d{1,2}$/.test(decimales)) return null;
+
+    let cifras: string;
+    if (/^\d+$/.test(entera)) {
+        cifras = entera;
+    } else {
+        // Agrupada de tres en tres con un solo separador, que no puede ser también el decimal.
+        const miles = /^[1-9]\d{0,2}([., ])\d{3}(?:\1\d{3})*$/.exec(entera);
+        if (!miles || (decimal >= 0 && miles[1] === t[decimal])) return null;
+        cifras = entera.replace(/[., ]/g, "");
+    }
+
+    const centimos = Number(cifras) * 100 + Number(decimales.padEnd(2, "0"));
+    return Number.isSafeInteger(centimos) ? centimos / 100 : null;
+}
