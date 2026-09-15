@@ -15,19 +15,21 @@ import { describe, it, expect } from "vitest";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import {
-	MAX_ENVIOS_POR_VENTANA,
-	REENVIO_MIN_MS,
-	VENTANA_ENVIOS_MS,
 	solicitarCodigoPin,
 	verificarCodigoPin,
 	type ContextoRecuperacion,
-	type RespuestaRecuperacion,
 } from "../src/domains/login/recuperarPin";
+import {
+	MAX_ENVIOS_POR_VENTANA,
+	REENVIO_MIN_MS,
+	VENTANA_ENVIOS_MS,
+	type RespuestaCodigo,
+} from "../src/domains/login/codigosPorCorreo";
 import { OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "../src/domains/licensing/licensing.helpers";
 import {
 	activateLicenseFirstTime,
 	ensureLicensingSchema,
-	getPinRecoveryCode,
+	getEmailCode,
 	issueLicense,
 } from "../src/server/licenseStore";
 
@@ -37,6 +39,7 @@ const TENANT = "tenant-1";
 const MAIN = "main-1";
 const ADMIN = "admin-1";
 const T0 = 1_800_000_000_000;
+const CLAVE_PIN = { tenantId: TENANT, deviceId: MAIN, purpose: "recuperar_pin" as const };
 
 type Correo = { to: string; subject: string; text: string };
 
@@ -50,7 +53,7 @@ type Escenario = {
 	verificar: (
 		codigo: string,
 		extra?: Partial<ContextoRecuperacion>,
-	) => Promise<RespuestaRecuperacion>;
+	) => Promise<RespuestaCodigo>;
 	avisos: Promise<unknown>[];
 	romperCorreo: (roto: boolean) => void;
 };
@@ -59,7 +62,7 @@ async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
 	await enElHub("recuperar-pin", async (hub: any) => {
 		const db = clienteSobre(hub.state.storage.sql);
 		await ensureLicensingSchema(db);
-		for (const tabla of ["licenses", "pin_recovery_codes", "license_device_swaps"]) {
+		for (const tabla of ["licenses", "email_codes", "tenant_recovery_emails", "license_device_swaps"]) {
 			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
 		}
 
@@ -157,7 +160,7 @@ describe("recuperar el PIN · el código", () => {
 		await escenario(async (e) => {
 			await solicitarCodigoPin(e.db, e.env, e.ctx());
 			const codigo = e.ultimoCodigo();
-			const fila = await getPinRecoveryCode(e.db, TENANT, MAIN);
+			const fila = await getEmailCode(e.db, CLAVE_PIN);
 
 			const sha = [
 				...new Uint8Array(
@@ -285,7 +288,7 @@ describe("recuperar el PIN · el buzón del titular no es un cañón", () => {
 			e.romperCorreo(true);
 			const r = await solicitarCodigoPin(e.db, e.env, e.ctx());
 			expect(r.status).toBe(502);
-			expect((await getPinRecoveryCode(e.db, TENANT, MAIN))?.consumed_at_ms).not.toBeNull();
+			expect((await getEmailCode(e.db, CLAVE_PIN))?.consumed_at_ms).not.toBeNull();
 
 			e.romperCorreo(false);
 			const otra = await solicitarCodigoPin(e.db, e.env, e.ctx({ ahora: T0 + 1_000 }));

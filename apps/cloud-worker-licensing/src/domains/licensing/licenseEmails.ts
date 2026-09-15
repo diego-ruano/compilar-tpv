@@ -251,3 +251,61 @@ export async function sendPinChangedNoticeEmail(
 		text,
 	});
 }
+
+/* ============================================================
+   5. Correo de recuperación (LOGIN-08)
+============================================================ */
+
+export async function sendRecoveryEmailCodeEmail(
+	env: Env,
+	args: { to: string; code: string; minutes: number },
+): Promise<boolean> {
+	const html = layout(
+		"Confirma el correo de recuperación del TPV",
+		`<p>Se ha pedido desde un TPV que los códigos para recuperar el PIN de sus administradores lleguen a este correo. Escribe este código en el TPV para confirmarlo:</p>
+     ${destacado(args.code)}
+     <p style="font-size:14px;color:#6b7280">Caduca en ${args.minutes} minutos.</p>
+     <p style="font-size:14px;color:#6b7280">Si no lo has pedido tú, ignora este correo: no cambiará nada.</p>`,
+	);
+
+	const text = `Código para confirmar el correo de recuperación del TPV:
+
+    ${args.code}
+
+Escríbelo en el TPV. Caduca en ${args.minutes} minutos.
+
+Si no lo has pedido tú, ignora este correo: no cambiará nada.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Confirma el correo de recuperación del TPV",
+		html,
+		text,
+	});
+}
+
+export async function sendRecoveryEmailChangedNoticeEmail(
+	env: Env,
+	args: { to: string; nuevoHint: string },
+): Promise<boolean> {
+	const html = layout(
+		"Ha cambiado el correo de recuperación de tu TPV",
+		`<p>A partir de ahora, los códigos para recuperar el PIN de un administrador de tu TPV llegarán a
+     <strong>${esc(args.nuevoHint)}</strong>.</p>
+     <p style="font-size:14px;color:#6b7280">El traslado de la licencia a otro equipo sigue usando el correo de la compra.</p>
+     <p style="font-size:14px;color:#b91c1c"><strong>¿No has sido tú?</strong> Responde a este correo cuanto antes.</p>`,
+	);
+
+	const text = `A partir de ahora, los códigos para recuperar el PIN de un administrador de tu TPV llegarán a ${args.nuevoHint}.
+
+El traslado de la licencia a otro equipo sigue usando el correo de la compra.
+
+¿No has sido tú? Responde a este correo cuanto antes.`;
+
+	return enviar(env, {
+		to: args.to,
+		subject: "Ha cambiado el correo de recuperación de tu TPV",
+		html,
+		text,
+	});
+}

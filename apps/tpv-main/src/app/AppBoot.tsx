@@ -16,7 +16,6 @@ import {
     Fingerprint,
     KeyRound,
     Link2,
-    Mail,
     MapPin,
     Monitor,
     Phone,
@@ -363,7 +362,6 @@ export default function AppBoot({ router }: { router: any }) {
         licenseKey: "",
         legal_name: "",
         business_name: "",
-        email: "",
         phone: "",
         country: "",
     });
@@ -382,7 +380,6 @@ export default function AppBoot({ router }: { router: any }) {
             act.licenseKey.trim().length > 0 &&
             act.legal_name.trim().length > 0 &&
             act.business_name.trim().length > 0 &&
-            act.email.trim().length > 0 &&
             act.phone.trim().length > 0 &&
             act.country.trim().length > 0;
         // En el paso de cambio de dispositivo, además hace falta el código completo.
@@ -783,7 +780,6 @@ export default function AppBoot({ router }: { router: any }) {
                     activation_key: act.licenseKey,
                     business_name: act.business_name,
                     legal_name: act.legal_name,
-                    email: act.email,
                     phone: act.phone,
                     country: act.country,
                     device_change_code: enDeviceChange
@@ -1530,31 +1526,10 @@ export default function AppBoot({ router }: { router: any }) {
                                                 </div>
                                             </div>
 
+                                            {/* Sin correo, a propósito (LOGIN-08): los códigos para
+                                                recuperar el PIN van al correo de la compra, que ya
+                                                está demostrado. Se cambia en Configuración → Licencia. */}
                                             <div className="grid gap-4 sm:grid-cols-2">
-                                                <div>
-                                                    <label
-                                                        htmlFor="activation-email"
-                                                        className="flex items-center gap-2 text-sm font-semibold text-fg"
-                                                    >
-                                                        <Mail className="size-4 text-accent" aria-hidden />
-                                                        Correo electrónico
-                                                    </label>
-                                                    <Input
-                                                        id="activation-email"
-                                                        type="email"
-                                                        value={act.email}
-                                                        onChange={(e) =>
-                                                            setAct((s) => ({
-                                                                ...s,
-                                                                email: e.target.value,
-                                                            }))
-                                                        }
-                                                        className="mt-2 h-12 px-4"
-                                                        placeholder="ejemplo@correo.com"
-                                                        autoComplete="email"
-                                                    />
-                                                </div>
-
                                                 <div>
                                                     <label
                                                         htmlFor="activation-phone"
@@ -1578,29 +1553,29 @@ export default function AppBoot({ router }: { router: any }) {
                                                         autoComplete="tel"
                                                     />
                                                 </div>
-                                            </div>
 
-                                            <div>
-                                                <label
-                                                    htmlFor="activation-country"
-                                                    className="flex items-center gap-2 text-sm font-semibold text-fg"
-                                                >
-                                                    <MapPin className="size-4 text-accent" aria-hidden />
-                                                    País
-                                                </label>
-                                                <Input
-                                                    id="activation-country"
-                                                    value={act.country}
-                                                    onChange={(e) =>
-                                                        setAct((s) => ({
-                                                            ...s,
-                                                            country: e.target.value,
-                                                        }))
-                                                    }
-                                                    className="mt-2 h-12 px-4"
-                                                    placeholder="España"
-                                                    autoComplete="country-name"
-                                                />
+                                                <div>
+                                                    <label
+                                                        htmlFor="activation-country"
+                                                        className="flex items-center gap-2 text-sm font-semibold text-fg"
+                                                    >
+                                                        <MapPin className="size-4 text-accent" aria-hidden />
+                                                        País
+                                                    </label>
+                                                    <Input
+                                                        id="activation-country"
+                                                        value={act.country}
+                                                        onChange={(e) =>
+                                                            setAct((s) => ({
+                                                                ...s,
+                                                                country: e.target.value,
+                                                            }))
+                                                        }
+                                                        className="mt-2 h-12 px-4"
+                                                        placeholder="España"
+                                                        autoComplete="country-name"
+                                                    />
+                                                </div>
                                             </div>
 
                                             {enDeviceChange ? (
@@ -1667,7 +1642,6 @@ export default function AppBoot({ router }: { router: any }) {
                                                             licenseKey: "",
                                                             legal_name: "",
                                                             business_name: "",
-                                                            email: "",
                                                             phone: "",
                                                             country: "",
                                                         });

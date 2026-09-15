@@ -4,7 +4,7 @@
 // Sustituye dualCall/op_id/outbox/afterRemoteOk. Conserva tipos, mappers y firmas.
 
 import { invokeClient } from "@tpv/client";
-import type { CodigoPinEnviado, LocalBackupInfo, RecoveryStatus } from "@tpv/contracts";
+import type { CodigoEnviado, LocalBackupInfo, RecoveryStatus } from "@tpv/contracts";
 
 export type DbUser = {
     id_usuario: string;
@@ -317,7 +317,7 @@ export async function uploadInitialSetupToCloud(params: {
 export async function solicitarCodigoPin(
     idUsuario: string,
 ): Promise<{ emailHint: string; minutos: number }> {
-    const r = await invokeClient<CodigoPinEnviado>("login_recuperar_pin_solicitar", {
+    const r = await invokeClient<CodigoEnviado>("login_recuperar_pin_solicitar", {
         args: { id_usuario: idUsuario },
     });
     return { emailHint: r.email_hint, minutos: r.minutos };

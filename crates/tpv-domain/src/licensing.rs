@@ -24,7 +24,6 @@ pub struct SolicitudActivacion {
     pub clave: String,
     pub business_name: String,
     pub legal_name: Option<String>,
-    pub email: Option<String>,
     pub phone: Option<String>,
     pub country: Option<String>,
 }
@@ -35,7 +34,6 @@ impl SolicitudActivacion {
         clave: String,
         business_name: String,
         legal_name: Option<String>,
-        email: Option<String>,
         phone: Option<String>,
         country: Option<String>,
     ) -> Result<Self, String> {
@@ -53,7 +51,6 @@ impl SolicitudActivacion {
             clave,
             business_name,
             legal_name: limpia_opcional(legal_name),
-            email: limpia_opcional(email),
             phone: limpia_opcional(phone),
             country: limpia_opcional(country),
         })
@@ -473,21 +470,20 @@ mod tests {
 
     #[test]
     fn la_activacion_exige_clave_y_nombre_de_negocio() {
-        assert!(SolicitudActivacion::validar("  ".into(), "Bar".into(), None, None, None, None).is_err());
-        assert!(SolicitudActivacion::validar("K".into(), "  ".into(), None, None, None, None).is_err());
+        assert!(SolicitudActivacion::validar("  ".into(), "Bar".into(), None, None, None).is_err());
+        assert!(SolicitudActivacion::validar("K".into(), "  ".into(), None, None, None).is_err());
 
         let s = SolicitudActivacion::validar(
             " K ".into(),
             " Bar ".into(),
             Some("  ".into()),
-            Some(" a@b.com ".into()),
-            None,
+            Some(" +34 600 ".into()),
             None,
         )
         .expect("válida");
         assert_eq!(s.clave, "K");
         assert_eq!(s.business_name, "Bar");
         assert_eq!(s.legal_name, None);
-        assert_eq!(s.email.as_deref(), Some("a@b.com"));
+        assert_eq!(s.phone.as_deref(), Some("+34 600"));
     }
 }

@@ -2097,6 +2097,10 @@ pub fn run() {
             commands::login::set_turno_partido_hoy,
             commands::recuperacion_pin::login_recuperar_pin_solicitar,
             commands::recuperacion_pin::login_recuperar_pin_confirmar,
+            commands::correo_recuperacion::correo_recuperacion_estado,
+            commands::correo_recuperacion::correo_recuperacion_solicitar,
+            commands::correo_recuperacion::correo_recuperacion_confirmar,
+            commands::correo_recuperacion::correo_recuperacion_usar_el_de_la_compra,
             // recuperación local
             commands::recovery::recovery_status,
             commands::recovery::recovery_list_backups,

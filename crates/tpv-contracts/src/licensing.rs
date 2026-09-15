@@ -128,9 +128,8 @@ pub struct LicenseActivateInput {
     #[serde(default)]
     #[ts(optional)]
     pub legal_name: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub email: Option<String>,
+    // Sin `email`, a propósito (LOGIN-08): el correo de recuperación es el de la compra hasta que
+    // alguien lo cambie verificándolo desde Configuración → Licencia.
     #[serde(default)]
     #[ts(optional)]
     pub phone: Option<String>,

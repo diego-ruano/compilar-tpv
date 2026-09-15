@@ -34,7 +34,6 @@ export type ApiError = {
 export type TenantInfo = {
 	displayName?: string;
 	legalName?: string;
-	email?: string;
 	phone?: string;
 	country?: string;
 };

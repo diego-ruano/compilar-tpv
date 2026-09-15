@@ -13,6 +13,7 @@ import type { LicenseLocalState } from "@tpv/contracts";
 
 import { Panel } from "../ui/Panel";
 import { cn } from "../utils";
+import { CorreoRecuperacion } from "./CorreoRecuperacion";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -148,6 +149,8 @@ export function Licencia({ darkMode }: { darkMode: boolean }) {
 					</div>
 				) : null}
 			</Panel>
+
+			<CorreoRecuperacion />
 		</div>
 	);
 }

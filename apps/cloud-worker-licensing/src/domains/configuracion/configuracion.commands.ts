@@ -70,7 +70,6 @@ export function patchContact(patch: Record<string, unknown>): BuiltCommand {
 		args.push(value);
 	}
 
-	if ("recovery_email" in patch) add("Recovery_Email", cleanString(patch.recovery_email) ?? "");
 	if ("contact_email" in patch) add("Contact_Email", cleanString(patch.contact_email) ?? "");
 	if ("contact_phone" in patch) add("Contact_Phone", cleanString(patch.contact_phone) ?? "");
 

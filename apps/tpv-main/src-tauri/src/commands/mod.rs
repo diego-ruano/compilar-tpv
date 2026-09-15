@@ -5,6 +5,7 @@
 pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
+pub mod correo_recuperacion;
 pub mod cuentas;
 pub mod email_config;
 pub mod inventario;

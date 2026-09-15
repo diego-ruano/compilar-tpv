@@ -69,7 +69,6 @@ pub struct TicketSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ContactSettings {
-    pub recovery_email: String,
     pub contact_email: String,
     pub contact_phone: String,
 }

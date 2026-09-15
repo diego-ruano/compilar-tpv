@@ -2,8 +2,7 @@
   "Contact_Settings": [
     {
       "Contact_Email": "contacto@bar.com",
-      "Contact_Phone": "600100200",
-      "Recovery_Email": "recuperacion@bar.com"
+      "Contact_Phone": "600100200"
     }
   ]
 }

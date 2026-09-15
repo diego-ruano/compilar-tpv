@@ -106,8 +106,8 @@ export default function RecuperarPinModal({ usuario, onCerrar, onRecuperado }: P
                 {!enviado ? (
                     <div className="mt-4 space-y-3 text-sm text-fg-muted">
                         <p>
-                            Te enviaremos un código al correo con el que se compró la licencia del
-                            TPV. Con él podrás elegir un PIN nuevo.
+                            Te enviaremos un código al correo de recuperación del TPV (el de la
+                            compra, salvo que se haya cambiado). Con él podrás elegir un PIN nuevo.
                         </p>
                         <p className="text-xs text-fg-subtle">Hace falta conexión a internet.</p>
                     </div>

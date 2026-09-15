@@ -58,7 +58,11 @@ fn ruta_de_administracion(path: &str) -> bool {
     if PAIRING_SIN_SESION.contains(&p) {
         return false;
     }
-    p.starts_with("/v1/pair/") || p.starts_with("/v1/device/")
+    // LOGIN-08: cambiar a dónde llegan los códigos de recuperación es de administrador, y el worker
+    // no conoce las sesiones. Sin esto, llamarlo por el proxy esquivaba el gate de sus comandos.
+    p.starts_with("/v1/pair/")
+        || p.starts_with("/v1/device/")
+        || p.starts_with("/v1/login/correo-recuperacion/")
 }
 
 #[tauri::command]
@@ -162,6 +166,22 @@ mod tests_gate_del_proxy {
         ] {
             assert!(ruta_de_administracion(p), "{p} debería exigir Administrador");
         }
+    }
+
+    /// LOGIN-08: el correo de recuperación tiene sus comandos con gate, pero el proxy firma lo que
+    /// le den. Si no exigiera rol aquí, bastaría con llamar a la ruta por él.
+    #[test]
+    fn cambiar_el_correo_de_recuperacion_pide_permiso_tambien_por_el_proxy() {
+        for p in [
+            "/v1/login/correo-recuperacion/solicitar",
+            "/v1/login/correo-recuperacion/confirmar",
+            "/v1/login/correo-recuperacion/usar-el-de-la-compra",
+            "/V1/Login/Correo-Recuperacion/Confirmar/",
+        ] {
+            assert!(ruta_de_administracion(p), "{p} debería exigir Administrador");
+        }
+        // Recuperar el PIN no: es justo para quien no puede iniciar sesión.
+        assert!(!ruta_de_administracion("/v1/login/recuperar-pin/solicitar"));
     }
 
     /// El caso que impide el callejón sin salida: el Handy que se empareja no tiene sesión

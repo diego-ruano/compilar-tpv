@@ -11,7 +11,7 @@ import { $, $$, browser } from "@wdio/globals";
 import { licenciaDelRecorrido } from "./entorno.js";
 import { conTexto, escribir, pulsar, pulsarXPath } from "./ui.js";
 
-/** El correo que se usa en todo el E2E. No recibe nada: la activación no manda correos. */
+/** El correo del administrador que se escribe al elegir el PIN. No recibe nada. */
 export const EMAIL = "e2e@altarialights.test";
 
 /**
@@ -61,7 +61,6 @@ export async function activarLicencia(negocio: string): Promise<"setup" | "login
     await escribir("#activation-license-key", licenciaDelRecorrido());
     await escribir("#activation-legal-name", "E2E TEST-01 S.L.");
     await escribir("#activation-business-name", negocio);
-    await escribir("#activation-email", EMAIL);
     await escribir("#activation-phone", "+34600000000");
     await escribir("#activation-country", "España");
 

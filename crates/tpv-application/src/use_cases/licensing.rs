@@ -56,7 +56,6 @@ pub async fn activate(
         input.activation_key,
         input.business_name,
         input.legal_name,
-        input.email,
         input.phone,
         input.country,
     )

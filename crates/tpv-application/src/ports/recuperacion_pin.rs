@@ -7,14 +7,14 @@
 
 use async_trait::async_trait;
 
-use tpv_contracts::login::CodigoPinEnviado;
+use tpv_contracts::login::CodigoEnviado;
 
 use crate::error::AppResult;
 
 #[async_trait]
 pub trait RecuperacionPinService: Send + Sync {
     /// Pide que se mande un código al correo del titular de la licencia.
-    async fn solicitar_codigo(&self, id_usuario: &str) -> AppResult<CodigoPinEnviado>;
+    async fn solicitar_codigo(&self, id_usuario: &str) -> AppResult<CodigoEnviado>;
 
     /// `Ok` sólo si el código vale para este equipo y este usuario. Si vale, queda gastado.
     async fn verificar_codigo(&self, id_usuario: &str, codigo: &str) -> AppResult<()>;

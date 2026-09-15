@@ -310,9 +310,10 @@ export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_re
 export type CobroVRItem = { producto_id: string, precio: number, };
 
 /**
- * El código ya va de camino. Sólo la pista del correo: el correo entero no sale de la nube.
+ * Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
+ * Sólo la pista del correo: el correo entero no sale de la nube.
  */
-export type CodigoPinEnviado = { 
+export type CodigoEnviado = { 
 /**
  * `a***@bar.com`.
  */
@@ -337,6 +338,11 @@ pin_actual?: string, pin_nuevo: string, email_nuevo: string, };
  */
 export type ConfigPatchInput = { patch: Record<string, unknown>, };
 
+/**
+ * Sólo el código: la dirección que queda confirmada es la que se pidió, guardada en la nube.
+ */
+export type ConfirmarCambioCorreoInput = { codigo: string, };
+
 export type ConfirmarCierreInput = { 
 /**
  * Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
@@ -350,7 +356,7 @@ fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<Denomin
  */
 export type ConfirmarCodigoPinInput = { id_usuario: string, codigo: string, pin_nuevo: string, };
 
-export type ContactSettings = { recovery_email: string, contact_email: string, contact_phone: string, };
+export type ContactSettings = { contact_email: string, contact_phone: string, };
 
 /**
  * `COUNT(*)` de una tabla ENTERA en la nube. Es lo único que ve una fila perdida fuera de la
@@ -466,6 +472,19 @@ export type EnviarPedidoEmailInput = { email_destino: string, nombre_proveedor: 
  * Catálogo cerrado de códigos de error. Compartido por Rust, el worker y el frontend.
  */
 export type ErrorCode = "validation" | "not_found" | "conflict" | "repository" | "external" | "internal" | "not_approved" | "main_offline" | "device_revoked" | "license_expired" | "license_not_found" | "invalid_pin" | "tenant_db_not_provisioned" | "bootstrap_too_large" | "tenant_migration_altered" | "backup_corrupt" | "permiso_denegado" | "datos_fiscales_incompletos" | "factura_completa_requerida";
+
+/**
+ * A dónde llegan los códigos para recuperar el PIN.
+ */
+export type EstadoCorreoRecuperacion = { 
+/**
+ * `a***@bar.com`.
+ */
+email_hint: string, 
+/**
+ * `true` mientras nadie lo haya cambiado: es el correo con el que se compró la licencia.
+ */
+es_el_de_la_compra: boolean, };
 
 /**
  * Resumen para el panel de Configuración → Fiscal y para la barra de estado.
@@ -606,7 +625,7 @@ export type KitchenRow = { ID_Comanda: string, Numero_Mesa: string, Fecha_Hora_A
  * Datos del formulario de activación. `activation_key` y `business_name` son los únicos
  * obligatorios; el resto son datos de contacto del negocio.
  */
-export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, email?: string, phone?: string, country?: string, 
+export type LicenseActivateInput = { activation_key: string, business_name: string, legal_name?: string, phone?: string, country?: string, 
 /**
  * Código de 6 dígitos del email. Solo hace falta al mover la licencia a otro equipo (§6.4).
  */
@@ -1154,6 +1173,8 @@ export type SetupPendiente = { pendiente: boolean,
 requiere_recuperacion: boolean, id_usuario?: string, nombre?: string, email?: string, };
 
 export type SigB64 = { sigB64: string, };
+
+export type SolicitarCambioCorreoInput = { correo: string, };
 
 export type SolicitarCodigoPinInput = { id_usuario: string, };
 

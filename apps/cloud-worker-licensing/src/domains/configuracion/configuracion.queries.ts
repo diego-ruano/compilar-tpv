@@ -89,7 +89,6 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 export async function getContact(db: Client): Promise<ContactSettings> {
 	const rs = await db.execute(`
 		SELECT
-			Recovery_Email AS recovery_email,
 			Contact_Email AS contact_email,
 			Contact_Phone AS contact_phone
 		FROM Contact_Settings
@@ -98,7 +97,6 @@ export async function getContact(db: Client): Promise<ContactSettings> {
 	`);
 	const r = rows(rs)[0] ?? {};
 	return {
-		recovery_email: String(r.recovery_email ?? ""),
 		contact_email: String(r.contact_email ?? ""),
 		contact_phone: String(r.contact_phone ?? ""),
 	};

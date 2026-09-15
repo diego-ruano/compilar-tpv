@@ -98,15 +98,18 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
     `,
 	);
 
-	// LOGIN-07: código para recuperar el PIN de un administrador. Uno por equipo (no por usuario),
-	// para que el tope de envíos no se multiplique recorriendo ids. Ver `recuperarPin.ts`.
+	// Códigos de un solo uso que se mandan por correo desde una ruta de tenant: recuperar el PIN
+	// (LOGIN-07) y confirmar un correo de recuperación nuevo (LOGIN-08). Uno por equipo y propósito
+	// —no por usuario ni por dirección—, para que el tope de envíos no se multiplique recorriendo ids
+	// o direcciones. Ver `domains/login/codigosPorCorreo.ts`.
 	await exec(
 		db,
 		`
-    CREATE TABLE IF NOT EXISTS pin_recovery_codes (
+    CREATE TABLE IF NOT EXISTS email_codes (
       tenant_id         TEXT NOT NULL,
       device_id         TEXT NOT NULL,
-      id_usuario        TEXT NOT NULL,
+      purpose           TEXT NOT NULL,
+      subject           TEXT NOT NULL,
       code_hash         TEXT NOT NULL,
       attempts          INTEGER NOT NULL DEFAULT 0,
       expires_at_ms     INTEGER NOT NULL,
@@ -114,7 +117,21 @@ export async function ensureLicensingSchema(db: Client): Promise<void> {
       created_at_ms     INTEGER NOT NULL,
       sends_in_window   INTEGER NOT NULL DEFAULT 1,
       window_started_ms INTEGER NOT NULL,
-      PRIMARY KEY (tenant_id, device_id)
+      PRIMARY KEY (tenant_id, device_id, purpose)
+    );
+    `,
+	);
+
+	// LOGIN-08: a dónde llegan los códigos de recuperación, cuando no es al correo de la compra.
+	// Sin fila = el de la compra. Tabla propia y no una columna de `tenants`, que ya tenía un `email`
+	// escrito a mano al activar y sin verificar: así nunca hay que decidir si ése vale.
+	await exec(
+		db,
+		`
+    CREATE TABLE IF NOT EXISTS tenant_recovery_emails (
+      tenant_id      TEXT PRIMARY KEY,
+      email          TEXT NOT NULL,
+      verified_at_ms INTEGER NOT NULL
     );
     `,
 	);
@@ -953,13 +970,20 @@ export async function consumeDeviceOtp(
 }
 
 /* ============================================================
-   Código de recuperación del PIN (LOGIN-07)
+   Códigos por correo de las rutas de tenant (LOGIN-07 / LOGIN-08)
 ============================================================ */
 
-export type PinRecoveryCodeRow = {
+export type EmailCodePurpose = "recuperar_pin" | "cambio_correo";
+
+/** Un código es de un equipo y un propósito: pedir otro del mismo sustituye al anterior. */
+export type EmailCodeKey = { tenantId: string; deviceId: string; purpose: EmailCodePurpose };
+
+export type EmailCodeRow = {
 	tenant_id: string;
 	device_id: string;
-	id_usuario: string;
+	purpose: EmailCodePurpose;
+	/** A qué se refiere: el usuario del PIN, o la dirección nueva del cambio de correo. */
+	subject: string;
 	code_hash: string;
 	attempts: number;
 	expires_at_ms: number;
@@ -969,22 +993,19 @@ export type PinRecoveryCodeRow = {
 	window_started_ms: number;
 };
 
-export async function getPinRecoveryCode(
-	db: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<PinRecoveryCodeRow | null> {
+export async function getEmailCode(db: Client, k: EmailCodeKey): Promise<EmailCodeRow | null> {
 	const r = await exec(
 		db,
-		`SELECT * FROM pin_recovery_codes WHERE tenant_id=? AND device_id=? LIMIT 1;`,
-		[tenantId, deviceId],
+		`SELECT * FROM email_codes WHERE tenant_id=? AND device_id=? AND purpose=? LIMIT 1;`,
+		[k.tenantId, k.deviceId, k.purpose],
 	);
 	const row = r.rows?.[0] as any;
 	if (!row) return null;
 	return {
 		tenant_id: String(row.tenant_id),
 		device_id: String(row.device_id),
-		id_usuario: String(row.id_usuario),
+		purpose: String(row.purpose) as EmailCodePurpose,
+		subject: String(row.subject),
 		code_hash: String(row.code_hash),
 		attempts: Number(row.attempts ?? 0),
 		expires_at_ms: Number(row.expires_at_ms ?? 0),
@@ -996,12 +1017,10 @@ export async function getPinRecoveryCode(
 }
 
 /** Guarda el código (sólo su HMAC). Pedir otro sustituye al anterior y reinicia los intentos. */
-export async function putPinRecoveryCode(
+export async function putEmailCode(
 	db: Client,
-	args: {
-		tenantId: string;
-		deviceId: string;
-		idUsuario: string;
+	args: EmailCodeKey & {
+		subject: string;
 		codeHash: string;
 		expiresAtMs: number;
 		nowMs: number;
@@ -1012,12 +1031,12 @@ export async function putPinRecoveryCode(
 	await exec(
 		db,
 		`
-    INSERT INTO pin_recovery_codes (
-      tenant_id, device_id, id_usuario, code_hash, attempts, expires_at_ms, consumed_at_ms,
+    INSERT INTO email_codes (
+      tenant_id, device_id, purpose, subject, code_hash, attempts, expires_at_ms, consumed_at_ms,
       created_at_ms, sends_in_window, window_started_ms
-    ) VALUES (?, ?, ?, ?, 0, ?, NULL, ?, ?, ?)
-    ON CONFLICT(tenant_id, device_id) DO UPDATE SET
-      id_usuario=excluded.id_usuario,
+    ) VALUES (?, ?, ?, ?, ?, 0, ?, NULL, ?, ?, ?)
+    ON CONFLICT(tenant_id, device_id, purpose) DO UPDATE SET
+      subject=excluded.subject,
       code_hash=excluded.code_hash,
       attempts=0,
       expires_at_ms=excluded.expires_at_ms,
@@ -1029,7 +1048,8 @@ export async function putPinRecoveryCode(
 		[
 			args.tenantId,
 			args.deviceId,
-			args.idUsuario,
+			args.purpose,
+			args.subject,
 			args.codeHash,
 			args.expiresAtMs,
 			args.nowMs,
@@ -1044,57 +1064,85 @@ export async function putPinRecoveryCode(
  * intento reservado, o `null` si ya no quedan (o el código está consumido). Comprobar primero y
  * sumar después dejaría pasar a la vez a todas las peticiones concurrentes.
  */
-export async function reservePinRecoveryAttempt(
+export async function reserveEmailCodeAttempt(
 	db: Client,
-	tenantId: string,
-	deviceId: string,
+	k: EmailCodeKey,
 	maxAttempts: number,
 ): Promise<number | null> {
 	const r = await exec(
 		db,
 		`
-    UPDATE pin_recovery_codes
+    UPDATE email_codes
     SET attempts = attempts + 1
-    WHERE tenant_id=? AND device_id=? AND consumed_at_ms IS NULL AND attempts < ?
+    WHERE tenant_id=? AND device_id=? AND purpose=? AND consumed_at_ms IS NULL AND attempts < ?
     RETURNING attempts;
     `,
-		[tenantId, deviceId, maxAttempts],
+		[k.tenantId, k.deviceId, k.purpose, maxAttempts],
 	);
 	const row = r.rows?.[0] as any;
 	return row ? Number(row.attempts) : null;
 }
 
 /** Consumo atómico: sólo consume si sigue sin consumir. */
-export async function consumePinRecoveryCode(
-	db: Client,
-	tenantId: string,
-	deviceId: string,
-	nowMs: number,
-): Promise<boolean> {
+export async function consumeEmailCode(db: Client, k: EmailCodeKey, nowMs: number): Promise<boolean> {
 	const r = await exec(
 		db,
 		`
-    UPDATE pin_recovery_codes
+    UPDATE email_codes
     SET consumed_at_ms = ?
-    WHERE tenant_id=? AND device_id=? AND consumed_at_ms IS NULL
+    WHERE tenant_id=? AND device_id=? AND purpose=? AND consumed_at_ms IS NULL
     RETURNING tenant_id;
     `,
-		[nowMs, tenantId, deviceId],
+		[nowMs, k.tenantId, k.deviceId, k.purpose],
 	);
 	return (r.rows?.length ?? 0) > 0;
 }
 
 /** Deja el código inservible sin borrar la fila: el tope de envíos por hora vive en ella. */
-export async function voidPinRecoveryCode(
-	db: Client,
-	tenantId: string,
-	deviceId: string,
-	nowMs: number,
-): Promise<void> {
+export async function voidEmailCode(db: Client, k: EmailCodeKey, nowMs: number): Promise<void> {
 	await exec(
 		db,
-		`UPDATE pin_recovery_codes SET consumed_at_ms=? WHERE tenant_id=? AND device_id=?;`,
-		[nowMs, tenantId, deviceId],
+		`UPDATE email_codes SET consumed_at_ms=? WHERE tenant_id=? AND device_id=? AND purpose=?;`,
+		[nowMs, k.tenantId, k.deviceId, k.purpose],
+	);
+}
+
+/* ============================================================
+   Correo de recuperación del tenant (LOGIN-08)
+============================================================ */
+
+/** El correo propio, o `null` si no se ha cambiado (y entonces vale el de la compra). */
+export async function getTenantRecoveryEmail(db: Client, tenantId: string): Promise<string | null> {
+	const r = await exec(
+		db,
+		`SELECT email FROM tenant_recovery_emails WHERE tenant_id=? LIMIT 1;`,
+		[tenantId],
+	);
+	const email = String((r.rows?.[0] as any)?.email ?? "").trim();
+	return email || null;
+}
+
+/** `null` vuelve al de la compra (borra la fila). Sólo se llama tras verificar el buzón nuevo. */
+export async function setTenantRecoveryEmail(
+	db: Client,
+	tenantId: string,
+	email: string | null,
+	nowMs: number,
+): Promise<void> {
+	if (email === null) {
+		await exec(db, `DELETE FROM tenant_recovery_emails WHERE tenant_id=?;`, [tenantId]);
+		return;
+	}
+	await exec(
+		db,
+		`
+    INSERT INTO tenant_recovery_emails (tenant_id, email, verified_at_ms)
+    VALUES (?, ?, ?)
+    ON CONFLICT(tenant_id) DO UPDATE SET
+      email=excluded.email,
+      verified_at_ms=excluded.verified_at_ms;
+    `,
+		[tenantId, email, nowMs],
 	);
 }
 

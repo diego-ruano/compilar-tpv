@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 
 use tpv_application::use_cases::recuperacion_pin as uc;
 use tpv_contracts::errors::{AppErrorDto, ErrorCode};
-use tpv_contracts::login::{CodigoPinEnviado, ConfirmarCodigoPinInput, SolicitarCodigoPinInput};
+use tpv_contracts::login::{CodigoEnviado, ConfirmarCodigoPinInput, SolicitarCodigoPinInput};
 use tpv_infra_licensing::PairingAdapter;
 
 use crate::{AppState, DeviceMode};
@@ -39,7 +39,7 @@ pub async fn login_recuperar_pin_solicitar(
     app: AppHandle,
     state: State<'_, AppState>,
     args: SolicitarCodigoPinInput,
-) -> Result<CodigoPinEnviado, AppErrorDto> {
+) -> Result<CodigoEnviado, AppErrorDto> {
     solo_en_la_main(&state).await?;
     let repo = state.login_repo().await?;
     Ok(uc::solicitar(repo.as_ref(), &nube(&app)?, args).await?)

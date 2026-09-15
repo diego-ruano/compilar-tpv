@@ -9,6 +9,8 @@ import type {
 	PunchInput as ContractPunchInput,
 	SetTurnoPartidoInput as ContractSetTurnoPartidoInput,
 	SolicitarCodigoPinInput,
+	SolicitarCambioCorreoInput,
+	ConfirmarCambioCorreoInput,
 } from "@tpv/contracts";
 
 const idStr = z.string().trim().min(1);
@@ -57,6 +59,16 @@ export const verificarCodigoPinSchema = z.object({
 	codigo: z.string().trim().min(1, "codigo required"),
 });
 
+// LOGIN-08: el correo de recuperación. Aquí sólo que llegue algo; la forma del correo la valida
+// `correoRecuperacion.ts`, con un mensaje que se pueda enseñar.
+export const solicitarCambioCorreoSchema = z.object({
+	correo: z.string().trim().min(1, "correo required"),
+});
+
+export const confirmarCambioCorreoSchema = z.object({
+	codigo: z.string().trim().min(1, "codigo required"),
+});
+
 export const punchSchema = z.object({
 	id_usuario: idStr,
 	pin: z.string().trim().min(1, "pin required"),
@@ -93,3 +105,5 @@ type _GSetTurnoPartido = Assert<SameKeys<z.infer<typeof setTurnoPartidoSchema>, 
 type _GCompleteInitialSetup = Assert<SameKeys<z.infer<typeof completeInitialSetupSchema>, CompleteInitialSetupInput>>;
 type _GPunch = Assert<SameKeys<z.infer<typeof punchSchema>, PunchInput>>;
 type _GSolicitarCodigoPin = Assert<SameKeys<z.infer<typeof solicitarCodigoPinSchema>, SolicitarCodigoPinInput>>;
+type _GSolicitarCambioCorreo = Assert<SameKeys<z.infer<typeof solicitarCambioCorreoSchema>, SolicitarCambioCorreoInput>>;
+type _GConfirmarCambioCorreo = Assert<SameKeys<z.infer<typeof confirmarCambioCorreoSchema>, ConfirmarCambioCorreoInput>>;

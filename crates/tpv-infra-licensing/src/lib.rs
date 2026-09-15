@@ -34,12 +34,13 @@ use serde_json::Value as JsonValue;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::cloud_sync::CloudSyncService;
 use tpv_application::ports::licensing::{LicensingService, PairingService};
+use tpv_application::ports::correo_recuperacion::CorreoRecuperacionService;
 use tpv_application::ports::recuperacion_pin::RecuperacionPinService;
 use tpv_contracts::errors::ErrorCode;
 use tpv_contracts::licensing::{
     ApiSignedHeaders, DeviceIdentity, HandyWsAuth, LicenseLocalState, PairCreateResult, SigB64,
 };
-use tpv_contracts::login::CodigoPinEnviado;
+use tpv_contracts::login::{CodigoEnviado, EstadoCorreoRecuperacion};
 use tpv_domain::licensing::{
     self as dom, AssertionVerificada, Concesion, EstadoLicencia, EstadoVerificado, FalloConsulta,
     ResultadoActivacion, SolicitudActivacion,
@@ -188,8 +189,6 @@ struct TenantInfo<'a> {
     display_name: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     legal_name: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    email: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     phone: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -461,7 +460,6 @@ impl LicensingService for LicensingAdapter {
             tenant_info: TenantInfo {
                 display_name: &solicitud.business_name,
                 legal_name: solicitud.legal_name.as_deref(),
-                email: solicitud.email.as_deref(),
                 phone: solicitud.phone.as_deref(),
                 country: solicitud.country.as_deref(),
             },
@@ -948,20 +946,93 @@ impl CloudSyncService for PairingAdapter {
 
 /// Un fallo de transporte (sin red, DNS, timeout) llega como `External` con el texto de reqwest;
 /// lo que contesta el worker llega como `Coded`, con su mensaje ya escrito para quien está delante.
-/// Se distinguen por la variante, no por el texto. Recuperar el PIN es lo único del login que
-/// necesita internet, así que hay que decirlo con esas palabras.
+/// Se distinguen por la variante, no por el texto. Recuperar el PIN y cambiar el correo de
+/// recuperación necesitan internet, así que hay que decirlo con esas palabras.
 fn sin_conexion(e: AppError) -> AppError {
     match e {
         AppError::External(detalle) => AppError::external(format!(
-            "No se ha podido contactar con el servidor. Recuperar el PIN necesita conexión a internet. ({detalle})"
+            "No se ha podido contactar con el servidor. Esto necesita conexión a internet. ({detalle})"
         )),
         otro => otro,
     }
 }
 
+/// La respuesta de las rutas del correo de recuperación (`{ ok, emailHint, esElDeLaCompra }`).
+fn estado_correo(resp: &JsonValue) -> EstadoCorreoRecuperacion {
+    EstadoCorreoRecuperacion {
+        email_hint: resp
+            .get("emailHint")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        es_el_de_la_compra: resp
+            .get("esElDeLaCompra")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true),
+    }
+}
+
+#[async_trait]
+impl CorreoRecuperacionService for PairingAdapter {
+    async fn estado(&self) -> AppResult<EstadoCorreoRecuperacion> {
+        let resp = self
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/login/correo-recuperacion/estado",
+                serde_json::json!({}),
+            )
+            .await
+            .map_err(sin_conexion)?;
+        Ok(estado_correo(&resp))
+    }
+
+    async fn solicitar_cambio(&self, correo: &str) -> AppResult<CodigoEnviado> {
+        let resp = self
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/login/correo-recuperacion/solicitar",
+                serde_json::json!({ "correo": correo }),
+            )
+            .await
+            .map_err(sin_conexion)?;
+        Ok(CodigoEnviado {
+            email_hint: resp
+                .get("emailHint")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            minutos: resp.get("minutos").and_then(|v| v.as_i64()).unwrap_or(10),
+        })
+    }
+
+    async fn confirmar_cambio(&self, codigo: &str) -> AppResult<EstadoCorreoRecuperacion> {
+        let resp = self
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/login/correo-recuperacion/confirmar",
+                serde_json::json!({ "codigo": codigo }),
+            )
+            .await
+            .map_err(sin_conexion)?;
+        Ok(estado_correo(&resp))
+    }
+
+    async fn usar_el_de_la_compra(&self) -> AppResult<EstadoCorreoRecuperacion> {
+        let resp = self
+            .tpv_server_post_json(
+                "tpv",
+                "/v1/login/correo-recuperacion/usar-el-de-la-compra",
+                serde_json::json!({}),
+            )
+            .await
+            .map_err(sin_conexion)?;
+        Ok(estado_correo(&resp))
+    }
+}
+
 #[async_trait]
 impl RecuperacionPinService for PairingAdapter {
-    async fn solicitar_codigo(&self, id_usuario: &str) -> AppResult<CodigoPinEnviado> {
+    async fn solicitar_codigo(&self, id_usuario: &str) -> AppResult<CodigoEnviado> {
         // Firmado como `tpv`: el tenant lo saca el worker del token y comprueba que es la Main.
         let resp = self
             .tpv_server_post_json(
@@ -972,7 +1043,7 @@ impl RecuperacionPinService for PairingAdapter {
             .await
             .map_err(sin_conexion)?;
 
-        Ok(CodigoPinEnviado {
+        Ok(CodigoEnviado {
             email_hint: resp
                 .get("emailHint")
                 .and_then(|v| v.as_str())

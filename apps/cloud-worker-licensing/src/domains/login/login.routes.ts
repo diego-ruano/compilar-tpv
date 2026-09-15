@@ -16,6 +16,12 @@ import { hashPin, verifyPin } from "./login.crypto";
 import * as q from "./login.queries";
 import * as S from "./login.schemas";
 import { solicitarCodigoPin, verificarCodigoPin } from "./recuperarPin";
+import {
+	confirmarCambioCorreo,
+	estadoCorreoRecuperacion,
+	solicitarCambioCorreo,
+	usarCorreoDeLaCompra,
+} from "./correoRecuperacion";
 import { badRequest } from "../../server/utils/response";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
@@ -171,24 +177,36 @@ loginRoutes.post("/sync-initial-setup", async (c) => {
 // con la clave de ESE equipo es la mitad de la prueba (la otra mitad es el buzón). La lógica y sus
 // porqués están en `recuperarPin.ts`.
 
-async function soloLaMainRecuperaPin(c: any): Promise<Response | null> {
+async function soloLaMain(c: any): Promise<Response | null> {
 	if (await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"))) return null;
 	return c.json(
 		{
 			ok: false,
 			code: "validation",
-			error: "recuperar_pin_solo_en_main",
-			message: "El PIN se recupera desde el TPV principal.",
+			error: "recuperacion_solo_en_main",
+			message: "Esto se hace desde el TPV principal.",
 		},
 		403,
 	);
+}
+
+/** Para los avisos por correo, que no pueden retener la respuesta. */
+function diferirEn(c: any): (p: Promise<unknown>) => void {
+	return (promesa) => {
+		// Sin `executionCtx` (tests) lanza: perder el aviso no puede tumbar la respuesta.
+		try {
+			c.executionCtx.waitUntil(promesa);
+		} catch {
+			void promesa;
+		}
+	};
 }
 
 loginRoutes.post("/recuperar-pin/solicitar", async (c) => {
 	const p = await parseBody(c, S.solicitarCodigoPinSchema);
 	if (!p.ok) return p.res;
 
-	const noMain = await soloLaMainRecuperaPin(c);
+	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
@@ -208,7 +226,7 @@ loginRoutes.post("/recuperar-pin/verificar", async (c) => {
 	const p = await parseBody(c, S.verificarCodigoPinSchema);
 	if (!p.ok) return p.res;
 
-	const noMain = await soloLaMainRecuperaPin(c);
+	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
@@ -234,6 +252,75 @@ loginRoutes.post("/recuperar-pin/verificar", async (c) => {
 			}
 		},
 	);
+	return c.json(r.body, r.status);
+});
+
+// ── Correo de recuperación (LOGIN-08) ───────────────────────────────────────────────────────
+// A dónde llegan los códigos de recuperar el PIN. Que quien lo cambia sea administrador lo exige la
+// Main (sesión); aquí cuenta el código enviado al correo nuevo y el aviso al anterior. Ver
+// `correoRecuperacion.ts`.
+
+function contextoCorreo(c: any) {
+	return {
+		tenantId: c.get("tenantId") as string,
+		deviceId: c.get("deviceId") as string,
+		licHash: c.get("licHash") as string,
+		ahora: Date.now(),
+	};
+}
+
+loginRoutes.post("/correo-recuperacion/estado", async (c) => {
+	const noMain = await soloLaMain(c);
+	if (noMain) return noMain;
+
+	const db = getDb(c.env);
+	await ensureLicensingSchema(db);
+
+	const r = await estadoCorreoRecuperacion(db, contextoCorreo(c));
+	return c.json(r.body, r.status);
+});
+
+loginRoutes.post("/correo-recuperacion/solicitar", async (c) => {
+	const p = await parseBody(c, S.solicitarCambioCorreoSchema);
+	if (!p.ok) return p.res;
+
+	const noMain = await soloLaMain(c);
+	if (noMain) return noMain;
+
+	const db = getDb(c.env);
+	await ensureLicensingSchema(db);
+
+	const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: p.data.correo });
+	return c.json(r.body, r.status);
+});
+
+loginRoutes.post("/correo-recuperacion/confirmar", async (c) => {
+	const p = await parseBody(c, S.confirmarCambioCorreoSchema);
+	if (!p.ok) return p.res;
+
+	const noMain = await soloLaMain(c);
+	if (noMain) return noMain;
+
+	const db = getDb(c.env);
+	await ensureLicensingSchema(db);
+
+	const r = await confirmarCambioCorreo(
+		db,
+		c.env,
+		{ ...contextoCorreo(c), codigo: p.data.codigo },
+		diferirEn(c),
+	);
+	return c.json(r.body, r.status);
+});
+
+loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", async (c) => {
+	const noMain = await soloLaMain(c);
+	if (noMain) return noMain;
+
+	const db = getDb(c.env);
+	await ensureLicensingSchema(db);
+
+	const r = await usarCorreoDeLaCompra(db, c.env, contextoCorreo(c), diferirEn(c));
 	return c.json(r.body, r.status);
 });
 

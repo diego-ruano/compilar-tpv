@@ -334,7 +334,7 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let conn = &g;
         let mut rows = conn
             .query(
-                "SELECT Recovery_Email, Contact_Email, Contact_Phone FROM Contact_Settings WHERE ID=1 LIMIT 1;",
+                "SELECT Contact_Email, Contact_Phone FROM Contact_Settings WHERE ID=1 LIMIT 1;",
                 (),
             )
             .await
@@ -346,9 +346,8 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             .ok_or_else(|| AppError::not_found("No existe Contact_Settings (ID=1)"))?;
         let g = |idx: i32| row.get_value(idx).map_err(db_err);
         Ok(ContactSettings {
-            recovery_email: v_string(g(0)?).unwrap_or_default(),
-            contact_email: v_string(g(1)?).unwrap_or_default(),
-            contact_phone: v_string(g(2)?).unwrap_or_default(),
+            contact_email: v_string(g(0)?).unwrap_or_default(),
+            contact_phone: v_string(g(1)?).unwrap_or_default(),
         })
     }
 
@@ -359,12 +358,6 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
         let mut sets: Vec<&str> = Vec::new();
         let mut args: Vec<Value> = Vec::new();
 
-        if patch_has(patch, "recovery_email") {
-            if let Some(v) = patch_string(patch, "recovery_email") {
-                sets.push("Recovery_Email = ?");
-                args.push(Value::Text(v));
-            }
-        }
         if patch_has(patch, "contact_email") {
             if let Some(v) = patch_string(patch, "contact_email") {
                 sets.push("Contact_Email = ?");

@@ -63,7 +63,6 @@ export default function Configuracion() {
     const contactReady = useContactSettings((s) => s.ready);
     const contactInit = useContactSettings((s) => s.init);
 
-    const [recoveryEmail, setRecoveryEmail] = useState("");
     const [contactEmail, setContactEmail] = useState("");
     const [contactPhone, setContactPhone] = useState("");
     const [savingContact, setSavingContact] = useState(false);
@@ -95,7 +94,6 @@ export default function Configuracion() {
     useEffect(() => {
         if (!contactReady || contactSyncedRef.current) return;
         contactSyncedRef.current = true;
-        setRecoveryEmail(contact.recoveryEmail);
         setContactEmail(contact.contactEmail);
         setContactPhone(contact.contactPhone);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -149,7 +147,7 @@ export default function Configuracion() {
         {
             key: "CONTACTO",
             title: "Contacto",
-            desc: "Recuperación y soporte",
+            desc: "Correo y teléfono de contacto",
             keywords: ["email", "correo", "teléfono", "soporte"],
         },
         {
@@ -162,7 +160,7 @@ export default function Configuracion() {
             key: "LICENCIA",
             title: "Licencia",
             desc: "Plan, estado y pago",
-            keywords: ["licencia", "plan", "pago", "dispositivos"],
+            keywords: ["licencia", "plan", "pago", "dispositivos", "correo de recuperación", "recuperar pin"],
         },
         {
             key: "APARIENCIA",
@@ -328,7 +326,7 @@ export default function Configuracion() {
     const onSaveContact = async () => {
         try {
             setSavingContact(true);
-            contact.setMany({ recoveryEmail, contactEmail, contactPhone });
+            contact.setMany({ contactEmail, contactPhone });
             await messageDialog("Guardado");
         } catch {
             await messageDialog("No se pudo guardar. Revisa la consola.", {
@@ -718,8 +716,6 @@ export default function Configuracion() {
                                         {section === "CONTACTO" ? (
                                             <Contacto
                                                 inputTone={inputTone}
-                                                recoveryEmail={recoveryEmail}
-                                                setRecoveryEmail={setRecoveryEmail}
                                                 contactEmail={contactEmail}
                                                 setContactEmail={setContactEmail}
                                                 contactPhone={contactPhone}

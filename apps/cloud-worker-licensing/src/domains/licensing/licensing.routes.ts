@@ -202,7 +202,8 @@ licenseRoutes.post("/activate", async (c) => {
 	await upsertTenantInfo(db, tenantId, {
 		displayName: tenantInfo.displayName ?? null,
 		legalName: tenantInfo.legalName ?? null,
-		email: tenantInfo.email ?? null,
+		// LOGIN-08: la activación ya no pregunta un correo. El de recuperación es el de la compra
+		// hasta que alguien lo cambie verificándolo; ver `domains/login/correoRecuperacion.ts`.
 		phone: tenantInfo.phone ?? null,
 		country: tenantInfo.country ?? null,
 	});

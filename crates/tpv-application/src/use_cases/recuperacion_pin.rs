@@ -17,7 +17,7 @@
 //!   · **Todo lo que puede fallar en local va antes de tocar la nube**, porque verificar el código lo
 //!     gasta: un PIN mal escrito no puede costarle al usuario un código.
 
-use tpv_contracts::login::{CodigoPinEnviado, ConfirmarCodigoPinInput, SolicitarCodigoPinInput};
+use tpv_contracts::login::{CodigoEnviado, ConfirmarCodigoPinInput, SolicitarCodigoPinInput};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::login::LoginRepository;
@@ -34,7 +34,7 @@ fn id_usuario(input: &str) -> AppResult<String> {
     Ok(id.to_string())
 }
 
-fn codigo_valido(input: &str) -> AppResult<String> {
+pub(crate) fn codigo_valido(input: &str) -> AppResult<String> {
     let c = input.trim();
     if c.len() != 6 || !c.chars().all(|ch| ch.is_ascii_digit()) {
         return Err(AppError::validation("El código son 6 cifras"));
@@ -68,7 +68,7 @@ pub async fn solicitar(
     repo: &dyn LoginRepository,
     svc: &dyn RecuperacionPinService,
     input: SolicitarCodigoPinInput,
-) -> AppResult<CodigoPinEnviado> {
+) -> AppResult<CodigoEnviado> {
     let id = id_usuario(&input.id_usuario)?;
     exigir_admin_activo(repo, &id).await?;
     svc.solicitar_codigo(&id).await
@@ -173,9 +173,9 @@ mod tests {
 
     #[async_trait]
     impl RecuperacionPinService for FakeNube {
-        async fn solicitar_codigo(&self, id: &str) -> AppResult<CodigoPinEnviado> {
+        async fn solicitar_codigo(&self, id: &str) -> AppResult<CodigoEnviado> {
             self.llamadas.lock().unwrap().push(format!("solicitar:{id}"));
-            Ok(CodigoPinEnviado { email_hint: "t***@bar.test".into(), minutos: 10 })
+            Ok(CodigoEnviado { email_hint: "t***@bar.test".into(), minutos: 10 })
         }
         async fn verificar_codigo(&self, id: &str, codigo: &str) -> AppResult<()> {
             self.llamadas.lock().unwrap().push(format!("verificar:{id}"));

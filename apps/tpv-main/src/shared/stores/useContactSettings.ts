@@ -7,7 +7,6 @@ import {
 import { conAviso } from "../lib/conAviso";
 
 const DEFAULTS: ContactSettings = {
-    recoveryEmail: "",
     contactEmail: "",
     contactPhone: "",
 };

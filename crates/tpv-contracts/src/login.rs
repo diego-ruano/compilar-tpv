@@ -121,10 +121,11 @@ pub struct SolicitarCodigoPinInput {
     pub id_usuario: String,
 }
 
-/// El código ya va de camino. Sólo la pista del correo: el correo entero no sale de la nube.
+/// Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
+/// Sólo la pista del correo: el correo entero no sale de la nube.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct CodigoPinEnviado {
+pub struct CodigoEnviado {
     /// `a***@bar.com`.
     pub email_hint: String,
     #[ts(type = "number")]
@@ -139,6 +140,33 @@ pub struct ConfirmarCodigoPinInput {
     pub id_usuario: String,
     pub codigo: String,
     pub pin_nuevo: String,
+}
+
+/* =========================================================
+   Correo de recuperación (LOGIN-08)
+========================================================= */
+
+/// A dónde llegan los códigos para recuperar el PIN.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct EstadoCorreoRecuperacion {
+    /// `a***@bar.com`.
+    pub email_hint: String,
+    /// `true` mientras nadie lo haya cambiado: es el correo con el que se compró la licencia.
+    pub es_el_de_la_compra: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct SolicitarCambioCorreoInput {
+    pub correo: String,
+}
+
+/// Sólo el código: la dirección que queda confirmada es la que se pidió, guardada en la nube.
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+pub struct ConfirmarCambioCorreoInput {
+    pub codigo: String,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]

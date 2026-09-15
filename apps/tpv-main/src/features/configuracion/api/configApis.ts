@@ -8,7 +8,6 @@ import { invokeClient } from "@tpv/client";
 /* ── Types frontend ── */
 
 export type ContactSettings = {
-    recoveryEmail: string;
     contactEmail: string;
     contactPhone: string;
 };
@@ -187,7 +186,6 @@ function mapTicketPatchToRust(patch: TicketSettingsPatch): Record<string, any> {
 
 function mapContactFromRust(x: any): ContactSettings {
     return {
-        recoveryEmail: String(pick(x, ["recovery_email", "recoveryEmail"], "")),
         contactEmail: String(pick(x, ["contact_email", "contactEmail"], "")),
         contactPhone: String(pick(x, ["contact_phone", "contactPhone"], "")),
     };
@@ -195,7 +193,6 @@ function mapContactFromRust(x: any): ContactSettings {
 
 function mapContactPatchToRust(patch: Partial<ContactSettings>): Record<string, any> {
     const out: Record<string, any> = {};
-    if ("recoveryEmail" in patch) out.recovery_email = patch.recoveryEmail;
     if ("contactEmail" in patch) out.contact_email = patch.contactEmail;
     if ("contactPhone" in patch) out.contact_phone = patch.contactPhone;
     return out;
