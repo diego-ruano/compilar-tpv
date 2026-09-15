@@ -1,0 +1,238 @@
+// apps/tpv-main/test/arranque.test.ts
+//
+// El arranque de la aplicación: qué pantalla se enseña, qué se le dice a quien la mira cuando la
+// licencia no le deja trabajar, cuándo se da por bueno el formulario de activación y cómo se lee el
+// código con el que se vincula un Handy.
+//
+// De la pantalla se prueban reglas de seguridad, no de maquetación: un Handy sin Main confirmada no
+// trabaja, una Main no enseña la aplicación hasta que el gate deja pasar, y un aviso de caducidad
+// nunca acompaña a una aplicación bloqueada. Son las que se pierden en silencio al retocar el JSX.
+
+process.env.TZ = "Europe/Madrid";
+
+import { describe, expect, it } from "vitest";
+import type { LicenseGateResult, LicenseLocalState } from "@tpv/contracts";
+
+import { activacionCompleta, correoValido, FORMULARIO_VACIO } from "../src/app/arranque/activacion";
+import { codigoParaVincular, leerCodigoDeVinculacion } from "../src/app/arranque/emparejamiento";
+import { decidirArranque, type EntradaArranque } from "../src/app/arranque/pantallaDeArranque";
+import { textoAvisoCaducidad, textoBloqueo, textoRechazoPrevio } from "../src/app/arranque/textosLicencia";
+
+const gate = (allowed: boolean, reason: string, extra: Partial<LicenseGateResult> = {}): LicenseGateResult => ({
+	allowed,
+	reason,
+	state: null,
+	...extra,
+});
+
+const conCaducidad = (expires_at_ms: number) => ({ expires_at_ms }) as LicenseLocalState;
+
+const entrada = (e: Partial<EntradaArranque>): EntradaArranque => ({
+	modo: "tpv",
+	licenciaCargando: false,
+	gate: gate(true, "ok"),
+	handyEmparejado: false,
+	mainOnline: null,
+	mainVolcando: false,
+	...e,
+});
+
+describe("qué pantalla enseña el arranque", () => {
+	it.each([
+		["mientras se lee el modo", { modo: "loading" }, { tipo: "cargando" }],
+		["mientras se lee la licencia", { licenciaCargando: true }, { tipo: "cargando" }],
+		["un equipo sin modo elige modo", { modo: null }, { tipo: "elegir_modo" }],
+		["un Handy sin emparejar vincula, aunque haya Main", { modo: "handy", mainOnline: true }, { tipo: "handy_vincular" }],
+		[
+			"un Handy que aún no sabe de la Main espera, conectando",
+			{ modo: "handy", handyEmparejado: true, mainOnline: null },
+			{ tipo: "handy_esperando_main", conectando: true, volcando: false },
+		],
+		[
+			"un Handy sin Main espera",
+			{ modo: "handy", handyEmparejado: true, mainOnline: false },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: false },
+		],
+		[
+			"un Handy con la Main volcando su atraso espera (SYNC-18)",
+			{ modo: "handy", handyEmparejado: true, mainOnline: true, mainVolcando: true },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: true },
+		],
+		["un Handy con Main trabaja", { modo: "handy", handyEmparejado: true, mainOnline: true }, { tipo: "handy_app" }],
+		["una Main mientras se comprueba la licencia no enseña nada", { gate: null }, { tipo: "cargando" }],
+		[
+			"una Main sin licencia activa",
+			{ gate: gate(false, "needs_activation") },
+			{ tipo: "tpv_activar", rechazoPrevio: null },
+		],
+		[
+			"una Main a la que se le anuló la licencia vuelve a activar sabiendo por qué",
+			{ gate: gate(false, "needs_activation", { last_rejection: "revoked" }) },
+			{ tipo: "tpv_activar", rechazoPrevio: "revoked" },
+		],
+		["una Main bloqueada", { gate: gate(false, "expired") }, { tipo: "tpv_bloqueada", motivo: "expired" }],
+		["una Main con licencia trabaja", { gate: gate(true, "ok") }, { tipo: "tpv_app" }],
+		["un modo que no es ninguno de los conocidos (localStorage corrupto)", { modo: "otro" as never }, { tipo: "modo_invalido" }],
+	] as [string, Partial<EntradaArranque>, object][])("%s", (_caso, e, esperada) => {
+		expect(decidirArranque(entrada(e)).pantalla).toEqual(esperada);
+	});
+
+	it("la Main sólo está lista con el gate dejando pasar, y sólo entonces se quita la barra de arranque", () => {
+		expect(decidirArranque(entrada({ gate: gate(true, "ok") }))).toMatchObject({ mainLista: true, conBarraDeArranque: false });
+		expect(decidirArranque(entrada({ gate: gate(true, "offline_grace") }))).toMatchObject({ mainLista: true });
+		for (const e of [{ gate: null }, { gate: gate(false, "expired") }, { gate: gate(false, "needs_activation") }, { modo: "handy" as const }]) {
+			expect(decidirArranque(entrada(e)), JSON.stringify(e)).toMatchObject({ mainLista: false, conBarraDeArranque: true });
+		}
+	});
+
+	it("un Handy sólo quita la barra de arranque cuando enseña su aplicación", () => {
+		const handy = { modo: "handy" as const, handyEmparejado: true };
+		expect(decidirArranque(entrada({ ...handy, mainOnline: true })).conBarraDeArranque).toBe(false);
+		expect(decidirArranque(entrada({ ...handy, mainOnline: null })).conBarraDeArranque).toBe(true);
+		expect(decidirArranque(entrada({ ...handy, mainOnline: true, mainVolcando: true })).conBarraDeArranque).toBe(true);
+	});
+
+	it("el aviso de caducidad sólo acompaña a una Main que trabaja", () => {
+		const warn = gate(true, "warn", { state: conCaducidad(123) });
+		expect(decidirArranque(entrada({ gate: warn })).avisoCaducidad).toEqual({ motivo: "warn", expiresAtMs: 123 });
+		expect(decidirArranque(entrada({ gate: gate(true, "expiry_grace") })).avisoCaducidad).toEqual({
+			motivo: "expiry_grace",
+			expiresAtMs: null,
+		});
+		expect(decidirArranque(entrada({ gate: gate(true, "ok") })).avisoCaducidad).toBeNull();
+		expect(decidirArranque(entrada({ gate: gate(false, "warn") })).avisoCaducidad).toBeNull();
+		expect(decidirArranque(entrada({ modo: "handy", gate: warn })).avisoCaducidad).toBeNull();
+	});
+});
+
+describe("lo que se dice cuando la licencia bloquea", () => {
+	it("cada motivo del servidor tiene su explicación, y ninguna es la genérica", () => {
+		const genérica = textoBloqueo("un_motivo_que_no_existe").titulo;
+		const titulos = ["expired", "revoked", "device_replaced", "bad_signature", "offline_expired", "license_not_found"].map(
+			(m) => textoBloqueo(m).titulo,
+		);
+		expect(new Set(titulos).size).toBe(titulos.length);
+		expect(titulos).not.toContain(genérica);
+	});
+
+	it("una anulación dice que la misma clave vuelve a activar sin perder datos", () => {
+		expect(textoBloqueo("revoked").titulo).toBe("Licencia anulada");
+		expect(textoBloqueo("revoked").cuerpo).toContain("sin perder ningún dato");
+		expect(textoBloqueo("expired").titulo).toBe("Licencia caducada");
+	});
+
+	it("perder la conexión demasiado tiempo y un reloj atrasado se explican igual", () => {
+		expect(textoBloqueo("clock_rollback_detected")).toEqual(textoBloqueo("offline_expired"));
+	});
+
+	it("un motivo nuevo, o un fallo al comprobar, no deja la pantalla muda", () => {
+		for (const m of ["gate_error:internal", "algo_nuevo", ""]) {
+			expect(textoBloqueo(m).titulo).toBe("Licencia bloqueada");
+			expect(textoBloqueo(m).cuerpo.length).toBeGreaterThan(0);
+		}
+	});
+
+	it("al volver a activar, se explica el rechazo anterior; en un equipo nuevo, nada", () => {
+		expect(textoRechazoPrevio(null)).toBeNull();
+		expect(textoRechazoPrevio("revoked")?.cuerpo).toContain("no se pierde ningún dato");
+		expect(textoRechazoPrevio("device_replaced")?.titulo).toBe("Esta licencia se activó en otro equipo");
+		expect(textoRechazoPrevio("un_motivo_nuevo")?.cuerpo).toContain("un_motivo_nuevo");
+	});
+});
+
+describe("el aviso de caducidad", () => {
+	const hora = (dia: number, h: number, m = 0) => new Date(2026, 8, dia, h, m).getTime();
+
+	it.each([
+		["caduca a las 23:00 y son las 08:00", hora(15, 8), hora(15, 23), "Tu licencia caduca hoy."],
+		["caduca a las 00:30 y son las 23:45", hora(15, 23, 45), hora(16, 0, 30), "Tu licencia caduca mañana."],
+		["caduca pasado mañana a primera hora", hora(15, 23), hora(17, 1), "Tu licencia caduca en 2 días."],
+	])("%s", (_caso, ahora, caducidad, esperado) => {
+		expect(textoAvisoCaducidad({ motivo: "warn", expiresAtMs: caducidad }, ahora)).toBe(esperado);
+	});
+
+	it("sin fecha de caducidad, avisa sin inventarse un plazo", () => {
+		expect(textoAvisoCaducidad({ motivo: "warn", expiresAtMs: null })).toBe("Tu licencia caduca pronto.");
+	});
+
+	it("caducada, no anuncia cuánto margen queda", () => {
+		const texto = textoAvisoCaducidad({ motivo: "expiry_grace", expiresAtMs: hora(14, 12) }, hora(15, 8));
+		expect(texto).not.toMatch(/\d/);
+		expect(texto).not.toContain("día");
+	});
+});
+
+describe("el formulario de activación", () => {
+	const lleno = {
+		licenseKey: "ABCD-EFGH-IJKL",
+		legal_name: "Bar La Plaza S.L.",
+		business_name: "Bar La Plaza",
+		phone: "+34 600 000 000",
+		country: "España",
+	};
+	const listo = { formulario: lleno, usarCorreoCompra: true, correoRecuperacion: "", enCambioDeEquipo: false, codigoCambio: "" };
+
+	it("con todo relleno y el correo de la compra, está listo", () => {
+		expect(activacionCompleta(listo)).toBe(true);
+	});
+
+	it("le falta cualquier campo, o sólo tiene espacios, y no lo está", () => {
+		expect(activacionCompleta({ ...listo, formulario: FORMULARIO_VACIO })).toBe(false);
+		for (const campo of Object.keys(lleno) as (keyof typeof lleno)[]) {
+			expect(activacionCompleta({ ...listo, formulario: { ...lleno, [campo]: "   " } }), campo).toBe(false);
+		}
+	});
+
+	it("sin el correo de la compra, pide uno válido (LOGIN-08)", () => {
+		const otro = { ...listo, usarCorreoCompra: false };
+		expect(activacionCompleta({ ...otro, correoRecuperacion: "" })).toBe(false);
+		expect(activacionCompleta({ ...otro, correoRecuperacion: "encargado@" })).toBe(false);
+		expect(activacionCompleta({ ...otro, correoRecuperacion: " encargado@bar.es " })).toBe(true);
+	});
+
+	it("si la licencia está en otro equipo, pide el código completo de 6 cifras", () => {
+		const cambio = { ...listo, enCambioDeEquipo: true };
+		expect(activacionCompleta({ ...cambio, codigoCambio: "" })).toBe(false);
+		expect(activacionCompleta({ ...cambio, codigoCambio: "12345" })).toBe(false);
+		expect(activacionCompleta({ ...cambio, codigoCambio: "123456" })).toBe(true);
+	});
+
+	it.each([
+		["encargado@bar.es", true],
+		["ENCARGADO@Bar-La-Plaza.com", true],
+		["  espacios@bar.es  ", true],
+		["sin-arroba.es", false],
+		["dos@@bar.es", false],
+		["con espacio@bar.es", false],
+		["sin@dominio", false],
+		["", false],
+	])("correo «%s» → %s", (correo, esperado) => {
+		expect(correoValido(correo)).toBe(esperado);
+	});
+});
+
+describe("el código con el que se vincula un Handy", () => {
+	it.each([
+		["123456", { pairCode: "123456", pairSecret: "" }],
+		[" 123456 ", { pairCode: "123456", pairSecret: "" }],
+		["tpv://pair?code=123456&secret=s3cr3t", { pairCode: "123456", pairSecret: "s3cr3t" }],
+		["TPV://PAIR?code=654321", { pairCode: "654321", pairSecret: "" }],
+		["tpv://pair?secret=s3cr3t&code=000001", { pairCode: "000001", pairSecret: "s3cr3t" }],
+	])("«%s» vale", (raw, esperado) => {
+		expect(leerCodigoDeVinculacion(raw)).toEqual(esperado);
+	});
+
+	it.each([["12345"], ["1234567"], ["abcdef"], ["tpv://pair?code=12a456"], ["tpv://pair"], ["https://pair?code=123456"], [""]])(
+		"«%s» no vale",
+		(raw) => {
+			expect(leerCodigoDeVinculacion(raw)).toBeNull();
+		},
+	);
+
+	it("manda el QR; si lo pegado no vale, el código manual", () => {
+		expect(codigoParaVincular("tpv://pair?code=111111&secret=s", "222222")).toEqual({ pairCode: "111111", pairSecret: "s" });
+		expect(codigoParaVincular("basura", "222222")).toEqual({ pairCode: "222222", pairSecret: "" });
+		expect(codigoParaVincular("", "222222")).toEqual({ pairCode: "222222", pairSecret: "" });
+		expect(codigoParaVincular("basura", "")).toBeNull();
+	});
+});
