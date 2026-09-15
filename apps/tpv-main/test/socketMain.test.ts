@@ -864,3 +864,102 @@ describe("recuperación de una BD restaurada", () => {
 		expect(SocketFalso.creados).toHaveLength(2);
 	});
 });
+
+describe("un socket que ya no es el actual no toca nada", () => {
+	// Se reconecta sin esperar al cierre del socket anterior cuando vuelve la red con uno abierto
+	// sin autenticar, o con uno que el vigía ya cerró pero cuyo cierre no ha terminado (un TCP
+	// medio-abierto puede tardar mucho). Su `onclose` llega entonces con otro socket en su sitio. Y
+	// el TenantHub cierra el socket anterior de un dispositivo en cuanto conecta el nuevo
+	// («replaced»), así que un socket de más no se queda en uno.
+
+	it("el cierre tardío del anterior no le quita nada a la conexión nueva", async () => {
+		const b = crearBackend();
+		const m = await montar();
+		const s1 = ultimo();
+		s1.abrir();
+		await m.volverLaRed();
+		const s2 = ultimo();
+		conPong(s2);
+		await conectar(s2);
+
+		s1.cerrar();
+		await asentar();
+
+		expect(estado()).toBe("conectado");
+		await s2.recibir({ type: "change", ...cambio(1) });
+		await asentar();
+		expect(b.aplicados, "lo que llega en vivo se sigue aplicando").toEqual([["rem-1"]]);
+		b.outbox.push(op(9));
+		await avanzar(3_000);
+		expect(s2.applies(), "la subida periódica sigue en marcha").toEqual(["op-9"]);
+		await avanzar(57_000);
+		expect(s2.tipos().filter((t) => t === "ping"), "el latido sigue en marcha").toHaveLength(2);
+		expect(SocketFalso.creados, "no se abre ningún socket más").toHaveLength(2);
+	});
+
+	it("con la nube echando al socket anterior, no entra en un bucle de reconexiones", async () => {
+		crearBackend();
+		const m = await montar();
+		const s1 = ultimo();
+		s1.abrir();
+		await m.volverLaRed();
+		await conectar(ultimo());
+		s1.cerrar();
+		await asentar();
+		// Durante un minuto, cada socket nuevo que se autentica hace que la nube cierre el anterior.
+		for (let i = 0; i < 20; i++) {
+			await avanzar(3_000);
+			const n = SocketFalso.creados.length;
+			if (SocketFalso.creados[n - 1].readyState === SocketFalso.CONNECTING) {
+				await conectar(SocketFalso.creados[n - 1]);
+				SocketFalso.creados[n - 2].cerrar();
+				await asentar();
+			}
+		}
+		expect(SocketFalso.creados).toHaveLength(2);
+	});
+
+	it("si el vigía cerró uno medio muerto y vuelve la red, el nuevo no sube nada antes de autenticarse", async () => {
+		const b = crearBackend();
+		const m = await montar();
+		const s1 = ultimo();
+		await conectar(s1);
+		await avanzar(90_000);
+		expect(s1.readyState).toBe(SocketFalso.CLOSING);
+
+		await m.volverLaRed();
+		const s2 = ultimo();
+		expect(s2).not.toBe(s1);
+		s2.abrir();
+		b.outbox.push(op(1));
+		h.oyentes.get("outbox:pending")!();
+		await asentar();
+		// Sin autenticar, la nube lo rechazaría y contaría como un intento fallido de esa operación.
+		expect(s2.applies()).toEqual([]);
+
+		await s2.recibir({ type: "challenge", nonceB64: "n" });
+		await s2.recibir({ type: "hello_ok" });
+		await asentar();
+		expect(s2.applies()).toEqual(["op-1"]);
+
+		s1.cerrar();
+		await asentar();
+		expect(estado()).toBe("conectado");
+		expect(SocketFalso.creados).toHaveLength(2);
+	});
+
+	it("al arrancar de nuevo (acaba una recuperación, cambia la palanca), el cierre del socket anterior no publica nada", async () => {
+		crearBackend();
+		const { socket } = await montar();
+		const s1 = ultimo();
+		await conectar(s1);
+		socket?.detener();
+
+		await montar();
+		const s2 = ultimo();
+		await conectar(s2);
+		s1.cerrar();
+		await asentar();
+		expect(estado()).toBe("conectado");
+	});
+});

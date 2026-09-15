@@ -577,6 +577,13 @@ no sólo en dev.
   - **Socket medio-muerto:** el latido verifica el `pong` (el DO lo contesta en el edge) y cierra
     tras dos latidos sin respuesta; además se reconecta al instante ante `online`/`focus`/
     `visibilitychange`. Sin ambos, un TCP medio-abierto se quedaba mudo para siempre.
+  - **Un socket abandonado no toca nada.** Quien reconecta sin esperar al cierre del anterior
+    (vuelve la red con uno a medio abrir, o el vigía ya lo cerró) lo suelta en ese momento
+    (`socketMain.ts::soltarSocket`), y el `onclose` de un socket que ya no es el actual no hace
+    nada. Ese cierre llega tarde: mientras lo gestionaba él, le quitaba al socket nuevo la
+    autenticación, el latido y la subida, dejaba de aplicar lo que llegaba y abría otra conexión, y
+    como el TenantHub echa al socket anterior de un dispositivo al conectar uno nuevo (`replaced`),
+    eso era un bucle de reconexiones.
 - **Sin conexión:** la Main sigue funcionando; el outbox y `_Sync_Applied_Ops` crecen pero la idempotencia los tolera. Se drenan al recuperarla.
 - **Un rechazo de subida no puede parar la cola (SYNC-20).** El outbox está ordenado, así que el
   drenado sube una operación y no pasa a la siguiente hasta que la nube confirma. Mientras el

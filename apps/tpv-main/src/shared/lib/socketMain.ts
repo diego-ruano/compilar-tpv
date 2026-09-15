@@ -712,6 +712,35 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		}, delay);
 	};
 
+	/**
+	 * Suelta el socket actual: sus temporizadores, sus confirmaciones pendientes y lo que se sabía de
+	 * su conexión.
+	 *
+	 * Lo hace quien lo abandona y en el momento, no su `onclose`. Ese evento llega cuando termina el
+	 * cierre, que en un TCP medio-abierto puede ser mucho después, y para entonces puede haber ya otro
+	 * socket en su sitio. Mientras lo hacía el `onclose`, el de un socket abandonado le quitaba al
+	 * nuevo la autenticación, el latido y la subida periódica, dejaba de aplicar lo que llegaba
+	 * (`caughtUp` a falso sin un catch-up detrás) y programaba otra conexión; y como el TenantHub echa
+	 * al socket anterior de un dispositivo en cuanto conecta uno nuevo, eso era un bucle.
+	 */
+	function soltarSocket() {
+		if (pingTimer) {
+			clearInterval(pingTimer);
+			pingTimer = null;
+		}
+		if (drainTimer) {
+			clearInterval(drainTimer);
+			drainTimer = null;
+		}
+		// Resolver como fallo los acks pendientes para no dejar promesas colgadas.
+		for (const cb of acks.values()) cb(false);
+		acks.clear();
+		ws = null;
+		authed = false;
+		// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
+		caughtUp = false;
+	}
+
 	// SYNC-17: reconexión inmediata cuando vuelve la red / la app recupera el foco, SOLO si no
 	// estamos ya sanos. Sin esto, un equipo que despierta de suspensión se queda esperando a que
 	// venza un backoff que puede ir por 30 s, con el socket ya muerto. La Handy ya lo hacía.
@@ -736,15 +765,18 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			clearTimeout(retryTimer);
 			retryTimer = null;
 		}
-		// Un WS "abierto" pero sin autenticar puede estar medio-muerto: cerrar para reabrir limpio.
-		if (ws && ws.readyState === WebSocket.OPEN) {
-			try {
-				ws.close();
-			} catch {
-				/* noop */
+		if (ws) {
+			// Un WS "abierto" pero sin autenticar puede estar medio-muerto: cerrar para reabrir limpio.
+			if (ws.readyState === WebSocket.OPEN) {
+				try {
+					ws.close();
+				} catch {
+					/* noop */
+				}
 			}
+			// Se suelta ya, sin esperar a su `onclose`: ver `soltarSocket`.
+			soltarSocket();
 		}
-		ws = null;
 		void open();
 	};
 
@@ -1022,21 +1054,9 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		};
 
 		socket.onclose = () => {
-			if (pingTimer) {
-				clearInterval(pingTimer);
-				pingTimer = null;
-			}
-			if (drainTimer) {
-				clearInterval(drainTimer);
-				drainTimer = null;
-			}
-			// Resolver como fallo los acks pendientes para no dejar promesas colgadas.
-			for (const cb of acks.values()) cb(false);
-			acks.clear();
-			if (ws === socket) ws = null;
-			authed = false;
-			// Forzamos catch-up al reconectar: lo perdido se recupera por el endpoint.
-			caughtUp = false;
+			// Si ya se soltó —se reconectó sin esperarle, o se detuvo—, en su sitio puede haber otro.
+			if (ws !== socket) return;
+			soltarSocket();
 			if (recuperacionBloqueada) {
 				marcar("pausada", "Recuperación detenida: hace falta decidir cómo continuar");
 				return;
@@ -1070,21 +1090,16 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 		reconectarSiHaceFalta: reconnectNowIfNeeded,
 		detener: () => {
 			cancelled = true;
-			authed = false;
 			if (unlistenOutbox) unlistenOutbox();
 			if (retryTimer) clearTimeout(retryTimer);
-			if (pingTimer) clearInterval(pingTimer);
-			if (drainTimer) clearInterval(drainTimer);
-			for (const cb of acks.values()) cb(false);
-			acks.clear();
 			if (ws) {
 				try {
 					ws.close();
 				} catch {
 					/* noop */
 				}
-				ws = null;
 			}
+			soltarSocket();
 		},
 	};
 }
