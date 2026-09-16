@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Plus,
   X,
   Users,
@@ -116,6 +117,142 @@ function generarCeldasMesLocal(fechaBase: Date) {
 function normalizarHora(h: string): string {
   if (!h) return "00:00";
   return h.slice(0, 5);
+}
+
+const HORAS_RESERVA = Array.from({ length: 288 }, (_, i) => {
+  const minutos = i * 5;
+  return `${String(Math.floor(minutos / 60)).padStart(2, "0")}:${String(minutos % 60).padStart(2, "0")}`;
+});
+
+function HoraSelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (hora: string) => void;
+}) {
+  const [abierto, setAbierto] = useState(false);
+  const [posicion, setPosicion] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+  const campoRef = useRef<HTMLDivElement>(null);
+  const listaRef = useRef<HTMLDivElement>(null);
+  const seleccionRef = useRef<HTMLButtonElement>(null);
+  const opciones = HORAS_RESERVA.includes(value) || !value ? HORAS_RESERVA : [value, ...HORAS_RESERVA];
+
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrarFuera = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!campoRef.current?.contains(target) && !listaRef.current?.contains(target)) {
+        setAbierto(false);
+      }
+    };
+    document.addEventListener("pointerdown", cerrarFuera);
+    return () => document.removeEventListener("pointerdown", cerrarFuera);
+  }, [abierto]);
+
+  useEffect(() => {
+    if (!abierto || !seleccionRef.current || !listaRef.current) return;
+    const lista = listaRef.current;
+    const seleccion = seleccionRef.current;
+    lista.scrollTop = Math.max(
+      0,
+      seleccion.offsetTop - lista.clientHeight / 2 + seleccion.clientHeight / 2,
+    );
+  }, [abierto, posicion]);
+
+  useEffect(() => {
+    if (!abierto) return;
+
+    const recolocar = () => {
+      const rect = campoRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const margen = 16;
+      const separacion = 4;
+      const alturaDeseada = Math.min(192, opciones.length * 40 + 8);
+      const espacioAbajo = window.innerHeight - rect.bottom - margen - separacion;
+      const maxHeight = Math.max(1, Math.min(alturaDeseada, espacioAbajo));
+      const width = Math.min(rect.width, window.innerWidth - margen * 2);
+      const left = Math.min(Math.max(margen, rect.left), window.innerWidth - margen - width);
+
+      setPosicion({
+        top: rect.bottom + separacion,
+        left,
+        width,
+        maxHeight,
+      });
+    };
+
+    const frame = requestAnimationFrame(recolocar);
+    window.addEventListener("resize", recolocar);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", recolocar);
+    };
+  }, [abierto, opciones.length]);
+
+  return (
+    <div ref={campoRef} className="relative w-full max-w-[14rem]">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={abierto}
+        onClick={() => setAbierto((actual) => !actual)}
+        className="flex w-full items-center justify-between rounded-lg border border-border bg-surface px-3 py-2 text-left text-sm text-fg outline-none focus:border-accent"
+      >
+        <span>{value || "Selecciona una hora"}</span>
+        <ChevronDown className="size-4 shrink-0 text-fg-muted" aria-hidden />
+      </button>
+
+      {abierto ? (
+        <div
+          ref={listaRef}
+          role="listbox"
+          aria-label="Horas disponibles"
+          style={
+            posicion
+              ? {
+                  position: "fixed",
+                  top: posicion.top,
+                  left: posicion.left,
+                  width: posicion.width,
+                  height: posicion.maxHeight,
+                  maxHeight: posicion.maxHeight,
+                  overflowY: "scroll",
+                  overscrollBehavior: "contain",
+                  scrollbarGutter: "stable",
+                }
+              : { position: "fixed", top: 0, left: 0, visibility: "hidden" }
+          }
+          className="z-50 rounded-lg border border-border bg-surface p-1 shadow-xl"
+        >
+          {opciones.map((hora) => (
+            <button
+              key={hora}
+              ref={hora === value ? seleccionRef : undefined}
+              type="button"
+              role="option"
+              aria-selected={hora === value}
+              onClick={() => {
+                onChange(hora);
+                setAbierto(false);
+              }}
+              className={`w-full rounded-md px-3 py-1.5 text-left text-sm transition ${
+                hora === value ? "bg-accent text-white" : "text-fg hover:bg-surface-2"
+              }`}
+            >
+              {hora}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -720,12 +857,9 @@ export default function Reservas() {
                         <label className="mb-1 block text-[11px] font-bold text-fg-muted">
                           Hora *
                         </label>
-                        <input
-                          type="time"
-                          required
+                        <HoraSelect
                           value={form.hora}
-                          onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))}
-                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+                          onChange={(hora) => setForm((p) => ({ ...p, hora }))}
                         />
                       </div>
 
@@ -767,7 +901,7 @@ export default function Reservas() {
                             const idZona = e.target.value;
                             setForm((p) => ({ ...p, idZona, idMesa: "" }));
                           }}
-                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-accent sm:max-w-[14rem]"
                         >
                           {zonas.map((z) => (
                             <option key={z.idZona} value={z.idZona}>
