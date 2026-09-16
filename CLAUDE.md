@@ -361,6 +361,20 @@ la lógica/SQL vive en `crates/*`.
   Un código nuevo se añade sólo si alguien necesita **hacer algo distinto** con ese caso; si sólo se
   muestra, es un `message` con el código genérico que corresponda. En el frontend, `toAppError(e)` /
   `esError(e, "…")` de `@tpv/client` normalizan lo capturado.
+- **Lo que ve la persona es `message`, y nunca un identificador.** Un error del worker lleva en
+  `error` un identificador de máquina (`pair_code_not_found`); mientras una respuesta no traía
+  `message`, la pantalla lo pintaba tal cual. Ahora hay tres piezas, y conviene saber cuál tocar:
+  - **La frase vive en el worker, junto al catálogo** (`lib/errorCodes.ts`): `MENSAJES` para lo que
+    alguien puede provocar usando el programa, `SIN_MENSAJE_PROPIO` para lo que ya tiene código de
+    negocio o sólo sale si hay un bug. Un identificador nuevo va a una de las dos o
+    `test/mensajesDeError.test.ts`, que lee el fuente entero, se pone rojo. **No se añade al enum
+    `ErrorCode`**: eso es para lo que alguien ramifica, no para lo que sólo se enseña.
+  - **La aplica un middleware a todas las respuestas** (`middleware/completarErrores.ts`), no cada
+    ruta: había cien respuestas escritas a mano y la próxima también lo estará. Lo que una respuesta
+    ya trae se respeta, así que un `message` escrito en la llamada, más preciso, gana a la tabla.
+  - **El cliente no enseña un identificador ni aunque le llegue** (`AppErrorDto::new`): pone la
+    frase genérica de su código con el identificador entre paréntesis, que es lo que sirve a soporte.
+    Y un fallo de red es `AppError::sin_conexion`, no el texto de reqwest.
 - Un comando Tauri NO contiene SQL ni reglas de negocio: sólo adapta entrada/salida e invoca un caso de uso.
 - El frontend en **modo TPV** no hace `fetch` a la nube para datos de negocio: sólo `invokeClient(...)`. En **modo Handy**, las lecturas van por REST al worker y las escrituras también (no hay BD local).
 

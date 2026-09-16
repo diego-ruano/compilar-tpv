@@ -254,14 +254,18 @@ impl AppErrorDto {
         let message = message.into();
         let limpio = message.trim();
 
-        // `message` se PINTA en la UI. Dos casos en los que el texto recibido no sirve para
-        // enseñárselo a nadie y se sustituye por el legible del catálogo:
-        //   · vacío,
-        //   · el propio identificador de máquina — que es justo lo que llega cuando el error
-        //     nace de un código del worker (`AppError::from_wire("main_offline")`), porque
-        //     ahí el string ES el código. Sin esto, el usuario leía "main_offline".
+        // `message` se PINTA en la UI. Tres casos en los que el texto recibido no sirve para
+        // enseñárselo a nadie:
+        //   · vacío, o el propio código — lo que llega cuando el error nace de un código del
+        //     worker (`AppError::from_wire("main_offline")`), porque ahí el string ES el código.
+        //     Se sustituye por el legible del catálogo.
+        //   · otro identificador de máquina (`pair_code_not_found`): una respuesta del worker sin
+        //     frase propia. Se enseña el legible y el identificador va detrás, entre paréntesis,
+        //     porque es lo único con lo que soporte puede saber qué pasó.
         let message = if limpio.is_empty() || limpio.eq_ignore_ascii_case(code.wire()) {
             code.default_message().to_string()
+        } else if es_identificador_de_maquina(limpio) {
+            format!("{} ({limpio})", code.default_message())
         } else {
             message
         };
@@ -272,6 +276,13 @@ impl AppErrorDto {
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::Internal, message)
     }
+}
+
+/// Un texto que no es una frase sino un identificador: sin espacios y con guion bajo
+/// (`pair_code_not_found`, `insufficient_stock:12:3:1`). Una palabra suelta sin guion bajo
+/// («Prohibido») no cuenta: podría ser un mensaje de verdad.
+fn es_identificador_de_maquina(texto: &str) -> bool {
+    texto.contains('_') && !texto.chars().any(char::is_whitespace)
 }
 
 /// Puente para los helpers de la shell (`lib.rs`, `AppState`) que todavía producen
@@ -500,6 +511,31 @@ mod tests {
             "un mensaje que es literalmente el código no sirve para enseñárselo a nadie"
         );
         assert_eq!(dto.message, ErrorCode::MainOffline.default_message());
+    }
+
+    /// Una respuesta del worker sin frase propia trae sólo su identificador. Enseñarlo tal cual
+    /// era lo que hacía leer `pair_code_not_found` en la pantalla de vinculación.
+    #[test]
+    fn un_identificador_de_maquina_se_ensena_con_su_frase_y_se_conserva_para_soporte() {
+        let dto = AppErrorDto::new(ErrorCode::External, "missing_op_id");
+        assert_eq!(dto.message, "Error de un servicio externo (missing_op_id)");
+
+        // Lo que algunos llevan detrás de los dos puntos también se conserva: es diagnóstico.
+        let dto = AppErrorDto::new(ErrorCode::Conflict, " insufficient_stock:12:3:1 ");
+        assert!(dto.message.starts_with(ErrorCode::Conflict.default_message()), "{}", dto.message);
+        assert!(dto.message.contains("insufficient_stock:12:3:1"), "{}", dto.message);
+    }
+
+    #[test]
+    fn una_frase_o_una_palabra_suelta_no_se_toma_por_identificador() {
+        for texto in [
+            "Ya hay un cliente con ese correo.",
+            "id_mesa invalido",
+            "No se ha podido conectar (error_de_red)",
+            "Prohibido",
+        ] {
+            assert_eq!(AppErrorDto::new(ErrorCode::Validation, texto).message, texto);
+        }
     }
 
     #[test]

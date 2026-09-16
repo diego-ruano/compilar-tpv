@@ -169,7 +169,7 @@ impl CloudClient {
         let resp = rb
             .send()
             .await
-            .map_err(|e| AppError::external(format!("http_send_failed: {e}")))?;
+            .map_err(AppError::sin_conexion)?;
 
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();

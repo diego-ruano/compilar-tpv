@@ -55,6 +55,7 @@ import { licenseRoutes } from "./domains/licensing/licensing.routes";
 import { adminRoutes } from "./domains/admin/admin.routes";
 import { stripeRoutes } from "./domains/stripe/stripe.routes";
 import { telemetryRoutes } from "./domains/telemetry/telemetry.routes";
+import { completarErrores } from "./middleware/completarErrores";
 
 // El Durable Object vive ahora en este worker (antes en `tpv-server`). Se instrumenta con Sentry
 // para capturar las excepciones de su ciclo de vida (apply idempotente, WebSocket, broadcast).
@@ -68,6 +69,10 @@ export const TenantHub = Sentry.instrumentDurableObjectWithSentry(
 );
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Todas las respuestas de error salen con `code` y, si lo hay, `message` legible. Va el primero
+// para envolver también las que produce `onError`.
+app.use("*", completarErrores);
 
 // ---------------- CORS preflight ----------------
 app.options("*", (c) =>

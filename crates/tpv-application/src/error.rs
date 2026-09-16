@@ -66,6 +66,18 @@ impl AppError {
         AppError::Internal(msg.into())
     }
 
+    /// No se ha podido hablar con la nube: sin red, DNS, timeout, TLS.
+    ///
+    /// Lo que devuelve reqwest ("error sending request for url …") no le dice nada a quien está
+    /// delante, y lo único que puede hacer esa persona es mirar la conexión. El detalle va detrás,
+    /// entre paréntesis, para diagnosticar. Es `External` y no un código propio: nadie ramifica
+    /// por él, sólo se enseña.
+    pub fn sin_conexion(detalle: impl std::fmt::Display) -> Self {
+        AppError::External(format!(
+            "No se ha podido conectar con el servidor. Comprueba la conexión a internet. ({detalle})"
+        ))
+    }
+
     /// Error con un código concreto del catálogo.
     pub fn coded(code: ErrorCode, msg: impl Into<String>) -> Self {
         AppError::Coded(code, msg.into())

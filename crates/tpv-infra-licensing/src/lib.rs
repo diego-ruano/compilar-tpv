@@ -790,7 +790,7 @@ impl PairingService for PairingAdapter {
             .body(body_str)
             .send()
             .await
-            .map_err(|e| ext(format!("reqwest_send_failed:{e}")))?;
+            .map_err(AppError::sin_conexion)?;
 
         let status = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
@@ -845,7 +845,7 @@ impl PairingService for PairingAdapter {
             .body(bytes)
             .send()
             .await
-            .map_err(|e| ext(format!("image_upload_send_failed:{e}")))?;
+            .map_err(AppError::sin_conexion)?;
 
         let status = resp.status().as_u16();
         if (200..300).contains(&status) {
@@ -867,7 +867,7 @@ impl PairingService for PairingAdapter {
             .header("x-device-sig", signed.x_device_sig)
             .send()
             .await
-            .map_err(|e| ext(format!("image_delete_send_failed:{e}")))?;
+            .map_err(AppError::sin_conexion)?;
 
         let status = resp.status().as_u16();
         if (200..300).contains(&status) {
@@ -900,7 +900,7 @@ impl PairingService for PairingAdapter {
             .body(body_str)
             .send()
             .await
-            .map_err(|e| ext(format!("image_download_send_failed:{e}")))?;
+            .map_err(AppError::sin_conexion)?;
 
         let status = resp.status().as_u16();
         if status == 404 {
@@ -944,19 +944,6 @@ impl CloudSyncService for PairingAdapter {
     }
 }
 
-/// Un fallo de transporte (sin red, DNS, timeout) llega como `External` con el texto de reqwest;
-/// lo que contesta el worker llega como `Coded`, con su mensaje ya escrito para quien está delante.
-/// Se distinguen por la variante, no por el texto. Recuperar el PIN y cambiar el correo de
-/// recuperación necesitan internet, así que hay que decirlo con esas palabras.
-fn sin_conexion(e: AppError) -> AppError {
-    match e {
-        AppError::External(detalle) => AppError::external(format!(
-            "No se ha podido contactar con el servidor. Esto necesita conexión a internet. ({detalle})"
-        )),
-        otro => otro,
-    }
-}
-
 /// La respuesta de las rutas que mandan un código (`{ ok, emailHint, minutos, reenvioSegundos, sinCambios? }`).
 fn codigo_enviado(resp: &JsonValue) -> CodigoEnviado {
     CodigoEnviado {
@@ -995,8 +982,7 @@ impl CorreoRecuperacionService for PairingAdapter {
                 "/v1/login/correo-recuperacion/estado",
                 serde_json::json!({}),
             )
-            .await
-            .map_err(sin_conexion)?;
+            .await?;
         Ok(estado_correo(&resp))
     }
 
@@ -1007,8 +993,7 @@ impl CorreoRecuperacionService for PairingAdapter {
                 "/v1/login/correo-recuperacion/solicitar",
                 serde_json::json!({ "correo": correo }),
             )
-            .await
-            .map_err(sin_conexion)?;
+            .await?;
         Ok(codigo_enviado(&resp))
     }
 
@@ -1019,8 +1004,7 @@ impl CorreoRecuperacionService for PairingAdapter {
                 "/v1/login/correo-recuperacion/confirmar",
                 serde_json::json!({ "codigo": codigo }),
             )
-            .await
-            .map_err(sin_conexion)?;
+            .await?;
         Ok(estado_correo(&resp))
     }
 
@@ -1031,8 +1015,7 @@ impl CorreoRecuperacionService for PairingAdapter {
                 "/v1/login/correo-recuperacion/usar-el-de-la-compra",
                 serde_json::json!({}),
             )
-            .await
-            .map_err(sin_conexion)?;
+            .await?;
         Ok(estado_correo(&resp))
     }
 }
@@ -1047,8 +1030,7 @@ impl RecuperacionPinService for PairingAdapter {
                 "/v1/login/recuperar-pin/solicitar",
                 serde_json::json!({ "id_usuario": id_usuario }),
             )
-            .await
-            .map_err(sin_conexion)?;
+            .await?;
 
         Ok(codigo_enviado(&resp))
     }
@@ -1059,8 +1041,7 @@ impl RecuperacionPinService for PairingAdapter {
             "/v1/login/recuperar-pin/verificar",
             serde_json::json!({ "id_usuario": id_usuario, "codigo": codigo }),
         )
-        .await
-        .map_err(sin_conexion)?;
+        .await?;
         Ok(())
     }
 }

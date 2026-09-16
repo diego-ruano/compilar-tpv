@@ -98,7 +98,8 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 		const e = err as { code?: string; message?: string };
 		console.error("[email] Cloudflare Email Service error:", e.code ?? "", e.message ?? err);
 		await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, false, e.code ?? null);
-		return c.json({ error: "email_send_failed", code: e.code ?? null }, 500);
+		// El código del binding va en `detalle`: `code` es el del catálogo compartido.
+		return c.json({ error: "email_send_failed", detalle: e.code ?? null }, 500);
 	}
 
 	await registrarEnvio(c.env, tenantId, deviceId, email_destino, nombre_proveedor, true, null);

@@ -12,3 +12,12 @@ declare module "*?raw" {
 	const content: string;
 	export default content;
 }
+
+// Lo mismo para una carpeta entera: `import.meta.glob("../src/**/*.ts", { query: "?raw", … })`
+// también lo resuelve Vite. Sólo se declara la forma que usan los tests (textos, ya cargados).
+interface ImportMeta {
+	glob(
+		patron: string,
+		opciones: { query: "?raw"; import: "default"; eager: true },
+	): Record<string, string>;
+}
