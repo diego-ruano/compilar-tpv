@@ -423,3 +423,55 @@ body {
         width: calc(100vw - 1rem) !important;
     }
 }
+
+/* La modal de impresión necesita más espacio que la medida común de las modales:
+   contiene controles y una previsualización lado a lado. */
+.fixed.inset-0 > [class~="max-w-[1000px]"] {
+    width: min(1000px, calc(100vw - 2rem)) !important;
+    max-width: 1000px !important;
+    height: min(88vh, calc(100dvh - 2rem));
+}
+
+/* La ficha de Inventario no cambia de tamaño mientras se invalida la consulta tras borrar,
+   evitando el salto visual bajo el diálogo de confirmación. */
+.fixed.inset-0 > [class~="max-w-[820px]"] {
+    height: min(44rem, calc(100dvh - 1.5rem));
+}
+
+/* La modal fiscal conserva nombres de utilidad legacy (`primary`), pero el tema actual
+   expone el color corporativo como `accent`. */
+.fixed.inset-0 button[class~="bg-primary"] {
+    background-color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent-fg) !important;
+}
+
+.fixed.inset-0 button[class~="bg-primary"]:hover:not(:disabled) {
+    background-color: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+}
+
+@media (max-width: 900px) {
+    .fixed.inset-0 > [class~="max-w-[1000px]"] > [class~="flex-1"][class~="min-h-0"] {
+        flex-direction: column;
+        overflow-y: auto;
+    }
+
+    .fixed.inset-0 > [class~="max-w-[1000px]"] > [class~="flex-1"][class~="min-h-0"] > [class~="w-[420px]"] {
+        width: 100% !important;
+        max-height: 42%;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
+    }
+}
+
+@media (max-width: 639px) {
+    .fixed.inset-0 > [class~="max-w-[1000px]"] {
+        width: calc(100vw - 1rem) !important;
+        height: calc(100dvh - 1rem);
+    }
+
+    .fixed.inset-0 > [class~="max-w-[1000px]"] > [class~="flex-1"][class~="min-h-0"] > [class~="w-[420px]"] {
+        max-height: 45%;
+    }
+}
