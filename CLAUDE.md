@@ -702,6 +702,9 @@ no sólo en dev.
     sin que nadie tuviera el token.
   - **Un dispositivo aprobado puede volver a reclamar su propio código** y recibe un reto nuevo. Es
     lo que salva una aplicación que se cerró esperando.
+  - **El dispositivo se da de alta en `devices` al recoger el token, no al aprobar.** Aprobar sólo
+    marca el código; dado de alta ahí, una aprobación que nadie recogía dejaba un Handy fantasma en
+    la lista de vinculados. Recogerlo es además el momento en que la Main recibe el aviso.
   - **Cancelar en la Handy suelta el código en la nube** (`/v1/pair/cancel`, firmado con la acción
     `PAIR_CANCEL`). Si sólo parara la espera en pantalla, la solicitud seguiría en la lista de la
     Main y aprobarla daría de alta un dispositivo que nadie va a usar. Lo ya aprobado no se deshace

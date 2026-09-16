@@ -137,15 +137,13 @@ class Mundo {
 		return { status: res.status, body: (await res.json()) as any, cuerpo };
 	}
 
-	/** Lo que hace `pairApprove` después de autenticar a la Main. */
-	aprobar(codigo: string, d: Dispositivo, ahora: number) {
-		this.sql.exec(
-			`INSERT INTO devices (device_id, tenant_id, role, revoked_at_ms, device_pubkey_b64) VALUES (?, ?, 'handy', NULL, ?);`,
-			d.id,
-			TENANT,
-			d.pub,
-		);
+	/** Lo que hace `pairApprove` después de autenticar a la Main: marcar el código, nada más. */
+	aprobar(codigo: string, _d: Dispositivo, ahora: number) {
 		this.sql.exec(`UPDATE pair_requests SET status='approved', approved_at_ms=? WHERE pair_code=?;`, ahora, codigo);
+	}
+
+	dispositivoRegistrado(d: Dispositivo): any {
+		return this.sql.exec(`SELECT * FROM devices WHERE device_id=?;`, d.id).toArray()[0];
 	}
 
 	solicitud(codigo: string): any {
@@ -276,6 +274,50 @@ describe("el reto y la recogida del token", () => {
 			expect(token.status).toBe(200);
 			expect(token.body).toMatchObject({ ok: true, tenantId: TENANT, deviceId: a.id });
 			expect(m.solicitud(CODIGO).status).toBe("used");
+		});
+	});
+
+	it("el dispositivo se da de alta al recoger el token, no al aprobar", async () => {
+		// Dado de alta al aprobar, una aprobación que nadie recogía dejaba un Handy fantasma en la
+		// lista de vinculados de la Main.
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("alta-al-recoger", async (m) => {
+			const { body } = await m.reclamar(a, CODIGO, T0);
+			m.aprobar(CODIGO, a, T0 + MIN);
+			expect(m.dispositivoRegistrado(a)).toBeUndefined();
+
+			expect((await m.recoger(a, CODIGO, body.nonceB64, T0 + MIN)).status).toBe(200);
+			expect(m.dispositivoRegistrado(a)).toMatchObject({
+				tenant_id: TENANT,
+				role: "handy",
+				revoked_at_ms: null,
+				device_pubkey_b64: a.pub,
+			});
+		});
+	});
+
+	it("un Handy revocado que se vuelve a vincular queda activo y con la clave nueva", async () => {
+		const antes = await dispositivo("handy-a", 1);
+		const ahora = await dispositivo("handy-a", 4);
+		await conPlanoDeControl("revocado-vuelve", async (m) => {
+			m.sql.exec(`INSERT INTO devices (device_id, tenant_id, role, revoked_at_ms, device_pubkey_b64)
+				VALUES (?, ?, 'handy', ?, ?);`, antes.id, TENANT, T0 - MIN, antes.pub);
+
+			const { body } = await m.reclamar(ahora, CODIGO, T0);
+			m.aprobar(CODIGO, ahora, T0);
+			expect((await m.recoger(ahora, CODIGO, body.nonceB64, T0)).status).toBe(200);
+			expect(m.dispositivoRegistrado(ahora)).toMatchObject({ revoked_at_ms: null, device_pubkey_b64: ahora.pub });
+		});
+	});
+
+	it("una aprobación que nadie recoge no deja ningún dispositivo", async () => {
+		const a = await dispositivo("handy-a", 1);
+		await conPlanoDeControl("sin-recoger", async (m) => {
+			await m.reclamar(a, CODIGO, T0);
+			m.aprobar(CODIGO, a, T0 + MIN);
+			// El código caduca sin que la Handy vuelva.
+			expect((await m.reclamar(a, CODIGO, T0 + 11 * MIN)).body.error).toBe("pair_code_expired");
+			expect(m.sql.exec(`SELECT COUNT(*) AS n FROM devices;`).toArray()[0].n).toBe(0);
 		});
 	});
 

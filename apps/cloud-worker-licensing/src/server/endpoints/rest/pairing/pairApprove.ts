@@ -117,30 +117,9 @@ export async function handlePairApprove(
 			return json({ ok: false, error: "no_claim_to_approve" }, 409, req);
 		}
 
-		await dbCentral.execute({
-			sql: `
-				INSERT INTO devices (
-					device_id,
-					tenant_id,
-					role,
-					first_seen_at_ms,
-					last_seen_at_ms,
-					revoked_at_ms,
-					device_pubkey_b64,
-					pubkey_alg
-				)
-				VALUES (?, ?, 'handy', ?, ?, NULL, ?, 'ed25519')
-				ON CONFLICT(device_id) DO UPDATE SET
-					tenant_id=excluded.tenant_id,
-					role='handy',
-					last_seen_at_ms=excluded.last_seen_at_ms,
-					revoked_at_ms=NULL,
-					device_pubkey_b64=excluded.device_pubkey_b64,
-					pubkey_alg='ed25519';
-			`,
-			args: [handyDeviceId, tenantId, now, now, handyPub],
-		});
-
+		// Aprobar sólo marca el código. El dispositivo se da de alta cuando la Handy recoge su token
+		// (`pairFetchToken.ts`): dado de alta aquí, una aprobación que nadie recogía dejaba en
+		// `devices` un Handy que no existía.
 		const updateRes = await dbCentral.execute({
 			sql: `
 				UPDATE pair_requests

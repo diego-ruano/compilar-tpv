@@ -1,13 +1,9 @@
 import type { Client } from "@libsql/client/web";
 
-import {
-	cargarDevice,
-	estaRevocado,
-	normalizarRol,
-} from "../../../../lib/deviceAuth";
 import { bytesToB64 } from "../../../utils/base64";
 import { json, serverError } from "../../../utils/response";
-import { comprobarFirmaDelReclamante, relojFueraDeMargen, sanitizeB64 } from "./pairing.firma";
+import { avisarSolicitudALaMain } from "./pairClaim";
+import { comprobarFirmaDelReclamante, relojFueraDeMargen } from "./pairing.firma";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	try {
@@ -48,20 +44,6 @@ async function getTenantLicHash(
 	const v = row ? String(row.license_key_hash || "").trim() : "";
 
 	return v || null;
-}
-
-async function getActiveHandyDevicePubkey(
-	dbCentral: Client,
-	tenantId: string,
-	deviceId: string,
-): Promise<string | null> {
-	const fila = await cargarDevice(dbCentral, tenantId, deviceId);
-	if (!fila) return null;
-	if (normalizarRol(fila.role) !== "handy") return null;
-	if (estaRevocado(fila)) return null;
-
-	const pub = String(fila.device_pubkey_b64 || "").trim();
-	return pub || null;
 }
 
 function toExactArrayBuffer(u8: Uint8Array): ArrayBuffer {
@@ -213,24 +195,6 @@ export async function handlePairFetchToken(
 			return serverError(req, "missing_pubkey");
 		}
 
-		const activeDevicePubkey = await getActiveHandyDevicePubkey(
-			dbCentral,
-			tenantId,
-			deviceId,
-		);
-
-		if (!activeDevicePubkey) {
-			return json(
-				{ ok: false, error: "device_not_registered_or_revoked" },
-				401,
-				req,
-			);
-		}
-
-		if (sanitizeB64(activeDevicePubkey) !== sanitizeB64(pubB64Raw)) {
-			return json({ ok: false, error: "device_pubkey_mismatch" }, 401, req);
-		}
-
 		const problema = await comprobarFirmaDelReclamante(dbCentral, {
 			accion: "PAIR_FETCH",
 			pairCode,
@@ -309,6 +273,36 @@ export async function handlePairFetchToken(
 				req,
 			);
 		}
+
+		// Ahora, y no al aprobar, es cuando el dispositivo existe de verdad: el código está gastado,
+		// la firma es la de la clave que la Main aprobó y el token sale en esta respuesta. Si ya
+		// estaba (una Handy que se vuelve a vincular), se reactiva con la clave nueva.
+		await dbCentral.execute({
+			sql: `
+				INSERT INTO devices (
+					device_id,
+					tenant_id,
+					role,
+					first_seen_at_ms,
+					last_seen_at_ms,
+					revoked_at_ms,
+					device_pubkey_b64,
+					pubkey_alg
+				)
+				VALUES (?, ?, 'handy', ?, ?, NULL, ?, 'ed25519')
+				ON CONFLICT(device_id) DO UPDATE SET
+					tenant_id=excluded.tenant_id,
+					role='handy',
+					last_seen_at_ms=excluded.last_seen_at_ms,
+					revoked_at_ms=NULL,
+					device_pubkey_b64=excluded.device_pubkey_b64,
+					pubkey_alg='ed25519';
+			`,
+			args: [deviceId, tenantId, now, now, pubB64Raw],
+		});
+
+		// La lista de vinculados de la Main cambia en este momento, no al aprobar.
+		await avisarSolicitudALaMain(env, tenantId);
 
 		return json(
 			{

@@ -179,8 +179,6 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	token_expired: "La autorización de este dispositivo ha caducado. Cierra y vuelve a abrir la aplicación.",
 	device_not_registered: "Este dispositivo no está dado de alta. Vuelve a vincularlo.",
 	device_pubkey_not_registered: "Este dispositivo no está dado de alta. Vuelve a vincularlo.",
-	device_not_registered_or_revoked:
-		"Este dispositivo no está dado de alta o se ha revocado. Vuelve a vincularlo desde el TPV principal.",
 	device_pubkey_mismatch:
 		"La identidad de este dispositivo no coincide con la registrada. Vuelve a vincularlo.",
 	missing_device_proof: "La firma de este dispositivo no es válida. Vuelve a vincularlo.",
