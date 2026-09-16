@@ -97,6 +97,35 @@ pub enum ErrorCode {
 }
 
 impl ErrorCode {
+    /// Todos los códigos del catálogo, en el orden en que se declaran.
+    ///
+    /// Es la ÚNICA lista de variantes escrita a mano, y la vigila un test que la compara con la
+    /// declaración del enum (`todos_coincide_con_la_declaracion_del_enum`). Antes había cuatro
+    /// copias —la búsqueda de `from_code` y tres tests— y a las cuatro les faltaban los dos
+    /// códigos fiscales, así que un `factura_completa_requerida` del worker llegaba como
+    /// `external` y los tests que debían cazarlo recorrían la misma lista incompleta.
+    pub const TODOS: [ErrorCode; 19] = [
+        ErrorCode::Validation,
+        ErrorCode::NotFound,
+        ErrorCode::Conflict,
+        ErrorCode::Repository,
+        ErrorCode::External,
+        ErrorCode::Internal,
+        ErrorCode::NotApproved,
+        ErrorCode::MainOffline,
+        ErrorCode::DeviceRevoked,
+        ErrorCode::LicenseExpired,
+        ErrorCode::LicenseNotFound,
+        ErrorCode::InvalidPin,
+        ErrorCode::TenantDbNotProvisioned,
+        ErrorCode::BootstrapTooLarge,
+        ErrorCode::TenantMigrationAltered,
+        ErrorCode::BackupCorrupt,
+        ErrorCode::PermisoDenegado,
+        ErrorCode::DatosFiscalesIncompletos,
+        ErrorCode::FacturaCompletaRequerida,
+    ];
+
     /// Mensaje por defecto, para cuando no hay detalle que añadir.
     pub fn default_message(self) -> &'static str {
         match self {
@@ -166,27 +195,7 @@ impl ErrorCode {
     /// (`"no_active_license_for_tenant"`), ésta lee el código ya resuelto (`"license_not_found"`).
     pub fn from_code(s: &str) -> Option<Self> {
         let s = s.trim().to_ascii_lowercase();
-        [
-            ErrorCode::Validation,
-            ErrorCode::NotFound,
-            ErrorCode::Conflict,
-            ErrorCode::Repository,
-            ErrorCode::External,
-            ErrorCode::Internal,
-            ErrorCode::NotApproved,
-            ErrorCode::MainOffline,
-            ErrorCode::DeviceRevoked,
-            ErrorCode::LicenseExpired,
-            ErrorCode::LicenseNotFound,
-            ErrorCode::InvalidPin,
-            ErrorCode::TenantDbNotProvisioned,
-            ErrorCode::BootstrapTooLarge,
-            ErrorCode::TenantMigrationAltered,
-            ErrorCode::BackupCorrupt,
-            ErrorCode::PermisoDenegado,
-        ]
-        .into_iter()
-        .find(|c| c.wire() == s)
+        ErrorCode::TODOS.into_iter().find(|c| c.wire() == s)
     }
 
     /// Resuelve el código a partir del string que devuelve el worker en `{ "error": … }`.
@@ -220,6 +229,8 @@ impl ErrorCode {
             "migration_altered" | "tenant_migration_altered" => ErrorCode::TenantMigrationAltered,
             "backup_corrupt" => ErrorCode::BackupCorrupt,
             "permiso_denegado" => ErrorCode::PermisoDenegado,
+            "datos_fiscales_incompletos" => ErrorCode::DatosFiscalesIncompletos,
+            "factura_completa_requerida" => ErrorCode::FacturaCompletaRequerida,
             _ => ErrorCode::External,
         }
     }
@@ -415,28 +426,9 @@ mod tests {
             ErrorCode::External,
             ErrorCode::Internal,
         ];
-        let todos = [
-            ErrorCode::Validation,
-            ErrorCode::NotFound,
-            ErrorCode::Conflict,
-            ErrorCode::Repository,
-            ErrorCode::External,
-            ErrorCode::Internal,
-            ErrorCode::NotApproved,
-            ErrorCode::MainOffline,
-            ErrorCode::DeviceRevoked,
-            ErrorCode::LicenseExpired,
-            ErrorCode::LicenseNotFound,
-            ErrorCode::InvalidPin,
-            ErrorCode::TenantDbNotProvisioned,
-            ErrorCode::BootstrapTooLarge,
-            ErrorCode::TenantMigrationAltered,
-            ErrorCode::BackupCorrupt,
-            ErrorCode::PermisoDenegado,
-        ];
 
         let f = fixture();
-        for code in todos {
+        for code in ErrorCode::TODOS {
             if genericos.contains(&code) {
                 continue;
             }
@@ -448,29 +440,43 @@ mod tests {
         }
     }
 
+    /// `TODOS` es una lista escrita a mano, así que se compara con lo único que no puede
+    /// quedarse corto: la declaración del propio enum, leída de este mismo fichero.
+    #[test]
+    fn todos_coincide_con_la_declaracion_del_enum() {
+        let fuente = include_str!("errors.rs");
+        let inicio = fuente.find("pub enum ErrorCode {").expect("declaración del enum");
+        let cuerpo = &fuente[inicio..];
+        let cuerpo = &cuerpo[..cuerpo.find("
+}").expect("cierre del enum")];
+
+        let declaradas: Vec<String> = cuerpo
+            .lines()
+            .skip(1)
+            .map(str::trim)
+            .filter(|l| !l.starts_with("//") && l.ends_with(','))
+            .map(|l| l.trim_end_matches(',').to_string())
+            .collect();
+        let en_todos: Vec<String> = ErrorCode::TODOS.iter().map(|c| format!("{c:?}")).collect();
+
+        assert!(declaradas.len() > 10, "no se ha podido leer el enum: {declaradas:?}");
+        assert_eq!(en_todos, declaradas, "ErrorCode::TODOS no recoge todas las variantes, en orden");
+    }
+
+    /// Lo que el worker manda en `code` es el valor serializado; `from_code` tiene que
+    /// reconocerlo para TODOS los códigos, o uno nuevo del worker se degrada a genérico.
+    #[test]
+    fn from_code_reconoce_cada_codigo_del_catalogo() {
+        for code in ErrorCode::TODOS {
+            assert_eq!(ErrorCode::from_code(&wire_de(code)), Some(code), "{code:?}");
+            assert_eq!(code.wire(), wire_de(code), "{code:?}: wire() y serde se separan");
+        }
+    }
+
     #[test]
     fn ningun_codigo_se_queda_sin_mensaje_legible() {
-        let todos = [
-            ErrorCode::Validation,
-            ErrorCode::NotFound,
-            ErrorCode::Conflict,
-            ErrorCode::Repository,
-            ErrorCode::External,
-            ErrorCode::Internal,
-            ErrorCode::NotApproved,
-            ErrorCode::MainOffline,
-            ErrorCode::DeviceRevoked,
-            ErrorCode::LicenseExpired,
-            ErrorCode::LicenseNotFound,
-            ErrorCode::InvalidPin,
-            ErrorCode::TenantDbNotProvisioned,
-            ErrorCode::BootstrapTooLarge,
-            ErrorCode::TenantMigrationAltered,
-            ErrorCode::BackupCorrupt,
-            ErrorCode::PermisoDenegado,
-        ];
 
-        for code in todos {
+        for code in ErrorCode::TODOS {
             let msg = code.default_message();
             assert!(!msg.trim().is_empty(), "{code:?} sin mensaje");
             // Un mensaje por defecto es para enseñárselo a alguien: no puede ser el propio
