@@ -120,19 +120,15 @@ CREATE TABLE pair_claim_fallos (
   bloqueado_hasta_ms INTEGER NOT NULL DEFAULT 0
 );
 
--- SIN USO: la usaba el throttle antiguo del claim, sustituido por la espera por tramos.
-CREATE TABLE pair_claim_throttle (
-  ip TEXT PRIMARY KEY,
-  window_start_ms INTEGER NOT NULL,
-  count INTEGER NOT NULL
-);
-
 CREATE TABLE Ws_Tickets (
   ticket TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
   expires_at_ms INTEGER NOT NULL
 );
+
+-- Cada petición de ticket borra los caducados: sin esto recorría la tabla entera.
+CREATE INDEX idx_ws_tickets_expires ON Ws_Tickets (expires_at_ms);
 
 
 -- ── Licencias ────────────────────────────────────────────────────────────────────────────────
@@ -203,14 +199,6 @@ CREATE TABLE license_payments (
 CREATE INDEX ix_license_payments_intent
   ON license_payments (stripe_payment_intent_id);
 CREATE INDEX ix_license_payments_license ON license_payments (license_id);
-
--- SIN USO: ninguna parte del código la lee ni la escribe.
-CREATE TABLE license_meta (
-  license_id TEXT PRIMARY KEY,
-  meta_json  TEXT,
-  updated_at_ms INTEGER NOT NULL DEFAULT (unixepoch()*1000),
-  FOREIGN KEY (license_id) REFERENCES licenses(license_id) ON DELETE CASCADE
-);
 
 CREATE TABLE admin_audit (
   audit_id   TEXT PRIMARY KEY,
