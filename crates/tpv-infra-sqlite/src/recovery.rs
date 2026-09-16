@@ -28,6 +28,14 @@ const MIGRACIONES_A_CONSERVAR: usize = 2;
 /// Base que no se pudo ni abrir y se apartó para poder reconstruir en su sitio. No se lista como
 /// copia restaurable: si SQLite no la abre, ofrecerla sería ofrecer el problema.
 const ILEGIBLE_PREFIX: &str = "ilegible-";
+/// La base que había antes de reconstruir tras un traslado de licencia. No se lista como copia
+/// restaurable —es justo lo que no vale—, pero se guarda: puede tener operaciones que nunca
+/// llegaron a la nube.
+const ANTES_DE_TRASLADO_PREFIX: &str = "antes-de-traslado-";
+/// Marca en AppData de que la licencia se ha trasladado a este equipo y su base todavía no se ha
+/// reconstruido desde la nube. Vive FUERA de `data.db` a propósito: restaurar una copia local
+/// no puede borrarla, porque esa copia también es de antes del traslado.
+const MARCA_TRASLADO: &str = "traslado-pendiente";
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
     AppError::repository(e.to_string())
@@ -63,6 +71,14 @@ async fn scalar_i64(conn: &Connection, sql: &str) -> AppResult<i64> {
 }
 
 pub async fn status(db: &Db) -> AppResult<RecoveryStatus> {
+    // Un traslado manda sobre todo lo demás: da igual que la base tenga usuarios o esté a medio
+    // reconciliar, lo que tiene es de antes y no se trabaja con ello.
+    if hay_traslado_pendiente(db.carpeta()) {
+        return Ok(RecoveryStatus {
+            state: RecoveryState::TransferPending,
+        });
+    }
+
     let r = db.read().await;
     let conn = r.conn();
     let pending = scalar_i64(
@@ -81,6 +97,48 @@ pub async fn status(db: &Db) -> AppResult<RecoveryStatus> {
         RecoveryState::Ready
     };
     Ok(RecoveryStatus { state })
+}
+
+/// Deja constancia de que la licencia se ha trasladado a este equipo desde otro.
+///
+/// A partir de aquí la Main no trabaja con su base: `status` dice `TransferPending`, la aplicación
+/// entra en la pantalla de recuperación (sólo con la nube), el outbox no sube (lo que tiene es de
+/// antes y pisaría lo que hizo el otro equipo) y la reconstrucción desde la nube quita la marca.
+/// Es el mismo camino que sigue un equipo nuevo tras un traslado; la diferencia es que éste tiene
+/// datos, y sin la marca los habría seguido usando.
+pub fn marcar_traslado(app_data_dir: &Path) -> AppResult<()> {
+    std::fs::create_dir_all(app_data_dir).map_err(db_err)?;
+    std::fs::write(app_data_dir.join(MARCA_TRASLADO), now_ms().to_string()).map_err(db_err)
+}
+
+pub fn hay_traslado_pendiente(app_data_dir: &Path) -> bool {
+    app_data_dir.join(MARCA_TRASLADO).exists()
+}
+
+/// La quita la reconstrucción desde la nube, al terminar.
+pub(crate) fn quitar_marca_traslado(app_data_dir: &Path) -> AppResult<()> {
+    match std::fs::remove_file(app_data_dir.join(MARCA_TRASLADO)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(db_err(e)),
+        _ => Ok(()),
+    }
+}
+
+/// Guarda la base de antes del traslado en `backups/antes-de-traslado-*`, antes de reemplazarla.
+pub(crate) async fn guardar_base_de_antes_del_traslado(db: &Db) -> AppResult<PathBuf> {
+    let dir = db.carpeta().join(BACKUP_DIR);
+    std::fs::create_dir_all(&dir).map_err(db_err)?;
+    let destino = dir.join(format!("{ANTES_DE_TRASLADO_PREFIX}{}{BACKUP_SUFFIX}", now_ms()));
+    let destino_str = destino
+        .to_str()
+        .ok_or_else(|| AppError::internal("Ruta de copia inválida"))?
+        .to_string();
+    // Por el pool de lectura, como las copias diarias: `VACUUM INTO` hace su propia instantánea.
+    let r = db.read().await;
+    r.conn()
+        .execute("VACUUM INTO ?1;", vec![Value::Text(destino_str)])
+        .await
+        .map_err(db_err)?;
+    Ok(destino)
 }
 
 /// Mantiene bloqueado el login hasta que el ciclo online confirme la convergencia.
@@ -451,7 +509,7 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
 
     let dir = app_data_dir.join(BACKUP_DIR);
     if dir.exists() {
-        for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX] {
+        for familia in ["pre-restore-", "failed-restore-", ILEGIBLE_PREFIX, ANTES_DE_TRASLADO_PREFIX] {
             // El nombre lleva el instante justo detrás del prefijo; los sidecars (`-wal`/`-shm`)
             // comparten instante con su `.db` y se van con él, no por separado.
             let mut sellos: Vec<i64> = Vec::new();
@@ -547,6 +605,13 @@ pub fn purge_restore_leftovers(app_data_dir: &Path) -> AppResult<()> {
 /// Copia y valida el respaldo en un fichero temporal independiente. Además lo marca pendiente de
 /// reconciliación ANTES del intercambio, para que ni un crash entre pasos pueda abrir el login.
 pub async fn prepare_restore(app_data_dir: &Path, id: &str) -> AppResult<PathBuf> {
+    // Tras un traslado, cualquier copia de este equipo es de antes: restaurarla sería volver a
+    // trabajar con lo que el traslado deja atrás. La pantalla ya no la ofrece; esto es la red.
+    if hay_traslado_pendiente(app_data_dir) {
+        return Err(AppError::conflict(
+            "La licencia viene de otro equipo: los datos tienen que traerse de la nube. Una copia de este ordenador es de antes del traslado.",
+        ));
+    }
     let source = resolve_backup(app_data_dir, id)?;
     validate_backup(&source).await?;
 
@@ -669,6 +734,64 @@ mod tests {
     async fn db_operativa(dir: &Path) -> std::sync::Arc<Db> {
         std::fs::create_dir_all(dir).unwrap();
         crate::connection::init_main_db(dir, false).await.unwrap()
+    }
+
+    /// Tras un traslado de licencia la base es de antes, esté como esté: tenga usuarios o esté a
+    /// medio reconciliar, no se trabaja con ella hasta reconstruirla desde la nube.
+    #[tokio::test]
+    async fn un_traslado_manda_sobre_el_estado_de_la_base() {
+        let dir = test_dir("traslado_estado");
+        let db = db_operativa(&dir).await;
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::Ready);
+
+        marcar_traslado(&dir).unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::TransferPending);
+
+        mark_reconciliation_pending(&db).await.unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::TransferPending);
+
+        quitar_marca_traslado(&dir).unwrap();
+        assert_eq!(status(&db).await.unwrap().state, RecoveryState::ReconciliationPending);
+        // Quitar una marca que ya no está no es un error: la reconstrucción puede repetirse.
+        quitar_marca_traslado(&dir).unwrap();
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Un equipo que se abre con el traslado pendiente arranca con las escrituras de negocio
+    /// cerradas: nada de lo que se escribiera podría subir, y bloquearía la reconstrucción.
+    #[tokio::test]
+    async fn abrir_una_base_con_traslado_pendiente_cierra_las_escrituras() {
+        let dir = test_dir("traslado_abrir");
+        drop(db_operativa(&dir).await);
+
+        marcar_traslado(&dir).unwrap();
+        let db = crate::connection::init_main_db(&dir, true).await.unwrap();
+        assert!(db.escrituras_de_negocio_bloqueadas());
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Una copia de este ordenador también es de antes del traslado: restaurarla sería volver a
+    /// trabajar con lo que el traslado deja atrás. La pantalla no la ofrece y esto lo impide.
+    #[tokio::test]
+    async fn tras_un_traslado_no_se_restaura_una_copia_local() {
+        let dir = test_dir("traslado_copia");
+        let db = db_operativa(&dir).await;
+        let backup = create_backup(&db, &dir).await.unwrap().unwrap();
+
+        marcar_traslado(&dir).unwrap();
+        let err = prepare_restore(&dir, &backup.id).await.unwrap_err();
+        assert_eq!(err.code(), ErrorCode::Conflict);
+
+        quitar_marca_traslado(&dir).unwrap();
+        let preparada = prepare_restore(&dir, &backup.id).await.unwrap();
+        discard_prepared(&preparada);
+
+        drop(db);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[tokio::test]

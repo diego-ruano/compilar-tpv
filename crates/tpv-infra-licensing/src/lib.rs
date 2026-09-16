@@ -203,6 +203,10 @@ struct ActivateOk {
     /// anterior a este cambio no la manda; en ese caso el cifrado queda inactivo y las
     /// columnas se leen/escriben en claro, como antes.
     field_dek: Option<String>,
+    /// Si la activación ha trasladado la licencia desde otro equipo. `default` para un worker
+    /// anterior que no lo manda: sin él no se sabe, y se sigue como hasta ahora.
+    #[serde(default)]
+    cambio_de_equipo: bool,
 }
 
 /// Datos del negocio que acompañan a la activación (el worker los espera en camelCase).
@@ -571,6 +575,7 @@ impl LicensingService for LicensingAdapter {
             // `/status` firmado. Aquí queda pendiente (None) hasta esa comprobación.
             expires_at_ms: None,
             plan: None,
+            cambio_de_equipo: ok.cambio_de_equipo,
         }))
     }
 
@@ -1051,6 +1056,26 @@ impl RecuperacionPinService for PairingAdapter {
         )
         .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_respuesta_de_activar {
+    use super::*;
+
+    const RESPUESTA: &str = r#"{"ok":true,"tenantId":"t1","token":"jwt","status":"active","expiresAt":null,"deviceId":"d1","fieldDek":"x""#;
+
+    #[test]
+    fn lee_si_la_activacion_ha_sido_un_traslado() {
+        let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA},\"cambioDeEquipo\":true}}")).unwrap();
+        assert!(ok.cambio_de_equipo);
+    }
+
+    /// Un worker anterior no lo manda: sin él no se sabe, y no se toca la base del equipo.
+    #[test]
+    fn sin_el_campo_no_es_un_traslado() {
+        let ok: ActivateOk = serde_json::from_str(&format!("{RESPUESTA}}}")).unwrap();
+        assert!(!ok.cambio_de_equipo);
     }
 }
 

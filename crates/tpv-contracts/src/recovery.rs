@@ -14,6 +14,10 @@ pub enum RecoveryState {
     Ready,
     DataMissing,
     ReconciliationPending,
+    /// La licencia se trasladó a este equipo desde otro. Lo que tenga la base local es de antes
+    /// del traslado, así que no se puede trabajar con ella: se reconstruye desde la nube, igual que
+    /// un equipo nuevo. Sólo con la nube — una copia local también sería de antes.
+    TransferPending,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

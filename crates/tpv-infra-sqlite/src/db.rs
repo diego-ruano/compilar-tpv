@@ -694,6 +694,9 @@ pub struct Db {
     /// Escrituras de negocio bloqueadas: la base no está en condiciones de generar operaciones
     /// nuevas (le faltan los datos, o está restaurada y aún sin reconciliar).
     escrituras_bloqueadas: AtomicBool,
+    /// La carpeta del fichero (AppData en la Main). Ahí viven las señales que tienen que
+    /// sobrevivir a la propia base, como la marca de traslado (`recovery::marcar_traslado`).
+    carpeta: std::path::PathBuf,
     /// Mantiene viva la `Database` mientras existan conexiones derivadas.
     _database: Database,
 }
@@ -737,8 +740,17 @@ impl Db {
             // Por defecto abierta: lo decide quien conoce el estado de recuperación
             // (`connection::init_main_db`), no el constructor genérico.
             escrituras_bloqueadas: AtomicBool::new(false),
+            carpeta: std::path::Path::new(path)
+                .parent()
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_default(),
             _database: database,
         }))
+    }
+
+    /// La carpeta donde está el fichero de la base.
+    pub fn carpeta(&self) -> &std::path::Path {
+        &self.carpeta
     }
 
     /// Inyecta (una vez) el callback que se dispara cuando una escritura local confirma una

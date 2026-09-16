@@ -61,6 +61,11 @@ export type ActivateResponse = {
 	 * Viaja sólo aquí, por TLS y en una respuesta que ya exige clave de activación válida.
 	 */
 	fieldDek: string;
+	/**
+	 * La licencia estaba en otro equipo y se ha trasladado a éste (con el código del correo). La
+	 * base local de este equipo, si tiene algo, no vale: la Main la reconstruye desde la nube.
+	 */
+	cambioDeEquipo: boolean;
 };
 
 /**

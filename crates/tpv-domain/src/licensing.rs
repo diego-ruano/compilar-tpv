@@ -69,6 +69,9 @@ pub struct Concesion {
     pub expires_at: Option<String>,
     pub expires_at_ms: Option<i64>,
     pub plan: Option<String>,
+    /// La licencia estaba en otro equipo y se ha trasladado a éste. Lo que haya en la base local
+    /// es de antes del traslado y no se reutiliza: se reconstruye desde la nube.
+    pub cambio_de_equipo: bool,
 }
 
 /// Resultado de intentar activar. El servidor puede exigir un código de cambio de dispositivo

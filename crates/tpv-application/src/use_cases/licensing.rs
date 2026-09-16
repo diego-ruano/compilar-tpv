@@ -63,12 +63,14 @@ pub async fn activate(
 
     match svc.activar_remoto(&solicitud, code.as_deref()).await? {
         ResultadoActivacion::Activada(concedido) => {
+            let cambio_de_equipo = concedido.cambio_de_equipo;
             let estado = estado_inicial(concedido);
             svc.save_state(&estado)?;
             Ok(LicenseActivateOutcome {
                 outcome: "activated".to_string(),
                 state: Some(estado),
                 email_hint: None,
+                cambio_de_equipo,
             })
         }
         ResultadoActivacion::CambioDispositivoRequerido { email_hint } => {
@@ -76,6 +78,7 @@ pub async fn activate(
                 outcome: "device_change_required".to_string(),
                 state: None,
                 email_hint: Some(email_hint),
+                cambio_de_equipo: false,
             })
         }
     }
@@ -461,6 +464,7 @@ mod tests {
             tenant_id: "tenant-1".into(), device_id: "device-1".into(),
             status: "active".into(), expires_at: Some("2027-01-01".into()),
             expires_at_ms: Some(1_798_761_600_000), plan: Some("pro".into()),
+            cambio_de_equipo: false,
         });
         assert_eq!(estado.tenant_id, "tenant-1");
         assert_eq!(estado.device_id, "device-1");
@@ -469,6 +473,99 @@ mod tests {
         assert!(estado.last_check_ok_ms.is_none());
         assert!(estado.last_check_attempt_ms.is_none());
         assert!(estado.activated_at_ms > 0);
+    }
+
+    /// Un servicio de licencias que contesta a la activación con lo que se le diga.
+    struct ServicioQueActiva {
+        respuesta: Mutex<Option<ResultadoActivacion>>,
+        guardado: Mutex<Option<LicenseLocalState>>,
+    }
+
+    #[async_trait]
+    impl LicensingService for ServicioQueActiva {
+        fn load_state(&self) -> AppResult<Option<LicenseLocalState>> {
+            Ok(None)
+        }
+        fn save_state(&self, state: &LicenseLocalState) -> AppResult<()> {
+            *self.guardado.lock().unwrap() = Some(state.clone());
+            Ok(())
+        }
+        fn delete_state(&self, _: Option<&str>) -> AppResult<()> {
+            Ok(())
+        }
+        fn last_rejection(&self) -> AppResult<Option<String>> {
+            Ok(None)
+        }
+        async fn activar_remoto(
+            &self,
+            _: &SolicitudActivacion,
+            _: Option<&str>,
+        ) -> AppResult<ResultadoActivacion> {
+            Ok(self.respuesta.lock().unwrap().take().expect("una sola activación por test"))
+        }
+        async fn solicitar_cambio_dispositivo(&self, _: &str) -> AppResult<()> {
+            Ok(())
+        }
+        async fn consultar_estado(
+            &self,
+            _: &LicenseLocalState,
+        ) -> Result<EstadoVerificado, dom::FalloConsulta> {
+            unreachable!("la activación no consulta el estado")
+        }
+    }
+
+    fn activacion(respuesta: ResultadoActivacion) -> (ServicioQueActiva, LicenseActivateInput) {
+        let svc = ServicioQueActiva {
+            respuesta: Mutex::new(Some(respuesta)),
+            guardado: Mutex::new(None),
+        };
+        let input = LicenseActivateInput {
+            activation_key: "TPV-AAAA-BBBB-CCCC".into(),
+            business_name: "Bar de Pruebas".into(),
+            legal_name: None,
+            phone: None,
+            country: None,
+            device_change_code: Some("123456".into()),
+        };
+        (svc, input)
+    }
+
+    fn concesion(cambio_de_equipo: bool) -> Concesion {
+        Concesion {
+            tenant_id: "tenant-1".into(),
+            device_id: "device-1".into(),
+            status: "active".into(),
+            expires_at: None,
+            expires_at_ms: None,
+            plan: None,
+            cambio_de_equipo,
+        }
+    }
+
+    /// Lo que decide si la base de este equipo se reconstruye desde la nube es lo que diga el
+    /// servidor, no que se haya escrito un código: con el código puesto, una activación en el
+    /// mismo equipo no es un traslado y no puede llevarse por delante sus datos.
+    #[tokio::test]
+    async fn la_activacion_dice_si_ha_sido_un_traslado_segun_el_servidor() {
+        let (svc, input) = activacion(ResultadoActivacion::Activada(concesion(true)));
+        let outcome = activate(&svc, input).await.unwrap();
+        assert_eq!(outcome.outcome, "activated");
+        assert!(outcome.cambio_de_equipo);
+        assert!(svc.guardado.lock().unwrap().is_some(), "la licencia queda guardada igual");
+
+        let (svc, input) = activacion(ResultadoActivacion::Activada(concesion(false)));
+        assert!(!activate(&svc, input).await.unwrap().cambio_de_equipo);
+    }
+
+    #[tokio::test]
+    async fn pedir_el_codigo_no_es_todavia_un_traslado() {
+        let (svc, input) = activacion(ResultadoActivacion::CambioDispositivoRequerido {
+            email_hint: "b***@bar.test".into(),
+        });
+        let outcome = activate(&svc, input).await.unwrap();
+        assert_eq!(outcome.outcome, "device_change_required");
+        assert!(!outcome.cambio_de_equipo);
+        assert!(svc.guardado.lock().unwrap().is_none());
     }
 
     #[test]

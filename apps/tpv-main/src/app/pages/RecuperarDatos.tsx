@@ -58,6 +58,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
     const [resultado, setResultado] = useState<BootstrapResultado | null>(null);
 
     const reconciliacionPendiente = useEstadoSync((s) => s.reconciliacionPendiente);
+    // La licencia viene de otro equipo: lo de este ordenador es de antes, copias incluidas, así que
+    // sólo se ofrece la nube (el backend también rechaza restaurar una copia local en este estado).
+    const trasladoPendiente = useEstadoSync((s) => s.trasladoPendiente);
     const fase = useEstadoSync((s) => s.faseRecuperacion);
     const errorReconciliacion = useEstadoSync((s) => s.errorRecuperacion);
     const iniciarReconciliacion = useEstadoSync((s) => s.iniciarReconciliacion);
@@ -152,16 +155,17 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                             Recuperar los datos de este TPV
                         </h1>
                         <p className="mt-3 text-sm leading-relaxed text-fg-muted sm:text-base">
-                            Puedes usar una copia diaria de este ordenador o descargar el estado
-                            actual de la nube. Después se comprobarán ambos lados antes de permitir
-                            trabajar de nuevo.
+                            {trasladoPendiente
+                                ? "La licencia se ha pasado a este ordenador desde otro equipo. Los datos que tenga este ordenador son de antes, así que hay que traer los actuales de la nube. Lo que hubiera aquí se guarda aparte, sin borrarlo."
+                                : "Puedes usar una copia diaria de este ordenador o descargar el estado actual de la nube. Después se comprobarán ambos lados antes de permitir trabajar de nuevo."}
                         </p>
                         {/* Se dice ANTES de elegir, no al fallar: con una copia local la gente da
                             por hecho que no hace falta red, y la comprobación contra la nube (que
                             es lo que desbloquea el login) sí la necesita. */}
                         <p className="mt-4 rounded-xl border border-border bg-surface px-4 py-3 text-sm text-fg">
-                            Hace falta conexión a internet para completar la recuperación, también
-                            si eliges una copia de este ordenador.
+                            {trasladoPendiente
+                                ? "Hace falta conexión a internet para traer los datos."
+                                : "Hace falta conexión a internet para completar la recuperación, también si eliges una copia de este ordenador."}
                         </p>
                     </section>
 
@@ -245,6 +249,7 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                     </div>
                                 )}
 
+                                {!trasladoPendiente && (
                                 <div>
                                     <h2 className="text-sm font-semibold">Copias de este ordenador</h2>
                                     <div className="mt-3 grid gap-2">
@@ -289,8 +294,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                         </p>
                                     </div>
                                 </div>
+                                )}
 
-                                <div className="border-t border-border pt-5">
+                                <div className={trasladoPendiente ? "" : "border-t border-border pt-5"}>
                                     <Button
                                         disabled={operacion !== null}
                                         onClick={() => void ejecutar("cloud", recuperarDesdeNube)}
@@ -306,7 +312,9 @@ export default function RecuperarDatos({ onRecuperado }: { onRecuperado?: () => 
                                             <AlertTriangle className="size-5 shrink-0 text-danger" aria-hidden />
                                             <span>
                                                 {volcadoDemasiadoGrande
-                                                    ? "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, actualiza el TPV a la última versión antes de reintentarlo."
+                                                    ? trasladoPendiente
+                                                        ? "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Actualiza el TPV a la última versión antes de reintentarlo."
+                                                        : "El histórico guardado en la nube es demasiado grande para descargarlo de una vez. Restaura una copia de este ordenador (arriba) y después se completará sola con lo que falte; si no tienes ninguna, actualiza el TPV a la última versión antes de reintentarlo."
                                                     : error.message}
                                             </span>
                                         </div>

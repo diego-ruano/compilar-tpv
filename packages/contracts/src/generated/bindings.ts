@@ -645,7 +645,11 @@ device_change_code?: string, };
  * `"device_change_required"` y llega la pista del email para pedir el código; en el caso normal
  * es `"activated"` con el estado ya guardado.
  */
-export type LicenseActivateOutcome = { outcome: string, state: LicenseLocalState | null, email_hint?: string, };
+export type LicenseActivateOutcome = { outcome: string, state: LicenseLocalState | null, email_hint?: string, 
+/**
+ * La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube.
+ */
+cambio_de_equipo: boolean, };
 
 /**
  * Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la
@@ -1023,7 +1027,7 @@ export type PuntualidadInfo = { puntual: boolean, programado: string, entrada: s
 /**
  * Estado que decide si la aplicación puede abrir el login o debe permanecer bloqueada.
  */
-export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending";
+export type RecoveryState = "ready" | "data_missing" | "reconciliation_pending" | "transfer_pending";
 
 export type RecoveryStatus = { state: RecoveryState, };
 

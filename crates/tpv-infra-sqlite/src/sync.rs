@@ -525,6 +525,13 @@ impl SyncRepository for SqliteSyncRepository {
     }
 
     async fn outbox_pending(&self, limit: i64) -> AppResult<Vec<OutboxEntry>> {
+        // Tras un traslado de licencia no sube nada: lo que hay en este outbox es de antes, y la
+        // nube ya tiene lo que hizo el otro equipo desde entonces. Subirlo lo pisaría. Se descarta
+        // al reconstruir la base (`bootstrap_restaurar`), que guarda antes una copia.
+        if crate::recovery::hay_traslado_pendiente(self.db.carpeta()) {
+            return Ok(Vec::new());
+        }
+
         let r = self.db.read().await;
         let conn = r.conn();
 
@@ -853,6 +860,15 @@ impl SyncRepository for SqliteSyncRepository {
         &self,
         snapshot: BootstrapSnapshot,
     ) -> AppResult<BootstrapResultado> {
+        // Tras un traslado de licencia la base de este equipo es de antes: se guarda entera (puede
+        // tener operaciones que nunca subieron) y se reemplaza por la de la nube, outbox incluido.
+        // La copia va ANTES de tomar el escritor: `VACUUM INTO` usa el pool de lectura.
+        let traslado = crate::recovery::hay_traslado_pendiente(self.db.carpeta());
+        if traslado {
+            let copia = crate::recovery::guardar_base_de_antes_del_traslado(&self.db).await?;
+            tracing::info!(target: "tpv::sync", copia = %copia.display(), "base de antes del traslado guardada");
+        }
+
         let w = self.db.write().await;
         let conn = w.raw();
 
@@ -933,7 +949,7 @@ impl SyncRepository for SqliteSyncRepository {
                     None => 0,
                 }
             };
-            if pendientes > 0 && !reconciliando && !sin_usuarios {
+            if pendientes > 0 && !reconciliando && !sin_usuarios && !traslado {
                 return Err(AppError::conflict(format!(
                     "Hay {pendientes} operaciones de este equipo sin subir a la nube. Restaurar las borraría: espera a que se sincronicen antes de recuperar."
                 )));
@@ -1004,6 +1020,13 @@ impl SyncRepository for SqliteSyncRepository {
             conn.execute("DELETE FROM _Sync_Encoladas;", ())
                 .await
                 .map_err(db_err)?;
+            if traslado {
+                // Lo que quedaba por subir es de antes del traslado (ver arriba): ya está en la
+                // copia, y en el outbox lo subiría el primer drenado encima de datos más nuevos.
+                conn.execute("DELETE FROM _Sync_Outbox;", ())
+                    .await
+                    .map_err(db_err)?;
+            }
             conn.execute(
                 "UPDATE _Sync_State SET Last_Seq = ?1 WHERE Id = 1;",
                 vec![Value::Integer(snapshot.seq)],
@@ -1074,6 +1097,14 @@ impl SyncRepository for SqliteSyncRepository {
                     tablas = restaurables.len(),
                     "BD local reconstruida desde la nube"
                 );
+                if traslado {
+                    // Después del COMMIT: si se quitara antes y la restauración fallara, el equipo
+                    // volvería a trabajar con la base vieja. Si falla quitarla, la base ya está
+                    // bien y lo único que pasa es que se volverá a pedir la reconstrucción.
+                    if let Err(e) = crate::recovery::quitar_marca_traslado(self.db.carpeta()) {
+                        tracing::warn!(target: "tpv::sync", error = %e, "no se pudo quitar la marca de traslado");
+                    }
+                }
                 Ok(BootstrapResultado {
                     seq: snapshot.seq,
                     filas_restauradas: filas,
@@ -1913,6 +1944,113 @@ mod tests_bootstrap {
         assert_eq!(r.filas_restauradas, 1);
         assert_eq!(zonas(&db).await, vec!["Terraza".to_string()]);
         assert_eq!(repo.get_checkpoint().await.unwrap(), 100);
+    }
+
+    // -- Traslado de licencia ---------------------------------------------------------------
+    //
+    // Un equipo que fue la Main y al que la licencia vuelve después de haber estado en otro: su
+    // base tiene usuarios, datos y operaciones que nunca subieron, todo de antes. Lo que se fija es
+    // que ese outbox no sube (pisaría lo que hizo el otro equipo), que la nube reemplaza la base
+    // igualmente, que lo de antes queda guardado y que un fallo a mitad no da el traslado por hecho.
+
+    async fn base_de_una_main_de_antes(db: &Arc<Db>) {
+        let w = db.write().await;
+        let conn: &Connection = w.raw();
+        for sql in [
+            "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre) \
+             SELECT 'u1', ID_Rol, 'ana@bar.example', 'x', 'Ana' FROM Roles LIMIT 1;",
+            "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('vieja', 'De antes');",
+            "INSERT INTO _Sync_Outbox (Op_Id, Command_Name, Statements_Json, Created_At_Ms) \
+             VALUES ('op-de-antes', 'test', '[]', 1);",
+        ] {
+            conn.execute(sql, ()).await.unwrap();
+        }
+    }
+
+    async fn contar(db: &Arc<Db>, sql: &str) -> i64 {
+        let r = db.read().await;
+        let mut rows = r.conn().query(sql, ()).await.unwrap();
+        v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn tras_un_traslado_el_outbox_de_antes_no_sube() {
+        let (repo, db, dir) = repo_temporal().await;
+        base_de_una_main_de_antes(&db).await;
+        assert_eq!(repo.outbox_pending(10).await.unwrap().len(), 1);
+
+        crate::recovery::marcar_traslado(&dir).unwrap();
+        assert!(repo.outbox_pending(10).await.unwrap().is_empty());
+        // No se borra por no ofrecerlo: sigue ahí hasta que la reconstrucción lo guarde aparte.
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn tras_un_traslado_la_nube_reemplaza_la_base_y_lo_de_antes_queda_guardado() {
+        let (repo, db, dir) = repo_temporal().await;
+        base_de_una_main_de_antes(&db).await;
+        crate::recovery::marcar_traslado(&dir).unwrap();
+
+        // Sin traslado, este mismo outbox impediría restaurar (ver el test de la guardia).
+        repo.bootstrap_restaurar(BootstrapSnapshot {
+            seq: 100,
+            total_filas: 1,
+            tablas: vec![tabla("Zonas", vec![vec![json!("z1"), json!("Terraza")]])],
+            backfill: vec![],
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(zonas(&db).await, vec!["Terraza".to_string()]);
+        assert_eq!(repo.get_checkpoint().await.unwrap(), 100);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 0);
+        assert!(!crate::recovery::hay_traslado_pendiente(&dir));
+        // Y sigue el camino de cualquier restauración: reconciliar antes de abrir el login.
+        assert_eq!(
+            crate::recovery::status(&db).await.unwrap().state,
+            tpv_contracts::recovery::RecoveryState::ReconciliationPending
+        );
+
+        // La base de antes, entera y con lo que no llegó a subir.
+        let copia = std::fs::read_dir(dir.join("backups"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("antes-de-traslado-"))
+            })
+            .expect("la base de antes del traslado tiene que quedar guardada");
+        let vieja = Db::open(copia.to_str().unwrap()).await.unwrap();
+        assert_eq!(zonas(&vieja).await, vec!["De antes".to_string()]);
+        assert_eq!(contar(&vieja, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1);
+    }
+
+    #[tokio::test]
+    async fn si_la_reconstruccion_falla_el_traslado_sigue_pendiente() {
+        let (repo, db, dir) = repo_temporal().await;
+        base_de_una_main_de_antes(&db).await;
+        crate::recovery::marcar_traslado(&dir).unwrap();
+
+        // La misma clave primaria dos veces: el volcado revienta a mitad.
+        let err = repo
+            .bootstrap_restaurar(BootstrapSnapshot {
+                seq: 100,
+                total_filas: 2,
+                tablas: vec![tabla(
+                    "Zonas",
+                    vec![vec![json!("z1"), json!("A")], vec![json!("z1"), json!("B")]],
+                )],
+                backfill: vec![],
+            })
+            .await;
+
+        assert!(err.is_err());
+        assert!(crate::recovery::hay_traslado_pendiente(&dir), "sin reconstruir, sigue pendiente");
+        assert_eq!(zonas(&db).await, vec!["De antes".to_string()]);
+        assert_eq!(contar(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await, 1);
+        assert!(repo.outbox_pending(10).await.unwrap().is_empty());
     }
 }
 

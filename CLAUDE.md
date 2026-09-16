@@ -764,12 +764,33 @@ catálogo se crearon el primer día.
 | Reconciliación | `shared/lib/recoverySync.ts` + `socketMain.ts` | catch-up → outbox → catch-up, hasta converger |
 | Desbloqueo | `commands/recovery.rs::recovery_complete` | Última barrera: outbox 0, checkpoint ≥ high-water |
 | Pantalla | `src/app/pages/RecuperarDatos.tsx` | Único sitio desde el que se dispara |
+| Traslado de licencia | `commands/licensing.rs::license_activate` + `infra-sqlite/src/recovery.rs::marcar_traslado` | La base de antes del traslado no se usa: se reconstruye desde la nube |
 
 - **"BD vacía" no es "instalación nueva", y confundirlas corrompe la nube.** El seed crea un admin
   con el PIN público `1234` y `Requiere_Setup = 1`; al completar esa pantalla, el `UPDATE Usuarios`
   sale por el outbox y **pisa en la nube la credencial del admin de verdad**, dejando fuera también
   a las Handy. La señal que las distingue tiene que vivir **fuera de `data.db`** — es justo lo que
   se ha perdido —: `license_state.json` y la clave del keyring sobreviven al borrado.
+- **Tras un traslado de licencia, la base local no se usa: se reconstruye desde la nube.** Un
+  equipo que recibe la licencia de otro con el código del correo —uno nuevo, o uno que ya fue la
+  Main y al que vuelve— tiene en su `data.db` lo de antes del traslado, y el otro equipo ha seguido
+  trabajando. Es el mismo camino que un equipo con la base vacía; la diferencia es que éste tiene
+  datos y sin esto los habría seguido usando. Reglas:
+  - **Quién dice que es un traslado es el servidor** (`cambioDeEquipo` en la respuesta de
+    `/v1/license/activate`), no que el cliente haya escrito un código: con el código puesto, activar
+    en el mismo equipo no es un traslado y no puede llevarse sus datos.
+  - **La señal es una marca en AppData** (`traslado-pendiente`), fuera de `data.db`: restaurar una
+    copia local no puede borrarla, porque esa copia también es de antes. Mientras exista, el estado
+    de recuperación es `transfer_pending` (manda sobre cualquier otro), las escrituras de negocio
+    están cerradas, la pantalla sólo ofrece la nube y **el outbox no sube**: lo que tiene pisaría lo
+    que el otro equipo hizo desde entonces.
+  - **Reconstruir desde la nube descarta ese outbox**, que es la excepción a la guardia de siempre, y
+    guarda antes la base entera en `backups/antes-de-traslado-*` (no se lista como copia restaurable
+    y la purga conserva las dos últimas). La marca se quita **después** del `COMMIT`: si la
+    reconstrucción falla a mitad, el traslado sigue pendiente.
+  - **Lo que no cubre:** el mismo equipo que vuelve a ser la Main de su licencia **sin** que se
+    trasladara a otro. Ahí su base sí vale; si su fila de `devices` se movió (se usó como Handy de
+    otro negocio), lo arregla `readmitirMain` al comprobar la licencia.
 - **Sin admin, la app no cae al login: entra en recuperación.** Cero usuarios es inalcanzable en una
   instalación nueva, así que la propia BD lleva el estado y no hace falta ni una tabla ni un fichero
   más. `requiere_recuperacion` gana a `pendiente`.

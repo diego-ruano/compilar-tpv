@@ -152,6 +152,9 @@ pub struct LicenseActivateOutcome {
     pub state: Option<LicenseLocalState>,
     #[ts(optional)]
     pub email_hint: Option<String>,
+    /// La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube.
+    #[serde(default)]
+    pub cambio_de_equipo: bool,
 }
 
 /// Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la

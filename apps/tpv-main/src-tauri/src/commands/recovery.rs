@@ -19,9 +19,18 @@ fn app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, AppErrorDto> {
 }
 
 #[tauri::command]
-pub async fn recovery_status(state: State<'_, AppState>) -> Result<RecoveryStatus, AppErrorDto> {
+pub async fn recovery_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<RecoveryStatus, AppErrorDto> {
     let abierta = { state.db.lock().await.as_ref().cloned() };
     let Some(db) = abierta else {
+        // Un traslado manda también sin base: la pantalla tiene que ofrecer sólo la nube.
+        if tpv_infra_sqlite::recovery::hay_traslado_pendiente(&app_data_dir(&app)?) {
+            return Ok(RecoveryStatus {
+                state: RecoveryState::TransferPending,
+            });
+        }
         // No tener `Db` son dos cosas muy distintas y no pueden contestar lo mismo. En Handy no
         // existe SQLite local y, por definición, tampoco una recuperación de Main. En una Main sí
         // la hay: significa que la base no se pudo abrir al arrancar (corrupta o ilegible), que es

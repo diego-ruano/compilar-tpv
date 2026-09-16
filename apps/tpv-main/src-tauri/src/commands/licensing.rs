@@ -64,12 +64,24 @@ pub async fn license_check_now(app: AppHandle) -> Result<LicenseGateResult, AppE
     Ok(res)
 }
 
+/// Si la activación trasladó la licencia desde otro equipo, lo que hubiera en la base local es de
+/// antes del traslado: se marca para reconstruirla desde la nube (`recovery::marcar_traslado`) y se
+/// cierran ya las escrituras de negocio, antes de que la aplicación arranque nada encima.
 #[tauri::command]
 pub async fn license_activate(
     app: AppHandle,
     args: LicenseActivateInput,
 ) -> Result<LicenseActivateOutcome, AppErrorDto> {
-    Ok(uc::activate(&svc(&app)?, args).await?)
+    let outcome = uc::activate(&svc(&app)?, args).await?;
+
+    if outcome.cambio_de_equipo {
+        tpv_infra_sqlite::recovery::marcar_traslado(&app_data_dir(&app)?)?;
+        if let Some(db) = app.state::<crate::AppState>().db.lock().await.as_ref() {
+            db.bloquear_escrituras_de_negocio(true);
+        }
+    }
+
+    Ok(outcome)
 }
 
 /// Pide al servidor que envíe el OTP de cambio de dispositivo al email de la licencia (§6.4).

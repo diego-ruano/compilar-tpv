@@ -22,6 +22,7 @@ function reiniciar() {
 		preferencia: "auto",
 		hidratada: false,
 		datosPerdidos: false,
+		trasladoPendiente: false,
 		reconciliacionPendiente: false,
 		faseRecuperacion: "inactiva",
 		errorRecuperacion: null,
@@ -83,6 +84,29 @@ describe("useEstadoSync", () => {
 		s().reintentar();
 
 		expect(s().pulso).toBe(antes + 2);
+	});
+
+	it("tras un traslado de licencia la base es de antes: no se sincroniza y sólo vale la nube", () => {
+		s().configurarRecuperacion("transfer_pending");
+		// `datosPerdidos` es lo que mantiene cerrado el socket: el outbox de antes no puede subir.
+		expect(s().datosPerdidos).toBe(true);
+		expect(s().trasladoPendiente).toBe(true);
+		expect(s().reconciliacionPendiente).toBe(false);
+
+		// Reconstruida desde la nube, se reconcilia como cualquier otra restauración.
+		s().iniciarReconciliacion();
+		expect(s().datosPerdidos).toBe(false);
+		expect(s().trasladoPendiente).toBe(false);
+		expect(s().reconciliacionPendiente).toBe(true);
+	});
+
+	it("una base normal no queda marcada como traslado", () => {
+		for (const estado of ["ready", "data_missing", "reconciliation_pending"] as const) {
+			s().configurarRecuperacion(estado);
+			expect(s().trasladoPendiente, estado).toBe(false);
+		}
+		s().configurarRecuperacion("data_missing");
+		expect(s().datosPerdidos).toBe(true);
 	});
 
 	it("una restauración no deja de estar bloqueada hasta finalizar la reconciliación", () => {

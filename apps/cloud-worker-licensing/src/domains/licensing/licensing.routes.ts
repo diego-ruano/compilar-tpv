@@ -243,6 +243,7 @@ licenseRoutes.post("/activate", async (c) => {
 		status: esPrimeraActivacion ? "active" : lic.status,
 		expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
 		fieldDek,
+		cambioDeEquipo: esCambioDeEquipo,
 	};
 
 	return c.json(out);
