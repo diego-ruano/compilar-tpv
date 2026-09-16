@@ -105,16 +105,6 @@ syncRoutes.post("/changes", async (c) => {
 		await tenantQuery(c.env, c.get("tenantId"), async (db) => {
 			await db.execute({
 				sql: `
-					CREATE TABLE IF NOT EXISTS Sync_Main_Checkpoints (
-						Device_Id TEXT PRIMARY KEY,
-						Last_Seq INTEGER NOT NULL,
-						Updated_At_Ms INTEGER NOT NULL
-					);
-				`,
-				args: [],
-			});
-			await db.execute({
-				sql: `
 					INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms)
 					VALUES (?1, ?2, ?3)
 					ON CONFLICT(Device_Id) DO UPDATE SET
