@@ -9,7 +9,7 @@ use tpv_contracts::venta_rapida::{
     VrUpdateNotaDetalleInput,
 };
 use tpv_contracts::verifactu::DestinatarioInput;
-use tpv_domain::venta_rapida::{limpiar_opcional, normalize_metodo, CobroFraccionado};
+use tpv_domain::venta_rapida::{id_de_cobro, limpiar_opcional, normalize_metodo, CobroFraccionado};
 
 use crate::error::{AppError, AppResult};
 use crate::ports::venta_rapida::VentaRapidaRepository;
@@ -168,6 +168,9 @@ pub async fn cobrar_fraccionado(
     repo: &dyn VentaRapidaRepository,
     input: VrCobrarFraccionadoInput,
 ) -> AppResult<String> {
+    let Some(id_pago) = id_de_cobro(&input.id_pago) else {
+        return Err(AppError::validation("id_pago invalid"));
+    };
     if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda invalid"));
     }
@@ -189,6 +192,7 @@ pub async fn cobrar_fraccionado(
     }
 
     let data = CobroFraccionado {
+        id_pago,
         id_comanda: input.id_comanda,
         metodo: normalize_metodo(&input.metodo),
         importe_total: input.importe_total,
@@ -349,6 +353,7 @@ mod tests {
     async fn cobrar_fraccionado_normaliza_metodo_ids_y_detalles() {
         let repo = FakeRepo::default();
         let input = VrCobrarFraccionadoInput {
+            id_pago: " 0192F7A4-3B1C-7D2E-8F00-123456789ABC ".into(),
             id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: 12.5,
             id_usuario_cobrador: Some(" usuario-1 ".into()), id_trabajador_cobrador: Some(" ".into()),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
@@ -358,6 +363,7 @@ mod tests {
         assert_eq!(cobrar_fraccionado(&repo, input).await.unwrap(), "T-000001");
         let calls = repo.cobros.lock().unwrap();
         assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id_pago, "0192f7a4-3b1c-7d2e-8f00-123456789abc");
         assert_eq!(calls[0].metodo, "Tarjeta");
         assert_eq!(calls[0].id_usuario_cobrador.as_deref(), Some("usuario-1"));
         assert!(calls[0].id_trabajador_cobrador.is_none());
@@ -368,12 +374,16 @@ mod tests {
     async fn cobrar_fraccionado_rechaza_importe_no_finito_y_detalles_vacios() {
         let repo = FakeRepo::default();
         let invalido = |importe, detalles| VrCobrarFraccionadoInput {
+            id_pago: "0192f7a4-3b1c-7d2e-8f00-123456789abc".into(),
             id_comanda: "c1".into(), metodo: "efectivo".into(), importe_total: importe,
             id_usuario_cobrador: None, id_trabajador_cobrador: None, detalles,
             destinatario: None,
         };
         assert!(cobrar_fraccionado(&repo, invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
         assert!(cobrar_fraccionado(&repo, invalido(1.0, vec![" ".into()])).await.is_err());
+        // Sin un id válido no hay forma de reconocer un reintento: no se cobra.
+        let sin_id = VrCobrarFraccionadoInput { id_pago: "tmp-1".into(), ..invalido(1.0, vec!["d1".into()]) };
+        assert!(cobrar_fraccionado(&repo, sin_id).await.is_err());
         assert!(repo.cobros.lock().unwrap().is_empty());
     }
 }

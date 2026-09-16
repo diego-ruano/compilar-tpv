@@ -1900,6 +1900,7 @@ mod tests_factura_completa {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
                 importe_total: 0.0,
@@ -2045,6 +2046,7 @@ mod tests_factura_completa {
         let repo = crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone());
         for det in ["d1", "d2"] {
             repo.cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
                 importe_total: 0.0,
@@ -2300,6 +2302,7 @@ mod tests_anular_vs_devolver {
         use tpv_application::ports::venta_rapida::VentaRapidaRepository as _;
         crate::venta_rapida::SqliteVentaRapidaRepository::new(db.clone())
             .cobrar_fraccionado(tpv_domain::venta_rapida::CobroFraccionado {
+                id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
                 importe_total: 0.0,

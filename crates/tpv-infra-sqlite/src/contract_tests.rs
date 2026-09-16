@@ -336,6 +336,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         "venta_rapida.cobrar_fraccionado" => {
             let repo = SqliteVentaRapidaRepository::new(db.clone());
             repo.cobrar_fraccionado(CobroFraccionado {
+                id_pago: crate::util::new_id(),
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
                 metodo: e["metodo"].as_str().unwrap().to_string(),
                 // El importe lo recalcula el comando desde la BD (se ignora el de entrada).

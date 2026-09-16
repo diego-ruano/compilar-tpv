@@ -1371,9 +1371,11 @@ Un cobro anulado **no se borra**. Diseño y porqués abajo; el plan que lo intro
   esa tabla habrá dos fuentes para la misma cifra y divergirán. Su `ID_Movimiento` se genera **antes**
   del INSERT (§9, «IDs deterministas»), y su `Importe` va siempre en positivo: el signo lo da el
   `Tipo`. Ampliarlo (devoluciones de VENTA-01, Veri*factu) es tocar el `CHECK`.
-- **El movimiento es idempotente por (`Tipo`, apunte), y tiene que serlo.** El cobro y el gasto se
-  guardan con `ON CONFLICT DO UPDATE` para que un reintento del cliente no duplique la venta; el
-  movimiento lleva un `WHERE NOT EXISTS` por el mismo motivo. Sin él, ese mismo reintento dejaría
+- **El movimiento es idempotente por (`Tipo`, apunte), y tiene que serlo.** El cobro y el gasto
+  aguantan un reintento sin duplicar la venta —el gasto con `ON CONFLICT DO UPDATE`; el cobro de
+  venta rápida por su `ID_Pago`, que genera la pantalla al encolarlo y con el que un reintento
+  devuelve el número del cobro que ya existe en vez de rechazarlo—; el movimiento lleva un
+  `WHERE NOT EXISTS` por el mismo motivo. Sin él, ese mismo reintento dejaría
   dos filas —cada una con su `ID_Movimiento` nuevo, así que ninguna clave las frenaría— y el
   historial contaría dos cobros donde hubo uno. Los dos lados llevan la misma guardia.
 - **Los anulados se ven, pero no cuentan.** Salen en la lista de Cuentas y en los PDF —es donde se

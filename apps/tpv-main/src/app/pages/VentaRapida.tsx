@@ -84,7 +84,12 @@ type PendingCobroIntent = {
   importeTotal: number;
   idUsuarioCobrador: string | null;
   idTrabajadorCobrador: string | null;
-  opIdCobro: string;
+  /**
+   * El id del cobro (`Pagos.ID_Pago`). Se genera al encolar y se persiste con el intent, así que un
+   * reintento tras un cierre inesperado lleva el mismo: si el cobro ya se guardó, la Main devuelve
+   * su número en vez de rechazarlo por no quedar líneas pendientes.
+   */
+  idPago: string;
   createdAtMs: number;
   /**
    * FISCAL-02: los datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe
@@ -144,12 +149,6 @@ function parseDetalleIdFromTicketItemId(ticketItemId: string): string {
   return raw.slice("detalle-".length).trim();
 }
 
-function makeStableCobroOpId(intentId: string): string {
-  return `vr_cobrar_fraccionado_${String(intentId || "")
-    .replace(/[^a-zA-Z0-9_-]/g, "_")
-    .slice(0, 120)}`;
-}
-
 function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
   if (!value || typeof value !== "object") return null;
 
@@ -167,7 +166,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
 
   const importeTotal = Number(obj.importeTotal ?? 0);
   const createdAtMs = Number(obj.createdAtMs ?? Date.now());
-  const opIdCobro = String(obj.opIdCobro ?? obj.op_id_cobro ?? "").trim() || makeStableCobroOpId(id);
+  const idPago = String(obj.idPago ?? "").trim() || crypto.randomUUID();
 
   // El destinatario se valida entero o se descarta: medio destinatario (nombre sin NIF) haría que
   // el backend rechazara el cobro una y otra vez sin que nada lo explicara.
@@ -198,7 +197,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     importeTotal,
     idUsuarioCobrador: String(obj.idUsuarioCobrador ?? "").trim() || null,
     idTrabajadorCobrador: String(obj.idTrabajadorCobrador ?? "").trim() || null,
-    opIdCobro,
+    idPago,
     createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
     destinatario,
   };
@@ -1057,7 +1056,7 @@ export default function VentaRapida() {
             idUsuarioCobrador: intent.idUsuarioCobrador,
             idTrabajadorCobrador: intent.idTrabajadorCobrador,
             detalles: detallesUsados,
-            opId: intent.opIdCobro,
+            idPago: intent.idPago,
             destinatario: intent.destinatario ?? null,
           });
 
@@ -1639,7 +1638,7 @@ export default function VentaRapida() {
           importeTotal,
           idUsuarioCobrador,
           idTrabajadorCobrador,
-          opIdCobro: makeStableCobroOpId(intentId),
+          idPago: crypto.randomUUID(),
           createdAtMs: Date.now(),
           destinatario: destinatario ?? null,
         };
@@ -1694,7 +1693,7 @@ export default function VentaRapida() {
    *
    *   · VOLUNTARIO — el cobro no ha salido todavía: se encola con el destinatario dentro.
    *   · OBLIGATORIO — el intent ya está en la cola y parado: se le añade el dato y se suelta. No se
-   *     vuelve a encolar nada, porque el `opIdCobro` es el mismo y la idempotencia del backend es
+   *     vuelve a encolar nada, porque el `idPago` es el mismo y la idempotencia del backend es
    *     por ahí: reencolar crearía un segundo intent para el mismo cobro.
    */
   const confirmarFactura = useCallback(

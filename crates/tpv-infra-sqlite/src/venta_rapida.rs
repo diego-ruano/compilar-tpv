@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de **venta rápida** (barra). Local-First:
-//! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id.
+//! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id. El cobro sí es
+//! idempotente, por su `ID_Pago`, que genera la pantalla (ver `cobrar_fraccionado`).
 
 use std::sync::Arc;
 
@@ -763,7 +764,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         let g = self.db.write().await;
         let db = &g;
 
-        let id_pago_final = new_id();
+        let id_pago_final = data.id_pago.clone();
 
         let id_usuario = data
             .id_usuario_cobrador
@@ -780,6 +781,34 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
 
         db.execute_batch("BEGIN;").await.map_err(db_err)?;
         let res: AppResult<String> = async {
+            // Un cobro que ya existe no se repite: se devuelve su número. Pasa cuando la aplicación
+            // se cae después de este COMMIT y antes de que la pantalla quite el cobro de su cola: al
+            // volver lo reintenta con el mismo id y, sin esto, se encontraba las líneas ya cobradas,
+            // decía «No se pudo cobrar» y las devolvía a pendiente — con el cobro, la factura y el
+            // stock ya guardados. Va antes de reservar el número y dentro de la transacción, para
+            // que dos intentos a la vez no pasen los dos por aquí.
+            //
+            // Se devuelve aunque ese cobro se haya anulado después: el cobro ocurrió, y la anulación
+            // es un hecho posterior que ya tiene su propio rastro.
+            {
+                let mut rows = db
+                    .query(
+                        "SELECT ID_Comanda, Numero_Ticket FROM Pagos WHERE ID_Pago = ?1;",
+                        vec![Value::Text(id_pago_final.clone())],
+                    )
+                    .await
+                    .map_err(db_err)?;
+                if let Some(r) = rows.next().await.map_err(db_err)? {
+                    let comanda = v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default();
+                    if comanda != data.id_comanda {
+                        return Err(AppError::conflict(
+                            "Ese id de cobro ya pertenece a un cobro de otra comanda",
+                        ));
+                    }
+                    return Ok(v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default());
+                }
+            }
+
             // FISCAL-01: el número se reserva DENTRO de la transacción. Antes se hacía fuera, y
             // con un contador de tickets daba igual gastar uno en un cobro que acabara en
             // ROLLBACK; ahora ese número es el de una factura, y un hueco tiene que ser un hueco
@@ -898,16 +927,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                   ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                   ID_Usuario_Cobrador, ID_Trabajador_Cobrador, Numero_Ticket
                 )
-                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7)
-                ON CONFLICT(ID_Pago) DO UPDATE SET
-                  ID_Comanda = excluded.ID_Comanda,
-                  Metodo_Pago = excluded.Metodo_Pago,
-                  Importe_Total = excluded.Importe_Total,
-                  Tipo = excluded.Tipo,
-                  ID_Usuario_Cobrador = excluded.ID_Usuario_Cobrador,
-                  ID_Trabajador_Cobrador = excluded.ID_Trabajador_Cobrador,
-                  -- El numero NO se pisa en un reintento: el ticket ya pudo salir impreso.
-                  Numero_Ticket = COALESCE(Pagos.Numero_Ticket, excluded.Numero_Ticket);
+                VALUES (?1, ?2, datetime('now','localtime'), ?3, ?4, 'FRACCIONADO', ?5, ?6, ?7);
                 "#,
                 vec![
                     Value::Text(id_pago_final.clone()),
@@ -1290,5 +1310,163 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests_cobro_repetido {
+    //! Cobrar dos veces el mismo cobro es cobrarlo una vez.
+    //!
+    //! La pantalla encola el cobro, lo manda y lo quita de la cola al volver la respuesta. Si la
+    //! aplicación se cae entre el COMMIT y ese momento, al arrancar lo reintenta con el mismo id.
+    //! Antes el reintento se encontraba las líneas ya cobradas y fallaba: la pantalla decía «No se
+    //! pudo cobrar» y devolvía las líneas a pendiente, con el cobro, la factura y el stock guardados.
+
+    use super::*;
+    use libsql::Connection;
+
+    const ID: &str = "0192f7a4-3b1c-7d2e-8f00-123456789abc";
+
+    const DOS_TICKETS_DE_BARRA: &[&str] = &[
+        "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar de Pruebas SL'
+           WHERE ID = 1;",
+        "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre)
+           VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
+        "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
+           VALUES ('prod', 'cat', 'Cerveza', 3.0, 10);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+        "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
+           VALUES ('otra', 'BARRA', '2027-01-15 12:05:00', 'Abierta', 3.0);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
+           VALUES ('det-otra', 'otra', 'prod', 1, 3.0, 10);",
+    ];
+
+    async fn preparar() -> (Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("venta_rapida");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            for sql in DOS_TICKETS_DE_BARRA {
+                conn.execute(sql, Vec::<Value>::new())
+                    .await
+                    .unwrap_or_else(|e| panic!("sembrando: {sql}\n{e}"));
+            }
+        }
+        (db, dir)
+    }
+
+    async fn cobrar(db: &Arc<Db>, id_pago: &str, comanda: &str, detalle: &str) -> AppResult<String> {
+        SqliteVentaRapidaRepository::new(db.clone())
+            .cobrar_fraccionado(CobroFraccionado {
+                id_pago: id_pago.into(),
+                id_comanda: comanda.into(),
+                metodo: "Efectivo".into(),
+                importe_total: 0.0,
+                id_usuario_cobrador: Some("u1".into()),
+                id_trabajador_cobrador: None,
+                detalles: vec![detalle.into()],
+                destinatario: None,
+            })
+            .await
+    }
+
+    async fn numero(db: &Arc<Db>, sql: &str) -> f64 {
+        let r = db.read().await;
+        let mut rows = r.query(sql, Vec::<Value>::new()).await.unwrap();
+        let row = rows.next().await.unwrap().expect("sin filas");
+        v_f64(row.get_value(0).unwrap()).unwrap_or(0.0)
+    }
+
+    /// Todo lo que deja un cobro. Si un reintento añade cualquiera de estas cosas, ha cobrado otra vez.
+    async fn rastro(db: &Arc<Db>) -> Vec<f64> {
+        let mut v = Vec::new();
+        for sql in [
+            "SELECT COUNT(*) FROM Pagos;",
+            "SELECT COUNT(*) FROM Pago_Detalles;",
+            "SELECT COUNT(*) FROM Registros_Facturacion;",
+            "SELECT COUNT(*) FROM Movimientos_Caja;",
+            "SELECT COUNT(*) FROM Suelto_Consumos;",
+            "SELECT Stock_Suelto FROM Productos WHERE ID_Producto = 'prod';",
+            "SELECT COALESCE(SUM(Ultimo), 0) FROM Serie_Facturacion;",
+        ] {
+            v.push(numero(db, sql).await);
+        }
+        v
+    }
+
+    #[tokio::test]
+    async fn repetirlo_devuelve_el_mismo_numero_sin_cobrar_otra_vez() {
+        let (db, _dir) = preparar().await;
+        let primero = cobrar(&db, ID, "com", "det").await.unwrap();
+        assert!(!primero.is_empty());
+        let tras_el_cobro = rastro(&db).await;
+        assert_eq!(tras_el_cobro, vec![1.0, 1.0, 1.0, 1.0, 1.0, 9.0, 1.0]);
+
+        let reintento = cobrar(&db, ID, "com", "det").await.unwrap();
+        assert_eq!(reintento, primero, "el número es el del ticket que ya salió");
+        assert_eq!(rastro(&db).await, tras_el_cobro, "ni pago, ni factura, ni stock, ni número nuevos");
+    }
+
+    #[tokio::test]
+    async fn otro_id_sobre_las_mismas_lineas_se_sigue_rechazando() {
+        // Lo idempotente es el cobro, no las líneas: un cobro distinto de algo ya cobrado no entra.
+        let (db, _dir) = preparar().await;
+        cobrar(&db, ID, "com", "det").await.unwrap();
+        let antes = rastro(&db).await;
+
+        let e = cobrar(&db, "0192f7a4-3b1c-7d2e-8f00-000000000002", "com", "det")
+            .await
+            .unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+        assert_eq!(rastro(&db).await, antes);
+    }
+
+    #[tokio::test]
+    async fn el_id_de_un_cobro_de_otra_comanda_no_devuelve_su_numero() {
+        // Si no, la pantalla daría por cobrada una comanda con el ticket de otra.
+        let (db, _dir) = preparar().await;
+        cobrar(&db, ID, "com", "det").await.unwrap();
+        let antes = rastro(&db).await;
+
+        let e = cobrar(&db, ID, "otra", "det-otra").await.unwrap_err();
+        assert_eq!(e.code(), tpv_contracts::errors::ErrorCode::Conflict);
+        assert_eq!(rastro(&db).await, antes);
+        assert_eq!(
+            numero(&db, "SELECT COUNT(*) FROM v_lineas_cobradas WHERE ID_Detalle = 'det-otra';").await,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn repetir_un_cobro_ya_anulado_no_lo_vuelve_a_cobrar() {
+        // Alguien lo anuló antes de que llegara el reintento. El cobro ocurrió y la anulación
+        // también: volver a cobrar desharía la decisión de quien anuló.
+        let (db, _dir) = preparar().await;
+        let primero = cobrar(&db, ID, "com", "det").await.unwrap();
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "UPDATE Pagos SET Estado = 'ANULADO', Anulado_En = '2027-01-15 12:10:00',
+                       Anulado_Por = 'u1', Motivo_Anulacion = 'error', Motivo_Baja = 'ERROR';",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+
+        assert_eq!(cobrar(&db, ID, "com", "det").await.unwrap(), primero);
+        assert_eq!(numero(&db, "SELECT COUNT(*) FROM Pagos;").await, 1.0);
+        assert_eq!(
+            numero(&db, "SELECT COUNT(*) FROM v_lineas_cobradas WHERE ID_Detalle = 'det';").await,
+            0.0,
+            "la línea sigue pendiente, como la dejó la anulación"
+        );
     }
 }

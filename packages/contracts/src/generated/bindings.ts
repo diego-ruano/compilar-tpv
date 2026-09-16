@@ -1430,7 +1430,15 @@ hasta_seq: number, };
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 
-export type VrCobrarFraccionadoInput = { id_comanda: string, metodo: string, importe_total: number, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, detalles: Array<string>, 
+export type VrCobrarFraccionadoInput = { 
+/**
+ * El id del cobro (`Pagos.ID_Pago`), un UUID que genera la pantalla al encolarlo.
+ *
+ * Es lo que hace idempotente el cobro: si la aplicación se cae después de guardarlo y antes de
+ * quitarlo de la cola, al volver se reintenta con el mismo id y se devuelve el número del cobro
+ * que ya existe, en vez de rechazarlo por no quedar líneas pendientes.
+ */
+id_pago: string, id_comanda: string, metodo: string, importe_total: number, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, detalles: Array<string>, 
 /**
  * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
  *

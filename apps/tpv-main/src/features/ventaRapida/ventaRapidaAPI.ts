@@ -354,7 +354,8 @@ export async function vrCobrarFraccionado(argsInput: {
     idUsuarioCobrador: string | null;
     idTrabajadorCobrador: string | null;
     detalles: string[];
-    opId?: string;
+    /** El id del cobro, generado al encolarlo: repetir la llamada con él no cobra dos veces. */
+    idPago: string;
     /**
      * FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe pasa
      * del límite de la simplificada y entonces no hay alternativa.
@@ -371,6 +372,7 @@ export async function vrCobrarFraccionado(argsInput: {
     try {
         const numeroTicket = await invokeClient<string>("vr_cobrar_fraccionado", {
             args: {
+                id_pago: argsInput.idPago,
                 id_comanda: argsInput.idComanda,
                 metodo: argsInput.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
                 importe_total: Number(argsInput.importeTotal),

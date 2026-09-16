@@ -21,9 +21,23 @@ pub fn limpiar_opcional(input: Option<String>) -> Option<String> {
     })
 }
 
-/// Datos de un cobro fraccionado ya validados/normalizados (sin op_id/outbox).
+/// El id de un cobro, tal como lo manda la pantalla: un UUID, en su forma canónica.
+///
+/// Lo genera la pantalla al encolar el cobro, no la base al guardarlo, y es lo que hace que cobrar
+/// dos veces el mismo intent sea un solo cobro (ver `cobrar_fraccionado` en la capa de datos). Por
+/// eso se normaliza: si un reintento llegara escrito de otra forma, sería otro cobro.
+pub fn id_de_cobro(input: &str) -> Option<String> {
+    uuid::Uuid::parse_str(input.trim())
+        .ok()
+        .filter(|id| !id.is_nil())
+        .map(|id| id.hyphenated().to_string())
+}
+
+/// Datos de un cobro fraccionado ya validados/normalizados.
 #[derive(Debug, Clone)]
 pub struct CobroFraccionado {
+    /// `Pagos.ID_Pago`. Ya pasado por `id_de_cobro`.
+    pub id_pago: String,
     pub id_comanda: String,
     pub metodo: String,
     pub importe_total: f64,
@@ -55,5 +69,18 @@ mod tests {
         assert_eq!(limpiar_opcional(Some(" sin  cebolla ".into())), Some("sin  cebolla".into()));
         assert_eq!(limpiar_opcional(Some("\t\n".into())), None);
         assert_eq!(limpiar_opcional(None), None);
+    }
+
+    #[test]
+    fn id_de_cobro_solo_acepta_un_uuid_y_lo_deja_en_forma_canonica() {
+        let id = "0192f7a4-3b1c-7d2e-8f00-123456789abc";
+        assert_eq!(id_de_cobro(id).as_deref(), Some(id));
+        // El mismo cobro escrito de otra forma sigue siendo el mismo cobro.
+        for otra_forma in [" 0192F7A4-3B1C-7D2E-8F00-123456789ABC ", "0192f7a43b1c7d2e8f00123456789abc"] {
+            assert_eq!(id_de_cobro(otra_forma).as_deref(), Some(id), "{otra_forma}");
+        }
+        for invalido in ["", "  ", "vr_cobrar_fraccionado_tmp-1", "00000000-0000-0000-0000-000000000000"] {
+            assert_eq!(id_de_cobro(invalido), None, "{invalido:?}");
+        }
     }
 }

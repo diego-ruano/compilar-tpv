@@ -189,12 +189,15 @@ export type UpdateNotaInput = Omit<VrUpdateNotaDetalleInput, "nota"> & {
  * que es justo lo que el veto de `applyViaHub` impide desde la nube — la cadena de huellas vive en
  * el SIF del obligado, y la nube es copia, no fuente.
  *
- * Se quita del tipo local con `Omit` en vez de declararlo en el zod y tirarlo: un campo validado que
- * nadie lee es una promesa que el código no cumple.
+ * Lo mismo vale para `id_pago`, el id con el que la Main hace idempotente el cobro: sólo tiene
+ * sentido donde se cobra.
+ *
+ * Se quitan del tipo local con `Omit` en vez de declararlos en el zod y tirarlos: un campo validado
+ * que nadie lee es una promesa que el código no cumple.
  */
 export type CobrarFraccionadoInput = Omit<
 	ContractVrCobrarFraccionadoInput,
-	"id_usuario_cobrador" | "id_trabajador_cobrador" | "destinatario"
+	"id_pago" | "id_usuario_cobrador" | "id_trabajador_cobrador" | "destinatario"
 > & {
 	id_usuario_cobrador: string | null;
 	id_trabajador_cobrador: string | null;

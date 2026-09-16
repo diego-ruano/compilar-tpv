@@ -194,6 +194,12 @@ pub struct StockLinea {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrCobrarFraccionadoInput {
+    /// El id del cobro (`Pagos.ID_Pago`), un UUID que genera la pantalla al encolarlo.
+    ///
+    /// Es lo que hace idempotente el cobro: si la aplicación se cae después de guardarlo y antes de
+    /// quitarlo de la cola, al volver se reintenta con el mismo id y se devuelve el número del cobro
+    /// que ya existe, en vez de rechazarlo por no quedar líneas pendientes.
+    pub id_pago: String,
     pub id_comanda: String,
     pub metodo: String,
     pub importe_total: f64,
