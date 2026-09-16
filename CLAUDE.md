@@ -707,6 +707,12 @@ no sólo en dev.
   - **El dispositivo se da de alta en `devices` al recoger el token, no al aprobar.** Aprobar sólo
     marca el código; dado de alta ahí, una aprobación que nadie recogía dejaba un Handy fantasma en
     la lista de vinculados. Recogerlo es además el momento en que la Main recibe el aviso.
+  - **Un equipo tiene UNA identidad para los dos modos**, así que vincularlo como Handy de otro
+    negocio mueve su fila de `devices` a ese negocio. Si vuelve a ser la Main del suyo,
+    `/v1/license/status` y `/refresh` lo readmiten solos (`readmitirMain`): firma con la clave que
+    tiene registrada y sigue siendo el `main_device_id`. Si la licencia ya está en otro equipo,
+    contestan `device_replaced` y se bloquea al momento. Sin esto la nube no lo reconocía, el
+    cliente lo tomaba por falta de red y agotaba la gracia sin conexión sin decir por qué.
   - **Cancelar en la Handy suelta el código en la nube** (`/v1/pair/cancel`, firmado con la acción
     `PAIR_CANCEL`). Si sólo parara la espera en pantalla, la solicitud seguiría en la lista de la
     Main y aprobarla daría de alta un dispositivo que nadie va a usar. Lo ya aprobado no se deshace

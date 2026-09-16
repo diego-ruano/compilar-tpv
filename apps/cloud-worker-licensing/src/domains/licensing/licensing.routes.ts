@@ -48,6 +48,7 @@ import {
 	provisionTenantDatabase,
 	signToken,
 	toBool01,
+	readmitirMain,
 	verifyDeviceProof,
 	verifyToken,
 } from "./licensing.helpers";
@@ -348,7 +349,15 @@ licenseRoutes.get("/status", async (c) => {
 		undefined,
 		rawBody,
 	);
-	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
+	if (!proof.ok && proof.error === "device_pubkey_not_registered") {
+		// Una Main cuya fila pasó a otro negocio (se usó como Handy): se la vuelve a dar de alta.
+		const readmision = await readmitirMain(c.req.raw, db, claims, rawBody);
+		if (!readmision.ok) {
+			return c.json({ ok: false, error: readmision.error } satisfies ApiError, readmision.status);
+		}
+	} else if (!proof.ok) {
+		return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
+	}
 
 	const lic = await getLicenseByHash(db, claims.licHash);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
@@ -415,7 +424,15 @@ licenseRoutes.post("/refresh", async (c) => {
 		undefined,
 		rawBody,
 	);
-	if (!proof.ok) return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
+	if (!proof.ok && proof.error === "device_pubkey_not_registered") {
+		// Una Main cuya fila pasó a otro negocio (se usó como Handy): se la vuelve a dar de alta.
+		const readmision = await readmitirMain(c.req.raw, db, claims, rawBody);
+		if (!readmision.ok) {
+			return c.json({ ok: false, error: readmision.error } satisfies ApiError, readmision.status);
+		}
+	} else if (!proof.ok) {
+		return c.json({ ok: false, error: proof.error } satisfies ApiError, 401);
+	}
 
 	const lic = await getLicenseByHash(db, claims.licHash);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);

@@ -13,7 +13,13 @@ import { createClient, type Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
 import type { LicenseGateState, SignedLicenseAssertion } from "../../shared";
-import { getDevicePubKeyB64, type LicenseRow } from "../../server/licenseStore";
+import {
+	ensureDevice,
+	getDevicePubKeyB64,
+	getDevicePubKeyB64EnCualquierNegocio,
+	getLicenseByHash,
+	type LicenseRow,
+} from "../../server/licenseStore";
 import { sha256Hex } from "../../server/crypto";
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
 import { sha256HexBytes, sha256HexStr, secretKey } from "../../server/utils/crypto";
@@ -251,6 +257,61 @@ export async function verifyDeviceProof(
 	target?: { method: string; path: string },
 	rawBody?: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+	return comprobarFirma(
+		request,
+		() => getDevicePubKeyB64(dbi, claims.tenantId, claims.deviceId),
+		target,
+		rawBody,
+	);
+}
+
+/**
+ * Vuelve a dar de alta como TPV a la Main de una licencia cuya fila de `devices` ya no está en su
+ * negocio. Lo llaman `/status` y `/refresh` cuando la firma falla por `device_pubkey_not_registered`.
+ *
+ * Pasa cuando un equipo que fue la Main se usa un tiempo como Handy de otro negocio: la identidad
+ * del equipo es una sola, así que al recoger su token de Handy su fila pasó a ese otro negocio. Al
+ * volver a modo TPV, sin esto, la nube no lo reconocía: el WebSocket se quedaba reintentando y la
+ * licencia lo tomaba por falta de red y tiraba de la gracia sin conexión hasta bloquearse, sin
+ * decir por qué — y el cliente tenía que volver a meter la clave.
+ *
+ * Sólo si la firma cuadra con la clave que ese equipo tiene registrada (en el negocio que sea) y
+ * el equipo sigue siendo el `main_device_id` de la licencia. Si la licencia se trasladó a otro
+ * equipo, se contesta `device_replaced`: se bloquea al momento en vez de agotar la gracia.
+ */
+export async function readmitirMain(
+	request: Request,
+	dbi: Client,
+	claims: { tenantId: string; deviceId: string; licHash: string },
+	rawBody?: Uint8Array,
+): Promise<{ ok: true } | { ok: false; status: 401 | 403; error: string }> {
+	const noRegistrado = { ok: false as const, status: 401 as const, error: "device_pubkey_not_registered" };
+
+	const lic = await getLicenseByHash(dbi, claims.licHash);
+	if (!lic || lic.tenant_id !== claims.tenantId) return noRegistrado;
+
+	const firma = await comprobarFirma(
+		request,
+		() => getDevicePubKeyB64EnCualquierNegocio(dbi, claims.deviceId),
+		undefined,
+		rawBody,
+	);
+	if (!firma.ok) return { ok: false, status: 401, error: firma.error };
+
+	if (lic.main_device_id !== claims.deviceId) {
+		return { ok: false, status: 403, error: "device_replaced" };
+	}
+
+	await ensureDevice(dbi, claims.tenantId, claims.deviceId, "tpv");
+	return { ok: true };
+}
+
+async function comprobarFirma(
+	request: Request,
+	obtenerClave: () => Promise<string | null>,
+	target?: { method: string; path: string },
+	rawBody?: Uint8Array,
+): Promise<{ ok: true } | { ok: false; error: string }> {
 	const tsStr = (request.headers.get("X-Device-Ts") || "").trim();
 	const sigB64Raw = (request.headers.get("X-Device-Sig") || "").trim();
 	if (!tsStr || !sigB64Raw) return { ok: false, error: "missing_device_proof" };
@@ -265,7 +326,7 @@ export async function verifyDeviceProof(
 	const MAX_SKEW_MS = 2 * 60 * 1000;
 	if (Math.abs(now - ts) > MAX_SKEW_MS) return { ok: false, error: "device_ts_out_of_range" };
 
-	const pubB64 = await getDevicePubKeyB64(dbi, claims.tenantId, claims.deviceId);
+	const pubB64 = await obtenerClave();
 	if (!pubB64) return { ok: false, error: "device_pubkey_not_registered" };
 
 	const auth = request.headers.get("authorization") || "";

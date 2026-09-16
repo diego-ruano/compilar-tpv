@@ -965,6 +965,21 @@ export async function getDevicePubKeyB64(
 	return v ? v : null;
 }
 
+/**
+ * La pubkey de un `device_id` esté registrado en el negocio que esté. Sólo para readmitir a una
+ * Main cuya fila pasó a otro negocio (`readmitirMain` en `licensing.helpers.ts`): la identidad del
+ * equipo es la misma en todos, así que su clave también.
+ */
+export async function getDevicePubKeyB64EnCualquierNegocio(
+	db: Client,
+	deviceId: string,
+): Promise<string | null> {
+	const r = await exec(db, `SELECT device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`, [deviceId]);
+	const row = (r.rows?.[0] as any) || null;
+	const v = row ? String(row.device_pubkey_b64 || "").trim() : "";
+	return v ? v : null;
+}
+
 /** Guarda la pubkey solo si está vacía. Si ya hay otra distinta → error (anti-clonado). */
 export async function setDevicePubKeyB64IfEmptyOrThrow(
 	db: Client,
