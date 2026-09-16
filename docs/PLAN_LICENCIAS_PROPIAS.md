@@ -26,22 +26,15 @@
 **Producto único:** una sola “línea” de licencia (`plan = "standard"`) con tres precios (uno por
 duración). Si en el futuro hay más planes, el modelo ya lleva la columna `plan`.
 
-**Sin ventana rota:** la migración del esquema borra las columnas `lemon_*`, que el `activate`
-actual todavía escribe. Por eso el worker se hace **de una sola tanda** (fases 1 y 2 juntas):
-modelo + emisión + `activate` reescrito + `status` firmado + retirada de Lemon en un único
-despliegue. Es viable porque **no hay ninguna licencia real en producción** (campo libre).
-
 ---
 
 ## Índice
 
 1. [Resumen ejecutivo](#1-resumen-ejecutivo)
-2. [Estado actual (inventario de lo que hay que tocar)](#2-estado-actual)
 3. [Arquitectura destino](#3-arquitectura-destino)
 4. [Modelo de datos (control-plane)](#4-modelo-de-datos)
 5. [Seguridad — modelo de amenaza y controles](#5-seguridad)
 6. [Flujos detallados](#6-flujos-detallados)
-7. [Cambios por capa (borrar / modificar / añadir)](#7-cambios-por-capa)
 8. [Configuración de Stripe](#8-configuracion-de-stripe)
 9. [Secretos y variables de entorno](#9-secretos)
 11. [Testing y verificación](#11-testing)
@@ -54,29 +47,20 @@ despliegue. Es viable porque **no hay ninguna licencia real en producción** (ca
 
 ## 1. Resumen ejecutivo
 
-Hoy el licenciamiento delega la **verdad comercial** en Lemon Squeezy: la activación llama a
-`https://api.lemonsqueezy.com/v1/licenses/activate`, y un webhook de Lemon actualiza el estado. La
-clave de licencia es de Lemon; nuestra tabla `licenses` está sembrada de columnas `lemon_*`.
+**Nosotros somos la fuente de verdad** de las licencias: viven en nuestra base de datos de control
+(Turso central), las genera **Stripe** (pago único, 3 duraciones) **o** el **admin a mano**, y el TPV
+las valida contra nuestro worker. El gate está **cerrado criptográficamente** (LIC-01): **el servidor
+firma el estado con ed25519 y el cliente lo verifica contra una clave pública pineada en el
+binario**, así que un *proxy local + CA propia / DNS spoofing* no puede forjar una licencia.
 
-El objetivo es que **nosotros seamos la fuente de verdad**: la licencia vive en nuestra base de datos
-de control (Turso central), la genera **Stripe** (pago único, 3 duraciones) **o** el **admin a mano**,
-y el TPV la valida contra nuestro worker. Además aprovechamos la reescritura para **cerrar la
-vulnerabilidad estructural del gate** (LIC-01): hoy la respuesta de licencia solo se confía a TLS; en
-el diseño nuevo **el servidor firma el estado con ed25519 y el cliente lo verifica contra una clave
-pública pineada en el binario**. Esto elimina el bypass por *proxy local + CA propia / DNS spoofing*.
+Piezas:
 
-Cambios de alto nivel:
-
-- **Fuera Lemon**: se borra `lemonActivate`, `verifyLemonSignature`, el webhook `/v1/webhooks/lemon`,
-  `LemonWebhookPayload`, el secreto `LEMON_WEBHOOK_SECRET` y **todas** las columnas `lemon_*`.
-- **Dentro Stripe** (pago único): un endpoint `POST /v1/stripe/webhook` verifica la firma de Stripe
-  (HMAC-SHA256 manual con SubtleCrypto, mismo patrón que ya se usa con Lemon) y, en
-  `checkout.session.completed`, **minta o extiende** una licencia y **envía la clave por email**
-  (Cloudflare Email Service, ya integrado).
+- **Stripe** (pago único): `POST /v1/stripe/webhook` verifica la firma de Stripe (HMAC-SHA256 manual
+  con SubtleCrypto, sin SDK) y, en `checkout.session.completed`, **minta o extiende** una licencia y
+  **envía la clave por email** (Cloudflare Email Service).
 - **Alta manual**: `POST /v1/admin/licenses` (token admin) minta una clave con la duración elegida.
-- **Activación endurecida**: la clave la valida nuestro worker contra la BD (ya no Lemon); se
-  aprovisiona la BD del tenant (igual que hoy) y se liga la pubkey del dispositivo (anti-copia, igual
-  que hoy). El token de sesión (JWT HS256) se **renueva** en `/status` (se elimina la re-activación
+- **Activación**: la clave la valida nuestro worker contra la BD; se aprovisiona la BD del tenant y
+  se liga la pubkey del dispositivo (anti-copia). El token de sesión (JWT HS256) se **renueva** en `/status` (se elimina la re-activación
   forzada a los 30 días).
 - **Gate criptográficamente cerrado**: `/status` devuelve el estado **firmado (ed25519)**; el cliente
   Rust lo verifica contra la **clave pública pineada** antes de conceder acceso, y **comprueba
@@ -93,56 +77,6 @@ Cambios de alto nivel:
 > **secretos nunca salen del keyring/worker**, y cada control criptográfico (firma, anti-replay,
 > idempotencia, comparación *timing-safe*) es correcto. El anti-tamper del binario es defensa en
 > profundidad proporcional, no una garantía absoluta; se documenta como tal en [§5](#5-seguridad).
-
----
-
-## 2. Estado actual
-
-### 2.1 Mapa de la superficie (lo que existe hoy)
-
-| Capa | Archivo | Rol respecto a licencias |
-|---|---|---|
-| Worker · rutas | [licensing.routes.ts](../apps/cloud-worker-licensing/src/domains/licensing/licensing.routes.ts) | `POST /v1/license/activate`, `GET /v1/license/status`, `POST /v1/webhooks/lemon` |
-| Worker · helpers | [licensing.helpers.ts](../apps/cloud-worker-licensing/src/domains/licensing/licensing.helpers.ts) | `lemonActivate`, `verifyLemonSignature`, `signToken`(HS256 30d), `verifyToken`, `verifyDeviceProof`, `provisionTenantDatabase`, `ensureTenantInitialAdmin` |
-| Worker · store | [licenseStore.ts](../apps/cloud-worker-licensing/src/server/licenseStore.ts) | tabla `licenses` con columnas `lemon_*`, `devices`, `tenants`, `license_instances`, `webhook_events`, `license_meta` |
-| Worker · tipos | [shared.ts](../apps/cloud-worker-licensing/src/shared.ts) | `LicenseStatus`, `ActivateRequest/Response`, `LemonWebhookPayload` |
-| Worker · env | [env.ts](../apps/cloud-worker-licensing/src/env.ts) | `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `LEMON_WEBHOOK_SECRET`, Turso, email (binding `EMAIL`) |
-| Worker · router | [index.ts](../apps/cloud-worker-licensing/src/index.ts) | monta `licenseRoutes` y `lemonWebhookRoutes` |
-| Cripto reutilizable | [server/crypto.ts](../apps/cloud-worker-licensing/src/server/crypto.ts) · [utils/crypto.ts](../apps/cloud-worker-licensing/src/server/utils/crypto.ts) · [utils/nobleEd25519.ts](../apps/cloud-worker-licensing/src/server/utils/nobleEd25519.ts) | `aesGcmEncrypt/Decrypt`, `sha256Hex`, verificación/firma ed25519, HMAC *timing-safe* |
-| Email | [email.routes.ts](../apps/cloud-worker-licensing/src/domains/email/email.routes.ts) | Cloudflare Email Service ya integrado (binding `EMAIL`, reutilizable para enviar la clave) |
-| Cliente Rust · adaptador | [lib.rs](../crates/tpv-infra-licensing/src/lib.rs) | `LicensingAdapter` (activate/gate/`call_status`), `PairingAdapter` |
-| Cliente Rust · identidad | [device.rs](../crates/tpv-infra-licensing/src/device.rs) | device-id + keypair ed25519 en keyring, `sign_device_proof` |
-| Contratos | [tpv-contracts/src/licensing.rs](../crates/tpv-contracts/src/licensing.rs) | `LicenseLocalState`, `LicenseGateResult`, `LicenseActivateInput` |
-| Puerto | [ports/licensing.rs](../crates/tpv-application/src/ports/licensing.rs) | `trait LicensingService` |
-| Caso de uso | [use_cases/licensing.rs](../crates/tpv-application/src/use_cases/licensing.rs) | valida entrada, invoca el servicio |
-| Comandos Tauri | [commands/licensing.rs](../apps/tpv-main/src-tauri/src/commands/licensing.rs) | `license_get_state/clear_state/gate/check_now/activate` |
-| Frontend · gate/activación | [AppBoot.tsx](../apps/tpv-main/src/app/AppBoot.tsx) | formulario de activación inline + gate al arrancar + `listen("license:changed")` + `BlockedScreen` |
-| Pulso periódico del gate | job `licencia` del runner ([jobs/registro.rs](../apps/tpv-main/src-tauri/src/jobs/registro.rs)) | cada 6 h en Rust: revalida, avisa a administradores y emite `license:changed` |
-| Frontend · config | [Licencia.tsx](../apps/tpv-main/src/features/configuracion/sections/Licencia.tsx) | estado real de la licencia: estado, plan, días restantes y dispositivo (lee `license_get_state`, sin red propia) |
-
-> **Control-plane sin migraciones.** El esquema de la BD central de Turso (`tpvcontrol-altarialights`)
-> **se creó a mano** (ver comentario en `licenseStore.ts`: *“Tu schema principal ya lo has creado en
-> Turso”*). No hay `migrations/*.sql` para él (las migraciones de `packages/database` son para la BD
-> **del tenant**, no para el control-plane). Por eso los cambios de columnas de §4 se aplican con un
-> **script SQL de migración versionado** (nuevo) que se ejecuta manualmente contra Turso y se guarda
-> en el repo para trazabilidad.
-
-### 2.2 Bugs/carencias que arrastramos y que este rediseño corrige
-
-De las auditorías [AUDITORIA_LICENCIAS.md](AUDITORIA_LICENCIAS.md) y
-[licensing-pairing.md](analisis/transversal/licensing-pairing.md):
-
-1. 🔴 **Token 30d sin refresco** → re-activación forzada periódica. *(Se corrige: refresco en `/status`.)*
-2. 🟠 **`expires_at` nunca se comprueba** en el gate. *(Se corrige: enforcement + firma.)*
-3. 🟠 **Asientos ilimitados** tras la 1ª activación. *(Se corrige: `expires_at` + 1 Main por licencia, ver §5.6.)*
-4. 🟠 **Un 4xx transitorio borra la licencia local** (p. ej. reloj desajustado → 401). *(Se corrige: clasificación de errores + `refresh` por device-proof.)*
-5. 🟡 **Los datos del formulario de activación se descartan.** *(Se corrige: se persisten en `tenants`/`licenses` o se simplifica el formulario.)*
-6. 🟡 **LIC-01: respuesta de licencia no verificada criptográficamente.** *(Se corrige: firma ed25519 pineada — el núcleo del rediseño.)*
-7. ⚪ **`LICENSE_JWT_SECRET` con triple propósito.** *(Se recomienda separar; ver §9.)*
-
-Ya **no** aplican (eliminados desde la auditoría de junio): `Activacion.tsx`, `api_get_auth_headers`,
-`/v1/license/validate`. `Licencia.tsx` ya no muestra el mock antiguo: desde la fase 4 lee el estado
-real (`license_get_state`).
 
 ---
 
@@ -191,12 +125,13 @@ Principios:
 
 ## 4. Modelo de datos
 
-### 4.1 Tabla `licenses` (destino)
+### 4.1 Tabla `licenses`
 
-Se **eliminan** las columnas `lemon_*` y se añaden las de Stripe/duración. Propuesta:
+Qué significa cada columna. La definición exacta que hay en producción (índices incluidos) está en
+[`docs/sql/control-plane/esquema-actual.sql`](sql/control-plane/esquema-actual.sql).
 
 ```sql
--- CONTROL-PLANE (Turso central). Migración manual versionada en el repo.
+-- CONTROL-PLANE (Turso central).
 CREATE TABLE licenses (
   license_id                 TEXT PRIMARY KEY,      -- uuid v4
   license_key_hash           TEXT NOT NULL UNIQUE,  -- sha256(clave) — indexado
@@ -220,7 +155,7 @@ CREATE TABLE licenses (
   customer_email             TEXT NOT NULL,         -- OBLIGATORIO: destino del OTP
   customer_name              TEXT,
 
-  -- Enlace Stripe (reemplaza lemon_*):
+  -- Enlace Stripe:
   stripe_customer_id         TEXT,
   stripe_checkout_session_id TEXT,                  -- idempotencia de fulfillment
   stripe_payment_intent_id   TEXT,
@@ -292,20 +227,10 @@ emitió fuera de la política comercial (devolver solo sin activar o dentro de l
 ⚠️ **Los tres eventos hay que suscribirlos en el endpoint de webhook del Dashboard de Stripe.** El
 worker solo recibe lo que esté marcado allí: sin eso, este código no llega a ejecutarse.
 
-### 4.2 `webhook_events` (idempotencia) — se conserva y generaliza
+### 4.2 `webhook_events` (idempotencia)
 
-La tabla `webhook_events` (hoy usada para Lemon) se **reutiliza** para Stripe: guarda `event_uid`
-(id del evento de Stripe, único), `event_name`, `payload_json`, `processed_ok`. Es la barrera de
-idempotencia recomendada por Stripe (procesar cada `event.id` una sola vez). Se renombra el campo
-conceptual pero la estructura vale igual.
-
-### 4.3 Retirada de columnas `lemon_*`
-
-`lemon_license_key_id`, `lemon_order_id`, `lemon_order_item_id`, `lemon_customer_id`,
-`lemon_store_id`, `lemon_product_id`, `lemon_created_at`, `lemon_updated_at`, `activation_limit`,
-`instances_count` → **DROP**. Como SQLite/libsql soporta `ALTER TABLE … DROP COLUMN` moderno, el
-script de migración las elimina; si se prefiere conservar histórico, se puede crear `licenses_v2` y
-migrar filas. Recomendación: **DROP** limpio (no hay ventas Lemon reales que preservar).
+Guarda `event_uid` (id del evento de Stripe, único), `event_name`, `payload_json` y `processed_ok`.
+Es la barrera de idempotencia recomendada por Stripe (procesar cada `event.id` una sola vez).
 
 ---
 
@@ -346,7 +271,7 @@ migrar filas. Recomendación: **DROP** limpio (no hay ventas Lemon reales que pr
 ### 5.2 Verificación del webhook de Stripe (sin bajar la guardia)
 
 - Stripe firma con cabecera `Stripe-Signature: t=<unix>,v1=<hmac_sha256_hex>[,v1=…]`.
-- Verificación (mismo patrón que `verifyLemonSignature`, con SubtleCrypto, **sin** SDK):
+- Verificación (con SubtleCrypto, **sin** SDK):
   1. Parsear `t` y **todos** los `v1`.
   2. `signed_payload = t + "." + rawBody` (**cuerpo crudo**, sin reparsear — cuidado con leer el body
      dos veces en Workers; usar `await c.req.raw.text()` una sola vez).
@@ -534,118 +459,6 @@ tpv-license revoke --license-id …  → status='revoked', disabled=1
 
 ---
 
-## 7. Cambios por capa
-
-Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
-
-### 7.1 Worker `tpv-api`
-
-**Licensing (rutas/helpers):**
-- 🟥 `licensing.helpers.ts`: `lemonActivate`, `verifyLemonSignature`.
-- 🟥 `licensing.routes.ts`: `lemonWebhookRoutes` (todo el bloque `POST /v1/webhooks/lemon`).
-- 🟨 `licensing.routes.ts` · `POST /v1/license/activate`: dejar de llamar a Lemon; validar la clave
-  contra `licenses` (existencia + `status` + no caducada); setear `activated_at`/`expires_at` en la 1ª
-  activación; persistir `tenantInfo`. Mantener `provisionTenantDatabase` + `ensureDevice` +
-  `setDevicePubKeyB64IfEmptyOrThrow`.
-- 🟨 `licensing.routes.ts` · `GET /v1/license/status`: añadir **aserción firmada ed25519** + **refresco
-  del token** + cálculo `warn`/`grace`/`expired` sobre `expires_at`.
-- 🟩 `licensing.routes.ts` · `POST /v1/license/refresh`: nuevo; auth por **device-proof** (decodifica
-  claims del token aunque esté caducado, verifica proof contra la pubkey guardada), reemite token.
-- 🟩 `licensing.routes.ts` · `POST /v1/license/device-change/request`: nuevo (§6.4). Genera el OTP de
-  6 dígitos, guarda su `sha256` en `license_device_otp` (ligado al `deviceId` que pide el cambio,
-  10 min, máx 5 intentos) y lo envía a `customer_email`. Respuesta **constante** (mismo 200 exista o
-  no la clave) para no filtrar qué claves son válidas. Rate-limit por clave/IP.
-- 🟨 `licensing.routes.ts` · `POST /v1/license/activate`: acepta `deviceChangeCode` opcional; sin él,
-  si `main_device_id` ya apunta a otro equipo → `409 device_change_required`. Con OTP válido:
-  reasigna `main_device_id`, registra el swap y **avisa por email al titular**.
-- 🟩 `licensing.helpers.ts`: `signLicenseAssertion(env, fields)` (ed25519 con
-  `LICENSE_SIGNING_PRIVATE_KEY`, WebCrypto `crypto.subtle.sign({name:'Ed25519'})` o `@noble/ed25519`),
-  `computeLicenseState(license, now)` (deriva `active/expired/warn/grace`) y los helpers del OTP
-  (`issueDeviceOtp`, `verifyDeviceOtp` — hash + caducidad + intentos, comparación *timing-safe*).
-
-**Stripe (nuevo dominio):**
-- 🟩 `src/domains/stripe/stripe.routes.ts`: `POST /v1/stripe/webhook` (verificación manual de firma,
-  idempotencia, fulfillment: mint/extend + email).
-- 🟩 `src/domains/stripe/stripe.helpers.ts`: `verifyStripeSignature(rawBody, header, secret)`,
-  `priceIdToTermMonths(priceId)` (mapa de los 3 Prices → 1/3/12), `retrieveSession(expand line_items)`
-  (REST `GET https://api.stripe.com/v1/checkout/sessions/:id` con `Authorization: Bearer
-  STRIPE_SECRET_KEY`; sin SDK, form-style como el `lemonActivate` actual).
-
-**Admin (nuevo dominio):**
-- 🟩 `src/domains/admin/admin.routes.ts`: `POST /v1/admin/licenses` (issue), `GET /v1/admin/licenses`
-  (list), `POST /v1/admin/licenses/:id/revoke`, `POST /v1/admin/licenses/:id/extend`. `email` es
-  **obligatorio** en el issue; `sendKey` decide si además se le manda la clave por correo.
-- 🟩 `src/middleware/requireAdmin.ts`: Bearer con comparación **timing-safe** contra `ADMIN_API_TOKEN`;
-  fail-closed si el secreto no está configurado. 🟨 De paso, `updates.routes.ts` (`checkAdmin`) pasa a
-  usarlo: hoy compara el token con `!==` (no *timing-safe*) y mantiene su propio secreto.
-- 🟩 `scripts/tpv-license.mjs` (raíz del repo, **fuera** del workspace/Turbo) + scripts de pnpm
-  (`license:issue`, `license:list`, `license:revoke`, `license:extend`). Lee `ADMIN_API_TOKEN` del
-  entorno del admin; nunca se hardcodea ni se versiona.
-
-**Store / tipos / env / router:**
-- 🟨 `licenseStore.ts`: quitar columnas `lemon_*` de `LicenseRow`, del `INSERT`/`ON CONFLICT` de
-  `upsertLicenseFromEventOrActivation`; renombrar/reenfocar a `issueLicense`, `extendLicense`,
-  `activateLicense`, `getLicenseByHash`, `getLicenseByStripeCustomer`. Mantener `ensureDevice`,
-  `setDevicePubKeyB64IfEmptyOrThrow`, `ensureTenantExistsMinimal`, `upsertWebhookEvent`.
-- 🟨 `shared.ts`: 🟥 `LemonWebhookPayload`; 🟨 `LicenseStatus` (alinear a
-  `issued|active|expired|revoked`); 🟩 tipos de la aserción firmada y de admin.
-- 🟨 `env.ts`: 🟥 `LEMON_WEBHOOK_SECRET`; 🟩 `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  `LICENSE_SIGNING_PRIVATE_KEY`, `ADMIN_API_TOKEN`.
-- 🟨 `index.ts`: 🟥 `lemonWebhookRoutes` (mount + import); 🟩 `app.route("/v1/stripe", stripeRoutes)` y
-  `app.route("/v1/admin", adminRoutes)`.
-- 🟨 `wrangler.json`: sin cambios de secretos (van por `wrangler secret put`); revisar `vars`.
-
-**Migración de esquema (control-plane):**
-- 🟩 Hecho a mano contra Turso; la estructura resultante está en
-  `docs/sql/control-plane/esquema-actual.sql` (ver §16.2).
-
-### 7.2 Cliente Rust (`crates/*`)
-
-- 🟨 [tpv-contracts/src/licensing.rs](../crates/tpv-contracts/src/licensing.rs):
-  - `LicenseLocalState`: 🟩 `expires_at_ms: Option<i64>`, `plan`, `warn`/`grace` derivados si se
-    quieren cachear. `expires_at` sigue como string informativo.
-  - 🟩 `LicenseGateResult`: enriquecer `reason` con `warn`/`expiry_grace`/`expired`/`bad_signature`
-    (strings estables — el frontend los compara por igualdad).
-  - 🟨 `LicenseActivateInput`: dejar obligatorio `display_name`; el resto (`legal_name/email/phone/
-    country`) opcional (ahora **sí** se persisten). Regenerar bindings (`pnpm generate-types`).
-- 🟨 [tpv-infra-licensing/src/lib.rs](../crates/tpv-infra-licensing/src/lib.rs):
-  - 🟩 `const LICENSE_SIGNING_PUBLIC_KEY_B64` (pineada) + verificación ed25519 en `call_status`.
-  - 🟨 `server_allows_use`: añadir chequeo de `expires_at` y de firma. 🟨 `gate_inner`: mapear
-    `warn`/`grace`. 🟨 clasificación de errores (no borrar en 401 de reloj/token; llamar a `refresh`).
-  - 🟨 unificar `LICENSE_API_BASE`/`TPV_SERVER_BASE` en una sola constante (LIC-06).
-- ⬜ [device.rs](../crates/tpv-infra-licensing/src/device.rs): **sin cambios** (identidad y proof se
-  reutilizan tal cual).
-- 🟨 [ports/licensing.rs](../crates/tpv-application/src/ports/licensing.rs) +
-  [use_cases/licensing.rs](../crates/tpv-application/src/use_cases/licensing.rs): 🟩 método `refresh`
-  si se expone como comando; validaciones de entrada. Cambios mínimos (la lógica vive en el adaptador).
-
-### 7.3 Comandos Tauri
-
-- 🟨 [commands/licensing.rs](../apps/tpv-main/src-tauri/src/commands/licensing.rs): sin cambios de firma
-  para `license_get_state/gate/check_now/activate/clear_state`. 🟩 opcional `license_refresh` (si no se
-  hace transparente dentro del gate). Registrar en `main.rs` si se añade.
-
-### 7.4 Frontend
-
-- 🟨 [AppBoot.tsx](../apps/tpv-main/src/app/AppBoot.tsx):
-  - Formulario de activación: mantener clave + nombre negocio; el resto de campos pasan a **opcionales**
-    (o se recortan) — coherente con que ahora **sí** se guardan (bug #5). `activationValid` se ajusta.
-  - `BlockedScreen`: textos por `reason` (`expired`, `revoked`, `bad_signature`, `offline_expired`).
-  - 🟩 Banner de aviso de caducidad (`warn` / `expiry_grace`) con CTA “Renovar” (link a la web de
-    compra). Reutiliza `UpdateBanner` como patrón visual.
-- 🟨 [Licencia.tsx](../apps/tpv-main/src/features/configuracion/sections/Licencia.tsx): cablear a
-  `license_get_state` real → mostrar plan, estado, **días restantes**, `expires_at`, `key_short`,
-  dispositivo, y botón “Renovar/Introducir clave”. Fin del *placeholder*.
-
-### 7.5 Documentación / config
-
-- 🟨 [CLAUDE.md](../CLAUDE.md): §4.5 y §referencias a licensing → describir Stripe en vez de Lemon.
-- 🟨 [BACKLOG.md](analisis/BACKLOG.md): cerrar LIC-01/02/06 al implementarse; enlazar este plan.
-- 🟨 [AUDITORIA_LICENCIAS.md](AUDITORIA_LICENCIAS.md) / [licensing-pairing.md](analisis/transversal/licensing-pairing.md):
-  nota de “superseded by este plan” (histórico).
-
----
-
 ## 8. Configuración de Stripe
 
 1. **Producto y precios (test primero).** Un producto “TPV — Licencia” con **3 Prices** *one-time*:
@@ -668,7 +481,7 @@ Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
 
 ## 9. Secretos
 
-**Añadir (worker, vía `wrangler secret put`):**
+**Del sistema de licencias (worker, vía `wrangler secret put`):**
 
 | Secreto | Qué es |
 |---|---|
@@ -676,8 +489,6 @@ Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
 | `STRIPE_WEBHOOK_SECRET` | `whsec_…` — verificar la firma del webhook. |
 | `LICENSE_SIGNING_PRIVATE_KEY` | seed ed25519 (32 bytes, base64) — firmar el estado de licencia. |
 | `ADMIN_API_TOKEN` | ≥ 256 bits — auth del endpoint admin (comparación *timing-safe*). |
-
-**Quitar:** `LEMON_WEBHOOK_SECRET`.
 
 **Constante pineada en el binario Rust:** `LICENSE_SIGNING_PUBLIC_KEY_B64` (la pública del par de
 firma; **no** es secreto, pero es **integridad crítica** — cambiarla invalida clientes).
@@ -734,7 +545,6 @@ console.log("LICENSE_SIGNING_PUBLIC_KEY_B64 =", b64(pub)); // → constante en l
 |---|---|---|
 | **Reloj del cliente** | El gate depende del reloj local para `expires_at`/gracia; un reloj adelantado “gana” días. | El servidor es autoritativo cuando hay red (firma `serverNow`); offline se tolera con la gracia acotada. Registrar desfases grandes. |
 | **Extensión por email vs clave** | Casar renovaciones por `stripe_customer_id` requiere que el Payment Link cree/enlace el Customer. | Activar “crear cliente” en Stripe; *fallback* a clave nueva si no hay match. |
-| **Migración destructiva** | `DROP COLUMN lemon_*` es irreversible. | Backup de la tabla `licenses` antes; no hay ventas Lemon reales que preservar. |
 | **Rotación de la clave de firma** | Cambiar la pública pineada invalida binarios viejos. | Pinear 2 claves (actual+siguiente) durante la ventana de rotación. |
 | **Anti-tamper del binario (LIC-04)** | Inherente a un gate en cliente. | Documentado; invertir en ofuscación solo si el valor lo justifica. |
 | **`LICENSE_JWT_SECRET` triple** | Acopla rotaciones (#10). | Separar en 3 secretos (mejora, no bloqueante). |
@@ -806,9 +616,6 @@ pnpm exec wrangler secret put ADMIN_API_TOKEN
 # 3. Stripe (empieza en modo TEST)
 pnpm exec wrangler secret put STRIPE_SECRET_KEY             # sk_test_… / sk_live_…
 pnpm exec wrangler secret put STRIPE_WEBHOOK_SECRET         # whsec_…
-
-# 4. Fuera el de Lemon
-pnpm exec wrangler secret delete LEMON_WEBHOOK_SECRET
 ```
 
 Ya existentes y que **siguen igual**: `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`, `TURSO_*`,

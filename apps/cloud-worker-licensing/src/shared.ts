@@ -3,7 +3,7 @@
 // Tipos que cruzan la frontera del worker de licencias (los consume el cliente Rust en
 // `crates/tpv-infra-licensing`). Cambiar un nombre de campo aquí rompe la app: son contrato.
 
-/** Ciclo de vida de una licencia en NUESTRO control-plane (ya no el de Lemon). */
+/** Ciclo de vida de una licencia en nuestro control-plane. */
 export type LicenseStatus =
 	| "issued" // emitida (comprada o alta manual), aún sin activar: el reloj no corre
 	| "active" // activada en un Main; corre hasta expires_at_ms

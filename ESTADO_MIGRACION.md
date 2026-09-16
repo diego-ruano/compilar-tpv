@@ -14,8 +14,8 @@ Los dos workers se han **unificado en uno solo**: `apps/cloud-worker-licensing/`
 
 - `tpv-api` reúne: API Hono (enrutador + subenrutadores), el DO **TenantHub** (movido desde el
   worker viejo, ahora resuelve credenciales de Turso en local con caché TTL en vez de la llamada
-  HTTP cruzada entre workers), **pairing** (`/v1/pair/*`), revoke, WS y el licensing legacy
-  (`/v1/license/*`, webhook Lemon) vía fallthrough mientras se migra a Hono.
+  HTTP cruzada entre workers), **pairing** (`/v1/pair/*`), revoke, WS y las licencias
+  (`/v1/license/*`, `/v1/stripe/*`, `/v1/admin/*`).
 - **Schema único**: los ficheros `packages/database/migrations/*.sql` (aplicados en orden) los
   consumen la app (Rust, `include_dir!` en `migrations.rs`) y el worker (`tenantMigrations.ts`).
   Limpiadas las tablas muertas de la antigua capa `dualCall`.

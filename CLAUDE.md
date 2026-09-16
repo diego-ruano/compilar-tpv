@@ -156,9 +156,11 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 - Los dos Cloudflare Workers se **fusionaron en uno solo**: `apps/cloud-worker-licensing/` (nombre
   desplegado `tpv-api`; la carpeta conserva el nombre `cloud-worker-licensing`). El antiguo
   `cloud-worker-api` (`tpv-server`) se **eliminó**.
-- `tpv-api` sirve: API Hono (`src/index.ts` → enrutador + subenrutadores en `src/routes/`), el DO
-  **TenantHub** (`src/durableObjects/`), **pairing** (`/v1/pair/*`), revoke, WS (`/ws`) y el
-  licensing legacy (`/v1/license/*`, `/v1/webhooks/lemon`) vía `app.all("*")` mientras se migra a Hono.
+- `tpv-api` sirve: API Hono (`src/index.ts` → enrutador + subenrutadores en `src/routes/` y
+  `src/domains/`), el DO **TenantHub** (`src/durableObjects/`), **pairing** (`/v1/pair/*`), revoke,
+  WS (`/ws`) y las **licencias**: activación y estado (`/v1/license/*`), compra por Stripe
+  (`/v1/stripe/*`) y alta manual (`/v1/admin/*`). Diseño en
+  [docs/PLAN_LICENCIAS_PROPIAS.md](docs/PLAN_LICENCIAS_PROPIAS.md).
 - El cliente Rust (`tpv-infra-licensing`) apunta a `https://tpv-api.altarialights.workers.dev`
   (constantes `LICENSE_API_BASE` y `TPV_SERVER_BASE`, ambas al mismo host).
 - **La base central (control-plane) no cambia de estructura desde el código.** Licencias,

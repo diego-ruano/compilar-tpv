@@ -176,7 +176,7 @@ app.route("/v1/email", emailRoutes);
 app.route("/v1/telemetry", telemetryRoutes);
 
 // ---------------- Licencias ----------------
-// Sistema PROPIO (ya no Lemon Squeezy): activación, cambio de dispositivo por OTP, estado
+// Sistema propio: activación, cambio de dispositivo por OTP, estado
 // firmado con ed25519 y refresco de token. Lo consume el cliente Rust (tpv-infra-licensing).
 app.route("/v1/license", licenseRoutes);
 

@@ -220,15 +220,17 @@ CREATE TABLE admin_audit (
   at_ms      INTEGER NOT NULL
 );
 
--- Idempotencia de los webhooks de pago (hoy Stripe; los comentarios de columna son de Lemon).
+-- Idempotencia de los webhooks de Stripe: cada `event.id` se procesa una sola vez.
+-- (Los comentarios de columna son de esta foto; los de la tabla en Turso son antiguos y no se
+-- pueden cambiar sin recrearla.)
 CREATE TABLE webhook_events (
-  event_uid        TEXT PRIMARY KEY,  -- lo generas tú (ej: sha256(sig + body))
-  event_name       TEXT NOT NULL,      -- meta.event_name o header x-event-name
-  resource_type    TEXT,              -- "license-keys" etc
-  resource_id      TEXT,              -- payload.data.id
-  sig_hex          TEXT,              -- X-Signature
-  body_sha256      TEXT,              -- sha256(body)
-  payload_json     TEXT NOT NULL,      -- body completo (o recortado)
+  event_uid        TEXT PRIMARY KEY,  -- id del evento de Stripe (event.id)
+  event_name       TEXT NOT NULL,      -- tipo del evento: checkout.session.completed, charge.refunded…
+  resource_type    TEXT,              -- el objeto del evento: "checkout.session", "charge", "dispute"
+  resource_id      TEXT,              -- id de ese objeto
+  sig_hex          TEXT,              -- SIN USO: la firma de Stripe se verifica y no se guarda (NULL)
+  body_sha256      TEXT,              -- sha256 del cuerpo crudo
+  payload_json     TEXT NOT NULL,      -- el cuerpo completo
   received_at_ms   INTEGER NOT NULL DEFAULT (unixepoch()*1000),
   processed_at_ms  INTEGER,
   processed_ok     INTEGER NOT NULL DEFAULT 0 CHECK (processed_ok IN (0,1)),
