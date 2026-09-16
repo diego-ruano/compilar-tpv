@@ -4,31 +4,37 @@
 // Main lo apruebe y guardar el token. Es el único camino por el que un Handy empieza a trabajar, y
 // sus fallos no se ven hasta que alguien intenta vincular uno con el cliente delante.
 //
-// Se prueba con dobles del IPC y de la nube y el reloj de Vitest, así que los tres minutos de espera
+// Se prueba con dobles del IPC y de la nube y el reloj de Vitest, así que los minutos de espera
 // pasan en milisegundos.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+	cancelarEmparejamiento,
 	emparejarHandy,
 	ESPERA_ENTRE_CONSULTAS_MS,
-	ESPERA_MAXIMA_APROBACION_MS,
+	ESPERA_SI_LA_NUBE_NO_LO_DICE_MS,
 	type DependenciasEmparejamiento,
 } from "../src/app/arranque/emparejamiento";
 
 const CLAVE = "P".repeat(44);
 const CODIGO = { pairCode: "123456", pairSecret: "s3cr3t" };
+/** Lo que le queda al código según la nube, en los dobles. */
+const CADUCA_EN_MS = 30_000;
 
 /** Un IPC y una nube en memoria. La Main aprueba tras `pendientesAntesDeAprobar` consultas. */
 function crearDobles() {
 	const estado = {
 		identidad: { deviceId: "h1", devicePubkeyB64: CLAVE } as Record<string, unknown>,
-		respuestaClaim: { nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999 } as Record<string, unknown>,
+		respuestaClaim: { nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999, caducaEnMs: CADUCA_EN_MS } as Record<string, unknown>,
 		respuestaToken: { tenantId: "t1", token: "jwt" } as Record<string, unknown>,
 		pendientesAntesDeAprobar: 2,
 		errorAlConsultar: null as unknown,
 		consultas: [] as Record<string, unknown>[],
 		claims: [] as Record<string, unknown>[],
+		cancelaciones: [] as Record<string, unknown>[],
+			/** Se ejecuta justo antes de contestar a una consulta: sirve para cancelar «mientras vuelve». */
+		antesDeContestar: null as null | (() => void),
 		tokenGuardado: null as unknown,
 		pendiente: null as unknown,
 		vivo: true,
@@ -54,7 +60,12 @@ function crearDobles() {
 				if (estado.consultas.length <= estado.pendientesAntesDeAprobar) {
 					throw { code: "not_approved", message: "Emparejamiento pendiente de aprobación" };
 				}
+				estado.antesDeContestar?.();
 				return estado.respuestaToken;
+			}
+			if (ruta === "/v1/pair/cancel") {
+				estado.cancelaciones.push(cuerpo);
+				return { ok: true, liberado: true };
 			}
 			throw new Error(`ruta inesperada ${ruta}`);
 		}) as DependenciasEmparejamiento["pedirALaNube"],
@@ -141,15 +152,74 @@ describe("emparejar un Handy", () => {
 		expect(estado.tokenGuardado).toBeNull();
 	});
 
-	it("sin aprobación en tres minutos, se rinde", async () => {
+	it("espera lo que la nube dice que le queda al código, y entonces se rinde", async () => {
+		// Antes era una constante de 3 minutos contra un reto que caducaba a los 2: si la Main
+		// aprobaba en el tercer minuto, la Handy fallaba igual.
 		const { estado, deps } = crearDobles();
 		estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
 		const resultado = arrancar(deps);
-		await vi.advanceTimersByTimeAsync(ESPERA_MAXIMA_APROBACION_MS + ESPERA_ENTRE_CONSULTAS_MS);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS + ESPERA_ENTRE_CONSULTAS_MS);
+
+		const { error } = await resultado;
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain("caducado");
+		expect(estado.consultas.length).toBe(CADUCA_EN_MS / ESPERA_ENTRE_CONSULTAS_MS);
+		expect(estado.tokenGuardado).toBeNull();
+	});
+
+	it("una aprobación en el último tramo del plazo todavía entra", async () => {
+		const { estado, deps } = crearDobles();
+		estado.pendientesAntesDeAprobar = CADUCA_EN_MS / ESPERA_ENTRE_CONSULTAS_MS - 1;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS);
+
+		expect((await resultado).valor).toEqual({ tenantId: "t1", token: "jwt", deviceId: "h1" });
+	});
+
+	it("si la nube no dice cuánto le queda al código, espera dos minutos", async () => {
+		const { estado, deps } = crearDobles();
+		estado.respuestaClaim = { nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999 };
+		estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(ESPERA_SI_LA_NUBE_NO_LO_DICE_MS + ESPERA_ENTRE_CONSULTAS_MS);
 
 		expect((await resultado).error).toBeInstanceOf(Error);
-		expect(estado.consultas.length).toBe(ESPERA_MAXIMA_APROBACION_MS / ESPERA_ENTRE_CONSULTAS_MS);
+		expect(estado.consultas.length).toBe(ESPERA_SI_LA_NUBE_NO_LO_DICE_MS / ESPERA_ENTRE_CONSULTAS_MS);
+	});
+
+	it("cancelar mientras vuelve la aprobación no deja el token guardado a escondidas", async () => {
+		const { estado, deps } = crearDobles();
+		estado.pendientesAntesDeAprobar = 0;
+		estado.antesDeContestar = () => {
+			estado.vivo = false;
+		};
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS);
+
+		expect(await resultado).toEqual({ valor: null, error: null });
 		expect(estado.tokenGuardado).toBeNull();
+	});
+
+	it("cancelar suelta el código en la nube, firmado con el reto y marcado como cancelación", async () => {
+		const { estado, deps } = crearDobles();
+		await cancelarEmparejamiento(
+			{ pairCode: "123456", pairSecret: "", nonceB64: "bm9uY2U=", nonceExpiresAtMs: 999 },
+			deps,
+		);
+
+		const [cancelacion] = estado.cancelaciones as { ts: number }[];
+		expect(cancelacion).toEqual({
+			pairCode: "123456",
+			deviceId: "h1",
+			nonceB64: "bm9uY2U=",
+			ts: cancelacion.ts,
+			// La acción va dentro de lo firmado: la firma de una consulta no puede servir para cancelar.
+			sigB64: `firma:${cancelacion.ts}
+PAIR_CANCEL
+123456
+bm9uY2U=
+h1`,
+		});
 	});
 
 	it("si la pantalla se va mientras espera, deja de preguntar y no guarda nada", async () => {
@@ -158,7 +228,7 @@ describe("emparejar un Handy", () => {
 		const resultado = arrancar(deps);
 		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS * 2);
 		estado.vivo = false;
-		await vi.advanceTimersByTimeAsync(ESPERA_MAXIMA_APROBACION_MS);
+		await vi.advanceTimersByTimeAsync(CADUCA_EN_MS);
 
 		expect(await resultado).toEqual({ valor: null, error: null });
 		expect(estado.consultas).toHaveLength(2);
@@ -203,7 +273,7 @@ describe("emparejar un Handy", () => {
 			const { estado, deps } = crearDobles();
 			estado.pendientesAntesDeAprobar = Number.POSITIVE_INFINITY;
 			const resultado = arrancar(deps);
-			await vi.advanceTimersByTimeAsync(ESPERA_MAXIMA_APROBACION_MS + ESPERA_ENTRE_CONSULTAS_MS);
+			await vi.advanceTimersByTimeAsync(CADUCA_EN_MS + ESPERA_ENTRE_CONSULTAS_MS);
 			mensajes.push(((await resultado).error as Error).message);
 		}
 		{
@@ -236,7 +306,7 @@ describe("emparejar un Handy", () => {
 	it("entiende los nombres de campo en snake_case que manda Rust o el worker", async () => {
 		const { estado, deps } = crearDobles();
 		estado.identidad = { device_id: "h1", device_pubkey_b64: CLAVE };
-		estado.respuestaClaim = { nonce_b64: "bm9uY2U=", nonce_expires_at_ms: 999 };
+		estado.respuestaClaim = { nonce_b64: "bm9uY2U=", nonce_expires_at_ms: 999, caducaEnMs: CADUCA_EN_MS };
 		estado.respuestaToken = { tenant_id: "t1", token: "jwt" };
 		estado.pendientesAntesDeAprobar = 0;
 		const resultado = arrancar(deps);

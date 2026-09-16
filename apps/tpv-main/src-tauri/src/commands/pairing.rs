@@ -39,13 +39,15 @@ fn svc(app: &AppHandle) -> Result<PairingAdapter, String> {
    secas, un equipo nuevo no podría emparejarse jamás.
 
    Por eso la regla va **por ruta y fallando cerrado**: todo `/v1/pair/…` y `/v1/device/…`
-   exige Administrador, salvo los dos pasos del emparejamiento que el Handy da sin sesión. Es
+   exige Administrador, salvo los pasos del emparejamiento que el Handy da sin sesión. Es
    un prefijo y no una lista de rutas exactas a propósito: una ruta de administración que se
    añada mañana queda cubierta sola, que es lo contrario de lo que hace una lista blanca. */
 
-/// Los dos pasos que da el Handy que se está emparejando, cuando todavía no hay sesión que
-/// exigirle. Van firmados como `anon`, así que el worker sólo les deja llegar hasta aquí.
-const PAIRING_SIN_SESION: [&str; 2] = ["/v1/pair/claim", "/v1/pair/fetch-token"];
+/// Los pasos que da el Handy que se está emparejando, cuando todavía no hay sesión que
+/// exigirle: reclamar el código, recoger el token y cancelar la espera. Van firmados como `anon`,
+/// así que el worker sólo les deja llegar hasta aquí (y los dos últimos, firmados además por la
+/// clave del dispositivo que reclamó).
+const PAIRING_SIN_SESION: [&str; 3] = ["/v1/pair/claim", "/v1/pair/fetch-token", "/v1/pair/cancel"];
 
 /// ¿Esta ruta del proxy es administración de dispositivos?
 ///
@@ -160,6 +162,7 @@ mod tests_gate_del_proxy {
             "/v1/device/revoke",
             "/v1/device/list",
             "/v1/pair/approve",
+            "/v1/pair/reject",
             "/v1/pair/pending",
             // Una ruta de administración que todavía no existe: el prefijo la cubre sola.
             "/v1/device/lo-que-venga",
@@ -185,11 +188,12 @@ mod tests_gate_del_proxy {
     }
 
     /// El caso que impide el callejón sin salida: el Handy que se empareja no tiene sesión
-    /// —ni puede tenerla— y estos dos pasos son todo su camino.
+    /// —ni puede tenerla— y estos pasos son todo su camino.
     #[test]
-    fn los_dos_pasos_del_emparejamiento_pasan_sin_sesion() {
+    fn los_pasos_del_emparejamiento_pasan_sin_sesion() {
         assert!(!ruta_de_administracion("/v1/pair/claim"));
         assert!(!ruta_de_administracion("/v1/pair/fetch-token"));
+        assert!(!ruta_de_administracion("/v1/pair/cancel"));
     }
 
     /// El resto del worker no pasa por este gate: no es un candado a la nube entera.

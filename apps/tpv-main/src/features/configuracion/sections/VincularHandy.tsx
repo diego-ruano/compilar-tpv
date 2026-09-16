@@ -12,6 +12,7 @@ import {
 	useAprobarHandy,
 	useDispositivosVinculados,
 	usePairPendientes,
+	useRechazarHandy,
 	useRevocarHandy,
 } from "../pairingQueries";
 import { conAviso } from "../../../shared/lib/conAviso";
@@ -81,6 +82,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 	const pendientes = usePairPendientes();
 	const vinculados = useDispositivosVinculados();
 	const aprobar = useAprobarHandy();
+	const rechazar = useRechazarHandy();
 	const revocar = useRevocarHandy();
 
 	const pending = pendientes.data ?? [];
@@ -88,13 +90,15 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 
 	// El cartel rojo sale cuando la consulta está EN error (React Query ya ha reintentado): un
 	// tropiezo suelto no debe pintar un error que se va solo, porque enseña a ignorarlos. Lo que
-	// sí se enseña siempre es el fallo de una acción del usuario —aprobar o desvincular—, que
-	// pulsó él y necesita saber si salió.
+	// sí se enseña siempre es el fallo de una acción del usuario —aprobar, rechazar o
+	// desvincular—, que pulsó él y necesita saber si salió.
 	const pendingErr = pendientes.isError
 		? toAppError(pendientes.error).message
 		: aprobar.isError
 			? toAppError(aprobar.error).message
-			: null;
+			: rechazar.isError
+				? toAppError(rechazar.error).message
+				: null;
 
 	const linkedErr = vinculados.isError
 		? toAppError(vinculados.error).message
@@ -102,7 +106,7 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 			? toAppError(revocar.error).message
 			: null;
 
-	const pendingBusy = aprobar.isPending;
+	const pendingBusy = aprobar.isPending || rechazar.isPending;
 	const revokingId = revocar.isPending ? revocar.variables : null;
 
 	function approve(code: string) {
@@ -408,6 +412,12 @@ export function VincularHandy({ darkMode }: { darkMode: boolean }) {
 														</div>
 
 														<div className="flex gap-2 shrink-0">
+															<GhostButton
+																disabled={pendingBusy}
+																onClick={() => rechazar.mutate(p.pairCode)}
+															>
+																Rechazar
+															</GhostButton>
 															<PrimaryButton
 																disabled={pendingBusy}
 																onClick={() => approve(p.pairCode)}

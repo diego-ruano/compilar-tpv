@@ -19,6 +19,7 @@ import { describe, it, expect } from "vitest";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
+import { ensurePairingSchema } from "../src/server/endpoints/rest/pairing/pairing.esquema";
 import { bytesToB64 } from "../src/server/utils/base64";
 
 const CODIGO = "123456";
@@ -26,37 +27,6 @@ const DEVICE_A = "device-a";
 const DEVICE_B = "device-b";
 const PUB_A = bytesToB64(new Uint8Array(32).fill(1));
 const PUB_B = bytesToB64(new Uint8Array(32).fill(2));
-
-/**
- * Las tablas del control-plane viven en Turso y no están en el repo (se crearon a mano), así que
- * aquí se replican SOLO las columnas que toca el claim. Si algún día divergen, lo que falla es
- * producción, no este test: por eso las columnas se copian de los INSERT/SELECT reales
- * (pairCreate.ts y pairPending.ts).
- */
-const ESQUEMA = [
-	`CREATE TABLE IF NOT EXISTS pair_requests (
-		pair_code                 TEXT PRIMARY KEY,
-		secret_hash               TEXT,
-		tenant_id                 TEXT,
-		created_by_device_id      TEXT,
-		status                    TEXT,
-		created_at_ms             INTEGER,
-		expires_at_ms             INTEGER,
-		used_at_ms                INTEGER,
-		claimed_at_ms             INTEGER,
-		claimed_by_device_id      TEXT,
-		claimed_device_pubkey_b64 TEXT,
-		claimed_device_name       TEXT,
-		attempts                  INTEGER NOT NULL DEFAULT 0,
-		last_attempt_at_ms        INTEGER
-	);`,
-	`CREATE TABLE IF NOT EXISTS device_challenges (
-		device_id     TEXT,
-		nonce_b64     TEXT,
-		expires_at_ms INTEGER,
-		created_at_ms INTEGER
-	);`,
-];
 
 function peticion(cuerpo: Record<string, unknown>, ip: string): Request {
 	return new Request("https://api.test/v1/pair/claim", {
@@ -82,7 +52,9 @@ async function reclamar(
 ): Promise<Resultado[]> {
 	return enElHub(nombreHub, async (hub: any) => {
 		const sql = hub.state.storage.sql;
-		for (const ddl of ESQUEMA) sql.exec(ddl);
+		const db = clienteSobre(sql);
+		// El esquema declarado, el mismo que crea el worker: no una copia que pueda divergir.
+		await ensurePairingSchema(db);
 		sql.exec("DELETE FROM pair_requests;");
 
 		const ahora = Date.now();
@@ -98,7 +70,6 @@ async function reclamar(
 			ahora + 10 * 60 * 1000,
 		);
 
-		const db = clienteSobre(sql);
 		const salida: Resultado[] = [];
 
 		for (const [i, c] of claims.entries()) {

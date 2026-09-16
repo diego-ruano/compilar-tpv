@@ -13,7 +13,7 @@ async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	}
 }
 
-function isAuthError(msg: string): boolean {
+export function isAuthError(msg: string): boolean {
 	return (
 		msg.includes("missing_token") ||
 		msg.includes("invalid_token") ||
@@ -91,7 +91,9 @@ export async function handlePairApprove(
 				args: [pairCode, tenantId],
 			});
 
-			return json({ ok: false, error: "expired" }, 410, req);
+			// `pair_code_expired` y no `expired`: ése es el alias de licencia caducada del catálogo, y
+			// la Main habría leído «La licencia ha caducado» al aprobar un código viejo.
+			return json({ ok: false, error: "pair_code_expired" }, 410, req);
 		}
 
 		const status = String(pr.status || "").trim().toLowerCase();

@@ -150,11 +150,20 @@ export default function EmparejarHandy({
 							</div>
 
 							{estado.step === "waiting_approval" ? (
-								<div className="rounded-2xl border border-warning bg-warning-soft px-4 py-3 text-sm text-fg" role="status">
-									<p className="font-semibold">Esperando aprobación en el TPV…</p>
-									<p className="mt-1 text-xs text-fg-muted">
-										Código <span className="font-mono font-bold text-fg">{estado.pairCode}</span>
-									</p>
+								<div
+									className="flex items-center justify-between gap-3 rounded-2xl border border-warning bg-warning-soft px-4 py-3 text-sm text-fg"
+									role="status"
+								>
+									<div>
+										<p className="font-semibold">Esperando aprobación en el TPV…</p>
+										<p className="mt-1 text-xs text-fg-muted">
+											Código <span className="font-mono font-bold text-fg">{estado.pairCode}</span>
+										</p>
+									</div>
+									{/* Sin esto, un código equivocado dejaba la pantalla esperando hasta que caducara. */}
+									<Button variant="secondary" size="sm" onClick={emparejamiento.cancelar}>
+										Cancelar
+									</Button>
 								</div>
 							) : null}
 

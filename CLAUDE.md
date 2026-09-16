@@ -683,6 +683,31 @@ no sólo en dev.
     con una columna numérica. Un panel que siempre grita es un panel apagado.
   - **El informe va a Axiom, no al usuario.** Un descuadre no lo puede atender quien está delante
     del TPV. Él sólo ve la consecuencia, en Conectividad.
+- **Emparejar una Handy** (`routes/pairing.ts` en el worker, `app/arranque/emparejamiento.ts` en la
+  Handy, Configuración → Vincular Handy en la Main). La Handy reclama un código de 6 cifras, la Main
+  lo aprueba o lo rechaza, y la Handy recoge su token firmando con su clave. Reglas al tocarlo:
+  - **El reto vive lo que el código, y la Handy espera lo que dice la nube** (`caducaEnMs`, en
+    relativo, para no depender de que los dos relojes coincidan). Eran dos plazos distintos —un reto
+    de 2 minutos y una espera de 3— y una aprobación en el tercer minuto dejaba el código gastado
+    sin que nadie tuviera el token.
+  - **Un dispositivo aprobado puede volver a reclamar su propio código** y recibe un reto nuevo. Es
+    lo que salva una aplicación que se cerró esperando.
+  - **Cancelar en la Handy suelta el código en la nube** (`/v1/pair/cancel`, firmado con la acción
+    `PAIR_CANCEL`). Si sólo parara la espera en pantalla, la solicitud seguiría en la lista de la
+    Main y aprobarla daría de alta un dispositivo que nadie va a usar. Lo ya aprobado no se deshace
+    cancelando: eso sería revocar.
+  - **La acción va dentro de lo que se firma**, para que la firma de una consulta no sirva para
+    cancelar ni al revés. Lo comprueba `pairing.firma.ts`, que comparten las dos rutas anónimas.
+  - **Los fallos esperan por tramos, por IP** (`pairing.intentos.ts`): 3 → 30 s, 6 → 5 min, 9 →
+    30 min, y se olvidan al emparejar bien o tras un día sin fallar. Por IP y no por dispositivo
+    porque el `deviceId` lo elige quien llama; el precio es que las Handy de un bar comparten la
+    cuenta. La espera se mira antes de leer el código, o un intento bloqueado seguiría diciendo si
+    existe. Una petición mal formada no cuenta: es un cliente roto, no alguien probando códigos.
+  - **Sus tablas se declaran en `pairing.esquema.ts`** y se crean si faltan; antes no estaban en el
+    repo. `devices` sigue sin declarar: la comparte la autenticación.
+  - **Las rutas anónimas nuevas hay que eximirlas también en el proxy** (`PAIRING_SIN_SESION` en
+    `commands/pairing.rs`): el resto de `/v1/pair/…` exige Administrador, y sin esa exención la
+    Handy, que no tiene sesión, no podría llamarla.
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el

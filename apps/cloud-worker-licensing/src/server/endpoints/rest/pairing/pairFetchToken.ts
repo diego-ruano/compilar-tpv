@@ -5,9 +5,9 @@ import {
 	estaRevocado,
 	normalizarRol,
 } from "../../../../lib/deviceAuth";
-import { b64ToBytes, bytesToB64 } from "../../../utils/base64";
+import { bytesToB64 } from "../../../utils/base64";
 import { json, serverError } from "../../../utils/response";
-import { ed25519Verify, nobleForceU8 } from "../../../utils/nobleEd25519";
+import { comprobarFirmaDelReclamante, relojFueraDeMargen, sanitizeB64 } from "./pairing.firma";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	try {
@@ -15,20 +15,6 @@ async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	} catch {
 		return fallback;
 	}
-}
-
-function sanitizeB64(input: string): string {
-	let s = String(input || "").trim();
-
-	s = s.replace(/^"+|"+$/g, "");
-	s = s.replace(/\s+/g, "");
-	s = s.replace(/-/g, "+").replace(/_/g, "/");
-
-	const mod = s.length % 4;
-	if (mod === 2) s += "==";
-	else if (mod === 3) s += "=";
-
-	return s;
 }
 
 function rowsAffected(result: any): number {
@@ -147,6 +133,7 @@ export async function handlePairFetchToken(
 	req: Request,
 	env: any,
 	dbCentral: Client,
+	ahoraMs: number = Date.now(),
 ): Promise<Response> {
 	try {
 		const body = await readJsonSafe(req, {
@@ -175,10 +162,9 @@ export async function handlePairFetchToken(
 			return json({ ok: false, error: "missing_proof" }, 400, req);
 		}
 
-		const now = Date.now();
-		const MAX_SKEW_MS = 2 * 60 * 1000;
+		const now = ahoraMs;
 
-		if (Math.abs(now - ts) > MAX_SKEW_MS) {
+		if (relojFueraDeMargen(ts, now)) {
 			return json({ ok: false, error: "timestamp_out_of_range" }, 401, req);
 		}
 
@@ -200,7 +186,15 @@ export async function handlePairFetchToken(
 			return json({ ok: false, error: "pair_code_expired" }, 410, req);
 		}
 
-		if (String(pr.status || "") !== "approved") {
+		const status = String(pr.status || "");
+
+		// Rechazada en la Main: la Handy tiene que enterarse en la siguiente consulta, no seguir
+		// esperando una aprobación que no va a llegar.
+		if (status === "rejected") {
+			return json({ ok: false, error: "pair_rejected" }, 409, req);
+		}
+
+		if (status !== "approved") {
 			return json({ ok: false, error: "not_approved" }, 409, req);
 		}
 
@@ -237,60 +231,18 @@ export async function handlePairFetchToken(
 			return json({ ok: false, error: "device_pubkey_mismatch" }, 401, req);
 		}
 
-		const chRes = await dbCentral.execute({
-			sql: `
-				SELECT *
-				FROM device_challenges
-				WHERE device_id=?
-				  AND nonce_b64=?
-				LIMIT 1;
-			`,
-			args: [deviceId, nonceB64],
+		const problema = await comprobarFirmaDelReclamante(dbCentral, {
+			accion: "PAIR_FETCH",
+			pairCode,
+			deviceId,
+			nonceB64,
+			ts,
+			sigB64: sigB64Raw,
+			pubB64: pubB64Raw,
+			ahoraMs: now,
 		});
-
-		const ch = chRes.rows?.[0] as any | undefined;
-		if (!ch) {
-			return json({ ok: false, error: "challenge_not_found" }, 404, req);
-		}
-
-		if (ch.used_at_ms) {
-			return json({ ok: false, error: "challenge_used" }, 409, req);
-		}
-
-		if (Number(ch.expires_at_ms || 0) < now) {
-			return json({ ok: false, error: "challenge_expired" }, 410, req);
-		}
-
-		const sigB64 = sanitizeB64(sigB64Raw);
-		const pubB64 = sanitizeB64(pubB64Raw);
-
-		let sigU8: Uint8Array;
-		let pubU8: Uint8Array;
-
-		try {
-			sigU8 = nobleForceU8(b64ToBytes(sigB64));
-			pubU8 = nobleForceU8(b64ToBytes(pubB64));
-		} catch {
-			return json({ ok: false, error: "bad_b64" }, 401, req);
-		}
-
-		if (sigU8.length !== 64) {
-			return json({ ok: false, error: "bad_signature_len" }, 401, req);
-		}
-
-		if (pubU8.length !== 32) {
-			return json({ ok: false, error: "bad_pubkey_len" }, 401, req);
-		}
-
-		const msgBytes = new TextEncoder().encode(
-			`${ts}\nPAIR_FETCH\n${pairCode}\n${nonceB64}\n${deviceId}`,
-		);
-
-		const msgU8 = nobleForceU8(msgBytes);
-
-		const ok = await ed25519Verify(sigU8, msgU8, pubU8);
-		if (!ok) {
-			return json({ ok: false, error: "bad_device_signature" }, 401, req);
+		if (problema) {
+			return json({ ok: false, error: problema.error }, problema.status, req);
 		}
 
 		const licHash = await getTenantLicHash(dbCentral, tenantId);

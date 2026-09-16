@@ -168,7 +168,7 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	forbidden_not_main: SOLO_EN_LA_MAIN,
 	forbidden_not_tpv: SOLO_EN_LA_MAIN,
 	too_many_attempts: "Demasiados intentos fallidos. Espera un poco antes de volver a intentarlo.",
-	too_many_requests: "Demasiados intentos seguidos. Espera un minuto antes de volver a intentarlo.",
+	pair_rejected: "El TPV principal ha rechazado la vinculación. Si es un error, genera un código nuevo en el TPV principal.",
 
 	// Autorización del dispositivo
 	missing_token: VOLVER_A_VINCULAR,
@@ -235,7 +235,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"license_revoked",
 	"license_not_found",
 	"no_active_license_for_tenant",
-	"expired",
 	"tenant_db_not_provisioned",
 	"bootstrap_demasiado_grande",
 	"migration_altered",

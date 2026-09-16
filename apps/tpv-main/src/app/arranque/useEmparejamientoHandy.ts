@@ -11,11 +11,13 @@ import { cloudPost } from "../../shared/lib/cloudApi";
 import { deviceFingerprint } from "../../shared/lib/deviceFingerprint";
 import type { ModeStateValue } from "../../shared/stores/useMode";
 import {
+	cancelarEmparejamiento,
 	codigoParaVincular,
 	emparejarHandy,
 	identidadDelDispositivo,
 	type CodigoDeVinculacion,
 	type Invocar,
+	type PedirALaNube,
 } from "./emparejamiento";
 
 export type EstadoEmparejamiento =
@@ -30,6 +32,7 @@ export type EstadoEmparejamiento =
 	| { step: "paired"; tenantId: string; token: string; deviceId: string };
 
 const invocar: Invocar = (comando, args) => invokeClient(comando, args);
+const pedirALaNube: PedirALaNube = (ruta, cuerpo) => cloudPost("anon", ruta, cuerpo);
 
 export function useEmparejamientoHandy(modo: ModeStateValue) {
 	const [estado, setEstado] = useState<EstadoEmparejamiento>({ step: "idle" });
@@ -39,6 +42,9 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	// lista de solicitudes antes de aprobar (sobre todo en la ruta de "solo código").
 	const [huella, setHuella] = useState("");
 	const vivoRef = useRef(true);
+	// Cada intento lleva su número. Cancelar lo sube, y así el intento que estaba esperando se
+	// entera en su siguiente vuelta y deja de tocar el estado — también si ya ha empezado otro.
+	const intentoRef = useRef(0);
 
 	useEffect(() => {
 		let alive = true;
@@ -87,22 +93,28 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 	}, [modo]);
 
 	async function iniciar(codigo: CodigoDeVinculacion) {
+		const intento = ++intentoRef.current;
+		const esElActual = () => vivoRef.current && intentoRef.current === intento;
+
 		setOcupado(true);
 		setError(null);
 
 		try {
 			const emparejado = await emparejarHandy(codigo, {
 				invoke: invocar,
-				pedirALaNube: (ruta, cuerpo) => cloudPost("anon", ruta, cuerpo),
-				sigueVivo: () => vivoRef.current,
-				alQuedarPendiente: (p) => setEstado({ step: "waiting_approval", ...p }),
+				pedirALaNube,
+				sigueVivo: esElActual,
+				alQuedarPendiente: (p) => {
+					if (esElActual()) setEstado({ step: "waiting_approval", ...p });
+				},
 			});
-			if (emparejado) setEstado({ step: "paired", ...emparejado });
+			if (emparejado && esElActual()) setEstado({ step: "paired", ...emparejado });
 		} catch (e: any) {
+			if (!esElActual()) return;
 			setError(String(e?.message || e));
 			setEstado({ step: "idle" });
 		} finally {
-			setOcupado(false);
+			if (esElActual()) setOcupado(false);
 		}
 	}
 
@@ -118,13 +130,35 @@ export function useEmparejamientoHandy(modo: ModeStateValue) {
 		void iniciar(codigo);
 	}
 
+	/**
+	 * Deja de esperar la aprobación y vuelve a la pantalla de vinculación. Además suelta el código en
+	 * la nube, para que la solicitud desaparezca de la lista de la Main.
+	 */
+	function cancelar() {
+		const espera = estado.step === "waiting_approval" ? estado : null;
+
+		intentoRef.current++;
+		setOcupado(false);
+		setError(null);
+		setEstado({ step: "idle" });
+
+		if (espera) {
+			// Sin aviso a propósito: la pantalla ya ha vuelto a la vinculación, que es lo que se pidió.
+			// Si no llega, lo único que pasa es que la solicitud sigue en la lista de la Main hasta que
+			// caduque el código, y aprobarla entonces no le da acceso a nadie: la Handy ya no la espera.
+			cancelarEmparejamiento(espera, { invoke: invocar, pedirALaNube }).catch((e: unknown) =>
+				console.warn("[emparejamiento] no se ha podido soltar el código en la nube:", e),
+			);
+		}
+	}
+
 	/** Vuelve a la pantalla de vinculación (re-emparejar o cambiar de TPV). */
 	function volverAVincular() {
 		setError(null);
 		setEstado({ step: "idle" });
 	}
 
-	return { estado, ocupado, error, huella, vincular, volverAVincular };
+	return { estado, ocupado, error, huella, vincular, cancelar, volverAVincular };
 }
 
 export type EmparejamientoHandy = ReturnType<typeof useEmparejamientoHandy>;

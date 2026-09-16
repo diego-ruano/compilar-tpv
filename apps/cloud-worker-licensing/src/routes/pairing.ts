@@ -8,9 +8,9 @@
 // un index gigante, ahora una ruta Hono).
 //
 // Auth:
-//   - `claim` y `fetch-token` son ANÓNIMOS (los usa la Handy antes de tener
+//   - `claim`, `fetch-token` y `cancel` son ANÓNIMOS (los usa la Handy antes de tener
 //     token): operan sobre la DB central validando código/secreto/firma.
-//   - `create`, `pending` y `approve` son de la MAIN/TPV: el handler verifica el
+//   - `create`, `pending`, `approve` y `reject` son de la MAIN/TPV: el handler verifica el
 //     JWT + el "device proof" ed25519 internamente vía `buildTenantContext`
 //     (ver server/middleware/withTenant.ts).
 //
@@ -31,16 +31,29 @@ import { handlePairFetchToken } from "../server/endpoints/rest/pairing/pairFetch
 import { handlePairCreate } from "../server/endpoints/rest/pairing/pairCreate";
 import { handlePairPending } from "../server/endpoints/rest/pairing/pairPending";
 import { handlePairApprove } from "../server/endpoints/rest/pairing/pairApprove";
+import { handlePairCancel } from "../server/endpoints/rest/pairing/pairCancel";
+import { handlePairReject } from "../server/endpoints/rest/pairing/pairReject";
+import { ensurePairingSchema } from "../server/endpoints/rest/pairing/pairing.esquema";
 
 export const pairingRoutes = new Hono<{ Bindings: Env }>();
 
-// ---- Handy (anónimos) ----
+// Las tablas del emparejamiento, antes de cualquier ruta (una vez por isolate).
+pairingRoutes.use("*", async (c, next) => {
+	await ensurePairingSchema(getDb(c.env));
+	await next();
+});
+
+// ---- Handy (anónimos, firmados por el dispositivo que reclamó) ----
 pairingRoutes.post("/claim", (c) =>
 	handlePairClaim(c.req.raw, c.env, getDb(c.env)),
 );
 
 pairingRoutes.post("/fetch-token", (c) =>
 	handlePairFetchToken(c.req.raw, c.env, getDb(c.env)),
+);
+
+pairingRoutes.post("/cancel", (c) =>
+	handlePairCancel(c.req.raw, c.env, getDb(c.env)),
 );
 
 // ---- Main / TPV (autenticados: token + device proof dentro del handler) ----
@@ -54,4 +67,8 @@ pairingRoutes.post("/pending", (c) =>
 
 pairingRoutes.post("/approve", (c) =>
 	handlePairApprove(c.req.raw, c.env, getDb(c.env)),
+);
+
+pairingRoutes.post("/reject", (c) =>
+	handlePairReject(c.req.raw, c.env, getDb(c.env)),
 );

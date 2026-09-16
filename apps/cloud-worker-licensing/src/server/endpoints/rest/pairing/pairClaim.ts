@@ -4,6 +4,8 @@ import { signInternalWorkerRequest } from "../../../../lib/internalAuth";
 import { json, serverError } from "../../../utils/response";
 import { sha256HexStr } from "../../../utils/crypto";
 import { b64ToBytes, bytesToB64 } from "../../../utils/base64";
+import { sanitizeB64 } from "./pairing.firma";
+import { anotarFallo, olvidarFallos, segundosDeEspera, textoDeEspera } from "./pairing.intentos";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	try {
@@ -11,20 +13,6 @@ async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	} catch {
 		return fallback;
 	}
-}
-
-function sanitizeB64(input: string): string {
-	let s = String(input || "").trim();
-
-	s = s.replace(/^"+|"+$/g, "");
-	s = s.replace(/\s+/g, "");
-	s = s.replace(/-/g, "+").replace(/_/g, "/");
-
-	const mod = s.length % 4;
-	if (mod === 2) s += "==";
-	else if (mod === 3) s += "=";
-
-	return s;
 }
 
 function normalizeEd25519PubkeyB64(input: string): string | null {
@@ -43,64 +31,34 @@ function rowsAffected(result: any): number {
 	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
 }
 
-// Throttle por IP del endpoint de claim (anónimo). El secret protege la ruta del QR, pero la
-// ruta de "solo código" no lo lleva, así que sin esto el espacio de 10^6 códigos quedaría
-// abierto a enumeración. Ventana fija de 60s; el límite es holgado para reintentos legítimos
-// (un emparejamiento hace UN claim y luego sondea fetch-token, otro endpoint), pero corta en
-// seco cualquier barrido masivo. Global (no por-colo), apoyado en la DB de control.
-const CLAIM_RL_WINDOW_MS = 60 * 1000;
-const CLAIM_RL_MAX = 30;
+export function ipDeLaPeticion(req: Request): string {
+	return String(req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "unknown")
+		.split(",")[0]
+		.trim();
+}
 
-async function claimRateLimitOk(
-	db: Client,
-	ip: string,
-	now: number,
-): Promise<boolean> {
-	await db.execute(`
-		CREATE TABLE IF NOT EXISTS pair_claim_throttle (
-			ip TEXT PRIMARY KEY,
-			window_start_ms INTEGER NOT NULL,
-			count INTEGER NOT NULL
-		);
-	`);
-
-	const r = await db.execute({
-		sql: `SELECT window_start_ms, count FROM pair_claim_throttle WHERE ip=? LIMIT 1;`,
-		args: [ip],
-	});
-
-	const row = r.rows?.[0] as any | undefined;
-
-	// Ventana nueva (o primera vez): reinicia el contador.
-	if (!row || now - Number(row.window_start_ms || 0) >= CLAIM_RL_WINDOW_MS) {
-		await db.execute({
-			sql: `
-				INSERT INTO pair_claim_throttle (ip, window_start_ms, count)
-				VALUES (?, ?, 1)
-				ON CONFLICT(ip) DO UPDATE SET window_start_ms=excluded.window_start_ms, count=1;
-			`,
-			args: [ip, now],
-		});
-		return true;
-	}
-
-	if (Number(row.count || 0) >= CLAIM_RL_MAX) return false;
-
-	await db.execute({
-		sql: `UPDATE pair_claim_throttle SET count=count+1 WHERE ip=?;`,
-		args: [ip],
-	});
-	return true;
+function demasiadosIntentos(req: Request, segundos: number): Response {
+	return json(
+		{
+			ok: false,
+			error: "too_many_attempts",
+			message: `Demasiados intentos fallidos. Vuelve a intentarlo dentro de ${textoDeEspera(segundos)}.`,
+			reintentarEnSegundos: segundos,
+		},
+		429,
+		req,
+	);
 }
 
 /**
- * Empuja a la Main el aviso de que hay una solicitud esperando aprobación.
+ * Empuja a la Main el aviso de que ha cambiado una solicitud de emparejamiento (una nueva, o una
+ * que la Handy ha cancelado), para que recargue la lista.
  *
- * Best-effort **a propósito**: el claim ya está guardado cuando llegamos aquí, así que un DO
+ * Best-effort **a propósito**: el cambio ya está guardado cuando llegamos aquí, así que un DO
  * que no responde —o un local sin ninguna Main conectada— no puede tumbar un emparejamiento
  * válido. El panel tiene su propia recarga de respaldo para ese caso.
  */
-async function avisarSolicitudALaMain(env: any, tenantId: string): Promise<void> {
+export async function avisarSolicitudALaMain(env: any, tenantId: string): Promise<void> {
 	if (!tenantId) return;
 
 	try {
@@ -126,10 +84,59 @@ async function avisarSolicitudALaMain(env: any, tenantId: string): Promise<void>
 	}
 }
 
+/**
+ * El reto que la Handy firma en cada consulta de `fetch-token` (y al cancelar).
+ *
+ * Vive lo mismo que el código, no dos minutos. Antes caducaba a los 2 minutos mientras la Handy
+ * esperaba 3: si la Main aprobaba entre medias, la Handy recibía `challenge_expired` y el código
+ * quedaba aprobado y gastado sin que nadie tuviera el token. `caducaEnMs` es relativo a propósito:
+ * la Handy lo suma a su propio reloj, que no tiene por qué coincidir con el del worker.
+ */
+async function nuevoReto(
+	req: Request,
+	db: Client,
+	deviceId: string,
+	pr: any,
+	now: number,
+	state: "pending_approval" | "approved",
+): Promise<Response> {
+	const nonceBytes = new Uint8Array(32);
+	crypto.getRandomValues(nonceBytes);
+
+	const nonceB64 = bytesToB64(nonceBytes);
+	const expMs = Number(pr.expires_at_ms || 0);
+
+	await db.execute({
+		sql: `
+			INSERT INTO device_challenges (
+				device_id,
+				nonce_b64,
+				expires_at_ms,
+				created_at_ms
+			)
+			VALUES (?, ?, ?, ?);
+		`,
+		args: [deviceId, nonceB64, expMs, now],
+	});
+
+	return json(
+		{
+			ok: true,
+			state,
+			nonceB64,
+			nonceExpiresAtMs: expMs,
+			caducaEnMs: Math.max(0, expMs - now),
+		},
+		200,
+		req,
+	);
+}
+
 export async function handlePairClaim(
 	req: Request,
 	env: any,
 	dbCentral: Client,
+	ahoraMs: number = Date.now(),
 ): Promise<Response> {
 	try {
 		const body = await readJsonSafe(req, {
@@ -153,7 +160,7 @@ export async function handlePairClaim(
 		// Ruta dual: el `pairSecret` es OPCIONAL.
 		//  - QR/URI  → llega el secret → se verifica abajo (prueba criptográfica de posesión).
 		//  - Solo código → sin secret → se omite la verificación y la seguridad recae en tres
-		//    cosas: el throttle por IP de arriba (enumeración), que el claim se adjudique al
+		//    cosas: la espera por fallos de abajo (enumeración), que el claim se adjudique al
 		//    PRIMERO y no se pueda pisar (FABLE-D, más abajo), y la aprobación manual en la Main,
 		//    donde el dueño compara la huella del reclamante con la que muestra el Handy.
 
@@ -170,19 +177,25 @@ export async function handlePairClaim(
 			return json({ ok: false, error: "invalid_devicePubKey" }, 400, req);
 		}
 
-		const now = Date.now();
+		const now = ahoraMs;
+		const clientIp = ipDeLaPeticion(req);
 
-		const clientIp = String(
-			req.headers.get("CF-Connecting-IP") ||
-				req.headers.get("x-forwarded-for") ||
-				"unknown",
-		)
-			.split(",")[0]
-			.trim();
-
-		if (!(await claimRateLimitOk(dbCentral, clientIp, now))) {
-			return json({ ok: false, error: "too_many_requests" }, 429, req);
+		// La espera por fallos se mira ANTES de leer el código: si no, cada intento bloqueado
+		// seguiría diciendo si el código existe, que es justo lo que se quiere frenar.
+		const espera = await segundosDeEspera(dbCentral, clientIp, now);
+		if (espera > 0) {
+			return demasiadosIntentos(req, espera);
 		}
+
+		// Todo lo que sale por aquí es un intento fallido de esta IP (ver `pairing.intentos.ts`).
+		// Los 400 de arriba no cuentan: son un cliente mal hecho, no alguien probando códigos. El
+		// fallo que cierra un tramo ya contesta con la espera, para que se vea en ese momento.
+		const fallo = async (cuerpo: Record<string, unknown>, status: number) => {
+			const impuesta = await anotarFallo(dbCentral, clientIp, now);
+			return impuesta > 0
+				? demasiadosIntentos(req, Math.ceil(impuesta / 1000))
+				: json({ ok: false, ...cuerpo }, status, req);
+		};
 
 		const prRes = await dbCentral.execute({
 			sql: `SELECT * FROM pair_requests WHERE pair_code=? LIMIT 1;`,
@@ -191,18 +204,18 @@ export async function handlePairClaim(
 
 		const pr = prRes.rows?.[0] as any | undefined;
 		if (!pr) {
-			return json({ ok: false, error: "pair_code_not_found" }, 404, req);
+			return fallo({ error: "pair_code_not_found" }, 404);
 		}
 
 		const attempts = Number(pr.attempts || 0);
 		const lastAttempt = Number(pr.last_attempt_at_ms || 0);
 
 		if (attempts >= 8 && now - lastAttempt < 10 * 60 * 1000) {
-			return json({ ok: false, error: "too_many_attempts" }, 429, req);
+			return fallo({ error: "too_many_attempts" }, 429);
 		}
 
 		if (pr.used_at_ms) {
-			return json({ ok: false, error: "pair_code_used" }, 409, req);
+			return fallo({ error: "pair_code_used" }, 409);
 		}
 
 		if (Number(pr.expires_at_ms || 0) < now) {
@@ -216,21 +229,28 @@ export async function handlePairClaim(
 				args: [pairCode],
 			});
 
-			return json({ ok: false, error: "pair_code_expired" }, 410, req);
+			return fallo({ error: "pair_code_expired" }, 410);
 		}
 
 		const status = String(pr.status || "").trim().toLowerCase();
 
-		if (status === "approved") {
-			return json({ ok: false, error: "pair_code_already_approved" }, 409, req);
+		// Aprobado para ESTE dispositivo: es su propio reintento (se cerró la aplicación esperando,
+		// o canceló y volvió a intentarlo). Se le da un reto nuevo y recoge el token con él. Antes se
+		// le contestaba `pair_code_already_approved` y el código quedaba gastado sin que nadie
+		// tuviera el token.
+		const aprobadoParaEste =
+			status === "approved" && String(pr.claimed_by_device_id || "") === deviceId;
+
+		if (status === "approved" && !aprobadoParaEste) {
+			return fallo({ error: "pair_code_already_approved" }, 409);
 		}
 
-		if (status !== "pending") {
-			return json(
-				{ ok: false, error: "invalid_pair_status", status },
-				409,
-				req,
-			);
+		if (status === "rejected") {
+			return fallo({ error: "pair_rejected" }, 409);
+		}
+
+		if (status !== "pending" && !aprobadoParaEste) {
+			return fallo({ error: "invalid_pair_status", status }, 409);
 		}
 
 		// Verificación del secret SOLO en la ruta fuerte (QR/URI). Si no llega secret, es la
@@ -250,8 +270,17 @@ export async function handlePairClaim(
 					args: [now, pairCode],
 				});
 
-				return json({ ok: false, error: "invalid_pair_secret" }, 401, req);
+				return fallo({ error: "invalid_pair_secret" }, 401);
 			}
+		}
+
+		if (aprobadoParaEste) {
+			// La Main aprobó ESTA clave; con otra, el token acabaría en manos de quien no se vio.
+			if (sanitizeB64(String(pr.claimed_device_pubkey_b64 || "")) !== devicePubKey) {
+				return fallo({ error: "device_pubkey_mismatch" }, 401);
+			}
+			await olvidarFallos(dbCentral, clientIp);
+			return nuevoReto(req, dbCentral, deviceId, pr, now, "approved");
 		}
 
 		// FABLE-D: el claim se fija al PRIMER reclamante. Sin la condición sobre
@@ -303,44 +332,13 @@ export async function handlePairClaim(
 				args: [now, pairCode],
 			});
 
-			return json(
-				{ ok: false, error: "pair_claim_race_or_invalid_state" },
-				409,
-				req,
-			);
+			return fallo({ error: "pair_claim_race_or_invalid_state" }, 409);
 		}
 
+		await olvidarFallos(dbCentral, clientIp);
 		await avisarSolicitudALaMain(env, String(pr.tenant_id || ""));
 
-		const nonceBytes = new Uint8Array(32);
-		crypto.getRandomValues(nonceBytes);
-
-		const nonceB64 = bytesToB64(nonceBytes);
-		const expMs = now + 2 * 60 * 1000;
-
-		await dbCentral.execute({
-			sql: `
-				INSERT INTO device_challenges (
-					device_id,
-					nonce_b64,
-					expires_at_ms,
-					created_at_ms
-				)
-				VALUES (?, ?, ?, ?);
-			`,
-			args: [deviceId, nonceB64, expMs, now],
-		});
-
-		return json(
-			{
-				ok: true,
-				state: "pending_approval",
-				nonceB64,
-				nonceExpiresAtMs: expMs,
-			},
-			200,
-			req,
-		);
+		return nuevoReto(req, dbCentral, deviceId, pr, now, "pending_approval");
 	} catch (e: any) {
 		const msg = String(e?.message || e);
 

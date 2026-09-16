@@ -1,18 +1,22 @@
 // src/app/arranque/emparejamiento.ts
 //
-// Cómo se vincula un Handy a su Main, sin React: leer el código que se escribe o se escanea, y el
-// bucle que reclama el emparejamiento, espera a que la Main lo apruebe y guarda el token.
+// Cómo se vincula un Handy a su Main, sin React: leer el código que se escribe o se escanea, el
+// bucle que reclama el emparejamiento, espera a que la Main lo apruebe y guarda el token, y la
+// cancelación de esa espera.
 //
-// El bucle recibe sus dependencias (el IPC, la nube, si la pantalla sigue viva) en vez de importarlas,
-// igual que `recoverySync.ts`: así se prueba con dobles y un reloj falso
+// El bucle recibe sus dependencias (el IPC, la nube, si la espera sigue en pie) en vez de
+// importarlas, igual que `recoverySync.ts`: así se prueba con dobles y un reloj falso
 // (`test/emparejamientoHandy.test.ts`), y la pantalla sólo lo arranca y pinta lo que devuelve.
 
 import { esError } from "@tpv/client";
 
 /** Cada cuánto se pregunta si la Main ya ha aprobado. */
 export const ESPERA_ENTRE_CONSULTAS_MS = 1500;
-/** Cuánto se espera la aprobación antes de rendirse. */
-export const ESPERA_MAXIMA_APROBACION_MS = 3 * 60 * 1000;
+/**
+ * Cuánto se espera si la nube no dice cuánto le queda al código. Un worker actual siempre lo dice
+ * (`caducaEnMs`); esto cubre uno anterior, cuyo reto caducaba a los dos minutos.
+ */
+export const ESPERA_SI_LA_NUBE_NO_LO_DICE_MS = 2 * 60 * 1000;
 
 // Los fallos que genera el propio emparejamiento. Acaban tal cual en la pantalla de vinculación,
 // delante de quien está vinculando el Handy, así que dicen qué hacer y no llevan códigos internos:
@@ -22,7 +26,7 @@ const SIN_IDENTIDAD =
 const RESPUESTA_INESPERADA =
 	"La nube ha respondido algo inesperado al vincular. Inténtalo de nuevo y, si se repite, genera un código nuevo en el TPV principal.";
 const SIN_APROBACION =
-	"El TPV principal no ha aprobado la vinculación en tres minutos. Vuelve a pulsar «Vincular dispositivo» y apruébala en el TPV principal.";
+	"El código ha caducado sin que el TPV principal aprobara la vinculación. Genera un código nuevo en el TPV principal y vuelve a intentarlo.";
 
 export type CodigoDeVinculacion = { pairCode: string; pairSecret: string };
 
@@ -59,17 +63,22 @@ export function codigoParaVincular(contenidoQr: string, codigoManual: string): C
 
 export type Emparejamiento = { tenantId: string; token: string; deviceId: string };
 
+/** Lo que queda pendiente mientras se espera la aprobación: con esto se puede cancelar. */
+export type EsperaDeAprobacion = CodigoDeVinculacion & { nonceB64: string; nonceExpiresAtMs: number };
+
 /** El IPC con Rust (`invokeClient`). */
 export type Invocar = <T>(comando: string, args?: Record<string, unknown>) => Promise<T>;
 
+/** Una petición anónima al worker (`cloudPost("anon", …)`). */
+export type PedirALaNube = <T>(ruta: string, cuerpo: unknown) => Promise<T>;
+
 export type DependenciasEmparejamiento = {
 	invoke: Invocar;
-	/** Una petición anónima al worker (`cloudPost("anon", …)`). */
-	pedirALaNube: <T>(ruta: string, cuerpo: unknown) => Promise<T>;
-	/** `false` en cuanto la pantalla que lo arrancó se desmonta: el bucle deja de consultar. */
+	pedirALaNube: PedirALaNube;
+	/** `false` en cuanto la espera deja de interesar (pantalla cerrada, o cancelada): el bucle para. */
 	sigueVivo: () => boolean;
 	/** Se llama al reclamar, cuando empieza la espera de la aprobación. */
-	alQuedarPendiente: (pendiente: CodigoDeVinculacion & { nonceB64: string; nonceExpiresAtMs: number }) => void;
+	alQuedarPendiente: (pendiente: EsperaDeAprobacion) => void;
 };
 
 export type Identidad = { deviceId: string; devicePubKeyB64: string };
@@ -88,19 +97,32 @@ export async function identidadDelDispositivo(invoke: Invocar): Promise<Identida
 	return { deviceId, devicePubKeyB64: pub };
 }
 
-async function firmar(invoke: Invocar, payload: string): Promise<string> {
+/**
+ * La prueba de que habla el dispositivo que reclamó. La acción va dentro de lo firmado para que la
+ * firma de una consulta no sirva para cancelar, ni al revés (`pairing.firma.ts` en el worker).
+ */
+async function firmar(
+	invoke: Invocar,
+	accion: "PAIR_FETCH" | "PAIR_CANCEL",
+	pairCode: string,
+	nonceB64: string,
+	deviceId: string,
+): Promise<{ ts: number; sigB64: string }> {
+	const ts = Date.now();
+	const payload = `${ts}\n${accion}\n${pairCode}\n${nonceB64}\n${deviceId}`;
 	const r = (await invoke("device_sign_b64", { args: { payload } })) as any;
-	const sig = String(r.sigB64 ?? r.sig_b64 ?? r.signature ?? "").trim();
-	if (!sig) throw new Error(SIN_IDENTIDAD);
-	return sig;
+	const sigB64 = String(r.sigB64 ?? r.sig_b64 ?? r.signature ?? "").trim();
+	if (!sigB64) throw new Error(SIN_IDENTIDAD);
+	return { ts, sigB64 };
 }
 
 /**
  * Reclama el emparejamiento con la Main y espera a que lo apruebe.
  *
  * Devuelve el emparejamiento ya guardado (el token queda en el keyring vía `handy_set_token`), o
- * `null` si la pantalla se desmontó mientras esperaba. «Todavía sin aprobar» no es un fallo: se sigue
- * preguntando. Cualquier otro error corta en el acto; los de la nube llegan tal como los da el IPC.
+ * `null` si la espera dejó de interesar. «Todavía sin aprobar» no es un fallo: se sigue
+ * preguntando hasta que caduca el código. Cualquier otro error corta en el acto, también que la
+ * Main lo rechace; los de la nube llegan tal como los da el IPC.
  */
 export async function emparejarHandy(
 	codigo: CodigoDeVinculacion,
@@ -124,16 +146,20 @@ export async function emparejarHandy(
 		throw new Error(RESPUESTA_INESPERADA);
 	}
 
+	// Hasta cuándo se espera lo dice la nube, en relativo: se suma a ESTE reloj, que no tiene por
+	// qué coincidir con el del worker. Antes era una constante de 3 minutos que no casaba con el
+	// reto del servidor.
+	const caducaEnMs = Number(claim.caducaEnMs);
+	const limite =
+		Date.now() + (Number.isFinite(caducaEnMs) && caducaEnMs > 0 ? caducaEnMs : ESPERA_SI_LA_NUBE_NO_LO_DICE_MS);
+
 	deps.alQuedarPendiente({ pairCode, pairSecret, nonceB64, nonceExpiresAtMs });
 
-	const empezo = Date.now();
-
-	while (Date.now() - empezo < ESPERA_MAXIMA_APROBACION_MS) {
+	while (Date.now() < limite) {
 		await new Promise((r) => setTimeout(r, ESPERA_ENTRE_CONSULTAS_MS));
 		if (!deps.sigueVivo()) return null;
 
-		const ts = Date.now();
-		const sigB64 = await firmar(deps.invoke, `${ts}\nPAIR_FETCH\n${pairCode}\n${nonceB64}\n${ident.deviceId}`);
+		const { ts, sigB64 } = await firmar(deps.invoke, "PAIR_FETCH", pairCode, nonceB64, ident.deviceId);
 
 		try {
 			const ft = (await deps.pedirALaNube("/v1/pair/fetch-token", {
@@ -151,6 +177,10 @@ export async function emparejarHandy(
 				throw new Error(RESPUESTA_INESPERADA);
 			}
 
+			// Si se canceló mientras volvía la respuesta, no se guarda: quien canceló espera ver la
+			// pantalla de vinculación, no un Handy vinculado a sus espaldas.
+			if (!deps.sigueVivo()) return null;
+
 			await deps.invoke("handy_set_token", { args: { token, tenant_id: tenantId } });
 
 			return { tenantId, token, deviceId: ident.deviceId };
@@ -164,4 +194,27 @@ export async function emparejarHandy(
 
 	if (!deps.sigueVivo()) return null;
 	throw new Error(SIN_APROBACION);
+}
+
+/**
+ * Suelta en la nube el código que se estaba esperando, para que desaparezca de la lista de la Main
+ * y nadie apruebe una solicitud que ya no espera nadie. Es lo que hace el botón «Cancelar».
+ *
+ * Quien llama decide qué hacer si falla: la pantalla ya ha dejado de esperar, y lo peor que pasa
+ * es que la solicitud siga en la lista hasta que caduque el código.
+ */
+export async function cancelarEmparejamiento(
+	espera: EsperaDeAprobacion,
+	deps: Pick<DependenciasEmparejamiento, "invoke" | "pedirALaNube">,
+): Promise<void> {
+	const ident = await identidadDelDispositivo(deps.invoke);
+	const { ts, sigB64 } = await firmar(deps.invoke, "PAIR_CANCEL", espera.pairCode, espera.nonceB64, ident.deviceId);
+
+	await deps.pedirALaNube("/v1/pair/cancel", {
+		pairCode: espera.pairCode,
+		deviceId: ident.deviceId,
+		nonceB64: espera.nonceB64,
+		ts,
+		sigB64,
+	});
 }

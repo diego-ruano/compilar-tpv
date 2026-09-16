@@ -127,6 +127,20 @@ export function useAprobarHandy() {
 	});
 }
 
+/**
+ * Rechaza una solicitud: desaparece de pendientes y el Handy que la hizo deja de esperar en su
+ * siguiente consulta. El código queda gastado; para volver a intentarlo hace falta uno nuevo.
+ */
+export function useRechazarHandy() {
+	const qc = useQueryClient();
+
+	return useMutation({
+		mutationFn: (pairCode: string) =>
+			cloudPost("tpv", "/v1/pair/reject", { pairCode }),
+		onSuccess: () => qc.invalidateQueries({ queryKey: pairingKeys.pendientes }),
+	});
+}
+
 /** Retira el acceso a un Handy vinculado. */
 export function useRevocarHandy() {
 	const qc = useQueryClient();
