@@ -432,6 +432,19 @@ body {
     height: min(88vh, calc(100dvh - 2rem));
 }
 
+/* La modal fiscal conserva nombres de utilidad legacy (`primary`), pero el tema actual
+   expone el color corporativo como `accent`. */
+.fixed.inset-0 button[class~="bg-primary"] {
+    background-color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: var(--accent-fg) !important;
+}
+
+.fixed.inset-0 button[class~="bg-primary"]:hover:not(:disabled) {
+    background-color: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+}
+
 @media (max-width: 900px) {
     .fixed.inset-0 > [class~="max-w-[1000px]"] > [class~="flex-1"][class~="min-h-0"] {
         flex-direction: column;
