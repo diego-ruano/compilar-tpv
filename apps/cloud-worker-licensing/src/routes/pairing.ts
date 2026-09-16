@@ -33,15 +33,8 @@ import { handlePairPending } from "../server/endpoints/rest/pairing/pairPending"
 import { handlePairApprove } from "../server/endpoints/rest/pairing/pairApprove";
 import { handlePairCancel } from "../server/endpoints/rest/pairing/pairCancel";
 import { handlePairReject } from "../server/endpoints/rest/pairing/pairReject";
-import { ensurePairingSchema } from "../server/endpoints/rest/pairing/pairing.esquema";
 
 export const pairingRoutes = new Hono<{ Bindings: Env }>();
-
-// Las tablas del emparejamiento, antes de cualquier ruta (una vez por isolate).
-pairingRoutes.use("*", async (c, next) => {
-	await ensurePairingSchema(getDb(c.env));
-	await next();
-});
 
 // ---- Handy (anónimos, firmados por el dispositivo que reclamó) ----
 pairingRoutes.post("/claim", (c) =>

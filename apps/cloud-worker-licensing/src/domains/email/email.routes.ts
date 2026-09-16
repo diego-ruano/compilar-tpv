@@ -108,7 +108,7 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 
 /**
  * Deja traza del envío en el control-plane (tabla `email_sends`, ver
- * `docs/sql/control-plane/2026-08-15_email_sends.sql`).
+ * `docs/sql/control-plane/esquema-actual.sql`).
  *
  * **No hay límite de envíos por decisión de producto** (2026-08-15): esto no corta nada, solo
  * permite mirar a posteriori quién envía y cuánto. Si algún día hiciera falta un tope, el COUNT

@@ -14,6 +14,7 @@ import { describe, it, expect } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import {
 	solicitarCodigoPin,
 	verificarCodigoPin,
@@ -28,7 +29,6 @@ import {
 import { OTP_MAX_ATTEMPTS, OTP_TTL_MS } from "../src/domains/licensing/licensing.helpers";
 import {
 	activateLicenseFirstTime,
-	ensureLicensingSchema,
 	getEmailCode,
 	issueLicense,
 } from "../src/server/licenseStore";
@@ -61,7 +61,7 @@ type Escenario = {
 async function escenario(fn: (e: Escenario) => Promise<void>): Promise<void> {
 	await enElHub("recuperar-pin", async (hub: any) => {
 		const db = clienteSobre(hub.state.storage.sql);
-		await ensureLicensingSchema(db);
+		prepararPlanoDeControl(hub.state.storage.sql);
 		for (const tabla of ["licenses", "email_codes", "tenant_recovery_emails", "license_device_swaps"]) {
 			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
 		}

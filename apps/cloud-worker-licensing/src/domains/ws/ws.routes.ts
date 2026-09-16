@@ -101,14 +101,6 @@ wsRoutes.post("/ticket", async (c) => {
 	crypto.getRandomValues(bytes);
 	const ticket = bytesToB64(bytes);
 
-	await db.execute(`
-		CREATE TABLE IF NOT EXISTS Ws_Tickets (
-			ticket TEXT PRIMARY KEY,
-			tenant_id TEXT NOT NULL,
-			device_id TEXT NOT NULL,
-			expires_at_ms INTEGER NOT NULL
-		);
-	`);
 	// Limpieza oportunista de tickets caducados (mantiene la tabla acotada sin job aparte).
 	await db.execute({
 		sql: `DELETE FROM Ws_Tickets WHERE expires_at_ms < ?;`,

@@ -23,7 +23,6 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import { ensureLicensingSchemaMw } from "../../middleware/ensureSchema";
 import { getDb } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
 import {
@@ -65,8 +64,6 @@ import {
 } from "./stripe.helpers";
 
 export const stripeRoutes = new Hono<{ Bindings: Env }>();
-
-stripeRoutes.use("*", ensureLicensingSchemaMw);
 
 /** Los eventos que nos importan. Un pago diferido (SEPA, etc.) llega por el segundo. */
 const EVENTOS_DE_PAGO = new Set([

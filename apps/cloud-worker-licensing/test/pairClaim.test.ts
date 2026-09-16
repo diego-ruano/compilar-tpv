@@ -18,8 +18,8 @@ import { describe, it, expect } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
-import { ensurePairingSchema } from "../src/server/endpoints/rest/pairing/pairing.esquema";
 import { bytesToB64 } from "../src/server/utils/base64";
 
 const CODIGO = "123456";
@@ -53,8 +53,8 @@ async function reclamar(
 	return enElHub(nombreHub, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		const db = clienteSobre(sql);
-		// El esquema declarado, el mismo que crea el worker: no una copia que pueda divergir.
-		await ensurePairingSchema(db);
+		// El esquema de producción, no una copia que pueda divergir.
+		prepararPlanoDeControl(sql);
 		sql.exec("DELETE FROM pair_requests;");
 
 		const ahora = Date.now();

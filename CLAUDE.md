@@ -161,6 +161,16 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   licensing legacy (`/v1/license/*`, `/v1/webhooks/lemon`) vía `app.all("*")` mientras se migra a Hono.
 - El cliente Rust (`tpv-infra-licensing`) apunta a `https://tpv-api.altarialights.workers.dev`
   (constantes `LICENSE_API_BASE` y `TPV_SERVER_BASE`, ambas al mismo host).
+- **La base central (control-plane) no cambia de estructura desde el código.** Licencias,
+  dispositivos, emparejamientos… viven en una Turso que existe siempre y no se recrea. El worker lee
+  y escribe filas, pero **no** hace `CREATE`/`ALTER`/`DROP` contra ella: antes lo hacían varias rutas
+  en cada isolate (y una en cada petición), y los índices que pedía el código ya no coincidían con
+  los de producción, así que habría creado duplicados. Su estructura se cambia **a mano en Turso**
+  y se refleja en la foto `docs/sql/control-plane/esquema-actual.sql`, que es lo único que la
+  documenta y lo que ejecutan los tests (`test/helpers/planoDeControl.ts`) para tener esas mismas
+  tablas en su SQLite temporal. Una tabla o columna nueva, por tanto, **se crea en Turso antes de
+  desplegar** el worker que la usa. No confundir con la base de cada tenant, que sí se migra desde
+  el código (§3, `packages/database/migrations`).
 
 ---
 
@@ -703,8 +713,6 @@ no sólo en dev.
     porque el `deviceId` lo elige quien llama; el precio es que las Handy de un bar comparten la
     cuenta. La espera se mira antes de leer el código, o un intento bloqueado seguiría diciendo si
     existe. Una petición mal formada no cuenta: es un cliente roto, no alguien probando códigos.
-  - **Sus tablas se declaran en `pairing.esquema.ts`** y se crean si faltan; antes no estaban en el
-    repo. `devices` sigue sin declarar: la comparte la autenticación.
   - **Las rutas anónimas nuevas hay que eximirlas también en el proxy** (`PAIRING_SIN_SESION` en
     `commands/pairing.rs`): el resto de `/v1/pair/…` exige Administrador, y sin esa exención la
     Handy, que no tiene sesión, no podría llamarla.

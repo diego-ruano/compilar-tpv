@@ -9,7 +9,6 @@ import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
-import { ensureLicensingSchema } from "../../server/licenseStore";
 
 import * as cmd from "./login.commands";
 import { hashPin, verifyPin } from "./login.crypto";
@@ -210,7 +209,6 @@ loginRoutes.post("/recuperar-pin/solicitar", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await solicitarCodigoPin(db, c.env, {
 		tenantId: c.get("tenantId"),
@@ -230,7 +228,6 @@ loginRoutes.post("/recuperar-pin/verificar", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await verificarCodigoPin(
 		db,
@@ -274,7 +271,6 @@ loginRoutes.post("/correo-recuperacion/estado", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await estadoCorreoRecuperacion(db, contextoCorreo(c));
 	return c.json(r.body, r.status);
@@ -288,7 +284,6 @@ loginRoutes.post("/correo-recuperacion/solicitar", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: p.data.correo });
 	return c.json(r.body, r.status);
@@ -302,7 +297,6 @@ loginRoutes.post("/correo-recuperacion/confirmar", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await confirmarCambioCorreo(
 		db,
@@ -318,7 +312,6 @@ loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", async (c) => {
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
-	await ensureLicensingSchema(db);
 
 	const r = await usarCorreoDeLaCompra(db, c.env, contextoCorreo(c), diferirEn(c));
 	return c.json(r.body, r.status);

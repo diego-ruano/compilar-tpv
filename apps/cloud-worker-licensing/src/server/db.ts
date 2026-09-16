@@ -24,8 +24,8 @@ export function getDb(env: TursoEnv): Client {
 export async function exec(db: Client, sql: string, args: any[] = []) {
 	// El `await` no sobra: sin el, esta funcion DEVUELVE la promesa de `execute` en vez de
 	// esperarla, y el runtime tarda un par de ticks en adoptarla. En ese hueco un rechazo cuenta
-	// como no gestionado —aunque el llamante lo capture, que es justo lo que hacen los ALTER de
-	// `ensureLicensingSchema`—, y workerd lo reporta como unhandled rejection.
+	// como no gestionado —aunque el llamante lo capture—, y workerd lo reporta como unhandled
+	// rejection.
 	return await db.execute({ sql, args });
 }
 

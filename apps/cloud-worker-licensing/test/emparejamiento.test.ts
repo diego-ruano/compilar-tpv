@@ -1,7 +1,7 @@
 // test/emparejamiento.test.ts
 //
 // Vincular una Handy de principio a fin, contra el SQL de verdad (el SQLite de un Durable Object
-// con el esquema que declara el worker) y con firmas ed25519 reales.
+// con la estructura de producción, `helpers/planoDeControl.ts`) y con firmas ed25519 reales.
 //
 // Lo que se fija, y el fallo de antes que evita cada cosa:
 //   · La espera por fallos crece por tramos (3 → 30 s, 6 → 5 min, 9 → 30 min). Antes había 30
@@ -17,11 +17,11 @@ import * as ed from "@noble/ed25519";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
 import { handlePairFetchToken } from "../src/server/endpoints/rest/pairing/pairFetchToken";
 import { handlePairCancel } from "../src/server/endpoints/rest/pairing/pairCancel";
 import { rechazarSolicitud } from "../src/server/endpoints/rest/pairing/pairReject";
-import { ensurePairingSchema } from "../src/server/endpoints/rest/pairing/pairing.esquema";
 import {
 	OLVIDO_MS,
 	esperaTrasFallos,
@@ -64,17 +64,21 @@ async function conPlanoDeControl<R>(nombre: string, prueba: (m: Mundo) => Promis
 	return enElHub(`emparejamiento-${nombre}`, async (hub: any) => {
 		const sql = hub.state.storage.sql;
 		const db = clienteSobre(sql);
-		await ensurePairingSchema(db);
-		// `devices` y `licenses` no son del emparejamiento (ver pairing.esquema.ts): aquí sólo las
-		// columnas que lee `fetch-token`.
-		sql.exec(`CREATE TABLE IF NOT EXISTS devices (
-			device_id TEXT PRIMARY KEY, tenant_id TEXT, role TEXT, revoked_at_ms INTEGER, device_pubkey_b64 TEXT)`);
-		sql.exec(`CREATE TABLE IF NOT EXISTS licenses (
-			license_key_hash TEXT, tenant_id TEXT, status TEXT, updated_at_ms INTEGER)`);
-		for (const tabla of ["pair_requests", "device_challenges", "pair_claim_fallos", "devices", "licenses"]) {
+		prepararPlanoDeControl(sql);
+		for (const tabla of ["pair_requests", "device_challenges", "pair_claim_fallos", "devices", "licenses", "tenants"]) {
 			sql.exec(`DELETE FROM ${tabla};`);
 		}
-		sql.exec(`INSERT INTO licenses VALUES ('hash-licencia', ?, 'active', ?);`, TENANT, T0);
+		// `fetch-token` necesita el negocio, su licencia activa y, al aprobar, el dispositivo.
+		sql.exec(`INSERT INTO tenants (tenant_id) VALUES (?);`, TENANT);
+		sql.exec(
+			`INSERT INTO licenses (license_id, license_key_hash, tenant_id, status, term_months, origin,
+			                       issued_at_ms, customer_email, created_at_ms, updated_at_ms)
+			 VALUES ('lic-1', 'hash-licencia', ?, 'active', 12, 'manual', ?, 'bar@ejemplo.test', ?, ?);`,
+			TENANT,
+			T0,
+			T0,
+			T0,
+		);
 		for (const codigo of [CODIGO, OTRO_CODIGO]) {
 			sql.exec(
 				`INSERT INTO pair_requests (pair_code, secret_hash, tenant_id, created_by_device_id, status, created_at_ms, expires_at_ms)

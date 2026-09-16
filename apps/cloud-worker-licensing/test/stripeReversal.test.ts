@@ -9,18 +9,18 @@
 // cliente pagó y usó).
 //
 // Los casos se ejecutan contra el esquema real del control-plane, sobre el SQLite del Durable
-// Object: `ensureLicensingSchema` crea las tablas de verdad y el SQL es el mismo que corre en
-// Turso. Lo que NO cubre: la verificación de la firma de Stripe y el enrutado HTTP, que viven en
+// Object: las tablas salen del esquema de producción (`helpers/planoDeControl.ts`) y el SQL es el
+// mismo que corre en Turso. Lo que NO cubre: la verificación de la firma de Stripe y el enrutado HTTP, que viven en
 // el handler del webhook (y que dependen de qué eventos estén suscritos en el Dashboard).
 
 import { describe, it, expect } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { revertir } from "../src/domains/stripe/stripe.routes";
 import {
 	activateLicenseFirstTime,
-	ensureLicensingSchema,
 	extendLicense,
 	getLicenseById,
 	issueLicense,
@@ -74,14 +74,12 @@ type Escenario = {
 /**
  * Todos los escenarios comparten un mismo Durable Object y se limpian las filas entre casos.
  *
- * No es capricho: `ensureLicensingSchema` recuerda en una variable de módulo que ya creó las
- * tablas (una vez por isolate, que en producción es lo correcto porque el control-plane es uno
- * solo). Con un DO por test, el segundo se encontraría el flag puesto y la base vacía.
+ * Las tablas se crean una vez, a partir del esquema de producción (`helpers/planoDeControl.ts`).
  */
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 	return enElHub("lic07", async (hub: any) => {
 		const db = clienteSobre(hub.state.storage.sql);
-		await ensureLicensingSchema(db);
+		prepararPlanoDeControl(hub.state.storage.sql);
 		for (const tabla of ["licenses", "license_payments", "admin_audit"]) {
 			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
 		}

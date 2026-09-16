@@ -17,35 +17,12 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Client } from "@libsql/client/web";
 
 import type { Env } from "../../env";
 import { getDb } from "../../server/db";
 import { checkAdminToken } from "../../middleware/requireAdmin";
 
 export const updatesRoutes = new Hono<{ Bindings: Env }>();
-
-// Crea la tabla de releases una vez por aislado (lazy). No usa DEFAULT en la PK para mantener el
-// control explícito de version/target/channel.
-let schemaReady = false;
-async function ensureReleasesSchema(db: Client) {
-	if (schemaReady) return;
-	await db.execute(`
-		CREATE TABLE IF NOT EXISTS app_releases (
-			version       TEXT NOT NULL,
-			target        TEXT NOT NULL DEFAULT 'windows',
-			channel       TEXT NOT NULL DEFAULT 'stable',
-			notes         TEXT,
-			pub_date      TEXT NOT NULL,
-			signature     TEXT NOT NULL,
-			url           TEXT NOT NULL,
-			is_active     INTEGER NOT NULL DEFAULT 1,
-			created_at_ms INTEGER NOT NULL DEFAULT (unixepoch()*1000),
-			PRIMARY KEY (version, target, channel)
-		);
-	`);
-	schemaReady = true;
-}
 
 // Verifica el token admin del header `Authorization: Bearer <token>`. Si el secreto no está
 // configurado, la publicación queda DESHABILITADA (fail-safe: nadie puede publicar por accidente).
@@ -71,7 +48,6 @@ updatesRoutes.get("/:target/:arch/:current", async (c) => {
 	const current = c.req.param("current"); // versión instalada (sólo para observabilidad)
 
 	const db = getDb(c.env);
-	await ensureReleasesSchema(db);
 
 	const r = await db.execute({
 		sql: `
@@ -142,7 +118,6 @@ updatesRoutes.post("/publish", async (c) => {
 	const pubDate = parsed.data.pub_date || new Date().toISOString();
 
 	const db = getDb(c.env);
-	await ensureReleasesSchema(db);
 
 	await db.execute({
 		sql: `
@@ -186,7 +161,6 @@ updatesRoutes.post("/deactivate", async (c) => {
 	const channel = parsed.data.channel || "stable";
 
 	const db = getDb(c.env);
-	await ensureReleasesSchema(db);
 
 	await db.execute({
 		sql: `

@@ -596,9 +596,8 @@ Leyenda: 🟥 **borrar** · 🟨 **modificar** · 🟩 **añadir**.
 - 🟨 `wrangler.json`: sin cambios de secretos (van por `wrangler secret put`); revisar `vars`.
 
 **Migración de esquema (control-plane):**
-- 🟩 `docs/sql/control-plane/2026-07-XX_licencias_propias.sql` (nuevo): `ALTER TABLE licenses DROP
-  COLUMN lemon_*`; `ADD COLUMN term_months/origin/issued_at_ms/activated_at_ms/expires_at_ms/
-  stripe_*`; índices. Ejecutar a mano contra Turso y versionar.
+- 🟩 Hecho a mano contra Turso; la estructura resultante está en
+  `docs/sql/control-plane/esquema-actual.sql` (ver §16.2).
 
 ### 7.2 Cliente Rust (`crates/*`)
 
@@ -819,21 +818,12 @@ Ya existentes y que **siguen igual**: `LICENSE_JWT_SECRET`, `LICENSE_STORE_KEY`,
 (`LICENSE_SIGNING_PUBLIC_KEY_B64` en `crates/tpv-infra-licensing/src/lib.rs`) — eso lo hago yo en la
 Fase 3, pero necesito que me pases la pública (no la privada).
 
-### 16.2 Esquema del control-plane (Turso) — **sin migración**
+### 16.2 Esquema del control-plane (Turso)
 
-El worker se **auto-provisiona** el esquema nuevo (`ensureLicensingSchema` en `licenseStore.ts`): la
-primera petición crea `licenses`, `license_device_otp`, `license_device_swaps`, `admin_audit` y las
-columnas de `tenants`. No hay que ejecutar SQL para eso.
-
-Lo único manual, **una vez**: borrar las tablas viejas de Lemon (el `CREATE TABLE IF NOT EXISTS` no
-puede reemplazar una `licenses` que ya existe con las columnas `lemon_*`):
-
-```bash
-turso db shell tpvcontrol-altarialights < docs/sql/control-plane/2026-07-14_licencias_propias.sql
-# (son 3 líneas: DROP de licenses, license_meta, license_instances)
-```
-
-Seguro porque no hay licencias reales. Tras esto, la primera llamada al worker reconstruye todo.
+> Superado. El worker ya **no** crea ni altera tablas de la base central (se quitó
+> `ensureLicensingSchema`): su estructura se gestiona a mano en Turso y está fotografiada en
+> [`docs/sql/control-plane/esquema-actual.sql`](sql/control-plane/esquema-actual.sql). Las
+> migraciones sueltas que se ejecutaron entonces se borraron: la foto recoge su resultado.
 
 ### 16.3 Stripe
 

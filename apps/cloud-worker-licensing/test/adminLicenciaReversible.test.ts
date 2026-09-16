@@ -19,11 +19,11 @@ import { describe, it, expect, vi } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { adminRoutes } from "../src/domains/admin/admin.routes";
 import { verifyInternalWorkerRequest } from "../src/lib/internalAuth";
 import {
 	activateLicenseFirstTime,
-	ensureLicensingSchema,
 	getLicenseById,
 	issueLicense,
 	revokeLicense,
@@ -90,21 +90,19 @@ function hubDeMentira() {
 }
 
 /**
- * Un único Durable Object para todos los casos, limpiando filas entre ellos: `ensureLicensingSchema`
- * recuerda por isolate que ya creó las tablas, así que un DO nuevo por test se encontraría el flag
- * puesto y la base vacía.
+ * Un único Durable Object para todos los casos, limpiando filas entre ellos: las tablas se crean
+ * una vez, a partir del esquema de producción (`helpers/planoDeControl.ts`).
  */
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 	return enElHub("admin-reversible", async (hub: any) => {
 		const db = clienteSobre(hub.state.storage.sql);
 		dbDePruebas = db;
-		await ensureLicensingSchema(db);
+		prepararPlanoDeControl(hub.state.storage.sql);
 		for (const tabla of ["licenses", "license_payments", "admin_audit"]) {
 			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
 		}
 
 		// El `Env` que ven las rutas: el token de admin y una `getDb` que devuelve este SQLite.
-		// `ensureLicensingSchemaMw` vuelve a pasar por aquí y es idempotente.
 		const hubFalso = hubDeMentira();
 		const env = {
 			ADMIN_API_TOKEN: TOKEN,
