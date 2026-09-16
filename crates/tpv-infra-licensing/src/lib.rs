@@ -150,19 +150,42 @@ fn api_url(path: &str) -> String {
 
 /* ===== Tipos de la API de licencias (internos del adaptador) ===== */
 
-/// Respuesta de error del worker: `{ ok:false, error, details? }`.
+/// Respuesta de error del worker: `{ ok:false, error, code?, message?, details? }`.
 #[derive(Debug, Deserialize)]
 struct ApiErr {
     error: String,
     /// ARCH-05: código ya resuelto por el worker. `Option` porque un worker anterior no lo
     /// manda; en ese caso se traduce el `error` con `ErrorCode::from_wire`.
     code: Option<String>,
+    /// La frase para quien está delante, si el worker la tiene (`lib/errorCodes.ts`).
+    message: Option<String>,
     details: Option<JsonValue>,
 }
 
 impl ApiErr {
     fn parse(text: &str) -> Option<Self> {
         serde_json::from_str::<ApiErr>(text).ok()
+    }
+
+    /// Lo que se enseña: la frase del worker si la trae y, si no, su identificador (que
+    /// `AppErrorDto` convierte en la frase genérica de su código). El `details` va detrás, entre
+    /// paréntesis, para diagnosticar: p. ej. el error de Turso de `tenant_db_provision_failed`.
+    fn texto(&self) -> String {
+        let base = self
+            .message
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .unwrap_or(&self.error);
+        let detalle = self.details.as_ref().and_then(|d| match d {
+            JsonValue::String(s) => Some(s.clone()),
+            JsonValue::Null => None,
+            other => Some(other.to_string()),
+        });
+        match detalle {
+            Some(d) if !d.trim().is_empty() => format!("{base} ({d})"),
+            _ => base.to_string(),
+        }
     }
 }
 
@@ -491,29 +514,14 @@ impl LicensingService for LicensingAdapter {
                     return Ok(ResultadoActivacion::CambioDispositivoRequerido { email_hint });
                 }
 
-                // ARCH-05: el código sale del catálogo (a partir del `error` del worker) y el
-                // texto queda como diagnóstico. Si el worker adjunta un `details` (p. ej. el
-                // error de Turso en `tenant_db_provision_failed`), se anexa al mensaje para
-                // que siga siendo diagnosticable en la UI, sin afectar al código.
-                let detalle = e.details.as_ref().and_then(|d| match d {
-                    JsonValue::String(s) => Some(s.clone()),
-                    JsonValue::Null => None,
-                    other => Some(other.to_string()),
-                });
-                // Manda el `code` del worker; si no viene (o no se reconoce), se traduce el
-                // string de negocio. Mismo criterio que `AppError::from_api_body`.
+                // ARCH-05: manda el `code` del worker; si no viene (o no se reconoce), se traduce
+                // el string de negocio. Mismo criterio que `AppError::from_api_body`.
                 let code = e
                     .code
                     .as_deref()
                     .and_then(ErrorCode::from_code)
                     .unwrap_or_else(|| ErrorCode::from_wire(&e.error));
-                return Err(AppError::coded(
-                    code,
-                    match detalle {
-                        Some(d) if !d.trim().is_empty() => format!("{}: {}", e.error, d),
-                        _ => e.error,
-                    },
-                ));
+                return Err(AppError::coded(code, e.texto()));
             }
             return Err(AppError::external(format!(
                 "activate_failed_http_{http}: {text}"
@@ -1043,5 +1051,37 @@ impl RecuperacionPinService for PairingAdapter {
         )
         .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_error_del_worker {
+    use super::*;
+
+    fn texto(cuerpo: &str) -> String {
+        ApiErr::parse(cuerpo).expect("cuerpo de error").texto()
+    }
+
+    /// Activar o cambiar de equipo enseñaba `invalid_code` aunque el worker mandara la frase.
+    #[test]
+    fn la_frase_del_worker_gana_al_identificador() {
+        assert_eq!(
+            texto(r#"{"ok":false,"error":"invalid_code","message":"El código no es correcto."}"#),
+            "El código no es correcto."
+        );
+    }
+
+    #[test]
+    fn sin_frase_queda_el_identificador_para_que_la_frontera_lo_traduzca() {
+        assert_eq!(texto(r#"{"ok":false,"error":"license_not_found"}"#), "license_not_found");
+        assert_eq!(texto(r#"{"ok":false,"error":"x","message":"   "}"#), "x");
+    }
+
+    #[test]
+    fn el_detalle_se_conserva_detras() {
+        assert_eq!(
+            texto(r#"{"ok":false,"error":"tenant_db_provision_failed","message":"No se ha podido preparar la base.","details":"turso 503"}"#),
+            "No se ha podido preparar la base. (turso 503)"
+        );
     }
 }
