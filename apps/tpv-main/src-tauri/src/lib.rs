@@ -1880,7 +1880,29 @@ pub fn run() {
     #[cfg(not(desktop))]
     let _ = &sentry_guard;
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // REV-05: una sola instancia por equipo. Dos procesos sobre la misma `data.db` abren dos
+    // WebSockets con el mismo `deviceId` (el TenantHub echa al anterior: bucle de `replaced`),
+    // duplican los jobs —dos remisiones a la AEAT, dos copias, dos backfills— y drenan el outbox a
+    // la vez. El segundo lanzamiento termina antes de hacer nada y el primero trae su ventana al
+    // frente, que es lo que espera quien ha hecho doble clic en el acceso directo.
+    //
+    // Tiene que ser el PRIMER plugin (lo pide su documentación): el segundo proceso sale dentro de
+    // su inicialización, y cualquier plugin anterior ya habría arrancado su trabajo.
+    //
+    // El candado va por `identifier`, así que el build de E2E (`…tpv.e2e`) no choca con la app de
+    // trabajo abierta en el mismo equipo, igual que no comparte su AppData.
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(ventana) = app.get_webview_window("main") {
+            let _ = ventana.unminimize();
+            let _ = ventana.show();
+            let _ = ventana.set_focus();
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init());
 

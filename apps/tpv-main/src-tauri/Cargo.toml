@@ -85,6 +85,10 @@ tauri-plugin-updater = "2"
 # `sentry-rust-minidump` (proceso helper) y native-tls → openssl, que no cross-compilan a Android.
 # Allí los crashes nativos los captura el SDK de Sentry (Gradle); el crate `sentry` (rustls) sigue vivo.
 tauri-plugin-sentry = "0.5"
+# Una sola instancia (REV-05): un segundo lanzamiento no arranca otro proceso sobre la misma
+# `data.db`, sólo trae al frente la ventana del que ya está abierto. Sólo escritorio: en Android
+# el sistema ya garantiza una instancia por app.
+tauri-plugin-single-instance = "2"
 
 # ───────────── Solo Android ─────────────
 [target.'cfg(target_os = "android")'.dependencies]
