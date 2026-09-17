@@ -13,12 +13,10 @@
 //   · Una licencia = un tenant = un Main (`main_device_id`). Cambiarlo exige OTP (§6.4).
 //   · `customer_email` es obligatorio: es la raíz de confianza de la recuperación.
 
-import type { Client } from "@libsql/client/web";
-
 import type { LicenseOrigin, LicenseStatus } from "../shared";
 import { aesGcmDecrypt, aesGcmEncrypt } from "./crypto";
 import { generateLicenseKey, licenseKeyHash, licenseKeyShort } from "../domains/licensing/licenseKey";
-import { exec } from "./db";
+import { exec, type Sql } from "./db";
 
 export type LicenseRow = {
 	license_id: string;
@@ -83,25 +81,13 @@ export function addMonths(fromMs: number, months: number): number {
    Lecturas
 ============================================================ */
 
-export async function getLicenseByHash(db: Client, licHash: string): Promise<LicenseRow | null> {
+export async function getLicenseByHash(db: Sql, licHash: string): Promise<LicenseRow | null> {
 	const r = await exec(db, `SELECT * FROM licenses WHERE license_key_hash = ? LIMIT 1;`, [licHash]);
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
-export async function getLicenseById(db: Client, licenseId: string): Promise<LicenseRow | null> {
+export async function getLicenseById(db: Sql, licenseId: string): Promise<LicenseRow | null> {
 	const r = await exec(db, `SELECT * FROM licenses WHERE license_id = ? LIMIT 1;`, [licenseId]);
-	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
-}
-
-export async function getLicenseByStripeSession(
-	db: Client,
-	sessionId: string,
-): Promise<LicenseRow | null> {
-	const r = await exec(
-		db,
-		`SELECT * FROM licenses WHERE stripe_checkout_session_id = ? LIMIT 1;`,
-		[sessionId],
-	);
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
@@ -111,7 +97,7 @@ export async function getLicenseByStripeSession(
  * deshabilitada y aún dentro de su `expires_at_ms` (o sin activar todavía).
  */
 export async function getRenewableLicenseByStripeCustomer(
-	db: Client,
+	db: Sql,
 	stripeCustomerId: string,
 	nowMs: number,
 ): Promise<LicenseRow | null> {
@@ -131,7 +117,7 @@ export async function getRenewableLicenseByStripeCustomer(
 	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
 }
 
-export async function listLicenses(db: Client, limit = 50, offset = 0): Promise<LicenseRow[]> {
+export async function listLicenses(db: Sql, limit = 50, offset = 0): Promise<LicenseRow[]> {
 	const r = await exec(
 		db,
 		`SELECT * FROM licenses ORDER BY created_at_ms DESC LIMIT ? OFFSET ?;`,
@@ -170,7 +156,7 @@ export type IssueLicenseArgs = {
  * la 1ª activación (decisión §4.1 — "compra la clave y actívala cuando montes el TPV").
  */
 export async function issueLicense(
-	db: Client,
+	db: Sql,
 	args: IssueLicenseArgs,
 ): Promise<{ license: LicenseRow; keyPlain: string }> {
 	const keyPlain = generateLicenseKey();
@@ -238,7 +224,7 @@ export async function issueLicense(
  * activaciones simultáneas no puedan pisarse.
  */
 export async function activateLicenseFirstTime(
-	db: Client,
+	db: Sql,
 	args: { licenseId: string; tenantId: string; deviceId: string; termMonths: number },
 ): Promise<number> {
 	const now = Date.now();
@@ -264,7 +250,7 @@ export async function activateLicenseFirstTime(
 
 /** Reasigna el Main (cambio de dispositivo, §6.4) y deja la traza de auditoría. */
 export async function reassignMainDevice(
-	db: Client,
+	db: Sql,
 	args: { licenseId: string; fromDeviceId: string | null; toDeviceId: string },
 ): Promise<void> {
 	const now = Date.now();
@@ -290,7 +276,7 @@ export async function reassignMainDevice(
  * que quedaba); si ya venció (o nunca se activó), cuenta desde ahora.
  */
 export async function extendLicense(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	months: number,
 ): Promise<number> {
@@ -317,12 +303,12 @@ export async function extendLicense(
 }
 
 /**
- * Sella la licencia con la sesión de Stripe que acaba de pagarla. El índice único sobre
- * `stripe_checkout_session_id` convierte esto en la barrera de idempotencia del fulfillment:
- * si el webhook se reprocesa, la sesión ya está sellada y no se vuelve a extender.
+ * Sella la licencia con la sesión de Stripe que acaba de pagarla: es el ÚLTIMO cobro, y cada
+ * renovación la sobrescribe. Por eso no sirve de barrera de idempotencia (REV-01): el reintento
+ * de una renovación antigua ya no la encontraría aquí. La barrera es `license_payments`.
  */
 export async function attachStripeSession(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	args: {
 		sessionId: string;
@@ -353,7 +339,7 @@ export async function attachStripeSession(
 	);
 }
 
-export async function revokeLicense(db: Client, licenseId: string): Promise<void> {
+export async function revokeLicense(db: Sql, licenseId: string): Promise<void> {
 	const now = Date.now();
 	await exec(
 		db,
@@ -370,7 +356,7 @@ export async function revokeLicense(db: Client, licenseId: string): Promise<void
  * vuelve a `issued` (su reloj no había arrancado) y una activada a `active`. Si además caducó
  * mientras tanto, `computeLicenseState` ya lo resuelve por `expires_at_ms`: aquí no se toca.
  */
-export async function reactivateLicense(db: Client, licenseId: string): Promise<void> {
+export async function reactivateLicense(db: Sql, licenseId: string): Promise<void> {
 	const now = Date.now();
 	await exec(
 		db,
@@ -394,7 +380,7 @@ export async function reactivateLicense(db: Client, licenseId: string): Promise<
  * exactamente "caducada", y el gate ya lo interpreta así.
  */
 export async function shortenLicense(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	months: number,
 ): Promise<number | null> {
@@ -428,7 +414,7 @@ export type LicensePaymentRow = {
 
 /** LIC-07: registra un cobro cumplido (alta o renovación) para poder revertirlo después. */
 export async function recordLicensePayment(
-	db: Client,
+	db: Sql,
 	args: {
 		licenseId: string;
 		kind: LicensePaymentKind;
@@ -457,9 +443,26 @@ export async function recordLicensePayment(
 	);
 }
 
+/**
+ * REV-01: el cobro que cumplió una sesión de checkout, si ya se cumplió. Es la barrera de
+ * idempotencia del webhook de pago: hay una fila por cobro y nunca se sobrescribe, y el índice
+ * único `ux_license_payments_session` impide que haya dos aunque dos entregas se crucen.
+ */
+export async function getLicensePaymentBySession(
+	db: Sql,
+	sessionId: string,
+): Promise<LicensePaymentRow | null> {
+	const r = await exec(
+		db,
+		`SELECT * FROM license_payments WHERE stripe_checkout_session_id = ? LIMIT 1;`,
+		[sessionId],
+	);
+	return (r.rows?.[0] as unknown as LicensePaymentRow) ?? null;
+}
+
 /** LIC-07: el cobro al que apunta un cargo de Stripe (por su PaymentIntent). */
 export async function getLicensePaymentByIntent(
-	db: Client,
+	db: Sql,
 	paymentIntentId: string,
 ): Promise<LicensePaymentRow | null> {
 	const r = await exec(
@@ -477,7 +480,7 @@ export async function getLicensePaymentByIntent(
 
 /** LIC-07: marca un cobro como devuelto. Impide que dos eventos de Stripe lo reviertan dos veces. */
 export async function markLicensePaymentReversed(
-	db: Client,
+	db: Sql,
 	paymentId: string,
 	args: { reason: string; eventUid: string },
 ): Promise<void> {
@@ -497,7 +500,7 @@ export async function markLicensePaymentReversed(
  * como revertido para siempre y un reembolso posterior del mismo cargo no haría nada.
  */
 export async function clearLicensePaymentReversal(
-	db: Client,
+	db: Sql,
 	paymentId: string,
 ): Promise<void> {
 	await exec(
@@ -519,7 +522,7 @@ export async function clearLicensePaymentReversal(
  * equivocada de un cliente con varias sería peor que no hacer nada y avisar.
  */
 export async function getSoleLicenseByStripeCustomer(
-	db: Client,
+	db: Sql,
 	stripeCustomerId: string,
 ): Promise<LicenseRow | null> {
 	const r = await exec(
@@ -533,7 +536,7 @@ export async function getSoleLicenseByStripeCustomer(
 
 /** LIC-07: la licencia sellada con ese PaymentIntent (el último cobro que la tocó). */
 export async function getLicenseByStripeIntent(
-	db: Client,
+	db: Sql,
 	paymentIntentId: string,
 ): Promise<LicenseRow | null> {
 	const r = await exec(
@@ -549,7 +552,7 @@ export async function getLicenseByStripeIntent(
  * la columna queda NULL y ese cliente aparece como "pagó y no tiene su clave" (reenviable con
  * `pnpm license:resend`).
  */
-export async function markKeyEmailSent(db: Client, licenseId: string): Promise<void> {
+export async function markKeyEmailSent(db: Sql, licenseId: string): Promise<void> {
 	const now = Date.now();
 	await exec(
 		db,
@@ -560,7 +563,7 @@ export async function markKeyEmailSent(db: Client, licenseId: string): Promise<v
 
 /** Persiste los datos del negocio que llegan en la activación (corrige el bug #5). */
 export async function upsertTenantInfo(
-	db: Client,
+	db: Sql,
 	tenantId: string,
 	info: {
 		displayName?: string | null;
@@ -595,7 +598,7 @@ export async function upsertTenantInfo(
 	);
 }
 
-export async function ensureTenantExistsMinimal(db: Client, tenantId: string) {
+export async function ensureTenantExistsMinimal(db: Sql, tenantId: string) {
 	const now = Date.now();
 	await exec(
 		db,
@@ -623,7 +626,7 @@ export async function ensureTenantExistsMinimal(db: Client, tenantId: string) {
  * un código de recuperación.
  */
 export async function getOrCreateTenantFieldDek(
-	db: Client,
+	db: Sql,
 	storeKeyB64: string,
 	tenantId: string,
 ): Promise<string> {
@@ -658,7 +661,7 @@ export async function getOrCreateTenantFieldDek(
 }
 
 async function leerFieldDek(
-	db: Client,
+	db: Sql,
 	storeKeyB64: string,
 	tenantId: string,
 ): Promise<string | null> {
@@ -693,7 +696,7 @@ export type DeviceOtpRow = {
  * Pedir un código nuevo sustituye al anterior y reinicia los intentos.
  */
 export async function putDeviceOtp(
-	db: Client,
+	db: Sql,
 	args: { licenseId: string; newDeviceId: string; codeHash: string; expiresAtMs: number },
 ): Promise<void> {
 	const now = Date.now();
@@ -715,7 +718,7 @@ export async function putDeviceOtp(
 }
 
 export async function getDeviceOtp(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	newDeviceId: string,
 ): Promise<DeviceOtpRow | null> {
@@ -728,7 +731,7 @@ export async function getDeviceOtp(
 }
 
 export async function bumpDeviceOtpAttempts(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	newDeviceId: string,
 ): Promise<void> {
@@ -744,7 +747,7 @@ export async function bumpDeviceOtpAttempts(
  * si otro intento se le adelantó (anti-replay ante peticiones concurrentes).
  */
 export async function consumeDeviceOtp(
-	db: Client,
+	db: Sql,
 	licenseId: string,
 	newDeviceId: string,
 ): Promise<boolean> {
@@ -785,7 +788,7 @@ export type EmailCodeRow = {
 	window_started_ms: number;
 };
 
-export async function getEmailCode(db: Client, k: EmailCodeKey): Promise<EmailCodeRow | null> {
+export async function getEmailCode(db: Sql, k: EmailCodeKey): Promise<EmailCodeRow | null> {
 	const r = await exec(
 		db,
 		`SELECT * FROM email_codes WHERE tenant_id=? AND device_id=? AND purpose=? LIMIT 1;`,
@@ -810,7 +813,7 @@ export async function getEmailCode(db: Client, k: EmailCodeKey): Promise<EmailCo
 
 /** Guarda el código (sólo su HMAC). Pedir otro sustituye al anterior y reinicia los intentos. */
 export async function putEmailCode(
-	db: Client,
+	db: Sql,
 	args: EmailCodeKey & {
 		subject: string;
 		codeHash: string;
@@ -857,7 +860,7 @@ export async function putEmailCode(
  * sumar después dejaría pasar a la vez a todas las peticiones concurrentes.
  */
 export async function reserveEmailCodeAttempt(
-	db: Client,
+	db: Sql,
 	k: EmailCodeKey,
 	maxAttempts: number,
 ): Promise<number | null> {
@@ -876,7 +879,7 @@ export async function reserveEmailCodeAttempt(
 }
 
 /** Consumo atómico: sólo consume si sigue sin consumir. */
-export async function consumeEmailCode(db: Client, k: EmailCodeKey, nowMs: number): Promise<boolean> {
+export async function consumeEmailCode(db: Sql, k: EmailCodeKey, nowMs: number): Promise<boolean> {
 	const r = await exec(
 		db,
 		`
@@ -891,7 +894,7 @@ export async function consumeEmailCode(db: Client, k: EmailCodeKey, nowMs: numbe
 }
 
 /** Deja el código inservible sin borrar la fila: el tope de envíos por hora vive en ella. */
-export async function voidEmailCode(db: Client, k: EmailCodeKey, nowMs: number): Promise<void> {
+export async function voidEmailCode(db: Sql, k: EmailCodeKey, nowMs: number): Promise<void> {
 	await exec(
 		db,
 		`UPDATE email_codes SET consumed_at_ms=? WHERE tenant_id=? AND device_id=? AND purpose=?;`,
@@ -904,7 +907,7 @@ export async function voidEmailCode(db: Client, k: EmailCodeKey, nowMs: number):
 ============================================================ */
 
 /** El correo propio, o `null` si no se ha cambiado (y entonces vale el de la compra). */
-export async function getTenantRecoveryEmail(db: Client, tenantId: string): Promise<string | null> {
+export async function getTenantRecoveryEmail(db: Sql, tenantId: string): Promise<string | null> {
 	const r = await exec(
 		db,
 		`SELECT email FROM tenant_recovery_emails WHERE tenant_id=? LIMIT 1;`,
@@ -916,7 +919,7 @@ export async function getTenantRecoveryEmail(db: Client, tenantId: string): Prom
 
 /** `null` vuelve al de la compra (borra la fila). Sólo se llama tras verificar el buzón nuevo. */
 export async function setTenantRecoveryEmail(
-	db: Client,
+	db: Sql,
 	tenantId: string,
 	email: string | null,
 	nowMs: number,
@@ -951,7 +954,7 @@ export async function setTenantRecoveryEmail(
  * deliberada; quien la unifique con el criterio general está cambiando eso a propósito.
  */
 export async function getDevicePubKeyB64(
-	db: Client,
+	db: Sql,
 	tenantId: string,
 	deviceId: string,
 ): Promise<string | null> {
@@ -971,7 +974,7 @@ export async function getDevicePubKeyB64(
  * equipo es la misma en todos, así que su clave también.
  */
 export async function getDevicePubKeyB64EnCualquierNegocio(
-	db: Client,
+	db: Sql,
 	deviceId: string,
 ): Promise<string | null> {
 	const r = await exec(db, `SELECT device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`, [deviceId]);
@@ -982,7 +985,7 @@ export async function getDevicePubKeyB64EnCualquierNegocio(
 
 /** Guarda la pubkey solo si está vacía. Si ya hay otra distinta → error (anti-clonado). */
 export async function setDevicePubKeyB64IfEmptyOrThrow(
-	db: Client,
+	db: Sql,
 	tenantId: string,
 	deviceId: string,
 	pubB64: string,
@@ -1017,7 +1020,7 @@ export async function setDevicePubKeyB64IfEmptyOrThrow(
  * (ver `pairApprove`); activar tenía que hacerlo también.
  */
 export async function ensureDevice(
-	db: Client,
+	db: Sql,
 	tenantId: string,
 	deviceId: string,
 	role: "tpv" | "handy" = "tpv",
@@ -1049,7 +1052,7 @@ export async function ensureDevice(
 ============================================================ */
 
 export async function upsertWebhookEvent(
-	db: Client,
+	db: Sql,
 	args: {
 		event_uid: string;
 		event_name: string;
@@ -1067,7 +1070,12 @@ export async function upsertWebhookEvent(
 		`SELECT processed_ok FROM webhook_events WHERE event_uid=? LIMIT 1;`,
 		[args.event_uid],
 	);
-	if (existing.rows?.length) return { already: true };
+	// REV-01: sólo está hecho lo que salió bien. Un evento que falló (`processed_ok = 0`) contestó
+	// 500 precisamente para que Stripe lo reintentara, y el reintento tiene que procesarse. Lo que
+	// impide aplicar dos veces un cobro no es esta tabla, sino la barrera por sesión dentro de la
+	// transacción del cumplimiento (`license_payments`).
+	const fila = existing.rows?.[0] as unknown as { processed_ok: number } | undefined;
+	if (fila) return { already: Number(fila.processed_ok) === 1 };
 
 	await exec(
 		db,
@@ -1094,7 +1102,7 @@ export async function upsertWebhookEvent(
 }
 
 export async function markWebhookProcessed(
-	db: Client,
+	db: Sql,
 	eventUid: string,
 	ok: boolean,
 	errorText?: string | null,
@@ -1112,7 +1120,7 @@ export async function markWebhookProcessed(
 ============================================================ */
 
 export async function auditAdmin(
-	db: Client,
+	db: Sql,
 	action: "issue" | "revoke" | "extend" | "resend" | "refund" | "dispute" | "reactivate" | "shorten",
 	licenseId: string | null,
 	detail: Record<string, unknown>,

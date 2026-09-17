@@ -15,7 +15,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { clienteSobre } from "./helpers/clienteSql";
+import { clienteSobre, conFalloSimulado } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { revertir } from "../src/domains/stripe/stripe.routes";
@@ -78,7 +78,7 @@ type Escenario = {
  */
 async function escenario<T>(fn: (e: Escenario) => Promise<T>): Promise<T> {
 	return enElHub("lic07", async (hub: any) => {
-		const db = clienteSobre(hub.state.storage.sql);
+		const db = clienteSobre(hub.state.storage.sql, hub.state.storage);
 		prepararPlanoDeControl(hub.state.storage.sql);
 		for (const tabla of ["licenses", "license_payments", "admin_audit"]) {
 			hub.state.storage.sql.exec(`DELETE FROM ${tabla};`);
@@ -253,5 +253,46 @@ describe("LIC-07 · chargebacks", () => {
 		});
 
 		expect(final).toBe(conRenovacion);
+	});
+});
+
+describe("REV-01 · un fallo a mitad de una reversión no la aplica dos veces", () => {
+	it("devolver una renovación: si falla marcar el cobro no se restan meses, y el reintento los resta una vez", async () => {
+		const r = await escenario(async (e) => {
+			const lic = await e.licenciaActivada();
+			const antes = lic.expires_at_ms!;
+			const conRenovacion = await e.renovar(lic.license_id);
+
+			const conFallo = conFalloSimulado(e.db, /UPDATE license_payments/);
+			const error = await revertir(conFallo, cargoDevuelto(PI_RENOVACION)).catch((err) => err);
+			const trasFallo = (await e.leer(lic.license_id)).expires_at_ms;
+
+			await revertir(e.db, cargoDevuelto(PI_RENOVACION));
+			return { antes, conRenovacion, error, trasFallo, final: (await e.leer(lic.license_id)).expires_at_ms };
+		});
+
+		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(r.trasFallo).toBe(r.conRenovacion);
+		expect(r.final).toBe(r.antes);
+	});
+
+	it("ganar la disputa de una renovación: si falla limpiar la marca no se suman meses, y el reintento los suma una vez", async () => {
+		const r = await escenario(async (e) => {
+			const lic = await e.licenciaActivada();
+			const conRenovacion = await e.renovar(lic.license_id);
+			await revertir(e.db, disputa(PI_RENOVACION, "created"));
+			const recortada = (await e.leer(lic.license_id)).expires_at_ms;
+
+			const conFallo = conFalloSimulado(e.db, /UPDATE license_payments/);
+			const error = await revertir(conFallo, disputa(PI_RENOVACION, "closed", "won")).catch((err) => err);
+			const trasFallo = (await e.leer(lic.license_id)).expires_at_ms;
+
+			await revertir(e.db, disputa(PI_RENOVACION, "closed", "won"));
+			return { conRenovacion, recortada, error, trasFallo, final: (await e.leer(lic.license_id)).expires_at_ms };
+		});
+
+		expect(String(r.error?.message)).toBe("fallo_simulado");
+		expect(r.trasFallo).toBe(r.recortada);
+		expect(r.final).toBe(r.conRenovacion);
 	});
 });

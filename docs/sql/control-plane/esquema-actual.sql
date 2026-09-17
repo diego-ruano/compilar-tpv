@@ -198,6 +198,10 @@ CREATE TABLE license_payments (
 
 CREATE INDEX ix_license_payments_intent
   ON license_payments (stripe_payment_intent_id);
+-- REV-01: una sesión de checkout se cumple una sola vez. Es la barrera del webhook de pago
+-- (`licenses.stripe_checkout_session_id` no sirve: cada renovación la sobrescribe).
+CREATE UNIQUE INDEX ux_license_payments_session
+  ON license_payments (stripe_checkout_session_id) WHERE stripe_checkout_session_id IS NOT NULL;
 CREATE INDEX ix_license_payments_license ON license_payments (license_id);
 
 CREATE TABLE admin_audit (

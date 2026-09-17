@@ -5,12 +5,18 @@
 // Barreras, en orden (cada una asume que la anterior pudo no bastar):
 //   1. Firma HMAC-SHA256 de Stripe, verificada sobre el cuerpo CRUDO, comparación timing-safe.
 //   2. Anti-replay: el timestamp de la firma no puede desviarse más de 5 minutos.
-//   3. Idempotencia por `event.id` en `webhook_events` (Stripe reintenta; puede duplicar).
-//   4. Idempotencia por sesión de checkout: si esa sesión ya materializó una licencia, se sale.
+//   3. Idempotencia por `event.id` en `webhook_events`: un evento que salió bien no se repite. Uno
+//      que falló SÍ se reprocesa — para eso se contestó 500 (REV-01).
+//   4. Idempotencia por sesión de checkout en `license_payments` (índice único): si esa sesión ya
+//      se cumplió, se sale. Es la barrera de verdad, y se comprueba dentro de la transacción.
 //   5. Fail-closed en la duración: sin `metadata.term_months` no se emite NADA.
 //
-// Se responde 2xx rápido y siempre que el evento quede registrado: un 5xx hace que Stripe
-// reintente, y no queremos reintentos por un fallo nuestro de correo.
+// REV-01 — todo lo que escribe un cobro, o una reversión, va en UNA transacción. Antes eran
+// sentencias sueltas: si fallaba la tercera, las dos primeras se quedaban, y el reintento —que no
+// sabía dónde se había parado— volvía a sumar (o a restar) los meses.
+//
+// Se responde 2xx en cuanto lo escrito está confirmado: un 5xx hace que Stripe reintente, y no
+// queremos reintentos por un fallo nuestro de correo.
 //
 // LIC-07 — la otra mitad: un pago puede DESHACERSE. Reembolso (lo emites tú desde Stripe, nunca
 // automático) o chargeback (lo pide el cliente a su banco y el dinero se va al instante). Hasta
@@ -23,7 +29,7 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import { getDb } from "../../server/db";
+import { enTransaccion, getDb, type Sql } from "../../server/db";
 import { sha256Hex } from "../../server/crypto";
 import {
 	attachStripeSession,
@@ -32,8 +38,8 @@ import {
 	extendLicense,
 	getLicenseById,
 	getLicenseByStripeIntent,
-	getLicenseByStripeSession,
 	getLicensePaymentByIntent,
+	getLicensePaymentBySession,
 	getRenewableLicenseByStripeCustomer,
 	getSoleLicenseByStripeCustomer,
 	issueLicense,
@@ -116,8 +122,8 @@ stripeRoutes.post("/webhook", async (c) => {
 
 	const db = getDb(env);
 
-	// Idempotencia (3): si ya lo procesamos, 200 y a otra cosa. Stripe reintenta ante cualquier
-	// duda, y procesar dos veces el mismo pago emitiría dos licencias.
+	// Idempotencia (3): si ya lo procesamos BIEN, 200 y a otra cosa. Si falló, se vuelve a
+	// intentar: la barrera por sesión (4) es la que impide aplicar dos veces el mismo pago.
 	const idemp = await upsertWebhookEvent(db, {
 		event_uid: eventId,
 		event_name: eventName,
@@ -151,7 +157,11 @@ stripeRoutes.post("/webhook", async (c) => {
 	}
 
 	try {
-		await cumplir(env, db, String(event?.data?.object?.id || ""));
+		const sessionId = String(event?.data?.object?.id || "");
+		if (!sessionId) throw new Error("missing_session_id");
+		// Se relee la sesión de Stripe en vez de fiarse del cuerpo del webhook (recomendación oficial).
+		const session = await retrieveCheckoutSession(env, sessionId);
+		await cumplir(env, db, session);
 		await markWebhookProcessed(db, eventId, true);
 		return c.json({ ok: true, received: true });
 	} catch (e: any) {
@@ -163,27 +173,35 @@ stripeRoutes.post("/webhook", async (c) => {
 	}
 });
 
+/** Qué ha hecho `cumplir` con una sesión. Lo leen los tests. */
+export type Cumplimiento =
+	| { accion: "sin_pagar" }
+	| { accion: "ya_cumplida"; license_id: string }
+	| { accion: "renovada"; license_id: string; expires_at_ms: number }
+	| { accion: "emitida"; license_id: string };
+
 /**
  * Convierte una sesión pagada en licencia: extiende la del cliente si ya tenía una viva, o le
  * minta una nueva y se la manda por correo.
+ *
+ * Recibe la sesión ya leída de Stripe para que la llamada de red quede fuera de la transacción
+ * (y para que los tests puedan pasarle una sin salir a internet).
  */
-async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string): Promise<void> {
+export async function cumplir(
+	env: Env,
+	db: ReturnType<typeof getDb>,
+	session: any,
+): Promise<Cumplimiento> {
+	const sessionId = String(session?.id || "");
 	if (!sessionId) throw new Error("missing_session_id");
-
-	// Se relee la sesión de Stripe en vez de fiarse del cuerpo del webhook (recomendación oficial).
-	const session = await retrieveCheckoutSession(env, sessionId);
 
 	// Un checkout puede completarse con el pago aún pendiente (métodos diferidos): entonces no se
 	// emite nada todavía. Ya llegará `async_payment_succeeded`.
 	const paymentStatus = String(session?.payment_status || "");
 	if (paymentStatus === "unpaid") {
 		console.log("[stripe] sesión sin pagar todavía, no se emite:", sessionId);
-		return;
+		return { accion: "sin_pagar" };
 	}
-
-	// Idempotencia (4): esta sesión ya se convirtió en licencia.
-	const yaCumplida = await getLicenseByStripeSession(db, sessionId);
-	if (yaCumplida) return;
 
 	// Fail-closed (5): sin duración conocida no se emite. Se registra para que se vea en el log
 	// del evento (queda `processed_ok = 0` con este mensaje).
@@ -203,64 +221,89 @@ async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string
 	const priceId = priceIdFromSession(session);
 	const paymentIntentId = paymentIntentIdFromSession(session);
 
-	// ¿Renovación? Si el cliente ya tiene una licencia viva, se le EXTIENDE: nada de mandarle una
-	// clave nueva que tendría que teclear en un TPV que ya funciona.
-	const renovable = customerId
-		? await getRenewableLicenseByStripeCustomer(db, customerId, Date.now())
-		: null;
+	// Todo lo que escribe el cobro, junto (REV-01). El correo sale después del COMMIT: mandar la
+	// clave de una licencia que luego se deshace sería entregar algo que no existe.
+	const hecho = await enTransaccion(db, async (tx) => {
+		// Idempotencia (4): esta sesión ya se cumplió. Se mira DENTRO de la transacción, y si dos
+		// entregas se cruzan igualmente, el índice único de `license_payments` rechaza la segunda
+		// y su transacción entera se deshace.
+		const yaCumplida = await getLicensePaymentBySession(tx, sessionId);
+		if (yaCumplida) return { tipo: "ya_cumplida" as const, license_id: yaCumplida.license_id };
 
-	if (renovable) {
-		const expiresAtMs = await extendLicense(db, renovable.license_id, termMonths);
-		await attachStripeSession(db, renovable.license_id, {
-			sessionId,
-			customerId,
-			paymentIntentId,
-			priceId,
+		// ¿Renovación? Si el cliente ya tiene una licencia viva, se le EXTIENDE: nada de mandarle
+		// una clave nueva que tendría que teclear en un TPV que ya funciona.
+		const renovable = customerId
+			? await getRenewableLicenseByStripeCustomer(tx, customerId, Date.now())
+			: null;
+
+		if (renovable) {
+			const expiresAtMs = await extendLicense(tx, renovable.license_id, termMonths);
+			await attachStripeSession(tx, renovable.license_id, {
+				sessionId,
+				customerId,
+				paymentIntentId,
+				priceId,
+			});
+
+			// LIC-07: `attachStripeSession` sobrescribe el cobro anterior en `licenses`, así que el
+			// historial es lo único que permite atribuir después un reembolso de ESTA renovación y
+			// saber cuántos meses hay que quitar.
+			await recordLicensePayment(tx, {
+				licenseId: renovable.license_id,
+				kind: "renewal",
+				termMonths,
+				sessionId,
+				paymentIntentId,
+			});
+
+			return { tipo: "renovada" as const, license: renovable, expiresAtMs };
+		}
+
+		const { license, keyPlain } = await issueLicense(tx, {
+			storeKeyB64: env.LICENSE_STORE_KEY,
+			termMonths,
+			origin: "stripe",
+			customerEmail: email,
+			customerName: name,
+			customerBusinessName: businessName,
+			customerPhone: phone,
+			customerAddressJson: addressJson,
+			stripeCustomerId: customerId,
+			stripeCheckoutSessionId: sessionId,
+			stripePaymentIntentId: paymentIntentId,
+			stripePriceId: priceId,
 		});
 
-		// LIC-07: `attachStripeSession` sobrescribe el cobro anterior en `licenses`, así que el
-		// historial es lo único que permite atribuir después un reembolso de ESTA renovación y
-		// saber cuántos meses hay que quitar.
-		await recordLicensePayment(db, {
-			licenseId: renovable.license_id,
-			kind: "renewal",
+		await recordLicensePayment(tx, {
+			licenseId: license.license_id,
+			kind: "issue",
 			termMonths,
 			sessionId,
 			paymentIntentId,
 		});
 
-		await sendLicenseRenewedEmail(env, {
-			to: renovable.customer_email,
-			name: renovable.customer_name,
-			termMonths,
-			expiresAtMs,
-		});
-		return;
+		return { tipo: "emitida" as const, license, keyPlain };
+	});
+
+	if (hecho.tipo === "ya_cumplida") {
+		return { accion: "ya_cumplida", license_id: hecho.license_id };
 	}
 
-	const { license, keyPlain } = await issueLicense(db, {
-		storeKeyB64: env.LICENSE_STORE_KEY,
-		termMonths,
-		origin: "stripe",
-		customerEmail: email,
-		customerName: name,
-		customerBusinessName: businessName,
-		customerPhone: phone,
-		customerAddressJson: addressJson,
-		stripeCustomerId: customerId,
-		stripeCheckoutSessionId: sessionId,
-		stripePaymentIntentId: paymentIntentId,
-		stripePriceId: priceId,
-	});
+	if (hecho.tipo === "renovada") {
+		await sendLicenseRenewedEmail(env, {
+			to: hecho.license.customer_email,
+			name: hecho.license.customer_name,
+			termMonths,
+			expiresAtMs: hecho.expiresAtMs,
+		});
+		return {
+			accion: "renovada",
+			license_id: hecho.license.license_id,
+			expires_at_ms: hecho.expiresAtMs,
+		};
+	}
 
-	await recordLicensePayment(db, {
-		licenseId: license.license_id,
-		kind: "issue",
-		termMonths,
-		sessionId,
-		paymentIntentId,
-	});
-
+	const { license, keyPlain } = hecho;
 	const emailSent = await sendLicenseKeyEmail(env, {
 		to: license.customer_email,
 		name: license.customer_name,
@@ -272,6 +315,8 @@ async function cumplir(env: Env, db: ReturnType<typeof getDb>, sessionId: string
 	// recuperable cifrada): dejamos `key_email_sent_at_ms` a NULL para que la licencia salga en
 	// `pnpm license:list` como pendiente y se reenvíe con `pnpm license:resend`.
 	if (emailSent) await markKeyEmailSent(db, license.license_id);
+
+	return { accion: "emitida", license_id: license.license_id };
 }
 
 /* ============================================================
@@ -290,7 +335,7 @@ type Reversion = { reason: "refund" | "dispute"; eventUid: string };
  * renovación y hay que asumir lo primero.
  */
 async function localizarCobro(
-	db: ReturnType<typeof getDb>,
+	db: Sql,
 	obj: any,
 ): Promise<{ license: LicenseRow; pago: LicensePaymentRow | null } | null> {
 	const paymentIntentId = String(obj?.payment_intent || "");
@@ -327,7 +372,7 @@ function diasActivada(license: LicenseRow): number | null {
  * revoca la licencia (el cliente no se queda con el producto).
  */
 async function revertirCobro(
-	db: ReturnType<typeof getDb>,
+	db: Sql,
 	obj: any,
 	rev: Reversion,
 ): Promise<Record<string, unknown>> {
@@ -388,7 +433,7 @@ async function revertirCobro(
 
 /** Deshace la reversión de una disputa ganada: el dinero vuelve, el servicio también. */
 async function restaurarCobro(
-	db: ReturnType<typeof getDb>,
+	db: Sql,
 	obj: any,
 	eventUid: string,
 ): Promise<Record<string, unknown>> {
@@ -430,6 +475,13 @@ export async function revertir(
 	db: ReturnType<typeof getDb>,
 	event: any,
 ): Promise<Record<string, unknown>> {
+	// REV-01: comprobar si el cobro ya se revirtió, tocar la licencia y marcar el cobro van juntos.
+	// Sueltos, un fallo al marcar dejaba la licencia ya recortada y el cobro sin marca, y el
+	// reintento volvía a restar los meses (o a sumarlos, al ganar una disputa).
+	return enTransaccion(db, (tx) => decidirReversion(tx, event));
+}
+
+async function decidirReversion(db: Sql, event: any): Promise<Record<string, unknown>> {
 	const obj = event?.data?.object ?? {};
 	const eventUid = String(event?.id || "");
 
