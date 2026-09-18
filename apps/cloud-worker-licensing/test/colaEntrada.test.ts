@@ -50,6 +50,18 @@ function opLinea(n: number) {
 	};
 }
 
+/**
+ * Una operación cuya hora la elegiría la base que la ejecute (REV-22). No es una sentencia que se
+ * pueda escribir hoy —lo vigila el scan de `*.commands.ts`—, pero es contra lo que existe el guard.
+ */
+function opConHoraDeTurso(n: number) {
+	const op = opLinea(n);
+	op.cmd.payload.steps[0].sql =
+		"UPDATE Comandas SET Fecha_Hora_Apertura = CURRENT_TIMESTAMP WHERE ID_Comanda = 'comanda-1';";
+	op.cmd.payload.steps[0].args = [];
+	return op;
+}
+
 /** Ver `applyLote.test.ts`: una FK diferida resetearía el DO entero; esto falla en el acto. */
 function opRota(n: number) {
 	const op = opLinea(n);
@@ -463,6 +475,38 @@ describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
 			expect(muertas(sql)).toEqual([]);
 			expect(intentosEnCola(sql)).toEqual([]);
 			expect(lineas(sql)).toEqual(["det-1", "det-2"]);
+		});
+	});
+
+	it("una hora que tendría que poner Turso se rechaza también por la cola", async () => {
+		// REV-22: el guard de CFG-04 estaba sólo en el camino en vivo. Por la cola entraba, y Turso
+		// resolvía el `CURRENT_TIMESTAMP` con su reloj y en UTC: la fila de la nube decía otra hora
+		// que la de la Main. Es el mismo motor — una operación no puede valer o no según hubiera
+		// atraso por delante cuando se subió.
+		await enElHub("rev22-hora", async (hub: any) => {
+			const { sql } = prepararHub(hub);
+			const antes = sql
+				.exec("SELECT Fecha_Hora_Apertura AS f FROM Comandas WHERE ID_Comanda = 'comanda-1';")
+				.toArray()[0].f;
+
+			hub.encolar(TENANT, [opLinea(1), opConHoraDeTurso(2), opLinea(3)]);
+
+			// Y se aparta a la PRIMERA: `hora_no_determinista` es un rechazo permanente, así que no
+			// tiene sentido parar el atraso de detrás cinco vueltas para llegar a lo mismo.
+			await hub.drenarCola();
+
+			expect(muertas(sql)).toEqual(["op-2"]);
+			expect(lineas(sql)).toEqual(["det-1", "det-3"]);
+			expect(
+				sql
+					.exec("SELECT Fecha_Hora_Apertura AS f FROM Comandas WHERE ID_Comanda = 'comanda-1';")
+					.toArray()[0].f,
+			).toBe(antes);
+
+			const error = String(
+				sql.exec("SELECT Error FROM _Cola_Muerta WHERE Op_Id = 'op-2';").toArray()[0].Error,
+			);
+			expect(error).toContain("hora_no_determinista");
 		});
 	});
 

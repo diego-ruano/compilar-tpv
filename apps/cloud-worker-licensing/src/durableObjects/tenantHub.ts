@@ -662,6 +662,17 @@ export class TenantHub {
 				throw new Error("missing_client_now");
 			}
 			const cmd = rewriteCmdNowLiterals(o.cmd, parsedNow ?? serverNowFixed());
+
+			// REV-22: y el guard duro de CFG-04, que aquí faltaba. Sin él, lo que llegara con una
+			// hora sin fijar —un `CURRENT_TIMESTAMP`, un `'now'` en UTC— lo resolvía Turso con su
+			// reloj, y la fila de la nube decía otra hora que la de la Main. Por el camino en vivo
+			// eso se rechaza desde SYNC-04; por la cola entraba, y es el MISMO motor: una operación
+			// no puede valer o no según haya atraso por delante cuando se subió.
+			const sinFijar = horaSinFijar(cmd);
+			if (sinFijar) {
+				throw new Error(`hora_no_determinista: ${sinFijar}`);
+			}
+
 			return { ...o, opId: op, commandName: command, cmd };
 		});
 

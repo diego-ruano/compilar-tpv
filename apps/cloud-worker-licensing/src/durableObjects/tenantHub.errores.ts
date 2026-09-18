@@ -36,6 +36,11 @@ const PERMANENTES = [
 	// CFG-04: el DO rechaza una escritura que dejaría a Turso elegir la hora. Es el propio comando
 	// el que está mal escrito: repetirlo da el mismo rechazo.
 	"hora_no_determinista",
+	// REV-22: su pareja. La hora del emisor viaja GUARDADA con la operación (la columna `Client_Now`
+	// de la cola, o el mensaje que la trajo), así que si falta o está fuera de la deriva admisible,
+	// faltará igual dentro de una hora. Y aquí esperar no es gratis: mientras una operación está en
+	// duda, el atraso que va detrás no avanza.
+	"missing_client_now",
 ] as const;
 
 /**

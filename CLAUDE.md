@@ -571,7 +571,12 @@ no sólo en dev.
     inserta, la informa.
   - **La nube sólo sabe fijar la hora local del emisor** (`X-Client-Now`). Un `'now'` en UTC o un
     `CURRENT_*` en una escritura de la Handy no tienen con qué resolverse, y el DO los rechaza
-    (`hora_no_determinista`) en vez de dejar que Turso elija.
+    (`hora_no_determinista`) en vez de dejar que Turso elija. **Y lo rechaza por los DOS caminos**
+    (REV-22): el guard estaba sólo en el apply en vivo, así que lo mismo entraba si venía por la
+    cola del volcado —y es el mismo motor: una operación no puede valer o no según hubiera atraso
+    por delante cuando se subió—. Los dos rechazos son permanentes, ése y `missing_client_now`: la
+    hora del emisor viaja guardada con la operación, así que si falta, faltará igual dentro de una
+    hora — y esperarla no sale gratis: detiene además a todo el atraso que va detrás.
   - **Y «hoy» también lo pone quien PREGUNTA, no sólo quien escribe (REV-03).** Las lecturas de la
     Handy se ejecutan en Turso, que corre en UTC: su `'localtime'` es UTC, así que un
     `date('now','localtime')` dentro de una consulta devolvía el día del servidor. De madrugada eso
