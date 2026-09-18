@@ -56,25 +56,14 @@ impl LoginRepository for HttpLoginRepository {
             .await
     }
 
-    async fn complete_initial_setup(
-        &self,
-        id_usuario: &str,
-        pin_actual: &str,
-        pin_nuevo: &str,
-        email_nuevo: &str,
-    ) -> AppResult<()> {
-        let body = json!({
-            "id_usuario": id_usuario,
-            "pin_actual": pin_actual,
-            "pin_nuevo": pin_nuevo,
-            "email_nuevo": email_nuevo,
-        });
-        let _: JsonValue = self
-            .client
-            .post_json("/v1/login/complete-initial-setup", &body)
-            .await?;
-        Ok(())
-    }
+    // REV-06: `complete_initial_setup` NO se implementa aquí, y su ausencia es la corrección.
+    // Mandaba el PIN a `/v1/login/complete-initial-setup`, que lo verificaba sin el bloqueo por
+    // intentos de LOGIN-01 y sin mirar `Requiere_Setup`: un PIN de cuatro cifras, diez mil
+    // combinaciones y ningún freno, y al acertar se le cambiaban PIN y correo a cualquier usuario
+    // activo, administrador incluido. No tapaba ningún hueco real —la pantalla nunca rellenaba el
+    // `pin_actual` que la ruta exigía, así que devolvía un 400— y no puede taparlo: una Handy no
+    // llega a este flujo, porque una Main con el setup pendiente no pasa de su propia pantalla de
+    // setup y por tanto no puede vincular ninguna Handy. Hereda el rechazo del puerto.
 
     async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus> {
         // Sin fecha ni hora: las pone el worker con el reloj de este equipo (`X-Client-Now`, que el
@@ -103,5 +92,29 @@ impl LoginRepository for HttpLoginRepository {
             .post_json("/v1/login/turno-partido", &body)
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! REV-06: la Handy no elige el PIN inicial de nadie.
+
+    use super::*;
+    use tpv_application::ports::login::LoginRepository;
+
+    #[tokio::test]
+    async fn la_handy_no_completa_el_setup_inicial() {
+        // La base apunta a un host que no existe: si esto saliera a la red, el error sería de red y
+        // no el del puerto. Que falle sin moverse es justamente lo que se comprueba.
+        let cliente = CloudClient::new("http://127.0.0.1:1", std::env::temp_dir()).unwrap();
+        let repo = HttpLoginRepository::new(Arc::new(cliente));
+
+        let e = repo
+            .complete_initial_setup("admin", "4321", "ladron@bar.test")
+            .await
+            .expect_err("tiene que rechazarlo");
+
+        let texto = format!("{e:?}");
+        assert!(texto.contains("TPV principal"), "mensaje inesperado: {texto}");
     }
 }

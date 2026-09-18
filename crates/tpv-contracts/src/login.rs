@@ -79,14 +79,12 @@ pub struct SetTurnoPartidoInput {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+/// El setup inicial NO lleva PIN actual (REV-06). Ocurre antes del primer login, así que no hay
+/// ninguno que confirmar —el que hay es el del seed, que es público—: quien autoriza es
+/// `Requiere_Setup = 1`. Llegó a viajar un `pin_actual` para el camino de la Handy, que la pantalla
+/// no rellenaba nunca y que sólo servía para que la nube lo verificara sin límite de intentos.
 pub struct CompleteInitialSetupInput {
     pub id_usuario: String,
-    /// Sólo lo manda el camino que llega CON sesión (el Handy, vía worker). El setup del primer
-    /// arranque ocurre ANTES del login: ahí no hay PIN que confirmar y el permiso es otro
-    /// (`Requiere_Setup`), así que llega vacío.
-    #[serde(default)]
-    #[ts(optional)]
-    pub pin_actual: Option<String>,
     pub pin_nuevo: String,
     pub email_nuevo: String,
 }

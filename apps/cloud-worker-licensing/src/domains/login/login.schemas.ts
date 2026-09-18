@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
-	CompleteInitialSetupInput,
 	LoginUserArgs,
 	PunchInput as ContractPunchInput,
 	SetTurnoPartidoInput as ContractSetTurnoPartidoInput,
@@ -29,13 +28,6 @@ export const setTurnoPartidoSchema = z.object({
 	id_usuario: idStr,
 	turno_partido: z.boolean(),
 	fecha: z.string().nullish().transform(cleanOptional),
-});
-
-export const completeInitialSetupSchema = z.object({
-	id_usuario: idStr,
-	pin_actual: z.string().trim().min(1, "pin_actual required"),
-	pin_nuevo: z.string().trim().min(4, "PIN demasiado corto"),
-	email_nuevo: z.string().trim().email("email invalid"),
 });
 
 // Subida del setup inicial desde la Main (modo TPV) a la nube. No verifica pin_actual: la
@@ -87,8 +79,6 @@ export type SetTurnoPartidoInput = Omit<
 	fecha?: string | null;
 };
 
-export type { CompleteInitialSetupInput };
-
 export type PunchInput = ContractPunchInput;
 
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
@@ -97,7 +87,6 @@ export type PunchInput = ContractPunchInput;
 // deja de compilar y el error nombra el campo. Ver `lib/typeGuards.ts`.
 type _GLoginUser = Assert<SameKeys<z.infer<typeof loginUserSchema>, LoginUserInput>>;
 type _GSetTurnoPartido = Assert<SameKeys<z.infer<typeof setTurnoPartidoSchema>, SetTurnoPartidoInput>>;
-type _GCompleteInitialSetup = Assert<SameKeys<z.infer<typeof completeInitialSetupSchema>, CompleteInitialSetupInput>>;
 type _GPunch = Assert<SameKeys<z.infer<typeof punchSchema>, PunchInput>>;
 type _GSolicitarCodigoPin = Assert<SameKeys<z.infer<typeof solicitarCodigoPinSchema>, SolicitarCodigoPinInput>>;
 type _GSolicitarCambioCorreo = Assert<SameKeys<z.infer<typeof solicitarCambioCorreoSchema>, SolicitarCambioCorreoInput>>;

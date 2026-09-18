@@ -93,9 +93,6 @@ pub async fn complete_initial_setup(
 ) -> AppResult<()> {
     let email_nuevo = requerido(&input.email_nuevo, "email_nuevo").map_err(AppError::validation)?;
     let pin_nuevo = requerido(&input.pin_nuevo, "pin_nuevo").map_err(AppError::validation)?;
-    // El PIN actual sólo viaja por el camino con sesión (Handy → worker). En el primer arranque
-    // el setup ocurre ANTES del login y no hay ninguno que confirmar.
-    let pin_actual = input.pin_actual.clone().unwrap_or_default();
 
     if input.id_usuario.trim().is_empty() {
         return Err(AppError::validation("id_usuario inválido"));
@@ -109,13 +106,8 @@ pub async fn complete_initial_setup(
         return Err(AppError::validation("Email inválido"));
     }
 
-    repo.complete_initial_setup(
-        &input.id_usuario,
-        pin_actual.trim(),
-        pin_nuevo.trim(),
-        email_nuevo.trim(),
-    )
-    .await
+    repo.complete_initial_setup(&input.id_usuario, pin_nuevo.trim(), email_nuevo.trim())
+        .await
 }
 
 pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<PunchStatus> {
@@ -162,13 +154,7 @@ mod tests {
         async fn intentos_fallidos(&self, _: &str) -> AppResult<i64> {
             Ok(self.fallidos)
         }
-        async fn complete_initial_setup(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: &str,
-        ) -> AppResult<()> {
+        async fn complete_initial_setup(&self, _: &str, _: &str, _: &str) -> AppResult<()> {
             unimplemented!("no usado")
         }
         async fn punch(&self, _: &str, _: &str, _: &str) -> AppResult<PunchStatus> {

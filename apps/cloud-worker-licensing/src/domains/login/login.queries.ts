@@ -150,22 +150,6 @@ export async function applyInitialSetupDirect(
 	});
 }
 
-export async function emailInUse(
-	db: Client,
-	email: string,
-	excludeId: string,
-): Promise<boolean> {
-	const rs = await db.execute({
-		sql: `
-			SELECT COUNT(*) AS count
-			FROM Usuarios
-			WHERE Email = ?1 AND ID_Usuario <> ?2;
-		`,
-		args: [email, excludeId],
-	});
-	return Number(rows(rs)[0]?.count ?? 0) > 0;
-}
-
 export async function punchStatus(db: Client, idUsuario: string): Promise<PunchStatus> {
 	const fechaRs = await db.execute("SELECT date('now','localtime') AS fecha;");
 	const fecha = String(rows(fechaRs)[0]?.fecha ?? "");

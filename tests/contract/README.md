@@ -310,8 +310,11 @@ test, para que relajarlo salga rojo antes de que el fallo pueda volver.
   Main y solo la Main, porque solo ella cobra. Los constructores de cobro del worker siguen ahí
   como referencia y sus casos contrastan el efecto que sí es compartido (dinero, stock, líneas
   cobradas); la numeración no forma parte de ese contrato.
-- **`login.complete_initial_setup`**: escribe `Password_Hash` con salt aleatorio (distinto por
-  diseño en cada lado), así que el efecto no es comparable columna a columna.
+- **`login.complete_initial_setup`**: ya **no hay segunda implementación** (REV-06). La nube
+  ofrecía una con el cerrojo cambiado —verificaba el PIN, sin freno, y no miraba `Requiere_Setup`—
+  y se retiró: elegir el PIN inicial es de la Main. Que nadie comparara este comando es parte de
+  por qué aquello duró tanto, pero no era cubrible de todos modos: escribe `Password_Hash` con salt
+  aleatorio, distinto por diseño en cada lado.
 - **`login.punch` sí está cubierto desde el 2026-08-22.** El lado Rust verifica el PIN dentro de
   `repo.punch`, que es lo que lo mantenía fuera; el caso llama a `exec_punch` —el efecto— y se salta
   esa verificación a propósito: **autenticar no es parte del contrato de replicación**, y lo que

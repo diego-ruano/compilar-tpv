@@ -1623,6 +1623,32 @@ que cierra también el modelo de amenaza de LIC-04.
   invocar comandos por el IPC. Cubre a un camarero con el TPV delante, no a un atacante; lo que de
   verdad importa lo valida además el worker, que corre donde el usuario no manda.
 
+### El PIN inicial se elige en la Main, y sólo ahí (REV-06)
+
+`complete_initial_setup` cambia el PIN y el correo del administrador **sin pedir el PIN actual**, y
+es correcto que sea así: ocurre antes del primer login, no hay ninguno que confirmar y el que hay es
+el del seed, que es público. Su único cerrojo es `Requiere_Setup = 1`, que se apaga al aplicarlo —la
+puerta se cierra tras el primer uso—. Consecuencias al tocarlo:
+
+- **No puede haber un segundo camino hacia esa fila.** El worker ofrecía uno
+  (`POST /v1/login/complete-initial-setup`) que cambiaba el cerrojo por otro: verificaba el PIN y no
+  miraba `Requiere_Setup`. Y lo verificaba **sin el freno de LOGIN-01**, así que desde cualquier
+  Handy vinculada se probaban las diez mil combinaciones de un PIN de cuatro cifras sin espera
+  alguna. Se retiró: es la misma decisión que `cobro_solo_en_main` y `soloLaMainEscribeCaja`, y en
+  Rust el puerto **falla por defecto** (como `restablecer_pin_admin`), así que la Handy lo rechaza
+  sin salir a la red.
+- **La Handy no puede llegar a este flujo, y eso no es casualidad**: una Main con el setup pendiente
+  no pasa de su propia pantalla (`App.tsx` fuerza `/setup`), así que no llega a Configuración y no
+  puede vincular ninguna Handy. Si algún día hiciera falta, se construye **con los dos cerrojos**,
+  no reabriendo aquél.
+- **El camino bueno sigue siendo el de siempre:** la Main lo aplica en su SQLite y sube el resultado
+  por `POST /v1/login/sync-initial-setup`, que va firmada y exige rol TPV, y escribe directa en
+  Turso porque en ese momento aún no hay WebSocket.
+- ⚠️ **Toda ruta del worker que verifique un PIN lleva el freno de LOGIN-01** —mirarlo antes y
+  contar el fallo después—, y eso incluye a la próxima que alguien escriba. Lo vigila
+  `test/pinSiempreConFreno.test.ts`, que lee el fuente y lo exige en cada handler que llame a
+  `ensurePin`: el olvido no es un comportamiento que se pueda provocar, es una línea que no está.
+
 ### Recuperar el PIN y el correo de recuperación (LOGIN-07 / LOGIN-08)
 
 | Pieza | Archivo | Rol |

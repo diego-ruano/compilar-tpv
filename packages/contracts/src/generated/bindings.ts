@@ -334,13 +334,13 @@ export type ComandaBarraRow = { ID_Comanda: string, Fecha_Hora_Apertura: string,
 
 export type ComandaRow = { id_comanda: string, id_mesa: string, id_trabajador: string | null, id_reserva: string | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: number, estado: string, };
 
-export type CompleteInitialSetupInput = { id_usuario: string, 
 /**
- * Sólo lo manda el camino que llega CON sesión (el Handy, vía worker). El setup del primer
- * arranque ocurre ANTES del login: ahí no hay PIN que confirmar y el permiso es otro
- * (`Requiere_Setup`), así que llega vacío.
+ * El setup inicial NO lleva PIN actual (REV-06). Ocurre antes del primer login, así que no hay
+ * ninguno que confirmar —el que hay es el del seed, que es público—: quien autoriza es
+ * `Requiere_Setup = 1`. Llegó a viajar un `pin_actual` para el camino de la Handy, que la pantalla
+ * no rellenaba nunca y que sólo servía para que la nube lo verificara sin límite de intentos.
  */
-pin_actual?: string, pin_nuevo: string, email_nuevo: string, };
+export type CompleteInitialSetupInput = { id_usuario: string, pin_nuevo: string, email_nuevo: string, };
 
 /**
  * Entrada de patch parcial (objeto con un subconjunto de claves de los ajustes).

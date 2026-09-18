@@ -32,14 +32,24 @@ pub trait LoginRepository: Send + Sync {
 
     /// Comprueba el email y aplica el setup inicial (cambia PIN + email). El permiso es
     /// `Requiere_Setup = 1`, que se apaga al aplicarlo: la operación se cierra sola tras el primer
-    /// uso. `pin_actual` sólo lo usa el adaptador HTTP (el worker sí lo exige).
+    /// uso.
+    ///
+    /// REV-06: **es de la Main, y por defecto falla** —igual que `restablecer_pin_admin`—, así que
+    /// la Handy no lo implementa. Lo hacía, contra una ruta del worker que verificaba el PIN sin
+    /// límite de intentos: diez mil combinaciones y el PIN del administrador. Y no cubría ningún
+    /// caso real, porque una Handy no puede llegar aquí — una Main con el setup pendiente no pasa
+    /// de su propia pantalla de setup (`App.tsx`), así que no llega a Configuración y no puede
+    /// vincular ninguna Handy.
     async fn complete_initial_setup(
         &self,
-        id_usuario: &str,
-        pin_actual: &str,
-        pin_nuevo: &str,
-        email_nuevo: &str,
-    ) -> AppResult<()>;
+        _id_usuario: &str,
+        _pin_nuevo: &str,
+        _email_nuevo: &str,
+    ) -> AppResult<()> {
+        Err(AppError::validation(
+            "El PIN inicial se elige desde el TPV principal",
+        ))
+    }
 
     /// Aplica el fichaje (entrada/salida) tras verificar el PIN; devuelve el estado del día.
     async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus>;

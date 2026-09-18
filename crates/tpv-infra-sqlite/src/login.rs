@@ -696,14 +696,13 @@ impl LoginRepository for SqliteLoginRepository {
         })
     }
 
-    /// `_pin_actual` no se usa aquí: el setup del primer arranque ocurre ANTES del login (no hay
-    /// PIN que confirmar, y el que hay es el del seed, que no es secreto). Quien autoriza es
+    /// No pide PIN actual: el setup del primer arranque ocurre ANTES del login, así que no hay
+    /// ninguno que confirmar y el que hay es el del seed, que no es secreto. Quien autoriza es
     /// `Requiere_Setup = 1`, que además se apaga al aplicarlo: la puerta se cierra tras el primer
-    /// uso. El adaptador HTTP sí lo manda, porque el worker lo exige por su cuenta.
+    /// uso. Es el ÚNICO cerrojo, y por eso esto sólo puede vivir donde está el dato (REV-06).
     async fn complete_initial_setup(
         &self,
         id_usuario: &str,
-        _pin_actual: &str,
         pin_nuevo: &str,
         email_nuevo: &str,
     ) -> AppResult<()> {
@@ -821,6 +820,114 @@ impl LoginRepository for SqliteLoginRepository {
         .map_err(db_err)?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_setup_inicial {
+    //! REV-06: el setup inicial no pide PIN —en el primer arranque no hay ninguno que confirmar, y
+    //! el del seed es público—, así que su ÚNICO cerrojo es `Requiere_Setup = 1`. Eso lo convierte
+    //! en lo más delicado de este fichero: si ese flag deja de mirarse, cualquiera que alcance esta
+    //! operación le cambia el PIN al administrador. Que la nube ya no ofrezca un camino hacia aquí
+    //! es la otra mitad del arreglo; ésta es la que queda.
+
+    use super::*;
+    use libsql::Connection;
+
+    const ADMIN: &str = "INSERT INTO Usuarios (ID_Usuario, ID_Rol, Email, Password_Hash, Nombre, Estado, Requiere_Setup)
+         VALUES ('admin', (SELECT ID_Rol FROM Roles WHERE Nombre_Rol = 'Administrador'),
+                 'admin@bar.test', 'hash-del-seed', 'Ana', 'Activo', 1);";
+
+    async fn repo_temporal() -> (SqliteLoginRepository, Arc<Db>, std::path::PathBuf) {
+        let dir = crate::test_temp::dir_temporal("login_setup");
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = Db::open(dir.join("data.db").to_str().unwrap()).await.unwrap();
+        {
+            let w = db.write().await;
+            let conn: &Connection = w.raw();
+            conn.execute(ADMIN, Vec::<Value>::new()).await.unwrap();
+        }
+        (SqliteLoginRepository::new(db.clone()), db, dir)
+    }
+
+    async fn campo(db: &Db, sql: &str) -> Value {
+        let g = db.read().await;
+        let mut rows = g.query(sql, Vec::<Value>::new()).await.unwrap();
+        rows.next().await.unwrap().unwrap().get_value(0).unwrap()
+    }
+
+    #[tokio::test]
+    async fn se_aplica_una_vez_y_cierra_la_puerta_detras() {
+        let (repo, db, _dir) = repo_temporal().await;
+
+        repo.complete_initial_setup("admin", "4321", "ana@bar.test")
+            .await
+            .expect("el primer setup tiene que entrar");
+
+        assert_eq!(
+            campo(&db, "SELECT Requiere_Setup FROM Usuarios WHERE ID_Usuario='admin';").await,
+            Value::Integer(0),
+            "el flag se apaga al aplicarlo: eso es lo que cierra la puerta"
+        );
+        let hash = campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await;
+        assert_ne!(hash, Value::Text("hash-del-seed".into()), "el PIN tiene que haber cambiado");
+
+        // Y una segunda vez ya no: no hay un segundo primer arranque.
+        let otra = repo
+            .complete_initial_setup("admin", "9999", "otro@bar.test")
+            .await;
+        assert!(otra.is_err(), "no puede volver a usarse");
+        assert_eq!(
+            campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await,
+            hash,
+            "y el intento no puede haber tocado nada"
+        );
+    }
+
+    #[tokio::test]
+    async fn un_usuario_que_ya_hizo_su_setup_no_se_toca() {
+        // El caso que la nube permitía: apuntar a un usuario cualquiera con el setup ya hecho.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute(
+                    "UPDATE Usuarios SET Requiere_Setup = 0 WHERE ID_Usuario = 'admin';",
+                    Vec::<Value>::new(),
+                )
+                .await
+                .unwrap();
+        }
+
+        let r = repo
+            .complete_initial_setup("admin", "4321", "ladron@bar.test")
+            .await;
+
+        assert!(r.is_err(), "sin Requiere_Setup no hay permiso");
+        assert_eq!(
+            campo(&db, "SELECT Password_Hash FROM Usuarios WHERE ID_Usuario='admin';").await,
+            Value::Text("hash-del-seed".into())
+        );
+        assert_eq!(
+            campo(&db, "SELECT Email FROM Usuarios WHERE ID_Usuario='admin';").await,
+            Value::Text("admin@bar.test".into()),
+            "ni el correo, que es por donde se recupera el acceso"
+        );
+    }
+
+    #[tokio::test]
+    async fn nada_de_esto_sale_por_el_outbox_sin_haberse_aplicado() {
+        // Un intento rechazado no puede dejar rastro replicable: subiría a la nube un UPDATE que
+        // aquí no ha ocurrido.
+        let (repo, db, _dir) = repo_temporal().await;
+        let _ = repo
+            .complete_initial_setup("nadie", "4321", "x@bar.test")
+            .await;
+
+        assert_eq!(
+            campo(&db, "SELECT COUNT(*) FROM _Sync_Outbox;").await,
+            Value::Integer(0)
+        );
     }
 }
 

@@ -16,3 +16,7 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 chrono = { workspace = true }
+
+[dev-dependencies]
+# Sólo para los tests: el adaptador no arranca ningún runtime, lo pone quien lo usa.
+tokio = { workspace = true }

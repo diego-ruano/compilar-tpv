@@ -134,7 +134,7 @@ mod tests {
         async fn login(&self, _: &str, _: &str) -> AppResult<LoginOk> {
             unimplemented!("no usado")
         }
-        async fn complete_initial_setup(&self, _: &str, _: &str, _: &str, _: &str) -> AppResult<()> {
+        async fn complete_initial_setup(&self, _: &str, _: &str, _: &str) -> AppResult<()> {
             unimplemented!("no usado")
         }
         async fn punch(&self, _: &str, _: &str, _: &str) -> AppResult<PunchStatus> {

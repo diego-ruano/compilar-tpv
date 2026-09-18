@@ -123,30 +123,23 @@ loginRoutes.post("/turno-partido", async (c) => {
 	return c.json({ ok: true });
 });
 
-loginRoutes.post("/complete-initial-setup", async (c) => {
-	const p = await parseBody(c, S.completeInitialSetupSchema);
-	if (!p.ok) return p.res;
-	const record = await tenantQuery(c, (db) =>
-		q.getLoginRecord(db, p.data.id_usuario),
-	);
-	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	const badPin = await ensurePin(c, p.data.pin_actual, String(record.password_hash));
-	if (badPin) return badPin;
-	const inUse = await tenantQuery(c, (db) =>
-		q.emailInUse(db, p.data.email_nuevo, p.data.id_usuario),
-	);
-	if (inUse) return c.json({ error: "email already in use" }, 409);
-	const passwordHash = await hashPin(p.data.pin_nuevo);
-	await apply(
-		c,
-		cmd.completeInitialSetup({
-			id_usuario: p.data.id_usuario,
-			email_nuevo: p.data.email_nuevo,
-			password_hash: passwordHash,
-		}),
-	);
-	return c.json({ ok: true });
-});
+// REV-06: aquí vivía `POST /complete-initial-setup`, que elegía el PIN inicial DESDE la nube
+// verificando el PIN anterior. Se ha retirado, y su ausencia es la corrección:
+//   · Verificaba un PIN **sin el bloqueo por intentos de LOGIN-01**, que sí tienen `/login` y
+//     `/punch`. Un PIN son cuatro cifras: diez mil combinaciones, ningún freno, y al acertar se le
+//     cambiaban PIN y correo a cualquier usuario activo, administrador incluido. Hacía falta una
+//     Handy vinculada (`tenantAuth` exige device-proof), que es exactamente a quien SEC-01 dice
+//     proteger contra esto.
+//   · Y tampoco miraba `Requiere_Setup`, que en la Main es el ÚNICO cerrojo (allí el PIN ni se
+//     comprueba: en el primer arranque no hay ninguno que confirmar). O sea que las dos
+//     implementaciones del mismo comando tenían el cerrojo cambiado: cada una la mitad de la otra.
+//   · No cubría ningún caso real. El setup lo hace la Main contra su SQLite y luego sube el
+//     resultado por `/sync-initial-setup` (aquí abajo); la Handy no entra nunca a este flujo,
+//     porque una Main con el setup pendiente no pasa de su propia pantalla de setup y por tanto no
+//     llega a Configuración ni puede vincular ninguna Handy.
+// Es la misma decisión que `cobro_solo_en_main`, `soloLaMainEscribeCaja` y `fiscalSoloMain`: quien
+// tiene autoridad sobre esa fila es la Main, así que la nube no ofrece un segundo camino hacia ella.
+// Lo vigila `test/pinSiempreConFreno.test.ts`, que además exige el freno a toda ruta que mire un PIN.
 
 // Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
 // no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con

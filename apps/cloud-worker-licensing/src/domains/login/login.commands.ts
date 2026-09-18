@@ -31,27 +31,9 @@ export function setTurnoPartido(input: {
 	};
 }
 
-export function completeInitialSetup(input: {
-	id_usuario: string;
-	email_nuevo: string;
-	password_hash: string;
-}): BuiltCommand {
-	return {
-		commandName: "complete_initial_setup",
-		command: {
-			type: "tenantDb.exec",
-			payload: {
-				sql: `
-					UPDATE Usuarios
-					SET Email = ?2, Password_Hash = ?3, Requiere_Setup = 0
-					WHERE ID_Usuario = ?1;
-				`,
-				args: [input.id_usuario, input.email_nuevo, input.password_hash],
-			},
-		},
-		cloudPayload: { id_usuario: input.id_usuario, email_nuevo: input.email_nuevo },
-	};
-}
+// REV-06: y aquí estaba `completeInitialSetup`, el comando que aquella ruta aplicaba. El setup
+// inicial lo escribe la Main en su SQLite y sube por el outbox; lo que la nube necesita de él lo
+// pone `applyInitialSetupDirect` (`/sync-initial-setup`), que es el camino de verdad.
 
 // La hora del fichaje no viaja en el cuerpo de la petición: se escribe `datetime('now','localtime')`
 // y la resuelve el Durable Object al aplicar, con el reloj local del equipo que ficha (CFG-04). La
