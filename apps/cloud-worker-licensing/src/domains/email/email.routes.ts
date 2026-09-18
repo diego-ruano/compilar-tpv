@@ -64,7 +64,7 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 	// proveedor dado de alta en ESTE tenant. Sin esto, un token robado podía usar nuestro dominio
 	// (con su SPF/DKIM) para mandar correo a cualquier dirección del mundo. Es el control real de
 	// abuso: acota a quién se puede escribir, en vez de cuánto.
-	const autorizado = await tenantQuery(c.env, tenantId, async (db) => {
+	const autorizado = await tenantQuery(c, async (db) => {
 		const r = await db.execute({
 			sql: `SELECT 1 FROM Proveedores
 			      WHERE Email IS NOT NULL AND lower(trim(Email)) = lower(trim(?1))

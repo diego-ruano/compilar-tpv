@@ -179,14 +179,13 @@ pub struct ConfirmarCambioCorreoInput {
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
+/// El fichaje NO lleva fecha ni hora: las pone el equipo que ficha — la Main con su reloj, y la
+/// Handy con el suyo vía `X-Client-Now` (CFG-04/REV-03). Estuvieron aquí, el TPV las calculaba y
+/// las mandaba en cada fichaje, y los cuatro sitios que las recibían las descartaban. Un campo que
+/// se envía y nadie lee es peor que no tenerlo: el día que alguien lo cablee, el control horario
+/// pasa a creerse un valor del cuerpo de la petición, que es cualquier cosa.
 pub struct PunchInput {
     pub id_usuario: String,
     pub pin: String,
     pub tipo: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub fecha: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub hora_evento: Option<String>,
 }

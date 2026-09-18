@@ -137,14 +137,7 @@ mod tests {
         async fn complete_initial_setup(&self, _: &str, _: &str, _: &str, _: &str) -> AppResult<()> {
             unimplemented!("no usado")
         }
-        async fn punch(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: Option<String>,
-            _: Option<String>,
-        ) -> AppResult<PunchStatus> {
+        async fn punch(&self, _: &str, _: &str, _: &str) -> AppResult<PunchStatus> {
             unimplemented!("no usado")
         }
         async fn set_turno_partido(&self, _: &str, _: Option<String>, _: bool) -> AppResult<()> {

@@ -60,23 +60,23 @@ async function apply(
 // Lecturas
 
 tareasRoutes.get("/trabajadores", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getTrabajadores(db))),
+	c.json(await tenantQuery(c, (db) => q.getTrabajadores(db))),
 );
 
 tareasRoutes.get("/admin", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getTareasAdmin(db))),
+	c.json(await tenantQuery(c, (db) => q.getTareasAdmin(db))),
 );
 
 // TAR-05. Ojo al orden: esta ruta va antes que `/:id`, que si no la captura como un id de tarea.
 tareasRoutes.get("/papelera", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getPapelera(db))),
+	c.json(await tenantQuery(c, (db) => q.getPapelera(db))),
 );
 
 tareasRoutes.get("/mias", async (c) => {
 	const idTrabajador = parseId(c.req.query("trabajador"));
 	if (idTrabajador == null) return badRequest(c, "id_trabajador invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.getMisTareas(db, idTrabajador),
 		),
 	);
@@ -86,7 +86,7 @@ tareasRoutes.get("/:id/asignados", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_tarea invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.getTareaAsignados(db, id),
 		),
 	);
@@ -95,7 +95,7 @@ tareasRoutes.get("/:id/asignados", async (c) => {
 tareasRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_tarea invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getTareaById(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.getTareaById(db, id)));
 });
 
 // Escrituras
@@ -104,7 +104,7 @@ tareasRoutes.post("/", async (c) => {
 	const p = await parseBody(c, S.createTareaSchema);
 	if (!p.ok) return p.res;
 	// TAR-03: validar que los trabajadores asignados existen antes de aplicar.
-	const okTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const okTrab = await tenantQuery(c, (db) =>
 		q.trabajadoresExisten(db, p.data.ids_trabajadores),
 	);
 	if (!okTrab) return badRequest(c, "trabajador_inexistente");
@@ -127,7 +127,7 @@ tareasRoutes.put("/:id/asignaciones", async (c) => {
 	const p = await parseBody(c, S.setAsignacionesTareaSchema);
 	if (!p.ok) return p.res;
 	// TAR-03: validar que los trabajadores asignados existen antes de aplicar.
-	const okTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const okTrab = await tenantQuery(c, (db) =>
 		q.trabajadoresExisten(db, p.data.ids_trabajadores),
 	);
 	if (!okTrab) return badRequest(c, "trabajador_inexistente");

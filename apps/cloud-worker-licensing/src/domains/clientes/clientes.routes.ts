@@ -57,14 +57,14 @@ async function apply(
 clientesRoutes.get("/overview", async (c) => {
 	const ranking = c.req.query("ranking") || "todos";
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.overview(db, ranking)),
+		await tenantQuery(c, (db) => q.overview(db, ranking)),
 	);
 });
 
 clientesRoutes.get("/:id/form", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_cliente invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.form(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.form(db, id)));
 });
 
 clientesRoutes.post("/", async (c) => {
@@ -73,7 +73,7 @@ clientesRoutes.post("/", async (c) => {
 	// CLI-04: rechazar email duplicado con un 409 limpio antes de aplicar (el índice
 	// único ux_clientes_email es el backstop real).
 	if (p.data.email) {
-		const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const dup = await tenantQuery(c, (db) =>
 			q.emailEnUso(db, p.data.email!, p.data.id_cliente),
 		);
 		if (dup) return c.json({ error: "email_duplicado" }, 409);
@@ -88,7 +88,7 @@ clientesRoutes.put("/:id", async (c) => {
 	const p = await parseBody(c, S.updateClienteSchema);
 	if (!p.ok) return p.res;
 	if (p.data.email) {
-		const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const dup = await tenantQuery(c, (db) =>
 			q.emailEnUso(db, p.data.email!, id),
 		);
 		if (dup) return c.json({ error: "email_duplicado" }, 409);

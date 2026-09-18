@@ -66,7 +66,7 @@ cuentasRoutes.get("/entradas", async (c) => {
 		page_size: c.req.query("page_size"),
 	});
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.entradas(db, p.del, p.al, p.q, p.page, p.page_size),
 		),
 	);
@@ -81,7 +81,7 @@ cuentasRoutes.get("/salidas", async (c) => {
 		page_size: c.req.query("page_size"),
 	});
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.salidas(db, p.del, p.al, p.q, p.page, p.page_size),
 		),
 	);
@@ -94,7 +94,7 @@ cuentasRoutes.get("/resumen", async (c) => {
 		q: c.req.query("q"),
 	});
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.resumen(db, p.del, p.al, p.q),
 		),
 	);
@@ -162,14 +162,14 @@ cuentasRoutes.post("/pagos/:id/anular", async (c) => {
 // cierre con ese id.
 cuentasRoutes.get("/cierres/ultimo", async (c) => {
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.ultimoCierre(db)),
+		await tenantQuery(c, (db) => q.ultimoCierre(db)),
 	);
 });
 
 cuentasRoutes.get("/cierres", async (c) => {
 	const limite = Number(c.req.query("limite") ?? 50);
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.listarCierres(db, Number.isFinite(limite) ? limite : 50),
 		),
 	);
@@ -179,6 +179,6 @@ cuentasRoutes.get("/cierres/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_cierre invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.detalleCierre(db, id)),
+		await tenantQuery(c, (db) => q.detalleCierre(db, id)),
 	);
 });

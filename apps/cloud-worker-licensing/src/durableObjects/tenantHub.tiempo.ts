@@ -18,6 +18,11 @@
 //
 // Un fallo aquí no revienta nada: corrompe la replicación en silencio, que es la peor forma
 // de fallar que tiene este sistema. De ahí que viva aparte y tenga sus propios tests.
+//
+// REV-03: `parseClientNow` y `rewriteNowInSql` los usa también el camino de LECTURA
+// (`lib/tenantClient.ts`), por el mismo motivo y con el mismo criterio: un `'now','localtime'` que
+// resuelva Turso es el día del servidor, no el del bar. Son las dos mitades de una sola regla, así
+// que viven en un solo sitio; si cambias cómo se fija la hora, cambias las dos a la vez.
 
 import type { InternalApplyCommand } from "./tenantHub.types";
 

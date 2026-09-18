@@ -62,7 +62,7 @@ syncRoutes.post("/changes", async (c) => {
 	const since = Math.max(0, Number((body as any)?.since ?? 0) || 0);
 	const limit = Math.min(Math.max(1, Number((body as any)?.limit ?? 500) || 500), 1000);
 
-	const snapshot = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	const snapshot = await tenantQuery(c, async (db) => {
 		// Items y high-water en la misma transacción de lectura. La recuperación sólo desbloquea
 		// cuando el checkpoint local alcanza exactamente una foto conocida del final del log.
 		const [rs, rsHighWater] = await db.batch(
@@ -102,7 +102,7 @@ syncRoutes.post("/changes", async (c) => {
 	// Main cayera antes de aplicar este lote, re-pediría desde `since` y no habríamos purgado de más.
 	// Best-effort: un fallo aquí no debe romper el catch-up.
 	try {
-		await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+		await tenantQuery(c, async (db) => {
 			await db.execute({
 				sql: `
 					INSERT INTO Sync_Main_Checkpoints (Device_Id, Last_Seq, Updated_At_Ms)
@@ -150,7 +150,7 @@ syncRoutes.post("/bootstrap", async (c) => {
 
 	const clientNow = c.req.header("x-client-now");
 
-	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	const resultado = await tenantQuery(c, async (db) => {
 		const rsTablas = await db.execute({
 			sql: `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC;`,
 			args: [],
@@ -303,7 +303,7 @@ syncRoutes.post("/historico", async (c) => {
 		return c.json({ ok: false, code: "validation", error: "tabla_no_paginable" }, 400);
 	}
 
-	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	const resultado = await tenantQuery(c, async (db) => {
 		// Un tenant con una versión de esquema por detrás puede no tener la tabla. Eso se informa
 		// como "no hay nada que traer", no como un error: la recuperación no puede quedarse
 		// atascada por una tabla que en ese negocio todavía no existe.
@@ -395,7 +395,7 @@ syncRoutes.post("/verificar", async (c) => {
 
 	const clientNow = c.req.header("x-client-now");
 
-	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	const resultado = await tenantQuery(c, async (db) => {
 		const rsTablas = await db.execute({
 			sql: `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name ASC;`,
 			args: [],
@@ -537,7 +537,7 @@ syncRoutes.post("/verificar-claves", async (c) => {
 	);
 	if (!validas.length) return c.json({ tablas: [] });
 
-	const resultado = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	const resultado = await tenantQuery(c, async (db) => {
 		// Tope por tabla. Una lista de claves crece con la tabla, y sin techo una base con años de
 		// histórico devolvería decenas de megas por una petición de diagnóstico. Si no cabe se dice
 		// (`truncada`) en vez de mandar media lista, que se leería como "te sobran 400.000 filas".

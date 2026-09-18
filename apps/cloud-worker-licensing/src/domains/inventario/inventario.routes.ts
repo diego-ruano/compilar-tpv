@@ -68,18 +68,18 @@ async function apply(
 // ───────────────── LECTURAS ─────────────────
 
 inventarioRoutes.get("/categorias", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.listCategorias(db))),
+	c.json(await tenantQuery(c, (db) => q.listCategorias(db))),
 );
 
 inventarioRoutes.get("/proveedores-mini", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.listProveedoresMini(db))),
+	c.json(await tenantQuery(c, (db) => q.listProveedoresMini(db))),
 );
 
 inventarioRoutes.get("/productos", async (c) => {
 	const idCategoria = parseId(c.req.query("categoria"));
 	if (idCategoria == null) return badRequest(c, "categoria inválida");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.listProductosByCategoria(db, idCategoria),
 		),
 	);
@@ -87,18 +87,18 @@ inventarioRoutes.get("/productos", async (c) => {
 
 inventarioRoutes.get("/resumen", async (c) => {
 	const limit = Number(c.req.query("limit")) || 12;
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.resumen(db, limit)));
+	return c.json(await tenantQuery(c, (db) => q.resumen(db, limit)));
 });
 
 inventarioRoutes.get("/alergenos", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.listAlergenos(db))),
+	c.json(await tenantQuery(c, (db) => q.listAlergenos(db))),
 );
 
 inventarioRoutes.get("/productos/:id/alergenos", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.alergenosProducto(db, id)),
+		await tenantQuery(c, (db) => q.alergenosProducto(db, id)),
 	);
 });
 
@@ -106,14 +106,14 @@ inventarioRoutes.get("/productos/:id/lotes", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.listLotesByProducto(db, id)),
+		await tenantQuery(c, (db) => q.listLotesByProducto(db, id)),
 	);
 });
 
 inventarioRoutes.get("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.productDetail(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.productDetail(db, id)));
 });
 
 // ───────────────── ESCRITURAS ─────────────────
@@ -136,7 +136,7 @@ inventarioRoutes.delete("/productos/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
 	// INV-05: no borrar productos con histórico de ventas; mensaje claro en vez de error crudo de FK.
-	const enUso = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const enUso = await tenantQuery(c, (db) =>
 		q.productoReferenciado(db, id),
 	);
 	if (enUso) {
@@ -171,7 +171,7 @@ inventarioRoutes.put("/lotes/:id", async (c) => {
 	const p = await parseBody(c, S.updateLoteSchema);
 	if (!p.ok) return p.res;
 	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
-	const info = await tenantQuery(c.env, c.get("tenantId"), (db) => q.getLoteStock(db, id));
+	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
 	await apply(c, cmd.updateLote(id, { ...p.data, id_lote: id }, info.stock_disponible));
 	return c.json({ ok: true });
@@ -183,7 +183,7 @@ inventarioRoutes.patch("/lotes/:id", async (c) => {
 	const p = await parseBody(c, S.ajusteLoteSchema);
 	if (!p.ok) return p.res;
 	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
-	const info = await tenantQuery(c.env, c.get("tenantId"), (db) => q.getLoteStock(db, id));
+	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
 	await apply(c, cmd.ajustarLote(id, p.data, info.stock_disponible));
 	return c.json({ ok: true });

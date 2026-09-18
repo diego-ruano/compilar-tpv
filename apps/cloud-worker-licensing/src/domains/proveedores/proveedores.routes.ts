@@ -55,22 +55,22 @@ async function apply(
 }
 
 proveedoresRoutes.get("/", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getAll(db))),
+	c.json(await tenantQuery(c, (db) => q.getAll(db))),
 );
 
 proveedoresRoutes.get("/categorias", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getCategorias(db))),
+	c.json(await tenantQuery(c, (db) => q.getCategorias(db))),
 );
 
 proveedoresRoutes.get("/productos", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getProductosAll(db))),
+	c.json(await tenantQuery(c, (db) => q.getProductosAll(db))),
 );
 
 proveedoresRoutes.get("/:id/productos", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_proveedor invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.getProductos(db, id)),
+		await tenantQuery(c, (db) => q.getProductos(db, id)),
 	);
 });
 

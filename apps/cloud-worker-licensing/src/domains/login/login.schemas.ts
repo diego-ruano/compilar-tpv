@@ -69,12 +69,13 @@ export const confirmarCambioCorreoSchema = z.object({
 	codigo: z.string().trim().min(1, "codigo required"),
 });
 
+// El fichaje no lleva fecha ni hora: las pone el equipo que ficha (TRAB-02, con CFG-04/REV-03).
+// Las llevó, y ninguna de las dos implementaciones las leía. Un TPV viejo que aún las mande no se
+// rompe contra esto: el schema no es `strict`, así que zod las descarta sin quejarse.
 export const punchSchema = z.object({
 	id_usuario: idStr,
 	pin: z.string().trim().min(1, "pin required"),
 	tipo: z.enum(["entrada", "salida"]),
-	fecha: z.string().nullish().transform(cleanOptional),
-	hora_evento: z.string().nullish().transform(cleanOptional),
 });
 
 export type LoginUserInput = LoginUserArgs;
@@ -88,13 +89,7 @@ export type SetTurnoPartidoInput = Omit<
 
 export type { CompleteInitialSetupInput };
 
-export type PunchInput = Omit<
-	ContractPunchInput,
-	"fecha" | "hora_evento"
-> & {
-	fecha?: string | null;
-	hora_evento?: string | null;
-};
+export type PunchInput = ContractPunchInput;
 
 // ── Drift-guard con los DTOs de Rust (ARCH-03) ───────────────────────────────
 // Una línea por schema: comprueba en LAS DOS DIRECCIONES que las claves del zod y

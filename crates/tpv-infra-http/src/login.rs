@@ -76,20 +76,13 @@ impl LoginRepository for HttpLoginRepository {
         Ok(())
     }
 
-    async fn punch(
-        &self,
-        id_usuario: &str,
-        pin: &str,
-        tipo: &str,
-        fecha: Option<String>,
-        hora_evento: Option<String>,
-    ) -> AppResult<PunchStatus> {
+    async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus> {
+        // Sin fecha ni hora: las pone el worker con el reloj de este equipo (`X-Client-Now`, que el
+        // transporte pone en todas las peticiones). Viajaron aquí y nadie las leía.
         let body = json!({
             "id_usuario": id_usuario,
             "pin": pin,
             "tipo": tipo,
-            "fecha": fecha,
-            "hora_evento": hora_evento,
         });
         self.client.post_json("/v1/login/punch", &body).await
     }

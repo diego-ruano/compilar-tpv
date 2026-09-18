@@ -42,14 +42,7 @@ pub trait LoginRepository: Send + Sync {
     ) -> AppResult<()>;
 
     /// Aplica el fichaje (entrada/salida) tras verificar el PIN; devuelve el estado del día.
-    async fn punch(
-        &self,
-        id_usuario: &str,
-        pin: &str,
-        tipo: &str,
-        fecha: Option<String>,
-        hora_evento: Option<String>,
-    ) -> AppResult<PunchStatus>;
+    async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus>;
 
     /// Fija un PIN nuevo a un **administrador activo** tras recuperar el acceso por correo
     /// (LOGIN-07). No pide el PIN actual: quien autoriza es el código que la nube acaba de dar por

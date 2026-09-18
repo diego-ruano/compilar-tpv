@@ -64,7 +64,7 @@ notificacionesRoutes.get("/", async (c) => {
 	if (uid == null) return badRequest(c, "id_usuario invalido");
 	const soloNoLeidas = c.req.query("solo_no_leidas") === "true";
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.listar(db, uid, soloNoLeidas)),
+		await tenantQuery(c, (db) => q.listar(db, uid, soloNoLeidas)),
 	);
 });
 
@@ -72,14 +72,14 @@ notificacionesRoutes.get("/papelera", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
 	if (uid == null) return badRequest(c, "id_usuario invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) => q.listarPapelera(db, uid)),
+		await tenantQuery(c, (db) => q.listarPapelera(db, uid)),
 	);
 });
 
 notificacionesRoutes.get("/count", async (c) => {
 	const uid = parseId(c.req.query("usuario"));
 	if (uid == null) return badRequest(c, "id_usuario invalido");
-	const count = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const count = await tenantQuery(c, (db) =>
 		q.contarNoLeidas(db, uid),
 	);
 	return c.json({ count });
@@ -94,7 +94,7 @@ notificacionesRoutes.post("/", async (c) => {
 	// Idempotencia por clave de dedupe: si ya hay una activa con esa clave, devolvemos su id sin
 	// crear otra (espejo de la emisión Local-First del repo SQLite).
 	if (p.data.clave_dedupe) {
-		const existing = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const existing = await tenantQuery(c, (db) =>
 			q.idActivaPorClave(db, p.data.clave_dedupe as string),
 		);
 		if (existing) return c.json({ ok: true, id_notificacion: existing });
@@ -108,7 +108,7 @@ notificacionesRoutes.post("/leer-todas", async (c) => {
 	const p = await parseBody(c, S.marcarTodasSchema);
 	if (!p.ok) return p.res;
 
-	const ids = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const ids = await tenantQuery(c, (db) =>
 		q.idsNoLeidas(db, p.data.id_usuario),
 	);
 	if (ids.length === 0) return c.json({ ok: true, marcadas: 0 });

@@ -53,9 +53,9 @@ export function completeInitialSetup(input: {
 	};
 }
 
-// TRAB-02: la hora de fichaje la fija SIEMPRE el backend (datetime('now','localtime'), que el DO
-// resuelve a literal al aplicar); nunca la envía el cliente, para que el control horario sea veraz.
-// La fecha viene ya calculada en servidor por la ruta.
+// La hora del fichaje no viaja en el cuerpo de la petición: se escribe `datetime('now','localtime')`
+// y la resuelve el Durable Object al aplicar, con el reloj local del equipo que ficha (CFG-04). La
+// fecha la calcula la ruta con ese mismo reloj (REV-03), para que las dos digan lo mismo.
 export function punchEntrada(input: {
 	id_usuario: string;
 	fecha: string;

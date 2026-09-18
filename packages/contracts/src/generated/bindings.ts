@@ -1014,7 +1014,14 @@ export type ProveedoresStatsArgs = { range: StatsRange, };
 
 export type ProveedoresStatsResponse = { total_gasto: number, num_gastos: number, gasto_medio: number, porcentaje_sobre_total_gastos: number, proveedor_top: ProveedorTop | null, gastos_evolucion: ChartSeriesF64Out, gasto_por_proveedor: ChartSeriesF64Out, ultimos_gastos: Array<UltimoGastoProveedor>, };
 
-export type PunchInput = { id_usuario: string, pin: string, tipo: string, fecha?: string, hora_evento?: string, };
+/**
+ * El fichaje NO lleva fecha ni hora: las pone el equipo que ficha — la Main con su reloj, y la
+ * Handy con el suyo vía `X-Client-Now` (CFG-04/REV-03). Estuvieron aquí, el TPV las calculaba y
+ * las mandaba en cada fichaje, y los cuatro sitios que las recibían las descartaban. Un campo que
+ * se envía y nadie lee es peor que no tenerlo: el día que alguien lo cablee, el control horario
+ * pasa a creerse un valor del cuerpo de la petición, que es cualquier cosa.
+ */
+export type PunchInput = { id_usuario: string, pin: string, tipo: string, };
 
 export type PunchParte = { parte: number, entrada: string | null, salida: string | null, estado: string, };
 

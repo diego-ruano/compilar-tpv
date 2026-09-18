@@ -67,7 +67,7 @@ function conflictStock(plan: any): never {
 }
 
 ventaRapidaRoutes.get("/categorias", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.categorias(db))),
+	c.json(await tenantQuery(c, (db) => q.categorias(db))),
 );
 
 ventaRapidaRoutes.get("/productos/search", async (c) => {
@@ -77,7 +77,7 @@ ventaRapidaRoutes.get("/productos/search", async (c) => {
 	});
 	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.searchProductos(db, parsed.data.query, parsed.data.limit),
 		),
 	);
@@ -87,7 +87,7 @@ ventaRapidaRoutes.get("/productos/:idCategoria", async (c) => {
 	const id = parseId(c.req.param("idCategoria"));
 	if (id == null) return badRequest(c, "id_categoria invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.productosByCategoria(db, id),
 		),
 	);
@@ -100,7 +100,7 @@ ventaRapidaRoutes.get("/comandas", async (c) => {
 	});
 	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.listComandas(
 				db,
 				parsed.data.include_pagadas,
@@ -113,14 +113,14 @@ ventaRapidaRoutes.get("/comandas", async (c) => {
 ventaRapidaRoutes.get("/comandas/:id/lineas", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_comanda invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.lineas(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.lineas(db, id)));
 });
 
 ventaRapidaRoutes.get("/comandas/:id/ticket-detalles", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_comanda invalido");
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.detallesVerTicket(db, id),
 		),
 	);
@@ -130,7 +130,7 @@ ventaRapidaRoutes.post("/index-rows", async (c) => {
 	const p = await parseBody(c, S.idsSchema);
 	if (!p.ok) return p.res;
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.indexRows(db, p.data.ids),
 		),
 	);
@@ -141,13 +141,13 @@ ventaRapidaRoutes.post("/comandas/barra", async (c) => {
 	if (!p.ok) return p.res;
 
 	if (p.data.get_or_create) {
-		const existing = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const existing = await tenantQuery(c, (db) =>
 			q.openBarraComanda(db),
 		);
 		if (existing) return c.json({ ok: true, id_comanda: existing });
 	}
 
-	const idTrab = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const idTrab = await tenantQuery(c, (db) =>
 		q.resolveTrabajadorId(db, p.data.id_trabajador),
 	);
 	const id = await apply(c, cmd.createComandaBarra(p.data, idTrab));
@@ -159,7 +159,7 @@ ventaRapidaRoutes.post("/lineas", async (c) => {
 	if (!p.ok) return p.res;
 	// El tipo de IVA se resuelve aquí y viaja como literal: dentro del INSERT sería una
 	// subconsulta que la Main reevaluaría en otro estado.
-	const datos = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const datos = await tenantQuery(c, (db) =>
 		mesasQ.datosDeLinea(db, p.data.id_producto),
 	);
 	const id = await apply(c, cmd.addLinea(p.data, datos.ivaPercent, datos.nombre));
@@ -192,7 +192,7 @@ ventaRapidaRoutes.post("/cobrar-fraccionado", async (c) => {
 	if (veto) return veto;
 	const p = await parseBody(c, S.cobrarFraccionadoSchema);
 	if (!p.ok) return p.res;
-	const plan = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const plan = await tenantQuery(c, (db) =>
 		q.cobrarPlan(db, p.data),
 	);
 	if (!plan.ok) conflictStock(plan);
@@ -204,7 +204,7 @@ ventaRapidaRoutes.post("/restar-stock", async (c) => {
 	const p = await parseBody(c, S.restarStockSchema);
 	if (!p.ok) return p.res;
 	if (!p.data.lineas.length) return c.json({ ok: true });
-	const plan = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const plan = await tenantQuery(c, (db) =>
 		q.restarStockPlan(db, p.data),
 	);
 	if (!plan.ok) conflictStock(plan);
@@ -215,7 +215,7 @@ ventaRapidaRoutes.post("/restar-stock", async (c) => {
 ventaRapidaRoutes.post("/comandas/delete-if-safe", async (c) => {
 	const p = await parseBody(c, z.object({ id_comanda: z.coerce.string().trim().min(1) }));
 	if (!p.ok) return p.res;
-	const hasPaid = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const hasPaid = await tenantQuery(c, (db) =>
 		q.hasPaidLines(db, p.data.id_comanda),
 	);
 	if (hasPaid) throw new HubError("comanda_has_paid_lines", 409);

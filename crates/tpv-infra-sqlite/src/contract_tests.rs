@@ -822,7 +822,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
             // Se llama a `exec_punch` (el efecto) y no a `repo.punch`, que antes verifica el PIN:
             // el PIN es autenticación, no forma parte del contrato de replicación.
             let conn = db.write().await;
-            crate::login::exec_punch(&conn, &s(&e["id_usuario"]), &s(&e["tipo"]), None, None)
+            crate::login::exec_punch(&conn, &s(&e["id_usuario"]), &s(&e["tipo"]))
                 .await
                 .expect("fichaje");
         }

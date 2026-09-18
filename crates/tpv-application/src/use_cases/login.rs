@@ -133,14 +133,7 @@ pub async fn punch(repo: &dyn LoginRepository, input: PunchInput) -> AppResult<P
         ));
     }
 
-    repo.punch(
-        &input.id_usuario,
-        &input.pin,
-        &tipo,
-        limpiar_opcional(input.fecha),
-        limpiar_opcional(input.hora_evento),
-    )
-    .await
+    repo.punch(&input.id_usuario, &input.pin, &tipo).await
 }
 
 #[cfg(test)]
@@ -178,14 +171,7 @@ mod tests {
         ) -> AppResult<()> {
             unimplemented!("no usado")
         }
-        async fn punch(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: Option<String>,
-            _: Option<String>,
-        ) -> AppResult<PunchStatus> {
+        async fn punch(&self, _: &str, _: &str, _: &str) -> AppResult<PunchStatus> {
             unimplemented!("no usado")
         }
         async fn set_turno_partido(

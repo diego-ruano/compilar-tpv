@@ -87,13 +87,6 @@ function todayLocalYmd(): string {
     return [d.getFullYear(), pad2(d.getMonth() + 1), pad2(d.getDate())].join("-");
 }
 
-function nowLocalSqlDateTime(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(
-        d.getDate(),
-    )} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
 /* =========================================================
    Mappers
 ========================================================= */
@@ -267,8 +260,6 @@ export async function punch(params: {
             id_usuario: params.idUsuario,
             pin: String(params.pin ?? ""),
             tipo: params.tipo,
-            fecha: todayLocalYmd(),
-            hora_evento: nowLocalSqlDateTime(),
         },
     });
     return mapPunchStatus(data);

@@ -81,10 +81,15 @@ impl CloudClient {
     /// silencio; sin esta cabecera, toda escritura del Handy cuyo SQL lleve `datetime('now')` fallaba
     /// (crear ticket, añadir línea, lotes, mesas, tareas, reservas…).
     ///
-    /// Se fija aquí, en el ÚNICO punto por el que pasan todas las peticiones (GET incluidos, donde
-    /// es inocua), y no en `write_body`: así ninguna ruta futura puede olvidarla — de hecho
-    /// `delete_json` ya se saltaba `write_body`. Espejo de `tpv_server_post_json`
-    /// (`tpv-infra-licensing`), que es el otro transporte y siempre la ha puesto.
+    /// Se fija aquí, en el ÚNICO punto por el que pasan todas las peticiones, y no en `write_body`:
+    /// así ninguna ruta futura puede olvidarla — de hecho `delete_json` ya se saltaba `write_body`.
+    /// Espejo de `tpv_server_post_json` (`tpv-infra-licensing`), que es el otro transporte y
+    /// siempre la ha puesto.
+    ///
+    /// REV-03 — en un GET ya NO es inocua, que es lo que decía esta nota. Con ella, el worker
+    /// resuelve el `'now','localtime'` de una LECTURA a la hora local de este equipo; sin ella lo
+    /// resuelve Turso, que corre en UTC, y «hoy» pasa a ser el día del servidor: de madrugada, el
+    /// de ayer. Quitarla de los GET no daría ningún error, sólo respuestas de otro día.
     /// `body` son los bytes que se van a enviar (vacío en GET/DELETE): entran en la firma, así que
     /// el llamante tiene que adjuntar **exactamente** esos bytes con `.body(...)`, nunca volver a
     /// serializar con `.json(...)` (FABLE-E).

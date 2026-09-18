@@ -55,7 +55,7 @@ async function apply(
 }
 
 reservasRoutes.get("/meta", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.meta(db))),
+	c.json(await tenantQuery(c, (db) => q.meta(db))),
 );
 
 reservasRoutes.get("/mes", async (c) => {
@@ -65,7 +65,7 @@ reservasRoutes.get("/mes", async (c) => {
 	});
 	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.mes(db, parsed.data.desde, parsed.data.hasta),
 		),
 	);
@@ -78,7 +78,7 @@ reservasRoutes.post("/", async (c) => {
 	// RES-02: rechazar el doble booking del mismo hueco exacto (mesa+día+hora) antes de aplicar.
 	// Una reserva sin mesa no ocupa ningún hueco, así que no puede solaparse con nadie.
 	const solapa = p.data.id_mesa
-		? await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		? await tenantQuery(c, (db) =>
 				q.haySolapeReserva(db, p.data.id_mesa!, p.data.dia_ymd, p.data.hora, p.data.id_reserva ?? null),
 			)
 		: false;
@@ -89,7 +89,7 @@ reservasRoutes.post("/", async (c) => {
 		);
 	}
 
-	const cliente = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const cliente = await tenantQuery(c, (db) =>
 		q.findClienteReserva(db, p.data.email, p.data.telefono),
 	);
 	const id = await apply(c, cmd.saveReserva(p.data, cliente));

@@ -79,32 +79,32 @@ async function ensurePin(
 }
 
 loginRoutes.get("/users", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.listLoginUsers(db))),
+	c.json(await tenantQuery(c, (db) => q.listLoginUsers(db))),
 );
 
 loginRoutes.post("/login", async (c) => {
 	const p = await parseBody(c, S.loginUserSchema);
 	if (!p.ok) return p.res;
 	// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
-	const secs = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const secs = await tenantQuery(c, (db) =>
 		q.throttleSecondsLeft(db, p.data.id_usuario),
 	);
 	if (secs > 0) {
 		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
 	}
-	const record = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
 	if (badPin) {
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.throttleFail(db, p.data.id_usuario),
 		);
 		return badPin;
 	}
-	await tenantQuery(c.env, c.get("tenantId"), (db) => q.throttleReset(db, p.data.id_usuario));
-	const ok = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	await tenantQuery(c, (db) => q.throttleReset(db, p.data.id_usuario));
+	const ok = await tenantQuery(c, (db) =>
 		q.loginOk(db, p.data.id_usuario),
 	);
 	return c.json(ok);
@@ -113,7 +113,7 @@ loginRoutes.post("/login", async (c) => {
 loginRoutes.get("/:id/punch-status", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_usuario invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.punchStatus(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.punchStatus(db, id)));
 });
 
 loginRoutes.post("/turno-partido", async (c) => {
@@ -126,13 +126,13 @@ loginRoutes.post("/turno-partido", async (c) => {
 loginRoutes.post("/complete-initial-setup", async (c) => {
 	const p = await parseBody(c, S.completeInitialSetupSchema);
 	if (!p.ok) return p.res;
-	const record = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	const badPin = await ensurePin(c, p.data.pin_actual, String(record.password_hash));
 	if (badPin) return badPin;
-	const inUse = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const inUse = await tenantQuery(c, (db) =>
 		q.emailInUse(db, p.data.email_nuevo, p.data.id_usuario),
 	);
 	if (inUse) return c.json({ error: "email already in use" }, 409);
@@ -160,7 +160,7 @@ loginRoutes.post("/sync-initial-setup", async (c) => {
 
 	const passwordHash = await hashPin(p.data.pin);
 
-	await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	await tenantQuery(c, (db) =>
 		q.applyInitialSetupDirect(db, {
 			idUsuario: p.data.id_usuario,
 			email: p.data.email,
@@ -321,34 +321,42 @@ loginRoutes.post("/punch", async (c) => {
 	const p = await parseBody(c, S.punchSchema);
 	if (!p.ok) return p.res;
 	// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
-	const secs = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const secs = await tenantQuery(c, (db) =>
 		q.throttleSecondsLeft(db, p.data.id_usuario),
 	);
 	if (secs > 0) {
 		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
 	}
-	const record = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const record = await tenantQuery(c, (db) =>
 		q.getLoginRecord(db, p.data.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
 	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
 	if (badPin) {
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.throttleFail(db, p.data.id_usuario),
 		);
 		return badPin;
 	}
-	await tenantQuery(c.env, c.get("tenantId"), (db) => q.throttleReset(db, p.data.id_usuario));
+	await tenantQuery(c, (db) => q.throttleReset(db, p.data.id_usuario));
 
-	// TRAB-02: se IGNORA la fecha/hora que envía el cliente (podría falsear el control horario) y se
-	// usa siempre la del servidor. La fecha del fichaje se calcula aquí en servidor.
-	const fecha = await tenantQuery(c.env, c.get("tenantId"), async (db) => {
+	// La fecha del fichaje. Sale de una consulta (`date('now','localtime')`) que `tenantQuery`
+	// resuelve con la hora local de quien ficha (REV-03), que es la MISMA con la que el Durable
+	// Object fija la `Hora_Entrada` de la fila. Antes la ponía Turso, que corre en UTC: a las 00:30
+	// se guardaba un fichaje fechado ayer con una hora de hoy — una fila que se contradice a sí
+	// misma y que viaja así a la Main, al registro de jornada.
+	//
+	// TRAB-02, el control horario ha de ser VERAZ: por eso la petición ya **no lleva** fecha ni hora
+	// — las llevó, y nadie las leía. Un valor del cuerpo es cualquier cosa; `X-Client-Now` es el
+	// reloj del equipo que ficha, el mismo que en la Main escribe el fichaje, y llega con su
+	// guardia de deriva.
+	const fecha = await tenantQuery(c, async (db) => {
 		const status = await q.punchStatus(db, p.data.id_usuario);
 		return status.fecha;
 	});
 
 	if (p.data.tipo === "entrada") {
-		const parte = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const parte = await tenantQuery(c, (db) =>
 			q.nextPunchPart(db, p.data.id_usuario, fecha),
 		);
 		await apply(
@@ -360,7 +368,7 @@ loginRoutes.post("/punch", async (c) => {
 			}),
 		);
 	} else {
-		const open = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		const open = await tenantQuery(c, (db) =>
 			q.getOpenPunch(db, p.data.id_usuario, fecha),
 		);
 		if (!open) {
@@ -376,7 +384,7 @@ loginRoutes.post("/punch", async (c) => {
 	}
 
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.punchStatusForDate(db, p.data.id_usuario, fecha),
 		),
 	);

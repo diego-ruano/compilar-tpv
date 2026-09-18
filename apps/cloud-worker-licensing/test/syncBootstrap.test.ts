@@ -26,7 +26,7 @@ let esTpv = true;
 
 vi.mock("../src/lib/tenantClient", async (original) => ({
 	...(await (original as any)()),
-	tenantQuery: async (_env: any, _tenantId: string, fn: any) => fn(clienteActual),
+	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
 }));
 
 vi.mock("../src/lib/deviceAuth", async (original) => ({

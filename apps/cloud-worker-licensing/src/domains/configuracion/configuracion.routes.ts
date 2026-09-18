@@ -49,7 +49,7 @@ async function apply(
 }
 
 configuracionRoutes.get("/contact", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getContact(db))),
+	c.json(await tenantQuery(c, (db) => q.getContact(db))),
 );
 
 configuracionRoutes.patch("/contact", async (c) => {
@@ -60,11 +60,11 @@ configuracionRoutes.patch("/contact", async (c) => {
 });
 
 configuracionRoutes.get("/business", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getBusiness(db))),
+	c.json(await tenantQuery(c, (db) => q.getBusiness(db))),
 );
 
 configuracionRoutes.get("/ticket", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.getTicket(db))),
+	c.json(await tenantQuery(c, (db) => q.getTicket(db))),
 );
 
 configuracionRoutes.patch("/business", async (c) => {

@@ -361,13 +361,11 @@ pub(crate) async fn exec_punch<C: Writer>(
     conn: &C,
     id_usuario: &str,
     tipo: &str,
-    _fecha: Option<String>,
-    _hora_evento: Option<String>,
 ) -> AppResult<PunchStatus> {
-    // TRAB-02: el control horario debe ser VERAZ. Se ignora deliberadamente la fecha/hora que
-    // envía el cliente (la Main —o un dispositivo— podría falsearla para backdating/forward-dating)
-    // y se usa SIEMPRE el reloj de confianza del backend. No hay flujo de corrección manual que
-    // preservar; si en el futuro se añade, debe ser una operación admin separada y auditada.
+    // TRAB-02: el control horario debe ser VERAZ, así que la fecha y la hora las pone el equipo que
+    // ficha y NO viajan en la petición — llegaron a viajar, sin que nadie las leyera, y ya ni
+    // existen en la entrada. No hay flujo de corrección manual que preservar; si en el futuro se
+    // añade, debe ser una operación admin separada y auditada.
     let fecha = today_ymd();
     let hora_evento = now_iso();
 
@@ -777,14 +775,7 @@ impl LoginRepository for SqliteLoginRepository {
         Ok(())
     }
 
-    async fn punch(
-        &self,
-        id_usuario: &str,
-        pin: &str,
-        tipo: &str,
-        fecha: Option<String>,
-        hora_evento: Option<String>,
-    ) -> AppResult<PunchStatus> {
+    async fn punch(&self, id_usuario: &str, pin: &str, tipo: &str) -> AppResult<PunchStatus> {
         crate::auth::throttle_check(&self.db, id_usuario).await?;
 
         let hash = {
@@ -801,7 +792,7 @@ impl LoginRepository for SqliteLoginRepository {
         let _ = crate::auth::throttle_registrar(&self.db, id_usuario, true).await;
 
         let db = self.db.write().await;
-        exec_punch(&db, id_usuario, tipo, fecha, hora_evento).await
+        exec_punch(&db, id_usuario, tipo).await
     }
 
     async fn set_turno_partido(

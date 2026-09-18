@@ -55,17 +55,17 @@ async function apply(
 }
 
 trabajadoresRoutes.get("/roles", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.roles(db))),
+	c.json(await tenantQuery(c, (db) => q.roles(db))),
 );
 
 trabajadoresRoutes.get("/turnos", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.turnos(db))),
+	c.json(await tenantQuery(c, (db) => q.turnos(db))),
 );
 
 trabajadoresRoutes.get("/by-usuario/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_usuario invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.idByUsuario(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.idByUsuario(db, id)));
 });
 
 trabajadoresRoutes.get("/horarios/semana", async (c) => {
@@ -74,20 +74,20 @@ trabajadoresRoutes.get("/horarios/semana", async (c) => {
 	});
 	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
 	return c.json(
-		await tenantQuery(c.env, c.get("tenantId"), (db) =>
+		await tenantQuery(c, (db) =>
 			q.asignacionesSemana(db, parsed.data.fecha_lunes),
 		),
 	);
 });
 
 trabajadoresRoutes.get("/", async (c) =>
-	c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.all(db))),
+	c.json(await tenantQuery(c, (db) => q.all(db))),
 );
 
 trabajadoresRoutes.get("/:id", async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_trabajador invalido");
-	return c.json(await tenantQuery(c.env, c.get("tenantId"), (db) => q.detail(db, id)));
+	return c.json(await tenantQuery(c, (db) => q.detail(db, id)));
 });
 
 trabajadoresRoutes.post("/", async (c) => {
@@ -110,7 +110,7 @@ trabajadoresRoutes.post("/horarios/asignaciones", async (c) => {
 	const p = await parseBody(c, S.asignacionCreateSchema);
 	if (!p.ok) return p.res;
 	// TRAB-04: bloquear el mismo turno para el mismo trabajador y día (aunque cambie el área).
-	const dup = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const dup = await tenantQuery(c, (db) =>
 		q.existeAsignacionTurno(db, p.data.id_trabajador, p.data.fecha, p.data.id_turno),
 	);
 	if (dup) {
@@ -144,7 +144,7 @@ trabajadoresRoutes.post("/horarios/copy-semana", async (c) => {
 	if (!p.ok) return p.res;
 	// TRAB-08: las filas origen se leen antes de construir el comando, para que cada copia lleve su
 	// ID ya resuelto en la sentencia que se replica.
-	const filas = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const filas = await tenantQuery(c, (db) =>
 		q.filasSemana(db, p.data.from_monday),
 	);
 	const data = await apply(c, cmd.copySemana(p.data, filas));
@@ -154,7 +154,7 @@ trabajadoresRoutes.post("/horarios/copy-semana", async (c) => {
 trabajadoresRoutes.post("/horarios/predeterminado-desde-semana", async (c) => {
 	const p = await parseBody(c, S.fechaLunesSchema);
 	if (!p.ok) return p.res;
-	const items = await tenantQuery(c.env, c.get("tenantId"), (db) =>
+	const items = await tenantQuery(c, (db) =>
 		q.predeterminadoDesdeSemanaItems(db, p.data.fecha_lunes),
 	);
 	const ok = await apply(

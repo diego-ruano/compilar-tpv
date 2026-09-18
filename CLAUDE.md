@@ -572,6 +572,22 @@ no sólo en dev.
   - **La nube sólo sabe fijar la hora local del emisor** (`X-Client-Now`). Un `'now'` en UTC o un
     `CURRENT_*` en una escritura de la Handy no tienen con qué resolverse, y el DO los rechaza
     (`hora_no_determinista`) en vez de dejar que Turso elija.
+  - **Y «hoy» también lo pone quien PREGUNTA, no sólo quien escribe (REV-03).** Las lecturas de la
+    Handy se ejecutan en Turso, que corre en UTC: su `'localtime'` es UTC, así que un
+    `date('now','localtime')` dentro de una consulta devolvía el día del servidor. De madrugada eso
+    es **ayer**, y salía en las tareas de hoy, en las estadísticas, en las reservas próximas y en la
+    fecha con la que se guardaba un fichaje — que además contradecía a su propia `Hora_Entrada`,
+    porque esa sí la fija el emisor. Se resuelve igual: `lib/tenantClient.ts` fija `X-Client-Now` a
+    literal antes de ejecutar, **con la misma función que el DO** (`rewriteNowInSql`). Reglas:
+    - **Va en `tenantQuery`, el único punto por el que pasan todas las lecturas**, y no consulta a
+      consulta: una que se añada mañana no puede olvidarse. Por eso `tenantQuery` recibe el
+      contexto de la petición y no `(env, tenantId)`.
+    - **Sin cabecera no se reescribe nada** y manda el reloj de Turso, que es como se comportaba
+      antes. Quien no dice su hora no puede esperar que se la adivinen.
+    - ⚠️ **`x-client-now` ya NO es inocua en un GET.** El cliente de Rust la pone en todas las
+      peticiones; quitarla de las lecturas no daría ningún error, sólo respuestas de otro día.
+    - **El harness de contrato no puede ver esto**, porque corre las dos implementaciones en la
+      misma zona horaria y por tanto se equivocan igual. Lo cubre `test/lecturasEnHoraLocal.test.ts`.
   - **Lo que no puede fijar nadie es un `'localtime'` aplicado a un valor**
     (`datetime(Fecha,'localtime')`): depende de la zona de quien lo ejecuta. En desarrollo revienta;
     en el equipo del cliente no se bloquea la escritura —puede ser un cobro— pero queda anotado.
