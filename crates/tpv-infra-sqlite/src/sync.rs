@@ -196,6 +196,25 @@ async fn purge_by_cursor(conn: &Connection, last_seq: i64) -> AppResult<()> {
 /// SYNC-22: encola la reparación de las filas que tocaba una operación apartada, y devuelve
 /// cuántas se han encolado.
 ///
+/// ¿Esta operación ya está apartada? (REV-04)
+///
+/// Es la guardia que hace repetible `outbox_mark_failed`. Una fila que ya está en cuarentena tiene
+/// su reparación encolada desde la primera vez: volver a pasar por ahí sólo sumaría copias de la
+/// misma reparación y un contador de intentos que ya no significa nada.
+async fn ya_apartada(conn: &Connection, op_id: &str) -> AppResult<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT Cuarentena FROM _Sync_Outbox WHERE Op_Id = ?1 LIMIT 1;",
+            vec![Value::Text(op_id.to_string())],
+        )
+        .await
+        .map_err(db_err)?;
+    match rows.next().await.map_err(db_err)? {
+        Some(r) => Ok(v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0) == 1),
+        None => Ok(false),
+    }
+}
+
 /// No reintenta la sentencia rechazada: lee cómo está **ahora** cada fila en la Main —que es el
 /// escritor único, o sea la autoridad— y encola un `INSERT OR REPLACE` con su contenido actual. Eso
 /// no depende del orden, se puede repetir sin daño y converge; reaplicar la sentencia vieja, en
@@ -652,6 +671,14 @@ impl SyncRepository for SqliteSyncRepository {
         let conn = w.raw();
         let err_trunc: String = error.chars().take(500).collect();
 
+        // REV-04: anotar dos veces el mismo fallo tiene que ser inocuo. El camino en vivo no repite
+        // (una apartada deja de ofrecerse), pero el aviso de la nube SÍ: el DO reofrece lo que no se
+        // le ha acusado en cada conexión, y un acuse que se pierda traería el mismo `Op_Id` mañana.
+        // Sin esta salida, cada repetición encolaría OTRA reparación de las mismas filas.
+        if ya_apartada(conn, op_id).await? {
+            return Ok(OutboxFallo::default());
+        }
+
         conn.execute(
             "UPDATE _Sync_Outbox \
                 SET Intentos = Intentos + 1, Ultimo_Error = ?1, Ultimo_Intento_Ms = ?2 \
@@ -691,6 +718,16 @@ impl SyncRepository for SqliteSyncRepository {
         if apartar {
             conn.execute(
                 "UPDATE _Sync_Outbox SET Cuarentena = 1 WHERE Op_Id = ?1;",
+                vec![Value::Text(op_id.to_string())],
+            )
+            .await
+            .map_err(db_err)?;
+            // REV-04: y deja de estar "encolada en la nube". Esa marca dice «está en camino, no la
+            // reenvíes», y su única forma de levantarse es que la operación vuelva por el catch-up
+            // — que es justo lo que no va a pasar con una apartada. Dejarla sería que la fila
+            // arrastrara dos estados contradictorios a la vez.
+            conn.execute(
+                "DELETE FROM _Sync_Encoladas WHERE Op_Id = ?1;",
                 vec![Value::Text(op_id.to_string())],
             )
             .await
@@ -2520,6 +2557,91 @@ mod tests_reparacion {
         let json = serde_json::to_string(&rep.statements[0].args).unwrap();
         assert!(json.contains("Terraza de arriba"), "args: {json}");
         assert!(!json.contains("\"Terraza\","), "no puede llevar el valor viejo: {json}");
+    }
+
+    #[tokio::test]
+    async fn apartar_dos_veces_la_misma_op_no_encola_dos_reparaciones() {
+        // REV-04: el aviso de que la nube apartó una operación se REPITE —el DO vuelve a ofrecerlo
+        // en cada conexión hasta que alguien lo acuse, y un acuse puede perderse—. Sin la guardia,
+        // cada repetición encolaría otra reparación de las mismas filas y la cola crecería sola.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Barra');")
+                .await
+                .unwrap();
+        }
+        let stmt = SqlStatement {
+            sql: "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;".into(),
+            args: vec![serde_json::json!("Barra"), serde_json::json!("z1")],
+        };
+        encolar_con(&db, "op-mala", &[stmt]).await;
+
+        let primera = repo
+            .outbox_mark_failed("op-mala", "la nube la apartó de su cola", true)
+            .await
+            .unwrap();
+        assert!(primera.apartada);
+        assert_eq!(primera.reparadas, 1);
+
+        // El mismo aviso otra vez: ya está todo hecho, así que no pasa nada más.
+        let segunda = repo
+            .outbox_mark_failed("op-mala", "la nube la apartó de su cola", true)
+            .await
+            .unwrap();
+        assert!(!segunda.apartada, "no vuelve a apartarse lo ya apartado");
+        assert_eq!(segunda.reparadas, 0, "y NO se encola otra reparación");
+
+        let reparaciones = repo
+            .outbox_pending(100)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.command_name == crate::sync_reparacion::COMANDO_REPARACION)
+            .count();
+        assert_eq!(reparaciones, 1, "una sola reparación en la cola");
+    }
+
+    #[tokio::test]
+    async fn apartar_suelta_la_marca_de_encolada() {
+        // REV-04: la marca dice «está en la cola de la nube, no la reenvíes», y sólo se levanta
+        // viendo volver la operación por el catch-up — que es justo lo que no va a pasar con una
+        // apartada. Dejarla sería que la fila arrastrara dos estados que se contradicen.
+        let (repo, db, _dir) = repo_temporal().await;
+        {
+            let w = db.write().await;
+            w.raw()
+                .execute_batch("INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('z1', 'Barra');")
+                .await
+                .unwrap();
+        }
+        let stmt = SqlStatement {
+            sql: "UPDATE Zonas SET Nombre_Zona = ?1 WHERE ID_Zona = ?2;".into(),
+            args: vec![serde_json::json!("Barra"), serde_json::json!("z1")],
+        };
+        encolar_con(&db, "op-mala", &[stmt]).await;
+        repo.outbox_mark_encolada(&["op-mala".to_string()])
+            .await
+            .unwrap();
+
+        repo.outbox_mark_failed("op-mala", "la nube la apartó de su cola", true)
+            .await
+            .unwrap();
+
+        let quedan = {
+            let r = db.read().await;
+            let mut rows = r
+                .conn()
+                .query(
+                    "SELECT COUNT(*) FROM _Sync_Encoladas WHERE Op_Id = 'op-mala';",
+                    (),
+                )
+                .await
+                .unwrap();
+            v_i64(rows.next().await.unwrap().unwrap().get_value(0).unwrap()).unwrap_or(-1)
+        };
+        assert_eq!(quedan, 0, "una apartada ya no está en camino");
     }
 
     #[tokio::test]

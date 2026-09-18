@@ -84,13 +84,23 @@ export type BulkApplyMsg = {
 	clientNow?: string;
 };
 
+/**
+ * REV-04: la Main acusa las operaciones que la nube apartó de su cola.
+ *
+ * Acusar no es cortesía: es lo que permite borrarlas de `_Cola_Muerta`. Mientras no llegue este
+ * mensaje la nube vuelve a ofrecerlas en cada conexión, porque una divergencia de la que nadie se
+ * ha enterado sigue siendo una divergencia.
+ */
+export type ColaApartadaAckMsg = { type: "cola_apartada_ack"; opIds?: unknown[] };
+
 export type AnyMsg =
 	| PingMsg
 	| HelloSignedMsg
 	| RecoveryReadyMsg
 	| EventMsg
 	| ApplyMsg
-	| BulkApplyMsg;
+	| BulkApplyMsg
+	| ColaApartadaAckMsg;
 
 /* =========================================================
    3. Comando interno (SQL replicable)

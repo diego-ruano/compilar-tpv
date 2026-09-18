@@ -407,24 +407,25 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	 * qué arreglar basta con qué comando y qué dijo la nube.
 	 */
 	async function anotarFalloDeSubida(
-		entry: OutboxEntry,
+		opId: string,
 		error?: string,
 		permanente?: boolean,
+		fase: "drain_outbox" | "cola_de_la_nube" = "drain_outbox",
 	): Promise<OutboxFallo | null> {
 		try {
 			const fallo = await invoke<OutboxFallo>("sync_outbox_mark_failed", {
-				opId: entry.op_id,
+				opId,
 				error: error ?? "sin detalle",
 				permanente: Boolean(permanente),
 			});
 			if (fallo.apartada) {
 				console.error(
-					`[outbox] op APARTADA tras ${fallo.intentos} rechazo(s): ${entry.op_id}`,
+					`[outbox] op APARTADA tras ${fallo.intentos} rechazo(s): ${opId}`,
 					error,
 				);
 				captureException(new Error("outbox_op_apartada"), {
-					fase: "drain_outbox",
-					op_id: entry.op_id,
+					fase,
+					op_id: opId,
 					command_name: fallo.command_name,
 					intentos: fallo.intentos,
 					permanente: Boolean(permanente),
@@ -478,7 +479,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 						// ordenada, una operación que la nube no puede aplicar dejaba detenido todo
 						// lo de detrás — que es un día de ventas. Ahora se anota el rechazo y, si la
 						// operación se aparta, el drenado SIGUE con la siguiente.
-						const fallo = await anotarFalloDeSubida(entry, error, permanente);
+						const fallo = await anotarFalloDeSubida(entry.op_id, error, permanente);
 						if (fallo?.apartada) {
 							progressed = true;
 							continue;
@@ -963,6 +964,40 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 					);
 				return;
 			}
+
+			// REV-04: la nube ha apartado operaciones de su cola. No es un reintento pendiente: es una
+			// divergencia. Se marcan como apartadas aquí —lo que pone su fila en cuarentena y encola
+			// la reparación por ESTADO de SYNC-22, que es lo único que repara el dato— y se acusa,
+			// para que la nube deje de guardarlas. Va con `permanente: true` porque el DO ya agotó
+			// sus intentos: reintentar la sentencia daría el mismo rechazo.
+			if (msg.type === "cola_apartada") {
+				const ops = Array.isArray(msg.ops) ? msg.ops : [];
+				if (!ops.length) return;
+				void (async () => {
+					const acusadas: string[] = [];
+					for (const o of ops) {
+						const opId = String(o?.opId ?? o?.op_id ?? "");
+						if (!opId) continue;
+						// Sólo se acusa lo que se ha llegado a anotar: si esto falla, la nube lo
+						// volverá a ofrecer en la conexión siguiente, que es justo lo que queremos.
+						const fallo = await anotarFalloDeSubida(
+							opId,
+							String(o?.error ?? "la nube apartó la operación de su cola"),
+							true,
+							"cola_de_la_nube",
+						);
+						if (fallo) acusadas.push(opId);
+					}
+					if (acusadas.length && socket.readyState === WebSocket.OPEN) {
+						socket.send(
+							JSON.stringify({ type: "cola_apartada_ack", opIds: acusadas }),
+						);
+					}
+				})();
+				return;
+			}
+
+			if (msg.type === "cola_apartada_ack_ok") return;
 
 			if (msg.type === "change") {
 				const ch = toChange(msg);

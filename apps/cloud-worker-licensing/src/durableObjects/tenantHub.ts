@@ -78,7 +78,17 @@ const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintent
 // SQLite del propio DO, no en memoria— y se puede ir. El DO las aplica por su cuenta.
 const COLA_LOTE = 50; // operaciones por batch contra Turso
 const COLA_MAX_INTENTOS = 5; // fallos de una operación antes de apartarla
-const COLA_REINTENTO_MS = 5_000; // espera antes de reintentar tras un fallo del ciclo
+// Espera tras un fallo que se le imputa a UNA operación. La base contesta, así que no hay nada que
+// esperar salvo darle sus intentos con algo de aire entre medias.
+const COLA_REINTENTO_MS = 5_000;
+// REV-04: y la escalera para cuando quien falla es la BASE. Plana a 5 s, un Turso caído despertaba
+// al DO doce veces por minuto —facturado a reloj de pared— para otras tantas idas y vueltas que ya
+// se sabía que iban a fallar. El tope de 15 min no hace esperar a nadie en la práctica: `encolar`
+// adelanta la alarma en cuanto la Main vuelve a escribir, y `setAlarm` es idempotente.
+const COLA_ESPERAS_BASE_CAIDA_MS = [5_000, 30_000, 120_000, 300_000, 900_000];
+// REV-04: cuánto se guarda una apartada que ninguna Main llegó a acusar. Es sólo la red por si ese
+// equipo no vuelve nunca; el camino normal es que la Main la acuse y se borre en el acto.
+const COLA_MUERTA_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 // Presupuesto de un `alarm`. El runtime corta a los 15 min; se sale mucho antes y se reprograma,
 // para no acercarse al límite y para que un despliegue no pille un drenado enorme a medias.
 const COLA_PRESUPUESTO_MS = 60_000;
@@ -769,7 +779,16 @@ export class TenantHub {
 			);
 		`);
 		// Lo que no se pudo aplicar por más que se reintentara. Se aparta para que el resto del
-		// atraso siga entrando; queda aquí con su error para poder mirarlo.
+		// atraso siga entrando.
+		//
+		// REV-04: y una fila aquí es una CARTA SIN ENTREGAR, no un archivo. Mientras esta tabla no la
+		// leyó nadie, la nube se quedaba con una fila distinta de la Main y el único que se enteraba
+		// era Axiom; la Main seguía teniendo la operación marcada como encolada, o sea en camino.
+		// Ahora cada fila espera aquí hasta que una Main la acuse (`cola_apartada_ack`), que es
+		// cuando esa Main ya ha puesto su copia en cuarentena y ha encolado la reparación por estado
+		// de SYNC-22. Reintentar la sentencia no serviría —lo que llega aquí es un rechazo
+		// permanente, y dará el mismo rechazo dentro de una hora—: lo que repara la divergencia es
+		// mandar cómo está la fila AHORA, y eso sólo lo sabe la Main.
 		sql.exec(`
 			CREATE TABLE IF NOT EXISTS _Cola_Muerta (
 				Op_Id TEXT PRIMARY KEY,
@@ -778,6 +797,16 @@ export class TenantHub {
 				Error TEXT NOT NULL,
 				Intentos INTEGER NOT NULL,
 				Apartada_En_Ms INTEGER NOT NULL
+			);
+		`);
+		// REV-04: los ciclos que ha fallado seguidos la BASE, para saber cuánto esperar antes del
+		// siguiente. Va en el SQLite del DO y no en un campo de instancia porque al hibernar la
+		// instancia se evacúa (SYNC-16) y la escalera volvería a empezar desde abajo en cada
+		// despertar, que es exactamente la espera plana que esto sustituye.
+		sql.exec(`
+			CREATE TABLE IF NOT EXISTS _Cola_Estado (
+				Id INTEGER PRIMARY KEY CHECK (Id = 1),
+				Ciclos_Fallidos INTEGER NOT NULL DEFAULT 0
 			);
 		`);
 	}
@@ -864,19 +893,28 @@ export class TenantHub {
 	}
 
 	/**
-	 * Anota el fallo de una operación y, si ya ha agotado los intentos, la aparta.
+	 * Anota el fallo de una operación y, si no tiene arreglo, la aparta.
 	 *
 	 * Apartarla es una decisión consciente: el resto del atraso —que puede ser un día entero de
 	 * ventas— no se queda sin subir por una operación que no hay forma de aplicar.
+	 *
+	 * ⚠️ REV-04: aquí sólo llega lo que se le imputa a ESTA operación. Un fallo de la base no pasa
+	 * por aquí y no gasta intentos de nadie (ver `aplicarLote`). Antes sí: cualquier excepción
+	 * contaba, así que un corte de Turso de veinticinco segundos se llevaba las cincuenta primeras
+	 * operaciones del atraso a la lápida —operaciones perfectamente sanas, que habrían entrado a la
+	 * primera en cuanto la base volviera—.
+	 *
+	 * `permanente` viene de `esRechazoPermanente`: un rechazo que no cambia por repetirlo se aparta
+	 * a la primera en vez de gastar cinco vueltas para llegar a la misma conclusión.
 	 */
-	private anotarFallo(op: OpParaAplicar, error: string): void {
+	private anotarFallo(op: OpParaAplicar, error: string, permanente: boolean): void {
 		const sql = this.state.storage.sql;
 		const fila = sql
 			.exec("SELECT Intentos FROM _Cola_Entrada WHERE Op_Id = ?;", op.opId)
 			.toArray()[0] as any;
 		const intentos = Number(fila?.Intentos ?? 0) + 1;
 
-		if (intentos >= COLA_MAX_INTENTOS) {
+		if (permanente || intentos >= COLA_MAX_INTENTOS) {
 			this.state.storage.transactionSync(() => {
 				sql.exec(
 					`INSERT OR REPLACE INTO _Cola_Muerta (Op_Id, Command_Name, Device_Id, Error, Intentos, Apartada_En_Ms)
@@ -896,7 +934,10 @@ export class TenantHub {
 				device_id: op.deviceId ?? null,
 				error: error.slice(0, 500),
 				intentos,
+				permanente,
 			});
+			// REV-04: y que se entere la Main, que es la única que puede reparar la divergencia.
+			this.avisarApartadas();
 			return;
 		}
 
@@ -909,14 +950,156 @@ export class TenantHub {
 	}
 
 	/**
+	 * Aplica un lote y, cuando algo falla, decide DE QUIÉN es la culpa. Es el corazón de REV-04.
+	 *
+	 * Devuelve qué ha pasado, porque de eso depende cuánto esperar:
+	 *  - `"ok"`: entró todo lo que podía entrar (lo apartado también cuenta: la cola avanzó).
+	 *  - `"base_caida"`: la base del tenant no contesta. No se le anota nada a nadie y se insiste.
+	 *  - `"operacion_en_duda"`: la base contesta pero una operación falla por algo que no sabemos
+	 *    clasificar. Se le anota el intento y se para: lo de detrás se apoya en ella.
+	 *
+	 * El orden importa tanto como el veredicto. El outbox de la Main está ordenado y sus
+	 * operaciones se apoyan unas en otras, así que lo único que puede saltarse es un rechazo
+	 * PERMANENTE —que no va a entrar hoy ni dentro de un mes, y esperarlo sería parar la cola para
+	 * siempre—. Cualquier otro fallo detiene el lote donde está.
+	 */
+	private async aplicarLote(
+		db: Client,
+		ops: OpParaAplicar[],
+	): Promise<"ok" | "base_caida" | "operacion_en_duda"> {
+		try {
+			const r = await this.applyBatchIdempotent(db, ops);
+			this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
+			return "ok";
+		} catch (e) {
+			// REV-04: que un error de credenciales SALGA de aquí es lo que deja actuar a la rotación
+			// de `withTenantDbRetry`. Capturado, su reintento era código inalcanzable para la cola
+			// (el `run` que le pasa el drenado nunca lanzaba), y un token de Turso caducado —que se
+			// arregla rotando— se llevaba por delante las cincuenta operaciones del lote.
+			if (isTursoAuthError(e)) throw e;
+		}
+
+		// El lote ha fallado y no sabemos cuál lo rompió: se prueban de una en una, EN ORDEN, que es
+		// lo que separa a la culpable de sus compañeras.
+		for (const op of ops) {
+			try {
+				const r = await this.applyBatchIdempotent(db, [op]);
+				this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
+				continue;
+			} catch (e: any) {
+				if (isTursoAuthError(e)) throw e;
+				const error = String(e?.message || e);
+
+				// Un rechazo permanente se aparta en el acto y la cola sigue por la de detrás: es la
+				// política de SYNC-20, que hasta ahora sólo aplicaba el camino en vivo.
+				if (esRechazoPermanente(error)) {
+					this.anotarFallo(op, error, true);
+					continue;
+				}
+
+				// Y si no sabemos que sea definitivo, puede ser la base. Preguntárselo a ella es la
+				// única respuesta fiable: el texto de un error de libsql no distingue "estoy caída"
+				// de "esta sentencia no me gusta", y fiarlo al texto es lo que se pudre en silencio
+				// cuando cambia una redacción entre versiones.
+				if (!(await this.baseResponde(db))) return "base_caida";
+
+				this.anotarFallo(op, error, false);
+				return "operacion_en_duda";
+			}
+		}
+
+		return "ok";
+	}
+
+	/**
+	 * ¿Sigue ahí la base del tenant? Una ida y vuelta, y sólo por el camino del fallo: en el ciclo
+	 * normal esto no se ejecuta nunca.
+	 */
+	private async baseResponde(db: Client): Promise<boolean> {
+		try {
+			await db.execute({ sql: "SELECT 1 AS ok;", args: [] });
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/** REV-04: cuánto esperar tras un ciclo que se fue al suelo por la base, y anotarlo. */
+	private esperaTrasBaseCaida(): number {
+		this.asegurarCola();
+		const sql = this.state.storage.sql;
+		sql.exec(
+			`INSERT INTO _Cola_Estado (Id, Ciclos_Fallidos) VALUES (1, 1)
+			 ON CONFLICT(Id) DO UPDATE SET Ciclos_Fallidos = Ciclos_Fallidos + 1;`,
+		);
+		const fila = sql
+			.exec("SELECT Ciclos_Fallidos FROM _Cola_Estado WHERE Id = 1;")
+			.toArray()[0] as any;
+		const n = Math.max(1, Number(fila?.Ciclos_Fallidos ?? 1));
+		return COLA_ESPERAS_BASE_CAIDA_MS[
+			Math.min(n - 1, COLA_ESPERAS_BASE_CAIDA_MS.length - 1)
+		];
+	}
+
+	/** La base ha vuelto a contestar: la escalera empieza otra vez por abajo. */
+	private reiniciarEspera(): void {
+		this.asegurarCola();
+		this.state.storage.sql.exec("UPDATE _Cola_Estado SET Ciclos_Fallidos = 0 WHERE Id = 1;");
+	}
+
+	/**
+	 * REV-04: las apartadas que ninguna Main ha acusado todavía.
+	 *
+	 * De paso tira las que ya no va a acusar nadie. El TTL es la red de un equipo que no vuelve
+	 * nunca, no la política: lo normal es que la fila dure lo que tarde la Main en conectarse.
+	 */
+	private apartadasPendientes(): { opId: string; commandName: string; error: string }[] {
+		this.asegurarCola();
+		const sql = this.state.storage.sql;
+		sql.exec("DELETE FROM _Cola_Muerta WHERE Apartada_En_Ms < ?;", nowMs() - COLA_MUERTA_TTL_MS);
+		return sql
+			.exec("SELECT Op_Id, Command_Name, Error FROM _Cola_Muerta ORDER BY Apartada_En_Ms;")
+			.toArray()
+			.map((f: any) => ({
+				opId: String(f.Op_Id),
+				commandName: String(f.Command_Name),
+				error: String(f.Error),
+			}));
+	}
+
+	/**
+	 * Le cuenta a la Main lo que la nube ha apartado, para que ponga su copia en cuarentena y
+	 * dispare la reparación por estado (SYNC-22).
+	 *
+	 * Va sólo al rol `tpv`, y el rol sale del attachment que fijó la BD central: un aviso que dice
+	 * "esto no está en la nube" no puede acabar en las Handy, que no tienen con qué repararlo.
+	 */
+	private avisarApartadas(): void {
+		const ops = this.apartadasPendientes();
+		if (!ops.length) return;
+		this.broadcastRol("tpv", { type: "cola_apartada", ops });
+	}
+
+	/** La Main ya lo ha anotado: la carta está entregada y la lápida sobra. */
+	private olvidarApartadas(opIds: string[]): number {
+		if (!opIds.length) return 0;
+		this.asegurarCola();
+		const sql = this.state.storage.sql;
+		this.state.storage.transactionSync(() => {
+			for (const id of opIds) sql.exec("DELETE FROM _Cola_Muerta WHERE Op_Id = ?;", id);
+		});
+		return opIds.length;
+	}
+
+	/**
 	 * Drena la cola en lotes hasta vaciarla o agotar el presupuesto de esta invocación.
 	 *
 	 * Aplica en Turso **primero** y borra de la cola después. Si el DO muere entre las dos cosas,
 	 * la operación se reaplica y el filtro de `Op_Id` la reconoce como ya aplicada: se pierde una
 	 * lectura, nunca un dato. Al revés (borrar y luego aplicar) se perdería la operación.
 	 *
-	 * Cuando un lote falla no sabemos cuál lo rompió, así que se reintenta de una en una: eso
-	 * separa a la culpable de sus compañeras, que sí pueden entrar.
+	 * De quién es la culpa cuando algo falla lo decide `aplicarLote`; aquí sólo se traduce ese
+	 * veredicto a cuánto se espera para la vuelta siguiente.
 	 */
 	private async drenarCola(): Promise<void> {
 		const limite = nowMs() + COLA_PRESUPUESTO_MS;
@@ -933,6 +1116,7 @@ export class TenantHub {
 			if (!filas.length) {
 				// Cola vacía: no se reprograma nada y el DO puede volver a hibernar. Si veníamos de
 				// drenar, es el momento de soltar a las Handy.
+				this.reiniciarEspera();
 				if (huboTrabajo) {
 					this.broadcastAuthed({
 						type: "main_volcando",
@@ -951,24 +1135,34 @@ export class TenantHub {
 			const delTenant = filas.filter((f: any) => String(f.Tenant_Id) === tenantId);
 			const ops = delTenant.map((f) => this.filaAOp(f));
 
-			await this.withTenantDbRetry(tenantId, async (db) => {
-				try {
-					const r = await this.applyBatchIdempotent(db, ops);
-					this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
-				} catch {
-					for (const op of ops) {
-						try {
-							const r = await this.applyBatchIdempotent(db, [op]);
-							this.sacarDeLaCola([...r.aplicadas, ...r.yaEstaban]);
-						} catch (e: any) {
-							this.anotarFallo(op, String(e?.message || e));
-						}
-					}
-				}
-			});
+			const veredicto = await this.withTenantDbRetry(tenantId, (db) =>
+				this.aplicarLote(db, ops),
+			);
 
 			// Aprovechamos el ciclo para purgar el log de sync ya consumido (throttleado dentro).
 			this.state.waitUntil(this.maybePurgeSyncLog(tenantId));
+
+			if (veredicto === "base_caida") {
+				// REV-04: nadie ha gastado un intento y nada se ha apartado. Se espera —cada vez
+				// más— y se vuelve. La cola es durable: esperar no cuesta ningún dato, y apartar
+				// aquí tiraría operaciones sanas que entrarán a la primera cuando la base vuelva.
+				const espera = this.esperaTrasBaseCaida();
+				this.emitSyncEvent("cola_base_caida", {
+					pendientes: this.cuantasEnCola(),
+					espera_ms: espera,
+				});
+				await this.state.storage.setAlarm(nowMs() + espera);
+				return;
+			}
+
+			// La base contesta, así que la escalera vuelve a cero aunque esta vuelta no haya sido
+			// limpia: lo que mide la escalera es la caída, no el tropiezo de una operación.
+			this.reiniciarEspera();
+
+			if (veredicto === "operacion_en_duda") {
+				await this.state.storage.setAlarm(nowMs() + COLA_REINTENTO_MS);
+				return;
+			}
 
 			// Guardia de progreso: una vuelta que no reduce la cola volvería a leer las mismas filas
 			// y a intentar lo mismo, girando en caliente hasta agotar el presupuesto (y facturando
@@ -1700,6 +1894,16 @@ export class TenantHub {
 						});
 
 						if (roleFinal === "tpv") {
+							// REV-04: lo que la nube apartó mientras esta Main no estaba (o estaba y no
+							// escuchaba: esto es también el reintento del aviso que no se acusó). Va
+							// antes del catch-up a propósito —la Main pone su copia en cuarentena y
+							// encola la reparación por estado— y se repite en cada conexión hasta que
+							// alguien lo acuse.
+							const apartadas = this.apartadasPendientes();
+							if (apartadas.length) {
+								this.send(ws, { type: "cola_apartada", ops: apartadas });
+							}
+
 							this.broadcast({ type: "main_online", deviceId }, deviceId);
 							if (msg.recovering) {
 								this.broadcastAuthed(
@@ -1745,6 +1949,28 @@ export class TenantHub {
 				volcando: this.cuantasEnCola() > 0 || this.isMainRecovering(),
 			});
 			this.send(ws, { type: "recovery_ready_ack" });
+			return;
+		}
+
+		// REV-04: la Main confirma que ya ha anotado las apartadas. Es lo que convierte `_Cola_Muerta`
+		// en una bandeja de salida en vez de un archivo que no lee nadie: entregada la carta, se tira.
+		// Sólo la Main puede acusar, porque sólo ella puede reparar (tiene la fila; la Handy no).
+		if (msg.type === "cola_apartada_ack") {
+			if (a.role !== "tpv") {
+				this.send(ws, { type: "error", error: "forbidden_not_tpv" });
+				return;
+			}
+			const opIds = Array.isArray(msg.opIds)
+				? (msg.opIds as unknown[]).map((v) => String(v)).filter(Boolean)
+				: [];
+			const olvidadas = this.olvidarApartadas(opIds);
+			if (olvidadas) {
+				this.emitSyncEvent("cola_apartada_acusada", {
+					device_id: a.deviceId,
+					n: olvidadas,
+				});
+			}
+			this.send(ws, { type: "cola_apartada_ack_ok", n: olvidadas });
 			return;
 		}
 

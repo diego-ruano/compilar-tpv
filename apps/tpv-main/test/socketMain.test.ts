@@ -894,3 +894,63 @@ describe("un socket que ya no es el actual no toca nada", () => {
 		expect(estado()).toBe("conectado");
 	});
 });
+
+describe("REV-04 · lo que la nube aparta de su cola", () => {
+	it("se pone en cuarentena aquí y se acusa, para que la nube deje de guardarlo", async () => {
+		// La nube apartó dos operaciones del atraso. No es un reintento pendiente: es que allí falta
+		// un dato que aquí sí está. Marcarlas es lo que pone su fila en cuarentena y encola la
+		// reparación por ESTADO (SYNC-22), que es lo único que repara la divergencia — reenviar la
+		// sentencia rechazada daría el mismo rechazo.
+		const b = crearBackend();
+		b.outbox = [op(1), op(2)];
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+
+		await s.recibir({
+			type: "cola_apartada",
+			ops: [
+				{ opId: "op-1", commandName: "clientes_update", error: "no such column: X" },
+				{ opId: "op-2", commandName: "clientes_update", error: "no such column: X" },
+			],
+		});
+		await asentar();
+
+		const marcados = b.llamadas.filter((l) => l.cmd === "sync_outbox_mark_failed");
+		expect(marcados.map((l) => l.args.opId)).toEqual(["op-1", "op-2"]);
+		// `permanente`, porque el DO ya agotó los suyos: un intento más aquí sería el mismo rechazo.
+		expect(marcados.every((l) => l.args.permanente === true)).toBe(true);
+		expect(b.apartadas).toEqual(new Set(["op-1", "op-2"]));
+
+		const ack = s.enviados.find((m) => m.type === "cola_apartada_ack");
+		expect(ack?.opIds).toEqual(["op-1", "op-2"]);
+
+		// Y que se entere quien puede arreglarlo, con el camino por el que vino.
+		const aviso = h.captureException.mock.calls.find(
+			(c: any[]) => c[1]?.fase === "cola_de_la_nube",
+		);
+		expect(aviso).toBeTruthy();
+		expect(aviso?.[1].op_id).toBe("op-1");
+	});
+
+	it("lo que no se ha podido anotar NO se acusa", async () => {
+		// El acuse es lo que hace que la nube tire la fila. Acusar algo que no se ha llegado a
+		// registrar aquí sería perder el único rastro de la divergencia: si esto falla, lo correcto
+		// es callarse y que la nube lo vuelva a ofrecer en la conexión siguiente.
+		const b = crearBackend();
+		b.outbox = [op(1)];
+		b.marcarFalloRompe = true;
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+
+		await s.recibir({
+			type: "cola_apartada",
+			ops: [{ opId: "op-1", commandName: "clientes_update", error: "no such column: X" }],
+		});
+		await asentar();
+
+		expect(s.enviados.some((m) => m.type === "cola_apartada_ack")).toBe(false);
+		expect(b.apartadas.size).toBe(0);
+	});
+});

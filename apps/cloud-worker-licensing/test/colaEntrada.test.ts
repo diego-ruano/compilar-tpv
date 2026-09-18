@@ -59,7 +59,13 @@ function opRota(n: number) {
 
 /**
  * Prepara el hub para drenar sin un Turso delante: el SQLite del propio DO hace de BD de tenant y
- * se sustituye el resolutor de credenciales por uno que devuelve ese cliente.
+ * se sustituye el RESOLUTOR DE CREDENCIALES por uno que devuelve ese cliente.
+ *
+ * ⚠️ REV-04: lo que se sustituye es el resolutor, no `withTenantDbRetry`. Mientras se puenteaba el
+ * envoltorio entero, su reintento por credenciales caducadas quedaba fuera de todo lo que se
+ * probaba aquí — y resultó estar roto: el `try`/`catch` del drenado se tragaba el 401 y la rotación
+ * no llegaba a dispararse nunca. Un doble que reemplaza la pieza que hay que vigilar no prueba
+ * nada. `credenciales` cuenta cuántas veces se ha pedido el cliente, que es como se ve la rotación.
  */
 function prepararHub(hub: any) {
 	const sql = hub.state.storage.sql;
@@ -67,8 +73,56 @@ function prepararHub(hub: any) {
 	for (const s of SEMILLA) sql.exec(s);
 
 	const db = clienteSobre(sql, hub.state.storage);
-	hub.withTenantDbRetry = async (_tenantId: string, run: any) => run(db);
-	return { sql, db };
+	const credenciales = { veces: 0 };
+	hub.getTenantDb = async () => {
+		credenciales.veces++;
+		return db;
+	};
+	hub.resolveTenantDbClient = async () => {
+		credenciales.veces++;
+		return db;
+	};
+	return { sql, db, credenciales };
+}
+
+/**
+ * Envuelve el cliente para que la base se caiga y se levante a voluntad.
+ *
+ * Falla en `batch` y en `execute` —los dos— porque el veredicto de `aplicarLote` depende justo de
+ * eso: cuando una operación falla, le pregunta a la base si sigue ahí con un `SELECT 1`. Un doble
+ * que sólo rompiera el `batch` contestaría que la base está viva y el test probaría lo contrario de
+ * lo que dice probar.
+ */
+function conLaBase(db: any, estado: { caida: boolean; error?: string }) {
+	const reventar = () => {
+		throw new Error(estado.error ?? "fetch failed: connect ECONNREFUSED");
+	};
+	return {
+		...db,
+		async execute(entrada: any) {
+			if (estado.caida) reventar();
+			return db.execute(entrada);
+		},
+		async batch(sentencias: any[], modo?: string) {
+			if (estado.caida) reventar();
+			return db.batch(sentencias, modo);
+		},
+	} as any;
+}
+
+const intentosEnCola = (sql: any) =>
+	sql
+		.exec("SELECT Op_Id, Intentos FROM _Cola_Entrada ORDER BY Seq;")
+		.toArray()
+		.map((f: any) => [String(f.Op_Id), Number(f.Intentos)]);
+
+const muertas = (sql: any) =>
+	sql.exec("SELECT Op_Id FROM _Cola_Muerta ORDER BY Apartada_En_Ms;").toArray().map((f: any) => f.Op_Id);
+
+/** Cuánto falta para la alarma programada, en ms. */
+async function esperaProgramada(hub: any): Promise<number> {
+	const t = await hub.state.storage.getAlarm();
+	return t === null ? -1 : Number(t) - Date.now();
 }
 
 const enCola = (sql: any) =>
@@ -120,23 +174,24 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 		});
 	});
 
-	it("una operación imposible se aparta y el resto del atraso entra igual", async () => {
+	it("una operación imposible se aparta a la primera y el resto del atraso entra igual", async () => {
 		// Lo que no puede pasar es que un día entero de ventas se quede sin subir por una operación
-		// que no hay forma de aplicar.
+		// que no hay forma de aplicar. Y `no such table` no va a dejar de serlo dentro de 25
+		// segundos: desde REV-04 se aparta en el acto en vez de gastar cinco vueltas para llegar a
+		// la misma conclusión.
 		await enElHub("cola-apartar", async (hub: any) => {
 			const { sql } = prepararHub(hub);
 
 			hub.encolar(TENANT, [opLinea(1), opRota(2), opLinea(3)]);
 
-			// Cada vuelta gasta un intento de la rota; a los 5 se aparta.
-			for (let i = 0; i < 6; i++) await hub.drenarCola();
+			await hub.drenarCola();
 
 			expect(enCola(sql)).toEqual([]);
 			expect(lineas(sql)).toEqual(["det-1", "det-3"]);
 
-			const muertas = sql.exec("SELECT Op_Id, Intentos FROM _Cola_Muerta;").toArray();
-			expect(muertas.map((f: any) => f.Op_Id)).toEqual(["op-2"]);
-			expect(Number(muertas[0].Intentos)).toBeGreaterThanOrEqual(5);
+			const filas = sql.exec("SELECT Op_Id, Intentos FROM _Cola_Muerta;").toArray();
+			expect(filas.map((f: any) => f.Op_Id)).toEqual(["op-2"]);
+			expect(Number(filas[0].Intentos)).toBe(1);
 		});
 	});
 
@@ -257,6 +312,179 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 				.toArray()
 				.map((f: any) => f.Op_Id);
 			expect(orden).toEqual(["op-1", "op-2", "op-3"]);
+		});
+	});
+});
+
+describe("REV-04 · de quién es la culpa cuando la cola falla", () => {
+	it("un corte de Turso no gasta ni un intento, y al volver entra todo en orden", async () => {
+		// El bug que esto cierra: cualquier excepción contaba como intento, así que cinco vueltas de
+		// cinco segundos —veinticinco segundos de Turso caído— mandaban a la lápida las cincuenta
+		// primeras operaciones del atraso. Operaciones sanas, que entran a la primera en cuanto la
+		// base vuelve. Es el peor fallo posible aquí: se pierde el dato en la nube y en silencio.
+		await enElHub("rev04-corte", async (hub: any) => {
+			const { sql, db } = prepararHub(hub);
+			const estado = { caida: true };
+			hub.getTenantDb = async () => conLaBase(db, estado);
+
+			hub.encolar(TENANT, [opLinea(1), opLinea(2), opLinea(3)]);
+
+			for (let i = 0; i < 6; i++) await hub.drenarCola();
+
+			expect(muertas(sql)).toEqual([]);
+			expect(intentosEnCola(sql)).toEqual([
+				["op-1", 0],
+				["op-2", 0],
+				["op-3", 0],
+			]);
+			expect(lineas(sql)).toEqual([]);
+
+			estado.caida = false;
+			await hub.drenarCola();
+
+			expect(enCola(sql)).toEqual([]);
+			expect(muertas(sql)).toEqual([]);
+			expect(lineas(sql)).toEqual(["det-1", "det-2", "det-3"]);
+			// Y en el orden en que salieron de la Main: sus operaciones se apoyan unas en otras.
+			expect(
+				sql.exec("SELECT Op_Id FROM Sync_Changes ORDER BY Seq;").toArray().map((f: any) => f.Op_Id),
+			).toEqual(["op-1", "op-2", "op-3"]);
+		});
+	});
+
+	it("mientras la base no contesta, la espera crece en escalera y se reinicia al volver", async () => {
+		// Plana a 5 s, un Turso caído despertaba al DO doce veces por minuto para otras tantas idas
+		// y vueltas que ya se sabía que iban a fallar — y el DO factura a reloj de pared.
+		await enElHub("rev04-escalera", async (hub: any) => {
+			const { sql, db } = prepararHub(hub);
+			const estado = { caida: true };
+			hub.getTenantDb = async () => conLaBase(db, estado);
+
+			hub.encolar(TENANT, [opLinea(1)]);
+
+			const esperas: number[] = [];
+			for (let i = 0; i < 3; i++) {
+				await hub.state.storage.deleteAlarm();
+				await hub.drenarCola();
+				esperas.push(await esperaProgramada(hub));
+			}
+
+			// 5 s → 30 s → 2 min. Se comparan con holgura: entre programar y leer pasa tiempo real.
+			expect(esperas[0]).toBeGreaterThan(3_000);
+			expect(esperas[0]).toBeLessThanOrEqual(5_000);
+			expect(esperas[1]).toBeGreaterThan(25_000);
+			expect(esperas[1]).toBeLessThanOrEqual(30_000);
+			expect(esperas[2]).toBeGreaterThan(110_000);
+			expect(esperas[2]).toBeLessThanOrEqual(120_000);
+
+			estado.caida = false;
+			await hub.drenarCola();
+
+			expect(enCola(sql)).toEqual([]);
+			// La escalera vuelve abajo: si no, el corte siguiente empezaría esperando un cuarto de
+			// hora y el atraso de un bar tardaría toda la mañana en subir.
+			const n = sql.exec("SELECT Ciclos_Fallidos AS n FROM _Cola_Estado WHERE Id = 1;").toArray()[0];
+			expect(Number(n?.n ?? 0)).toBe(0);
+		});
+	});
+
+	it("un fallo que no se sabe clasificar no deja pasar a las de detrás", async () => {
+		// La base contesta, así que la culpa es de esta operación: se le anota el intento. Pero NO se
+		// aplican las de detrás mientras siga en duda —podría ser un `SQLITE_BUSY` que se arregle
+		// solo—, porque colarlas sería aplicar el futuro antes que el pasado. Sólo un rechazo
+		// PERMANENTE permite saltarse a una: ésa no va a entrar nunca y esperarla es parar la cola.
+		await enElHub("rev04-orden-fallo", async (hub: any) => {
+			const { sql, db } = prepararHub(hub);
+			let rompeALa1 = true;
+			hub.getTenantDb = async () => ({
+				...db,
+				async batch(sentencias: any[], modo?: string) {
+					if (rompeALa1 && JSON.stringify(sentencias).includes("det-1")) {
+						throw new Error("internal error: unexpected response from server");
+					}
+					return db.batch(sentencias, modo);
+				},
+			});
+
+			hub.encolar(TENANT, [opLinea(1), opLinea(2), opLinea(3)]);
+
+			await hub.drenarCola();
+
+			expect(lineas(sql)).toEqual([]);
+			expect(intentosEnCola(sql)).toEqual([
+				["op-1", 1],
+				["op-2", 0],
+				["op-3", 0],
+			]);
+			// Y se reintenta pronto, no con la escalera de una caída: la base está viva.
+			expect(await esperaProgramada(hub)).toBeLessThanOrEqual(5_000);
+
+			// Agotados los intentos se aparta, y entonces sí pasa el resto del atraso.
+			for (let i = 0; i < 5; i++) await hub.drenarCola();
+			expect(muertas(sql)).toEqual(["op-1"]);
+
+			rompeALa1 = false;
+			await hub.drenarCola();
+			expect(lineas(sql)).toEqual(["det-2", "det-3"]);
+		});
+	});
+
+	it("un token de Turso caducado se rota, no se lleva el lote por delante", async () => {
+		// `withTenantDbRetry` sabe rotar credenciales desde siempre; lo que pasaba es que el drenado
+		// capturaba el 401 antes de que llegara a enterarse, así que su reintento era código
+		// inalcanzable desde la cola y las cincuenta operaciones del lote gastaban un intento por un
+		// problema que se arregla pidiendo un token nuevo.
+		await enElHub("rev04-credenciales", async (hub: any) => {
+			const { sql, db, credenciales } = prepararHub(hub);
+
+			// Un token caducado no falla una vez: falla TODAS hasta que se rota. Modelarlo con un
+			// solo fallo dejaba el test en verde con el bug puesto —el reintento de una en una
+			// aplicaba lo mismo sin rotar nada—, así que aquí el cliente viejo no vuelve a servir.
+			let rotado = false;
+			const caducado = conLaBase(db, { caida: true, error: "Server returned HTTP status 401" });
+			hub.getTenantDb = async () => {
+				credenciales.veces++;
+				return rotado ? db : caducado;
+			};
+			hub.resolveTenantDbClient = async (_t: string, forzar: boolean) => {
+				credenciales.veces++;
+				if (forzar) rotado = true;
+				return rotado ? db : caducado;
+			};
+
+			hub.encolar(TENANT, [opLinea(1), opLinea(2)]);
+			credenciales.veces = 0;
+
+			await hub.drenarCola();
+
+			expect(rotado).toBe(true); // el 401 llegó hasta quien sabe rotar
+			expect(credenciales.veces).toBeGreaterThanOrEqual(2);
+			expect(enCola(sql)).toEqual([]);
+			expect(muertas(sql)).toEqual([]);
+			expect(intentosEnCola(sql)).toEqual([]);
+			expect(lineas(sql)).toEqual(["det-1", "det-2"]);
+		});
+	});
+
+	it("lo apartado espera a que la Main lo acuse, y entonces se olvida", async () => {
+		// `_Cola_Muerta` era una lápida que no visitaba nadie: la nube se quedaba con una fila
+		// distinta de la Main y el único que se enteraba era Axiom. Ahora es una bandeja de salida.
+		await enElHub("rev04-acuse", async (hub: any) => {
+			const { sql } = prepararHub(hub);
+
+			hub.encolar(TENANT, [opRota(1)]);
+			await hub.drenarCola();
+
+			const pendientes = hub.apartadasPendientes();
+			expect(pendientes.map((o: any) => o.opId)).toEqual(["op-1"]);
+			expect(pendientes[0].error).toMatch(/Tabla_Que_No_Existe|no such table/i);
+
+			// Repetir el aviso es inocuo: mientras nadie acuse, la nube lo vuelve a ofrecer.
+			expect(hub.apartadasPendientes().map((o: any) => o.opId)).toEqual(["op-1"]);
+
+			hub.olvidarApartadas(["op-1"]);
+			expect(hub.apartadasPendientes()).toEqual([]);
+			expect(muertas(sql)).toEqual([]);
 		});
 	});
 });

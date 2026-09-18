@@ -681,6 +681,50 @@ no sólo en dev.
   - **El `alarm` captura sus excepciones y se reprograma a mano**: el reintento automático se rinde
     a los 6 intentos y la cola se quedaría muerta en silencio. Y para si una vuelta no la reduce,
     para no girar en caliente (que además se factura).
+  - **Cuando la cola falla hay que decidir DE QUIÉN es la culpa, y no vale contarlo como intento de
+    la operación (REV-04).** Cualquier excepción sumaba uno, y a los cinco —cinco vueltas de cinco
+    segundos, o sea **veinticinco segundos de Turso caído**— la operación se iba a `_Cola_Muerta`.
+    Operaciones sanas, que habrían entrado a la primera en cuanto la base volviera. Lo decide
+    `aplicarLote` y sus tres veredictos:
+    - **Un rechazo PERMANENTE** (`esRechazoPermanente`, el mismo catálogo que el camino en vivo)
+      **se aparta en el acto** y la cola sigue por la de detrás. No va a entrar hoy ni dentro de un
+      mes, y esperarlo es parar la cola para siempre.
+    - **Cualquier otro fallo pregunta a la base si sigue ahí** (`SELECT 1`, y sólo por el camino del
+      fallo). Es la única respuesta fiable: el texto de un error de libsql no distingue «estoy
+      caída» de «esta sentencia no me gusta», y fiarlo al texto se pudre en cuanto cambia una
+      redacción entre versiones.
+    - **Si la base no contesta, no se le anota nada a nadie**: se espera —5 s, 30 s, 2 min, 5 min,
+      15 min— y se insiste. La cola es durable, así que esperar no cuesta ningún dato; apartar sí.
+      El tope alto no hace esperar a nadie: `encolar` adelanta la alarma en cuanto la Main vuelve a
+      escribir. La escalera vive en `_Cola_Estado`, en el SQLite del DO, porque un campo de
+      instancia se evapora al hibernar (SYNC-16) y volvería a empezar por abajo en cada despertar.
+    - **Si la base contesta, la culpa es de esa operación**: se le anota el intento y **se para el
+      lote ahí**. Lo de detrás se apoya en ella; colarlo sería aplicar el futuro antes que el
+      pasado. Sólo un permanente permite saltarse a una.
+  - ⚠️ **Un error de credenciales tiene que SALIR del drenado.** El `try`/`catch` que aísla a la
+    operación culpable se lo tragaba, así que el reintento con rotación de `withTenantDbRetry` era
+    código inalcanzable desde la cola: un token de Turso caducado —que se arregla pidiendo otro— se
+    llevaba por delante las cincuenta operaciones del lote. Y por eso el test **no puede sustituir
+    `withTenantDbRetry` por un passthrough**, que es lo que tapó esto: se sustituye el resolutor de
+    credenciales y el envoltorio se deja vivo.
+  - **`_Cola_Muerta` es una bandeja de salida, no un archivo (REV-04).** No la leía nadie: la nube
+    se quedaba con una fila distinta de la Main, el único que se enteraba era Axiom y la Main
+    seguía teniendo la operación marcada como «encolada», o sea en camino. Ahora cada fila espera
+    ahí hasta que una Main la acuse (`cola_apartada` → `cola_apartada_ack`), y al acusarla la Main
+    pone su copia en cuarentena y encola la reparación por estado de SYNC-22 — que es lo único que
+    repara el dato: lo que llega a esa tabla es un rechazo permanente, y reintentar la sentencia
+    daría el mismo rechazo. Reglas:
+    - **El aviso va sólo al rol `tpv`**, sacado del attachment. Una Handy no tiene la fila, así que
+      no tiene con qué reparar nada.
+    - **Se repite en cada conexión hasta que alguien acuse**, y sólo se acusa lo que se ha llegado
+      a anotar: un acuse de algo no registrado pierde el único rastro de la divergencia. Por eso
+      `outbox_mark_failed` tiene que ser repetible (`ya_apartada`), o cada repetición encolaría otra
+      reparación de las mismas filas.
+    - **Apartar suelta la marca de `_Sync_Encoladas`.** Esa marca dice «está en camino, no la
+      reenvíes» y sólo se levanta viéndola volver por el catch-up, que es justo lo que no va a
+      pasar. Dejarla sería arrastrar dos estados que se contradicen.
+    - **El TTL de 30 días es la red de un equipo que no vuelve nunca**, no la política. Purgar por
+      antigüedad a secas borraría la prueba de una divergencia que no ha reparado nadie.
 - **Una divergencia se repara por ESTADO, nunca reintentando la sentencia (SYNC-22/24).** Apartar
   una operación evita el atasco pero deja la nube distinta, y la Handy —que no tiene BD local— pasa
   entonces a enseñar otra cosa que la Main. Reglas:
