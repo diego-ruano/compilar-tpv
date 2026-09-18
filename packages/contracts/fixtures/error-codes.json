@@ -10,6 +10,7 @@
     { "wire": "license_expired", "code": "license_expired", "porque": "licencia caducada" },
     { "wire": "expired", "code": "license_expired", "porque": "alias corto del gate de licencia" },
     { "wire": "license_revoked", "code": "license_expired", "porque": "licencia anulada: para el cliente es el mismo caso que caducada (LicenseExpired ya cubre 'caducada o bloqueada'), y la acción es idéntica: parar y revisar la licencia" },
+    { "wire": "device_not_registered", "code": "device_revoked", "porque": "la fila de este dispositivo ya no está en este negocio (se vinculó como Handy de otro, o se borró): para quien lo recibe es lo mismo que estar revocado, y lo que arregla las dos cosas es volver a vincularlo" },
     { "wire": "device_replaced", "code": "device_revoked", "porque": "la licencia se activó en otro equipo (§6.4): este Main deja de serlo, así que para él equivale a estar revocado" },
     { "wire": "license_not_found", "code": "license_not_found", "porque": "el servidor no reconoce la licencia" },
     { "wire": "no_active_license_for_tenant", "code": "license_not_found", "porque": "el tenant no tiene licencia activa" },

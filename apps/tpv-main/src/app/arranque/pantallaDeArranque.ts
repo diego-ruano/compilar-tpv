@@ -11,9 +11,12 @@
 //   · Una Main no enseña la aplicación hasta que el gate de licencia deja pasar; mientras se comprueba
 //     no se enseña nada.
 //   · El aviso de caducidad sólo acompaña a una Main que trabaja, nunca a una bloqueada.
+//   · Un Handy al que la nube rechaza no está «conectando»: se le dice qué pasa y qué hacer. Es
+//     la diferencia entre una espera que termina sola y una que no va a terminar nunca.
 
 import type { LicenseGateResult } from "@tpv/contracts";
 
+import type { MotivoRechazo } from "../../shared/stores/useMainPresence";
 import type { ModeStateValue } from "../../shared/stores/useMode";
 
 export type EntradaArranque = {
@@ -26,6 +29,8 @@ export type EntradaArranque = {
 	handyEmparejado: boolean;
 	mainOnline: boolean | null;
 	mainVolcando: boolean;
+	/** La nube no deja entrar a este Handy, y por qué. `null` mientras no lo haya dicho. */
+	rechazoHandy: MotivoRechazo | null;
 };
 
 export type AvisoCaducidad = { motivo: "warn" | "expiry_grace"; expiresAtMs: number | null };
@@ -34,7 +39,12 @@ export type Pantalla =
 	| { tipo: "cargando" }
 	| { tipo: "elegir_modo" }
 	| { tipo: "handy_vincular" }
-	| { tipo: "handy_esperando_main"; conectando: boolean; volcando: boolean }
+	| {
+			tipo: "handy_esperando_main";
+			conectando: boolean;
+			volcando: boolean;
+			rechazo: MotivoRechazo | null;
+	  }
 	| { tipo: "handy_app" }
 	| { tipo: "tpv_activar"; rechazoPrevio: string | null }
 	| { tipo: "tpv_bloqueada"; motivo: string }
@@ -78,8 +88,11 @@ function pantalla(e: EntradaArranque): Pantalla {
 		if (e.mainOnline === true && !e.mainVolcando) return { tipo: "handy_app" };
 		return {
 			tipo: "handy_esperando_main",
-			conectando: e.mainOnline === null,
+			// Un rechazo NO es estar conectando: la nube ya ha contestado, y lo que ha dicho es
+			// que no. Confundirlos es lo que dejaba la pantalla girando para siempre.
+			conectando: e.mainOnline === null && e.rechazoHandy === null,
 			volcando: e.mainVolcando,
+			rechazo: e.rechazoHandy,
 		};
 	}
 

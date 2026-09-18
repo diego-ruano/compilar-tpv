@@ -216,7 +216,13 @@ impl ErrorCode {
             // `device_replaced`: la licencia se activó en otro equipo (§6.4 del plan de
             // licencias). Este Main ya no lo es, así que para él la consecuencia es la misma que
             // estar revocado: parar. Ver el fixture compartido `error-codes.json`.
-            "device_revoked" | "revoked" | "device_replaced" => ErrorCode::DeviceRevoked,
+            // `device_not_registered`: la fila de este dispositivo ya no está en este negocio
+            // (se vinculó como Handy de otro, o se borró). La consecuencia es la misma que estar
+            // revocado —parar y volver a vincular—, y para una Handy es lo que la separa de un
+            // corte de red, que sí se reintenta.
+            "device_revoked" | "revoked" | "device_replaced" | "device_not_registered" => {
+                ErrorCode::DeviceRevoked
+            }
             // `license_revoked` cae aquí a propósito: `LicenseExpired` ya significa "caducada o
             // bloqueada", y quien lo recibe hace lo mismo en ambos casos.
             "license_expired" | "expired" | "license_revoked" => ErrorCode::LicenseExpired,

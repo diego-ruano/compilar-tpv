@@ -78,7 +78,7 @@ beforeEach(() => {
 	vi.stubGlobal("WebSocket", SocketFalso);
 	SocketFalso.reiniciar();
 	h.invoke.mockReset();
-	useMainPresence.setState({ mainOnline: null, volcando: false, retryTick: 0 });
+	useMainPresence.setState({ mainOnline: null, volcando: false, retryTick: 0, rechazo: null });
 });
 
 afterEach(async () => {
@@ -123,6 +123,80 @@ describe("cuándo se intenta", () => {
 		await avanzar(3_000);
 		expect(SocketFalso.creados).toHaveLength(0);
 		expect(cuenta(b, "handy_get_ws_auth")).toBe(2);
+	});
+});
+
+describe("cuando la nube dice que no", () => {
+	// El token de una Handy caduca a los 30 días y la nube también puede revocarla. Eso llega como
+	// un código del catálogo, no como un fallo de red, y la diferencia es todo: un corte se reintenta
+	// y se pasa solo; esto no se pasa hasta que alguien va y lo arregla. Mientras se trataron igual,
+	// la pantalla decía «Conectando…» para siempre y nadie llegaba a enterarse.
+	const rechazando = (b: Backend, code: string) => {
+		b.ticket = () => {
+			throw { code, message: "lo que diga la nube" };
+		};
+	};
+
+	it("a un dispositivo revocado se le dice, y se deja de insistir cada pocos segundos", async () => {
+		const b = crearBackend();
+		rechazando(b, "device_revoked");
+		await montar();
+
+		expect(presencia().rechazo).toBe("dispositivo");
+		expect(SocketFalso.creados).toHaveLength(0);
+		// Y sigue bloqueado: un rechazo no es permiso para operar a ciegas.
+		expect(presencia().mainOnline).toBeNull();
+
+		// La espera pasa a ser de cinco minutos, no la corta de un corte de red.
+		await avanzar(5 * 60_000 - 1);
+		expect(cuenta(b, "tpv_server_post_json")).toBe(1);
+		await avanzar(1);
+		expect(cuenta(b, "tpv_server_post_json")).toBe(2);
+	});
+
+	it("una licencia caída se cuenta distinto: eso no se arregla aquí", async () => {
+		const b = crearBackend();
+		rechazando(b, "license_expired");
+		await montar();
+		expect(presencia().rechazo).toBe("licencia");
+	});
+
+	it("lo que no reconoce sigue siendo falta de red, y se reintenta enseguida", async () => {
+		const b = crearBackend();
+		rechazando(b, "internal");
+		await montar();
+		expect(presencia().rechazo).toBeNull();
+		await avanzar(3_000);
+		expect(cuenta(b, "tpv_server_post_json")).toBe(2);
+	});
+
+	it("y al volver a dejarle entrar, el aviso se retira solo", async () => {
+		const b = crearBackend();
+		let rechazar = true;
+		b.ticket = () => {
+			if (rechazar) throw { code: "device_revoked", message: "lo que diga la nube" };
+			return { ticket: "tk" };
+		};
+		await montar();
+		expect(presencia().rechazo).toBe("dispositivo");
+
+		rechazar = false;
+		await avanzar(5 * 60_000);
+		await conectar(ultimo());
+
+		expect(presencia().rechazo).toBeNull();
+		expect(presencia().mainOnline).toBe(true);
+	});
+
+	it("volver a primer plano no vuelve a preguntar mientras el rechazo siga en pie", async () => {
+		const b = crearBackend();
+		rechazando(b, "device_revoked");
+		const s = await montar();
+
+		const antes = cuenta(b, "tpv_server_post_json");
+		s.reconectarSiHaceFalta();
+		await asentar();
+		expect(cuenta(b, "tpv_server_post_json")).toBe(antes);
 	});
 });
 

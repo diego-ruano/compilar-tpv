@@ -154,6 +154,42 @@ pub fn clear_license_token() -> Result<(), String> {
     Ok(())
 }
 
+/* ===== caducidad del token de sesión ===== */
+
+/// Margen con el que se da por caducado un token que aún no lo está. Cubre el viaje de la petición
+/// y un desajuste pequeño de reloj entre el equipo y la nube.
+const MARGEN_CADUCIDAD_SEGS: i64 = 60;
+
+/// ¿Este JWT ya no vale por fecha?
+///
+/// Se lee del propio token (su `exp`), **sin preguntar a nadie**, y es lo que decide si un 401 de la
+/// nube merece renovar la credencial y repetir la petición. La alternativa —renovar ante cualquier
+/// 401— no vale: por el mismo transporte viaja el login de la Handy, que contesta 401 con un PIN
+/// incorrecto **y anota el intento** (LOGIN-01), así que repetirlo gastaría dos de los intentos que
+/// alguien tiene antes de quedarse fuera. Con esta comprobación, un 401 con el token en regla no es
+/// cosa nuestra y no se toca nada.
+///
+/// Un token que no se puede leer cuenta como caducado: si no sabemos ni qué llevamos, renovarlo es
+/// lo único que puede arreglarlo, y quien decide de verdad es la nube al recibir la firma.
+pub fn token_caducado(token: &str) -> bool {
+    let ahora = chrono::Utc::now().timestamp();
+    match exp_del_token(token) {
+        Some(exp) => exp <= ahora + MARGEN_CADUCIDAD_SEGS,
+        None => true,
+    }
+}
+
+/// El `exp` (segundos desde epoch) de un JWT, o `None` si no se puede leer. NO verifica la firma:
+/// para eso está el worker. Aquí sólo se mira la fecha que el propio token dice llevar.
+fn exp_del_token(token: &str) -> Option<i64> {
+    let payload_b64 = token.trim().split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload_b64)
+        .ok()?;
+    let payload: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    payload.get("exp")?.as_i64()
+}
+
 /* ===== handy token (almacén de secretos) ===== */
 
 pub fn get_handy_token() -> Result<String, String> {
@@ -226,6 +262,52 @@ pub fn clear_field_dek() -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Un JWT de mentira con el `exp` que se le pida. No lleva firma válida a propósito: quien
+    /// comprueba la firma es el worker, y `token_caducado` sólo lee la fecha.
+    fn jwt_con_exp(exp: Option<i64>) -> String {
+        let payload = match exp {
+            Some(e) => format!(r#"{{"tenantId":"t","exp":{e}}}"#),
+            None => r#"{"tenantId":"t"}"#.to_string(),
+        };
+        let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.as_bytes());
+        format!("cabecera.{b64}.firma")
+    }
+
+    /// REV-02. Esta función decide si un 401 de la nube merece renovar la credencial y **repetir**
+    /// la petición, y por ese mismo transporte viajan las escrituras de la Handy y su login —que
+    /// contesta 401 con un PIN incorrecto y anota el intento—. O sea: que diga `true` de más cuesta
+    /// intentos de alguien que quiere entrar a trabajar, y que diga `false` de más deja la Handy
+    /// inservible. Por eso se prueba sola.
+    #[test]
+    fn un_token_vigente_no_se_renueva() {
+        let dentro_de_una_hora = chrono::Utc::now().timestamp() + 3600;
+        assert!(!token_caducado(&jwt_con_exp(Some(dentro_de_una_hora))));
+    }
+
+    #[test]
+    fn un_token_pasado_de_fecha_si() {
+        let hace_un_rato = chrono::Utc::now().timestamp() - 1;
+        assert!(token_caducado(&jwt_con_exp(Some(hace_un_rato))));
+    }
+
+    /// El margen: un token que caduca dentro de treinta segundos no llega a destino.
+    #[test]
+    fn uno_a_punto_de_caducar_cuenta_como_caducado() {
+        let ahora = chrono::Utc::now().timestamp();
+        assert!(token_caducado(&jwt_con_exp(Some(ahora + 30))));
+        assert!(!token_caducado(&jwt_con_exp(Some(ahora + 120))));
+    }
+
+    /// Lo que no se puede leer se renueva: si no sabemos ni qué llevamos, es lo único que puede
+    /// arreglarlo, y el veredicto de verdad lo da la nube al recibir la firma.
+    #[test]
+    fn lo_que_no_se_puede_leer_se_renueva() {
+        assert!(token_caducado(""));
+        assert!(token_caducado("esto-no-es-un-jwt"));
+        assert!(token_caducado("a.no-es-base64-valido!.c"));
+        assert!(token_caducado(&jwt_con_exp(None)), "sin exp no sabemos hasta cuando vale");
+    }
 
     /// Fija el formato del device-proof. Si alguien lo cambia aquí sin cambiarlo en el worker (o
     /// al revés), el cliente empieza a recibir 401 en TODAS sus llamadas y cuesta mucho verlo:

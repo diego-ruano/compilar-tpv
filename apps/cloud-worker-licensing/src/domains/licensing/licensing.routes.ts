@@ -32,6 +32,7 @@ import {
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
+import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
 import { sendDeviceChangeCodeEmail, sendDeviceChangedNoticeEmail } from "./licenseEmails";
 import {
@@ -42,6 +43,7 @@ import {
 	emailHint,
 	generateOtpCode,
 	GRACE_DAYS,
+	handyTokenTtlSeconds,
 	OTP_MAX_ATTEMPTS,
 	OTP_TTL_MS,
 	otpHash,
@@ -439,6 +441,31 @@ licenseRoutes.post("/refresh", async (c) => {
 	if (!lic) return c.json({ ok: false, error: "license_not_found" } satisfies ApiError, 404);
 	if (estaAnulada(lic)) {
 		return c.json({ ok: false, error: "license_revoked" } satisfies ApiError, 403);
+	}
+
+	// El rol sale de la FILA, nunca del token (ver `tenant.ts`). Y hay que preguntarlo aquí porque
+	// de él dependen las dos cosas que siguen: una Handy no es —ni puede ser— el `main_device_id`
+	// de la licencia, así que la comprobación de traslado la daría por desplazada SIEMPRE, y su
+	// token no vive lo mismo que el de la Main.
+	const fila = await cargarDevice(db, claims.tenantId, claims.deviceId);
+
+	// Un dispositivo revocado no merece un token nuevo. Antes se le daba: era inútil (todo lo
+	// demás vuelve a mirar la fila y le contesta `device_revoked`), pero le hacía creer que el
+	// problema se había arreglado y volvía a intentarlo contra la misma pared.
+	if (fila && estaRevocado(fila)) {
+		return c.json({ ok: false, error: "device_revoked" } satisfies ApiError, 401);
+	}
+
+	if (normalizarRol(fila?.role) === "handy") {
+		// REV-02: el token de la Handy se emite al emparejar y NADA lo renovaba: a los 30 días dejaba de
+		// funcionar y había que volver a vincularla a mano. Aquí se reemite con la misma llave que
+		// autentica todo lo demás —la firma de su clave privada, que ya se ha comprobado arriba—,
+		// que es lo que hace que un token caducado no sea un callejón sin salida.
+		const token = await signToken(env, claims, {
+			rol: "handy",
+			ttlSegundos: handyTokenTtlSeconds(env),
+		});
+		return c.json({ ok: true, token });
 	}
 
 	// Si la licencia ya se movió a otro Main, este equipo no merece un token nuevo.

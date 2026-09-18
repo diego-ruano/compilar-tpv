@@ -27,7 +27,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::Client;
+use reqwest::{Client, Method, Response};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -49,6 +49,7 @@ use tpv_domain::licensing::{
 use device::{
     clear_license_token, get_handy_token, get_license_token, get_or_create_device_id,
     get_or_create_device_keypair, set_license_token, sign_device_proof, sign_payload_b64,
+    token_caducado,
 };
 
 /// Worker unificado `tpv-api` (fusión de los antiguos `tpv-licensing` + `tpv-server`): sirve
@@ -697,6 +698,194 @@ impl PairingAdapter {
             x_device_sig: sig,
         })
     }
+
+    /// Manda el POST ya firmado y devuelve el par crudo `(status, cuerpo)`.
+    ///
+    /// Está aparte de `tpv_server_post_json` porque esa petición puede hacerse **dos veces**: si
+    /// la nube contesta 401 a una Handy, se renueva su token y se repite. Y repetirla exige volver
+    /// a firmar —la firma cubre el token, y el token es justo lo que ha cambiado—, así que no vale
+    /// con reenviar las mismas cabeceras.
+    async fn enviar_post(&self, mode: &str, path: &str, body_str: &str) -> AppResult<(u16, String)> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
+            .build()
+            .map_err(|e| ext(format!("reqwest_build_failed:{e}")))?;
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+        // El reloj lo pone el dispositivo emisor (Main o Handy), NO el servidor: el worker usa
+        // esta hora local para resolver los `datetime('now')` de las escrituras a un literal fijo,
+        // de modo que la fila sea idéntica en nube/Main/Handy (replicación determinista).
+        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        if let Ok(v) = HeaderValue::from_str(&client_now) {
+            headers.insert("x-client-now", v);
+        }
+
+        if mode == "tpv" || mode == "handy" {
+            let signed = self.signed_headers_inner(mode, "POST", path, body_str.as_bytes())?;
+
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&signed.authorization)
+                    .map_err(|_| AppError::external("bad_authorization_header"))?,
+            );
+            headers.insert(
+                "x-device-ts",
+                HeaderValue::from_str(&signed.x_device_ts)
+                    .map_err(|_| AppError::external("bad_x_device_ts"))?,
+            );
+            headers.insert(
+                "x-device-sig",
+                HeaderValue::from_str(&signed.x_device_sig)
+                    .map_err(|_| AppError::external("bad_x_device_sig"))?,
+            );
+        }
+
+        let resp = client
+            .post(api_url(path))
+            .headers(headers)
+            .body(body_str.to_string())
+            .send()
+            .await
+            .map_err(AppError::sin_conexion)?;
+
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        Ok((status, text))
+    }
+
+    /// REV-02: reemite el token de la Handy por `/v1/license/refresh` y lo guarda en el
+    /// almacén de secretos.
+    ///
+    /// El token de una Handy se emite al emparejarla y dura 30 días. Nadie lo renovaba: al
+    /// caducar, TODAS sus peticiones pasaban a contestar 401 y la aplicación lo leía como falta de
+    /// red, así que se quedaba en «Conectando…» para siempre y había que volver a vincularla a
+    /// mano. Lo que la autentica aquí no es el token —que puede estar caducado, y es el caso— sino
+    /// la firma de su clave privada, la misma con la que firma todo lo demás.
+    ///
+    /// Si el equipo está revocado o ya no está en este negocio, la nube contesta con un código del
+    /// catálogo (`device_revoked`) y quien llamó deja de insistir, que es lo contrario de lo que
+    /// hacía antes.
+    ///
+    /// Lo llaman los DOS transportes de la Handy —este `tpv_server_post_json` (ticket del
+    /// WebSocket, emparejamiento) y el `CloudClient` de `tpv-infra-http` (todas sus lecturas y
+    /// escrituras)—, cada uno ante su 401. Uno solo no bastaba: el ticket se pide al reconectar, y
+    /// un equipo que cruza la caducidad con el socket abierto se quedaba con la pantalla conectada
+    /// y todas sus lecturas fallando.
+    pub async fn renovar_token_handy(&self) -> AppResult<()> {
+        const PATH: &str = "/v1/license/refresh";
+
+        let token = get_handy_token().map_err(AppError::external)?;
+        let tenant_id = device::handy_get_tenant()
+            .map_err(ext)?
+            .ok_or_else(|| ext("handy_tenant_missing"))?;
+
+        let device_id = get_or_create_device_id().map_err(ext)?;
+        let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
+
+        let ts = now_ms();
+        // Se manda sin cuerpo: se firma la cadena vacía (igual que el `/refresh` de la Main).
+        let sig = sign_device_proof(&sk, ts, "POST", PATH, token.trim(), b"").map_err(ext)?;
+
+        let resp = http_client()?
+            .post(api_url(PATH))
+            .bearer_auth(token.trim())
+            .header("X-Device-Ts", ts.to_string())
+            .header("X-Device-Sig", sig)
+            .send()
+            .await
+            .map_err(AppError::sin_conexion)?;
+
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        if !(200..300).contains(&status) {
+            return Err(AppError::from_api_body(status, &text));
+        }
+
+        let nuevo = serde_json::from_str::<RefreshOk>(&text)
+            .map_err(|e| ext(format!("bad_refresh_response:{e}")))?;
+
+        device::handy_set_token(nuevo.token.trim(), &tenant_id).map_err(ext)
+    }
+
+    /// Manda una petición firmada (las de imágenes: PUT, DELETE y el POST de descarga) y, si la nube
+    /// contesta 401 con el token de la Handy caducado, la repite UNA vez con el token renovado
+    /// (REV-02).
+    ///
+    /// Recibe los ingredientes y no una petición ya montada porque hay que **firmarla otra vez**:
+    /// la firma cubre el token, y el token es justo lo que ha cambiado.
+    ///
+    /// Devuelve la `Response` sin leer, que es lo que separa a estos tres del POST de JSON: la
+    /// descarga de una imagen quiere los bytes, no el texto.
+    async fn enviar_firmado(
+        &self,
+        mode: &str,
+        metodo: Method,
+        path: &str,
+        cuerpo: &[u8],
+        content_type: Option<&str>,
+    ) -> AppResult<Response> {
+        let resp = self
+            .una_peticion_firmada(mode, metodo.clone(), path, cuerpo, content_type)
+            .await?;
+
+        if resp.status().as_u16() != 401 || mode != "handy" {
+            return Ok(resp);
+        }
+        if !self.renovar_si_el_token_ha_caducado().await {
+            return Ok(resp);
+        }
+
+        self.una_peticion_firmada(mode, metodo, path, cuerpo, content_type)
+            .await
+    }
+
+    /// Un intento: firma con el token que haya AHORA y manda.
+    async fn una_peticion_firmada(
+        &self,
+        mode: &str,
+        metodo: Method,
+        path: &str,
+        cuerpo: &[u8],
+        content_type: Option<&str>,
+    ) -> AppResult<Response> {
+        let signed = self.signed_headers_inner(mode, metodo.as_str(), path, cuerpo)?;
+
+        let mut rb = http_client()?
+            .request(metodo, api_url(path))
+            .header(AUTHORIZATION, signed.authorization)
+            .header("x-device-ts", signed.x_device_ts)
+            .header("x-device-sig", signed.x_device_sig);
+
+        if let Some(ct) = content_type {
+            rb = rb.header(
+                CONTENT_TYPE,
+                HeaderValue::from_str(ct).map_err(|_| AppError::validation("bad_content_type"))?,
+            );
+        }
+        if !cuerpo.is_empty() {
+            rb = rb.body(cuerpo.to_vec());
+        }
+
+        rb.send().await.map_err(AppError::sin_conexion)
+    }
+
+    /// Renueva el token de la Handy **sólo si el que llevamos ya no vale por fecha**, y dice si
+    /// merece la pena repetir la petición que se llevó el 401.
+    ///
+    /// Los dos transportes preguntan esto y no «ha fallado, renueva», por lo que explica
+    /// `token_caducado`: por ellos viajan escrituras y el login de la Handy, y repetir una petición
+    /// que la nube sí procesó no es gratis. Con el token caducado el 401 lo puso la autenticación
+    /// del worker **antes** de tocar nada, así que repetir es seguro por construcción.
+    pub async fn renovar_si_el_token_ha_caducado(&self) -> bool {
+        match get_handy_token() {
+            Ok(token) if token_caducado(&token) => self.renovar_token_handy().await.is_ok(),
+            _ => false,
+        }
+    }
 }
 
 #[async_trait]
@@ -753,60 +942,27 @@ impl PairingService for PairingAdapter {
         path: &str,
         body: JsonValue,
     ) -> AppResult<JsonValue> {
-        let url = api_url(path);
-
-        let client = Client::builder()
-            .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-            .build()
-            .map_err(|e| ext(format!("reqwest_build_failed:{e}")))?;
-
-        let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-        // El reloj lo pone el dispositivo emisor (Main o Handy), NO el servidor: el worker usa
-        // esta hora local para resolver los `datetime('now')` de las escrituras a un literal fijo,
-        // de modo que la fila sea idéntica en nube/Main/Handy (replicación determinista).
-        let client_now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        if let Ok(v) = HeaderValue::from_str(&client_now) {
-            headers.insert("x-client-now", v);
-        }
-
         // El cuerpo se serializa UNA vez: es lo que se firma y lo que se envía. Si se dejase que
         // reqwest lo volviera a serializar con `.json(&body)`, cualquier diferencia de bytes
         // (orden, espacios) invalidaría la firma en el worker.
         let body_str =
             serde_json::to_string(&body).map_err(|e| ext(format!("bad_json_body:{e}")))?;
 
-        if mode == "tpv" || mode == "handy" {
-            let signed = self.signed_headers_inner(mode, "POST", path, body_str.as_bytes())?;
+        let (mut status, mut text) = self.enviar_post(mode, path, &body_str).await?;
 
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&signed.authorization)
-                    .map_err(|_| AppError::external("bad_authorization_header"))?,
-            );
-            headers.insert(
-                "x-device-ts",
-                HeaderValue::from_str(&signed.x_device_ts)
-                    .map_err(|_| AppError::external("bad_x_device_ts"))?,
-            );
-            headers.insert(
-                "x-device-sig",
-                HeaderValue::from_str(&signed.x_device_sig)
-                    .map_err(|_| AppError::external("bad_x_device_sig"))?,
-            );
+        // REV-02. Un 401 en una Handy con el token caducado es la credencial, no la petición: se
+        // renueva y se repite UNA vez. Quien decide es la fecha del propio token
+        // (`renovar_si_el_token_ha_caducado`) y no el texto del error, que cambia según por dónde
+        // lo rechace el worker (`jwt_expired`, `token_expired`, `invalid_token`).
+        //
+        // Si renovar no arregla nada —el dispositivo está revocado, o su fila ya no está en este
+        // negocio— el segundo intento vuelve con el mismo 401 y su código del catálogo, que es lo
+        // que permite a quien llamó dejar de reintentar en vez de tomarlo por falta de red.
+        if status == 401 && mode == "handy" && self.renovar_si_el_token_ha_caducado().await {
+            let (s2, t2) = self.enviar_post(mode, path, &body_str).await?;
+            status = s2;
+            text = t2;
         }
-
-        let resp = client
-            .post(&url)
-            .headers(headers)
-            .body(body_str)
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
-
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
 
         let parsed: JsonValue =
             serde_json::from_str(&text).unwrap_or(JsonValue::Object(Default::default()));
@@ -844,21 +1000,11 @@ impl PairingService for PairingAdapter {
     ) -> AppResult<()> {
         // PUT firmado (device-proof sobre el path canónico, sin query). El tenant lo deriva el
         // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
-        // escritura directa a R2 (no pasa por el hub).
-        let url = api_url(path);
-        let signed = self.signed_headers_inner(mode, "PUT", path, &bytes)?;
-        let client = http_client()?;
-
-        let resp = client
-            .put(&url)
-            .header(AUTHORIZATION, signed.authorization)
-            .header("x-device-ts", signed.x_device_ts)
-            .header("x-device-sig", signed.x_device_sig)
-            .header(CONTENT_TYPE, content_type)
-            .body(bytes)
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
+        // escritura directa a R2 (no pasa por el hub), y subir dos veces el mismo fichero al mismo
+        // path deja exactamente lo mismo — por eso repetirlo tras renovar el token es inocuo.
+        let resp = self
+            .enviar_firmado(mode, Method::PUT, path, &bytes, Some(content_type))
+            .await?;
 
         let status = resp.status().as_u16();
         if (200..300).contains(&status) {
@@ -869,18 +1015,9 @@ impl PairingService for PairingAdapter {
     }
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
-        let url = api_url(path);
-        let signed = self.signed_headers_inner(mode, "DELETE", path, b"")?;
-        let client = http_client()?;
-
-        let resp = client
-            .delete(&url)
-            .header(AUTHORIZATION, signed.authorization)
-            .header("x-device-ts", signed.x_device_ts)
-            .header("x-device-sig", signed.x_device_sig)
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
+        let resp = self
+            .enviar_firmado(mode, Method::DELETE, path, b"", None)
+            .await?;
 
         let status = resp.status().as_u16();
         if (200..300).contains(&status) {
@@ -898,22 +1035,18 @@ impl PairingService for PairingAdapter {
         // la Main no necesita conocerlo; `rel_path` viaja en el cuerpo, que **ahora sí entra en la
         // firma** (FABLE-E). 404 → None (el binario aún no está en R2).
         let path = "/v1/images/download";
-        let url = api_url(path);
         let body_str = serde_json::to_string(&serde_json::json!({ "rel_path": rel_path }))
             .map_err(|e| ext(format!("bad_json_body:{e}")))?;
-        let signed = self.signed_headers_inner(mode, "POST", path, body_str.as_bytes())?;
-        let client = http_client()?;
 
-        let resp = client
-            .post(&url)
-            .header(AUTHORIZATION, signed.authorization)
-            .header("x-device-ts", signed.x_device_ts)
-            .header("x-device-sig", signed.x_device_sig)
-            .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-            .body(body_str)
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
+        let resp = self
+            .enviar_firmado(
+                mode,
+                Method::POST,
+                path,
+                body_str.as_bytes(),
+                Some("application/json"),
+            )
+            .await?;
 
         let status = resp.status().as_u16();
         if status == 404 {

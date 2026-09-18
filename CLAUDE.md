@@ -727,6 +727,44 @@ no sólo en dev.
   - **Las rutas anónimas nuevas hay que eximirlas también en el proxy** (`PAIRING_SIN_SESION` en
     `commands/pairing.rs`): el resto de `/v1/pair/…` exige Administrador, y sin esa exención la
     Handy, que no tiene sesión, no podría llamarla.
+- **El token de la Handy se renueva solo, y lo hace la misma llave que firma todo lo demás.** Dura
+  30 días (`handyTokenTtlSeconds`, un único sitio para los dos que lo emiten) y no lo renovaba nadie:
+  al caducar, la Handy se quedaba inservible y había que volver a vincularla a mano. Reglas:
+  - **Lo renueva el transporte, no cada pantalla**, y lo renuevan **los dos**: el POST firmado
+    (`tpv-infra-licensing::tpv_server_post_json`, por donde va el ticket del WebSocket) y el
+    `CloudClient` de `tpv-infra-http`, por donde va **todo** lo demás que hace una Handy. Sólo en el
+    ticket no basta: se pide al reconectar, así que un equipo que cruza la caducidad con el socket
+    abierto se quedaba con la pantalla conectada y todas sus lecturas fallando en silencio.
+  - ⚠️ **Se renueva porque NUESTRO token ha caducado, no porque haya salido un 401.** Lo decide la
+    fecha del propio token (`device::token_caducado`, que lee su `exp` sin preguntar a nadie), y el
+    motivo es que por ese mismo transporte viaja el **login** de la Handy: contesta 401 con un PIN
+    incorrecto **y anota el intento** (LOGIN-01), así que repetirlo a ciegas gastaría dos de los
+    intentos que alguien tiene antes de quedarse fuera. Comparar el texto del error tampoco vale:
+    el worker rechaza con `jwt_expired`, `token_expired` o `invalid_token` según por dónde entre.
+  - **Y es lo que hace seguro repetir una escritura.** Un 401 por token caducado lo pone la
+    autenticación del worker **antes** de que ningún handler toque nada, así que no hay nada
+    aplicado que duplicar; y el segundo intento va con **la misma** `X-Idempotency-Key`, porque
+    generar otra convertiría el reintento en una operación nueva para el Durable Object — justo lo
+    que esa clave existe para evitar.
+  - **Quien reemite mira el ROL de la fila, nunca el token.** A una Handy no se le puede aplicar la
+    comprobación de traslado de licencia (§6.4): no es —ni puede ser— el `main_device_id`, así que
+    `computeLicenseState` la daba por desplazada **siempre**, y eso era justo el muro.
+  - **Un dispositivo revocado no recibe token nuevo.** Antes sí: era inútil (todo lo demás vuelve a
+    mirar su fila) pero le hacía creer que el problema estaba resuelto.
+- **Un rechazo de la nube no es un corte de red, y la Handy tiene que distinguirlos.** Los dos
+  caminos se ven igual desde el cliente —no hay ticket— y hasta ahora se trataban igual: reintentar
+  con backoff, callando. Un corte se pasa solo; que te hayan revocado el acceso o que la licencia del
+  negocio esté caída, no. Reglas:
+  - **Quien lo decide es el código del catálogo**, en `socketComun.ts::pedirTicketWs` —compartido por
+    los dos sockets, que es lo que impide que uno de ellos se quede sin el arreglo del otro— y la
+    lista es `CODIGOS_RECHAZO`.
+  - **Un rechazo se pinta, no se gira.** `useMainPresence.rechazo` separa «no hay Main» (una espera
+    que termina sola) de «la nube no te deja entrar a ti», y `HandyEsperandoMain` dice cuál de las
+    dos es y qué hacer. Un spinner eterno es una mentira: hace esperar por algo que no va a pasar.
+  - **Se espacia a 5 minutos y no se reintenta al volver a primer plano.** Preguntar lo mismo cada
+    vez que alguien desbloquea la tablet no cambia la respuesta. El botón «Reintentar» rearranca el
+    socket entero, que es la forma manual de volver a preguntar, y el aviso **se retira solo** en
+    cuanto la nube vuelve a dejar entrar.
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el

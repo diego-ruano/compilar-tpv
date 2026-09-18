@@ -24,13 +24,20 @@
 // los timers se congelan en segundo plano (el backoff no dispara a tiempo → se quedaba en
 // "Conectando" hasta recargar), se reconecta de inmediato al volver la app a primer plano / al
 // volver la red (`visibilitychange`/`online`/`focus`), y hay un botón "Reintentar" (retryTick).
+//
+// REV-02: y no todo fallo es falta de red. El token de una Handy caduca (30 días), y la nube
+// también puede revocarla o rechazar la licencia del negocio. Eso lo dice `pedirTicketWs` con un código del
+// catálogo, y aquí se traduce a un RECHAZO (`useMainPresence.rechazo`): se deja de reintentar cada
+// pocos segundos y la pantalla dice qué pasa en vez de girar bajo un "Conectando…" eterno. El
+// token caducado ni llega hasta aquí —lo renueva Rust y repite la petición—; lo que llega es lo
+// que renovar no arregla.
 
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ModeStateValue } from "../stores/useMode";
 import { useSyncSignal } from "../stores/useSyncSignal";
 import { useMainPresence } from "../stores/useMainPresence";
-import { cloudPost, CLOUD_WS_URL as WS_URL } from "./cloudApi";
+import { CLOUD_WS_URL as WS_URL } from "./cloudApi";
 import { queryClient } from "./queryClient";
 import {
 	affectedComandas,
@@ -40,7 +47,14 @@ import {
 } from "./syncStatements";
 import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
-import { crearEsperas, firmarHello, leerIdDispositivo, vigilarLatido } from "./socketComun";
+import {
+	crearEsperas,
+	firmarHello,
+	leerIdDispositivo,
+	pedirTicketWs,
+	RETRY_RECHAZADO_MS,
+	vigilarLatido,
+} from "./socketComun";
 
 // Gracia antes de bloquear la UI ("Conectando con la Main…") al caerse el WS. Evita que caídas
 // transitorias parpadeen el bloqueo: si reconectamos y recibimos presencia (`main_status`/
@@ -54,19 +68,6 @@ async function loadAuth(): Promise<{ token: string; tenantId: string } | null> {
 		const tenantId = String(r?.tenantId ?? r?.tenant_id ?? "");
 		if (!token || !tenantId) return null;
 		return { token, tenantId };
-	} catch {
-		return null;
-	}
-}
-
-// SYNC-15: ticket efímero de un solo uso para no exponer el JWT en la URL del WebSocket. `null` si
-// el endpoint falla; en ese caso NO abrimos el WS (ya no existe respaldo `?token=`: el token nunca
-// viaja por la URL) y reintentamos más tarde con backoff.
-async function loadWsTicket(): Promise<string | null> {
-	try {
-		const r = (await cloudPost<any>("handy", "/v1/ws/ticket", {})) as any;
-		const t = String(r?.ticket ?? "");
-		return t || null;
 	} catch {
 		return null;
 	}
@@ -117,12 +118,26 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 		}, BLOCK_GRACE_MS);
 	};
 
-	const scheduleReconnect = () => {
+	const scheduleReconnect = (espera?: number) => {
 		if (cancelled || retryTimer) return;
 		retryTimer = setTimeout(() => {
 			retryTimer = null;
 			void open();
-		}, esperas.siguiente());
+		}, espera ?? esperas.siguiente());
+	};
+
+	/**
+	 * La nube ha dicho que no. No es un corte: es una licencia que hay que renovar o un
+	 * dispositivo que hay que volver a vincular, así que se cuenta tal cual (la pantalla deja de
+	 * decir "Conectando…") y se espacia mucho el reintento. El botón "Reintentar" rearranca el
+	 * socket entero, que es la forma manual de volver a preguntar.
+	 */
+	const marcarRechazo = (codigo: string, detalle: string) => {
+		console.warn("[ws handy] la nube rechaza este dispositivo:", codigo, detalle);
+		clearBlockTimer();
+		const motivo = codigo === "device_revoked" ? "dispositivo" : "licencia";
+		useMainPresence.getState().setRechazo(motivo);
+		useMainPresence.getState().setMainOnline(null);
 	};
 
 	// Reconexión inmediata al volver la app a primer plano / al volver la red, SOLO si no estamos
@@ -130,6 +145,9 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 	// tiempo y sin esto la Handy se quedaba clavada en "Conectando" hasta recargar.
 	const reconnectNowIfNeeded = () => {
 		if (cancelled || opening) return;
+		// Un rechazo de la nube no lo arregla volver a primer plano: sin esto, cada vez que el
+		// camarero desbloquea la tablet se pediría otro ticket con la misma licencia bloqueada.
+		if (useMainPresence.getState().rechazo !== null) return;
 		// Ya conectando: dejamos que termine.
 		if (ws && ws.readyState === WebSocket.CONNECTING) return;
 		// Ya sano (WS abierto y Main confirmada): no tocamos nada.
@@ -172,14 +190,20 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 			}
 
 			// SYNC-15: el WS se abre SOLO con un ticket efímero de un solo uso (nunca el token en
-			// la URL). Si no lo obtenemos, reintentamos más tarde.
-			const ticket = await loadWsTicket();
+			// la URL). Si no lo obtenemos, el motivo decide cuánto esperamos —y si esperar sirve
+			// de algo.
+			const res = await pedirTicketWs("handy");
 			if (cancelled) return;
-			if (!ticket) {
-				scheduleReconnect();
+			if (!res.ok) {
+				if (res.rechazado) {
+					marcarRechazo(res.codigo, res.detalle);
+					scheduleReconnect(RETRY_RECHAZADO_MS);
+				} else {
+					scheduleReconnect();
+				}
 				return;
 			}
-			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(ticket)}`);
+			const socket = new WebSocket(`${WS_URL}?ticket=${encodeURIComponent(res.ticket)}`);
 			ws = socket;
 
 			socket.onopen = () => {
@@ -232,6 +256,9 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 				if (msg.type === "main_status") {
 					esperas.reiniciar(); // SYNC-09: autenticados → vuelve a la espera corta
 					clearBlockTimer();
+					// Nos han dejado entrar: lo que sea que nos rechazaba está resuelto. El aviso se
+					// retira solo, como el resto de avisos del producto.
+					useMainPresence.getState().setRechazo(null);
 					useMainPresence.getState().setMainOnline(Boolean(msg.online));
 					// SYNC-18: entrar a mitad de un volcado tiene que bloquear igual; con
 					// `online` a secas no nos enteraríamos.
@@ -324,8 +351,10 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 				}
 				ws = null;
 			}
-			// Dejamos de ser Handy (o se desmonta): presencia desconocida.
+			// Dejamos de ser Handy (o se desmonta): presencia desconocida. El rechazo se va con
+			// ella, y por eso "Reintentar" —que rearranca el socket— vuelve a preguntar de verdad.
 			useMainPresence.getState().setMainOnline(null);
+			useMainPresence.getState().setRechazo(null);
 		},
 	};
 }

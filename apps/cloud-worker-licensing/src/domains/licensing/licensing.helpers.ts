@@ -67,14 +67,45 @@ export function toBool01(v: any, fallback = false): boolean {
 
 // ---------------- JWT de sesión (HS256) ----------------
 
+/** Vida del token de sesión de la Main. Nunca se llega a ella: `/status` lo renueva cada 6 h. */
+export const MAIN_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+
+/**
+ * Vida del token de la Handy, que se emite al emparejar (`pairFetchToken`) y se reemite en
+ * `/refresh`. Los dos sitios preguntan aquí: un TTL escrito dos veces se separa, y la mitad que
+ * se quedara corta caducaría tokens que la otra da por buenos.
+ *
+ * El suelo de una hora es contra un valor mal puesto en la configuración del worker: un TTL de
+ * segundos dejaría a las Handy renovando en bucle.
+ */
+export function handyTokenTtlSeconds(env: Env): number {
+	const raw = Number((env as any)?.HANDY_TOKEN_TTL_SECONDS ?? 0);
+	if (Number.isFinite(raw) && raw >= 3600) return Math.floor(raw);
+
+	return MAIN_TOKEN_TTL_SECONDS;
+}
+
+/**
+ * Emite un token de sesión. Es el ÚNICO sitio donde se firma uno: antes el del emparejamiento se
+ * construía a mano (su propio HS256, su propio base64url) y el de la licencia con `jose`, así que
+ * eran dos formas de decir lo mismo que podían separarse sin que nada fallara.
+ *
+ * `rol` va en el payload por fidelidad con el token que ya emitía el emparejamiento, pero **nadie
+ * lo lee**: el rol de un dispositivo sale siempre de su fila en `devices` (ver `tenant.ts`), porque
+ * un claim del token no puede otorgar privilegios que la BD central no reconozca.
+ */
 export async function signToken(
 	env: Env,
 	claims: { tenantId: string; deviceId: string; licHash: string },
+	opciones: { rol?: "tpv" | "handy"; ttlSegundos?: number } = {},
 ): Promise<string> {
-	return await new SignJWT(claims)
+	const ttl = opciones.ttlSegundos ?? MAIN_TOKEN_TTL_SECONDS;
+	const payload = opciones.rol ? { ...claims, role: opciones.rol } : { ...claims };
+
+	return await new SignJWT(payload)
 		.setProtectedHeader({ alg: "HS256", typ: "JWT" })
 		.setIssuedAt()
-		.setExpirationTime("30d")
+		.setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
 		.sign(secretKey(env.LICENSE_JWT_SECRET));
 }
 

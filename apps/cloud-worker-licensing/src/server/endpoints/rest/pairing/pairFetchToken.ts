@@ -1,6 +1,9 @@
 import type { Client } from "@libsql/client/web";
 
-import { bytesToB64 } from "../../../utils/base64";
+import {
+	handyTokenTtlSeconds,
+	signToken,
+} from "../../../../domains/licensing/licensing.helpers";
 import { json, serverError } from "../../../utils/response";
 import { avisarSolicitudALaMain } from "./pairClaim";
 import { comprobarFirmaDelReclamante, relojFueraDeMargen } from "./pairing.firma";
@@ -15,13 +18,6 @@ async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 
 function rowsAffected(result: any): number {
 	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
-}
-
-function getHandyTokenTtlSeconds(env: any): number {
-	const raw = Number(env?.HANDY_TOKEN_TTL_SECONDS ?? 0);
-	if (Number.isFinite(raw) && raw >= 3600) return Math.floor(raw);
-
-	return 30 * 24 * 60 * 60;
 }
 
 async function getTenantLicHash(
@@ -44,71 +40,6 @@ async function getTenantLicHash(
 	const v = row ? String(row.license_key_hash || "").trim() : "";
 
 	return v || null;
-}
-
-function toExactArrayBuffer(u8: Uint8Array): ArrayBuffer {
-	const out = new Uint8Array(u8.byteLength);
-	out.set(u8);
-	return out.buffer;
-}
-
-function b64ToB64url(b64: string): string {
-	return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function b64urlFromBytes(bytes: Uint8Array): string {
-	return b64ToB64url(bytesToB64(bytes));
-}
-
-function b64urlFromUtf8(s: string): string {
-	return b64urlFromBytes(new TextEncoder().encode(s));
-}
-
-async function hmacSha256Sign(
-	secret: string,
-	data: Uint8Array,
-): Promise<Uint8Array> {
-	const keyBytes = new TextEncoder().encode(secret);
-
-	const key = await crypto.subtle.importKey(
-		"raw",
-		toExactArrayBuffer(keyBytes),
-		{ name: "HMAC", hash: "SHA-256" },
-		false,
-		["sign"],
-	);
-
-	const sigBuf = await crypto.subtle.sign(
-		"HMAC",
-		key,
-		toExactArrayBuffer(data),
-	);
-
-	return new Uint8Array(sigBuf);
-}
-
-async function signJwtHs256(
-	payload: Record<string, any>,
-	secret: string,
-	expSeconds: number,
-): Promise<string> {
-	const nowSec = Math.floor(Date.now() / 1000);
-
-	const header = { alg: "HS256", typ: "JWT" };
-	const body = { ...payload, iat: nowSec, exp: nowSec + expSeconds };
-
-	const encHeader = b64urlFromUtf8(JSON.stringify(header));
-	const encPayload = b64urlFromUtf8(JSON.stringify(body));
-	const signingInput = `${encHeader}.${encPayload}`;
-
-	const sigBytes = await hmacSha256Sign(
-		secret,
-		new TextEncoder().encode(signingInput),
-	);
-
-	const encSig = b64urlFromBytes(sigBytes);
-
-	return `${signingInput}.${encSig}`;
 }
 
 export async function handlePairFetchToken(
@@ -219,17 +150,14 @@ export async function handlePairFetchToken(
 			return serverError(req, "missing_LICENSE_JWT_SECRET");
 		}
 
-		const ttlSeconds = getHandyTokenTtlSeconds(env);
+		const ttlSeconds = handyTokenTtlSeconds(env);
 
-		const token = await signJwtHs256(
-			{
-				tenantId,
-				deviceId,
-				licHash,
-				role: "handy",
-			},
-			jwtSecret,
-			ttlSeconds,
+		// El mismo emisor que usa `/v1/license/refresh` para reemitirlo cuando caduque: si cada uno
+		// firmara el suyo, un token renovado podría no ser el mismo token con otra fecha.
+		const token = await signToken(
+			env,
+			{ tenantId, deviceId, licHash },
+			{ rol: "handy", ttlSegundos: ttlSeconds },
 		);
 
 		const challengeUpdate = await dbCentral.execute({

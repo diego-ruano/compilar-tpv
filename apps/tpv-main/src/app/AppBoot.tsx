@@ -55,6 +55,7 @@ export default function AppBoot({ router }: { router: any }) {
 	// Presencia de la Main vista por el Handy: sin Main activa, el Handy se bloquea entero
 	// (login incluido). null = aún conectando/sin confirmar (fail-closed).
 	const mainOnline = useMainPresence((s) => s.mainOnline);
+	const rechazoHandy = useMainPresence((s) => s.rechazo);
 	// SYNC-18: la Main está subiendo su atraso. Cuenta como "no disponible todavía" para el Handy.
 	const mainVolcando = useMainPresence((s) => s.volcando);
 
@@ -121,6 +122,7 @@ export default function AppBoot({ router }: { router: any }) {
 		handyEmparejado: emparejamiento.estado.step === "paired",
 		mainOnline,
 		mainVolcando,
+		rechazoHandy,
 	});
 
 	// SYNC-17: en cuanto la licencia deja pasar (activación recién hecha, licencia renovada, o el
@@ -164,6 +166,7 @@ export default function AppBoot({ router }: { router: any }) {
 					<HandyEsperandoMain
 						conectando={p.conectando}
 						volcando={p.volcando}
+						rechazo={p.rechazo}
 						onReintentar={() => useMainPresence.getState().requestReconnect()}
 						onIrAVinculacion={emparejamiento.volverAVincular}
 					/>

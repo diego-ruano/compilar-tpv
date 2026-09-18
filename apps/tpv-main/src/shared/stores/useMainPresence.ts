@@ -16,12 +16,31 @@
 //   - null  → desconocido (WS aún conectando / sin confirmar). Fail-closed: se bloquea.
 //   - false → confirmado que NO hay Main. Se bloquea.
 //   - true  → hay Main activa. Se deja operar.
+//
+// Y aparte del bloqueo está el RECHAZO, que es otra cosa: no es que no haya Main, es que la nube no
+// deja entrar a ESTE Handy (le han revocado el acceso, o la licencia del negocio no está activa).
+// Sin distinguirlo, los dos casos se veían igual —«Conectando con la Main…», girando— y el único
+// que se arregla solo es el primero.
 
 import { create } from "zustand";
+
+/**
+ * Por qué la nube no deja entrar a este Handy. Son dos porque lo que hay que hacer es distinto:
+ * `licencia` se arregla en la Main (renovarla) y este Handy se desbloquea solo; `dispositivo` se
+ * arregla aquí, volviendo a vincularlo.
+ */
+export type MotivoRechazo = "dispositivo" | "licencia";
 
 type MainPresenceStore = {
 	mainOnline: boolean | null;
 	setMainOnline: (v: boolean | null) => void;
+	/**
+	 * La nube ha rechazado a este Handy (`null` = no ha pasado). Lo escribe `socketHandy` al
+	 * traducir el código del catálogo con el que el worker le niega el ticket, y se retira solo en
+	 * cuanto vuelve a dejarle entrar.
+	 */
+	rechazo: MotivoRechazo | null;
+	setRechazo: (v: MotivoRechazo | null) => void;
 	/**
 	 * SYNC-18: la Main está conectada pero subiendo el atraso que acumuló sin conexión, así que la
 	 * nube todavía no refleja su estado. El Handy se bloquea igual que sin Main —escribir sobre un
@@ -40,6 +59,8 @@ type MainPresenceStore = {
 export const useMainPresence = create<MainPresenceStore>((set) => ({
 	mainOnline: null,
 	setMainOnline: (v) => set({ mainOnline: v }),
+	rechazo: null,
+	setRechazo: (v) => set({ rechazo: v }),
 	volcando: false,
 	setVolcando: (v) => set({ volcando: v }),
 	retryTick: 0,

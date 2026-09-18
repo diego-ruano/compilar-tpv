@@ -44,16 +44,20 @@ import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { captureException } from "../observability/sentry";
 import { reconcileRestoredDatabase, type RecoveryPhase } from "./recoverySync";
-import { crearEsperas, firmarHello, leerIdDispositivo, vigilarLatido } from "./socketComun";
+import {
+	crearEsperas,
+	firmarHello,
+	leerIdDispositivo,
+	pedirTicketWs,
+	RETRY_RECHAZADO_MS,
+	vigilarLatido,
+} from "./socketComun";
 
 // SYNC-17: esperas largas para los dos casos en los que reintentar rápido no arregla nada.
 // `sin_identidad` no llega ni a tocar la red (son dos `invoke` locales), pero repetirlo cada 3 s
 // en un TPV recién instalado solo llena la consola; el camino rápido de verdad es el `pulso` que
 // dispara AppBoot en cuanto la licencia deja pasar.
 const RETRY_SIN_IDENTIDAD_MS = 60_000;
-// `rechazado` lo dice el worker (licencia caducada/anulada, dispositivo desplazado). Insistir es
-// pedirle lo mismo una y otra vez: se espacia y se espera al `pulso` de una licencia renovada.
-const RETRY_RECHAZADO_MS = 5 * 60_000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
 // SYNC-18: a partir de aquí no se sube de una en una, se VUELCA. El corte separa dos situaciones
@@ -105,35 +109,6 @@ async function loadLicense(): Promise<{ tenantId: string } | null> {
 		return { tenantId };
 	} catch {
 		return null;
-	}
-}
-
-/** Resultado de pedir el ticket: hay que distinguir "no hay red" de "el worker dice que no". */
-type ResultadoTicket =
-	| { ok: true; ticket: string }
-	| { ok: false; rechazado: boolean; detalle: string };
-
-// SYNC-17: códigos con los que el worker nos está diciendo que este dispositivo no puede
-// sincronizar. Reintentar en 3 s no cambia nada; lo que lo cambia es renovar la licencia (y eso
-// llega por el `pulso`). Ver el re-chequeo de licencia en `/v1/ws/ticket` (ws.routes.ts).
-const CODIGOS_RECHAZO = new Set(["license_expired", "license_not_found", "device_revoked"]);
-
-// SYNC-15: canjea el token por un ticket efímero de un solo uso para NO exponer el JWT en la URL
-// del WebSocket. Si falla NO abrimos el WS (ya no existe respaldo `?token=`: el token nunca viaja
-// por la URL) y reintentamos más tarde, con la espera que corresponda al motivo.
-async function loadWsTicket(mode: "tpv" | "handy"): Promise<ResultadoTicket> {
-	try {
-		const r = (await cloudPost<any>(mode, "/v1/ws/ticket", {})) as any;
-		const t = String(r?.ticket ?? "");
-		if (!t) return { ok: false, rechazado: false, detalle: "respuesta sin ticket" };
-		return { ok: true, ticket: t };
-	} catch (e) {
-		const err = toAppError(e);
-		return {
-			ok: false,
-			rechazado: CODIGOS_RECHAZO.has(err.code),
-			detalle: err.message || err.code,
-		};
 	}
 }
 
@@ -779,7 +754,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 
 		// SYNC-15: el WS se abre SOLO con un ticket efímero de un solo uso (nunca el token en la
 		// URL). Si no lo obtenemos, el motivo decide cuánto esperamos.
-		const res = await loadWsTicket("tpv");
+		const res = await pedirTicketWs("tpv");
 		if (cancelled) return;
 		if (!res.ok) {
 			if (res.rechazado) {

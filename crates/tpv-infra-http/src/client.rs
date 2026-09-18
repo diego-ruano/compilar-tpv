@@ -9,6 +9,12 @@
 //!   (la firma va sobre el path SIN query string, y sobre los bytes exactos del cuerpo).
 //! - Escrituras (POST/PUT/PATCH/DELETE): requieren la cabecera `X-Idempotency-Key`; se aplican
 //!   vía el Durable Object contra la Main conectada (si no hay Main, responde `main_offline`).
+//!
+//! REV-02 — el token caduca y aquí se renueva. El de la Handy dura 30 días y por este transporte
+//! pasa TODO lo que hace (no tiene BD local): si caduca, dejan de funcionar a la vez sus lecturas y
+//! sus escrituras. Renovarlo sólo en el ticket del WebSocket no bastaba, porque ese ticket se pide
+//! al reconectar: un equipo que cruza la caducidad con el socket abierto se quedaba con la pantalla
+//! conectada y todo lo demás fallando en silencio.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -97,8 +103,7 @@ impl CloudClient {
 
     /// GET firmado que deserializa la respuesta JSON en `T`.
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> AppResult<T> {
-        let rb = self.signed_req(Method::GET, path, b"")?;
-        Self::send(rb).await
+        self.enviar(Method::GET, path, b"", None, &[]).await
     }
 
     /// GET firmado con parámetros de query (reqwest los codifica; la firma va sobre el path).
@@ -107,8 +112,7 @@ impl CloudClient {
         path: &str,
         query: &[(&str, String)],
     ) -> AppResult<T> {
-        let rb = self.signed_req(Method::GET, path, b"")?.query(query);
-        Self::send(rb).await
+        self.enviar(Method::GET, path, b"", None, query).await
     }
 
     /// POST firmado (escritura): añade `X-Idempotency-Key`.
@@ -140,10 +144,14 @@ impl CloudClient {
 
     /// DELETE firmado (escritura sin cuerpo): añade `X-Idempotency-Key`.
     pub async fn delete_json<T: DeserializeOwned>(&self, path: &str) -> AppResult<T> {
-        let rb = self
-            .signed_req(Method::DELETE, path, b"")?
-            .header("x-idempotency-key", Uuid::new_v4().to_string());
-        Self::send(rb).await
+        self.enviar(
+            Method::DELETE,
+            path,
+            b"",
+            Some(&Uuid::new_v4().to_string()),
+            &[],
+        )
+        .await
     }
 
     async fn write_body<B, T>(&self, method: Method, path: &str, body: &B) -> AppResult<T>
@@ -157,31 +165,82 @@ impl CloudClient {
         let bytes = serde_json::to_vec(body)
             .map_err(|e| AppError::external(format!("bad_json_body: {e}")))?;
 
-        let rb = self
-            .signed_req(method, path, &bytes)?
-            .header("x-idempotency-key", Uuid::new_v4().to_string())
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(bytes);
-        Self::send(rb).await
+        self.enviar(method, path, &bytes, Some(&Uuid::new_v4().to_string()), &[])
+            .await
     }
 
-    async fn send<T: DeserializeOwned>(rb: RequestBuilder) -> AppResult<T> {
-        let resp = rb
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
+    /// Manda la petición y, si la nube contesta 401 porque nuestro token ha caducado, la repite
+    /// UNA vez con el token renovado (REV-02).
+    ///
+    /// Dos cosas hacen que repetir sea seguro incluso en una escritura:
+    ///
+    /// - **La clave de idempotencia es la misma** en los dos intentos. Generar otra convertiría un
+    ///   reintento en una operación nueva para el Durable Object, que es justo lo que esa clave
+    ///   existe para evitar.
+    /// - **Un 401 por token caducado lo pone la autenticación del worker**, antes de que ningún
+    ///   handler toque nada: no hay nada aplicado que repetir. Por eso la condición es la fecha del
+    ///   token y no «ha dado 401» — ver `device::token_caducado`.
+    async fn enviar<T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        cuerpo: &[u8],
+        idempotencia: Option<&str>,
+        query: &[(&str, String)],
+    ) -> AppResult<T> {
+        let (status, text) = self
+            .una_vez(method.clone(), path, cuerpo, idempotencia, query)
+            .await?;
 
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
+        let (status, text) = if status == 401
+            && self.pairing.renovar_si_el_token_ha_caducado().await
+        {
+            self.una_vez(method, path, cuerpo, idempotencia, query)
+                .await?
+        } else {
+            (status, text)
+        };
 
-        if !status.is_success() {
+        if !(200..300).contains(&status) {
             // ARCH-05: el código lo resuelve `from_api_body`, que prefiere el `code` que
             // manda el worker (él tiene el status y el contexto de la ruta) y sólo traduce el
             // string de negocio si no viene.
-            return Err(AppError::from_api_body(status.as_u16(), &text));
+            return Err(AppError::from_api_body(status, &text));
         }
 
         serde_json::from_str::<T>(&text)
             .map_err(|e| AppError::external(format!("bad_json: {e} | body={text}")))
+    }
+
+    /// Un intento: firma con el token que haya AHORA en el almacén de secretos y devuelve el par
+    /// crudo `(status, cuerpo)`. Se firma dentro y no fuera porque la firma cubre el token, así que
+    /// el segundo intento tiene que firmarse otra vez —con el nuevo— para valer de algo.
+    async fn una_vez(
+        &self,
+        method: Method,
+        path: &str,
+        cuerpo: &[u8],
+        idempotencia: Option<&str>,
+        query: &[(&str, String)],
+    ) -> AppResult<(u16, String)> {
+        let mut rb = self.signed_req(method, path, cuerpo)?;
+
+        if !query.is_empty() {
+            rb = rb.query(query);
+        }
+        if let Some(clave) = idempotencia {
+            rb = rb.header("x-idempotency-key", clave);
+        }
+        if !cuerpo.is_empty() {
+            rb = rb
+                .header(reqwest::header::CONTENT_TYPE, "application/json")
+                .body(cuerpo.to_vec());
+        }
+
+        let resp = rb.send().await.map_err(AppError::sin_conexion)?;
+        let status = resp.status().as_u16();
+        let text = resp.text().await.unwrap_or_default();
+
+        Ok((status, text))
     }
 }

@@ -34,6 +34,7 @@ const entrada = (e: Partial<EntradaArranque>): EntradaArranque => ({
 	handyEmparejado: false,
 	mainOnline: null,
 	mainVolcando: false,
+	rechazoHandy: null,
 	...e,
 });
 
@@ -46,17 +47,27 @@ describe("qué pantalla enseña el arranque", () => {
 		[
 			"un Handy que aún no sabe de la Main espera, conectando",
 			{ modo: "handy", handyEmparejado: true, mainOnline: null },
-			{ tipo: "handy_esperando_main", conectando: true, volcando: false },
+			{ tipo: "handy_esperando_main", conectando: true, volcando: false, rechazo: null },
 		],
 		[
 			"un Handy sin Main espera",
 			{ modo: "handy", handyEmparejado: true, mainOnline: false },
-			{ tipo: "handy_esperando_main", conectando: false, volcando: false },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: false, rechazo: null },
 		],
 		[
 			"un Handy con la Main volcando su atraso espera (SYNC-18)",
 			{ modo: "handy", handyEmparejado: true, mainOnline: true, mainVolcando: true },
-			{ tipo: "handy_esperando_main", conectando: false, volcando: true },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: true, rechazo: null },
+		],
+		[
+			"un Handy al que la nube ha revocado el acceso no está conectando: se le dice",
+			{ modo: "handy", handyEmparejado: true, mainOnline: null, rechazoHandy: "dispositivo" as const },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: false, rechazo: "dispositivo" },
+		],
+		[
+			"y con la licencia del negocio caída, tampoco",
+			{ modo: "handy", handyEmparejado: true, mainOnline: null, rechazoHandy: "licencia" as const },
+			{ tipo: "handy_esperando_main", conectando: false, volcando: false, rechazo: "licencia" },
 		],
 		["un Handy con Main trabaja", { modo: "handy", handyEmparejado: true, mainOnline: true }, { tipo: "handy_app" }],
 		["una Main mientras se comprueba la licencia no enseña nada", { gate: null }, { tipo: "cargando" }],
