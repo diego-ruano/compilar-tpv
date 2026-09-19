@@ -148,8 +148,9 @@ pub(crate) async fn asegurar_base_para_recuperar(
     Ok(())
 }
 
-/// Sustituye la BD completa por una copia local ya validada. Mientras se cierra el `Db`, el mutex
-/// de `AppState` permanece tomado: ningún comando ni job puede adquirir una conexión nueva.
+/// Sustituye la BD completa por una copia local ya validada. El mutex de `AppState` permanece
+/// tomado desde que se comprueba que se puede reemplazar hasta que la base nueva está abierta:
+/// ningún comando ni job puede adquirir una conexión nueva en ese intervalo (REV-18).
 #[tauri::command]
 pub async fn recovery_restore_backup(
     app: AppHandle,
@@ -162,15 +163,25 @@ pub async fn recovery_restore_backup(
         .find(|b| b.id == backup_id)
         .ok_or_else(|| AppError::not_found("La copia local seleccionada ya no existe"))?;
 
-    // Antes de preparar nada: reemplazar el fichero se lleva por delante el outbox actual. Es la
-    // misma guardia que el volcado desde la nube (ver `asegurar_reemplazo_seguro`).
-    if let Some(actual) = state.db.lock().await.as_ref().cloned() {
-        tpv_infra_sqlite::recovery::asegurar_reemplazo_seguro(&actual).await?;
+    // REV-18: el cerrojo se toma UNA vez, y la comprobación va dentro.
+    //
+    // Reemplazar el fichero se lleva por delante el outbox actual, así que antes se comprueba que
+    // no haya nada sin subir (`asegurar_reemplazo_seguro`, la misma guardia que el volcado desde la
+    // nube). Pero se comprobaba soltando el cerrojo justo después, y entre el permiso y el
+    // reemplazo cabía una escritura: exactamente la ventana que `bootstrap_restaurar` evita
+    // haciendo la comprobación DENTRO de su transacción, y que CLAUDE.md dice no dejar abierta.
+    //
+    // El precio es que la copia del fichero se prepara con el cerrojo tomado, o sea que ningún
+    // comando puede coger una conexión mientras dura. Es aceptable justo aquí: a esta pantalla sólo
+    // se llega con el equipo sin poder operar —reconciliación pendiente, cero usuarios o base
+    // ilegible—, y el intercambio de más abajo ya lo retiene hasta diez segundos.
+    let mut guard = state.db.lock().await;
+
+    if let Some(actual) = guard.as_ref() {
+        tpv_infra_sqlite::recovery::asegurar_reemplazo_seguro(actual).await?;
     }
 
     let prepared = tpv_infra_sqlite::recovery::prepare_restore(&dir, &backup_id).await?;
-
-    let mut guard = state.db.lock().await;
 
     // Puede no haber `Db`: si la base local estaba corrupta, el arranque no pudo abrirla y siguió
     // sin ella para poder llegar hasta aquí. Es justo el caso que esta pantalla existe para
