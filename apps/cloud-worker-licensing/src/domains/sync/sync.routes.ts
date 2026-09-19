@@ -512,6 +512,78 @@ syncRoutes.post("/verificar", async (c) => {
  * dos lados, así que da igual quién lo lea; lo que no da igual es que lo lean **dos sitios
  * distintos**, porque entonces pueden discrepar.
  */
+/**
+ * Tope de filas de UNA respuesta de `/verificar-claves`, y también el de una tabla suelta.
+ *
+ * Una lista de claves crece con la tabla, y sin techo una base con años de histórico devolvería
+ * decenas de megas por una petición de diagnóstico.
+ */
+export const TOPE_CLAVES = 200_000;
+
+/**
+ * Lee las claves de cada tabla **gastando un presupuesto común** (REV-21).
+ *
+ * El tope por tabla no acotaba nada por sí solo: la petición admite 60 tablas y se resolvían
+ * **todas a la vez** en un `batch`, así que el peor caso eran 60 × 200.000 listas de claves vivas
+ * en un isolate de 128 MB. No hacía falta un atacante: un negocio con años de histórico y varias
+ * tablas descuadradas lo alcanza solo, y justo el día que la verificación hace falta — que es el
+ * único día en que este endpoint se pide.
+ *
+ * Por eso se recorren de una en una y el presupuesto se va gastando: las primeras tablas salen
+ * enteras y las que ya no caben se marcan `truncada`, que es lo que la Main sabe leer («ésta no la
+ * puedo comparar, la salto», `sync.rs::contrastar_con_la_nube`). Se pierde una comparación y se
+ * vuelve a pedir; lo que no se pierde es el isolate, que se las llevaría todas por delante.
+ *
+ * El tope entra por parámetro para poder probar el reparto sin sembrar doscientas mil filas.
+ */
+export async function leerClaves(
+	db: { execute: (q: { sql: string; args: any[] }) => Promise<any> },
+	tablas: { nombre: string; claves: string[] }[],
+	tope: number,
+): Promise<{
+	tablas: { nombre: string; columnas: string[]; claves: unknown[][]; truncada: boolean }[];
+}> {
+	let presupuesto = tope;
+	const salida: {
+		nombre: string;
+		columnas: string[];
+		claves: unknown[][];
+		truncada: boolean;
+	}[] = [];
+
+	for (const t of tablas) {
+		const cabe = Math.min(tope, presupuesto);
+		// Sin presupuesto no se consulta siquiera: traer filas para tirarlas es pagar la memoria
+		// igual, que es justo lo que se viene a evitar.
+		if (cabe <= 0) {
+			salida.push({ nombre: t.nombre, columnas: t.claves, claves: [], truncada: true });
+			continue;
+		}
+
+		const r = await db.execute({
+			sql: `SELECT ${t.claves.map((k) => `"${k}"`).join(", ")} FROM "${t.nombre}" LIMIT ${cabe + 1};`,
+			args: [],
+		});
+		const filas = r.rows ?? [];
+
+		// Media lista se leería como «te sobran 400.000 filas», así que o va entera o no va.
+		if (filas.length > cabe) {
+			salida.push({ nombre: t.nombre, columnas: t.claves, claves: [], truncada: true });
+			continue;
+		}
+
+		presupuesto -= filas.length;
+		salida.push({
+			nombre: t.nombre,
+			columnas: t.claves,
+			claves: filas.map((f: any) => t.claves.map((k) => f[k] ?? null)),
+			truncada: false,
+		});
+	}
+
+	return { tablas: salida };
+}
+
 syncRoutes.post("/verificar-claves", async (c) => {
 	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
 	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
@@ -537,35 +609,7 @@ syncRoutes.post("/verificar-claves", async (c) => {
 	);
 	if (!validas.length) return c.json({ tablas: [] });
 
-	const resultado = await tenantQuery(c, async (db) => {
-		// Tope por tabla. Una lista de claves crece con la tabla, y sin techo una base con años de
-		// histórico devolvería decenas de megas por una petición de diagnóstico. Si no cabe se dice
-		// (`truncada`) en vez de mandar media lista, que se leería como "te sobran 400.000 filas".
-		const TOPE = 200_000;
-
-		const rs = await db.batch(
-			validas.map((t) => ({
-				sql: `SELECT ${t.claves.map((k) => `"${k}"`).join(", ")} FROM "${t.nombre}" LIMIT ${TOPE + 1};`,
-				args: [],
-			})),
-			"read",
-		);
-
-		return {
-			tablas: validas.map((t, i) => {
-				const filas = rs[i]?.rows ?? [];
-				const truncada = filas.length > TOPE;
-				return {
-					nombre: t.nombre,
-					columnas: t.claves,
-					claves: truncada
-						? []
-						: filas.map((r: any) => t.claves.map((k) => r[k] ?? null)),
-					truncada,
-				};
-			}),
-		};
-	});
+	const resultado = await tenantQuery(c, (db) => leerClaves(db, validas, TOPE_CLAVES));
 
 	return c.json(resultado);
 });

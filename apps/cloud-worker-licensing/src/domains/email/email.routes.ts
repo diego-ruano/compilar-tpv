@@ -8,10 +8,18 @@
 // El remitente (`from`) sale de las vars EMAIL_FROM_ADDRESS/EMAIL_FROM_NAME y su dominio debe estar
 // dado de alta en Email Sending (SPF+DKIM). No se usan claves de API: el binding autentica solo.
 //
-// Anti-abuso (FABLE-C, 2026-08-15): el destinatario debe ser el `Email` de un proveedor dado de
-// alta en el tenant — el dispositivo no puede escribir a una dirección arbitraria con nuestro
-// dominio. **No hay límite por número de correos**: es decisión de producto; en su lugar cada
-// envío deja traza en `email_sends` (control-plane) para poder revisarlo a posteriori.
+// Anti-abuso, en dos ejes, y hacen falta los dos:
+//
+//   · A QUIÉN (FABLE-C, 2026-08-15): el destinatario debe ser el `Email` de un proveedor dado de
+//     alta en el tenant — el dispositivo no puede escribir a una dirección arbitraria con nuestro
+//     dominio.
+//   · CUÁNTO (REV-14): un tope diario por negocio. La decisión de 2026-08-15 fue «acotar a quién,
+//     no cuánto», y eso sólo se sostiene si «a quién» está de verdad acotado — y no lo estaba: dar
+//     de alta un proveedor es una escritura de negocio corriente, así que con un token robado se
+//     creaba un proveedor con cualquier correo y se enviaba, sin límite y con el SPF/DKIM de
+//     nuestro dominio detrás. El filtro no acotaba el destinatario: acotaba el número de pasos.
+//
+// Cada envío deja traza en `email_sends` (control-plane), que es de donde sale el recuento.
 
 import { Hono } from "hono";
 import { z } from "zod";
@@ -19,7 +27,7 @@ import { z } from "zod";
 import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
-import { getDb } from "../../server/db";
+import { getDb, type Sql } from "../../server/db";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -59,6 +67,10 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 	const { email_destino, nombre_proveedor, notas, lineas } = parsed.data;
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
+
+	if (await pasaDelTope(getDb(c.env), tenantId)) {
+		return c.json({ error: "email_limite_diario" }, 429);
+	}
 
 	// FABLE-C — el destinatario NO lo elige libremente el dispositivo: tiene que ser el correo de un
 	// proveedor dado de alta en ESTE tenant. Sin esto, un token robado podía usar nuestro dominio
@@ -107,12 +119,43 @@ emailRoutes.post("/enviar-pedido", async (c) => {
 });
 
 /**
- * Deja traza del envío en el control-plane (tabla `email_sends`, ver
- * `docs/sql/control-plane/esquema-actual.sql`).
+ * REV-14 · El tope diario por negocio.
  *
- * **No hay límite de envíos por decisión de producto** (2026-08-15): esto no corta nada, solo
- * permite mirar a posteriori quién envía y cuánto. Si algún día hiciera falta un tope, el COUNT
- * sobre `(tenant_id, sent_at_ms)` ya está indexado y sale de aquí mismo.
+ * Cien correos al día es un número que ningún bar alcanza pidiendo a sus proveedores y que sí
+ * estorba a quien quiera usar nuestro dominio de relé. Está aquí arriba y no escondido en la
+ * consulta porque es el tipo de número que se ajusta mirando `email_sends`, no razonando.
+ */
+export const TOPE_DIARIO = 100;
+export const VENTANA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * ¿Este negocio ya ha gastado su cupo de hoy?
+ *
+ * Dos decisiones que importan:
+ *   · **Sólo cuentan los ENTREGADOS** (`ok = 1`). Un proveedor con el buzón lleno, o una caída de
+ *     nuestro proveedor de correo, no pueden gastarle el cupo a un bar que no ha mandado nada.
+ *     Y lo que se protege es la reputación del dominio, que sólo sufre con lo que sale.
+ *   · **Si no se puede contar, se deja pasar.** Es la misma regla que el registro de abajo: Turso
+ *     caído no puede impedir que un bar mande su pedido. Un tope que convierte una caída nuestra
+ *     en «no puedes trabajar» cuesta más de lo que evita.
+ */
+export async function pasaDelTope(db: Sql, tenantId: string): Promise<boolean> {
+	try {
+		const r = await db.execute({
+			sql: `SELECT COUNT(*) AS n FROM email_sends
+			      WHERE tenant_id = ?1 AND ok = 1 AND sent_at_ms > ?2`,
+			args: [tenantId, Date.now() - VENTANA_MS],
+		});
+		return Number((r.rows?.[0] as any)?.n ?? 0) >= TOPE_DIARIO;
+	} catch (e: any) {
+		console.error("[email] no se pudo contar el cupo diario:", String(e?.message || e));
+		return false;
+	}
+}
+
+/**
+ * Deja traza del envío en el control-plane (tabla `email_sends`, ver
+ * `docs/sql/control-plane/esquema-actual.sql`), y es además de donde sale el recuento del tope.
  *
  * Es **best-effort a propósito**: si la tabla no existe todavía o Turso falla, se registra en el
  * log del worker y ya está. Un fallo del registro no puede impedir que un bar mande su pedido.

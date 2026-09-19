@@ -205,6 +205,8 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 		"La operación anterior todavía se está guardando. Espera un momento y vuelve a intentarlo.",
 	email_destino_no_autorizado: "Sólo se pueden mandar pedidos al correo de un proveedor dado de alta.",
 	email_send_failed: "No se ha podido enviar el correo. Inténtalo más tarde.",
+	email_limite_diario:
+		"Se han mandado muchos pedidos por correo hoy desde este negocio. Vuelve a intentarlo mañana.",
 
 	// Licencia, base de la nube y códigos por correo
 	invalid_license_key_format: "La clave de licencia no tiene el formato correcto. Revísala.",

@@ -173,6 +173,36 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   tablas en su SQLite temporal. Una tabla o columna nueva, por tanto, **se crea en Turso antes de
   desplegar** el worker que la usa. No confundir con la base de cada tenant, que sí se migra desde
   el código (§3, `packages/database/migrations`).
+- **El correo se acota por destinatario Y por volumen (REV-14).** El filtro «sólo al `Email` de un
+  proveedor dado de alta» (FABLE-C) no acotaba el destinatario: dar de alta un proveedor es una
+  escritura de negocio corriente, así que con un token robado se creaba uno con cualquier correo y
+  se enviaba, sin límite y con el SPF/DKIM de nuestro dominio detrás. Acotaba el número de pasos.
+  Ahora hay además un **tope diario por negocio** (`TOPE_DIARIO`, ventana móvil de 24 h, contado
+  sobre `email_sends`). Dos reglas que no se pueden tocar sin deshacerlo: **sólo cuentan los
+  entregados** (`ok = 1`) —un buzón lleno o una caída de nuestro proveedor de correo no pueden
+  gastarle el cupo a un bar que no ha mandado nada, y lo que se protege es la reputación del
+  dominio, que sólo sufre con lo que sale—; y **si no se puede contar, se deja pasar**, igual que
+  el registro del envío: un tope que convierte una caída de Turso en «no puedes trabajar» cuesta
+  más de lo que evita.
+
+- **Borrar una imagen la quita también del caché del edge (REV-20).** El GET público la guarda con
+  `max-age=31536000, immutable`, así que borrarla de R2 no la quitaba de la calle: la copia
+  cacheada seguía sirviéndose. ⚠️ **La purga es del colo que atiende la petición, no de toda la
+  red**: la Cache API de Workers es por centro de datos y barrer los demás pide el API de purga de
+  Cloudflare, o sea un token nuevo. Cubre el caso real —el bar borra una foto y sus dispositivos,
+  que salen por el mismo colo, dejan de verla— y no cubre a quien guardó la URL y la abre desde
+  otro país. Nota para no perder el tiempo: la Handy **no** lee por esta ruta, lee del `r2.dev` del
+  bucket (`shared/lib/imageUrl.ts`), así que esta caché sólo afecta a quien use la URL del worker.
+
+- **Un tope por elemento no acota una respuesta (REV-21).** `/verificar-claves` limitaba a 200.000
+  claves **por tabla** y aceptaba 60 tablas resueltas **a la vez** en un `batch`: 60 × 200.000
+  listas vivas en un isolate de 128 MB. No hacía falta un atacante —un negocio con años de
+  histórico y varias tablas descuadradas lo alcanza solo, y justo el día que la verificación hace
+  falta—. Ahora `leerClaves` recorre las tablas de una en una gastando un **presupuesto común**: lo
+  que ya no cabe se marca `truncada`, que es lo que la Main sabe leer (se salta esa tabla y se
+  vuelve a pedir). La regla general, que es lo que hay que recordar al añadir cualquier endpoint
+  que devuelva listas: **el techo va en la respuesta, no en cada pieza**.
+
 - **Una compra de Stripe dice lo que es; el worker no lo adivina (REV-13).** Renovar y comprar una
   segunda licencia entran por el mismo webhook, y la única señal que había era el cliente de
   Stripe: si ya tenía una licencia viva, la compra nueva **la extendía**. O sea que comprar con los

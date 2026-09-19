@@ -15,7 +15,8 @@
 //                           El nombre de archivo es un UUID no adivinable (no enumerable).
 //   - PUT    /*           → FIRMADO (JWT + device-proof). Sube bytes; el tenant sale del
 //                           token (no del path). Sólo la app (Main/Handy emparejados) escribe.
-//   - DELETE /*           → FIRMADO. Borra el objeto (reemplazo/limpieza).
+//   - DELETE /*           → FIRMADO. Borra el objeto (reemplazo/limpieza) y purga su copia
+//                           cacheada en el edge (REV-20; ver la nota del handler sobre el alcance).
 
 import { Hono } from "hono";
 
@@ -145,12 +146,38 @@ imagesRoutes.post("/download", tenantAuth, async (c) => {
 	return new Response(obj.body, { headers });
 });
 
+/**
+ * URL pública de una imagen: la clave con la que el GET de arriba la guardó en el caché del edge.
+ * Se construye sobre el origen de ESTA petición porque es el mismo worker el que sirve las dos.
+ */
+function urlPublica(reqUrl: string, tenantId: string, relPath: string): string {
+	const u = new URL(reqUrl);
+	u.pathname = `/v1/images/${tenantId}/${relPath}`;
+	u.search = "";
+	return u.toString();
+}
+
 imagesRoutes.delete("/*", tenantAuth, async (c) => {
 	const relPath = relPathFromUrl(c.req.url);
 	if (!REL_PATH_RE.test(relPath)) {
 		return c.json({ error: "bad_image_path" }, 400);
 	}
-	const key = `${c.get("tenantId")}/${relPath}`;
+	const tenantId = c.get("tenantId");
+	const key = `${tenantId}/${relPath}`;
 	await c.env.IMAGES.delete(key);
+
+	// REV-20: borrarla de R2 no la quitaba de la calle. El GET público la guarda en el caché del
+	// edge con `max-age=31536000, immutable`, así que la copia cacheada seguía sirviéndose un año
+	// después de borrar el original — para siempre, a efectos prácticos. Es poco enumerable (el
+	// nombre es un UUID) pero «borrar» tiene que significar que deja de ser pública.
+	//
+	// ⚠️ **Esto purga el colo que atiende esta petición, no toda la red.** La Cache API de Workers
+	// es por centro de datos y no hay forma de barrer los demás sin el API de purga de Cloudflare,
+	// que pide un token nuevo. Cubre el caso real —el bar borra una foto y sus propios
+	// dispositivos, que salen por el mismo colo, dejan de verla— y no cubre a quien guardó la URL
+	// y la abre desde otro país. Si algún día hace falta que cubra eso, la pieza que falta es ese
+	// token, no este código.
+	await caches.default.delete(new Request(urlPublica(c.req.url, tenantId, relPath)));
+
 	return c.json({ ok: true });
 });
