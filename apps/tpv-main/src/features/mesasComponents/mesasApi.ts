@@ -442,7 +442,6 @@ export async function mesasCobrarDetalles(params: {
     metodo: "Tarjeta" | "Efectivo";
     tipo: "TOTAL" | "FRACCIONADO";
     detalleIds: string[];
-    idUsuario: string | null;
     /**
      * FISCAL-02: datos del cliente cuando pide **factura completa** (`F1`), o cuando el importe pasa
      * del límite de la simplificada y entonces no hay alternativa.
@@ -462,9 +461,6 @@ export async function mesasCobrarDetalles(params: {
         .map((x) => toId(x))
         .filter((s) => s.length > 0);
 
-    const idUsuario =
-        params.idUsuario != null ? toId(params.idUsuario) || null : null;
-
     if (!idComanda || !detalleIds.length) return "";
 
     return await invokeClient<string>("cobrar_detalles", {
@@ -473,7 +469,7 @@ export async function mesasCobrarDetalles(params: {
             metodo: params.metodo,
             tipo: params.tipo,
             detalle_ids: detalleIds,
-            id_usuario: idUsuario,
+            // REV-17: quién cobra lo pone el backend desde la sesión (SEC-01).
             destinatario: params.destinatario ?? null,
         },
     });

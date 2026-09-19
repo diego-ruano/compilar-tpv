@@ -1681,6 +1681,26 @@ que cierra también el modelo de amenaza de LIC-04.
   quién abrió el cajón, quién anuló un cobro): sale de la sesión, y por eso `ConfirmarCierreInput`,
   `CierreIdInput`, `AbrirCajonArgs` y `AnularPagoInput` ya no llevan `id_usuario`. Una auditoría firmada con el nombre que le pasen da
   confianza sin merecerla, que es peor que no tener ninguna.
+  - **Y quién COBRA es de esa misma lista (REV-17).** Era el que faltaba, y el que más importa: el
+    cobrador que se guarda con el pago es el rastro con el que se investiga un descuadre del cajón,
+    así que aceptarlo de la entrada deja firmar un cobro en efectivo con el nombre de otro — la
+    sisa que ese rastro existe para poder ver. `VrCobrarFraccionadoInput`,
+    `MesasCobrarVentaRapidaInput` y `MesasCobrarDetallesInput` ya no llevan cobrador, y los tres
+    comandos lo toman de la sesión. Reglas:
+    - **Piden sesión, no rol.** Cobrar lo hace cualquiera a mitad de servicio, como abrir el cajón:
+      exigir Administrador aquí convierte el TPV en inservible en hora punta, que es justo lo que la
+      regla de «la lista corta a propósito» previene. Lo que hace falta es estar identificado, y no
+      hay camino que se salte eso: a las dos pantallas de venta sólo se llega pasando el login.
+    - **Un cobro reintentado sigue siendo del mismo.** La cola de intents de venta rápida vive en
+      `localStorage` bajo una clave que ya lleva dentro el usuario y el trabajador, así que nadie
+      drena los de otro y un reintento tras un cierre inesperado no cambia de nombre.
+    - **Un administrador que cobra queda registrado como él mismo.** Antes la pantalla de mesas
+      mandaba `null` cuando cobraba un administrador (y la de barra, no: mandaba su id), así que el
+      mismo cobro se anotaba de dos formas según por dónde entrara. Ahora es el de la sesión en los
+      dos sitios. Un cobro sin cobrador es un hueco justo donde se investiga un descuadre.
+    - **Lo vigila `tests_exenciones_del_gate::todo_comando_que_cobra_saca_el_cobrador_de_la_sesion`**,
+      que lee el fuente: el fallo a impedir no es que un cobro devuelva mal, es que el próximo camino
+      de cobro nazca sin esa línea — que es como nacieron los tres que había.
 - **La lista de comandos gateados es corta a propósito.** Gatear "añadir una línea a la comanda"
   convierte el TPV en inservible en hora punta, y un gate que estorba acaba en que todo el mundo
   conoce el PIN del encargado — que es justo el permiso que se quería quitar. Antes de añadir uno,

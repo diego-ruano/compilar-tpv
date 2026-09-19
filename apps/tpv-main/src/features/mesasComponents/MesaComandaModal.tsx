@@ -902,7 +902,6 @@ export default function MesaComandaModal({
                         ? "TOTAL"
                         : "FRACCIONADO",
                 detalleIds: ids,
-                idUsuario: operador,
                 destinatario: destinatario ?? null,
             });
 

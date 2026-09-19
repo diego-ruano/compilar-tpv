@@ -130,9 +130,18 @@ pub async fn cobrar_venta_rapida(
     state: State<'_, AppState>,
     args: MesasCobrarVentaRapidaInput,
 ) -> Result<String, AppErrorDto> {
+    // REV-17: quién cobra sale de aquí y no del input. Sin rol: cobrar lo hace cualquiera a mitad
+    // de servicio, como abrir el cajón — lo que hace falta es estar identificado.
+    let sesion = state.sesion().await?;
     let repo = state.mesas_repo().await?;
     // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
-    Ok(uc::cobrar_venta_rapida(repo.as_ref(), args).await?)
+    Ok(uc::cobrar_venta_rapida(
+        repo.as_ref(),
+        &sesion.id_usuario,
+        sesion.id_trabajador.as_deref(),
+        args,
+    )
+    .await?)
 }
 
 #[tauri::command]
@@ -235,9 +244,11 @@ pub async fn cobrar_detalles(
     state: State<'_, AppState>,
     args: MesasCobrarDetallesInput,
 ) -> Result<String, AppErrorDto> {
+    // REV-17: quién cobra sale de la sesión. Ver `cobrar_venta_rapida`.
+    let sesion = state.sesion().await?;
     let repo = state.mesas_repo().await?;
     // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
-    Ok(uc::cobrar_detalles(repo.as_ref(), args).await?)
+    Ok(uc::cobrar_detalles(repo.as_ref(), &sesion.id_usuario, args).await?)
 }
 
 /* ===== COCINA ===== */

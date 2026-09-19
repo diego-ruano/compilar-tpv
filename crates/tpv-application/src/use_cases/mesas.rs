@@ -153,8 +153,11 @@ pub async fn get_or_create_comanda_barra(
         .await
 }
 
+/// REV-17: el cobrador llega **aparte** del input, porque sale de la sesión y no de la pantalla.
 pub async fn cobrar_venta_rapida(
     repo: &dyn MesasRepository,
+    id_usuario: &str,
+    id_trabajador: Option<&str>,
     input: MesasCobrarVentaRapidaInput,
 ) -> AppResult<String> {
     let items: Vec<(String, f64)> = input
@@ -168,8 +171,8 @@ pub async fn cobrar_venta_rapida(
     let data = CobroVentaRapida {
         metodo: normalize_metodo(&input.metodo),
         items,
-        id_usuario_cobrador: opt_id(input.id_usuario_cobrador),
-        id_trabajador_cobrador: opt_id(input.id_trabajador_cobrador),
+        id_usuario_cobrador: opt_id(Some(id_usuario.to_string())),
+        id_trabajador_cobrador: opt_id(id_trabajador.map(str::to_string)),
         id_comanda: opt_id(input.id_comanda),
         destinatario: destinatario_de(input.destinatario),
     };
@@ -263,8 +266,14 @@ pub async fn update_detalle_nota(
         .await
 }
 
+/// REV-17: quién cobra llega **aparte** del input, porque sale de la sesión.
+///
+/// Sigue siendo un solo valor porque `CobroDetalles` sólo tiene uno: el `ID_Trabajador_Cobrador`
+/// que se guarda con el pago lo resuelve la capa de datos mirando `Trabajadores.ID_Usuario`, que es
+/// exactamente lo que hacía antes con lo que mandaba la pantalla.
 pub async fn cobrar_detalles(
     repo: &dyn MesasRepository,
+    id_usuario: &str,
     input: MesasCobrarDetallesInput,
 ) -> AppResult<String> {
     let mut ids: Vec<String> = input
@@ -289,7 +298,7 @@ pub async fn cobrar_detalles(
         metodo,
         tipo,
         detalle_ids: ids,
-        id_usuario: opt_id(input.id_usuario),
+        id_usuario: opt_id(Some(id_usuario.to_string())),
         destinatario: destinatario_de(input.destinatario),
     };
     repo.cobrar_detalles(data).await

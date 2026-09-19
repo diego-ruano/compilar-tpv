@@ -766,7 +766,17 @@ export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: strin
 
 export type MesasCerrarComandaInput = { id_comanda: string, total: number, };
 
-export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tipo: string, detalle_ids: Array<string>, id_usuario?: string, 
+/**
+ * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+ *
+ * Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+ * justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+ * investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+ * IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+ * ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+ * pasando el login.
+ */
+export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tipo: string, detalle_ids: Array<string>, 
 /**
  * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
  *
@@ -776,7 +786,17 @@ export type MesasCobrarDetallesInput = { id_comanda: string, metodo: string, tip
  */
 destinatario?: DestinatarioInput, };
 
-export type MesasCobrarVentaRapidaInput = { metodo: string, items: Array<CobroVRItem>, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, 
+/**
+ * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+ *
+ * Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+ * justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+ * investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+ * IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+ * ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+ * pasando el login.
+ */
+export type MesasCobrarVentaRapidaInput = { metodo: string, items: Array<CobroVRItem>, 
 /**
  * Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
  */
@@ -1447,6 +1467,16 @@ hasta_seq: number, };
 
 export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
 
+/**
+ * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+ *
+ * Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+ * justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+ * investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+ * IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+ * ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+ * pasando el login.
+ */
 export type VrCobrarFraccionadoInput = { 
 /**
  * El id del cobro (`Pagos.ID_Pago`), un UUID que genera la pantalla al encolarlo.
@@ -1455,7 +1485,7 @@ export type VrCobrarFraccionadoInput = {
  * quitarlo de la cola, al volver se reintenta con el mismo id y se devuelve el número del cobro
  * que ya existe, en vez de rechazarlo por no quedar líneas pendientes.
  */
-id_pago: string, id_comanda: string, metodo: string, importe_total: number, id_usuario_cobrador?: string, id_trabajador_cobrador?: string, detalles: Array<string>, 
+id_pago: string, id_comanda: string, metodo: string, importe_total: number, detalles: Array<string>, 
 /**
  * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
  *

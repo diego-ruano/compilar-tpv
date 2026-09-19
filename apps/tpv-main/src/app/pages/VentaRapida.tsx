@@ -82,8 +82,6 @@ type PendingCobroIntent = {
   ticketItemIds: string[];
   detalleIds: string[];
   importeTotal: number;
-  idUsuarioCobrador: string | null;
-  idTrabajadorCobrador: string | null;
   /**
    * El id del cobro (`Pagos.ID_Pago`). Se genera al encolar y se persiste con el intent, así que un
    * reintento tras un cierre inesperado lleva el mismo: si el cobro ya se guardó, la Main devuelve
@@ -195,8 +193,6 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     ticketItemIds,
     detalleIds,
     importeTotal,
-    idUsuarioCobrador: String(obj.idUsuarioCobrador ?? "").trim() || null,
-    idTrabajadorCobrador: String(obj.idTrabajadorCobrador ?? "").trim() || null,
     idPago,
     createdAtMs: Number.isFinite(createdAtMs) && createdAtMs > 0 ? createdAtMs : Date.now(),
     destinatario,
@@ -1053,8 +1049,6 @@ export default function VentaRapida() {
             idComanda: intent.idComanda,
             metodo: metodoDb as any,
             importeTotal: intent.importeTotal,
-            idUsuarioCobrador: intent.idUsuarioCobrador,
-            idTrabajadorCobrador: intent.idTrabajadorCobrador,
             detalles: detallesUsados,
             idPago: intent.idPago,
             destinatario: intent.destinatario ?? null,
@@ -1593,9 +1587,9 @@ export default function VentaRapida() {
         return;
       }
 
-      const idUsuarioCobrador: string | null = idUsuarioAuth ?? null;
-      const idTrabajadorCobrador: string | null = idTrabajadorAuth ?? null;
-
+      // REV-17: el cobrador ya no se mete en el intent. Lo pone el backend desde la sesión, así
+      // que un cobro que se reintenta al volver de un cierre inesperado queda a nombre de quien
+      // tiene la sesión abierta entonces — que es quien está delante del cajón.
       try {
         const idComanda = await ensureComandaActiva();
 
@@ -1636,8 +1630,6 @@ export default function VentaRapida() {
           ticketItemIds,
           detalleIds,
           importeTotal,
-          idUsuarioCobrador,
-          idTrabajadorCobrador,
           idPago: crypto.randomUUID(),
           createdAtMs: Date.now(),
           destinatario: destinatario ?? null,
@@ -1675,8 +1667,6 @@ export default function VentaRapida() {
     [
       quiereFactura,
       hasPendingTicketWrites,
-      idUsuarioAuth,
-      idTrabajadorAuth,
       ensureComandaActiva,
       markTicketItemsAsPaidLocal,
       queueComandaRefresh,

@@ -2768,6 +2768,55 @@ mod tests_exenciones_del_gate {
         );
     }
 
+    /// REV-17: y el que cobra tiene que SACAR de la sesión quién cobra.
+    ///
+    /// Es el reverso del test de arriba: allí se vigila que nadie ponga el gate donde no cabe, y
+    /// aquí que nadie lo quite donde hace falta. El cobrador que se guarda con el pago es el rastro
+    /// con el que se investiga un descuadre del cajón, así que aceptarlo de la entrada —como se
+    /// hacía— es dejar que cualquiera firme su cobro en efectivo con el nombre de otro.
+    ///
+    /// Se vigila el fuente y no el comportamiento porque el fallo que hay que impedir no es que un
+    /// cobro devuelva mal: es que el **próximo** camino de cobro nazca sin esta línea, que es
+    /// exactamente como nacieron los tres que había.
+    #[test]
+    fn todo_comando_que_cobra_saca_el_cobrador_de_la_sesion() {
+        const FUENTES: &[(&str, &str)] = &[
+            ("commands/mesas.rs", include_str!("commands/mesas.rs")),
+            (
+                "commands/venta_rapida.rs",
+                include_str!("commands/venta_rapida.rs"),
+            ),
+        ];
+
+        let mut vistos = 0;
+        for (fichero, fuente) in FUENTES {
+            for bloque in fuente.split("#[tauri::command]").skip(1) {
+                // El cuerpo llega hasta el comando siguiente; con eso basta para mirar dentro.
+                let Some(firma) = bloque.split("pub async fn ").nth(1) else {
+                    continue;
+                };
+                let nombre = firma.split('(').next().unwrap_or("").trim();
+                if !nombre.contains("cobrar") {
+                    continue;
+                }
+                vistos += 1;
+                assert!(
+                    bloque.contains("state.sesion()"),
+                    "{fichero}::{nombre} no saca el cobrador de la sesión (SEC-01/REV-17).\n\
+                     Quién cobra no puede llegar en los argumentos: es el rastro con el que se \
+                     investiga un descuadre del cajón."
+                );
+            }
+        }
+
+        // Si mañana se renombran, este test dejaría de mirar nada y seguiría en verde.
+        assert_eq!(
+            vistos, 3,
+            "se esperaban 3 comandos de cobro (cobrar_venta_rapida, cobrar_detalles, \
+             vr_cobrar_fraccionado); si has añadido o quitado uno, actualiza el número"
+        );
+    }
+
     /// Y al revés: `login_user` tiene que dejar la sesión puesta, o todos los comandos gateados
     /// dejarían de funcionar — también en la Handy, que pasa por este mismo comando.
     #[test]

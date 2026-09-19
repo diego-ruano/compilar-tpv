@@ -129,9 +129,23 @@ pub async fn vr_cobrar_fraccionado(
     state: State<'_, AppState>,
     args: VrCobrarFraccionadoInput,
 ) -> Result<String, AppErrorDto> {
+    // REV-17: quién cobra sale de aquí y no del input. Sin rol: cobrar lo hace cualquiera a mitad
+    // de servicio, como abrir el cajón — lo que hace falta es estar identificado.
+    //
+    // Un cobro que se reintenta desde la cola de la pantalla tras un cierre inesperado queda a
+    // nombre de quien tenga la sesión abierta cuando por fin entre — y es el mismo: esa cola se
+    // guarda bajo una clave de `localStorage` que ya lleva dentro el usuario y el trabajador
+    // (`PENDING_COBROS_STORAGE_PREFIX`), así que nadie drena los intents de otro.
+    let sesion = state.sesion().await?;
     let repo = state.venta_rapida_repo().await?;
     // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
-    Ok(uc::cobrar_fraccionado(repo.as_ref(), args).await?)
+    Ok(uc::cobrar_fraccionado(
+        repo.as_ref(),
+        &sesion.id_usuario,
+        sesion.id_trabajador.as_deref(),
+        args,
+    )
+    .await?)
 }
 
 #[tauri::command]

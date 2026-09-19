@@ -192,6 +192,14 @@ pub struct StockLinea {
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
+/// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+///
+/// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+/// justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+/// investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+/// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+/// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+/// pasando el login.
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct VrCobrarFraccionadoInput {
     /// El id del cobro (`Pagos.ID_Pago`), un UUID que genera la pantalla al encolarlo.
@@ -203,12 +211,6 @@ pub struct VrCobrarFraccionadoInput {
     pub id_comanda: String,
     pub metodo: String,
     pub importe_total: f64,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_usuario_cobrador: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_trabajador_cobrador: Option<String>,
     pub detalles: Vec<String>,
     /// FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
     ///

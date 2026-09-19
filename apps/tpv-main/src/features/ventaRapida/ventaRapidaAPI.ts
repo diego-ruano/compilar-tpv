@@ -351,8 +351,6 @@ export async function vrCobrarFraccionado(argsInput: {
     idComanda: string;
     metodo: "Tarjeta" | "Efectivo";
     importeTotal: number;
-    idUsuarioCobrador: string | null;
-    idTrabajadorCobrador: string | null;
     detalles: string[];
     /** El id del cobro, generado al encolarlo: repetir la llamada con él no cobra dos veces. */
     idPago: string;
@@ -376,14 +374,8 @@ export async function vrCobrarFraccionado(argsInput: {
                 id_comanda: argsInput.idComanda,
                 metodo: argsInput.metodo === "Tarjeta" ? "Tarjeta" : "Efectivo",
                 importe_total: Number(argsInput.importeTotal),
-                id_usuario_cobrador:
-                    argsInput.idUsuarioCobrador == null
-                        ? null
-                        : argsInput.idUsuarioCobrador,
-                id_trabajador_cobrador:
-                    argsInput.idTrabajadorCobrador == null
-                        ? null
-                        : argsInput.idTrabajadorCobrador,
+                // REV-17: quién cobra ya no viaja aquí. Lo pone el backend desde la sesión, como
+                // quién anula, quién cierra la caja y quién abre el cajón (SEC-01).
                 detalles: normalizePositiveIds(argsInput.detalles ?? []),
                 destinatario: argsInput.destinatario ?? null,
             },

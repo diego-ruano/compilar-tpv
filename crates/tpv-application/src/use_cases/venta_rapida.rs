@@ -164,8 +164,17 @@ pub async fn update_nota_detalle(
         .await
 }
 
+fn limpio(s: Option<&str>) -> Option<String> {
+    s.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// REV-17: el cobrador llega **aparte** del input, porque sale de la sesión y no de la pantalla.
+/// Que sean dos parámetros y no un campo más es lo que impide que alguien lo vuelva a meter ahí
+/// sin darse cuenta: el input ya no tiene dónde.
 pub async fn cobrar_fraccionado(
     repo: &dyn VentaRapidaRepository,
+    id_usuario: &str,
+    id_trabajador: Option<&str>,
     input: VrCobrarFraccionadoInput,
 ) -> AppResult<String> {
     let Some(id_pago) = id_de_cobro(&input.id_pago) else {
@@ -196,14 +205,8 @@ pub async fn cobrar_fraccionado(
         id_comanda: input.id_comanda,
         metodo: normalize_metodo(&input.metodo),
         importe_total: input.importe_total,
-        id_usuario_cobrador: input
-            .id_usuario_cobrador
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
-        id_trabajador_cobrador: input
-            .id_trabajador_cobrador
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
+        id_usuario_cobrador: limpio(Some(id_usuario)),
+        id_trabajador_cobrador: limpio(id_trabajador),
         detalles,
         destinatario: destinatario_de(input.destinatario),
     };
@@ -355,19 +358,47 @@ mod tests {
         let input = VrCobrarFraccionadoInput {
             id_pago: " 0192F7A4-3B1C-7D2E-8F00-123456789ABC ".into(),
             id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: 12.5,
-            id_usuario_cobrador: Some(" usuario-1 ".into()), id_trabajador_cobrador: Some(" ".into()),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
             destinatario: None,
         };
         // Devuelve el número de ticket del cobro, que es lo que el POS imprime a continuación.
-        assert_eq!(cobrar_fraccionado(&repo, input).await.unwrap(), "T-000001");
+        assert_eq!(
+            cobrar_fraccionado(&repo, " usuario-1 ", Some(" "), input).await.unwrap(),
+            "T-000001"
+        );
         let calls = repo.cobros.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].id_pago, "0192f7a4-3b1c-7d2e-8f00-123456789abc");
         assert_eq!(calls[0].metodo, "Tarjeta");
+        // REV-17: el cobrador es el de la sesión, recortado; un trabajador en blanco no se inventa.
         assert_eq!(calls[0].id_usuario_cobrador.as_deref(), Some("usuario-1"));
         assert!(calls[0].id_trabajador_cobrador.is_none());
         assert_eq!(calls[0].detalles, vec!["d1".to_string(), "d2".to_string()]);
+    }
+
+    /// REV-17: y lo que mande la pantalla no puede cambiarlo. El campo ya no existe en el input,
+    /// así que un cliente que lo siga enviando —una versión vieja de la webview, o alguien
+    /// llamando al IPC a mano— se lo encuentra ignorado: serde no lo conoce y el cobro queda
+    /// firmado por quien tiene la sesión abierta.
+    #[tokio::test]
+    async fn el_cobrador_es_el_de_la_sesion_aunque_la_pantalla_mande_otro() {
+        let crudo = serde_json::json!({
+            "id_pago": "0192f7a4-3b1c-7d2e-8f00-123456789abc",
+            "id_comanda": "c1",
+            "metodo": "Efectivo",
+            "importe_total": 3.0,
+            "detalles": ["d1"],
+            "id_usuario_cobrador": "el-jefe",
+            "id_trabajador_cobrador": "t-del-jefe",
+        });
+        let input: VrCobrarFraccionadoInput = serde_json::from_value(crudo).unwrap();
+
+        let repo = FakeRepo::default();
+        cobrar_fraccionado(&repo, "u-camarero", Some("t-camarero"), input).await.unwrap();
+
+        let calls = repo.cobros.lock().unwrap();
+        assert_eq!(calls[0].id_usuario_cobrador.as_deref(), Some("u-camarero"));
+        assert_eq!(calls[0].id_trabajador_cobrador.as_deref(), Some("t-camarero"));
     }
 
     #[tokio::test]
@@ -376,14 +407,15 @@ mod tests {
         let invalido = |importe, detalles| VrCobrarFraccionadoInput {
             id_pago: "0192f7a4-3b1c-7d2e-8f00-123456789abc".into(),
             id_comanda: "c1".into(), metodo: "efectivo".into(), importe_total: importe,
-            id_usuario_cobrador: None, id_trabajador_cobrador: None, detalles,
+            detalles,
             destinatario: None,
         };
-        assert!(cobrar_fraccionado(&repo, invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
-        assert!(cobrar_fraccionado(&repo, invalido(1.0, vec![" ".into()])).await.is_err());
+        let cobrar = |input| cobrar_fraccionado(&repo, "u1", None, input);
+        assert!(cobrar(invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
+        assert!(cobrar(invalido(1.0, vec![" ".into()])).await.is_err());
         // Sin un id válido no hay forma de reconocer un reintento: no se cobra.
         let sin_id = VrCobrarFraccionadoInput { id_pago: "tmp-1".into(), ..invalido(1.0, vec!["d1".into()]) };
-        assert!(cobrar_fraccionado(&repo, sin_id).await.is_err());
+        assert!(cobrar(sin_id).await.is_err());
         assert!(repo.cobros.lock().unwrap().is_empty());
     }
 }

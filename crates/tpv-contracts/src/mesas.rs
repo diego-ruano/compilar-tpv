@@ -351,17 +351,19 @@ pub struct MesasCreateComandaBarraInput {
     pub id_trabajador: Option<String>,
 }
 
+/// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+///
+/// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+/// justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+/// investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+/// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+/// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+/// pasando el login.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCobrarVentaRapidaInput {
     pub metodo: String,
     pub items: Vec<CobroVRItem>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_usuario_cobrador: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_trabajador_cobrador: Option<String>,
     /// Comanda concreta a cobrar (si no, se usa/crea la de barra abierta).
     #[serde(default)]
     #[ts(optional)]
@@ -432,6 +434,14 @@ pub struct MesasUpdateDetalleNotaInput {
     pub nota: Option<String>,
 }
 
+/// REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
+///
+/// Es la misma regla que ya aplican anular un cobro, cerrar la caja y abrir el cajón, y faltaba
+/// justo donde más duele: el cobrador que se guarda con el pago es el rastro con el que se
+/// investiga un descuadre del cajón. Firmándolo con lo que le pase la pantalla, quien alcance el
+/// IPC puede cobrar en efectivo a nombre de otro — o sea, la sisa que ese rastro existe para poder
+/// ver. Y no hay sitio donde se cobre sin sesión: a las dos pantallas de venta sólo se llega
+/// pasando el login.
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCobrarDetallesInput {
@@ -439,9 +449,6 @@ pub struct MesasCobrarDetallesInput {
     pub metodo: String,
     pub tipo: String,
     pub detalle_ids: Vec<String>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub id_usuario: Option<String>,
     /// FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
     ///
     /// Se llega aquí por dos caminos: el cliente lo pide («Factura con NIF») o el importe pasa del
