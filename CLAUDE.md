@@ -173,6 +173,15 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   tablas en su SQLite temporal. Una tabla o columna nueva, por tanto, **se crea en Turso antes de
   desplegar** el worker que la usa. No confundir con la base de cada tenant, que sí se migra desde
   el código (§3, `packages/database/migrations`).
+- **El token de la base de cada tenant se rota solo, y que no se pueda rotar NO es una caída
+  (REV-09).** Dura 7 días (`?expiration=7d`) y se renueva cada 24, así que cuando toca rotar le
+  quedan casi seis de vida. La API de plataforma de Turso es otro servicio con su propia
+  disponibilidad, y un fallo suyo salía por la misma puerta que un token inservible: se quedaba sin
+  resolver la credencial, o sea todas las lecturas REST y el Durable Object **de todos los
+  negocios**. Ahora `resolveTenantDbCredentials` sigue con el token guardado, con dos límites que
+  son lo que impide que esto sea «ignorar errores»: no vale con `forceRotate` —venimos de un 401, el
+  guardado ya lo rechazó la base— ni cuando al token le quedan menos de 12 h, porque entonces seguir
+  con él sólo cambia un error claro ahora por un 401 opaco dentro de un rato.
 
 ---
 

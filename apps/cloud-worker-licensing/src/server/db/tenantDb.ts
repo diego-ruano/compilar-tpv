@@ -36,6 +36,14 @@ export type ResolvedTenantDb = {
 
 const TENANT_DB_ROTATE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Lo que dura el token que acuña `tursoCreateDbToken` (`?expiration=7d`). La rotación cada 24 h
+// deja seis días de margen, y ese margen es justo lo que REV-09 aprovecha: si la API de plataforma
+// de Turso no contesta, el token guardado sigue sirviendo.
+const TENANT_DB_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// Cuánto antes de que caduque se deja de tolerar el fallo. Pasado ese punto, seguir con el token
+// guardado sólo cambia un error claro ahora por un 401 opaco dentro de unas horas.
+const TENANT_DB_MARGEN_CADUCIDAD_MS = 12 * 60 * 60 * 1000;
+
 // ---------------- Guard de migración por tenant (caché por isolate) ----------------
 //
 // Comprobar la tabla `_migrations` en Turso por HTTP en CADA petición arruinaría el rendimiento.
@@ -218,7 +226,38 @@ export async function resolveTenantDbCredentials(
 		Date.now() - lastRotationBaseMs >= TENANT_DB_ROTATE_INTERVAL_MS;
 
 	if (shouldRotate) {
-		const freshToken = await tursoCreateDbToken(env, dbName);
+		// REV-09: una rotación PROACTIVA que falla no puede tumbar la nube entera.
+		//
+		// El token guardado dura 7 días y se rota cada 24 h, así que cuando toca rotar suele
+		// quedarle casi una semana de vida. Aun así, un fallo de la API de plataforma de Turso
+		// —que es otro servicio, con su propia disponibilidad— salía por aquí y dejaba sin
+		// resolver la credencial: todas las lecturas REST y el Durable Object, de TODOS los
+		// negocios, mientras durase. Se cambiaba una molestia (no rotar hoy) por una caída.
+		//
+		// Reglas de este `catch`:
+		//   · Sólo vale para la rotación proactiva. Con `forceRotate` venimos de un 401, o sea que
+		//     el token guardado YA no sirve: reutilizarlo sería girar en el mismo error.
+		//   · Y sólo mientras al token le quede holgura. Cerca de su caducidad se vuelve a fallar,
+		//     porque entonces seguir con él sólo cambia un error claro ahora por un 401 opaco luego.
+		let freshToken: string;
+		try {
+			freshToken = await tursoCreateDbToken(env, dbName);
+		} catch (e: any) {
+			const vidaRestante = lastRotationBaseMs
+				? lastRotationBaseMs + TENANT_DB_TOKEN_TTL_MS - Date.now()
+				: 0;
+			if (forceRotate || vidaRestante < TENANT_DB_MARGEN_CADUCIDAD_MS) throw e;
+
+			console.warn(
+				`[tenantDb] no se pudo rotar el token de tenant=${tenantId}: ${String(e?.message || e)}. ` +
+				`Se sigue con el guardado (le quedan ${Math.round(vidaRestante / 3_600_000)} h).`,
+			);
+			const token = await aesGcmDecryptFromB64(
+				env.LICENSE_STORE_KEY,
+				String(row.turso_auth_token_enc),
+			);
+			return { dbName, tursoUrl, tursoAuthToken: token, rotated: false, rotatedAtMs: lastRotationBaseMs };
+		}
 
 		// CAS: solo escribe si nadie más ha rotado mientras generábamos el token.
 		const won = await rotateTokenIfOwner(
