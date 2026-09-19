@@ -187,9 +187,14 @@ pub struct EstadoVerificado {
 /// Por qué no se pudo obtener un estado verificado, clasificado por lo que implica para el gate.
 #[derive(Debug, Clone)]
 pub enum FalloConsulta {
-    /// Sin red, timeout, 5xx, o una incidencia de auth transitoria (reloj desfasado). La licencia
-    /// local sigue valiendo mientras dure la gracia offline.
+    /// Sin red, timeout, 5xx o una incidencia de auth transitoria. La licencia local sigue
+    /// valiendo mientras dure la gracia offline.
     Inalcanzable,
+    /// El servidor contesta, pero rechaza la firma porque el RELOJ de este equipo va desfasado
+    /// (`device_ts_out_of_range`, más de 2 min). Para el gate se comporta igual que `Inalcanzable`
+    /// —la licencia es buena y el TPV tiene que seguir vendiendo—, pero se distingue porque tiene
+    /// arreglo y lo tiene quien está delante: se le puede decir que ajuste la hora (REV-10).
+    RelojDesfasado,
     /// La respuesta llegó pero su firma no verifica (o no es de esta petición). Posible servidor
     /// falso / MITM: se bloquea, pero NO se borra la licencia (podría ser transitorio).
     FirmaInvalida,
@@ -203,6 +208,7 @@ impl std::fmt::Display for FalloConsulta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             FalloConsulta::Inalcanzable => write!(f, "license_status_unreachable"),
+            FalloConsulta::RelojDesfasado => write!(f, "device_ts_out_of_range"),
             FalloConsulta::FirmaInvalida => write!(f, "bad_signature"),
             FalloConsulta::Rechazada { code } => write!(f, "{code}"),
             FalloConsulta::Ilegible { detalle } => write!(f, "status_unreadable: {detalle}"),
@@ -230,6 +236,8 @@ pub enum Motivo {
     GraciaOffline,
     GraciaOfflineAgotada,
     RelojAtrasado,
+    /// REV-10: el servidor no acepta la firma porque el reloj de este equipo va desfasado.
+    RelojDesfasado,
 }
 
 impl Motivo {
@@ -247,6 +255,7 @@ impl Motivo {
             Motivo::GraciaOffline => "offline_grace".to_string(),
             Motivo::GraciaOfflineAgotada => "offline_expired".to_string(),
             Motivo::RelojAtrasado => "clock_rollback_detected".to_string(),
+            Motivo::RelojDesfasado => "clock_skew_detected".to_string(),
         }
     }
 }
@@ -318,6 +327,18 @@ pub fn evaluar_fallo(
             Gracia::Agotada => Veredicto::bloquear(Motivo::GraciaOfflineAgotada),
             Gracia::RelojAtrasado => Veredicto::bloquear(Motivo::RelojAtrasado),
         }),
+
+        // REV-10: el mismo VEREDICTO que `Inalcanzable` —la licencia vale y el TPV sigue
+        // vendiendo mientras dure la gracia—, pero con su propio motivo. Sin él, un reloj mal
+        // puesto se contaba como «sin conexión»: 72 h de cuenta atrás y luego un bloqueo que habla
+        // de internet, cuando lo que hay que hacer es ajustar la hora. El motivo es el mismo
+        // permita o bloquee, porque la acción de quien está delante es la misma.
+        FalloConsulta::RelojDesfasado => {
+            Resolucion::Decidido(match evaluar_gracia(base_ms, ahora_ms) {
+                Gracia::Vigente => Veredicto::permitir(Motivo::RelojDesfasado),
+                _ => Veredicto::bloquear(Motivo::RelojDesfasado),
+            })
+        }
 
         // Sin firma válida no hay acceso, pase lo que pase. Se conserva la licencia: podría ser un
         // MITM puntual o una rotación de clave, no un motivo para forzar la re-activación.
@@ -444,6 +465,49 @@ mod tests {
                 assert_eq!(v.accion, AccionEstado::Conservar);
             }
             Resolucion::Indecidible => panic!("una firma inválida siempre decide: bloquea"),
+        }
+    }
+
+    #[test]
+    fn un_reloj_desfasado_no_se_cuenta_como_falta_de_red() {
+        // REV-10. El veredicto es el MISMO que sin conexión —la licencia es buena y el TPV tiene
+        // que seguir vendiendo—, así que lo que se fija es el motivo: es lo único que le llega a
+        // quien está delante, y es lo único que puede arreglar. Contado como «sin conexión», el
+        // usuario veía 72 h de cuenta atrás y luego un bloqueo que hablaba de internet.
+        let base = AHORA - 1000;
+
+        match evaluar_fallo(&FalloConsulta::RelojDesfasado, base, AHORA, false) {
+            Resolucion::Decidido(v) => {
+                assert!(v.permitido, "con gracia vigente se sigue vendiendo");
+                assert_eq!(v.motivo.codigo(), "clock_skew_detected");
+            }
+            _ => panic!("tiene que decidir"),
+        }
+
+        // Y agotada la gracia bloquea, pero diciendo lo mismo: la acción de quien está delante no
+        // cambia porque hayan pasado tres días.
+        let vieja = AHORA - GRACIA_OFFLINE_MS - 1;
+        match evaluar_fallo(&FalloConsulta::RelojDesfasado, vieja, AHORA, false) {
+            Resolucion::Decidido(v) => {
+                assert!(!v.permitido);
+                assert_eq!(v.motivo.codigo(), "clock_skew_detected");
+            }
+            _ => panic!("tiene que decidir"),
+        }
+    }
+
+    #[test]
+    fn sin_conexion_de_verdad_sigue_diciendo_lo_de_siempre() {
+        // La otra mitad: si esto cambiara, un corte de internet pasaría a echarle la culpa al reloj.
+        let base = AHORA - 1000;
+        match evaluar_fallo(&FalloConsulta::Inalcanzable, base, AHORA, false) {
+            Resolucion::Decidido(v) => assert_eq!(v.motivo.codigo(), "offline_grace"),
+            _ => panic!("tiene que decidir"),
+        }
+        let vieja = AHORA - GRACIA_OFFLINE_MS - 1;
+        match evaluar_fallo(&FalloConsulta::Inalcanzable, vieja, AHORA, false) {
+            Resolucion::Decidido(v) => assert_eq!(v.motivo.codigo(), "offline_expired"),
+            _ => panic!("tiene que decidir"),
         }
     }
 

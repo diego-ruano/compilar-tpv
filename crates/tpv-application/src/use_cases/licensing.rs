@@ -201,6 +201,28 @@ async fn avisar_estado_licencia<Tz: TimeZone + Sync>(
                 })
                 .await;
         }
+        // REV-10: el reloj, que es lo único de esta lista que puede arreglar quien está delante.
+        // Va aparte de `offline_grace` a propósito: decirle «no hay conexión» a alguien cuyo
+        // problema es la hora le manda a mirar el router.
+        "clock_skew_detected" => {
+            let bucket = ahora_ms / (4 * HORA_MS);
+            let _ = notifier
+                .emitir(NuevaNotificacion {
+                    tipo: "reloj_desfasado".to_string(),
+                    severidad: Severidad::Aviso,
+                    titulo: "La hora de este equipo no es correcta".to_string(),
+                    cuerpo: Some(
+                        "El servidor de licencias rechaza las peticiones de este equipo porque su fecha y hora van desfasadas más de 2 minutos. Ajústalas (mejor con hora automática) o dejará de funcionar."
+                            .to_string(),
+                    ),
+                    destino: Destino::Rol(ADMIN_ROL_ID.to_string()),
+                    accion: None,
+                    payload: None,
+                    clave_dedupe: Some(format!("reloj_desfasado:{bucket}")),
+                    expira_en: None,
+                })
+                .await;
+        }
         _ => {}
     }
 }

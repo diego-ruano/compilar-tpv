@@ -637,6 +637,16 @@ no sólo en dev.
       fija `adminLicenciaReversible.test.ts`, que pasa la request capturada por el mismo verificador.
     - Lo que queda fuera y no tiene arreglo: un equipo **sin socket** (apagado, sin red) sigue
       dependiendo del job. Tampoco importa: sin nube no está replicando de todos modos.
+  - **Un reloj desfasado no es falta de red, y hay que decirlo (REV-10).** El worker rechaza la
+    firma de un equipo cuya hora se aparta más de 2 minutos (`device_ts_out_of_range`), y el cliente
+    lo metía en el mismo saco que «no llego»: 72 h de gracia offline contando hacia atrás y luego un
+    bloqueo que hablaba de internet, mientras ni el WebSocket ni la Handy conectaban por el mismo
+    motivo y nada lo decía. Es el único fallo de esa lista que puede resolver quien está delante.
+    `FalloConsulta::RelojDesfasado` da el **mismo veredicto** que `Inalcanzable` —la licencia es
+    buena y el TPV tiene que seguir vendiendo— pero su propio motivo (`clock_skew_detected`), que es
+    lo que cambia la notificación y el texto de la pantalla de bloqueo. Sigue pendiente el aviso
+    *proactivo* comparando con `serverTime` (PROD-04); esto sólo arregla el diagnóstico cuando ya
+    está fallando.
   - **Palanca de emergencia sin UI:** `connectivity: "auto" | "off"` en `device_config.json`
     (comandos `get/set_connection_mode`). Sirve para una red patológica o un cliente que no quiera
     nube. La captura del outbox NO depende de ella: al volver a `auto` se drena lo acumulado.

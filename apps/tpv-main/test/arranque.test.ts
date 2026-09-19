@@ -119,11 +119,28 @@ describe("qué pantalla enseña el arranque", () => {
 describe("lo que se dice cuando la licencia bloquea", () => {
 	it("cada motivo del servidor tiene su explicación, y ninguna es la genérica", () => {
 		const genérica = textoBloqueo("un_motivo_que_no_existe").titulo;
-		const titulos = ["expired", "revoked", "device_replaced", "bad_signature", "offline_expired", "license_not_found"].map(
-			(m) => textoBloqueo(m).titulo,
-		);
+		const titulos = [
+			"expired",
+			"revoked",
+			"device_replaced",
+			"bad_signature",
+			"offline_expired",
+			"license_not_found",
+			// REV-10: el reloj tiene su propio texto. Con el de «sin conexión» se mandaba a mirar
+			// el router a alguien cuyo problema era la hora del equipo.
+			"clock_skew_detected",
+		].map((m) => textoBloqueo(m).titulo);
 		expect(new Set(titulos).size).toBe(titulos.length);
 		expect(titulos).not.toContain(genérica);
+	});
+
+	it("un reloj desfasado dice que es la hora, y cómo arreglarlo", () => {
+		// Es el único motivo de esta lista que puede resolver quien está delante del TPV, así que
+		// es el único que tiene sentido explicar con una instrucción.
+		const t = textoBloqueo("clock_skew_detected");
+		expect(t.titulo).toContain("hora");
+		expect(t.cuerpo).toContain("hora automática");
+		expect(t.cuerpo).not.toContain("conexión");
 	});
 
 	it("una anulación dice que la misma clave vuelve a activar sin perder datos", () => {

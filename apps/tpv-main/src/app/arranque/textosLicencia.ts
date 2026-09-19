@@ -39,6 +39,13 @@ export function textoBloqueo(motivo: string): Texto {
 			titulo: "No se pudo verificar la licencia",
 			cuerpo: "La respuesta del servidor de licencias no superó la comprobación de seguridad. Revisa tu conexión (proxy/antivirus) y reintenta.",
 		};
+	// REV-10: el reloj tiene su propio texto porque tiene arreglo, y lo tiene quien está delante.
+	// Con el de «sin conexión» se manda a mirar el router a alguien cuyo problema es la hora.
+	if (motivo === "clock_skew_detected")
+		return {
+			titulo: "La hora de este equipo no es correcta",
+			cuerpo: "El servidor de licencias rechaza las peticiones de este equipo porque su fecha y hora van desfasadas más de dos minutos. Ajústalas en Windows —lo más seguro es activar la hora automática— y reintenta la comprobación.",
+		};
 	if (motivo === "offline_expired" || motivo === "clock_rollback_detected")
 		return {
 			titulo: "Sin conexión demasiado tiempo",

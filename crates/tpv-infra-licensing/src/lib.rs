@@ -327,7 +327,14 @@ fn clasificar_error(http: u16, code: &str) -> FalloConsulta {
         "license_not_found" | "license_revoked" | "device_replaced" => {
             FalloConsulta::Rechazada { code: code.to_string() }
         }
-        // Todo lo demás (token/reloj/proof/5xx): transitorio o ambiguo. No se tira la licencia;
+        // REV-10: el reloj de este equipo va más de 2 min desfasado, así que el worker no acepta
+        // su firma. Se trataba como «no llego», y por eso el usuario veía una cuenta atrás de 72 h
+        // y después un bloqueo que hablaba de la conexión — mientras ni el WebSocket ni la Handy
+        // conectaban, por lo mismo, y nada decía que la culpa era de la hora. La licencia sigue
+        // siendo buena: el veredicto no cambia, cambia lo que se le cuenta a quien puede arreglarlo.
+        "device_ts_out_of_range" | "timestamp_out_of_range" => FalloConsulta::RelojDesfasado,
+
+        // Todo lo demás (token/proof/5xx): transitorio o ambiguo. No se tira la licencia;
         // decide la gracia offline. Si persiste > 72 h, la gracia expira y bloquea igual.
         _ => {
             let _ = http;
@@ -1241,5 +1248,41 @@ mod tests_error_del_worker {
             texto(r#"{"ok":false,"error":"tenant_db_provision_failed","message":"No se ha podido preparar la base.","details":"turso 503"}"#),
             "No se ha podido preparar la base. (turso 503)"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_clasificar_error {
+    //! REV-10: de qué clase es cada fallo del worker, que es lo que decide qué se le cuenta al
+    //! usuario. El reloj desfasado se contaba como «no llego»: 72 h de cuenta atrás y después un
+    //! bloqueo hablando de internet, mientras ni el WebSocket ni la Handy conectaban por lo mismo.
+
+    use super::*;
+
+    fn codigo(http: u16, code: &str) -> String {
+        clasificar_error(http, code).to_string()
+    }
+
+    #[test]
+    fn un_reloj_desfasado_se_distingue_de_no_tener_red() {
+        assert_eq!(codigo(401, "device_ts_out_of_range"), "device_ts_out_of_range");
+        // El worker usa los dos nombres según por dónde entre la petición.
+        assert_eq!(codigo(401, "timestamp_out_of_range"), "device_ts_out_of_range");
+    }
+
+    #[test]
+    fn lo_demas_sigue_siendo_inalcanzable() {
+        // La otra mitad: sin esto, cualquier 5xx pasaría a echarle la culpa al reloj.
+        for code in ["jwt_expired", "bad_device_signature", "internal_error", ""] {
+            assert_eq!(codigo(500, code), "license_status_unreachable", "code={code}");
+        }
+    }
+
+    #[test]
+    fn un_rechazo_de_la_licencia_no_se_toca() {
+        // Estos SÍ borran el estado local, así que confundirlos con el reloj sería mucho peor.
+        for code in ["license_not_found", "license_revoked", "device_replaced"] {
+            assert_eq!(codigo(403, code), code, "code={code}");
+        }
     }
 }
