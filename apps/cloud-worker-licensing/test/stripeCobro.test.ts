@@ -46,6 +46,27 @@ const sesion = (id: string, meses = 12) => ({
 	line_items: { data: [{ price: { id: "price_anual", metadata: { term_months: String(meses) } } }] },
 });
 
+/**
+ * Una sesión de RENOVACIÓN (REV-13). Se distingue de la de alta en dos cosas, y hacen falta las
+ * dos: el Price lleva `metadata.intent = renewal` —QUE es una renovación— y el enlace lleva el
+ * `license_id` en `client_reference_id` —CUÁL renueva—. Antes no hacía falta ninguna: bastaba con
+ * que el cliente de Stripe ya tuviera una licencia viva, que es el bug.
+ */
+const sesionRenovacion = (id: string, licenseId: string, meses = 12) => ({
+	...sesion(id, meses),
+	client_reference_id: licenseId,
+	line_items: {
+		data: [
+			{
+				price: {
+					id: "price_renovacion",
+					metadata: { term_months: String(meses), intent: "renewal" },
+				},
+			},
+		],
+	},
+});
+
 type Escenario = {
 	db: any;
 	sql: any;
@@ -142,8 +163,9 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 	it("una renovación suma sus meses una vez aunque llegue dos veces", async () => {
 		const r = await escenario(async (e) => {
 			const lic = await e.licenciaActivada();
-			const primera = await cumplir(ENV, e.db, sesion("cs_renovacion"));
-			const segunda = await cumplir(ENV, e.db, sesion("cs_renovacion"));
+			const renovar = sesionRenovacion("cs_renovacion", lic.license_id);
+			const primera = await cumplir(ENV, e.db, renovar);
+			const segunda = await cumplir(ENV, e.db, renovar);
 			return { antes: lic.expires_at_ms!, primera, segunda, final: await e.leer(lic.license_id) };
 		});
 
@@ -157,11 +179,11 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 		// renovación A ya no se reconocía en cuanto llegaba la B.
 		const r = await escenario(async (e) => {
 			const lic = await e.licenciaActivada();
-			await cumplir(ENV, e.db, sesion("cs_renovacion_a"));
-			await cumplir(ENV, e.db, sesion("cs_renovacion_b"));
+			await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_a", lic.license_id));
+			await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_b", lic.license_id));
 			const trasB = (await e.leer(lic.license_id)).expires_at_ms;
 
-			const reintentoA = await cumplir(ENV, e.db, sesion("cs_renovacion_a"));
+			const reintentoA = await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_a", lic.license_id));
 			return { trasB, reintentoA, final: (await e.leer(lic.license_id)).expires_at_ms };
 		});
 
@@ -190,13 +212,14 @@ describe("REV-01 · un fallo a mitad no deja nada a medias", () => {
 	it("renovación: si falla el registro del cobro no se extiende, y el reintento extiende una vez", async () => {
 		const r = await escenario(async (e) => {
 			const lic = await e.licenciaActivada();
+			const renovar = sesionRenovacion("cs_renovacion", lic.license_id);
 
 			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);
-			const error = await cumplir(ENV, conFallo, sesion("cs_renovacion")).catch((err) => err);
+			const error = await cumplir(ENV, conFallo, renovar).catch((err) => err);
 			const trasFallo = await e.leer(lic.license_id);
 			const cobrosTrasFallo = e.contar("license_payments");
 
-			const reintento = await cumplir(ENV, e.db, sesion("cs_renovacion"));
+			const reintento = await cumplir(ENV, e.db, renovar);
 			return {
 				antes: lic,
 				error,

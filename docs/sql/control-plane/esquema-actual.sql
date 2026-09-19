@@ -183,6 +183,21 @@ CREATE TABLE license_device_swaps (
   at_ms          INTEGER NOT NULL
 );
 
+-- REV-13 · Qué avisos de caducidad se han mandado ya, para no repetirlos.
+--
+-- La clave incluye `expires_at_ms` a propósito: sin él, una licencia renovada no volvería a avisar
+-- nunca (la fila del año pasado seguiría ahí). Con él, mover la caducidad abre un aviso nuevo y
+-- deja el anterior como rastro de lo que se envió.
+--
+-- `kind`: 'expira_30' | 'expira_7' (ver PELDANOS en domains/licensing/avisosDeCaducidad.ts).
+CREATE TABLE license_notices (
+  license_id                 TEXT NOT NULL,
+  kind                       TEXT NOT NULL,
+  expires_at_ms              INTEGER NOT NULL,
+  sent_at_ms                 INTEGER NOT NULL,
+  PRIMARY KEY (license_id, kind, expires_at_ms)
+);
+
 CREATE TABLE license_payments (
   payment_id                 TEXT PRIMARY KEY,
   license_id                 TEXT NOT NULL,

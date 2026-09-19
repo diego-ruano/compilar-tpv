@@ -138,6 +138,70 @@ No tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valien
 }
 
 /* ============================================================
+   1.c Aviso de caducidad (REV-13): el único sitio del que sale el enlace de renovación
+============================================================ */
+
+/**
+ * «Tu licencia caduca el X, renuévala aquí».
+ *
+ * El enlace **no se compone aquí**: llega hecho desde `avisosDeCaducidad.ts`, con el `license_id`
+ * dentro. Es lo que hace que la compra que venga detrás se reconozca como una renovación de ESTA
+ * licencia y no como un alta — o sea, lo que impide que el cliente acabe con una clave nueva que
+ * tendría que teclear en un TPV que ya funciona.
+ *
+ * No se menciona la clave de licencia ni se repite: renovar no la cambia, y enseñarla en un correo
+ * de recordatorio es repartirla sin motivo.
+ */
+export async function sendLicenseExpiringEmail(
+	env: Env,
+	args: {
+		to: string;
+		name?: string | null;
+		expiresAtMs: number;
+		diasRestantes: number;
+		enlace: string;
+	},
+): Promise<boolean> {
+	const saludo = args.name?.trim() ? `Hola, ${args.name.trim()}:` : "Hola:";
+	const hasta = new Date(args.expiresAtMs).toLocaleDateString("es-ES", {
+		day: "numeric",
+		month: "long",
+		year: "numeric",
+		timeZone: "Europe/Madrid",
+	});
+	const cuanto = args.diasRestantes === 1 ? "mañana" : `en ${args.diasRestantes} días`;
+
+	const html = layout(
+		"Tu licencia caduca pronto",
+		`<p>${esc(saludo)}</p>
+     <p>Tu licencia del TPV caduca <strong>${esc(cuanto)}</strong>, el <strong>${esc(hasta)}</strong>.</p>
+     <p style="margin:24px 0;text-align:center">
+       <a href="${esc(args.enlace)}" style="display:inline-block;padding:12px 24px;background:#111827;color:#ffffff;
+          text-decoration:none;border-radius:8px;font-weight:600">Renovar mi licencia</a>
+     </p>
+     <p style="font-size:14px;color:#6b7280">Renueva desde ese botón y se alargará la licencia que ya tienes:
+     <strong>no hace falta cambiar ninguna clave</strong> ni tocar el TPV. Si compras por otro sitio se te
+     emitirá una licencia distinta, que es lo que querrás sólo si estás abriendo otro local.</p>
+     <p style="font-size:14px;color:#6b7280">Si la dejas caducar, el TPV deja de poder usarse hasta que la
+     renueves. Tus datos no se pierden.</p>`,
+	);
+
+	const text = `${saludo}
+
+Tu licencia del TPV caduca ${cuanto}, el ${hasta}.
+
+Renuévala aquí: ${args.enlace}
+
+Desde ese enlace se alarga la licencia que ya tienes: no hace falta cambiar ninguna clave ni tocar el TPV.
+Si compras por otro sitio se te emitirá una licencia distinta, que es lo que querrás sólo si estás abriendo
+otro local.
+
+Si la dejas caducar, el TPV deja de poder usarse hasta que la renueves. Tus datos no se pierden.`;
+
+	return enviar(env, { to: args.to, subject: `Tu licencia del TPV caduca ${cuanto}`, html, text });
+}
+
+/* ============================================================
    2. Código de cambio de dispositivo (OTP)
 ============================================================ */
 

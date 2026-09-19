@@ -173,6 +173,45 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   tablas en su SQLite temporal. Una tabla o columna nueva, por tanto, **se crea en Turso antes de
   desplegar** el worker que la usa. No confundir con la base de cada tenant, que sí se migra desde
   el código (§3, `packages/database/migrations`).
+- **Una compra de Stripe dice lo que es; el worker no lo adivina (REV-13).** Renovar y comprar una
+  segunda licencia entran por el mismo webhook, y la única señal que había era el cliente de
+  Stripe: si ya tenía una licencia viva, la compra nueva **la extendía**. O sea que comprar con los
+  mismos datos era literalmente lo que disparaba la renovación. El dueño que abría un segundo local
+  pagaba y no recibía clave; quien compraba sin haber estrenado la anterior acababa con una sola
+  clave de veinticuatro meses. Ahora hacen falta **dos** señales y las dos vienen del pago:
+  - **QUÉ es**: `metadata.intent = renewal` en el Price, por el mismo camino que `term_months`
+    (`intencionDeLaCompra`), para poder crear precios nuevos sin desplegar. **El defecto es
+    «alta»**, y ésa es la mitad importante: a un Price al que se le olvide el metadata le sobra una
+    licencia —molesto, visible y con arreglo—, mientras que dar por renovación lo que no lo es deja
+    a alguien pagando sin recibir nada.
+  - **CUÁL se renueva**: el `license_id` que el enlace lleva en `client_reference_id`
+    (`licenseIdFromSession`). Sin esto «renovación» seguiría siendo una adivinanza en cuanto
+    alguien tenga dos locales.
+  - **Una renovación sin destino EMITE una licencia** (`licenciaQueRenueva` devuelve su motivo:
+    enlace sin licencia, licencia desconocida, anulada, sin estrenar, o de otro cliente). Es la
+    dirección en la que el error se deshace: quien pagó se lleva algo que funciona. Queda anotado
+    en `admin_audit` como `renovacion_sin_destino`, porque es un síntoma y no un caso normal.
+  - **`issued` no se renueva nunca.** No hay reloj que alargar, y extenderla le pondría caducidad a
+    una clave que el cliente todavía no ha instalado. `expired` **sí**: es el caso normal.
+  - **El dueño se comprueba por cliente de Stripe O por correo.** No es una frontera de seguridad
+    —renovar la licencia de otro es pagarle el año, no robarle nada—: es que un checkout puede
+    crear un Customer nuevo si el correo se escribe con otra grafía, y rechazar por eso una
+    renovación legítima cambia un acierto raro por un fallo frecuente.
+  - **El aviso de caducidad es parte del arreglo, no un extra** (`avisosDeCaducidad.ts`, cron
+    diario en `wrangler.json` → `scheduled` en `index.ts`). Es el único sitio del que sale el
+    enlace de renovación: sin él, el camino correcto existe y no lo conoce nadie, y el cliente
+    vuelve al enlace de compra. Reglas: **sin `RENEWAL_URL` no se manda nada** (un aviso sin botón
+    empuja al sitio equivocado); **un aviso por licencia y por ciclo**, el peldaño más urgente que
+    le toque (30 y 7 días), o una licencia que entra con 5 días recibiría los dos correos a la vez;
+    y se **marca antes de enviar y sólo se envía si se ganó la marca**, soltándola si el correo
+    falla — un aviso que no ha salido no puede quedar contado como enviado.
+  - **La clave de `license_notices` incluye `expires_at_ms`.** Sin él, la fila del año pasado
+    silenciaría para siempre a una licencia que se renueva todos los años.
+  - ⚠️ **Al desplegar esto hace falta tocar Stripe y Turso**, y sin ello el arreglo no existe:
+    crear el Price de renovación con `metadata.intent = renewal` y su Payment Link, poner ese
+    enlace en `RENEWAL_URL`, y crear a mano la tabla `license_notices` en el control-plane (§4.5:
+    su estructura no la toca el código; está en `docs/sql/control-plane/esquema-actual.sql`).
+
 - **El token de la base de cada tenant se rota solo, y que no se pueda rotar NO es una caída
   (REV-09).** Dura 7 días (`?expiration=7d`) y se renueva cada 24, así que cuando toca rotar le
   quedan casi seis de vida. La API de plataforma de Turso es otro servicio con su propia

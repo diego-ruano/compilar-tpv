@@ -52,6 +52,11 @@
 			"remote": true
 		}
 	],
+	"triggers": {
+		"crons": [
+			"0 7 * * *"
+		]
+	},
 	"vars": {
 		"TURSO_DATABASE_URL": "libsql://tpvcontrol-altarialights.aws-eu-west-1.turso.io",
 		"TURSO_ORG_SLUG": "altarialights",

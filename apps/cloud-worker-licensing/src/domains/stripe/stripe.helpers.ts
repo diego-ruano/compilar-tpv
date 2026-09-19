@@ -116,6 +116,54 @@ export function termMonthsFromSession(session: any): number | null {
 	return null;
 }
 
+/**
+ * Qué es esta compra (REV-13).
+ *
+ * **Una compra tiene que decir lo que es.** Antes no lo decía y el worker lo adivinaba: si el
+ * cliente de Stripe ya tenía una licencia viva, la compra nueva la extendía. Un dueño que abría un
+ * segundo local pagaba y no recibía clave — se le alargaba la del primero —, y quien compraba sin
+ * haber estrenado la anterior acababa con una sola clave de veinticuatro meses. No era un caso
+ * raro: era todo el que compra dos veces.
+ *
+ * Sale del `metadata.intent` del Price, por el mismo camino que `term_months`: así se pueden crear
+ * precios nuevos sin desplegar el worker. Un Price marcado `intent=renewal` renueva; cualquier
+ * otro, incluido el que no traiga nada, es un **alta**.
+ *
+ * **El defecto es «alta» a propósito, y es la mitad importante de esta función.** Un Price al que
+ * se le olvide el metadata vende una licencia de más: molesto, visible y con arreglo (se usa o se
+ * devuelve). Al revés —dar por renovación lo que no lo es— es lo que ya pasaba: alguien paga y no
+ * recibe nada, y eso no lo arregla ningún correo.
+ */
+export type IntencionDeCompra = "alta" | "renovacion";
+
+export function intencionDeLaCompra(session: any): IntencionDeCompra {
+	const items: any[] = session?.line_items?.data ?? [];
+
+	for (const item of items) {
+		const raw = item?.price?.metadata?.intent ?? item?.price?.product?.metadata?.intent;
+		if (String(raw ?? "").trim().toLowerCase() === "renewal") return "renovacion";
+	}
+
+	return "alta";
+}
+
+/**
+ * QUÉ licencia renueva esta compra (REV-13): el `license_id` que el enlace de renovación lleva en
+ * `client_reference_id`.
+ *
+ * Sin esto, «renovación» seguiría siendo una adivinanza en cuanto alguien tenga dos locales: hay
+ * que saber cuál de las dos licencias se alarga. Lo pone `enlaceDeRenovacion` al construir la URL
+ * que va en el correo de aviso, y Stripe lo devuelve tal cual en la sesión.
+ *
+ * Se filtra contra el alfabeto que Stripe acepta en ese campo (alfanuméricos, `-` y `_`, 200
+ * caracteres) para no arrastrar basura hasta una consulta.
+ */
+export function licenseIdFromSession(session: any): string | null {
+	const raw = String(session?.client_reference_id ?? "").trim();
+	if (!raw || raw.length > 200) return null;
+	return /^[A-Za-z0-9_-]+$/.test(raw) ? raw : null;
+}
+
 export function customerEmailFromSession(session: any): string | null {
 	const email =
 		session?.customer_details?.email ?? session?.customer_email ?? null;

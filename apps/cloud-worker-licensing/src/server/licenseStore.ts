@@ -96,25 +96,72 @@ export async function getLicenseById(db: Sql, licenseId: string): Promise<Licens
  * la que ya tiene en vez de emitirle otra clave (§4.1 del plan). Vigente = no revocada, no
  * deshabilitada y aún dentro de su `expires_at_ms` (o sin activar todavía).
  */
-export async function getRenewableLicenseByStripeCustomer(
+/**
+ * Las licencias a las que les queda poco y hay que avisar (REV-13).
+ *
+ * Sólo **activadas**: una `issued` que nadie ha estrenado no tiene reloj corriendo, así que no
+ * caduca ni hay nada que renovarle. Y sólo vivas (`disabled = 0`, no anuladas): avisar a quien le
+ * revocaste la licencia de que va a caducar es ruido, y encima confuso.
+ *
+ * La ventana es `(desde, hasta]` en milisegundos de caducidad, y la decide quien llama: así el
+ * mismo SELECT sirve para el peldaño de 30 días y para el de 7 sin repetir la consulta.
+ */
+export async function licenciasPorCaducar(
 	db: Sql,
-	stripeCustomerId: string,
-	nowMs: number,
-): Promise<LicenseRow | null> {
+	desdeMs: number,
+	hastaMs: number,
+): Promise<LicenseRow[]> {
 	const r = await exec(
 		db,
 		`
     SELECT * FROM licenses
-    WHERE stripe_customer_id = ?
-      AND status IN ('issued', 'active')
+    WHERE status = 'active'
       AND disabled = 0
-      AND (expires_at_ms IS NULL OR expires_at_ms > ?)
-    ORDER BY expires_at_ms DESC
-    LIMIT 1;
+      AND expires_at_ms IS NOT NULL
+      AND expires_at_ms > ?
+      AND expires_at_ms <= ?
+    ORDER BY expires_at_ms ASC;
     `,
-		[stripeCustomerId, nowMs],
+		[desdeMs, hastaMs],
 	);
-	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
+	return (r.rows ?? []) as unknown as LicenseRow[];
+}
+
+/**
+ * Marca un aviso como enviado, y dice si ha sido ESTA llamada la que lo ha marcado.
+ *
+ * Devolver el resultado es lo que hace que el aviso salga una vez: se marca **antes** de enviar y
+ * sólo se envía si se ganó la fila. Dos ejecuciones del cron a la vez, o un reintento, encuentran
+ * la fila puesta y no mandan nada. (REV-15 enseñó la otra mitad: un `INSERT` condicionado cuyo
+ * resultado nadie mira no condiciona nada.)
+ *
+ * La clave incluye `expires_at_ms` a propósito. Sin él, una licencia renovada nunca volvería a
+ * avisar: la fila del año pasado seguiría ahí. Con él, mover la caducidad —renovar, o acortarla
+ * desde administración— abre un aviso nuevo y deja el anterior como rastro de lo que se mandó.
+ */
+export async function marcarAvisoEnviado(
+	db: Sql,
+	args: { licenseId: string; kind: string; expiresAtMs: number; nowMs: number },
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`INSERT OR IGNORE INTO license_notices (license_id, kind, expires_at_ms, sent_at_ms)
+     VALUES (?, ?, ?, ?);`,
+		[args.licenseId, args.kind, args.expiresAtMs, args.nowMs],
+	);
+	return Number((r as any)?.rowsAffected ?? 0) > 0;
+}
+
+/** Deshace el marcado: para cuando el envío falla y queremos que el próximo ciclo lo reintente. */
+export async function olvidarAvisoEnviado(
+	db: Sql,
+	args: { licenseId: string; kind: string; expiresAtMs: number },
+): Promise<void> {
+	await exec(
+		db,
+		`DELETE FROM license_notices WHERE license_id = ? AND kind = ? AND expires_at_ms = ?;`,
+		[args.licenseId, args.kind, args.expiresAtMs],
+	);
 }
 
 export async function listLicenses(db: Sql, limit = 50, offset = 0): Promise<LicenseRow[]> {

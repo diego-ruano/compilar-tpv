@@ -30,6 +30,7 @@ import {
 	corsHeaders,
 } from "./server/utils/response";
 
+import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { pairingRoutes } from "./routes/pairing";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { configuracionRoutes } from "./domains/configuracion/configuracion.routes";
@@ -242,8 +243,31 @@ app.onError((err, c) => {
 	});
 });
 
+/**
+ * REV-13 · Lo único que este worker hace por su cuenta: avisar de las licencias que caducan.
+ *
+ * Va aquí y no en una ruta porque nadie lo va a llamar: el cliente no sabe que su licencia se
+ * acaba hasta que deja de funcionar. El cron está en `wrangler.json` (`triggers.crons`), una vez
+ * al día, y el cuerpo es idempotente — un día perdido se recupera solo al siguiente.
+ *
+ * Los errores se tragan a propósito: si esto revienta, Cloudflare lo reintenta y mientras tanto no
+ * puede afectar a nada más, porque no hay nada más en este handler.
+ */
+async function programado(env: Env): Promise<void> {
+	try {
+		const r = await avisarDeCaducidades(env, getDb(env));
+		console.log(
+			`[cron] avisos de caducidad: ${r.enviados} enviados, ${r.yaAvisadas} ya avisadas, ` +
+				`${r.fallidos} fallidos, de ${r.revisadas} revisadas`,
+		);
+	} catch (err) {
+		console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
+	}
+}
+
 // El wrapper de Sentry captura las excepciones no controladas del worker (requiere el flag
 // `nodejs_compat`, ver wrangler.json). Si no hay `SENTRY_DSN`, es un no-op transparente.
 export default Sentry.withSentry(sentryOptions, {
 	fetch: (request, env, ctx) => app.fetch(request, env, ctx),
+	scheduled: (_evento, env, ctx) => ctx.waitUntil(programado(env)),
 } satisfies ExportedHandler<Env>);
