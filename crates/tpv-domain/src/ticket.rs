@@ -80,6 +80,84 @@ impl TramoIva {
 /// cobrar por un desplegable que alguien no tocó.
 pub const CAUSA_EXENCION_POR_DEFECTO: &str = "E1";
 
+/// Reparte un importe COBRADO entre las líneas, conservando el peso de cada tipo de IVA (REV-16).
+///
+/// Hace falta cuando lo que se cobra no es la suma de las líneas enteras: un cobro parcial. Lo que
+/// se hacía antes era colapsarlo todo en una línea **al tipo de la primera**, y eso declara mal el
+/// IVA en cuanto el ticket mezcla tipos — que en un bar es lo normal, comida al 10 % y alcohol al
+/// 21 %. Peor todavía con las exentas: la condición era «exento sólo si lo son TODAS», así que un
+/// ticket con una línea exenta y otra no se declaraba entero como *sujeto* y al tipo de la exenta.
+///
+/// ⚠️ **Y nadie de fuera lo habría cazado.** Se comprobó contra la AEAT mandando una `CuotaTotal`
+/// descuadrada a propósito: la acepta sin decir nada (ver `docs/PRUEBAS_AEAT.md`). Un desglose mal
+/// repartido sale por la puerta como si tal cosa.
+///
+/// El reparto es proporcional y **cuadra al céntimo**: se redondea cada línea y el resto que sobra
+/// o falta va a la línea más grande, que es donde menos se nota y donde no puede dejar un importe
+/// en negativo. Lo que sale tiene que sumar exactamente `cobrado`, porque de esa suma salen la
+/// base y la cuota del registro.
+///
+/// Casos de borde, todos hacia poder facturar:
+///   * sin líneas, o con líneas que suman cero, no hay proporción que repartir: se devuelve una
+///     sola línea con el importe cobrado y la forma de la primera (o del tipo general si no hay
+///     ninguna);
+///   * las líneas que se quedan en `0,00` al redondear se descartan, para no emitir un tramo de
+///     base cero que no dice nada.
+pub fn prorratear(lineas: &[LineaTicket], cobrado: f64, tipo_general: f64) -> Vec<LineaTicket> {
+    let unica = |modelo: Option<&LineaTicket>| {
+        vec![LineaTicket {
+            total_con_iva: a_centimos(cobrado),
+            tipo_iva: modelo.map(|l| l.tipo_iva).unwrap_or(tipo_general),
+            exento: modelo.map(|l| l.exento).unwrap_or(false),
+            causa_exencion: modelo.and_then(|l| l.causa_exencion.clone()),
+        }]
+    };
+
+    let suma: f64 = lineas.iter().map(|l| l.total_con_iva).sum();
+    if lineas.is_empty() || suma <= 0.0 {
+        return unica(lineas.first());
+    }
+
+    // Se trabaja en céntimos enteros: repartir en coma flotante y confiar en que cuadre es cómo se
+    // llega a un ticket que dice `0,38 + 0,02 = 0,39`.
+    let objetivo = (cobrado * 100.0).round() as i64;
+    let mut centimos: Vec<i64> = lineas
+        .iter()
+        .map(|l| (l.total_con_iva / suma * cobrado * 100.0).round() as i64)
+        .collect();
+
+    let resto = objetivo - centimos.iter().sum::<i64>();
+    if resto != 0 {
+        // A la más grande: es la que absorbe un céntimo sin cambiar de signo ni de sentido.
+        let mayor = centimos
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, c)| **c)
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        centimos[mayor] += resto;
+    }
+
+    let out: Vec<LineaTicket> = lineas
+        .iter()
+        .zip(centimos)
+        .filter(|(_, c)| *c != 0)
+        .map(|(l, c)| LineaTicket {
+            total_con_iva: c as f64 / 100.0,
+            tipo_iva: l.tipo_iva,
+            exento: l.exento,
+            causa_exencion: l.causa_exencion.clone(),
+        })
+        .collect();
+
+    // Todo se fue a cero (un cobro de céntimos repartido entre muchas líneas): mejor una línea con
+    // el importe que ninguna, porque el registro tiene que salir igualmente.
+    if out.is_empty() {
+        return unica(lineas.first());
+    }
+    out
+}
+
 /// Calcula el desglose a partir de las líneas.
 ///
 /// `tipo_general` es el del negocio (`Business_Settings.IVA_Percent`), que usan las líneas sin tipo
@@ -280,4 +358,97 @@ mod tests {
         let lineas: Vec<LineaTicket> = (0..40).map(|i| sujeta(10.0, (i % 3) as f64 * 10.0)).collect();
         assert!(desglose(&lineas).len() <= 12);
     }
+
+    /* ── REV-16 · prorrateo de un cobro parcial ──────────────────────────── */
+
+    #[test]
+    fn un_cobro_parcial_conserva_el_peso_de_CADA_tipo() {
+        // Comida al 10 % y alcohol al 21 %: el ticket de cualquier bar. Antes todo se declaraba al
+        // tipo de la PRIMERA línea, así que la mitad del IVA salía mal.
+        let lineas = [sujeta(110.0, 10.0), sujeta(121.0, 21.0)];
+        let p = prorratear(&lineas, 115.5, 21.0);
+
+        assert_eq!(p.len(), 2);
+        assert_eq!(p[0].tipo_iva, 10.0);
+        assert_eq!(p[1].tipo_iva, 21.0);
+        // La mitad de cada una: 110 y 121 suman 231, y se cobra 115,50.
+        assert_eq!(p[0].total_con_iva, 55.0);
+        assert_eq!(p[1].total_con_iva, 60.5);
+    }
+
+    #[test]
+    fn el_reparto_suma_EXACTAMENTE_lo_cobrado() {
+        // Tres líneas iguales y un importe que no se divide entre tres: el céntimo que sobra tiene
+        // que caer en alguna parte, o base + cuota dejan de dar el total (error 2005 de la AEAT).
+        let lineas = [sujeta(10.0, 10.0), sujeta(10.0, 10.0), sujeta(10.0, 10.0)];
+        let p = prorratear(&lineas, 10.0, 10.0);
+
+        let total: f64 = p.iter().map(|l| l.total_con_iva).sum();
+        assert!((total - 10.0).abs() < 1e-9, "{total}");
+    }
+
+    #[test]
+    fn una_linea_exenta_sigue_siendo_exenta_aunque_la_otra_no_lo_sea() {
+        // El caso peor de los de antes: `exento` sólo era cierto si lo eran TODAS, así que esto se
+        // declaraba entero como sujeto y al tipo de la exenta (0 %). Dos afirmaciones legales
+        // falsas de una vez.
+        let lineas = [exenta(50.0, "E1"), sujeta(50.0, 21.0)];
+        let p = prorratear(&lineas, 50.0, 21.0);
+
+        assert_eq!(p.len(), 2);
+        assert!(p[0].exento);
+        assert_eq!(p[0].causa_exencion.as_deref(), Some("E1"));
+        assert!(!p[1].exento);
+        assert_eq!(p[1].tipo_iva, 21.0);
+
+        // Y el desglose que sale de ahí tiene sus dos tramos, cada uno de su clase.
+        let d = desglose(&p);
+        assert_eq!(d.len(), 2);
+        assert!(matches!(d[0], TramoIva::Sujeta { tipo: 21.0, .. }));
+        assert!(matches!(&d[1], TramoIva::Exenta { causa, .. } if causa == "E1"));
+    }
+
+    #[test]
+    fn sin_lineas_se_declara_el_importe_al_tipo_general() {
+        // No debería pasar, pero el registro tiene que salir igualmente: el cobro es el hecho
+        // fiscal y no puede quedarse sin factura porque falte el detalle.
+        let p = prorratear(&[], 12.5, 21.0);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].total_con_iva, 12.5);
+        assert_eq!(p[0].tipo_iva, 21.0);
+        assert!(!p[0].exento);
+    }
+
+    #[test]
+    fn unas_lineas_que_suman_cero_no_bloquean_la_factura() {
+        // Invitaciones a 0,00 y un cobro por encima: no hay proporción que repartir. Se declara el
+        // importe con la forma de la primera línea en vez de dividir por cero.
+        let p = prorratear(&[sujeta(0.0, 10.0)], 5.0, 21.0);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].total_con_iva, 5.0);
+        assert_eq!(p[0].tipo_iva, 10.0);
+    }
+
+    #[test]
+    fn las_lineas_que_se_quedan_en_cero_no_generan_un_tramo_vacio() {
+        // Un cobro de céntimos sobre un ticket grande: la línea pequeña redondea a 0,00 y un tramo
+        // de base cero no dice nada. Lo que no puede cambiar es la suma.
+        let lineas = [sujeta(1000.0, 10.0), sujeta(0.05, 21.0)];
+        let p = prorratear(&lineas, 0.10, 10.0);
+
+        assert!(p.iter().all(|l| l.total_con_iva != 0.0));
+        let total: f64 = p.iter().map(|l| l.total_con_iva).sum();
+        assert!((total - 0.10).abs() < 1e-9, "{total}");
+    }
+
+    #[test]
+    fn cobrar_el_total_exacto_no_cambia_nada() {
+        // La garantía de que esto no toca el camino normal: si se cobra la suma de las líneas, el
+        // reparto devuelve las mismas líneas.
+        let lineas = [sujeta(110.0, 10.0), sujeta(121.0, 21.0)];
+        let p = prorratear(&lineas, 231.0, 21.0);
+        assert_eq!(p[0].total_con_iva, 110.0);
+        assert_eq!(p[1].total_con_iva, 121.0);
+    }
+
 }

@@ -896,20 +896,18 @@ pub async fn emitir_cobro(
         //   * un cobro que no enlaza líneas (no debería pasar, pero no puede impedir facturar), y
         //   * un cobro PARCIAL de una línea, donde lo cobrado no es la suma de las líneas enteras.
         // En los dos, lo que se declara es el importe del cobro, que es el hecho fiscal: la
-        // factura es el cobro. Se pierde el detalle por tipo, no el dinero — y si todas las líneas
-        // van al mismo tipo (el caso de un bar), no se pierde ni eso.
-        let tipo = lineas
-            .first()
-            .map(|l| l.tipo_iva)
-            .unwrap_or(obligado.iva_general);
-        let exento = !lineas.is_empty() && lineas.iter().all(|l| l.exento);
-        let causa = lineas.first().and_then(|l| l.causa_exencion.clone());
-        lineas = vec![LineaTicket {
-            total_con_iva: importe_pago,
-            tipo_iva: tipo,
-            exento,
-            causa_exencion: causa,
-        }];
+        // factura es el cobro.
+        //
+        // REV-16: lo que se hacía era colapsarlo todo en UNA línea al tipo de la primera, y eso
+        // declara mal el IVA en cuanto el ticket mezcla tipos — comida al 10 % y alcohol al 21 %,
+        // o sea lo normal en un bar. Con las exentas era peor: sólo se declaraba exento si lo eran
+        // todas, así que una línea exenta junto a otra que no lo es salía entera como *sujeta* y
+        // al tipo de la exenta. Ahora se reparte en proporción (`ticket::prorratear`), que
+        // conserva el peso de cada tipo y cuadra al céntimo.
+        //
+        // ⚠️ Esto no lo habría cazado nadie de fuera: la AEAT acepta una `CuotaTotal` descuadrada
+        // sin decir nada (`docs/PRUEBAS_AEAT.md`). El único control es esta aritmética.
+        lineas = ticket::prorratear(&lineas, importe_pago, obligado.iva_general);
     }
 
     emitir_alta(

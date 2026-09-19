@@ -1532,6 +1532,18 @@ no dejar de hacerlo.
   pone en un `<choice>`: informar tipo o cuota en un tramo exento es el error 1238. La causa de
   exención (`E1`…`E6`) la lleva el producto (`Productos.Exento`, `Causa_Exencion`) y se congela en la
   línea al vender, como el nombre y el tipo.
+- **Un cobro parcial se reparte en proporción, no se colapsa (REV-16).** Cuando lo cobrado no es la
+  suma de las líneas enteras, el desglose salía de UNA línea al tipo de **la primera**: con comida
+  al 10 % y alcohol al 21 % —o sea, un ticket de bar— la mitad del IVA se declaraba mal. Y con las
+  exentas era peor, porque la condición era «exento sólo si lo son todas»: una línea exenta junto a
+  otra que no lo es salía entera como *sujeta* y al tipo de la exenta, dos afirmaciones legales
+  falsas de una vez. Ahora lo reparte `tpv_domain::ticket::prorratear`, que conserva el peso de
+  cada tipo y **cuadra al céntimo** (el resto va a la línea mayor). Hoy es latente —los tres
+  caminos de cobro pagan líneas enteras— y se arregla igualmente porque el día que exista un botón
+  de «cobrar un importe» el fallo ya estaría emitido. ⚠️ Y no lo habría cazado nadie de fuera: la
+  AEAT **acepta una `CuotaTotal` descuadrada sin decir nada** (`docs/PRUEBAS_AEAT.md`); esta
+  aritmética y sus tablas de golden son el único control que hay.
+
 - **Anular y devolver no son lo mismo** (§13). Un cobro anulado **por error** emite un registro de
   **anulación**; una **devolución** al cliente emite una rectificativa `R5` y no deshace nada. Lo
   decide `ClaseBaja` en `anular_pago`, y de ello depende si las líneas y el stock vuelven.
