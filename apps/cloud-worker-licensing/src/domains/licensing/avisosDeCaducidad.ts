@@ -2,17 +2,17 @@
 //
 // «Tu licencia caduca pronto, renuévala aquí» (REV-13).
 //
-// Es la otra mitad de hacer explícita la renovación. Mientras renovar consistió en volver al mismo
-// enlace de compra, el worker no tenía forma de saber si una compra era un alta o una renovación y
-// lo adivinaba por el cliente de Stripe — de ahí que quien abría un segundo local pagara y no
-// recibiera clave. Ahora la renovación tiene su propio Price (`metadata.intent = renewal`) y su
-// propio enlace, que lleva dentro QUÉ licencia renueva. Este job es quien pone ese enlace en manos
-// del cliente; sin él, el camino correcto existiría y no lo conocería nadie.
+// Una licencia que caduca no avisa sola: el cliente se entera el día que el TPV deja de vender, y
+// ése es el peor momento posible. Este job es lo único que lo adelanta.
+//
+// El enlace es **el de compra de siempre** (`CHECKOUT_URL`), no uno especial de renovación: lo que
+// convierte esa compra en tiempo añadido es activar la clave en un equipo que ya tiene licencia
+// (REV-13, `licensing.routes.ts`). Así no hay forma de equivocarse comprando por el sitio que no
+// es, que era la trampa de la primera versión de esto.
 //
 // Reglas:
-//   · **Sin `RENEWAL_URL` no se manda nada.** Un aviso de caducidad sin enlace empuja al cliente
-//     al enlace de compra normal, que le emitiría una clave nueva: exactamente el problema que
-//     esto viene a quitar. Fallar callado es mejor que fallar enseñando el camino equivocado.
+//   · **Sin `CHECKOUT_URL` no se manda nada.** Un aviso que no lleva a ninguna parte no es un
+//     aviso: deja al cliente sabiendo que tiene un problema y sin qué hacer con él.
 //   · **Un aviso por licencia y por ciclo**, el más urgente que le toque. Con dos peldaños
 //     independientes, una licencia que entra al catálogo con 5 días por delante recibiría los dos
 //     correos el mismo día.
@@ -48,29 +48,23 @@ export const PELDANOS = [
 const DIAS_MAX = Math.max(...PELDANOS.map((p) => p.dias));
 
 /**
- * El enlace de renovación de UNA licencia concreta.
+ * El enlace de compra que va en el aviso.
  *
- * `RENEWAL_URL` es el Payment Link del Price de renovación (el que lleva `metadata.intent =
- * renewal`), y lo que se le añade aquí es el `client_reference_id`: el `license_id` que Stripe
- * devuelve intacto en la sesión y con el que el webhook sabe cuál alargar. Sin ese parámetro la
- * compra llegaría marcada como renovación y sin destino, y acabaría emitiendo una licencia nueva.
- *
- * `prefilled_email` es sólo comodidad — el dueño no tiene que teclear su correo—, pero además
- * ayuda a que Stripe reutilice el Customer que ya existe, que es lo que luego permite reconocer
- * el pago como suyo aunque el enlace se hubiera reenviado.
+ * Es el de siempre: no hay enlace «de renovación». Lo único que se le añade es el correo, que es
+ * comodidad para quien lo abre — y de paso ayuda a que Stripe reutilice el cliente que ya existe,
+ * que deja el historial de compras junto en vez de repartido.
  */
-export function enlaceDeRenovacion(env: Env, license: LicenseRow): string | null {
-	const base = String(env.RENEWAL_URL || "").trim();
+export function enlaceDeCompra(env: Env, license: LicenseRow): string | null {
+	const base = String(env.CHECKOUT_URL || "").trim();
 	if (!base) return null;
 
 	try {
 		const url = new URL(base);
-		url.searchParams.set("client_reference_id", license.license_id);
 		const correo = String(license.customer_email || "").trim();
 		if (correo) url.searchParams.set("prefilled_email", correo);
 		return url.toString();
 	} catch {
-		console.error("[avisos] RENEWAL_URL no es una URL válida:", base);
+		console.error("[avisos] CHECKOUT_URL no es una URL válida:", base);
 		return null;
 	}
 }
@@ -100,11 +94,11 @@ export async function avisarDeCaducidades(
 		enviados: 0,
 		yaAvisadas: 0,
 		fallidos: 0,
-		sinEnlace: !String(env.RENEWAL_URL || "").trim(),
+		sinEnlace: !String(env.CHECKOUT_URL || "").trim(),
 	};
 
 	if (resumen.sinEnlace) {
-		console.error("[avisos] falta RENEWAL_URL: no se avisa de ninguna caducidad");
+		console.error("[avisos] falta CHECKOUT_URL: no se avisa de ninguna caducidad");
 		return resumen;
 	}
 
@@ -128,7 +122,7 @@ export async function avisarDeCaducidades(
 			continue;
 		}
 
-		const enlace = enlaceDeRenovacion(env, license);
+		const enlace = enlaceDeCompra(env, license);
 		if (!enlace) {
 			await olvidarAvisoEnviado(db, { licenseId: license.license_id, kind: peldano.kind, expiresAtMs });
 			resumen.fallidos += 1;

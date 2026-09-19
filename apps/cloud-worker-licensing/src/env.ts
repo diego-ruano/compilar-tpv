@@ -41,15 +41,14 @@ export interface Env {
 	STRIPE_SECRET_KEY?: string;
 	STRIPE_WEBHOOK_SECRET?: string;
 
-	// REV-13 · El Payment Link del Price de RENOVACIÓN, o sea el que lleva `metadata.intent =
-	// renewal`. No es el enlace de compra normal, y confundirlos deshace el arreglo entero: una
-	// renovación comprada por el enlace de alta emite una clave nueva en vez de alargar la que hay.
+	// REV-13 · El enlace público donde el cliente compra. Uno solo, y sirve para las dos cosas:
+	// si teclea la clave en un equipo que ya tiene licencia, se le suma el tiempo; si no, estrena.
+	// Lo decide `licensing.routes.ts` al activar, no el enlace por el que se compró — que es lo
+	// que hace que nadie pueda equivocarse comprando.
 	//
-	// El worker le añade el `client_reference_id` con el `license_id` (ver
-	// `domains/licensing/avisosDeCaducidad.ts`), que es lo que le dice al webhook CUÁL renovar.
-	// Sin esta variable no se manda ningún aviso de caducidad: un aviso sin enlace empuja al
-	// cliente al enlace equivocado.
-	RENEWAL_URL?: string;
+	// Lo usa el correo de aviso de caducidad. Sin esta variable no se manda ningún aviso: uno que
+	// no lleva a ninguna parte es peor que no mandarlo.
+	CHECKOUT_URL?: string;
 
 	// Turso Platform API (crear DBs + tokens por-tenant)
 	TURSO_PLATFORM_TOKEN: string;

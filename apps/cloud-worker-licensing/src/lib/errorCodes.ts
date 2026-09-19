@@ -224,6 +224,11 @@ export const MENSAJES: Readonly<Record<string, string>> = {
 	demasiadas_solicitudes: "Se han pedido demasiados códigos. Espera un rato antes de pedir otro.",
 	espera_reenvio: "Espera unos minutos antes de pedir otro código.",
 	sin_correo: "La licencia no tiene un correo al que enviar el código.",
+	// REV-13: se teclea un código que ya se usó. Lo normal es reintentar un canje que ya salió
+	// bien (y los meses ya están sumados), así que el texto tiene que evitar que lo vuelva a
+	// intentar creyendo que no se aplicó.
+	license_already_used:
+		"Ese código ya se ha usado. Si acabas de canjearlo, el tiempo ya está sumado a tu licencia.",
 };
 
 export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([

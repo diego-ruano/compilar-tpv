@@ -97,6 +97,117 @@ export async function getLicenseById(db: Sql, licenseId: string): Promise<Licens
  * deshabilitada y aún dentro de su `expires_at_ms` (o sin activar todavía).
  */
 /**
+ * Exige que un equipo YA conocido presente la clave pública con la que está registrado (REV-13).
+ *
+ * `exigirClaveSiEsDeOtroNegocio` no sirve aquí: aquél cubre el robo ENTRE negocios y se aparta en
+ * cuanto el dispositivo es del tenant que autoriza, que es justo el caso del canje. Y el
+ * `device_id` no es un secreto —viaja en los mensajes de presencia del WebSocket (REV-07)—, así
+ * que sin esto bastaría con conocer el de otro bar para gastar una clave sobre su licencia.
+ *
+ * Un dispositivo sin clave registrada pasa: es el mismo hueco que deja
+ * `setDevicePubKeyB64IfEmptyOrThrow` para poder rellenarla la primera vez.
+ */
+export async function exigirLaClaveDeEsteEquipo(
+	db: Sql,
+	deviceId: string,
+	pubB64: string,
+): Promise<void> {
+	const r = await exec(
+		db,
+		`SELECT device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
+		[deviceId],
+	);
+	const registrada = String((r.rows?.[0] as any)?.device_pubkey_b64 || "").trim();
+	if (!registrada || registrada === pubB64.trim()) return;
+
+	const err: any = new Error("device_key_mismatch");
+	err.code = "device_key_mismatch";
+	throw err;
+}
+
+/**
+ * La licencia viva de la que este equipo es la Main, si la hay (REV-13).
+ *
+ * Es lo que convierte una clave nueva en tiempo añadido en vez de en un negocio nuevo: el mismo
+ * enlace de compra sirve para estrenar y para renovar, y lo que decide es lo que el TPV ya tiene
+ * cuando se teclea el código, no por dónde se compró.
+ *
+ * `active` y `expired`, las dos: renovar cuando ya se te ha pasado la fecha es EL caso normal.
+ * `revoked` no — a quien se le ha cortado el servicio no se le devuelve pagando otra clave; eso
+ * pasa por administración.
+ */
+export async function licenciaVivaDelDispositivo(
+	db: Sql,
+	deviceId: string,
+): Promise<LicenseRow | null> {
+	const r = await exec(
+		db,
+		`
+    SELECT * FROM licenses
+    WHERE main_device_id = ?
+      AND disabled = 0
+      AND status IN ('active', 'expired')
+    ORDER BY expires_at_ms DESC
+    LIMIT 1;
+    `,
+		[deviceId],
+	);
+	return (r.rows?.[0] as unknown as LicenseRow) ?? null;
+}
+
+/**
+ * Gasta una clave **sin estrenar** sobre otra licencia, y dice si ha sido esta llamada la que la
+ * ha gastado (REV-13).
+ *
+ * El `WHERE` es la mitad importante: sólo se canjea lo que sigue `issued` y sin equipo. Una
+ * licencia **ya activada no suma tiempo** —decisión de producto: si lo que quieres es mover una
+ * licencia a otro local, eso es un cambio de equipo y va por su propia pantalla, reciclando la que
+ * hay en vez de creando otra—. Y mirar `rowsAffected` es la lección de REV-15: una condición de
+ * carrera que nadie comprueba no es una condición de carrera, y aquí dos intentos a la vez
+ * sumarían el doble de meses.
+ */
+export async function canjearLicencia(
+	db: Sql,
+	claveId: string,
+	sobreLicenciaId: string,
+): Promise<boolean> {
+	const r = await exec(
+		db,
+		`UPDATE licenses
+        SET status = 'redeemed',
+            redeemed_into_license_id = ?,
+            updated_at_ms = ?
+      WHERE license_id = ?
+        AND status = 'issued'
+        AND main_device_id IS NULL
+        AND disabled = 0;`,
+		[sobreLicenciaId, Date.now(), claveId],
+	);
+	return Number((r as any)?.rowsAffected ?? 0) > 0;
+}
+
+/**
+ * Pasa el cobro de una clave canjeada a la licencia que recibió su tiempo, como renovación.
+ *
+ * Sin esto, un reembolso de esa compra no quitaría nada: `localizarCobro` (LIC-07) llega al cobro
+ * por el `payment_intent`, y ese cobro seguiría apuntando a la clave gastada —que ya no tiene
+ * meses que quitar— en vez de a la licencia donde de verdad fueron a parar. Se **mueve** en vez de
+ * insertar otro porque `license_payments` tiene índice único por sesión de checkout: dos filas con
+ * la misma sesión es justo lo que esa barrera impide.
+ */
+export async function reasignarCobrosDeLaClave(
+	db: Sql,
+	claveId: string,
+	aLicenciaId: string,
+): Promise<void> {
+	await exec(
+		db,
+		`UPDATE license_payments SET license_id = ?, kind = 'renewal' WHERE license_id = ?;`,
+		[aLicenciaId, claveId],
+	);
+}
+
+/**
  * Las licencias a las que les queda poco y hay que avisar (REV-13).
  *
  * Sólo **activadas**: una `issued` que nadie ha estrenado no tiene reloj corriendo, así que no

@@ -72,6 +72,11 @@ pub struct Concesion {
     /// La licencia estaba en otro equipo y se ha trasladado a éste. Lo que haya en la base local
     /// es de antes del traslado y no se reutiliza: se reconstruye desde la nube.
     pub cambio_de_equipo: bool,
+    /// REV-13 · La clave no ha estrenado nada: le ha **sumado su tiempo** a la licencia que este
+    /// equipo ya tenía. No hay negocio nuevo, ni base que reconstruir — sigue todo igual con más
+    /// meses por delante. Es lo contrario de `cambio_de_equipo` y por eso son dos campos: uno dice
+    /// «tus datos son de antes y no valen» y el otro «no ha cambiado nada».
+    pub tiempo_sumado: bool,
 }
 
 /// Resultado de intentar activar. El servidor puede exigir un código de cambio de dispositivo

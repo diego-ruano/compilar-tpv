@@ -52,7 +52,7 @@ import {
 	upsertWebhookEvent,
 } from "../../server/licenseStore";
 import type { LicenseRow, LicensePaymentRow } from "../../server/licenseStore";
-import { sendLicenseKeyEmail, sendLicenseRenewedEmail } from "../licensing/licenseEmails";
+import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
 import {
 	customerAddressJsonFromSession,
@@ -61,8 +61,6 @@ import {
 	customerIdFromSession,
 	customerNameFromSession,
 	customerPhoneFromSession,
-	intencionDeLaCompra,
-	licenseIdFromSession,
 	paymentIntentIdFromSession,
 	priceIdFromSession,
 	retrieveCheckoutSession,
@@ -188,56 +186,6 @@ export type Cumplimiento =
  * Recibe la sesión ya leída de Stripe para que la llamada de red quede fuera de la transacción
  * (y para que los tests puedan pasarle una sin salir a internet).
  */
-/**
- * A QUÉ licencia se aplica una renovación (REV-13), o por qué a ninguna.
- *
- * La pregunta ya no es «¿este cliente tiene alguna licencia viva?» —que era la adivinanza— sino
- * «¿el enlace por el que ha pagado nombra una licencia que se pueda renovar, y es suya?».
- *
- * Los rechazos son informativos: quien llama emite una licencia nueva igualmente (quien paga se
- * lleva algo que funciona) y deja el motivo anotado. Cada uno dice una cosa distinta al mirar el
- * historial, y por eso no se colapsan en un booleano.
- */
-async function licenciaQueRenueva(
-	tx: Sql,
-	session: any,
-	email: string,
-	customerId: string | null,
-): Promise<{ license: LicenseRow } | { rechazo: string }> {
-	const licenseId = licenseIdFromSession(session);
-	// Un Price marcado como renovación cuyo enlace no lleva licencia: casi siempre, el enlace de
-	// pago suelto en vez del que genera el correo de aviso.
-	if (!licenseId) return { rechazo: "sin_license_id" };
-
-	const license = await getLicenseById(tx, licenseId);
-	if (!license) return { rechazo: "license_id_desconocido" };
-
-	// Anulada o deshabilitada: renovarla la resucitaría por la puerta de atrás, sin pasar por
-	// administración. Si de verdad hay que devolverle el servicio, eso es un `reactivate`.
-	if (license.status === "revoked" || Number(license.disabled) === 1) {
-		return { rechazo: "licencia_anulada" };
-	}
-
-	// Emitida y nunca estrenada: no hay reloj corriendo, así que no hay nada que alargar —
-	// extenderla le pondría caducidad a una clave que el cliente todavía no ha instalado, que es
-	// justo uno de los dos casos que REV-13 describe. `expired` sí se renueva: es EL caso normal.
-	if (!license.expires_at_ms || license.status === "issued") {
-		return { rechazo: "licencia_sin_estrenar" };
-	}
-
-	// Que el enlace sea suyo. No es una frontera de seguridad —renovar la licencia de otro es
-	// pagarle el año, no robarle nada—: es una comprobación de que el pago va donde el cliente
-	// cree. Vale el cliente de Stripe O el correo, porque un checkout puede crear un Customer
-	// nuevo si el comprador escribe el correo con otra grafía, y rechazar por eso una renovación
-	// legítima sería cambiar un acierto raro por un fallo frecuente.
-	const mismoCliente = !!customerId && license.stripe_customer_id === customerId;
-	const mismoCorreo =
-		String(license.customer_email || "").trim().toLowerCase() === email.trim().toLowerCase();
-	if (!mismoCliente && !mismoCorreo) return { rechazo: "otro_cliente" };
-
-	return { license };
-}
-
 export async function cumplir(
 	env: Env,
 	db: ReturnType<typeof getDb>,
@@ -281,50 +229,13 @@ export async function cumplir(
 		const yaCumplida = await getLicensePaymentBySession(tx, sessionId);
 		if (yaCumplida) return { tipo: "ya_cumplida" as const, license_id: yaCumplida.license_id };
 
-		// REV-13: renovar o dar de alta lo dice la COMPRA, no lo adivina el worker.
-		//
-		// Antes se miraba si ese cliente de Stripe ya tenía una licencia viva y, si la tenía, se le
-		// extendía. El que abría un segundo local pagaba y no recibía clave. Ahora hay dos
-		// preguntas separadas y las dos las contesta el pago: `intent=renewal` en el Price dice
-		// QUE es una renovación, y el `client_reference_id` del enlace dice CUÁL.
-		const objetivo =
-			intencionDeLaCompra(session) === "renovacion"
-				? await licenciaQueRenueva(tx, session, email, customerId)
-				: null;
-
-		if (objetivo && "license" in objetivo) {
-			const renovable = objetivo.license;
-			const expiresAtMs = await extendLicense(tx, renovable.license_id, termMonths);
-			await attachStripeSession(tx, renovable.license_id, {
-				sessionId,
-				customerId,
-				paymentIntentId,
-				priceId,
-			});
-
-			// LIC-07: `attachStripeSession` sobrescribe el cobro anterior en `licenses`, así que el
-			// historial es lo único que permite atribuir después un reembolso de ESTA renovación y
-			// saber cuántos meses hay que quitar.
-			await recordLicensePayment(tx, {
-				licenseId: renovable.license_id,
-				kind: "renewal",
-				termMonths,
-				sessionId,
-				paymentIntentId,
-			});
-
-			return { tipo: "renovada" as const, license: renovable, expiresAtMs };
-		}
-
-		// Se pagó una renovación y no hay a qué aplicarla: enlace viejo, licencia anulada, o el
-		// `license_id` de otro cliente. **Se emite una licencia nueva**, que es la dirección en la
-		// que este error se puede deshacer: quien ha pagado se queda con algo que funciona, y una
-		// clave de más se usa o se devuelve. La alternativa —no entregar nada, o alargarle la
-		// licencia a un tercero— deja al cliente sin producto y sin forma de saber por qué.
-		//
-		// Queda anotado en `admin_audit` porque es un síntoma, no un caso normal: si empieza a
-		// salir, o el correo manda un enlace caducado o alguien está compartiendo el suyo.
-		const anomalia = objetivo && "rechazo" in objetivo ? objetivo.rechazo : null;
+		// REV-13: aquí ya no se decide nada. Toda compra emite una clave, y lo que convierte esa
+		// clave en tiempo añadido o en un negocio nuevo pasa al activarla, en
+		// `licensing.routes.ts`: si el equipo que la teclea ya es la Main de una licencia, le suma
+		// sus meses; si no, estrena. Así el mismo enlace de compra vale para las dos cosas y el
+		// cliente no tiene que acertar con nada — que era el problema: antes se adivinaba por el
+		// cliente de Stripe, así que comprar con los mismos datos extendía la licencia que había y
+		// el dueño de un segundo local pagaba y no recibía clave.
 
 		const { license, keyPlain } = await issueLicense(tx, {
 			storeKeyB64: env.LICENSE_STORE_KEY,
@@ -349,38 +260,11 @@ export async function cumplir(
 			paymentIntentId,
 		});
 
-		if (anomalia) {
-			console.warn(
-				`[stripe] renovación sin destino (${anomalia}): se emitió la licencia ${license.license_id} ` +
-					`para la sesión ${sessionId}`,
-			);
-			await auditAdmin(tx, "issue", license.license_id, {
-				motivo: "renovacion_sin_destino",
-				rechazo: anomalia,
-				session_id: sessionId,
-				license_id_pedido: licenseIdFromSession(session),
-			});
-		}
-
 		return { tipo: "emitida" as const, license, keyPlain };
 	});
 
 	if (hecho.tipo === "ya_cumplida") {
 		return { accion: "ya_cumplida", license_id: hecho.license_id };
-	}
-
-	if (hecho.tipo === "renovada") {
-		await sendLicenseRenewedEmail(env, {
-			to: hecho.license.customer_email,
-			name: hecho.license.customer_name,
-			termMonths,
-			expiresAtMs: hecho.expiresAtMs,
-		});
-		return {
-			accion: "renovada",
-			license_id: hecho.license.license_id,
-			expires_at_ms: hecho.expiresAtMs,
-		};
 	}
 
 	const { license, keyPlain } = hecho;

@@ -1,18 +1,18 @@
 // test/avisoDeCaducidad.test.ts
 //
-// REV-13 · La otra mitad: el correo que pone el enlace de renovación en manos del cliente.
+// REV-13 · El aviso de caducidad.
 //
-// Sin esto, el camino correcto existe y no lo conoce nadie: el cliente vuelve al enlace de compra
-// normal, y eso le emite una licencia nueva — que es justo lo que el arreglo viene a quitar. De
-// ahí que el job se niegue a mandar nada si no hay enlace de renovación configurado: un aviso sin
-// botón empuja al sitio equivocado.
+// Una licencia que caduca no avisa sola: el cliente se entera el día que el TPV deja de vender.
+// El enlace es el de compra de siempre —lo que convierte esa compra en tiempo añadido es activar
+// la clave en un equipo que ya tiene licencia—, así que aquí lo que se fija es el reparto de los
+// avisos: a quién, cuántas veces y qué pasa cuando el correo no sale.
 
 import { describe, it, expect } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { avisarDeCaducidades, enlaceDeRenovacion } from "../src/domains/licensing/avisosDeCaducidad";
+import { avisarDeCaducidades, enlaceDeCompra } from "../src/domains/licensing/avisosDeCaducidad";
 
 const DIA = 24 * 60 * 60 * 1000;
 const AHORA = 1_800_000_000_000;
@@ -24,7 +24,7 @@ function entorno(extra: Record<string, unknown> = {}) {
 	const env = {
 		EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
 		EMAIL_FROM_NAME: "TPV",
-		RENEWAL_URL: "https://buy.stripe.com/renovacion",
+		CHECKOUT_URL: "https://buy.stripe.com/renovacion",
 		EMAIL: {
 			send: async (msg: Correo) => {
 				enviados.push(msg);
@@ -217,7 +217,7 @@ describe("REV-13 · cuántas veces se avisa", () => {
 			const enviados: any[] = [];
 			const env = {
 				EMAIL_FROM_ADDRESS: "pedidos@ejemplo.test",
-				RENEWAL_URL: "https://buy.stripe.com/renovacion",
+				CHECKOUT_URL: "https://buy.stripe.com/renovacion",
 				EMAIL: {
 					send: async (msg: any) => {
 						if (rota) throw new Error("buzón caído");
@@ -242,26 +242,25 @@ describe("REV-13 · cuántas veces se avisa", () => {
 });
 
 describe("REV-13 · el enlace", () => {
-	it("lleva dentro el license_id, que es lo que hace que la compra se reconozca como renovación", async () => {
+	it("es el enlace de compra de siempre, con el correo puesto", async () => {
 		const { env } = entorno();
 		const url = new URL(
-			enlaceDeRenovacion(env, {
+			enlaceDeCompra(env, {
 				license_id: "lic-abc",
 				customer_email: "bar@ejemplo.test",
 			} as any)!,
 		);
 
 		expect(url.origin + url.pathname).toBe("https://buy.stripe.com/renovacion");
-		expect(url.searchParams.get("client_reference_id")).toBe("lic-abc");
 		expect(url.searchParams.get("prefilled_email")).toBe("bar@ejemplo.test");
 	});
 
-	it("sin RENEWAL_URL no se manda ningún aviso", async () => {
-		// Fallar callado es mejor que fallar enseñando el camino equivocado: un aviso sin botón
-		// manda al cliente al enlace de compra, y eso le emite una clave nueva.
+	it("sin CHECKOUT_URL no se manda ningún aviso", async () => {
+		// Un aviso que no lleva a ninguna parte no es un aviso: deja al cliente sabiendo que tiene
+		// un problema y sin qué hacer con él.
 		const r = await escenario("sin-enlace", async (e) => {
 			e.licencia("lic-1", 25);
-			const { env, enviados } = entorno({ RENEWAL_URL: "" });
+			const { env, enviados } = entorno({ CHECKOUT_URL: "" });
 			return { resumen: await avisarDeCaducidades(env, e.db, AHORA), enviados, avisos: e.avisos() };
 		});
 

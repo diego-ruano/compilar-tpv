@@ -655,7 +655,13 @@ export type LicenseActivateOutcome = { outcome: string, state: LicenseLocalState
 /**
  * La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube.
  */
-cambio_de_equipo: boolean, };
+cambio_de_equipo: boolean, 
+/**
+ * REV-13 · El código ha sumado su tiempo a la licencia que este equipo ya tenía, en vez de
+ * estrenar un negocio nuevo. La pantalla lo dice con otras palabras («se han añadido N
+ * meses») y no hay nada más que hacer.
+ */
+tiempo_sumado: boolean, };
 
 /**
  * Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la

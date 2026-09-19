@@ -20,7 +20,6 @@ import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { cumplir } from "../src/domains/stripe/stripe.routes";
 import {
 	activateLicenseFirstTime,
-	addMonths,
 	getLicenseById,
 	markWebhookProcessed,
 	upsertWebhookEvent,
@@ -160,35 +159,27 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 		expect(r.cobros).toBe(1);
 	});
 
-	it("una renovación suma sus meses una vez aunque llegue dos veces", async () => {
+	it("una segunda compra del mismo cliente emite OTRA clave (REV-13)", async () => {
+		// Antes el webhook adivinaba: si ese cliente de Stripe ya tenía una licencia viva, la
+		// compra nueva se la EXTENDÍA. O sea que comprar con los mismos datos era lo que disparaba
+		// la renovación, y el dueño de un segundo local pagaba y no recibía clave. Ahora el
+		// webhook no decide nada: emite. Lo que convierte una clave en tiempo añadido es
+		// teclearla en un equipo que ya tiene licencia, y eso pasa al activar.
 		const r = await escenario(async (e) => {
-			const lic = await e.licenciaActivada();
-			const renovar = sesionRenovacion("cs_renovacion", lic.license_id);
-			const primera = await cumplir(ENV, e.db, renovar);
-			const segunda = await cumplir(ENV, e.db, renovar);
-			return { antes: lic.expires_at_ms!, primera, segunda, final: await e.leer(lic.license_id) };
+			const primera = await e.licenciaActivada();
+			const segunda = await cumplir(ENV, e.db, sesion("cs_segundo_local"));
+			return {
+				primera,
+				segunda,
+				licencias: e.contar("licenses"),
+				primeraFinal: await e.leer(primera.license_id),
+			};
 		});
 
-		expect(r.primera.accion).toBe("renovada");
-		expect(r.segunda.accion).toBe("ya_cumplida");
-		expect(r.final.expires_at_ms).toBe(addMonths(r.antes, 12));
-	});
-
-	it("el reintento de una renovación antigua no extiende aunque haya habido otra después", async () => {
-		// `licenses.stripe_checkout_session_id` guarda sólo la ÚLTIMA sesión: con la barrera ahí, la
-		// renovación A ya no se reconocía en cuanto llegaba la B.
-		const r = await escenario(async (e) => {
-			const lic = await e.licenciaActivada();
-			await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_a", lic.license_id));
-			await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_b", lic.license_id));
-			const trasB = (await e.leer(lic.license_id)).expires_at_ms;
-
-			const reintentoA = await cumplir(ENV, e.db, sesionRenovacion("cs_renovacion_a", lic.license_id));
-			return { trasB, reintentoA, final: (await e.leer(lic.license_id)).expires_at_ms };
-		});
-
-		expect(r.reintentoA.accion).toBe("ya_cumplida");
-		expect(r.final).toBe(r.trasB);
+		expect(r.segunda.accion).toBe("emitida");
+		expect(r.licencias).toBe(2);
+		// Y a la del primer local no se le ha tocado ni un día.
+		expect(r.primeraFinal.expires_at_ms).toBe(r.primera.expires_at_ms);
 	});
 
 	it("la base rechaza dos cobros con la misma sesión", async () => {
@@ -209,38 +200,6 @@ describe("REV-01 · una sesión se cumple una sola vez", () => {
 });
 
 describe("REV-01 · un fallo a mitad no deja nada a medias", () => {
-	it("renovación: si falla el registro del cobro no se extiende, y el reintento extiende una vez", async () => {
-		const r = await escenario(async (e) => {
-			const lic = await e.licenciaActivada();
-			const renovar = sesionRenovacion("cs_renovacion", lic.license_id);
-
-			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);
-			const error = await cumplir(ENV, conFallo, renovar).catch((err) => err);
-			const trasFallo = await e.leer(lic.license_id);
-			const cobrosTrasFallo = e.contar("license_payments");
-
-			const reintento = await cumplir(ENV, e.db, renovar);
-			return {
-				antes: lic,
-				error,
-				trasFallo,
-				cobrosTrasFallo,
-				reintento,
-				final: await e.leer(lic.license_id),
-			};
-		});
-
-		expect(String(r.error?.message)).toBe("fallo_simulado");
-		// Ni los meses ni la sesión: la extensión y el sellado se deshicieron con el cobro.
-		expect(r.trasFallo.expires_at_ms).toBe(r.antes.expires_at_ms);
-		expect(r.trasFallo.stripe_checkout_session_id).toBe("cs_alta");
-		expect(r.cobrosTrasFallo).toBe(1);
-
-		expect(r.reintento.accion).toBe("renovada");
-		expect(r.final.expires_at_ms).toBe(addMonths(r.antes.expires_at_ms!, 12));
-		expect(r.final.stripe_checkout_session_id).toBe("cs_renovacion");
-	});
-
 	it("alta: si falla el registro del cobro no queda licencia, y el reintento emite una", async () => {
 		const r = await escenario(async (e) => {
 			const conFallo = conFalloSimulado(e.db, /INSERT INTO license_payments/);

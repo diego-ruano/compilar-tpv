@@ -66,6 +66,13 @@ export type ActivateResponse = {
 	 * base local de este equipo, si tiene algo, no vale: la Main la reconstruye desde la nube.
 	 */
 	cambioDeEquipo: boolean;
+	/**
+	 * REV-13 · La clave no ha estrenado nada: le ha **sumado su tiempo** a la licencia que este
+	 * equipo ya tenía. No hay negocio nuevo, ni base nueva, ni nada que reconstruir — sigue todo
+	 * como estaba, con más meses por delante. Es lo que permite que el mismo enlace de compra
+	 * sirva para estrenar y para renovar.
+	 */
+	tiempoSumado?: boolean;
 };
 
 /**

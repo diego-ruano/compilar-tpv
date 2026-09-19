@@ -235,44 +235,48 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   vuelve a pedir). La regla general, que es lo que hay que recordar al añadir cualquier endpoint
   que devuelva listas: **el techo va en la respuesta, no en cada pieza**.
 
-- **Una compra de Stripe dice lo que es; el worker no lo adivina (REV-13).** Renovar y comprar una
-  segunda licencia entran por el mismo webhook, y la única señal que había era el cliente de
-  Stripe: si ya tenía una licencia viva, la compra nueva **la extendía**. O sea que comprar con los
-  mismos datos era literalmente lo que disparaba la renovación. El dueño que abría un segundo local
-  pagaba y no recibía clave; quien compraba sin haber estrenado la anterior acababa con una sola
-  clave de veinticuatro meses. Ahora hacen falta **dos** señales y las dos vienen del pago:
-  - **QUÉ es**: `metadata.intent = renewal` en el Price, por el mismo camino que `term_months`
-    (`intencionDeLaCompra`), para poder crear precios nuevos sin desplegar. **El defecto es
-    «alta»**, y ésa es la mitad importante: a un Price al que se le olvide el metadata le sobra una
-    licencia —molesto, visible y con arreglo—, mientras que dar por renovación lo que no lo es deja
-    a alguien pagando sin recibir nada.
-  - **CUÁL se renueva**: el `license_id` que el enlace lleva en `client_reference_id`
-    (`licenseIdFromSession`). Sin esto «renovación» seguiría siendo una adivinanza en cuanto
-    alguien tenga dos locales.
-  - **Una renovación sin destino EMITE una licencia** (`licenciaQueRenueva` devuelve su motivo:
-    enlace sin licencia, licencia desconocida, anulada, sin estrenar, o de otro cliente). Es la
-    dirección en la que el error se deshace: quien pagó se lleva algo que funciona. Queda anotado
-    en `admin_audit` como `renovacion_sin_destino`, porque es un síntoma y no un caso normal.
-  - **`issued` no se renueva nunca.** No hay reloj que alargar, y extenderla le pondría caducidad a
-    una clave que el cliente todavía no ha instalado. `expired` **sí**: es el caso normal.
-  - **El dueño se comprueba por cliente de Stripe O por correo.** No es una frontera de seguridad
-    —renovar la licencia de otro es pagarle el año, no robarle nada—: es que un checkout puede
-    crear un Customer nuevo si el correo se escribe con otra grafía, y rechazar por eso una
-    renovación legítima cambia un acierto raro por un fallo frecuente.
-  - **El aviso de caducidad es parte del arreglo, no un extra** (`avisosDeCaducidad.ts`, cron
-    diario en `wrangler.json` → `scheduled` en `index.ts`). Es el único sitio del que sale el
-    enlace de renovación: sin él, el camino correcto existe y no lo conoce nadie, y el cliente
-    vuelve al enlace de compra. Reglas: **sin `RENEWAL_URL` no se manda nada** (un aviso sin botón
-    empuja al sitio equivocado); **un aviso por licencia y por ciclo**, el peldaño más urgente que
-    le toque (30 y 7 días), o una licencia que entra con 5 días recibiría los dos correos a la vez;
-    y se **marca antes de enviar y sólo se envía si se ganó la marca**, soltándola si el correo
-    falla — un aviso que no ha salido no puede quedar contado como enviado.
-  - **La clave de `license_notices` incluye `expires_at_ms`.** Sin él, la fila del año pasado
-    silenciaría para siempre a una licencia que se renueva todos los años.
-  - ⚠️ **Al desplegar esto hace falta tocar Stripe y Turso**, y sin ello el arreglo no existe:
-    crear el Price de renovación con `metadata.intent = renewal` y su Payment Link, poner ese
-    enlace en `RENEWAL_URL`, y crear a mano la tabla `license_notices` en el control-plane (§4.5:
-    su estructura no la toca el código; está en `docs/sql/control-plane/esquema-actual.sql`).
+- **Un código nuevo SUMA tiempo si el equipo ya tiene licencia, y estrena si no (REV-13).** Renovar
+  y comprar el segundo local entran por el mismo sitio, y el worker lo adivinaba **por el cliente
+  de Stripe**: si ya tenía una licencia viva, la compra nueva se la extendía. O sea que comprar con
+  los mismos datos era lo que disparaba la renovación — el dueño que abría otro bar pagaba y no
+  recibía clave, y quien compraba sin haber estrenado la anterior acababa con una sola clave de
+  veinticuatro meses. Reglas:
+  - **La decisión NO está en la compra, está en la activación.** Un solo enlace, un solo tipo de
+    compra: Stripe emite y ya. Lo que convierte esa clave en tiempo añadido o en un negocio nuevo
+    es lo que el TPV tiene delante cuando se teclea, y eso no hay forma de equivocarlo. Se intentó
+    antes con un Price marcado `intent=renewal` y un enlace propio, y se retiró: hacía depender la
+    corrección de que el cliente entrara por el sitio bueno.
+  - **Canjear no crea nada.** La rama va **antes** de resolver el tenant: ni tenant, ni base en
+    Turso, ni DEK. El negocio sigue siendo el mismo con más meses, que es justo lo que hace que
+    esto no pueda perder datos — lo contrario (clave nueva → tenant nuevo) dejaba la nube huérfana.
+  - **Sólo canjea una clave SIN estrenar.** Una licencia ya activada no suma tiempo: moverla a otro
+    local es un **cambio de equipo**, que recicla la que hay y va por su propio camino con el
+    código del correo. Lo garantiza el `WHERE status='issued'` de `canjearLicencia`, y hay que
+    mirar su `rowsAffected` (REV-15) o dos intentos a la vez regalan el doble de meses.
+  - **Se suma sobre lo que quedaba, o sobre hoy si ya venció.** `extendLicense` ya lo hacía; no se
+    regala el tiempo muerto de una licencia caducada hace meses.
+  - **El cobro se muda con el tiempo** (`reasignarCobrosDeLaClave`, a `kind='renewal'`). Sin eso un
+    reembolso no tendría de dónde restar: LIC-07 llega al cobro por el `payment_intent` y se
+    encontraría apuntando a la clave gastada, que ya no tiene meses. Se **mueve** y no se inserta
+    otro porque `license_payments` tiene índice único por sesión de checkout.
+  - **La identidad del equipo se comprueba antes de gastar la clave**, con
+    `exigirLaClaveDeEsteEquipo` y **no** con `exigirClaveSiEsDeOtroNegocio`: aquél cubre el robo
+    entre negocios y se aparta en cuanto el dispositivo es del tenant que autoriza, que es este
+    caso exacto. El `device_id` no es un secreto (viaja en la presencia del WebSocket, REV-07).
+  - **Lo que queda fuera, a sabiendas:** teclear en el bar 1 el código que era para el bar 2 le
+    suma el tiempo al bar 1. Se ve en el acto —el bar 2 sigue pidiendo licencia— y por eso la
+    pantalla enseña «tiempo añadido, vence el X» y espera a que pulsen, en vez de seguir de largo.
+    Y un equipo nuevo del mismo bar que activa una clave nueva en vez de usar el cambio de
+    dispositivo empieza limpio: eso es lo que hay.
+  - **El aviso de caducidad** (`avisosDeCaducidad.ts`, cron diario → `scheduled` en `index.ts`)
+    manda al enlace de compra **de siempre** (`CHECKOUT_URL`). Sin esa variable no se manda nada:
+    un aviso que no lleva a ninguna parte deja al cliente sabiendo que tiene un problema y sin qué
+    hacer con él. Un aviso por licencia y ciclo, el peldaño más urgente (30 y 7 días); se marca
+    antes de enviar y sólo se envía si se ganó la marca, soltándola si el correo falla. La clave de
+    `license_notices` incluye `expires_at_ms`, o la fila del año pasado silenciaría para siempre a
+    una licencia que se renueva todos los años.
+  - ⚠️ **Al desplegar hay que tocar Turso**: `license_notices` (tabla nueva) y
+    `licenses.redeemed_into_license_id` (columna nueva). Su estructura no la toca el código (§4.5).
 
 - **El token de la base de cada tenant se rota solo, y que no se pueda rotar NO es una caída
   (REV-09).** Dura 7 días (`?expiration=7d`) y se renueva cada 24, así que cuando toca rotar le

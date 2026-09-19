@@ -155,6 +155,11 @@ pub struct LicenseActivateOutcome {
     /// La licencia se ha trasladado desde otro equipo: los datos de éste se traen de la nube.
     #[serde(default)]
     pub cambio_de_equipo: bool,
+    /// REV-13 · El código ha sumado su tiempo a la licencia que este equipo ya tenía, en vez de
+    /// estrenar un negocio nuevo. La pantalla lo dice con otras palabras («se han añadido N
+    /// meses») y no hay nada más que hacer.
+    #[serde(default)]
+    pub tiempo_sumado: bool,
 }
 
 /// Args de `license_request_device_change`: pide al servidor que mande el OTP al email de la

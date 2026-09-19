@@ -64,6 +64,7 @@ pub async fn activate(
     match svc.activar_remoto(&solicitud, code.as_deref()).await? {
         ResultadoActivacion::Activada(concedido) => {
             let cambio_de_equipo = concedido.cambio_de_equipo;
+            let tiempo_sumado = concedido.tiempo_sumado;
             let estado = estado_inicial(concedido);
             svc.save_state(&estado)?;
             Ok(LicenseActivateOutcome {
@@ -71,6 +72,7 @@ pub async fn activate(
                 state: Some(estado),
                 email_hint: None,
                 cambio_de_equipo,
+                tiempo_sumado,
             })
         }
         ResultadoActivacion::CambioDispositivoRequerido { email_hint } => {
@@ -79,6 +81,7 @@ pub async fn activate(
                 state: None,
                 email_hint: Some(email_hint),
                 cambio_de_equipo: false,
+                tiempo_sumado: false,
             })
         }
     }
@@ -486,7 +489,7 @@ mod tests {
             tenant_id: "tenant-1".into(), device_id: "device-1".into(),
             status: "active".into(), expires_at: Some("2027-01-01".into()),
             expires_at_ms: Some(1_798_761_600_000), plan: Some("pro".into()),
-            cambio_de_equipo: false,
+            cambio_de_equipo: false, tiempo_sumado: false,
         });
         assert_eq!(estado.tenant_id, "tenant-1");
         assert_eq!(estado.device_id, "device-1");
@@ -561,6 +564,7 @@ mod tests {
             expires_at_ms: None,
             plan: None,
             cambio_de_equipo,
+            tiempo_sumado: false,
         }
     }
 

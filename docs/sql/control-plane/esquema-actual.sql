@@ -150,6 +150,13 @@ CREATE TABLE licenses (
   expires_at_ms              INTEGER,
   customer_email             TEXT NOT NULL,
   customer_name              TEXT,
+  -- REV-13 · Sobre qué licencia se canjeó esta clave, si se canjeó.
+  --
+  -- Una clave nueva tecleada en un equipo que YA tiene licencia no activa un negocio nuevo: le
+  -- suma su tiempo al que hay (status pasa a 'redeemed' y aquí queda sobre cuál). Es lo que hace
+  -- que el mismo enlace de compra sirva para estrenar y para renovar, sin que el cliente tenga
+  -- que acertar con nada.
+  redeemed_into_license_id   TEXT,
   stripe_customer_id         TEXT,
   stripe_checkout_session_id TEXT,
   stripe_payment_intent_id   TEXT,

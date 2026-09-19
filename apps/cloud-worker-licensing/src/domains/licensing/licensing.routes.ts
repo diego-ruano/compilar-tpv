@@ -19,6 +19,9 @@ import { getDb } from "../../server/db";
 import { timingSafeEqualHex } from "../../server/utils/crypto";
 import {
 	activateLicenseFirstTime,
+	canjearLicencia,
+	exigirLaClaveDeEsteEquipo,
+	extendLicense,
 	bumpDeviceOtpAttempts,
 	consumeDeviceOtp,
 	ensureDevice,
@@ -29,13 +32,19 @@ import {
 	putDeviceOtp,
 	reassignMainDevice,
 	getOrCreateTenantFieldDek,
+	licenciaVivaDelDispositivo,
+	reasignarCobrosDeLaClave,
 	setDevicePubKeyB64IfEmptyOrThrow,
 	upsertTenantInfo,
 	type LicenseRow,
 } from "../../server/licenseStore";
 import { cargarDevice, estaRevocado, normalizarRol } from "../../lib/deviceAuth";
 import { licenseKeyHash, normalizeLicenseKey } from "./licenseKey";
-import { sendDeviceChangeCodeEmail, sendDeviceChangedNoticeEmail } from "./licenseEmails";
+import {
+	sendDeviceChangeCodeEmail,
+	sendDeviceChangedNoticeEmail,
+	sendLicenseRenewedEmail,
+} from "./licenseEmails";
 import {
 	assertEnv,
 	buildSignedAssertion,
@@ -133,6 +142,83 @@ licenseRoutes.post("/activate", async (c) => {
 	const esPrimeraActivacion = !lic.main_device_id;
 	const esMismoEquipo = lic.main_device_id === deviceId;
 	const esCambioDeEquipo = !esPrimeraActivacion && !esMismoEquipo;
+
+	// ── REV-13 · Canjear: una clave sin estrenar SUMA tiempo al negocio que este equipo ya tiene ──
+	//
+	// El mismo enlace de compra sirve para estrenar y para renovar, y lo que decide cuál es de las
+	// dos no es por dónde se compró: es lo que el TPV ya tiene cuando se teclea el código. Antes se
+	// adivinaba en el webhook de Stripe por el cliente que pagaba —así que comprar con los mismos
+	// datos era lo que disparaba la renovación, y el dueño de un segundo local pagaba y no recibía
+	// clave—. Aquí no hay nada que adivinar: o este equipo ya es la Main de una licencia, o no.
+	//
+	// Va ANTES de resolver el tenant a propósito: canjear no crea nada. Ni tenant, ni base en
+	// Turso, ni DEK. El negocio sigue siendo el mismo con más meses por delante, que es justo lo
+	// que hace que esto no pueda perder datos.
+	//
+	// Y sólo entra por aquí una clave **sin estrenar**: una licencia ya activada no suma tiempo.
+	// Moverla a otro local es un cambio de equipo, que recicla la que hay y tiene su propio camino.
+	if (esPrimeraActivacion) {
+		const actual = await licenciaVivaDelDispositivo(db, deviceId);
+
+		if (actual) {
+			// La identidad del equipo se comprueba ANTES de gastar la clave: sin esto bastaría con
+			// saber un `device_id` ajeno —que viaja en los mensajes de presencia del WebSocket,
+			// REV-07— para sumarle meses a la licencia de otro. No es robar, pero tampoco es lo que
+			// quiere quien ha pagado.
+			//
+			// Y no vale `exigirClaveSiEsDeOtroNegocio`: aquél se aparta en cuanto el dispositivo es
+			// del tenant que autoriza, que es exactamente este caso.
+			try {
+				await exigirLaClaveDeEsteEquipo(db, deviceId, devicePubKey);
+			} catch (e: any) {
+				if (e?.code === "device_key_mismatch") {
+					return c.json({ ok: false, error: "device_key_mismatch" } satisfies ApiError, 409);
+				}
+				throw e;
+			}
+
+			// Gastar la clave y sumar sus meses, en este orden: si el canje no gana la carrera, no
+			// se ha sumado nada.
+			if (!(await canjearLicencia(db, lic.license_id, actual.license_id))) {
+				return c.json({ ok: false, error: "license_already_used" } satisfies ApiError, 409);
+			}
+
+			const expiresAtMs = await extendLicense(db, actual.license_id, lic.term_months);
+			// LIC-07: el cobro se muda con el tiempo, o un reembolso no tendría de dónde restar.
+			await reasignarCobrosDeLaClave(db, lic.license_id, actual.license_id);
+
+			// Recibo. No bloquea nada —quien ha canjeado está delante del TPV y ya lo ve en
+			// pantalla—, pero deja constancia en su correo de cuánto se sumó y hasta cuándo.
+			c.executionCtx.waitUntil(
+				sendLicenseRenewedEmail(env, {
+					to: actual.customer_email,
+					name: actual.customer_name,
+					termMonths: lic.term_months,
+					expiresAtMs,
+				}),
+			);
+
+			const tenantId = actual.tenant_id || "";
+			const out: ActivateResponse = {
+				ok: true,
+				tenantId,
+				deviceId,
+				// El token lleva el hash de la licencia que SIGUE viva, no el de la clave gastada:
+				// es con lo que `/status` la reconoce a partir de ahora.
+				token: await signToken(env, {
+					tenantId,
+					deviceId,
+					licHash: actual.license_key_hash,
+				}),
+				status: "active",
+				expiresAt: expiresAtMs ? new Date(expiresAtMs).toISOString() : null,
+				fieldDek: await getOrCreateTenantFieldDek(db, env.LICENSE_STORE_KEY, tenantId),
+				cambioDeEquipo: false,
+				tiempoSumado: true,
+			};
+			return c.json(out);
+		}
+	}
 
 	// ── Cambio de equipo: exige el OTP del email (§6.4) ──────────────────────
 	if (esCambioDeEquipo) {

@@ -51,6 +51,11 @@ export default function ActivacionLicencia({
 	const [enviando, setEnviando] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
+	// REV-13: el código no ha estrenado nada, le ha sumado tiempo a la licencia que ya había. Se
+	// enseña y se espera a que pulsen, en vez de seguir de largo: quien acaba de pagar tiene que
+	// ver que los meses han entrado — si la pantalla pasara sola, no sabría si se aplicó.
+	const [sumado, setSumado] = useState<string | null>(null);
+
 	// LOGIN-08: por defecto los códigos de recuperación van al correo de la compra. Si se desmarca,
 	// el correo escrito queda pendiente y se confirma con su código en la pantalla del PIN.
 	const [usarCorreoCompra, setUsarCorreoCompra] = useState(true);
@@ -121,6 +126,13 @@ export default function ActivacionLicencia({
 
 			setDeviceChangeHint(null);
 			setDeviceChangeCode("");
+
+			if (outcome.tiempo_sumado) {
+				// No hay nada que configurar: el negocio, el PIN y el correo son los de siempre.
+				setSumado(outcome.state?.expires_at ?? null);
+				return;
+			}
+
 			fijarCorreoPendiente(usarCorreoCompra ? null : correoRecuperacion.trim().toLowerCase());
 			await onActivada();
 		} catch (e: any) {
@@ -131,6 +143,34 @@ export default function ActivacionLicencia({
 	}
 
 	const errorVisible = error ?? errorAlVolver;
+
+	if (sumado !== null) {
+		const hasta = (() => {
+			const d = new Date(sumado);
+			return Number.isNaN(d.getTime())
+				? null
+				: d.toLocaleDateString("es-ES", { day: "numeric", month: "long", year: "numeric" });
+		})();
+
+		return (
+			<div className="relative flex min-h-full w-full items-center justify-center bg-bg p-4 text-fg sm:p-6 lg:p-10">
+				<FondoDecorado />
+				<div className="relative w-full max-w-md rounded-2xl border border-border bg-bg-elev p-6 text-center shadow-lg">
+					<p className="text-lg font-semibold text-fg">Tiempo añadido</p>
+					<p className="mt-2 text-sm leading-relaxed text-fg-muted">
+						El código se ha sumado a la licencia que ya tenías.
+						{hasta ? <> Ahora vence el <strong className="text-fg">{hasta}</strong>.</> : null}
+					</p>
+					<p className="mt-2 text-xs leading-relaxed text-fg-muted">
+						No cambia nada más: tus datos, tu PIN y tus dispositivos siguen igual.
+					</p>
+					<Button className="mt-5 w-full" onClick={conAviso(onActivada)}>
+						Continuar
+					</Button>
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="relative flex min-h-full w-full items-center justify-center overflow-y-auto bg-bg p-4 text-fg sm:p-6 lg:p-10">

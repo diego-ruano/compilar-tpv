@@ -144,13 +144,12 @@ No tienes que hacer nada: tu TPV lo detectará solo. La misma clave sigue valien
 /**
  * «Tu licencia caduca el X, renuévala aquí».
  *
- * El enlace **no se compone aquí**: llega hecho desde `avisosDeCaducidad.ts`, con el `license_id`
- * dentro. Es lo que hace que la compra que venga detrás se reconozca como una renovación de ESTA
- * licencia y no como un alta — o sea, lo que impide que el cliente acabe con una clave nueva que
- * tendría que teclear en un TPV que ya funciona.
+ * El enlace es el de compra de siempre. Lo que convierte esa compra en tiempo añadido y no en una
+ * licencia nueva es teclear la clave en un equipo que ya tiene la suya (REV-13), así que el correo
+ * puede explicarlo en una frase y no depende de que nadie acierte con ningún enlace especial.
  *
- * No se menciona la clave de licencia ni se repite: renovar no la cambia, y enseñarla en un correo
- * de recordatorio es repartirla sin motivo.
+ * No se menciona la clave de licencia actual: renovar no la cambia, y repetirla en un correo de
+ * recordatorio es repartirla sin motivo.
  */
 export async function sendLicenseExpiringEmail(
 	env: Env,
@@ -179,9 +178,10 @@ export async function sendLicenseExpiringEmail(
        <a href="${esc(args.enlace)}" style="display:inline-block;padding:12px 24px;background:#111827;color:#ffffff;
           text-decoration:none;border-radius:8px;font-weight:600">Renovar mi licencia</a>
      </p>
-     <p style="font-size:14px;color:#6b7280">Renueva desde ese botón y se alargará la licencia que ya tienes:
-     <strong>no hace falta cambiar ninguna clave</strong> ni tocar el TPV. Si compras por otro sitio se te
-     emitirá una licencia distinta, que es lo que querrás sólo si estás abriendo otro local.</p>
+     <p style="font-size:14px;color:#6b7280">Recibirás un código nuevo por correo. Al escribirlo en tu TPV
+     <strong>se sumará el tiempo a la licencia que ya tienes</strong>: no cambia nada más, ni se pierde nada.
+     (Si lo escribes en un equipo nuevo, en cambio, empezará una licencia aparte — que es lo que querrás si
+     estás abriendo otro local.)</p>
      <p style="font-size:14px;color:#6b7280">Si la dejas caducar, el TPV deja de poder usarse hasta que la
      renueves. Tus datos no se pierden.</p>`,
 	);
@@ -192,9 +192,9 @@ Tu licencia del TPV caduca ${cuanto}, el ${hasta}.
 
 Renuévala aquí: ${args.enlace}
 
-Desde ese enlace se alarga la licencia que ya tienes: no hace falta cambiar ninguna clave ni tocar el TPV.
-Si compras por otro sitio se te emitirá una licencia distinta, que es lo que querrás sólo si estás abriendo
-otro local.
+Recibirás un código nuevo por correo. Al escribirlo en tu TPV se sumará el tiempo a la licencia que ya
+tienes: no cambia nada más, ni se pierde nada. (Si lo escribes en un equipo nuevo, en cambio, empezará una
+licencia aparte — que es lo que querrás si estás abriendo otro local.)
 
 Si la dejas caducar, el TPV deja de poder usarse hasta que la renueves. Tus datos no se pierden.`;
 

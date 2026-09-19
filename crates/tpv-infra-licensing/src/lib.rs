@@ -208,6 +208,11 @@ struct ActivateOk {
     /// anterior que no lo manda: sin él no se sabe, y se sigue como hasta ahora.
     #[serde(default)]
     cambio_de_equipo: bool,
+    /// REV-13: la clave ha sumado su tiempo a la licencia que ya había en este equipo. `default`
+    /// para un worker anterior que no lo manda — ahí no existía el canje, así que `false` es lo
+    /// que era verdad.
+    #[serde(default)]
+    tiempo_sumado: bool,
 }
 
 /// Datos del negocio que acompañan a la activación (el worker los espera en camelCase).
@@ -584,6 +589,7 @@ impl LicensingService for LicensingAdapter {
             expires_at_ms: None,
             plan: None,
             cambio_de_equipo: ok.cambio_de_equipo,
+            tiempo_sumado: ok.tiempo_sumado,
         }))
     }
 
