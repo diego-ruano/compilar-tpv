@@ -212,7 +212,13 @@ verifactu_entorno: string, };
  * Lleva sólo lo que le importa al arqueo de cada apunte: la fecha, el método y el importe, y si un
  * gasto salió del cajón. El concepto o el proveedor no mueven ningún número.
  */
-export type CambioCajaInput = { "tipo": "editar_pago", id_pago: string, fecha_hora: string, metodo: string, } | { "tipo": "anular_pago", id_pago: string, } | { "tipo": "crear_gasto", fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "editar_gasto", id_gasto: string, fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "borrar_gasto", id_gasto: string, };
+export type CambioCajaInput = { "tipo": "editar_pago", id_pago: string, fecha_hora: string, metodo: string, } | { "tipo": "anular_pago", id_pago: string, 
+/**
+ * REV-08: `"ERROR"` o `"DEVOLUCION"`. De esto depende a qué cierre le toca el cambio, que
+ * es lo que la pantalla enseña antes de confirmar. Ausente = `"ERROR"`, como en
+ * `AnularPagoInput`.
+ */
+clase?: string, } | { "tipo": "crear_gasto", fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "editar_gasto", id_gasto: string, fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "borrar_gasto", id_gasto: string, };
 
 export type CategoriaInvDto = { ID_Categoria: string, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
 

@@ -60,6 +60,15 @@ struct Afectado {
     pone: TotalesCaja,
 }
 
+/// ¿Esta baja es una devolución? (REV-08)
+///
+/// Ausente es `ERROR`, igual que en `AnularPagoInput`: es lo que hacía este comando antes de
+/// FISCAL-01, y es el lado que sí rectifica — equivocarse hacia rectificar deja un aviso de más,
+/// no un arqueo mudo.
+fn es_devolucion(clase: Option<&str>) -> bool {
+    clase.map(str::trim).map(str::to_uppercase).as_deref() == Some("DEVOLUCION")
+}
+
 /// Dónde cae un apunte tal como está guardado. `None` si su fecha no se reconoce: entonces tampoco
 /// lo cuenta el SQL que suma los periodos, así que no hay cierre al que quitarle nada.
 fn posicion_guardada(a: &ApunteGuardado) -> Option<Posicion> {
@@ -183,11 +192,26 @@ async fn planificar(
             };
             Ok((afectados(repo, antes, Some(despues)).await?, guardado))
         }
-        CambioCajaInput::AnularPago { id_pago } => {
+        CambioCajaInput::AnularPago { id_pago, clase } => {
             let guardado = repo.apunte(ApunteCaja::Pago, id_pago.trim()).await?;
             if !matches!(guardado, Some(ApunteGuardado::Cobro { .. })) {
                 return Ok((Vec::new(), guardado));
             }
+
+            // REV-08: una DEVOLUCIÓN no toca el cierre de la venta, y es la diferencia entera.
+            //
+            // Anular por ERROR dice que aquel cobro no debió existir: la noche que se cerró, el
+            // esperado contaba un dinero que no estaba, o sea que aquel arqueo estaba mal y hay que
+            // rectificarlo. Devolver dice lo contrario: la venta fue real y el dinero SÍ estaba en
+            // el cajón esa noche. Lo que pasa es que hoy sale. Rectificar entonces el cierre de
+            // aquel día le inventa un sobrante que nunca hubo —y, con la salida de hoy sin contar,
+            // el de hoy salía además con una falta—: dos arqueos descuadrados por una operación
+            // normal. La salida de hoy la recoge `totales_desde`, en el periodo abierto, que es
+            // donde el dinero se ha ido de verdad.
+            if es_devolucion(clase.as_deref()) {
+                return Ok((Vec::new(), guardado));
+            }
+
             let antes = guardado.as_ref().and_then(posicion_guardada);
             // Anular deja el cobro donde estaba, pero ya sin aportar nada al cajón.
             let despues = antes.as_ref().map(|p| Posicion {
@@ -448,13 +472,13 @@ pub async fn anular_pago(
 ) -> AppResult<bool> {
     let cambio = CambioCajaInput::AnularPago {
         id_pago: input.id_pago.clone(),
+        // REV-08: la clase decide a qué cierre le toca el cambio. Una devolución no toca el de la
+        // venta —el dinero sí estuvo en el cajón esa noche—, sale del periodo abierto.
+        clase: input.clase.clone(),
     };
     let (afectados, guardado) = planificar(cierres, &cambio).await?;
     let motivo = limpio(input.motivo.clone());
-    let devolucion = input
-        .clase
-        .as_deref()
-        .is_some_and(|c| c.trim().eq_ignore_ascii_case("DEVOLUCION"));
+    let devolucion = es_devolucion(input.clase.as_deref());
     let descripcion = match guardado.as_ref() {
         Some(ApunteGuardado::Cobro {
             importe,

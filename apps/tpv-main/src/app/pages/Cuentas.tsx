@@ -770,7 +770,10 @@ export default function Cuentas() {
                 // devuelve las líneas y el stock, que es reversible.
                 const clase = claseBaja ?? "ERROR";
                 await conAvisoDeCierre(
-                    { tipo: "anular_pago", id_pago: idPago },
+                    // REV-08: la clase viaja también en la previsualización. Una devolución no
+                    // toca el cierre de la venta, así que enseñar lo contrario sería pedir un
+                    // motivo por un descuadre que no va a ocurrir.
+                    { tipo: "anular_pago", id_pago: idPago, clase },
                     async () => {
                         await anularPago.mutateAsync({ idPago, motivo, clase });
                         setConfirmAccion(null);

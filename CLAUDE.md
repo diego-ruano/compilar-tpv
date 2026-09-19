@@ -1514,9 +1514,26 @@ El corte del periodo de caja. **CUENTA-06**; diseño y porqués en
   noche. Si mañana se corrige un cobro de esa noche, la foto no cambia —dejaría de explicar por qué
   faltaban 20 €—: lo que cambia es el **rectificado** (`Rect_*`), que se guarda al lado.
 - **Sólo se cuadra el efectivo.** `esperado = fondo + cobros **activos** en efectivo − gastos
-  pagados con caja` (CUENTA-07, §13; CAJA-01). Un gasto sólo resta si lleva `Pagado_Con_Caja`: el
-  que se paga por banco no ha tocado el cajón. Y las anulaciones del periodo se enseñan al lado, sin
-  entrar en el cálculo.
+  pagados con caja − devoluciones de otros periodos` (CUENTA-07, §13; CAJA-01; REV-08). Un gasto
+  sólo resta si lleva `Pagado_Con_Caja`: el que se paga por banco no ha tocado el cajón. Y las
+  anulaciones del periodo se enseñan al lado, sin entrar en el cálculo.
+- **Una devolución sale del cajón el día que se DEVUELVE, no el día que se vendió (REV-08).** Es la
+  diferencia entera entre las dos clases de baja, y se contaba mal en los dos extremos a la vez:
+  devolver el martes una venta del viernes no restaba nada del periodo abierto —aquel cobro ya no
+  estaba en él, así que el arqueo del martes salía con esa falta— y además rectificaba el cierre del
+  viernes, inventándole un sobrante que nunca hubo. Dos arqueos descuadrados por una operación
+  normal. Reglas:
+  - **Anular por ERROR sí rectifica el cierre de la venta.** Dice que aquel cobro no debió existir:
+    el esperado de aquella noche contaba un dinero que no estaba, o sea que el arqueo salió mal.
+  - **Devolver no lo toca.** La venta fue real y el dinero SÍ estuvo en el cajón esa noche; lo que
+    cambia es hoy. Por eso `previsualizar` no enseña ningún cierre afectado ni pide motivo.
+  - **`Fecha_Hora <= desde` es lo que impide restar dos veces.** Una venta devuelta dentro de su
+    propio periodo ya deja de sumar al dejar de ser `ACTIVO` —entró y salió, neto cero—, y restarla
+    otra vez la dejaría en negativo. Sin cierre anterior no hay periodo previo, así que tampoco.
+  - **La clase viaja también en la previsualización** (`CambioCajaInput::AnularPago.clase`), o la
+    pantalla enseñaría un impacto que no va a ocurrir y pediría un motivo por un descuadre
+    inexistente. Ausente es `ERROR`, el lado que sí rectifica: equivocarse hacia rectificar deja un
+    aviso de más, no un arqueo mudo.
 - **Un gasto no tiene hora, y cae en el periodo a las 12:00 de su día** (`HORA_DE_UN_GASTO`, y la
   misma expresión en el SQL de `totales_desde`). Un bar abre por la mañana y cierra de madrugada: el
   mediodía cae dentro del servicio de ese día, así que el gasto de la tarde va al cierre de esa noche.

@@ -173,10 +173,21 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         // Ahora el cobro anulado sigue ahí pero no cuenta como venta, así que el dinero que falta
         // sale como que falta.
         //
-        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES, sin tocar nada: una
-        // devolución deja el cobro en 'ANULADO' (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual
-        // POR QUÉ salió el dinero: lo que cambia entre los dos instrumentos es el registro fiscal
-        // que se emite, no la aritmética.
+        // ⚠️ Y con FISCAL-01 ese mismo filtro cubre ya las DEVOLUCIONES: una devolución deja el
+        // cobro en 'ANULADO' (`Motivo_Baja = 'DEVOLUCION'`). Al cajón le da igual POR QUÉ salió el
+        // dinero: lo que cambia entre los dos instrumentos es el registro fiscal que se emite, no
+        // la aritmética.
+        //
+        // ⚠️ Pero sólo cubre la devolución del MISMO periodo, y por eso está la segunda resta
+        // (REV-08). El dinero de una devolución sale del cajón el día que se devuelve, no el día
+        // que se vendió: devolver el martes una venta del viernes no quita nada del periodo
+        // abierto —aquel cobro ya no está en él— y el arqueo del martes salía con esa falta. Se
+        // resta aquí, que es donde el dinero se fue de verdad.
+        //
+        // La condición `Fecha_Hora <= desde` es la que impide contarlo dos veces: una venta
+        // devuelta DENTRO de su propio periodo ya sale del primer sumando al dejar de ser 'ACTIVO'
+        // —entró y salió, neto cero—, y restarla otra vez la dejaría en negativo. Sin cierre
+        // anterior (`?1 IS NULL`) no hay «periodo anterior» posible, así que tampoco se resta.
         //
         // Quien venga a «arreglar» esto restando además desde `Movimientos_Caja` habría creado la
         // segunda fuente para la misma cifra que esa tabla existe para no ser, y restaría dos veces.
@@ -190,12 +201,24 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         let sql = format!(
             r#"
             SELECT
-              ROUND(COALESCE((
-                SELECT SUM(Importe_Total) FROM Pagos
-                WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
-                  AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
-                  AND (?1 IS NULL OR datetime(Fecha_Hora) > datetime(?1))
-              ), 0), 2),
+              ROUND(
+                COALESCE((
+                  SELECT SUM(Importe_Total) FROM Pagos
+                  WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                    AND COALESCE(Estado,'ACTIVO') = 'ACTIVO'
+                    AND (?1 IS NULL OR datetime(Fecha_Hora) > datetime(?1))
+                ), 0)
+                - COALESCE((
+                  SELECT SUM(Importe_Total) FROM Pagos
+                  WHERE COALESCE(Metodo_Pago,'') <> 'Tarjeta'
+                    AND Estado = 'ANULADO'
+                    AND Motivo_Baja = 'DEVOLUCION'
+                    AND ?1 IS NOT NULL
+                    AND datetime(Fecha_Hora) <= datetime(?1)
+                    AND Anulado_En IS NOT NULL
+                    AND datetime(Anulado_En) > datetime(?1)
+                ), 0)
+              , 2),
               ROUND(COALESCE((
                 SELECT SUM(Importe) FROM Cuentas_Gastos
                 WHERE Pagado_Con_Caja = 1
@@ -628,6 +651,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
 
 #[cfg(test)]
 mod tests {
+    #![allow(non_snake_case)] // los nombres en mayúsculas señalan qué afirma cada test
+
     //! CAJA-01 contra una BD de verdad: que las sumas del periodo, el cierre al que pertenece un
     //! apunte y la rectificación guardada digan lo mismo que prometen el dominio y el caso de uso.
 
@@ -691,6 +716,145 @@ mod tests {
             importe,
             proveedor_id: None,
             pagado_con_caja,
+        }
+    }
+
+    /// Anula el cobro `p1` como devolución, tal y como lo deja `cuentas::anular_pago`.
+    async fn devolver_p1_en(db: &Arc<Db>, cuando: &str) {
+        sembrar(
+            db,
+            &[&format!(
+                "UPDATE Pagos SET Estado='ANULADO', Motivo_Baja='DEVOLUCION',
+                        Anulado_En='{cuando}', Anulado_Por='u1', Motivo_Anulacion='no le gustó'
+                  WHERE ID_Pago='p1';"
+            )],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_de_otro_dia_sale_del_cajon_de_HOY() {
+        // REV-08. La venta fue el día 10 y se cerró esa noche con el dinero dentro; el arqueo del
+        // 10 estaba bien. El día 12 se devuelve: salen 20 € del cajón de HOY. Como aquel cobro ya
+        // no está en el periodo abierto, no lo restaba nadie y el arqueo de hoy salía con 20 € de
+        // falta — una operación normal produciendo un descuadre que hay que ir a investigar.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+        devolver_p1_en(&db, "2026-05-12 13:00:00").await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        let t = caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap();
+
+        assert_eq!(t.ventas_efectivo, -20.0, "el dinero sale del periodo abierto");
+    }
+
+    #[tokio::test]
+    async fn devolver_dentro_del_MISMO_periodo_no_resta_dos_veces() {
+        // El caso que hace falso lo obvio. Si se vende y se devuelve antes de cerrar, el cobro ya
+        // deja de sumar al dejar de ser 'ACTIVO' —entró y salió, neto cero—: restarlo otra vez
+        // dejaría el esperado en -20 y el arqueo saldría con 20 € de sobra.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        devolver_p1_en(&db, "2026-05-10 22:00:00").await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        // Sin cierre anterior, y con uno anterior a la venta: en los dos casos el neto es cero.
+        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, 0.0);
+        assert_eq!(
+            caja.totales_desde(Some("2026-05-09 23:00:00")).await.unwrap().ventas_efectivo,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_anulacion_por_ERROR_no_sale_del_cajon_de_hoy() {
+        // La otra mitad, y la que impide que esto se convierta en «restar toda baja». Anular por
+        // error dice que aquel cobro no debió existir: el dinero no salió hoy de ninguna parte, lo
+        // que hay que corregir es el arqueo de aquella noche, y de eso se encarga la rectificación.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+        sembrar(
+            &db,
+            &["UPDATE Pagos SET Estado='ANULADO', Motivo_Baja='ERROR',
+                      Anulado_En='2026-05-12 13:00:00', Anulado_Por='u1', Motivo_Anulacion='mesa equivocada'
+                WHERE ID_Pago='p1';"],
+        )
+        .await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        let t = caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap();
+
+        assert_eq!(t.ventas_efectivo, 0.0);
+    }
+
+    #[tokio::test]
+    async fn devolver_una_venta_con_TARJETA_no_toca_el_cajon() {
+        // El dinero vuelve por donde vino. El filtro es el mismo de siempre, pero conviene fijarlo:
+        // la resta nueva tenía que heredarlo y no heredarlo habría metido las tarjetas en el arqueo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &["UPDATE Pagos SET Metodo_Pago='Tarjeta' WHERE ID_Pago='p1';"]).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+        devolver_p1_en(&db, "2026-05-12 13:00:00").await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        assert_eq!(
+            caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap().ventas_efectivo,
+            0.0
+        );
+    }
+
+    #[tokio::test]
+    async fn una_devolucion_NO_rectifica_el_cierre_de_la_venta() {
+        // La otra mitad del descuadre doble: aquel arqueo estaba bien —el dinero sí estuvo en el
+        // cajón esa noche—, así que rectificarlo le inventa un sobrante de 20 € que nunca hubo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        let impacto = rect::previsualizar(
+            &caja,
+            &CambioCajaInput::AnularPago {
+                id_pago: "p1".into(),
+                clase: Some("DEVOLUCION".into()),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(impacto.cierres.is_empty(), "una devolución no toca ningún cierre hecho");
+        assert!(!impacto.requiere_motivo);
+    }
+
+    #[tokio::test]
+    async fn una_anulacion_por_ERROR_si_lo_rectifica() {
+        // Y aquí sí: el esperado de aquella noche contaba un dinero que no estaba, o sea que el
+        // arqueo salió mal y hay que corregirlo.
+        let (db, _dir) = db_temporal().await;
+        sembrar(&db, &[USUARIO]).await;
+        sembrar(&db, COBRO).await;
+        sembrar(&db, &[CIERRE_CUADRADO]).await;
+
+        let caja = SqliteCierreCajaRepository::new(db.clone());
+        for clase in [None, Some("ERROR".to_string())] {
+            let impacto = rect::previsualizar(
+                &caja,
+                &CambioCajaInput::AnularPago { id_pago: "p1".into(), clase },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(impacto.cierres.len(), 1, "tiene que tocar el cierre de esa noche");
+            assert_eq!(impacto.cierres[0].esperado_despues, 0.0);
+            assert_eq!(impacto.cierres[0].descuadre_despues, 20.0);
         }
     }
 

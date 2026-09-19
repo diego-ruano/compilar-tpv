@@ -214,6 +214,12 @@ pub enum CambioCajaInput {
     },
     AnularPago {
         id_pago: String,
+        /// REV-08: `"ERROR"` o `"DEVOLUCION"`. De esto depende a qué cierre le toca el cambio, que
+        /// es lo que la pantalla enseña antes de confirmar. Ausente = `"ERROR"`, como en
+        /// `AnularPagoInput`.
+        #[serde(default)]
+        #[ts(optional)]
+        clase: Option<String>,
     },
     CrearGasto {
         fecha: String,
