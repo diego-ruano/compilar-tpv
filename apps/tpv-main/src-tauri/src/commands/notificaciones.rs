@@ -7,7 +7,7 @@ use tauri::State;
 
 use tpv_application::use_cases::notificaciones as uc;
 use tpv_contracts::notificaciones::{
-    CrearNotificacionInput, MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionIdInput,
+    MarcarLeidaInput, MarcarTodasLeidasInput, NotificacionIdInput,
     NotificacionRow, NotificacionesListArgs, NotificacionesUsuarioArgs,
 };
 
@@ -52,17 +52,6 @@ pub async fn notificaciones_marcar_todas_leidas(
 ) -> Result<i64, AppErrorDto> {
     let repo = state.notificaciones_repo().await?;
     uc::marcar_todas_leidas(repo.as_ref(), args)
-        .await
-        .map_err(AppErrorDto::from)
-}
-
-#[tauri::command]
-pub async fn notificaciones_crear(
-    state: State<'_, AppState>,
-    args: CrearNotificacionInput,
-) -> Result<String, AppErrorDto> {
-    let notifier = state.notifier().await?;
-    uc::crear(notifier.as_ref(), args)
         .await
         .map_err(AppErrorDto::from)
 }

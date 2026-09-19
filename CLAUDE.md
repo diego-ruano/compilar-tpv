@@ -173,6 +173,38 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   tablas en su SQLite temporal. Una tabla o columna nueva, por tanto, **se crea en Turso antes de
   desplegar** el worker que la usa. No confundir con la base de cada tenant, que sí se migra desde
   el código (§3, `packages/database/migrations`).
+- **El feed del updater sirve la versión MÁS ALTA de la arquitectura que pregunta (REV-23).**
+  Ordenaba por `created_at_ms` —cuándo se insertó la fila— e ignoraba el `arch`, que llegaba en la
+  ruta y sólo servía para componer la clave de `platforms`. Lo primero casi siempre coincide con
+  «la más nueva» y deja de coincidir justo cuando duele: `publish` es un `INSERT OR REPLACE`, así
+  que retocar la URL o las notas de una versión vieja le pone la fecha de hoy y pasa a ser «la
+  última»; el updater no la instalaría —no baja de versión— pero dejaría de ofrecer la buena, y un
+  equipo recién instalado se queda clavado sin que nada lo diga. Ahora `arch` está en la clave de
+  `app_releases` y en el `WHERE`, y la comparación la hace `compararVersiones` (numérica por
+  tramos; una preliberación pierde contra su versión final). ⚠️ **Requiere rehacer la tabla en
+  Turso** (la clave primaria cambia a `(version, target, arch, channel)`).
+
+- **La webview no puede escribir sobre los ficheros de los que depende el equipo (REV-24).**
+  `fs:allow-write-file` iba sin ámbito y `fs:default` ya alcanza el directorio de datos entero, así
+  que cualquier código del bundle podía escribir encima de `data.db`, del estado de licencia o de
+  las copias. El permiso se queda —hace falta para guardar un PDF donde la persona elija, y esa
+  ruta la autoriza el diálogo en tiempo de ejecución (`tauri-plugin-dialog` llama a `allow_file`
+  con lo elegido)— pero con un `deny` para lo que nunca se escribe desde la interfaz. Al añadir un
+  fichero propio a AppData, añádelo a ese `deny`; lo vigila
+  `tests_exenciones_del_gate::la_webview_no_puede_escribir_sobre_los_ficheros_del_equipo`, que
+  además rechaza cualquier `fs:allow-write*` declarado como cadena suelta (sin ámbito).
+
+- **Lo registrado es lo invocable: lo que no se invoca no se registra (REV-26).** Había trece
+  comandos en el `generate_handler!` que nadie llamaba. No es sólo limpieza — el modelo de amenaza
+  de §14 asume que quien tiene la máquina puede invocar cualquier comando por el IPC—, y dos eran
+  incómodos de verdad: `tpv_server_signed_headers` devolvía la firma de **cualquier** petición sin
+  pasar por ningún gate, o sea la vuelta a la esquina del candado que `tpv_server_post_json` sí
+  tiene para `/v1/pair/…` y `/v1/device/…`; y `cobrar_venta_rapida` era un segundo camino de cobro
+  de barra, no idempotente. Los casos de uso se quedan (la Handy los usa por HTTP); lo que se fue
+  es la puerta. Al retirar un comando, `scripts/check-comandos-tauri.mjs` confirma que nadie lo
+  invocaba, y los dos delicados los vigila
+  `tests_exenciones_del_gate::los_comandos_retirados_no_vuelven_por_la_puerta_de_atras`.
+
 - **El correo se acota por destinatario Y por volumen (REV-14).** El filtro «sólo al `Email` de un
   proveedor dado de alta» (FABLE-C) no acotaba el destinatario: dar de alta un proveedor es una
   escritura de negocio corriente, así que con un token robado se creaba uno con cualquier correo y

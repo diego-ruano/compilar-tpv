@@ -7,12 +7,11 @@ use tauri::State;
 
 use tpv_application::use_cases::mesas as uc;
 use tpv_contracts::mesas::{
-    CategoriaVendibleOut, ComandaBarraListItem, ComandaRow, KitchenRow, MesaLineaComandaRow,
-    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCerrarComandaInput,
-    MesasCobrarDetallesInput, MesasCobrarVentaRapidaInput, MesasComandaSetTrabajadorInput,
-    MesasCreateComandaBarraInput, MesasDeleteComandaBarraIfSafeInput, MesasDeleteDetalleInput,
-    MesasGetOrCreateComandaBarraInput, MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
-    MesasKitchenSetLineStateInput, MesasListComandasBarraArgs, MesasRemoveOnePendingDetalleInput,
+    CategoriaVendibleOut, ComandaRow, KitchenRow, MesaLineaComandaRow,
+    MesaMetaOut, MesasAbrirComandaInput, MesasAddLineaComandaInput, MesasCobrarDetallesInput, MesasComandaSetTrabajadorInput,
+    MesasDeleteDetalleInput,
+    MesasIdCategoriaArgs, MesasIdComandaArgs, MesasIdMesaArgs,
+    MesasKitchenSetLineStateInput, MesasRemoveOnePendingDetalleInput,
     MesasSaveLayoutInput, MesasSearchProductosArgs, MesasSetReservaEstadoInput,
     MesasUpdateDetalleNotaInput, ProductoVendibleOut, SalonOut,
 };
@@ -87,16 +86,6 @@ pub async fn comanda_set_trabajador_if_null(
 }
 
 #[tauri::command]
-pub async fn cerrar_comanda(
-    state: State<'_, AppState>,
-    args: MesasCerrarComandaInput,
-) -> Result<String, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    uc::cerrar_comanda(repo.as_ref(), args).await?;
-    Ok("OK".to_string())
-}
-
-#[tauri::command]
 pub async fn get_lineas_comanda(
     state: State<'_, AppState>,
     args: MesasIdComandaArgs,
@@ -115,61 +104,6 @@ pub async fn add_linea_comanda(
 }
 
 /* ===== BARRA ===== */
-
-#[tauri::command]
-pub async fn get_or_create_comanda_barra(
-    state: State<'_, AppState>,
-    args: MesasGetOrCreateComandaBarraInput,
-) -> Result<String, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::get_or_create_comanda_barra(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-pub async fn cobrar_venta_rapida(
-    state: State<'_, AppState>,
-    args: MesasCobrarVentaRapidaInput,
-) -> Result<String, AppErrorDto> {
-    // REV-17: quién cobra sale de aquí y no del input. Sin rol: cobrar lo hace cualquiera a mitad
-    // de servicio, como abrir el cajón — lo que hace falta es estar identificado.
-    let sesion = state.sesion().await?;
-    let repo = state.mesas_repo().await?;
-    // Devuelve el número de ticket del cobro: es lo que el POS imprime a continuación.
-    Ok(uc::cobrar_venta_rapida(
-        repo.as_ref(),
-        &sesion.id_usuario,
-        sesion.id_trabajador.as_deref(),
-        args,
-    )
-    .await?)
-}
-
-#[tauri::command]
-pub async fn create_comanda_barra(
-    state: State<'_, AppState>,
-    args: MesasCreateComandaBarraInput,
-) -> Result<String, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::create_comanda_barra(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-pub async fn list_comandas_barra(
-    state: State<'_, AppState>,
-    args: MesasListComandasBarraArgs,
-) -> Result<Vec<ComandaBarraListItem>, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::list_comandas_barra(repo.as_ref(), args).await?)
-}
-
-#[tauri::command]
-pub async fn delete_comanda_barra_if_safe(
-    state: State<'_, AppState>,
-    args: MesasDeleteComandaBarraIfSafeInput,
-) -> Result<bool, AppErrorDto> {
-    let repo = state.mesas_repo().await?;
-    Ok(uc::delete_comanda_barra_if_safe(repo.as_ref(), args).await?)
-}
 
 /* ===== META + CATÁLOGO ===== */
 

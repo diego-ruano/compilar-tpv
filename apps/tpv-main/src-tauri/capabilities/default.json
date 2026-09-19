@@ -20,6 +20,18 @@
 
         "fs:default",
 
-        "fs:allow-write-file"
+        {
+            "identifier": "fs:allow-write-file",
+            "deny": [
+                { "path": "$APPDATA/data.db" },
+                { "path": "$APPDATA/data.db-wal" },
+                { "path": "$APPDATA/data.db-shm" },
+                { "path": "$APPDATA/data.db.bak.*" },
+                { "path": "$APPDATA/device_config.json" },
+                { "path": "$APPDATA/license_state.json" },
+                { "path": "$APPDATA/traslado-pendiente" },
+                { "path": "$APPDATA/backups/**" }
+            ]
+        }
     ]
 }

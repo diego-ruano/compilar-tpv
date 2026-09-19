@@ -96,15 +96,6 @@ pub async fn sync_liberar_encoladas(
     Ok(uc::liberar_encoladas_caducadas(repo.as_ref(), antiguedad_ms).await?)
 }
 
-/// Purga de mantenimiento de `_Sync_Applied_Ops` (solo registros antiguos ya subidos a la nube).
-/// El frontend la invoca cuando el outbox queda vacío tras drenar.
-#[tauri::command]
-pub async fn sync_purge_applied_ops(state: State<'_, AppState>) -> Result<(), AppErrorDto> {
-    let repo = state.sync_repo().await?;
-    uc::purge_applied_ops(repo.as_ref()).await?;
-    Ok(())
-}
-
 /// Foto de salud de la sincronización (SYNC-14) para el panel de Configuración → Conectividad.
 #[tauri::command]
 pub async fn sync_health(state: State<'_, AppState>) -> Result<SyncHealth, AppErrorDto> {

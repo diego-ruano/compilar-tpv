@@ -282,9 +282,16 @@ CREATE INDEX idx_email_sends_tenant_ts ON email_sends(tenant_id, sent_at_ms);
 
 -- ── Actualizaciones de la app ────────────────────────────────────────────────────────────────
 
+-- REV-23 · `arch` es parte de la identidad de una release, y está en la clave.
+--
+-- El feed recibe `/{target}/{arch}/{version}` y **ignoraba el arch**: servía la fila de `windows`
+-- fuese cual fuese, y la etiquetaba en `platforms` con el arch que hubiera pedido el cliente. Hoy
+-- sólo se publica x86_64 y en Windows un instalador x86_64 arranca emulado, así que no se notaba;
+-- el día que exista una build aarch64 se notaría instalando la que no es.
 CREATE TABLE app_releases (
   version       TEXT NOT NULL,
   target        TEXT NOT NULL DEFAULT 'windows',
+  arch          TEXT NOT NULL DEFAULT 'x86_64',
   channel       TEXT NOT NULL DEFAULT 'stable',
   notes         TEXT,
   pub_date      TEXT NOT NULL,
@@ -292,5 +299,5 @@ CREATE TABLE app_releases (
   url           TEXT NOT NULL,
   is_active     INTEGER NOT NULL DEFAULT 1,
   created_at_ms INTEGER NOT NULL DEFAULT (unixepoch()*1000),
-  PRIMARY KEY (version, target, channel)
+  PRIMARY KEY (version, target, arch, channel)
 );

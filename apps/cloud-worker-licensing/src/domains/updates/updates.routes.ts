@@ -42,6 +42,49 @@ async function checkAdmin(c: { req: { header: (n: string) => string | undefined 
 
 /* ── Feed que consume el updater de Tauri ──────────────────────────────────── */
 
+/**
+ * Compara dos versiones semánticas. Devuelve >0 si `a` es más nueva.
+ *
+ * REV-23: el feed ordenaba por `created_at_ms`, o sea por **cuándo se insertó la fila**, no por
+ * qué versión es. Casi siempre coinciden y por eso no se notaba; dejan de coincidir justo cuando
+ * más duele, porque `publish` es un `INSERT OR REPLACE`: retocar la URL o las notas de una versión
+ * vieja le pone la fecha de hoy y esa vuelve a ser «la última». El updater no la instalaría —no
+ * baja de versión— pero sí dejaría de ofrecer la buena, y un equipo recién instalado se queda
+ * clavado en una versión antigua sin que nada lo diga.
+ *
+ * Los tramos no numéricos (`1.2.0-beta.1`) se comparan como texto y **pierden** contra la versión
+ * sin sufijo, que es lo que dice semver: una preliberación es anterior a su versión final.
+ */
+export function compararVersiones(a: string, b: string): number {
+	const partir = (v: string) => {
+		const [nucleo, ...resto] = String(v).trim().split("-");
+		return {
+			numeros: nucleo.split(".").map((n) => Number.parseInt(n, 10) || 0),
+			sufijo: resto.join("-"),
+		};
+	};
+	const x = partir(a);
+	const y = partir(b);
+
+	for (let i = 0; i < Math.max(x.numeros.length, y.numeros.length); i++) {
+		const d = (x.numeros[i] ?? 0) - (y.numeros[i] ?? 0);
+		if (d !== 0) return d;
+	}
+
+	// Mismo núcleo: sin sufijo gana a con sufijo; entre dos sufijos, orden de texto.
+	if (!x.sufijo && y.sufijo) return 1;
+	if (x.sufijo && !y.sufijo) return -1;
+	return x.sufijo === y.sufijo ? 0 : x.sufijo > y.sufijo ? 1 : -1;
+}
+
+type Release = {
+	version: string;
+	notes: string | null;
+	pub_date: string;
+	signature: string;
+	url: string;
+};
+
 updatesRoutes.get("/:target/:arch/:current", async (c) => {
 	const target = c.req.param("target"); // p. ej. "windows"
 	const arch = c.req.param("arch"); // p. ej. "x86_64"
@@ -49,20 +92,27 @@ updatesRoutes.get("/:target/:arch/:current", async (c) => {
 
 	const db = getDb(c.env);
 
+	// REV-23: se filtra por `arch`, que antes se ignoraba —llegaba en la ruta, no entraba en la
+	// consulta y sólo servía para componer la clave de `platforms`—. O sea que un equipo aarch64
+	// se llevaba el instalador x86_64 etiquetado como suyo. En Windows arranca emulado y por eso
+	// no se ha notado; el día que exista una build aarch64 se notaría instalando la que no es.
+	//
+	// Y se traen TODAS las activas en vez de la última insertada: cuál es la más nueva lo decide
+	// la versión, no la fecha de la fila. Son unas pocas decenas de filas como mucho.
 	const r = await db.execute({
 		sql: `
 			SELECT version, notes, pub_date, signature, url
 			FROM app_releases
-			WHERE target = ? AND channel = 'stable' AND is_active = 1
-			ORDER BY created_at_ms DESC
-			LIMIT 1
+			WHERE target = ? AND arch = ? AND channel = 'stable' AND is_active = 1
 		`,
-		args: [target],
+		args: [target, arch],
 	});
 
-	const row = r.rows?.[0] as unknown as
-		| { version: string; notes: string | null; pub_date: string; signature: string; url: string }
-		| undefined;
+	const row = ((r.rows ?? []) as unknown as Release[]).reduce<Release | undefined>(
+		(mejor, fila) =>
+			!mejor || compararVersiones(fila.version, mejor.version) > 0 ? fila : mejor,
+		undefined,
+	);
 
 	// Visibilidad de versiones: queda en los logs del worker (observability ya activa).
 	console.log("[update] check", {
@@ -100,6 +150,7 @@ const publishSchema = z.object({
 	notes: z.string().nullable().optional(),
 	pub_date: z.string().optional(), // ISO; si falta, ahora
 	target: z.string().optional(), // por defecto "windows"
+	arch: z.string().optional(), // por defecto "x86_64" (REV-23: forma parte de la identidad)
 	channel: z.string().optional(), // por defecto "stable"
 });
 
@@ -114,6 +165,7 @@ updatesRoutes.post("/publish", async (c) => {
 	}
 
 	const target = parsed.data.target || "windows";
+	const arch = parsed.data.arch || "x86_64";
 	const channel = parsed.data.channel || "stable";
 	const pubDate = parsed.data.pub_date || new Date().toISOString();
 
@@ -122,12 +174,13 @@ updatesRoutes.post("/publish", async (c) => {
 	await db.execute({
 		sql: `
 			INSERT OR REPLACE INTO app_releases
-				(version, target, channel, notes, pub_date, signature, url, is_active, created_at_ms)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 1, unixepoch()*1000)
+				(version, target, arch, channel, notes, pub_date, signature, url, is_active, created_at_ms)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch()*1000)
 		`,
 		args: [
 			parsed.data.version,
 			target,
+			arch,
 			channel,
 			parsed.data.notes ?? null,
 			pubDate,
@@ -136,7 +189,7 @@ updatesRoutes.post("/publish", async (c) => {
 		],
 	});
 
-	return c.json({ ok: true, version: parsed.data.version, target, channel });
+	return c.json({ ok: true, version: parsed.data.version, target, arch, channel });
 });
 
 /* ── Rollback: desactivar una release (admin) ──────────────────────────────── */
@@ -144,6 +197,7 @@ updatesRoutes.post("/publish", async (c) => {
 const deactivateSchema = z.object({
 	version: z.string().min(1),
 	target: z.string().optional(),
+	arch: z.string().optional(),
 	channel: z.string().optional(),
 });
 
@@ -162,13 +216,16 @@ updatesRoutes.post("/deactivate", async (c) => {
 
 	const db = getDb(c.env);
 
+	// Sin `arch` se desactiva la versión en TODOS los arch, que es lo que quiere un rollback: si
+	// una versión está mal, lo está en todas partes. Indicándolo se acota a uno.
+	const arch = parsed.data.arch;
 	await db.execute({
 		sql: `
 			UPDATE app_releases SET is_active = 0
-			WHERE version = ? AND target = ? AND channel = ?
+			WHERE version = ? AND target = ? AND channel = ? AND (?4 IS NULL OR arch = ?4)
 		`,
-		args: [parsed.data.version, target, channel],
+		args: [parsed.data.version, target, channel, arch ?? null],
 	});
 
-	return c.json({ ok: true, deactivated: parsed.data.version, target, channel });
+	return c.json({ ok: true, deactivated: parsed.data.version, target, arch: arch ?? "todos", channel });
 });

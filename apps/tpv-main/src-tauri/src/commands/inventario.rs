@@ -5,8 +5,7 @@ use tauri::State;
 use tpv_application::use_cases::inventario as uc;
 use tpv_contracts::inventario::{
     AjusteLoteInput, AlergenoInvDto, CategoriaInvDto, CreateLoteInput, IdCategoriaArgs,
-    IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoBaseDto,
-    ProductoDetalleDto, ProductoListDto, ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs,
+    IdProductoArgs, InventarioResumenResponse, LoteDto, ProductDetailResponse, ProductoListDto, ProveedorMiniDto, SetProductoAlergenosInput, SummaryArgs,
     UpdateLoteInput, UpsertCategoriaInput, UpsertProductoInput, UpsertProductoResult,
 };
 use crate::AppState;
@@ -82,30 +81,12 @@ pub async fn inventario_set_alergenos_producto(
 }
 
 #[tauri::command]
-pub async fn inventario_get_producto(
-    state: State<'_, AppState>,
-    args: IdProductoArgs,
-) -> Result<Option<ProductoBaseDto>, AppErrorDto> {
-    let repo = state.inventario_repo().await?;
-    Ok(uc::get_producto(repo.as_ref(), args.id_producto).await?)
-}
-
-#[tauri::command]
 pub async fn inventario_get_product_detail(
     state: State<'_, AppState>,
     args: IdProductoArgs,
 ) -> Result<ProductDetailResponse, AppErrorDto> {
     let repo = state.inventario_repo().await?;
     Ok(uc::get_product_detail(repo.as_ref(), args.id_producto).await?)
-}
-
-#[tauri::command]
-pub async fn inventario_get_producto_detalle(
-    state: State<'_, AppState>,
-    args: IdProductoArgs,
-) -> Result<Option<ProductoDetalleDto>, AppErrorDto> {
-    let repo = state.inventario_repo().await?;
-    Ok(uc::get_producto_detalle(repo.as_ref(), args.id_producto).await?)
 }
 
 #[tauri::command]

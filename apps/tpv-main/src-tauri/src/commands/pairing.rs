@@ -11,9 +11,8 @@ use tauri::{AppHandle, Manager, State};
 use tpv_application::use_cases::cloud_sync as uc_sync;
 use tpv_application::use_cases::pairing as uc;
 use tpv_contracts::licensing::{
-    ApiSignedHeaders, DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
-    PairCreateResult, SigB64, TpvServerPostJsonArgs, TpvServerSignedHeadersArgs,
-    UploadInitialSetupArgs,
+    DeviceIdentity, DeviceSignB64Args, HandySetTokenArgs, HandyWsAuth,
+    PairCreateResult, SigB64, TpvServerPostJsonArgs, UploadInitialSetupArgs,
 };
 use tpv_infra_licensing::PairingAdapter;
 use tpv_contracts::errors::AppErrorDto;
@@ -74,12 +73,6 @@ pub fn handy_set_token(app: AppHandle, args: HandySetTokenArgs) -> Result<String
 }
 
 #[tauri::command]
-pub fn handy_clear_token(app: AppHandle) -> Result<String, AppErrorDto> {
-    uc::handy_clear_token(&svc(&app)?)?;
-    Ok("OK".into())
-}
-
-#[tauri::command]
 pub fn handy_get_tenant(app: AppHandle) -> Result<Option<String>, AppErrorDto> {
     Ok(uc::handy_get_tenant(&svc(&app)?)?)
 }
@@ -98,14 +91,6 @@ pub fn device_get_identity(app: AppHandle) -> Result<DeviceIdentity, AppErrorDto
 #[tauri::command]
 pub fn device_sign_b64(app: AppHandle, args: DeviceSignB64Args) -> Result<SigB64, AppErrorDto> {
     Ok(uc::device_sign_b64(&svc(&app)?, args)?)
-}
-
-#[tauri::command]
-pub fn tpv_server_signed_headers(
-    app: AppHandle,
-    args: TpvServerSignedHeadersArgs,
-) -> Result<ApiSignedHeaders, AppErrorDto> {
-    Ok(uc::tpv_server_signed_headers(&svc(&app)?, args)?)
 }
 
 #[tauri::command]

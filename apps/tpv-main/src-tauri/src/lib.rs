@@ -1358,16 +1358,6 @@ async fn images_backfill(
     Ok(format!("encoladas={encoladas}"))
 }
 
-#[tauri::command]
-fn get_app_data_path(app: AppHandle) -> Result<String, AppErrorDto> {
-    let app_data_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("Error obteniendo ruta AppData: {e}"))?;
-
-    Ok(app_data_dir.to_string_lossy().to_string())
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // Comandos: impresión (host/Windows) — ver `printing.rs`
 // ──────────────────────────────────────────────────────────────────────────────
@@ -2093,7 +2083,6 @@ pub fn run() {
             images_delete,
             images_ensure_local,
             images_backfill,
-            get_app_data_path,
             // auto-actualización (updater)
             updater_check,
             updater_status,
@@ -2139,14 +2128,8 @@ pub fn run() {
             commands::mesas::get_comanda_abierta_by_mesa,
             commands::mesas::abrir_comanda,
             commands::mesas::comanda_set_trabajador_if_null,
-            commands::mesas::cerrar_comanda,
             commands::mesas::get_lineas_comanda,
             commands::mesas::add_linea_comanda,
-            commands::mesas::get_or_create_comanda_barra,
-            commands::mesas::cobrar_venta_rapida,
-            commands::mesas::create_comanda_barra,
-            commands::mesas::list_comandas_barra,
-            commands::mesas::delete_comanda_barra_if_safe,
             commands::mesas::mesas_meta_all,
             commands::mesas::list_categorias_vendibles,
             commands::mesas::list_productos_by_categoria,
@@ -2166,9 +2149,7 @@ pub fn run() {
             commands::inventario::inventario_list_alergenos,
             commands::inventario::inventario_get_alergenos_producto,
             commands::inventario::inventario_set_alergenos_producto,
-            commands::inventario::inventario_get_producto,
             commands::inventario::inventario_get_product_detail,
-            commands::inventario::inventario_get_producto_detalle,
             commands::inventario::inventario_delete_producto,
             commands::inventario::inventario_upsert_producto,
             commands::inventario::inventario_list_lotes_by_producto,
@@ -2249,7 +2230,6 @@ pub fn run() {
             commands::notificaciones::notificaciones_no_leidas,
             commands::notificaciones::notificaciones_marcar_leida,
             commands::notificaciones::notificaciones_marcar_todas_leidas,
-            commands::notificaciones::notificaciones_crear,
             commands::notificaciones::notificaciones_descartar,
             commands::notificaciones::notificaciones_papelera,
             commands::notificaciones::notificaciones_restaurar,
@@ -2300,9 +2280,7 @@ pub fn run() {
             commands::licensing::license_gate,
             commands::licensing::license_check_now,
             // pairing (migrado a arquitectura hexagonal — commands/pairing.rs)
-            commands::pairing::tpv_server_signed_headers,
             commands::pairing::handy_set_token,
-            commands::pairing::handy_clear_token,
             commands::pairing::handy_get_tenant,
             commands::pairing::handy_get_ws_auth,
             commands::pairing::device_get_identity,
@@ -2319,7 +2297,6 @@ pub fn run() {
             commands::sync::sync_outbox_mark_failed,
             commands::sync::sync_outbox_mark_encolada,
             commands::sync::sync_liberar_encoladas,
-            commands::sync::sync_purge_applied_ops,
             commands::sync::sync_health,
             commands::sync::sync_backfill_estado,
             commands::sync::sync_bootstrap_desde_nube,
@@ -2768,6 +2745,99 @@ mod tests_exenciones_del_gate {
         );
     }
 
+    /// REV-26: lo registrado es lo invocable, así que lo que no se invoca no se registra.
+    ///
+    /// Había trece comandos en el `generate_handler!` que ningún sitio del frontend ni del E2E
+    /// llamaba por su nombre. No es sólo limpieza: **todo lo registrado es alcanzable por el IPC**,
+    /// y el modelo de amenaza de §14 asume que quien tiene la máquina delante puede invocarlo. Dos
+    /// de ellos eran de verdad incómodos: `tpv_server_signed_headers` devolvía la firma de
+    /// cualquier petición **sin pasar por ningún gate** —mientras su hermano `tpv_server_post_json`
+    /// sí exige Administrador para `/v1/pair/…` y `/v1/device/…`, o sea que era la vuelta a esa
+    /// esquina—, y `cobrar_venta_rapida` era un segundo camino de cobro de barra, no idempotente y
+    /// sin nadie que lo usara.
+    ///
+    /// Esto vigila los dos que importan. El resto se fue con ellos y lo cubre
+    /// `scripts/check-comandos-tauri.mjs`, que rompe si el frontend invoca algo que no está.
+    #[test]
+    fn los_comandos_retirados_no_vuelven_por_la_puerta_de_atras() {
+        // Sólo el registro, no el fichero entero: si no, este propio test —que nombra los dos
+        // comandos— se contaría como una reaparición.
+        const FUENTE_COMPLETA: &str = include_str!("lib.rs");
+        let desde = FUENTE_COMPLETA
+            .find("generate_handler![")
+            .expect("no se encuentra el registro de comandos");
+        let hasta = FUENTE_COMPLETA[desde..]
+            .find("])")
+            .expect("el registro de comandos no cierra")
+            + desde;
+        let registro = &FUENTE_COMPLETA[desde..hasta];
+
+        for (comando, porque) in [
+            (
+                "tpv_server_signed_headers",
+                "firma cualquier petición sin gate: es la vuelta a la esquina del candado de                  `tpv_server_post_json` (SEC-01)",
+            ),
+            (
+                "cobrar_venta_rapida",
+                "es un segundo camino de cobro de barra, y no es idempotente",
+            ),
+        ] {
+            assert!(
+                !registro.contains(comando),
+                "`{comando}` ha vuelto al registro de comandos, y no puede: {porque} (REV-26).
+                 Si de verdad hace falta, lo que hay que construir es su gate, no el comando."
+            );
+        }
+    }
+
+    /// REV-24: la webview no puede escribir sobre los ficheros de los que depende el equipo.
+    ///
+    /// `fs:allow-write-file` iba sin ámbito, y `fs:default` ya permite el directorio de datos de
+    /// la aplicación entero: o sea que cualquier código de la webview podía escribir encima de
+    /// `data.db`, del estado de licencia o de las copias de seguridad. La CSP es estricta y no hay
+    /// `eval`, así que no es una puerta abierta de par en par — pero una dependencia del bundle
+    /// está dentro de ese perímetro, y lo que se juega es la base de datos del negocio.
+    ///
+    /// El permiso se conserva porque hace falta: guardar un PDF en la ruta que elige la persona.
+    /// Esa ruta la autoriza el diálogo en tiempo de ejecución (`tauri-plugin-dialog` llama a
+    /// `allow_file` con lo que se ha elegido), así que lo único que hay que quitar del alcance es
+    /// lo que nunca se escribe desde la interfaz.
+    ///
+    /// Se lee el fichero de capacidades porque el fallo a impedir no es que algo se comporte mal
+    /// hoy: es que mañana alguien añada `fs:allow-write-text-file` sin ámbito y nadie lo note.
+    #[test]
+    fn la_webview_no_puede_escribir_sobre_los_ficheros_del_equipo() {
+        const CAPACIDADES: &str = include_str!("../capabilities/default.json");
+
+        /// Lo que no puede quedar al alcance de un `writeFile` de la webview.
+        const INTOCABLES: &[&str] = &[
+            "$APPDATA/data.db",
+            "$APPDATA/device_config.json",
+            "$APPDATA/license_state.json",
+            "$APPDATA/traslado-pendiente",
+            "$APPDATA/backups/**",
+        ];
+
+        // Un permiso de escritura suelto (una cadena, sin objeto) no lleva ámbito: eso es
+        // exactamente lo que REV-24 encontró.
+        for linea in CAPACIDADES.lines().map(str::trim) {
+            let suelto = linea.trim_end_matches(',').trim_matches('"');
+            assert!(
+                !(suelto.starts_with("fs:allow-write") || suelto == "fs:write-all"),
+                "`{suelto}` está declarado sin ámbito.
+                 Un permiso de escritura de la webview tiene que ir como objeto con su `deny`, o                  vuelve a alcanzar a `data.db` (REV-24)."
+            );
+        }
+
+        for intocable in INTOCABLES {
+            assert!(
+                CAPACIDADES.contains(intocable),
+                "`{intocable}` ya no está en el `deny` de capabilities/default.json (REV-24).
+                 Si el fichero ha cambiado de nombre, cámbialo aquí; si se ha quitado el `deny`,                  la webview puede escribir encima de él."
+            );
+        }
+    }
+
     /// REV-17: y el que cobra tiene que SACAR de la sesión quién cobra.
     ///
     /// Es el reverso del test de arriba: allí se vigila que nadie ponga el gate donde no cabe, y
@@ -2809,11 +2879,12 @@ mod tests_exenciones_del_gate {
             }
         }
 
-        // Si mañana se renombran, este test dejaría de mirar nada y seguiría en verde.
+        // Si mañana se renombran, este test dejaría de mirar nada y seguiría en verde. Eran tres
+        // hasta que REV-26 retiró `cobrar_venta_rapida`, que no invocaba nadie.
         assert_eq!(
-            vistos, 3,
-            "se esperaban 3 comandos de cobro (cobrar_venta_rapida, cobrar_detalles, \
-             vr_cobrar_fraccionado); si has añadido o quitado uno, actualiza el número"
+            vistos, 2,
+            "se esperaban 2 comandos de cobro (cobrar_detalles, vr_cobrar_fraccionado); si has \
+             añadido o quitado uno, actualiza el número"
         );
     }
 
