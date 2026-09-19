@@ -28,7 +28,8 @@ function retenerEnvio(c: { executionCtx: ExecutionContext }, p: Promise<unknown>
 		void p;
 	}
 }
-import { unauthorized } from "../server/utils/response";
+import { forbidden, unauthorized } from "../server/utils/response";
+import { vetoDeLicencia } from "../lib/licenciaEnUso";
 
 export type TenantVars = {
 	tenantId: string;
@@ -134,6 +135,15 @@ export const tenantAuth: MiddlewareHandler<{
 		// cliente ramificar ante un `device_revoked` en vez de reintentar contra una pared.
 		return unauthorized(c.req.raw, motivo);
 	}
+
+	// REV-12: y la licencia. Iba sólo delante del ticket del WebSocket, así que con una anulada o
+	// caducada seguía valiendo el JWT —30 días, y `/v1/license/status` lo renueva cada seis horas—
+	// para mandar correo con nuestro dominio, subir a R2, bajarse el volcado de `/v1/sync/bootstrap`
+	// y leer todo lo de la Handy. El cliente se bloqueaba solo porque obedece la aserción firmada:
+	// lo único que lo impedía era su buena fe. Va aquí y no en cada ruta para que la siguiente que
+	// alguien añada quede cubierta sin acordarse de nada.
+	const veto = await vetoDeLicencia(c);
+	if (veto) return forbidden(c.req.raw, veto);
 
 	await next();
 };

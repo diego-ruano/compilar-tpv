@@ -50,6 +50,7 @@ import {
 	otpHash,
 	provisionTenantDatabase,
 	signToken,
+	stateAllowsUse,
 	toBool01,
 	readmitirMain,
 	verifyDeviceProof,
@@ -387,7 +388,17 @@ licenseRoutes.get("/status", async (c) => {
 
 	// Token renovado en cada comprobación (cada 6 h): así nunca se llega al muro de los 30 días
 	// que obligaba a reactivar a mano (bug #1).
-	const token = await signToken(env, claims);
+	//
+	// REV-12: pero sólo si la licencia deja trabajar. Se renovaba siempre, incluso anulada, de modo
+	// que el equipo conservaba indefinidamente una credencial buena para todo lo que no fuera esta
+	// ruta. `warn` y `expiry_grace` sí renuevan, que es lo que permite seguir vendiendo y
+	// replicando durante la gracia.
+	//
+	// Esta ruta contesta igual pase lo que pase: es por donde el cliente se ENTERA de que su
+	// licencia ha dejado de valer, así que callarla lo dejaría sin saberlo. Lo que se le niega es
+	// el token nuevo, no la respuesta.
+	const estadoActual = computeLicenseState(lic, claims.deviceId, now);
+	const token = stateAllowsUse(estadoActual) ? await signToken(env, claims) : undefined;
 
 	return c.json({
 		ok: true,

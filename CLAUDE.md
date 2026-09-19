@@ -615,10 +615,23 @@ no sólo en dev.
   siempre que sea el dispositivo `tpv`; el estado real (`conectado` · `reintentando` ·
   `sin_identidad` · `rechazado` · `pausada`) lo publica `useMainSocket` en el store
   **`useEstadoSync`** y lo pinta Configuración → Conectividad. Reglas al tocar esto:
-  - **La autoridad es el worker.** `/v1/ws/ticket` exige JWT + device-proof y además comprueba la
-    licencia (`computeLicenseState`/`stateAllowsUse`, los mismos que firman `/v1/license/status`) y
-    que un rol `tpv` siga siendo el `main_device_id`. El cliente no decide si "puede" conectarse:
-    lo intenta y obedece. Un 403 se traduce a `rechazado` y espacia los reintentos.
+  - **La autoridad es el worker, y la licencia se comprueba en TODAS las rutas** (`tenantAuth` →
+    `lib/licenciaEnUso.ts`), no sólo al pedir el ticket del WebSocket. El estado lo deriva
+    `computeLicenseState`/`stateAllowsUse`, los mismos que firman `/v1/license/status`, y de paso se
+    veta al rol `tpv` que ya no sea el `main_device_id` (una Main desplazada). El cliente no decide
+    si "puede" conectarse: lo intenta y obedece. Un 403 se traduce a `rechazado` y espacia los
+    reintentos. Reglas al tocarlo:
+    - **Iba sólo delante del ticket, y eso dejaba abierto todo lo demás (REV-12).** El JWT dura 30
+      días y `/v1/license/status` lo renueva cada seis horas, así que con una licencia anulada o
+      caducada seguían funcionando el correo con nuestro dominio, las subidas a R2, el volcado de
+      `/v1/sync/bootstrap` y las lecturas de la Handy. El cliente se bloquea solo porque obedece la
+      aserción firmada: lo único que lo impedía era su buena fe.
+    - **Y `/status` ya no reparte token si la licencia no deja trabajar.** Contesta igual —es por
+      donde el cliente se entera—, pero sin credencial nueva: renovarla indefinidamente a un equipo
+      anulado era lo que hacía eterno el problema anterior.
+    - **La comprobación se cachea 60 s por isolate.** Sin eso serían dos consultas más al
+      control-plane en cada petición. El retraso no importa porque anular ya empuja: `revoke` le
+      pide al TenantHub que cierre el socket del equipo en el acto (ver abajo).
   - **La gracia por caducidad sincroniza.** `expiry_grace` pasa el filtro a propósito: durante esos
     días el TPV sigue vendiendo, y vender sin replicar es la peor combinación.
   - **Anular una licencia empuja; caducar, no.** `POST /v1/admin/licenses/:id/revoke` le pide al
