@@ -269,9 +269,15 @@ mod tests {
 
     #[test]
     fn pin_unicode_se_verifica_sin_normalizaciones_ocultas() {
-        let hash = hash_password("CafÃ©42Ã±").unwrap();
-        assert!(tpv_domain::login::verify_pin("CafÃ©42Ã±", &hash).is_ok());
+        // REV-25: el literal estaba mojibakeado («CafÃ©42Ã±»), o sea que probaba un PIN de ASCII
+        // con símbolos, no uno con acentos. Justo lo que dice comprobar era lo único que no
+        // comprobaba: que el hash y la verificación tratan los caracteres multibyte como la misma
+        // secuencia de bytes en los dos sentidos.
+        let hash = hash_password("Café42ñ").unwrap();
+        assert!(tpv_domain::login::verify_pin("Café42ñ", &hash).is_ok());
         assert!(tpv_domain::login::verify_pin("Cafe42n", &hash).is_err());
+        // Y que no se normaliza por detrás: «é» compuesta no es «é» precompuesta.
+        assert!(tpv_domain::login::verify_pin("Cafe\u{301}42ñ", &hash).is_err());
     }
 
     #[test]
