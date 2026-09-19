@@ -222,12 +222,28 @@ licenseRoutes.post("/activate", async (c) => {
 	let expiresAtMs = lic.expires_at_ms;
 
 	if (esPrimeraActivacion) {
-		expiresAtMs = await activateLicenseFirstTime(db, {
+		const activada = await activateLicenseFirstTime(db, {
 			licenseId: lic.license_id,
 			tenantId,
 			deviceId,
 			termMonths: lic.term_months,
 		});
+
+		// REV-15: dos equipos activando la misma clave a la vez. El `UPDATE` va condicionado a que
+		// siga sin activar, así que sólo uno gana — pero nadie miraba si había ganado, y la
+		// perdedora seguía hasta el final: se llevaba un token y la DEK de un tenant que la
+		// licencia no apunta. Dos equipos creyéndose la Main del mismo negocio, cada uno con su
+		// base, y ninguno de los dos enterándose.
+		//
+		// A la perdedora se le dice lo mismo que a cualquier equipo que llega tarde a una licencia
+		// ya activada: está en otro sitio. Lo que sí queda detrás es la base de Turso que se
+		// aprovisionó unas líneas más arriba, vacía y sin dueño; moverlo todo por delante del
+		// aprovisionamiento lo evitaría, pero dejaría la licencia atada a un equipo cuya base falló
+		// al crearse, y eso es peor que una base de sobra.
+		if (activada === null) {
+			return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 409);
+		}
+		expiresAtMs = activada;
 	} else if (esCambioDeEquipo) {
 		await reassignMainDevice(db, {
 			licenseId: lic.license_id,

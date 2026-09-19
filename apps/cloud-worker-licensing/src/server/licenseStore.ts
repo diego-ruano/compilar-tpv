@@ -220,17 +220,24 @@ export async function issueLicense(
 
 /**
  * 1ª activación: arranca el reloj y liga la licencia a su tenant y a su Main.
- * Condicionada en SQL a que siga sin activar (`main_device_id IS NULL`), para que dos
- * activaciones simultáneas no puedan pisarse.
+ *
+ * Condicionada en SQL a que siga sin activar (`main_device_id IS NULL`), para que dos activaciones
+ * simultáneas no puedan pisarse. Devuelve `null` si **no** ganó esa carrera (REV-15).
+ *
+ * ⚠️ Mirar el resultado es la mitad que faltaba. El `WHERE` estaba desde el principio, pero nadie
+ * comprobaba si había afectado a alguna fila, así que la perdedora seguía como si tal cosa: se
+ * llevaba un token y la DEK de un tenant que la licencia no apunta, o sea dos equipos creyéndose
+ * la Main del mismo negocio con dos bases distintas. Una condición de carrera que no se comprueba
+ * es una condición de carrera.
  */
 export async function activateLicenseFirstTime(
 	db: Sql,
 	args: { licenseId: string; tenantId: string; deviceId: string; termMonths: number },
-): Promise<number> {
+): Promise<number | null> {
 	const now = Date.now();
 	const expiresAt = addMonths(now, args.termMonths);
 
-	await exec(
+	const r = await exec(
 		db,
 		`
     UPDATE licenses
@@ -245,7 +252,7 @@ export async function activateLicenseFirstTime(
 		[args.tenantId, args.deviceId, now, expiresAt, now, args.licenseId],
 	);
 
-	return expiresAt;
+	return Number((r as any)?.rowsAffected ?? 0) > 0 ? expiresAt : null;
 }
 
 /** Reasigna el Main (cambio de dispositivo, §6.4) y deja la traza de auditoría. */

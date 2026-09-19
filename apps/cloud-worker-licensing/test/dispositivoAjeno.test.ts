@@ -32,6 +32,7 @@ vi.mock("../src/server/db", async (importOriginal) => {
 
 const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
 const { generateLicenseKey, licenseKeyHash } = await import("../src/domains/licensing/licenseKey");
+const { activateLicenseFirstTime } = await import("../src/server/licenseStore");
 
 const ENV = {
 	LICENSE_JWT_SECRET: "secreto-de-pruebas",
@@ -163,6 +164,74 @@ describe("la regla, que comparten las dos puertas", () => {
 			await expect(
 				exigirClaveSiEsDeOtroNegocio(dbDePruebas as any, VICTIMA, PUB_ATACANTE, BAR_ATACANTE),
 			).rejects.toThrow("device_key_mismatch");
+		});
+	});
+});
+
+describe("REV-15 · dos equipos activando la misma clave a la vez", () => {
+	// La carrera de verdad no se puede montar desde la ruta: para cuando la segunda petición lee la
+	// licencia, la primera ya la ha marcado, y entonces entra por el camino de «cambio de equipo».
+	// Lo que hay que fijar es el adjudicador, que es donde estaba el fallo: el `UPDATE` iba
+	// condicionado a que la licencia siguiera sin activar —correcto— pero **nadie miraba si había
+	// afectado a alguna fila**, así que la perdedora seguía hasta el final y se llevaba un token y
+	// la DEK de un tenant que la licencia no apunta. Dos equipos creyéndose la Main del mismo
+	// negocio, cada uno con su base, y ninguno de los dos enterándose.
+
+	it("sólo uno gana, y el otro se entera", async () => {
+		await escenario("carrera", async (sql) => {
+			const comun = { licenseId: "lic-atacante", termMonths: 12 };
+
+			const primero = await activateLicenseFirstTime(dbDePruebas as any, {
+				...comun,
+				tenantId: "tenant-del-primero",
+				deviceId: "equipo-primero",
+			});
+			const segundo = await activateLicenseFirstTime(dbDePruebas as any, {
+				...comun,
+				tenantId: "tenant-del-segundo",
+				deviceId: "equipo-segundo",
+			});
+
+			expect(typeof primero).toBe("number");
+			expect(segundo).toBeNull();
+
+			// Y la licencia es del primero, no del último que pasó por aquí.
+			expect(
+				sql
+					.exec(`SELECT tenant_id, main_device_id FROM licenses WHERE license_id='lic-atacante';`)
+					.toArray()[0],
+			).toEqual({ tenant_id: "tenant-del-primero", main_device_id: "equipo-primero" });
+		});
+	});
+
+	it("y la ruta traduce esa derrota en un rechazo, sin entregar credenciales", async () => {
+		// Lo que no puede pasar, gane quien gane: que el perdedor se vaya con un token y una DEK.
+		await escenario("carrera-ruta", async (sql) => {
+			sql.exec(
+				`UPDATE licenses SET status='active', tenant_id='tenant-del-primero',
+				        main_device_id='equipo-primero', activated_at_ms=1, expires_at_ms=?
+				  WHERE license_id='lic-atacante';`,
+				Date.now() + 365 * 24 * 60 * 60 * 1000,
+			);
+
+			const res = await licenseRoutes.request(
+				"/activate",
+				{
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({
+						activationKey: CLAVE,
+						deviceId: "equipo-segundo",
+						devicePubKey: "clave-del-segundo",
+					}),
+				},
+				ENV,
+			);
+
+			expect(res.status).toBe(409);
+			const cuerpo = (await res.json()) as any;
+			expect(cuerpo.token).toBeUndefined();
+			expect(cuerpo.fieldDek).toBeUndefined();
 		});
 	});
 });
