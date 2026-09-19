@@ -15,7 +15,7 @@
 
 import { describe, it, expect } from "vitest";
 
-import { esRechazoPermanente } from "../src/durableObjects/tenantHub.errores";
+import { esFalloPasajero, esRechazoPermanente } from "../src/durableObjects/tenantHub.errores";
 
 describe("un rechazo que NO se arregla reintentando", () => {
 	it("reconoce el desajuste de esquema que motivó todo esto", () => {
@@ -86,5 +86,60 @@ describe("un rechazo que SÍ se arregla solo", () => {
 				new Error('fetch failed while executing: UPDATE X SET unique constraint failed'),
 			),
 		).toBe(false);
+	});
+});
+
+describe("REV-11 · y el reverso: lo que SÍ sabemos que es pasajero", () => {
+	// `esRechazoPermanente` sólo dice «no lo apartes todavía». Eso no basta para el otro lado de la
+	// decisión: la Main necesita saber cuándo el fallo no dice nada de SU operación, para no gastar
+	// uno de los veinte intentos que tiene antes de apartarla. Cuatro baches de red bastaban.
+
+	it("reconoce lo que está en la lista", () => {
+		for (const msg of [
+			"fetch failed",
+			"Network connection lost",
+			"The request timed out",
+			"database is locked",
+			"SQLITE_BUSY: database is busy",
+			"stream closed",
+			"503 Service Unavailable",
+		]) {
+			expect(esFalloPasajero(new Error(msg))).toBe(true);
+		}
+	});
+
+	it("NO es la negación de `esRechazoPermanente`, y ahí está el matiz", () => {
+		// Lo desconocido no es permanente —no se aparta a la primera— pero tampoco se puede
+		// prometer que se arregle solo. Si aquí dijera que sí, no se gastaría nunca un intento y
+		// una operación que la nube no puede aplicar detendría la cola para siempre: exactamente el
+		// atasco que SYNC-20 existe para romper.
+		const desconocido = new Error("algo raro ha pasado");
+		expect(esRechazoPermanente(desconocido)).toBe(false);
+		expect(esFalloPasajero(desconocido)).toBe(false);
+	});
+
+	it("un rechazo de SQL no es pasajero", () => {
+		expect(esFalloPasajero(new Error("no such column: Razon_Social"))).toBe(false);
+		expect(esFalloPasajero(new Error("UNIQUE constraint failed: Usuarios.Email"))).toBe(false);
+	});
+
+	it("y los dos no pueden ser ciertos a la vez", () => {
+		// Serían órdenes contradictorias para la Main: apartar ya y no contar el intento.
+		for (const msg of [
+			"fetch failed while executing: UPDATE X SET unique constraint failed",
+			"no such table: Pagos",
+			"timeout",
+			"algo raro",
+			"",
+		]) {
+			const e = new Error(msg);
+			expect(esRechazoPermanente(e) && esFalloPasajero(e)).toBe(false);
+		}
+	});
+
+	it("aguanta lo que no sea un Error", () => {
+		expect(esFalloPasajero("fetch failed")).toBe(true);
+		expect(esFalloPasajero(undefined)).toBe(false);
+		expect(esFalloPasajero(null)).toBe(false);
 	});
 });

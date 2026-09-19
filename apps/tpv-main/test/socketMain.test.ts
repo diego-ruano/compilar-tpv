@@ -661,20 +661,94 @@ describe("subida: de la Main a la nube", () => {
 		expect(b.enviadas.map((e) => e.opId)).toEqual(["op-2"]);
 	});
 
-	it("sin confirmación en 10 s cuenta como fallo", async () => {
+	it("sin confirmación en 10 s se para, pero NO se le gasta un intento a la operación", async () => {
+		// REV-11: que no llegue el ack no dice nada de la operación, dice que no hay línea. Y
+		// apartarla no desatascaría nada, porque lo que viene detrás está parado por lo mismo — es
+		// el mismo cable. Contarlo costaba ~5 intentos por cada socket medio muerto, así que cuatro
+		// baches de red apartaban una venta buena, con su aviso falso a Sentry y la nube divergente.
 		const b = crearBackend();
 		b.outbox = [op(1)];
 		SocketFalso.nubePorDefecto = () => undefined;
 		await montar();
 		await conectar(ultimo());
-		await avanzar(9_999);
+
+		// Varias vueltas del drenado: el timeout, el reintento a los 3 s, y otra vez.
+		await avanzar(10_000);
+		await avanzar(3_000);
+		await avanzar(10_000);
+		await avanzar(3_000);
+		await avanzar(10_000);
+
 		expect(cuenta(b, "sync_outbox_mark_failed")).toBe(0);
-		await avanzar(1);
+		// Y sigue en la cola, en su sitio: no se ha perdido ni se ha adelantado nadie.
+		expect(b.apartadas.size).toBe(0);
+		expect(b.enviadas).toEqual([]);
+		expect(b.outbox.map((o) => o.op_id)).toEqual(["op-1"]);
+	});
+
+	it("un rechazo pasajero de la nube tampoco gasta intento", async () => {
+		// REV-11: el DO lo clasifica (`tenantHub.errores.ts`) y lo dice en el ack. Una caída de
+		// Turso no es un rechazo de la operación; el cliente no puede deducirlo del texto porque los
+		// mensajes de libsql cambian de redacción entre versiones.
+		const b = crearBackend();
+		b.outbox = [op(1)];
+		SocketFalso.nubePorDefecto = (m) =>
+			m.type === "apply"
+				? {
+						type: "apply_ack",
+						opId: m.opId,
+						ok: false,
+						error: "fetch failed: connect ECONNREFUSED",
+						permanente: false,
+						transitorio: true,
+					}
+				: undefined;
+		await montar();
+		await conectar(ultimo());
+		await avanzar(3_000);
+		await avanzar(3_000);
+
+		expect(cuenta(b, "sync_outbox_mark_failed")).toBe(0);
+		expect(b.outbox.map((o) => o.op_id)).toEqual(["op-1"]);
+	});
+
+	it("un rechazo que no sabemos clasificar SÍ cuenta, y acaba apartándose", async () => {
+		// La otra mitad, y la que impide que esto se convierta en «no apartar nunca»: lo desconocido
+		// sigue la política de siempre —fallar hacia transitorio, pero con un tope—, porque una
+		// operación que la nube no puede aplicar no puede detener el día de ventas que tiene detrás.
+		const b = crearBackend();
+		b.outbox = [op(1)];
+		SocketFalso.nubePorDefecto = (m) =>
+			m.type === "apply"
+				? { type: "apply_ack", opId: m.opId, ok: false, error: "algo raro" }
+				: undefined;
+		await montar();
+		await conectar(ultimo());
+		await avanzar(3_000);
+
 		expect(b.llamadas.find((l) => l.cmd === "sync_outbox_mark_failed")?.args).toEqual({
 			opId: "op-1",
-			error: "ack_timeout",
+			error: "algo raro",
 			permanente: false,
 		});
+	});
+
+	it("soltar el socket al reconectar no le gasta un intento al que iba en vuelo", async () => {
+		// `soltarSocket` resuelve como fallo los acks colgados para no dejar promesas vivas. Eso es
+		// correcto, pero es un fallo de transporte: sin decirlo, cada reconexión le costaba un
+		// intento a la operación que estuviera esperando su ack.
+		const b = crearBackend();
+		b.outbox = [op(1)];
+		SocketFalso.nubePorDefecto = () => undefined; // nadie contesta: el ack se queda en vuelo
+		const { volverLaRed } = await montar();
+		await conectar(ultimo());
+		await avanzar(1_000);
+
+		// Vuelve la red con el socket a medio morir: se suelta el anterior sin esperar su onclose.
+		ultimo().cerrar();
+		await volverLaRed();
+
+		expect(cuenta(b, "sync_outbox_mark_failed")).toBe(0);
 	});
 
 	it("con más de 100 pendientes al conectar vuelca por trozos de 200 a la cola de la nube (SYNC-18)", async () => {

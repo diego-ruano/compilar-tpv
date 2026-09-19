@@ -60,6 +60,17 @@ import {
 const RETRY_SIN_IDENTIDAD_MS = 60_000;
 const OUTBOX_BATCH = 50;
 const ACK_TIMEOUT_MS = 10000;
+// REV-11: los tres fallos que ponemos NOSOTROS cuando la nube no llega a contestar. Son cadenas
+// nuestras, no mensajes de la nube, así que compararlas aquí es leer una constante propia y no
+// adivinar la redacción de libsql — que es lo que la regla de SYNC-20 prohíbe.
+const ERROR_SOCKET_CERRADO = "socket_not_open";
+const ERROR_SIN_ACK = "ack_timeout";
+const ERROR_SOCKET_SOLTADO = "socket_soltado";
+const ERRORES_DE_TRANSPORTE = new Set([
+	ERROR_SOCKET_CERRADO,
+	ERROR_SIN_ACK,
+	ERROR_SOCKET_SOLTADO,
+]);
 // SYNC-18: a partir de aquí no se sube de una en una, se VUELCA. El corte separa dos situaciones
 // distintas: con la nube casi al día, subir en vivo va sobrado y el Handy ve el cambio al instante;
 // con un atraso de verdad, esperar un ack por operación son minutos con el cliente atado a la
@@ -182,17 +193,24 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	// el tenant está roto) gira para siempre diciendo que espera conexión.
 	let recuperacionBloqueada = false;
 	let drainTimer: ReturnType<typeof setInterval> | null = null;
-	const acks = new Map<
-		string,
-		(
-			ok: boolean,
-			error?: string,
-			seq?: number,
-			encolada?: boolean,
-			// SYNC-20: la nube dice si su rechazo es definitivo. Ver `tenantHub.errores.ts`.
-			permanente?: boolean,
-		) => void
-	>();
+	/**
+	 * Lo que contesta la nube a un `apply`, o lo que ponemos nosotros cuando no llega a contestar.
+	 *
+	 * `permanente` y `transitorio` son las dos mitades de la clasificación que hace el DO
+	 * (`tenantHub.errores.ts`): definitivo, pasajero, o ninguno de los dos —desconocido—. El cliente
+	 * NO los deduce del texto; los mensajes de libsql cambian de redacción entre versiones.
+	 */
+	type Ack = {
+		ok: boolean;
+		error?: string;
+		seq?: number;
+		encolada?: boolean;
+		// SYNC-20: la nube dice si su rechazo es definitivo. Ver `tenantHub.errores.ts`.
+		permanente?: boolean;
+		// REV-11: y si es de los que se arreglan solos, para no gastar un intento por ello.
+		transitorio?: boolean;
+	};
+	const acks = new Map<string, (ack: Ack) => void>();
 	// SYNC-18: sólo hay un volcado en curso a la vez (el bucle es secuencial), así que basta un
 	// hueco en vez de un mapa.
 	let ackVolcado: ((ok: boolean, error?: string) => void) | null = null;
@@ -255,36 +273,21 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 	}
 
 	// Envía una operación del outbox por el WS (mensaje `apply`) y espera su `apply_ack`.
-	function sendApply(
-		socket: WebSocket,
-		entry: OutboxEntry,
-	): Promise<{
-		ok: boolean;
-		error?: string;
-		seq?: number;
-		encolada?: boolean;
-		permanente?: boolean;
-	}> {
-		return new Promise<{
-			ok: boolean;
-			error?: string;
-			seq?: number;
-			encolada?: boolean;
-			permanente?: boolean;
-		}>((resolve) => {
+	function sendApply(socket: WebSocket, entry: OutboxEntry): Promise<Ack> {
+		return new Promise<Ack>((resolve) => {
 			if (socket.readyState !== WebSocket.OPEN) {
-				resolve({ ok: false, error: "socket_not_open" });
+				resolve({ ok: false, error: ERROR_SOCKET_CERRADO });
 				return;
 			}
 			const timer = setTimeout(() => {
 				acks.delete(entry.op_id);
-				resolve({ ok: false, error: "ack_timeout" });
+				resolve({ ok: false, error: ERROR_SIN_ACK });
 			}, ACK_TIMEOUT_MS);
 
-			acks.set(entry.op_id, (ok, error, seq, encolada, permanente) => {
+			acks.set(entry.op_id, (ack) => {
 				clearTimeout(timer);
 				acks.delete(entry.op_id);
-				resolve({ ok, error, seq, encolada, permanente });
+				resolve(ack);
 			});
 
 			socket.send(
@@ -463,9 +466,41 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 				let progressed = false;
 				for (const entry of pending) {
 					if (cancelled || socket.readyState !== WebSocket.OPEN) break;
-					const { ok, error, seq, encolada, permanente } = await sendApply(socket, entry);
+					const { ok, error, seq, encolada, permanente, transitorio } = await sendApply(
+						socket,
+						entry,
+					);
 					if (!ok) {
 						console.warn(`[outbox] apply_ack FALLÓ op=${entry.op_id}:`, error ?? "(sin error)");
+
+						// REV-11: lo que no es un rechazo de LA OPERACIÓN no le gasta un intento.
+						//
+						// Entran aquí los tres fallos de transporte —el socket se cerró, el ack no
+						// llegó, o lo soltamos al reconectar— y los que la propia nube reconoce como
+						// pasajeros (Turso ocupado o caído). Ninguno dice nada sobre esta operación:
+						// dicen que ahora mismo no se puede subir NADA.
+						//
+						// Y ahí está la razón de fondo, que es distinta de la de SYNC-20: apartar
+						// existe para que una operación imposible no detenga el día de ventas que
+						// tiene detrás. Pero cuando lo que falla es el transporte, lo de detrás está
+						// igual de parado —es el mismo cable—, así que apartar la cabeza de la cola
+						// no desatasca nada: sólo tira una venta buena, avisa a Sentry de un
+						// problema que no existe y deja la nube divergente. Se contaban ~5 intentos
+						// por cada socket medio muerto (10 s de espera + 3 s hasta el reintento,
+						// durante los 65 s que tarda el latido en cerrarlo), así que cuatro baches
+						// de red bastaban para apartar una venta perfectamente sana.
+						//
+						// Lo desconocido sí cuenta, y acabará apartándose: es la política escrita de
+						// «fallar hacia transitorio», no una excepción a ella.
+						if (transitorio || ERRORES_DE_TRANSPORTE.has(String(error ?? ""))) {
+							if (strict) {
+								throw new Error(
+									`No se pudo subir una operación local (${entry.op_id}): ${error ?? "sin conexión"}`,
+								);
+							}
+							break;
+						}
+
 						if (strict) {
 							// Con el op_id delante: reintentar en bucle una operación que la nube
 							// rechaza siempre no lo arregla, y sin el identificador no hay por dónde
@@ -669,8 +704,10 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			clearInterval(drainTimer);
 			drainTimer = null;
 		}
-		// Resolver como fallo los acks pendientes para no dejar promesas colgadas.
-		for (const cb of acks.values()) cb(false);
+		// Resolver como fallo los acks pendientes para no dejar promesas colgadas. Con su motivo:
+		// es un fallo de transporte, no un rechazo, y sin decirlo le costaba un intento a la
+		// operación que estuviera en vuelo (REV-11).
+		for (const cb of acks.values()) cb({ ok: false, error: ERROR_SOCKET_SOLTADO });
 		acks.clear();
 		ws = null;
 		authed = false;
@@ -950,18 +987,21 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 						console.warn("sync_outbox_mark_encolada falló:", e),
 					);
 					const cbEnc = acks.get(opId);
-					if (cbEnc) cbEnc(true, undefined, 0, true);
+					if (cbEnc) cbEnc({ ok: true, seq: 0, encolada: true });
 					return;
 				}
 				const cb = acks.get(opId);
 				if (cb)
-					cb(
-						Boolean(msg.ok),
-						msg.ok ? undefined : String(msg.error ?? "unknown"),
-						Number(msg.seq ?? 0),
-						false,
-						Boolean(msg.permanente),
-					);
+					cb({
+						ok: Boolean(msg.ok),
+						error: msg.ok ? undefined : String(msg.error ?? "unknown"),
+						seq: Number(msg.seq ?? 0),
+						encolada: false,
+						permanente: Boolean(msg.permanente),
+						// Un worker anterior a REV-11 no manda este campo: se cuenta como antes,
+						// que es el lado seguro (de más, nunca de menos).
+						transitorio: Boolean(msg.transitorio),
+					});
 				return;
 			}
 

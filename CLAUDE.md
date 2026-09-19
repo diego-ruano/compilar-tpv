@@ -653,6 +653,23 @@ no sólo en dev.
     falle de forma visible.
   - **Se falla hacia TRANSITORIO.** Apartar deja a la nube divergente en esa fila; reintentar de más
     sólo cuesta tiempo, y un error desconocido se apartará igual al agotar `MAX_SUBIDA_ATTEMPTS`.
+  - **Y sólo cuenta un intento lo que sea un rechazo de LA OPERACIÓN (REV-11).** No contaba: un
+    `ack_timeout`, un socket soltado al reconectar o una caída de Turso gastaban uno de los veinte,
+    así que **cuatro baches de red apartaban una venta buena** —con su aviso falso a Sentry y la
+    nube divergente—. Se medía en unos cinco intentos por cada socket medio muerto: 10 s de espera
+    más 3 s hasta el reintento, durante los 65 s que tarda el latido en cerrarlo. Reglas:
+    - **El transporte no cuenta nunca**, y el motivo es distinto del de SYNC-20: apartar existe para
+      que una operación imposible no detenga el día de ventas que tiene detrás, pero cuando lo roto
+      es el transporte lo de detrás está parado por lo mismo —es el mismo cable—, así que apartar la
+      cabeza de la cola no desatasca nada. Sólo puede tirar un dato.
+    - **Quien clasifica sigue siendo el DO**, y ahora lo dice en las dos direcciones: `permanente`
+      (apartar ya) y `transitorio` (`esFalloPasajero`, no cuenta). Son **tres** estados, porque lo
+      desconocido no es ninguno de los dos: ése cuenta y acabará apartándose, que es lo que impide
+      que esto se convierta en «no apartar jamás».
+    - **Los tres errores de transporte los pone el cliente** (`ERRORES_DE_TRANSPORTE` en
+      `socketMain.ts`), así que compararlos ahí es leer una constante propia y no adivinar la
+      redacción de libsql — que es lo que la regla de arriba prohíbe.
+    - **Un worker sin `transitorio` se comporta como antes**: se cuenta. De más, nunca de menos.
   - **Una apartada no se borra ni se reintenta luego.** Es lo único que queda de un dato que la nube
     no tiene, y reaplicar más tarde un `UPDATE` viejo por encima de uno nuevo no repara el dato: lo
     corrompe. Por eso `asegurar_reemplazo_seguro` **sí** la sigue contando (restaurar la borraría).

@@ -82,3 +82,21 @@ export function esRechazoPermanente(error: unknown): boolean {
 	if (TRANSITORIOS.some((f) => texto.includes(f))) return false;
 	return PERMANENTES.some((f) => texto.includes(f));
 }
+
+/**
+ * ¿Es un fallo que RECONOCEMOS como pasajero? (REV-11)
+ *
+ * No es la negación de `esRechazoPermanente`: eso incluiría lo desconocido, y lo desconocido no se
+ * puede prometer que se arregle solo. Aquí sólo entra lo que está en la lista de arriba, y sirve
+ * para una cosa concreta: que el ack se lo diga a la Main y ésta **no gaste uno de los intentos**
+ * que tiene la operación antes de apartarse.
+ *
+ * Lo que la Main no puede hacer es deducirlo del texto por su cuenta. Quien tiene la excepción
+ * delante es el DO, y los mensajes de libsql cambian de redacción entre versiones: esa comparación,
+ * hecha en el cliente, se pudre sin que nada falle de forma visible.
+ */
+export function esFalloPasajero(error: unknown): boolean {
+	const texto = String((error as any)?.message ?? error ?? "").toLowerCase();
+	if (!texto) return false;
+	return TRANSITORIOS.some((f) => texto.includes(f));
+}

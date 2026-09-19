@@ -6,7 +6,7 @@ import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
 import { estaRevocado } from "../lib/deviceAuth";
 import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 import { ingestToAxiom } from "../observability/axiom";
-import { esRechazoPermanente } from "./tenantHub.errores";
+import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 
 import type {
 	AnyMsg,
@@ -2158,12 +2158,19 @@ export class TenantHub {
 						// comparando mensajes de libsql, que cambian de redacción entre versiones.
 						// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
 						// esquema del tenant no admite paraba la cola entera para siempre.
+						//
+						// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de Turso —que
+						// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
+						// cuatro baches bastaban para apartar una venta perfectamente buena. Son
+						// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y
+						// desconocido (cuenta, y acabará apartándose si no deja de fallar).
 						this.send(ws, {
 							type: "apply_ack",
 							opId,
 							ok: false,
 							error: String(e?.message || e),
 							permanente: esRechazoPermanente(e),
+							transitorio: esFalloPasajero(e),
 						});
 					}
 				})(),
