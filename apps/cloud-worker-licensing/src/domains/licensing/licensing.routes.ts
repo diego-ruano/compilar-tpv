@@ -23,6 +23,7 @@ import {
 	consumeDeviceOtp,
 	ensureDevice,
 	ensureTenantExistsMinimal,
+	exigirClaveSiEsDeOtroNegocio,
 	getDeviceOtp,
 	getLicenseByHash,
 	putDeviceOtp,
@@ -175,6 +176,14 @@ licenseRoutes.post("/activate", async (c) => {
 	await ensureTenantExistsMinimal(db, tenantId);
 
 	try {
+		// REV-07: la comprobación va PRIMERO, y ahí estaba el fallo. `ensureDevice` hace un
+		// `ON CONFLICT(device_id) DO UPDATE` que mueve la fila al tenant de quien activa, y sólo
+		// después se miraba la clave — con una consulta filtrada por el tenant NUEVO, o sea sobre la
+		// fila ya movida—. Resultado: presentando una licencia propia y el `device_id` ajeno, la
+		// Main de otro negocio se quedaba con su fila en un tenant que no es el suyo. Ahora, si ese
+		// `device_id` ya tiene clave registrada en cualquier negocio y no es ésta, no se toca nada.
+		await exigirClaveSiEsDeOtroNegocio(db, deviceId, devicePubKey, tenantId);
+
 		// Liga la pubkey del dispositivo (anti-copia). Si ese device_id ya existía con OTRA
 		// clave, esto lanza `device_key_mismatch`: alguien ha copiado el fichero de estado.
 		await ensureDevice(db, tenantId, deviceId, "tpv", devicePubKey);

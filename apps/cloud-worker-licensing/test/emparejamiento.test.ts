@@ -335,6 +335,66 @@ describe("el reto y la recogida del token", () => {
 		});
 	});
 
+	it("no se le puede quitar a otro negocio su dispositivo (REV-07)", async () => {
+		// El ataque: montar el emparejamiento en un negocio propio pero reclamando el `device_id` de
+		// la Main de otro. El alta hace `ON CONFLICT(device_id) DO UPDATE` de `tenant_id` **y de
+		// `device_pubkey_b64`**, así que aquella Main se quedaba firmando con una clave que ya no
+		// era la suya: `bad_device_signature` en todo, y sin poder reactivar, porque activar la
+		// rechaza entonces con `device_key_mismatch`. El `device_id` ajeno no es un secreto: viaja
+		// en los mensajes de presencia del WebSocket, así que lo conocen las Handy del local.
+		const victima = await dispositivo("main-de-otro-bar", 7);
+		const atacante = await dispositivo("main-de-otro-bar", 9); // mismo id, SU clave
+		await conPlanoDeControl("robo-de-dispositivo", async (m) => {
+			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('tenant-de-la-victima');`);
+			m.sql.exec(
+				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
+				 VALUES (?, 'tenant-de-la-victima', 'tpv', ?, 'ed25519');`,
+				victima.id,
+				victima.pub,
+			);
+
+			const { body } = await m.reclamar(atacante, CODIGO, T0);
+			m.aprobar(CODIGO, atacante, T0);
+			const r = await m.recoger(atacante, CODIGO, body.nonceB64, T0);
+
+			expect(r.status).toBe(409);
+			expect(r.body.error).toBe("device_key_mismatch");
+
+			// Y la fila de la víctima, intacta: ni de negocio, ni de rol, ni de clave.
+			expect(m.dispositivoRegistrado(victima)).toMatchObject({
+				tenant_id: "tenant-de-la-victima",
+				role: "tpv",
+				device_pubkey_b64: victima.pub,
+			});
+		});
+	});
+
+	it("pero el equipo de verdad sí puede mudarse de negocio, firmando con su clave (REV-07)", async () => {
+		// La otra mitad, y la que impide que el arreglo rompa lo que §9 decide a propósito: un
+		// equipo tiene UNA identidad para sus dos modos, así que vincularlo como Handy de otro
+		// negocio mueve su fila. Lo que se exige es que lo haga él, no cualquiera.
+		const equipo = await dispositivo("equipo-viajero", 7);
+		await conPlanoDeControl("mudanza-legitima", async (m) => {
+			m.sql.exec(`INSERT INTO tenants (tenant_id) VALUES ('su-negocio-de-antes');`);
+			m.sql.exec(
+				`INSERT INTO devices (device_id, tenant_id, role, device_pubkey_b64, pubkey_alg)
+				 VALUES (?, 'su-negocio-de-antes', 'tpv', ?, 'ed25519');`,
+				equipo.id,
+				equipo.pub,
+			);
+
+			const { body } = await m.reclamar(equipo, CODIGO, T0);
+			m.aprobar(CODIGO, equipo, T0);
+			expect((await m.recoger(equipo, CODIGO, body.nonceB64, T0)).status).toBe(200);
+
+			expect(m.dispositivoRegistrado(equipo)).toMatchObject({
+				tenant_id: TENANT,
+				role: "handy",
+				device_pubkey_b64: equipo.pub,
+			});
+		});
+	});
+
 	it("un código aprobado para otro dispositivo no sirve, ni con el mismo id y otra clave", async () => {
 		const a = await dispositivo("handy-a", 1);
 		const b = await dispositivo("handy-b", 2);

@@ -795,6 +795,26 @@ no sólo en dev.
     tiene registrada y sigue siendo el `main_device_id`. Si la licencia ya está en otro equipo,
     contestan `device_replaced` y se bloquea al momento. Sin esto la nube no lo reconocía, el
     cliente lo tomaba por falta de red y agotaba la gracia sin conexión sin decir por qué.
+  - ⚠️ **Pero esa mudanza la hace ÉL, firmando con su clave (REV-07).** Las dos puertas que dan de
+    alta un dispositivo —activar una licencia y recoger el token de un emparejamiento— hacen
+    `ON CONFLICT(device_id) DO UPDATE SET tenant_id=…`, y ninguna miraba la clave registrada antes
+    de mover la fila. Con una licencia propia y el `device_id` ajeno, la Main de otro bar se
+    quedaba con su fila en un tenant que no es el suyo; y por la puerta del emparejamiento, que
+    además pisaba `device_pubkey_b64`, firmando con una clave que ya no vale — `bad_device_signature`
+    en todo y **sin poder reactivar**, porque activar la rechaza entonces con `device_key_mismatch`.
+    El `device_id` no es un secreto: viaja en los mensajes de presencia del WebSocket. Reglas:
+    - **Lo decide `exigirClaveSiEsDeOtroNegocio`, y se llama ANTES de tocar nada.** La comprobación
+      ya existía (`setDevicePubKeyB64IfEmptyOrThrow`); lo que fallaba era el orden, y que consultara
+      filtrando por el tenant nuevo — o sea, sobre la fila ya movida.
+    - **El corte es ENTRE negocios.** Dentro del mismo, que la clave cambie es la vía de
+      recuperación que hay hoy: un Handy revocado que se vuelve a vincular queda activo con la clave
+      nueva, y eso lo aprueba el dueño desde su Main. Prohibirlo dejaría sin salida a un equipo que
+      perdiera su par de claves —la identidad y la clave viven en dos entradas distintas del almacén
+      de secretos— y no hay ninguna pantalla para limpiar una `device_pubkey_b64`. Que alguien de
+      dentro del local pueda quitarle el sitio a su propia Main queda fuera a sabiendas: es el
+      modelo de amenaza que §14 ya asume.
+    - **Una puerta nueva que dé de alta un dispositivo llama a ese guardián.** Hoy son dos; la regla
+      se escribe porque la forma de romperla es añadir la tercera sin acordarse.
   - **Cancelar en la Handy suelta el código en la nube** (`/v1/pair/cancel`, firmado con la acción
     `PAIR_CANCEL`). Si sólo parara la espera en pantalla, la solicitud seguiría en la lista de la
     Main y aprobarla daría de alta un dispositivo que nadie va a usar. Lo ya aprobado no se deshace

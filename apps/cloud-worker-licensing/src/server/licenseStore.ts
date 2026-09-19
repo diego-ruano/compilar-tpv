@@ -983,6 +983,51 @@ export async function getDevicePubKeyB64EnCualquierNegocio(
 	return v ? v : null;
 }
 
+/**
+ * REV-07: un `device_id` de OTRO negocio no se toca sin su clave.
+ *
+ * Un equipo tiene una sola identidad para sus dos modos, así que su fila puede mudarse de negocio
+ * (§9 de CLAUDE.md, `readmitirMain`) — pero mudarse es algo que hace **él**, firmando con su clave.
+ * Lo que no puede es que otro se lo lleve: bastaba presentar un `device_id` ajeno para que el
+ * `ON CONFLICT(device_id) DO UPDATE` del alta moviera la fila de la víctima, y en el camino del
+ * emparejamiento también su `device_pubkey_b64`.
+ *
+ * ⚠️ **El corte es entre negocios, y el matiz importa.** Dentro del mismo, que la clave cambie es
+ * la vía de recuperación que existe hoy: un Handy revocado que se vuelve a vincular queda activo
+ * con la clave nueva, y eso lo aprueba el dueño desde su propia Main. Prohibirlo dejaría sin salida
+ * a un equipo cuyo par de claves se perdiera —la identidad y la clave viven en dos entradas
+ * distintas del almacén de secretos— y no hay ninguna pantalla para limpiar una `device_pubkey_b64`.
+ * Queda fuera, por tanto, que alguien de dentro del local le quite el sitio a su propia Main; es el
+ * modelo de amenaza que §14 ya asume («cubre a un camarero con el TPV delante, no a un atacante»).
+ *
+ * Lanza `device_key_mismatch`, el mismo error que `setDevicePubKeyB64IfEmptyOrThrow`. La diferencia
+ * es CUÁNDO: esto se llama **antes** de tocar nada.
+ */
+export async function exigirClaveSiEsDeOtroNegocio(
+	db: Sql,
+	deviceId: string,
+	pubB64: string,
+	tenantIdQueAutoriza: string,
+): Promise<void> {
+	const r = await exec(
+		db,
+		`SELECT tenant_id, device_pubkey_b64 FROM devices WHERE device_id=? LIMIT 1;`,
+		[deviceId],
+	);
+	const row = (r.rows?.[0] as any) || null;
+	if (!row) return;
+
+	const duenyo = String(row.tenant_id || "").trim();
+	const registrada = String(row.device_pubkey_b64 || "").trim();
+
+	if (!registrada || !duenyo || duenyo === tenantIdQueAutoriza) return;
+	if (registrada === pubB64.trim()) return;
+
+	const err: any = new Error("device_key_mismatch");
+	err.code = "device_key_mismatch";
+	throw err;
+}
+
 /** Guarda la pubkey solo si está vacía. Si ya hay otra distinta → error (anti-clonado). */
 export async function setDevicePubKeyB64IfEmptyOrThrow(
 	db: Sql,
