@@ -13,6 +13,8 @@ import type { ImpactoCajaDto } from "@tpv/contracts";
 import { ModalShell } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
 import { euro } from "./formato";
+import { abs } from "../../shared/lib/dinero";
+import type { Dinero } from "@tpv/contracts";
 
 type Props = {
     impacto: ImpactoCajaDto;
@@ -24,9 +26,9 @@ type Props = {
     onConfirmar: (motivo: string | null) => void;
 };
 
-function descuadreEnPalabras(d: number): string {
+function descuadreEnPalabras(d: Dinero): string {
     if (Math.round(d * 100) === 0) return "cuadra";
-    return d < 0 ? `faltan ${euro(-d)}` : `sobran ${euro(d)}`;
+    return d < 0 ? `faltan ${euro(abs(d))}` : `sobran ${euro(d)}`;
 }
 
 export default function ImpactoCierreModal({

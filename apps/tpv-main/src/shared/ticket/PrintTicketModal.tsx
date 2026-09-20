@@ -21,11 +21,13 @@ import {
 import { verifactuBloqueTicket } from "../../features/configuracion/api/verifactuApis";
 import TicketPaper, { type TicketPaperFiscal } from "./TicketPaper";
 import { conAviso } from "../lib/conAviso";
+import type { Dinero } from "@tpv/contracts";
+import { eur, sumar } from "../lib/dinero";
 
 export type PrintableLine = {
     id: string;
     nombre: string;
-    precio: number;
+    precio: Dinero;
     pagado: boolean;
     /**
      * Tipo de IVA con el que se vendió la línea. `null`/ausente = el general del negocio.
@@ -50,12 +52,6 @@ function cn(...classes: Array<string | false | undefined | null>) {
     return classes.filter(Boolean).join(" ");
 }
 
-function eur(n: number) {
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-    }).format(n);
-}
 
 export default function PrintTicketModal({
     open,
@@ -121,7 +117,7 @@ export default function PrintTicketModal({
     }, [modo, items, seleccion]);
 
     const totalEfectivo = useMemo(
-        () => effectiveItems.reduce((acc, it) => acc + it.precio, 0),
+        () => sumar(...effectiveItems.map((it) => it.precio)),
         [effectiveItems],
     );
 

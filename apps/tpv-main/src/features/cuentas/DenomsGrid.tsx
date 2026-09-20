@@ -11,6 +11,8 @@ import { Minus, Plus } from "lucide-react";
 import { cn } from "../../shared/lib/cn";
 import { euro, moneyLabel } from "./formato";
 import type { CashCount, Denom } from "./cuentasApis";
+import type { Dinero } from "@tpv/contracts";
+import { por } from "../../shared/lib/dinero";
 
 function Badge({ children }: { children: React.ReactNode }) {
     return (
@@ -37,7 +39,7 @@ export default function DenomsGrid({
     onAdd: (label: string) => void;
     onRemove: (label: string) => void;
     onReset: () => void;
-    total: number;
+    total: Dinero;
 }) {
     return (
         <div className="min-w-0 rounded-2xl border border-border bg-surface p-4">
@@ -67,7 +69,7 @@ export default function DenomsGrid({
                 {denoms.map((d) => {
                     const c = count[d.label] || 0;
                     const active = c > 0;
-                    const subtotal = Math.round(c * d.value * 100) / 100;
+                    const subtotal = por(d.value, c);
                     return (
                         <div
                             key={d.label}

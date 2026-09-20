@@ -18,6 +18,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import { ModalShell } from "../ui/ModalShell";
 import { nifValido } from "./nif";
+import type { Dinero } from "@tpv/contracts";
+import { eur } from "../lib/dinero";
 
 /** Lo que el formulario devuelve. Espejo de `DestinatarioInput` en Rust. */
 export type DatosFiscales = {
@@ -42,8 +44,8 @@ export default function DatosFiscalesModal({
     open: boolean;
     onClose: () => void;
     onConfirmar: (d: DatosFiscales) => void | Promise<void>;
-    importe: number;
-    limite: number;
+    importe: Dinero;
+    limite: Dinero;
     obligatorio: boolean;
     guardando?: boolean;
     error?: string | null;
@@ -68,9 +70,6 @@ export default function DatosFiscalesModal({
 
     const nifOk = useMemo(() => nifValido(nif), [nif]);
     const puede = nombre.trim().length > 0 && nifOk && !guardando;
-
-    const eur = (n: number) =>
-        `${(Math.round(n * 100) / 100).toFixed(2).replace(".", ",")} €`;
 
     if (!open) return null;
 

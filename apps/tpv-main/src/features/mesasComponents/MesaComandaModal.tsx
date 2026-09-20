@@ -39,6 +39,8 @@ import {
     type ProductoDTO,
 } from "./mesasApi";
 import { conAviso } from "../../shared/lib/conAviso";
+import { CERO, abs, deCentimos, eur } from "../../shared/lib/dinero";
+import type { Dinero } from "@tpv/contracts";
 import {
     cambioDelCobro,
     DENOMS_COBRO,
@@ -59,7 +61,7 @@ type TicketItem = {
     id: string; // ID_Detalle
     productoId: string;
     nombre: string;
-    precio: number;
+    precio: Dinero;
     pagado: boolean;
     seleccionado: boolean;
     estadoCocina: "PENDIENTE" | "PREPARADO" | string;
@@ -82,12 +84,6 @@ function pick(obj: any, keys: string[]) {
     return undefined;
 }
 
-function eur(n: number) {
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-    }).format(n);
-}
 
 function Modal({
     open,
@@ -250,8 +246,8 @@ function mapTicketRows(rows: any[]): TicketItem[] {
         const nombre = String(
             pick(r, ["nombre", "Nombre_Producto", "Nombre"]) ?? "",
         );
-        const precio = Number(
-            pick(r, ["precio", "Precio_Unitario", "precioUnitario"]) ?? 0,
+        const precio = deCentimos(
+            Number(pick(r, ["precio", "Precio_Unitario", "precioUnitario"]) ?? 0),
         );
         const pagadoNum = Number(pick(r, ["pagado", "Pagado"]) ?? 0);
         const pagado = pagadoNum === 1;
@@ -388,7 +384,7 @@ const ProductCard = React.memo(function ProductCard({
                 <div className="mt-2 flex items-start justify-between gap-2">
                     <p className="font-semibold leading-tight">{p.Nombre}</p>
                     <span className="text-sm font-bold">
-                        {eur(Number(p.Precio_Venta || 0))}
+                        {eur(deCentimos(Number(p.Precio_Venta || 0)))}
                     </span>
                 </div>
             </div>
@@ -717,7 +713,7 @@ export default function MesaComandaModal({
                     id: optimisticId,
                     productoId: p.ID_Producto,
                     nombre: p.Nombre,
-                    precio: Number(p.Precio_Venta ?? 0),
+                    precio: deCentimos(Number(p.Precio_Venta ?? 0)),
                     pagado: false,
                     seleccionado: false,
                     estadoCocina: "PENDIENTE",
@@ -965,7 +961,7 @@ export default function MesaComandaModal({
     const totalEfectivo = useMemo(() => totalRecuento(DENOMS_COBRO, cashCount), [cashCount]);
 
     const totalACobrar = useMemo(
-        () => (haySeleccion ? totalSeleccionado : 0),
+        () => (haySeleccion ? totalSeleccionado : CERO),
         [haySeleccion, totalSeleccionado],
     );
 
@@ -1271,7 +1267,7 @@ export default function MesaComandaModal({
                                                         Falta
                                                     </p>
                                                     <p className="text-lg font-bold text-danger">
-                                                        {eur(Math.abs(diferencia))}
+                                                        {eur(abs(diferencia))}
                                                     </p>
                                                 </div>
                                             )}

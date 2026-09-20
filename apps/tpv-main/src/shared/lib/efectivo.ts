@@ -21,8 +21,12 @@
 // El cobro no tiene gemelo: el importe lo suma el backend a partir de las líneas y el recuento de
 // monedas no sale del equipo. Pero es lo que el camarero lee para saber cuánto devolver.
 
-/** Una moneda o billete del contador: la etiqueta con la que se pinta y lo que vale en euros. */
-export type Denominacion = { label: string; value: number };
+import type { Dinero } from "@tpv/contracts";
+
+import { CERO, abs as absDinero, deCentimos, esCero, redondear, restar, sumar } from "./dinero";
+
+/** Una moneda o billete del contador: la etiqueta con la que se pinta y lo que vale. */
+export type Denominacion = { label: string; value: Dinero };
 
 /** Cuántas unidades se han contado de cada denominación, por etiqueta. */
 export type Recuento = Record<string, number>;
@@ -36,41 +40,32 @@ export type Recuento = Record<string, number>;
  * pantalla no se puede sumar con las denominaciones de la otra: las etiquetas no coinciden.
  */
 export const DENOMS_COBRO: readonly Denominacion[] = [
-    { label: "200€", value: 200 },
-    { label: "100€", value: 100 },
-    { label: "50€", value: 50 },
-    { label: "20€", value: 20 },
-    { label: "10€", value: 10 },
-    { label: "5€", value: 5 },
-    { label: "2€", value: 2 },
-    { label: "1€", value: 1 },
-    { label: "0,50€", value: 0.5 },
-    { label: "0,20€", value: 0.2 },
-    { label: "0,10€", value: 0.1 },
-    { label: "0,05€", value: 0.05 },
+    { label: "200€", value: deCentimos(20_000) },
+    { label: "100€", value: deCentimos(10_000) },
+    { label: "50€", value: deCentimos(5_000) },
+    { label: "20€", value: deCentimos(2_000) },
+    { label: "10€", value: deCentimos(1_000) },
+    { label: "5€", value: deCentimos(500) },
+    { label: "2€", value: deCentimos(200) },
+    { label: "1€", value: deCentimos(100) },
+    { label: "0,50€", value: deCentimos(50) },
+    { label: "0,20€", value: deCentimos(20) },
+    { label: "0,10€", value: deCentimos(10) },
+    { label: "0,05€", value: deCentimos(5) },
 ];
 
 /**
- * Redondeo a céntimos, igual que `a_centimos` de Rust: la mitad se aleja del cero.
+ * Suma de importes. Exacta: son enteros.
  *
- * Nunca devuelve `-0`: `Intl.NumberFormat` lo pinta «-0,00 €». Y lo que no es un número finito
- * cuenta como cero: Rust no puede recibir un `NaN` (serde lo rechaza), pero en pantalla se pintaría
- * «NaN €» en mitad de un cobro.
+ * El redondeo que esto hacía antes (`aCentimos`) se mudó a `shared/lib/dinero.ts`, que es donde
+ * vive ahora la única regla de redondeo de la interfaz. Aquí ya no hay nada que redondear.
  */
-export function aCentimos(v: number): number {
-    if (!Number.isFinite(v)) return 0;
-    const centimos = Math.round(Math.abs(v) * 100);
-    if (centimos === 0) return 0;
-    return (v < 0 ? -centimos : centimos) / 100;
-}
-
-/** Suma de importes redondeada a céntimos. Lo que no es un número no suma. */
-export function sumaImportes(importes: Iterable<number>): number {
+export function sumaImportes(importes: Iterable<Dinero>): Dinero {
     let bruto = 0;
     for (const v of importes) {
         if (Number.isFinite(v)) bruto += v;
     }
-    return aCentimos(bruto);
+    return deCentimos(bruto);
 }
 
 /**
@@ -79,7 +74,7 @@ export function sumaImportes(importes: Iterable<number>): number {
  * Las unidades que no son positivas no suman (no existe «menos tres billetes»), ni tampoco una
  * etiqueta que no esté en `denoms`.
  */
-export function totalRecuento(denoms: readonly Denominacion[], recuento: Recuento): number {
+export function totalRecuento(denoms: readonly Denominacion[], recuento: Recuento): Dinero {
     let bruto = 0;
     for (const d of denoms) {
         const unidades = Number(recuento?.[d.label] ?? 0);
@@ -87,48 +82,44 @@ export function totalRecuento(denoms: readonly Denominacion[], recuento: Recuent
             bruto += d.value * unidades;
         }
     }
-    return aCentimos(bruto);
+    return deCentimos(bruto);
 }
 
 /**
  * Lo que hay que devolver al cliente: positivo es cambio, negativo es lo que falta.
  *
- * Los dos lados se redondean antes de restar, como hace `calcular` en Rust con cada entrada: el
- * total a cobrar llega como suma de líneas y puede traer ruido de coma flotante.
+ * Ya no hace falta redondear los dos lados antes de restar: el «cambio -0,00 €» que esto existía
+ * para evitar venía de que el total a cobrar llegaba como suma de flotantes. Ahora llega entero.
  */
-export function cambioDelCobro(entregado: number, aCobrar: number): number {
-    return aCentimos(aCentimos(entregado) - aCentimos(aCobrar));
+export function cambioDelCobro(entregado: Dinero, aCobrar: Dinero): Dinero {
+    return restar(entregado, aCobrar);
 }
 
 /** El arqueo resuelto, con los mismos campos que `CierreCalculado` de Rust. */
 export type Arqueo = {
-    fondoInicial: number;
-    ventasEfectivo: number;
-    gastosCaja: number;
+    fondoInicial: Dinero;
+    ventasEfectivo: Dinero;
+    gastosCaja: Dinero;
     /** Fondo + ventas en efectivo − gastos pagados con caja. */
-    esperado: number;
-    contado: number;
+    esperado: Dinero;
+    contado: Dinero;
     /** Contado − esperado. Negativo = falta dinero. */
-    descuadre: number;
-    dejado: number;
+    descuadre: Dinero;
+    dejado: Dinero;
     /** Contado − dejado: lo que sale del cajón. */
-    retirado: number;
+    retirado: Dinero;
 };
 
 /** El arqueo, igual que `calcular` de Rust. */
 export function calcularArqueo(entrada: {
-    fondoInicial: number;
-    ventasEfectivo: number;
-    gastosCaja: number;
-    contado: number;
-    dejado: number;
+    fondoInicial: Dinero;
+    ventasEfectivo: Dinero;
+    gastosCaja: Dinero;
+    contado: Dinero;
+    dejado: Dinero;
 }): Arqueo {
-    const fondoInicial = aCentimos(entrada.fondoInicial);
-    const ventasEfectivo = aCentimos(entrada.ventasEfectivo);
-    const gastosCaja = aCentimos(entrada.gastosCaja);
-    const contado = aCentimos(entrada.contado);
-    const dejado = aCentimos(entrada.dejado);
-    const esperado = aCentimos(fondoInicial + ventasEfectivo - gastosCaja);
+    const { fondoInicial, ventasEfectivo, gastosCaja, contado, dejado } = entrada;
+    const esperado = restar(sumar(fondoInicial, ventasEfectivo), gastosCaja);
 
     return {
         fondoInicial,
@@ -136,9 +127,9 @@ export function calcularArqueo(entrada: {
         gastosCaja,
         esperado,
         contado,
-        descuadre: aCentimos(contado - esperado),
+        descuadre: restar(contado, esperado),
         dejado,
-        retirado: aCentimos(contado - dejado),
+        retirado: restar(contado, dejado),
     };
 }
 
@@ -146,9 +137,9 @@ export function calcularArqueo(entrada: {
  * ¿Hace falta escribir un motivo? Igual que `exige_motivo` de Rust: se mira el valor absoluto, y un
  * umbral de cero o negativo pide motivo para cualquier descuadre.
  */
-export function exigeMotivo(descuadre: number, umbral: number): boolean {
-    if (umbral <= 0) return Math.abs(descuadre) > 0;
-    return Math.abs(descuadre) > umbral;
+export function exigeMotivo(descuadre: Dinero, umbral: Dinero): boolean {
+    if (umbral <= 0) return !esCero(descuadre);
+    return absDinero(descuadre) > umbral;
 }
 
 /** Por qué no se puede guardar un cierre, o `null` si se puede. */
@@ -163,7 +154,7 @@ export type ProblemaDelCierre = "deja_mas_de_lo_contado" | "falta_motivo";
 export function validarCierre(
     arqueo: Arqueo,
     motivo: string | null | undefined,
-    umbral: number,
+    umbral: Dinero,
 ): ProblemaDelCierre | null {
     if (arqueo.dejado > arqueo.contado) return "deja_mas_de_lo_contado";
     const hayMotivo = (motivo ?? "").trim().length > 0;
@@ -189,14 +180,14 @@ export function validarCierre(
  * - El símbolo € delante o detrás se ignora, y un texto vacío es cero: no escribir nada es no haber
  *   empezado con nada.
  */
-export function leerImporte(texto: string): number | null {
+export function leerImporte(texto: string): Dinero | null {
     const t = (texto ?? "")
         .replace(/[\s\u00a0\u202f]+/g, " ")
         .trim()
         .replace(/^€ ?/, "")
         .replace(/ ?€$/, "")
         .trim();
-    if (t === "") return 0;
+    if (t === "") return CERO;
     if (!/^[\d., ]+$/.test(t)) return null;
 
     const ultimoPunto = t.lastIndexOf(".");
@@ -228,6 +219,7 @@ export function leerImporte(texto: string): number | null {
         cifras = entera.replace(/[., ]/g, "");
     }
 
+    // Ya venía calculando céntimos por dentro: lo que cambia es que ya no se divide al salir.
     const centimos = Number(cifras) * 100 + Number(decimales.padEnd(2, "0"));
-    return Number.isSafeInteger(centimos) ? centimos / 100 : null;
+    return Number.isSafeInteger(centimos) ? deCentimos(centimos) : null;
 }

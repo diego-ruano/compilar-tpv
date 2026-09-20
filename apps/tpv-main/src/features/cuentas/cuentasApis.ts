@@ -5,7 +5,9 @@
 // helpers de caja (solo frontend / localStorage).
 
 import { invokeClient } from "@tpv/client";
-import type { CambioCajaInput, ImpactoCajaDto } from "@tpv/contracts";
+import type { CambioCajaInput, Dinero, ImpactoCajaDto } from "@tpv/contracts";
+
+import { deCentimos } from "../../shared/lib/dinero";
 
 /* =========================
    Tipos UI
@@ -16,7 +18,7 @@ export type Entrada = {
     fechaHora: string; // "YYYY-MM-DD HH:mm"
     cliente: string;
     metodo: "Tarjeta" | "Efectivo";
-    importe: number;
+    importe: Dinero;
     /** CUENTA-07: un cobro anulado NO se borra. Sale en la lista, marcado. */
     anulado: boolean;
     anuladoEn?: string | null;
@@ -30,7 +32,7 @@ export type Salida = {
     fechaHora: string; // "YYYY-MM-DD"
     tipoGasto: string;
     concepto: string;
-    importe: number;
+    importe: Dinero;
     proveedorId?: string | null;
     /** CAJA-01: el dinero salió del cajón, así que resta del esperado del arqueo. */
     pagadoConCaja: boolean;
@@ -42,15 +44,15 @@ export type ProveedorMini = {
 };
 
 export type ResumenCaja = {
-    totalEntradas: number;
-    totalSalidas: number;
-    totalEfectivo: number;
+    totalEntradas: Dinero;
+    totalSalidas: Dinero;
+    totalEfectivo: Dinero;
     totalTarjeta: number;
     countEntradas: number;
     countSalidas: number;
     /** Anulaciones del rango. NO entran en los totales de arriba (CUENTA-07). */
     countAnuladas: number;
-    totalAnulado: number;
+    totalAnulado: Dinero;
 };
 
 /** Tamaño de página por defecto de los listados de caja (CUENTA-05). */
@@ -58,7 +60,7 @@ export const CUENTAS_PAGE_SIZE = 50;
 
 export type Denom = {
     label: string;
-    value: number;
+    value: Dinero;
     kind: "moneda" | "billete";
 };
 
@@ -69,20 +71,20 @@ export type CashCount = Record<string, number>;
 ========================= */
 
 export const DEFAULT_DENOMS: Denom[] = [
-    { label: "0.01€", value: 0.01, kind: "moneda" },
-    { label: "0.02€", value: 0.02, kind: "moneda" },
-    { label: "0.05€", value: 0.05, kind: "moneda" },
-    { label: "0.10€", value: 0.1, kind: "moneda" },
-    { label: "0.20€", value: 0.2, kind: "moneda" },
-    { label: "0.50€", value: 0.5, kind: "moneda" },
-    { label: "1€", value: 1, kind: "moneda" },
-    { label: "2€", value: 2, kind: "moneda" },
-    { label: "5€", value: 5, kind: "billete" },
-    { label: "10€", value: 10, kind: "billete" },
-    { label: "20€", value: 20, kind: "billete" },
-    { label: "50€", value: 50, kind: "billete" },
-    { label: "100€", value: 100, kind: "billete" },
-    { label: "200€", value: 200, kind: "billete" },
+    { label: "0.01€", value: deCentimos(1), kind: "moneda" },
+    { label: "0.02€", value: deCentimos(2), kind: "moneda" },
+    { label: "0.05€", value: deCentimos(5), kind: "moneda" },
+    { label: "0.10€", value: deCentimos(10), kind: "moneda" },
+    { label: "0.20€", value: deCentimos(20), kind: "moneda" },
+    { label: "0.50€", value: deCentimos(50), kind: "moneda" },
+    { label: "1€", value: deCentimos(100), kind: "moneda" },
+    { label: "2€", value: deCentimos(200), kind: "moneda" },
+    { label: "5€", value: deCentimos(500), kind: "billete" },
+    { label: "10€", value: deCentimos(1_000), kind: "billete" },
+    { label: "20€", value: deCentimos(2_000), kind: "billete" },
+    { label: "50€", value: deCentimos(5_000), kind: "billete" },
+    { label: "100€", value: deCentimos(10_000), kind: "billete" },
+    { label: "200€", value: deCentimos(20_000), kind: "billete" },
 ];
 
 /* =========================
@@ -124,7 +126,7 @@ function mapEntrada(r: any): Entrada {
         fechaHora: toStr(r?.fechaHora ?? r?.fecha_hora ?? r?.Fecha_Hora ?? ""),
         cliente: toStr(r?.cliente ?? r?.Cliente ?? "—"),
         metodo: metodoRaw === "Tarjeta" ? "Tarjeta" : "Efectivo",
-        importe: toNum(r?.importe ?? r?.Importe_Total ?? r?.importe_total, 0),
+        importe: deCentimos(toNum(r?.importe ?? r?.Importe_Total ?? r?.importe_total, 0)),
         anulado: toStr(r?.estado ?? r?.Estado, "ACTIVO") === "ANULADO",
         anuladoEn: toIdOrNull(r?.anuladoEn ?? r?.anulado_en),
         anuladoPor: toIdOrNull(r?.anuladoPor ?? r?.anulado_por),
@@ -140,7 +142,7 @@ function mapSalida(r: any): Salida {
         ),
         tipoGasto: toStr(r?.tipoGasto ?? r?.tipo_gasto ?? r?.Tipo_Gasto ?? ""),
         concepto: toStr(r?.concepto ?? r?.Concepto ?? ""),
-        importe: toNum(r?.importe ?? r?.Importe ?? 0),
+        importe: deCentimos(toNum(r?.importe ?? r?.Importe ?? 0)),
         proveedorId: toIdOrNull(
             r?.proveedorId ?? r?.proveedor_id ?? r?.id_proveedor ?? r?.ID_Proveedor,
         ),
@@ -217,14 +219,14 @@ export async function cuentasGetResumen(params: {
         args: { del: params.del ?? null, al: params.al ?? null, q: q ? q : null },
     });
     return {
-        totalEntradas: toNum(r?.total_entradas ?? r?.totalEntradas, 0),
-        totalSalidas: toNum(r?.total_salidas ?? r?.totalSalidas, 0),
-        totalEfectivo: toNum(r?.total_efectivo ?? r?.totalEfectivo, 0),
+        totalEntradas: deCentimos(toNum(r?.total_entradas ?? r?.totalEntradas, 0)),
+        totalSalidas: deCentimos(toNum(r?.total_salidas ?? r?.totalSalidas, 0)),
+        totalEfectivo: deCentimos(toNum(r?.total_efectivo ?? r?.totalEfectivo, 0)),
         totalTarjeta: toNum(r?.total_tarjeta ?? r?.totalTarjeta, 0),
         countEntradas: toNum(r?.count_entradas ?? r?.countEntradas, 0),
         countSalidas: toNum(r?.count_salidas ?? r?.countSalidas, 0),
         countAnuladas: toNum(r?.count_anuladas ?? r?.countAnuladas, 0),
-        totalAnulado: toNum(r?.total_anulado ?? r?.totalAnulado, 0),
+        totalAnulado: deCentimos(toNum(r?.total_anulado ?? r?.totalAnulado, 0)),
     };
 }
 
@@ -240,7 +242,7 @@ export async function cuentasCreateGasto(payload: {
     fecha: string;
     tipoGasto: string;
     concepto: string;
-    importe: number;
+    importe: Dinero;
     proveedorId?: string | null;
     pagadoConCaja?: boolean;
     motivoRectificacion?: string | null;
@@ -264,7 +266,7 @@ export async function cuentasUpdateGasto(payload: {
     fecha: string;
     tipoGasto: string;
     concepto: string;
-    importe: number;
+    importe: Dinero;
     proveedorId?: string | null;
     pagadoConCaja?: boolean;
     motivoRectificacion?: string | null;
@@ -303,7 +305,7 @@ export async function cuentasUpdatePago(payload: {
     idPago: string;
     fechaHora: string;
     metodo: "Tarjeta" | "Efectivo";
-    importe: number;
+    importe: Dinero;
     motivoRectificacion?: string | null;
 }): Promise<boolean> {
     const r = await invokeClient<any>("cuentas_update_pago", {

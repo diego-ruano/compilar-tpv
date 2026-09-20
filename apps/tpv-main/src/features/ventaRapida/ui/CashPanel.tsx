@@ -3,6 +3,8 @@ import React from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import { Denom } from "../types";
 import { cn } from "../utils";
+import type { Dinero } from "@tpv/contracts";
+import { abs } from "../../../shared/lib/dinero";
 
 export default function CashPanel({
   denoms,
@@ -19,10 +21,10 @@ export default function CashPanel({
 }: {
   denoms: readonly Denom[];
   cashCount: Record<string, number>;
-  totalACobrar: number;
-  totalEfectivo: number;
-  diferencia: number;
-  formatMoney: (n: number) => string;
+  totalACobrar: Dinero;
+  totalEfectivo: Dinero;
+  diferencia: Dinero;
+  formatMoney: (d: Dinero) => string;
   onAddCash: (label: string) => void;
   onRemoveCash: (label: string) => void;
   onReset: () => void;
@@ -59,7 +61,7 @@ export default function CashPanel({
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-danger sm:text-sm">Falta</p>
               <p className="text-base font-bold text-danger sm:text-lg">
-                {formatMoney(Math.abs(diferencia))}
+                {formatMoney(abs(diferencia))}
               </p>
             </div>
           )}

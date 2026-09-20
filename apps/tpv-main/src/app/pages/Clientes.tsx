@@ -34,6 +34,8 @@ import {
   useUpdateCliente,
 } from "../../features/ClientsComponents/clientesQueries";
 import { conAviso } from "../../shared/lib/conAviso";
+import type { Dinero } from "@tpv/contracts";
+import { deCentimos, eur } from "../../shared/lib/dinero";
 
 type Vista = "list" | "detail";
 
@@ -47,17 +49,14 @@ type ClienteUI = {
   Mesa: string;
   Comensales: string;
 
-  TotalGastado: number;
+  TotalGastado: Dinero;
   TotalReservas: number;
   ReservasPendientes: number;
 };
 
-function euro(n: number) {
-  return (Number(n) || 0).toLocaleString("es-ES", {
-    style: "currency",
-    currency: "EUR",
-  });
-}
+// El formateador del dinero vive en un solo sitio (ARQ-01): tenerlo aqui otra vez era la
+// duodecima copia, y no todas protegian igual contra un importe ilegible.
+const euro = eur;
 
 const RANKINGS: { key: FiltroRanking; label: string }[] = [
   { key: "todos", label: "Todos" },
@@ -124,7 +123,7 @@ export default function Clientes() {
     const hora = r.Ultima_Reserva_Hora;
     const ultimaReserva = fecha ? `${fecha}${hora ? ` ${hora}` : ""}` : "-";
 
-    const totalGastado = Number(r.Total_Gastado_Stored || 0);
+    const totalGastado = deCentimos(Number(r.Total_Gastado_Stored || 0));
 
     return {
       ID_Cliente: String(r.ID_Cliente ?? ""),

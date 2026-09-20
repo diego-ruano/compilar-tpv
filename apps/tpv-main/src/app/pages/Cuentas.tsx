@@ -25,12 +25,7 @@ import DatosFiscalesModal, {
     type DatosFiscales,
 } from "../../shared/ticket/DatosFiscalesModal";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
-import type {
-    CambioCajaInput,
-    ImpactoCajaDto,
-    LineaTicketDto,
-    TicketReimpresionDto,
-} from "@tpv/contracts";
+import type { CambioCajaInput, Dinero, ImpactoCajaDto, LineaTicketDto, TicketReimpresionDto } from "@tpv/contracts";
 import { invokeClient, toAppError } from "@tpv/client";
 import { ModalShell, SearchInput } from "../../shared/ui";
 import { cn } from "../../shared/lib/cn";
@@ -79,6 +74,7 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeFile } from "@tauri-apps/plugin-fs";
 import { conAviso } from "../../shared/lib/conAviso";
+import { CERO, deCentimos, deTexto, eur, restar, sumar } from "../../shared/lib/dinero";
 
 function todayYMD() {
     const d = new Date();
@@ -187,7 +183,7 @@ function mapEntradaUI(r: any): Entrada {
         cliente: String(r?.cliente ?? ""),
         metodo:
             String(r?.metodo ?? "Efectivo") === "Tarjeta" ? "Tarjeta" : "Efectivo",
-        importe: Number(r?.importe ?? 0),
+        importe: deCentimos(Number(r?.importe ?? 0)),
         anulado: Boolean(r?.anulado),
         anuladoEn: r?.anuladoEn ?? null,
         anuladoPor: r?.anuladoPor ?? null,
@@ -251,7 +247,7 @@ function mapSalidaUI(
         fechaHora: String(r?.fechaHora ?? r?.Fecha ?? "").slice(0, 10),
         tipoGasto: String(r?.tipoGasto ?? r?.Tipo_Gasto ?? ""),
         concepto: String(r?.concepto ?? r?.Concepto ?? ""),
-        importe: Number(r?.importe ?? r?.Importe ?? 0),
+        importe: deCentimos(Number(r?.importe ?? r?.Importe ?? 0)),
         proveedorId,
         proveedorNombre,
         pagadoConCaja: Boolean(r?.pagadoConCaja ?? r?.pagado_con_caja),
@@ -500,9 +496,9 @@ export default function Cuentas() {
 
     // Totales de cabecera: del resumen agregado (todo el rango + búsqueda), no de la página visible.
     const resumen = resumenQuery.data;
-    const totalEntradas = resumen?.totalEntradas ?? 0;
-    const totalSalidas = resumen?.totalSalidas ?? 0;
-    const balance = totalEntradas - totalSalidas;
+    const totalEntradas = resumen?.totalEntradas ?? CERO;
+    const totalSalidas = resumen?.totalSalidas ?? CERO;
+    const balance = restar(totalEntradas, totalSalidas);
 
     // Controles de paginación: hay "siguiente" si aún quedan filas por debajo del total del resumen.
     // Los anulados salen en la lista pero NO cuentan en `countEntradas` (no son ventas), así que
@@ -550,7 +546,7 @@ export default function Cuentas() {
             const fecha = (egFecha || "").trim();
             const tipo = (egTipo || "").trim();
             const concepto = (egConcepto || "").trim();
-            const importe = Number(String(egImporte).replace(",", "."));
+            const importe = deTexto(egImporte) ?? CERO;
 
             const provRaw = (egProveedorId || "").trim();
             const proveedorId = provRaw === "" ? null : provRaw;
@@ -710,7 +706,7 @@ export default function Cuentas() {
 
             const fechaHora = (epFechaHora || "").trim();
             // El importe no se edita (CUENTA-02): el backend lo recalcula desde las líneas cobradas.
-            const importe = Number(String(epImporte).replace(",", ".")) || 0;
+            const importe = deTexto(epImporte) ?? CERO;
 
             if (!fechaHora) return setErrEditPago("La fecha/hora es obligatoria.");
 
@@ -802,7 +798,7 @@ export default function Cuentas() {
             const fecha = (gFecha || "").trim();
             const tipo = (gTipo || "").trim();
             const concepto = (gConcepto || "").trim();
-            const importe = Number(String(gImporte).replace(",", "."));
+            const importe = deTexto(gImporte) ?? CERO;
 
             const provRaw = (gProveedorId || "").trim();
             const proveedorId = provRaw === "" ? null : provRaw;
@@ -873,15 +869,11 @@ export default function Cuentas() {
             // Un cobro anulado no es una venta: no suma (CUENTA-07). Sale en el listado igual, y
             // marcado, porque este PDF es el documento con el que se cuadra la caja y una salida
             // de dinero que no aparece es exactamente lo que no se puede explicar después.
-            const totalEntradasPdf = entradasFull.reduce(
-                (a, e) => a + (e.anulado ? 0 : Number(e.importe) || 0),
-                0,
+            const totalEntradasPdf = sumar(
+                ...entradasFull.map((e) => (e.anulado ? CERO : e.importe)),
             );
-            const totalSalidasPdf = salidasFull.reduce(
-                (a, s) => a + (Number(s.importe) || 0),
-                0,
-            );
-            const balancePdf = totalEntradasPdf - totalSalidasPdf;
+            const totalSalidasPdf = sumar(...salidasFull.map((s) => s.importe));
+            const balancePdf = restar(totalEntradasPdf, totalSalidasPdf);
 
             const pdfDoc = await PDFDocument.create();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -899,7 +891,7 @@ export default function Cuentas() {
             const gray = rgb(0.35, 0.35, 0.35);
             const black = rgb(0.1, 0.1, 0.1);
 
-            const formatMoney = (n: number) => euro(Number(n || 0));
+            const formatMoney = (d: Dinero) => eur(d);
 
             const safeText = (t: any) =>
                 asciiSafe(
@@ -1118,15 +1110,15 @@ export default function Cuentas() {
             const entradasHoyF = entradasHoy ?? [];
             const salidasHoyF = salidasHoy ?? [];
 
-            const totalEntradasHoy = entradasHoyF.reduce(
-                (acc: number, e: any) => acc + (e?.anulado ? 0 : Number(e.importe) || 0),
-                0,
+            const totalEntradasHoy = sumar(
+                ...entradasHoyF.map((e: any) =>
+                    e?.anulado ? CERO : deCentimos(Number(e.importe) || 0),
+                ),
             );
-            const totalSalidasHoy = salidasHoyF.reduce(
-                (acc: number, s: any) => acc + (Number(s.importe ?? s.Importe) || 0),
-                0,
+            const totalSalidasHoy = sumar(
+                ...salidasHoyF.map((s: any) => deCentimos(Number(s.importe ?? s.Importe) || 0)),
             );
-            const balanceHoy = totalEntradasHoy - totalSalidasHoy;
+            const balanceHoy = restar(totalEntradasHoy, totalSalidasHoy);
 
             const defaultName = `cuenta_dia_${hoy}.pdf`;
             const filePath = await save({
@@ -1151,7 +1143,7 @@ export default function Cuentas() {
 
             const gray = rgb(0.35, 0.35, 0.35);
             const black = rgb(0.1, 0.1, 0.1);
-            const formatMoney = (n: number) => euro(Number(n || 0));
+            const formatMoney = (d: Dinero) => eur(d);
             const safeText = (t: any) =>
                 asciiSafe(
                     String(t ?? "")
@@ -1277,7 +1269,7 @@ export default function Cuentas() {
                             x: M + 380,
                         },
                         {
-                            text: formatMoney(Number(e.importe ?? 0)),
+                            text: formatMoney(e.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1329,7 +1321,7 @@ export default function Cuentas() {
                         { text: tipo, x: M + 110 },
                         { text: concepto, x: M + 230 },
                         {
-                            text: formatMoney(Number(s.importe ?? s.Importe ?? 0)),
+                            text: formatMoney(s.importe),
                             x: M + 460,
                             w: PAGE_W - M - (M + 460),
                             align: "right",
@@ -1388,7 +1380,7 @@ export default function Cuentas() {
                         {(resumen?.countAnuladas ?? 0) > 0 ? (
                             <Badge>
                                 <span className="text-danger">
-                                    Anulados: {resumen?.countAnuladas} · {euro(resumen?.totalAnulado ?? 0)}
+                                    Anulados: {resumen?.countAnuladas} · {euro(resumen?.totalAnulado ?? CERO)}
                                 </span>
                             </Badge>
                         ) : null}
@@ -2365,7 +2357,7 @@ export default function Cuentas() {
                                     </div>
                                     <div>
                                         <span className="font-semibold">Importe:</span>{" "}
-                                        {euro(Number(confirmAccion.gasto.importe || 0))}
+                                        {euro(confirmAccion.gasto.importe)}
                                     </div>
                                     {confirmAccion.gasto.tipoGasto === "Proveedor" &&
                                         confirmAccion.gasto.proveedorId ? (
@@ -2391,7 +2383,7 @@ export default function Cuentas() {
                                     </div>
                                     <div>
                                         <span className="font-semibold">Importe:</span>{" "}
-                                        {euro(Number(confirmAccion.entrada.importe || 0))}
+                                        {euro(confirmAccion.entrada.importe)}
                                     </div>
                                 </div>
                             )}
@@ -2547,7 +2539,7 @@ export default function Cuentas() {
                     const e = f3Pago;
                     if (e) return emitirFacturaSustitutiva(e, d);
                 }}
-                importe={f3Pago?.importe ?? 0}
+                importe={f3Pago?.importe ?? CERO}
                 limite={limiteSimplif}
                 obligatorio={false}
                 guardando={f3Guardando}

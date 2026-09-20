@@ -11,10 +11,13 @@
 // una vista previa que no coincide con el papel es peor que no tener vista previa, porque el
 // usuario configura contra ella.
 
+import type { Dinero } from "@tpv/contracts";
+import { CERO, entre, por, redondear, restar, sumar, textoFiscal } from "../lib/dinero";
+
 /** Una línea tal y como llega del POS (una por pulsación) o de un cobro ya hecho. */
 export type LineaEntrada = {
 	nombre: string;
-	precio: number;
+	precio: Dinero;
 	/** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
 	ivaPercent?: number | null;
 	/** Unidades de la línea. Ausente = 1. */
@@ -32,7 +35,7 @@ export type LineaEntrada = {
 /** Una línea ya agrupada, como se imprime. */
 export type LineaAgrupada = {
 	nombre: string;
-	precio: number;
+	precio: Dinero;
 	qty: number;
 	ivaPercent: number | null;
 	exento: boolean;
@@ -45,16 +48,16 @@ export type LineaAgrupada = {
  * `<choice>`, así que un tramo exento **no tiene** tipo ni cuota — no los tiene a cero.
  */
 export type TramoIva =
-	| { clase: "sujeta"; tipo: number; base: number; iva: number }
-	| { clase: "exenta"; causa: string; base: number };
+	| { clase: "sujeta"; tipo: number; base: Dinero; iva: Dinero }
+	| { clase: "exenta"; causa: string; base: Dinero };
 
 /** Causa por defecto de una línea marcada exenta sin elegir cuál. Gemelo del dominio. */
 export const CAUSA_EXENCION_POR_DEFECTO = "E1";
 
-/** Redondeo a céntimos. Lo que se compara es lo que se imprime, no el flotante. */
-export function aCentimos(n: number): number {
-	return Math.round(n * 100) / 100;
-}
+// El redondeo vivía aquí, con un `Math.round` pelado, y NO era el de Rust: `Math.round` lleva la
+// mitad hacia +∞ y `f64::round` la aleja del cero, así que -1,125 € daba -1,12 en esta vista previa
+// y -1,13 en el papel. Ahora es el compartido (`shared/lib/dinero.ts`), fijado por la tabla de
+// casos que leen las tres implementaciones.
 
 /**
  * Importe en formato español: `1,70 €`. Gemelo de `fmt_eur` en `printing.rs`.
@@ -67,9 +70,8 @@ export function aCentimos(n: number): number {
  * El redondeo a céntimos va ANTES de formatear y con la misma operación que usa Rust, para que los
  * empates (1,125) caigan del mismo lado en los dos sitios.
  */
-export function eur(n: number): string {
-	const c = aCentimos(n);
-	return `${(c === 0 ? 0 : c).toFixed(2).replace(".", ",")} €`;
+export function eur(d: Dinero): string {
+	return `${textoFiscal(d).replace(".", ",")} €`;
 }
 
 /**
@@ -102,7 +104,9 @@ export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 		const iva = it.ivaPercent ?? null;
 		const entera = Number.isInteger(it.cantidad);
 		const unidades = entera ? (it.cantidad as number) : 1;
-		const precio = entera ? it.precio : it.precio * (it.cantidad ?? 1);
+		// Céntimos por una cantidad fraccionaria vuelve a ser flotante: se redondea al
+		// céntimo, igual que hace el SQL con su CAST(ROUND(...)).
+		const precio = entera ? it.precio : redondear(it.precio * (it.cantidad ?? 1));
 		const exento = it.exento === true;
 		const causa = exento ? (it.causaExencion || CAUSA_EXENCION_POR_DEFECTO) : null;
 		// La exención entra en la clave de agrupación: dos unidades del mismo producto, una exenta
@@ -117,8 +121,8 @@ export function agruparLineas(items: LineaEntrada[]): LineaAgrupada[] {
 }
 
 /** Total del ticket: lo que se cobra. */
-export function totalDe(lineas: LineaAgrupada[]): number {
-	return lineas.reduce((acc, g) => acc + g.qty * g.precio, 0);
+export function totalDe(lineas: LineaAgrupada[]): Dinero {
+	return sumar(...lineas.map((g) => por(g.precio, g.qty)));
 }
 
 /**
@@ -137,41 +141,43 @@ export function totalDe(lineas: LineaAgrupada[]): number {
  * Las **exentas** se agrupan por causa, van después de las sujetas y no llevan ni tipo ni cuota.
  */
 export function desgloseIva(lineas: LineaAgrupada[], ivaNegocio: number | null): TramoIva[] {
-	const porTipo = new Map<number, number>();
-	const porCausa = new Map<string, number>();
+	const porTipo = new Map<number, Dinero>();
+	const porCausa = new Map<string, Dinero>();
 	for (const g of lineas) {
-		const importe = g.qty * g.precio;
+		const importe = por(g.precio, g.qty);
 		if (g.exento) {
 			const causa = g.causaExencion || CAUSA_EXENCION_POR_DEFECTO;
-			porCausa.set(causa, (porCausa.get(causa) ?? 0) + importe);
+			porCausa.set(causa, sumar(porCausa.get(causa) ?? CERO, importe));
 		} else {
 			const tipo = g.ivaPercent ?? ivaNegocio ?? 0;
-			porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + importe);
+			porTipo.set(tipo, sumar(porTipo.get(tipo) ?? CERO, importe));
 		}
 	}
 
 	const sujetas: TramoIva[] = Array.from(porTipo.entries())
 		.sort((a, b) => a[0] - b[0])
 		.map(([tipo, bruto]) => {
-			const totalTramo = aCentimos(bruto);
+			const totalTramo = bruto;
 			const divisor = 1 + tipo / 100;
-			const base = divisor === 0 ? totalTramo : aCentimos(totalTramo / divisor);
-			return { clase: "sujeta" as const, tipo, base, iva: aCentimos(totalTramo - base) };
+			// La base se DIVIDE, no se multiplica por el recíproco: la de 0,91 € al 4 % sale 87
+			// por ese camino y 88 dividiendo, que es lo que imprime el papel.
+			const base = divisor === 0 ? totalTramo : entre(totalTramo, divisor);
+			return { clase: "sujeta" as const, tipo, base, iva: restar(totalTramo, base) };
 		});
 
 	const exentas: TramoIva[] = Array.from(porCausa.entries())
 		.sort((a, b) => a[0].localeCompare(b[0]))
-		.map(([causa, bruto]) => ({ clase: "exenta" as const, causa, base: aCentimos(bruto) }));
+		.map(([causa, bruto]) => ({ clase: "exenta" as const, causa, base: bruto }));
 
 	return [...sujetas, ...exentas];
 }
 
 /** Suma de las bases del desglose. */
-export function baseTotal(tramos: TramoIva[]): number {
-	return aCentimos(tramos.reduce((acc, t) => acc + t.base, 0));
+export function baseTotal(tramos: TramoIva[]): Dinero {
+	return sumar(...tramos.map((t) => t.base));
 }
 
 /** Suma de las cuotas. Un tramo exento aporta cero — y en el XML ese cero no se informa. */
-export function cuotaTotal(tramos: TramoIva[]): number {
-	return aCentimos(tramos.reduce((acc, t) => acc + (t.clase === "sujeta" ? t.iva : 0), 0));
+export function cuotaTotal(tramos: TramoIva[]): Dinero {
+	return sumar(...tramos.map((t) => (t.clase === "sujeta" ? t.iva : CERO)));
 }

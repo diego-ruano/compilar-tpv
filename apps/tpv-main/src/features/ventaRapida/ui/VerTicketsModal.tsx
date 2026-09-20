@@ -1,7 +1,7 @@
 // src/features/ventaRapida/ui/VerTicketsModal.tsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Search, ChevronDown, ChevronUp, Trash2, FolderOpen } from "lucide-react";
-import { cn, eur } from "../utils";
+import { cn } from "../utils";
 
 import {
   type IndexRow as ApiIndexRow,
@@ -10,6 +10,7 @@ import {
 
 import { vrGetIndexRows, vrGetDetallesVerTicket } from "../ventaRapidaAPI";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { CERO, deCentimos, eur, redondear } from "../../../shared/lib/dinero";
 
 export type VentaRapidaComandaBarraRow = {
   ID_Comanda: string;
@@ -121,8 +122,8 @@ export default function VerTicketsModal({
       .filter(({ dt }) => isTodayLocal(dt));
 
     return filtered.map(({ c, dt }) => {
-      const totalPendiente = Math.round(Number(c.Total_Pendiente ?? 0) * 100) / 100;
-      const total = Math.round(Number(c.Total_Comanda ?? 0) * 100) / 100;
+      const totalPendiente = deCentimos(Number(c.Total_Pendiente ?? 0));
+      const total = deCentimos(Number(c.Total_Comanda ?? 0));
       const est = estadoTicket(c);
 
       const when = dt.toLocaleString("es-ES", {
@@ -280,8 +281,8 @@ export default function VerTicketsModal({
           String(r.c.Estado ?? ""),
           String(r.totalPendiente ?? ""),
           String(r.total ?? ""),
-          eur(r.totalPendiente ?? 0),
-          eur(r.total ?? 0),
+          eur(r.totalPendiente ?? CERO),
+          eur(r.total ?? CERO),
           `cocina ${r.pendientesCocina}`,
           `pago ${r.pendientesPago}`,
           idx?.Productos ?? "",
@@ -536,10 +537,11 @@ export default function VerTicketsModal({
                                       ? "border-success/30 bg-success-soft text-success"
                                       : "border-border bg-surface text-fg-muted";
 
-                                  const importe =
-                                    Math.round(
-                                      Number(d.Cantidad) * Number(d.Precio_Unitario) * 100,
-                                    ) / 100;
+                                  // Centimos por una cantidad fraccionaria: vuelve a ser
+                                  // flotante, asi que se redondea al centimo como hace el SQL.
+                                  const importe = redondear(
+                                    Number(d.Cantidad) * Number(d.Precio_Unitario),
+                                  );
 
                                   return (
                                     <div
@@ -584,7 +586,7 @@ export default function VerTicketsModal({
                                       <div className="shrink-0 text-right">
                                         <p className="text-sm font-bold text-fg">{eur(importe)}</p>
                                         <p className="text-xs text-fg-subtle">
-                                          {eur(Number(d.Precio_Unitario || 0))} / ud
+                                          {eur(deCentimos(Number(d.Precio_Unitario || 0)))} / ud
                                         </p>
                                       </div>
                                     </div>

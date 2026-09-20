@@ -14,6 +14,7 @@ import { invokeClient } from "@tpv/client";
 
 import { useBusinessSettings } from "../../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../../shared/stores/useTicketSettings";
+import type { Dinero } from "@tpv/contracts";
 
 /* ── Tipos ── */
 
@@ -117,7 +118,7 @@ export type DatosDelTicket = {
 /** Item simple (por defecto una unidad); `buildTicketPayload` agrupa los iguales. */
 export type SimpleTicketItem = {
     nombre: string;
-    precio: number;
+    precio: Dinero;
     /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
     ivaPercent?: number | null;
     /**

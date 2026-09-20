@@ -4,6 +4,8 @@
 // Tipos UI (camelCase) y mappers intactos; sólo cambia el transporte.
 
 import { invokeClient } from "@tpv/client";
+import { deCentimos } from "../../../shared/lib/dinero";
+import type { Dinero } from "@tpv/contracts";
 
 /* ── Types frontend ── */
 
@@ -35,7 +37,7 @@ export type BusinessSettings = {
      */
     descripcionOp: string;
     /** Límite (IVA incluido) por encima del cual ya no cabe una simplificada. 3.000 € en hostelería. */
-    limiteSimplif: number;
+    limiteSimplif: Dinero;
     /** `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint y la URL del QR del papel. */
     verifactuEntorno: string;
 };
@@ -112,7 +114,7 @@ function mapBizFromRust(x: any): BusinessSettings {
         descripcionOp: String(
             pick(x, ["descripcion_op", "descripcionOp"], "Servicios de hosteleria y restauracion"),
         ),
-        limiteSimplif: num(pick(x, ["limite_simplif", "limiteSimplif"]), 3000),
+        limiteSimplif: deCentimos(num(pick(x, ["limite_simplif", "limiteSimplif"]), 300_000)),
         verifactuEntorno:
             String(pick(x, ["verifactu_entorno", "verifactuEntorno"], "produccion")) === "pruebas"
                 ? "pruebas"

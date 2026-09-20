@@ -34,6 +34,7 @@ import {
     type CashCount,
 } from "./cuentasApis";
 import { conAviso } from "../../shared/lib/conAviso";
+import { CERO, abs, deCentimos } from "../../shared/lib/dinero";
 import {
     calcularArqueo,
     exigeMotivo as descuadreExigeMotivo,
@@ -96,9 +97,9 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     const fondoIlegible = !!prep?.es_primer_cierre && fondoEscrito === null;
 
     const fondo = useMemo(() => {
-        if (!prep) return 0;
+        if (!prep) return CERO;
         if (!prep.es_primer_cierre) return prep.fondo_inicial;
-        return fondoEscrito ?? 0;
+        return fondoEscrito ?? CERO;
     }, [prep, fondoEscrito]);
 
     // La misma cuenta que hará Rust al confirmar (`tpv_domain::cierre_caja::calcular`): lo que se
@@ -107,8 +108,8 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
         () =>
             calcularArqueo({
                 fondoInicial: fondo,
-                ventasEfectivo: prep?.ventas_efectivo ?? 0,
-                gastosCaja: prep?.gastos_caja ?? 0,
+                ventasEfectivo: prep?.ventas_efectivo ?? CERO,
+                gastosCaja: prep?.gastos_caja ?? CERO,
                 contado: totalContado,
                 dejado: totalDejado,
             }),
@@ -116,7 +117,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
     );
     const { esperado, descuadre, retirado } = arqueo;
 
-    const umbral = prep?.umbral_descuadre ?? 5;
+    const umbral = prep?.umbral_descuadre ?? deCentimos(500);
     const exigeMotivo = descuadreExigeMotivo(descuadre, umbral);
     const dejaDeMas = arqueo.dejado > arqueo.contado;
 
@@ -304,7 +305,7 @@ export default function CierreCajaModal({ open, onClose, onCerrado }: Props) {
                                             : descuadre === 0
                                               ? "Cuadra"
                                               : descuadre < 0
-                                                ? `Faltan ${euro(Math.abs(descuadre))}`
+                                                ? `Faltan ${euro(abs(descuadre))}`
                                                 : `Sobran ${euro(descuadre)}`}
                                     </p>
                                     <p className="mt-2 text-xs text-fg-muted">

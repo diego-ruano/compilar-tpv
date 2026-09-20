@@ -9,6 +9,7 @@
 // ve en el ticket que ya se le ha dado al cliente.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { deEuros, redondear } from "../src/shared/lib/dinero";
 
 // El módulo llama a `invokeClient` en las funciones de impresora; los tests de payload no lo tocan,
 // pero importar el módulo arrastra el cliente de Tauri, que en node no existe.
@@ -32,13 +33,14 @@ const { useBusinessSettings } = await import("../src/shared/stores/useBusinessSe
 const { useTicketSettings } = await import("../src/shared/stores/useTicketSettings");
 
 /** Una unidad suelta, como la manda el POS. */
+/** Los supuestos se escriben en EUROS; lo que se compara son céntimos. */
 function unidad(nombre: string, precio: number, ivaPercent?: number | null) {
-	return { nombre, precio, ivaPercent };
+	return { nombre, precio: deEuros(precio), ivaPercent };
 }
 
 /** Total del payload, que es lo que acaba imprimiéndose como TOTAL. */
 function total(items: Array<{ cantidad: number; precio_unitario: number }>) {
-	return items.reduce((acc, l) => acc + l.cantidad * l.precio_unitario, 0);
+	return items.reduce((acc, l) => acc + redondear(l.cantidad * l.precio_unitario), 0);
 }
 
 beforeEach(() => {
@@ -63,7 +65,7 @@ describe("agrupación de líneas", () => {
 		]);
 
 		expect(p.items).toHaveLength(1);
-		expect(p.items[0]).toMatchObject({ nombre: "Cafe", cantidad: 3, precio_unitario: 1.1 });
+		expect(p.items[0]).toMatchObject({ nombre: "Cafe", cantidad: 3, precio_unitario: 110 });
 	});
 
 	it("no junta el mismo producto vendido a precios distintos", () => {
@@ -72,7 +74,7 @@ describe("agrupación de líneas", () => {
 		const p = buildTicketPayload([unidad("Cafe", 1.1), unidad("Cafe", 1.2)]);
 
 		expect(p.items).toHaveLength(2);
-		expect(total(p.items)).toBeCloseTo(2.3, 10);
+		expect(total(p.items)).toBe(230);
 	});
 
 	it("no junta el mismo producto vendido a tipos de IVA distintos", () => {
@@ -95,15 +97,15 @@ describe("agrupación de líneas", () => {
 
 	it("respeta una cantidad que ya viene contada", () => {
 		// La reimpresión lee del cobro una línea que ya trae "2 unidades a 1,30".
-		const p = buildTicketPayload([{ nombre: "Cafe", precio: 1.3, cantidad: 2 }]);
+		const p = buildTicketPayload([{ nombre: "Cafe", precio: deEuros(1.3), cantidad: 2 }]);
 
-		expect(p.items[0]).toMatchObject({ cantidad: 2, precio_unitario: 1.3 });
+		expect(p.items[0]).toMatchObject({ cantidad: 2, precio_unitario: 130 });
 	});
 
 	it("suma las cantidades ya contadas de líneas iguales", () => {
 		const p = buildTicketPayload([
-			{ nombre: "Cafe", precio: 1.3, cantidad: 2 },
-			{ nombre: "Cafe", precio: 1.3, cantidad: 3 },
+			{ nombre: "Cafe", precio: deEuros(1.3), cantidad: 2 },
+			{ nombre: "Cafe", precio: deEuros(1.3), cantidad: 3 },
 		]);
 
 		expect(p.items).toHaveLength(1);
@@ -113,10 +115,10 @@ describe("agrupación de líneas", () => {
 	it("una cantidad fraccionada no descuadra el total", () => {
 		// El ticket cuenta unidades enteras: 0,35 kg de jamón a 60 €/kg no se puede escribir como
 		// "0,35 x 60". Se pliega a una unidad de 21 €, que es lo que se cobra.
-		const p = buildTicketPayload([{ nombre: "Jamon", precio: 60, cantidad: 0.35 }]);
+		const p = buildTicketPayload([{ nombre: "Jamon", precio: deEuros(60), cantidad: 0.35 }]);
 
 		expect(p.items[0].cantidad).toBe(1);
-		expect(total(p.items)).toBeCloseTo(21, 10);
+		expect(total(p.items)).toBe(2100);
 	});
 
 	it("agrupar nunca cambia el dinero", () => {
@@ -131,7 +133,7 @@ describe("agrupación de líneas", () => {
 
 		for (const items of casos) {
 			const esperado = items.reduce((acc, it) => acc + it.precio, 0);
-			expect(total(buildTicketPayload(items).items)).toBeCloseTo(esperado, 10);
+			expect(total(buildTicketPayload(items).items)).toBe(esperado);
 		}
 	});
 

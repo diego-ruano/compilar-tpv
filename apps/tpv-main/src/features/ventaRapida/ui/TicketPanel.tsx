@@ -14,6 +14,7 @@ import PrintTicketModal from "../../../shared/ticket/PrintTicketModal";
 import { useMode } from "../../../shared/stores/useMode";
 import type { DatosDelTicket } from "../../configuracion/api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
+import type { Dinero } from "@tpv/contracts";
 
 export default function TicketPanel({
   ticket,
@@ -42,8 +43,8 @@ export default function TicketPanel({
 }: {
   ticket: TicketItem[];
   paso: Paso;
-  totalPendiente: number;
-  totalSeleccionado: number;
+  totalPendiente: Dinero;
+  totalSeleccionado: Dinero;
   haySeleccion: boolean;
 
   onCobrarTodo: () => void;
@@ -67,7 +68,7 @@ export default function TicketPanel({
 
   onGuardarNota: (detalleId: string, nota: string) => void | Promise<void>;
 
-  formatMoney: (n: number) => string;
+  formatMoney: (d: Dinero) => string;
 }) {
   const hayPendientes = ticket.some((t) => !t.pagado);
 

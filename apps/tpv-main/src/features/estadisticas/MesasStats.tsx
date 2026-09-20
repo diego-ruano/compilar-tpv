@@ -5,17 +5,10 @@ import Chart from "react-apexcharts";
 import { APEX_CHART_BASE } from "./apexBase";
 import type { MesasStatsResponse } from "./statsApis";
 import { useMesasStats } from "./statsQueries";
+import { CERO, deCentimos, eur } from "../../shared/lib/dinero";
 
 export type StatsRange = "hoy" | "semana" | "mes" | "anio";
 
-function eur(n: number) {
-    const v = Number.isFinite(n) ? n : 0;
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 2,
-    }).format(v);
-}
 
 function cn(...classes: Array<string | false | null | undefined>) {
     return classes.filter(Boolean).join(" ");
@@ -108,10 +101,10 @@ export default function MesasStats({ range }: { range: StatsRange }) {
                 },
             },
             grid: { strokeDashArray: 4 },
-            yaxis: { labels: { formatter: (v: any) => eur(Number(v)) } },
+            yaxis: { labels: { formatter: (v: any) => eur(deCentimos(Number(v))) } },
             tooltip: {
                 y: {
-                    formatter: (v: any) => eur(Number(v)),
+                    formatter: (v: any) => eur(deCentimos(Number(v))),
                 },
             },
         };
@@ -192,7 +185,7 @@ export default function MesasStats({ range }: { range: StatsRange }) {
                     <div className="flex-1 flex items-center justify-center">
                         <div className="text-center">
                             <p className="text-4xl font-bold text-fg">
-                                {eur(data?.ticket_medio_por_mesa ?? 0)}
+                                {eur(data?.ticket_medio_por_mesa ?? CERO)}
                             </p>
                             <p className="text-xs text-fg-subtle mt-1">
                                 (solo valor)

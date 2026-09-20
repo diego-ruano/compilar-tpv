@@ -6,6 +6,7 @@ import {
     type BusinessSettings,
 } from "../../features/configuracion/api/configApis";
 import { conAviso } from "../lib/conAviso";
+import { deCentimos } from "../lib/dinero";
 
 const DEFAULTS: BusinessSettings = {
     businessName: "TPV",
@@ -19,7 +20,7 @@ const DEFAULTS: BusinessSettings = {
     // factura, y que esté vacía es precisamente lo que impide cobrar hasta que alguien la escriba.
     razonSocial: "",
     descripcionOp: "Servicios de hosteleria y restauracion",
-    limiteSimplif: 3000,
+    limiteSimplif: deCentimos(300_000),
     verifactuEntorno: "produccion",
 };
 

@@ -12,6 +12,7 @@ import {
     type TrabajadorCardStats,
 } from "./statsApis";
 import { useTrabajadoresStats } from "./statsQueries";
+import { CERO, deCentimos, eur as formatEur } from "../../shared/lib/dinero";
 
 /**
  * ✅ NUEVO (frontend):
@@ -25,13 +26,6 @@ type TrabajadorCardStatsExt = TrabajadorCardStats & {
     horas_trabajadas?: number; // total horas en el rango
 };
 
-function formatEur(n: number) {
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 2,
-    }).format(Number.isFinite(n) ? n : 0);
-}
 
 function formatHours(n: number) {
     const v = Number.isFinite(n) ? n : 0;
@@ -317,7 +311,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
             tooltip: {
                 fillSeriesColor: false, // ✅ sin “bloque” de color
                 y: {
-                    formatter: (val: number) => formatEur(val),
+                    formatter: (val: number) => formatEur(deCentimos(val)),
                     title: { formatter: () => "Ventas" },
                 },
             },
@@ -440,7 +434,7 @@ export default function TrabajadoresStats({ range }: { range: StatsRange }) {
                                                             <span className="font-semibold text-fg">
                                                                 Ticket medio:
                                                             </span>{" "}
-                                                            {formatEur(w.ticket_medio_eur ?? 0)}
+                                                            {formatEur(w.ticket_medio_eur ?? CERO)}
                                                         </p>
 
                                                         <TareasLine

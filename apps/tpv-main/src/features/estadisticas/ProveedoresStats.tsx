@@ -8,17 +8,11 @@ import {
   type StatsRange,
 } from "./statsApis";
 import { useProveedoresStats } from "./statsQueries";
+import { CERO, deCentimos, entre, eur as formatEur } from "../../shared/lib/dinero";
 
 /* =========================
    Helpers
 ========================= */
-function formatEur(n: number) {
-  return new Intl.NumberFormat("es-ES", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 2,
-  }).format(Number.isFinite(n) ? n : 0);
-}
 
 function rangeLabel(r: StatsRange) {
   if (r === "hoy") return "Hoy";
@@ -111,13 +105,13 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
 
   const BLUE = "#0ea5e9";
 
-  const total = data?.total_gasto ?? 0;
+  const total = data?.total_gasto ?? CERO;
   const numGastos = data?.num_gastos ?? 0;
-  const gastoMedio = data?.gasto_medio ?? (numGastos > 0 ? total / numGastos : 0);
+  const gastoMedio = data?.gasto_medio ?? (numGastos > 0 ? entre(total, numGastos) : CERO);
   const pctSobreTotalGastos = data?.porcentaje_sobre_total_gastos ?? 0;
 
   const topProvName = data?.proveedor_top?.nombre ?? "—";
-  const topProvTotal = data?.proveedor_top?.total ?? 0;
+  const topProvTotal = data?.proveedor_top?.total ?? CERO;
 
   const pctTop = useMemo(() => {
     if (total <= 0) return 0;
@@ -155,11 +149,11 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
           style: { fontSize: "12px" },
         },
       },
-      yaxis: { labels: { formatter: (v: number) => formatEur(v) } },
+      yaxis: { labels: { formatter: (v: number) => formatEur(deCentimos(v)) } },
       tooltip: {
         shared: true,
         fillSeriesColor: false,
-        y: { formatter: (v: number) => formatEur(v), title: { formatter: () => "Gasto" } },
+        y: { formatter: (v: number) => formatEur(deCentimos(v)), title: { formatter: () => "Gasto" } },
       },
       legend: {
         show: true,
@@ -205,7 +199,7 @@ export default function ProveedoresStats({ range }: { range: StatsRange }) {
         shared: false,
         fillSeriesColor: false,
         marker: { show: true },
-        y: { formatter: (v: number) => formatEur(v), title: { formatter: () => "Total" } },
+        y: { formatter: (v: number) => formatEur(deCentimos(v)), title: { formatter: () => "Total" } },
       },
       legend: {
         show: true,

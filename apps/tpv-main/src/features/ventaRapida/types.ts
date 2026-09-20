@@ -1,3 +1,5 @@
+import type { Dinero } from "@tpv/contracts";
+
 export type Categoria = {
     ID_Categoria: string;
     Nombre: string;
@@ -28,7 +30,7 @@ export type TicketItem = {
     detalleId: string;
     productoId: string;
     nombre: string;
-    precio: number;
+    precio: Dinero;
     pagado: boolean;
     seleccionado: boolean;
     categoriaNombre?: string | null;

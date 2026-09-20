@@ -21,10 +21,12 @@ import { useBusinessSettings } from "../stores/useBusinessSettings";
 import { useTicketSettings } from "../stores/useTicketSettings";
 import { resolveImageUrl } from "../lib/imageUrl";
 import { agruparLineas, desgloseIva, eur, recortar as recortarA, totalDe } from "./ticketMath";
+import { CERO, por } from "../lib/dinero";
+import type { Dinero } from "@tpv/contracts";
 
 export type TicketPaperItem = {
     nombre: string;
-    precio: number;
+    precio: Dinero;
     /** Tipo de IVA de la línea; `null`/ausente = el general del negocio. */
     ivaPercent?: number | null;
     /** Unidades de la línea. Ausente = 1. */
@@ -229,7 +231,7 @@ export default function TicketPaper({
                 ) : (
                     <div>
                         {grouped.map((g, idx) => {
-                            const lineTotal = g.qty * g.precio;
+                            const lineTotal = por(g.precio, g.qty);
                             return (
                                 <div key={idx} style={{ marginBottom: 8 }}>
                                     <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
@@ -266,7 +268,7 @@ export default function TicketPaper({
                                     <span>
                                         IVA ({tramosIva[0]?.clase === "sujeta" ? tramosIva[0].tipo : ivaPercent}%)
                                     </span>
-                                    <span>{eur(tramosIva[0]?.clase === "sujeta" ? tramosIva[0].iva : 0)}</span>
+                                    <span>{eur(tramosIva[0]?.clase === "sujeta" ? tramosIva[0].iva : CERO)}</span>
                                 </div>
                             </>
                         ) : (

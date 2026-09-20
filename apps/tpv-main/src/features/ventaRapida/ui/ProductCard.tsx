@@ -4,6 +4,8 @@ import { Info, Minus, Plus, ImageOff } from "lucide-react";
 import { ProductoDisplay } from "../types";
 import { cn } from "../utils";
 import ImageWithFallback from "../../../shared/ui/ImageWithFallback";
+import type { Dinero } from "@tpv/contracts";
+import { deCentimos } from "../../../shared/lib/dinero";
 
 export type ProductCardProps = {
   p: ProductoDisplay;
@@ -11,7 +13,7 @@ export type ProductCardProps = {
   onAdd: (p: ProductoDisplay) => void;
   onRemove: (productoId: string) => void;
   onInfo: (productId: string) => void;
-  formatPrice: (n: number) => string;
+  formatPrice: (d: Dinero) => string;
 };
 
 function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCardProps) {
@@ -78,7 +80,7 @@ function ProductCard({ p, qty, onAdd, onRemove, onInfo, formatPrice }: ProductCa
             {p.Nombre}
           </p>
           <span className="whitespace-nowrap text-xs font-bold text-fg sm:text-sm">
-            {formatPrice(Number(p.Precio_Venta || 0))}
+            {formatPrice(deCentimos(Number(p.Precio_Venta || 0)))}
           </span>
         </div>
       </div>

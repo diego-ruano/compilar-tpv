@@ -11,6 +11,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { deEuros } from "../src/shared/lib/dinero";
 import {
 	agruparLineas,
 	baseTotal,
@@ -22,15 +23,16 @@ import {
 	type LineaEntrada,
 } from "../src/shared/ticket/ticketMath";
 
+/** Los supuestos se escriben en EUROS, que es como se lee un ticket; se comparan en céntimos. */
 function unidad(nombre: string, precio: number, ivaPercent?: number | null): LineaEntrada {
-	return { nombre, precio, ivaPercent };
+	return { nombre, precio: deEuros(precio), ivaPercent };
 }
 
 describe("agrupación", () => {
 	it("junta unidades idénticas", () => {
 		const g = agruparLineas([unidad("Cafe", 1.1), unidad("Cafe", 1.1)]);
 		expect(g).toEqual([
-			{ nombre: "Cafe", precio: 1.1, qty: 2, ivaPercent: null, exento: false, causaExencion: null },
+			{ nombre: "Cafe", precio: 110, qty: 2, ivaPercent: null, exento: false, causaExencion: null },
 		]);
 	});
 
@@ -44,24 +46,25 @@ describe("agrupación", () => {
 		// tramos del registro de facturación, que es justo lo que la agrupación existe para evitar.
 		expect(
 			agruparLineas([
-				{ nombre: "X", precio: 5 },
-				{ nombre: "X", precio: 5, exento: true, causaExencion: "E1" },
+				{ nombre: "X", precio: deEuros(5) },
+				{ nombre: "X", precio: deEuros(5), exento: true, causaExencion: "E1" },
 			]),
 		).toHaveLength(2);
 	});
 
 	it("respeta y suma las cantidades ya contadas", () => {
 		const g = agruparLineas([
-			{ nombre: "Cafe", precio: 1.3, cantidad: 2 },
-			{ nombre: "Cafe", precio: 1.3, cantidad: 3 },
+			{ nombre: "Cafe", precio: deEuros(1.3), cantidad: 2 },
+			{ nombre: "Cafe", precio: deEuros(1.3), cantidad: 3 },
 		]);
 		expect(g[0].qty).toBe(5);
 	});
 
 	it("una cantidad fraccionada conserva el dinero aunque pierda el detalle", () => {
-		const g = agruparLineas([{ nombre: "Jamon", precio: 60, cantidad: 0.35 }]);
+		const g = agruparLineas([{ nombre: "Jamon", precio: deEuros(60), cantidad: 0.35 }]);
 		expect(g[0].qty).toBe(1);
-		expect(totalDe(g)).toBeCloseTo(21, 10);
+		// Ya no hace falta tolerancia: 60 EUR x 0,35 son 2100 centimos exactos.
+		expect(totalDe(g)).toBe(2100);
 	});
 
 	it("agrupar no cambia el total", () => {
@@ -74,12 +77,12 @@ describe("agrupación", () => {
 describe("desglose de IVA", () => {
 	it("sin tipo propio todo va al tipo del negocio", () => {
 		const t = desgloseIva(agruparLineas([unidad("Cafe", 11)]), 10);
-		expect(t).toEqual([{ clase: "sujeta", tipo: 10, base: 10, iva: 1 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 10, base: 1000, iva: 100 }]);
 	});
 
 	it("el tipo de la línea manda sobre el del negocio", () => {
 		const t = desgloseIva(agruparLineas([unidad("Vino", 12.1, 21)]), 10);
-		expect(t).toEqual([{ clase: "sujeta", tipo: 21, base: 10, iva: 2.1 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 21, base: 1000, iva: 210 }]);
 	});
 
 	it("un ticket con dos tipos los separa y los ordena", () => {
@@ -88,12 +91,12 @@ describe("desglose de IVA", () => {
 			10,
 		);
 		expect(t.map((x) => (x.clase === "sujeta" ? x.tipo : null))).toEqual([10, 21]);
-		expect(baseTotal(t) + cuotaTotal(t)).toBeCloseTo(23.1, 10);
+		expect(baseTotal(t) + cuotaTotal(t)).toBe(2310);
 	});
 
 	it("un tipo del cero por ciento no divide entre cero", () => {
 		const t = desgloseIva(agruparLineas([unidad("Libro", 10, 0)]), 10);
-		expect(t).toEqual([{ clase: "sujeta", tipo: 0, base: 10, iva: 0 }]);
+		expect(t).toEqual([{ clase: "sujeta", tipo: 0, base: 1000, iva: 0 }]);
 	});
 
 	it("un ticket vacío no inventa tramos", () => {
@@ -106,32 +109,32 @@ describe("desglose de IVA", () => {
 		// «simplificando». Gemelo de `una_linea_exenta_no_lleva_tipo_ni_cuota` en el dominio.
 		const t = desgloseIva(
 			agruparLineas([
-				{ nombre: "Cafe", precio: 11 },
-				{ nombre: "Exento", precio: 5, exento: true, causaExencion: "E1" },
+				{ nombre: "Cafe", precio: deEuros(11) },
+				{ nombre: "Exento", precio: deEuros(5), exento: true, causaExencion: "E1" },
 			]),
 			10,
 		);
 		expect(t).toEqual([
-			{ clase: "sujeta", tipo: 10, base: 10, iva: 1 },
-			{ clase: "exenta", causa: "E1", base: 5 },
+			{ clase: "sujeta", tipo: 10, base: 1000, iva: 100 },
+			{ clase: "exenta", causa: "E1", base: 500 },
 		]);
 		// Y la exenta no aporta cuota: 1 €, no 1 € más un cero informado.
-		expect(cuotaTotal(t)).toBeCloseTo(1, 10);
-		expect(baseTotal(t)).toBeCloseTo(15, 10);
+		expect(cuotaTotal(t)).toBe(100);
+		expect(baseTotal(t)).toBe(1500);
 	});
 
 	it("una exenta sin causa cae en E1", () => {
-		const t = desgloseIva(agruparLineas([{ nombre: "x", precio: 7, exento: true }]), 10);
-		expect(t).toEqual([{ clase: "exenta", causa: "E1", base: 7 }]);
+		const t = desgloseIva(agruparLineas([{ nombre: "x", precio: deEuros(7), exento: true }]), 10);
+		expect(t).toEqual([{ clase: "exenta", causa: "E1", base: 700 }]);
 	});
 
 	it("las exentas se agrupan por causa y van detrás de las sujetas", () => {
 		const t = desgloseIva(
 			agruparLineas([
-				{ nombre: "b", precio: 5, exento: true, causaExencion: "E2" },
-				{ nombre: "c", precio: 11 },
-				{ nombre: "a", precio: 3, exento: true, causaExencion: "E1" },
-				{ nombre: "a", precio: 2, exento: true, causaExencion: "E1" },
+				{ nombre: "b", precio: deEuros(5), exento: true, causaExencion: "E2" },
+				{ nombre: "c", precio: deEuros(11) },
+				{ nombre: "a", precio: deEuros(3), exento: true, causaExencion: "E1" },
+				{ nombre: "a", precio: deEuros(2), exento: true, causaExencion: "E1" },
 			]),
 			10,
 		);
@@ -152,7 +155,7 @@ describe("desglose de IVA", () => {
 			for (let c = 1; c <= 20_000; c++) {
 				const total = c / 100;
 				const [tramo] = desgloseIva(agruparLineas([unidad("x", total)]), tipo);
-				const suma = Math.round((tramo.base + (tramo.clase === "sujeta" ? tramo.iva : 0)) * 100);
+				const suma = tramo.base + (tramo.clase === "sujeta" ? tramo.iva : 0);
 				if (suma !== c) {
 					fallos.push(`${total.toFixed(2)} al ${tipo}%: ${tramo.base}`);
 					if (fallos.length > 5) break;
@@ -173,8 +176,8 @@ describe("desglose de IVA", () => {
 					agruparLineas([unidad("A", x), unidad("B", y, 21)]),
 					10,
 				);
-				const suma = Math.round((baseTotal(tramos) + cuotaTotal(tramos)) * 100);
-				const total = Math.round((x + y) * 100);
+				const suma = baseTotal(tramos) + cuotaTotal(tramos);
+				const total = deEuros(x) + deEuros(y);
 				if (suma !== total) {
 					fallos.push(`${x} al 10% + ${y} al 21%: ${suma} != ${total}`);
 					if (fallos.length > 5) break;
@@ -189,13 +192,13 @@ describe("desglose de IVA", () => {
 		// cuota se redondeaba por su cuenta. Si alguno vuelve a divergir, los dos lados se han
 		// separado.
 		const golden: Array<[number, number, number, number]> = [
-			// [total, tipo, base, iva]
-			[0.39, 4, 0.38, 0.01],
-			[0.91, 4, 0.88, 0.03],
-			[1.17, 4, 1.13, 0.04],
-			[1.69, 4, 1.63, 0.06],
-			[2.21, 4, 2.13, 0.08],
-			[2.47, 4, 2.38, 0.09],
+			// [total en euros, tipo, base en céntimos, iva en céntimos]
+			[0.39, 4, 38, 1],
+			[0.91, 4, 88, 3],
+			[1.17, 4, 113, 4],
+			[1.69, 4, 163, 6],
+			[2.21, 4, 213, 8],
+			[2.47, 4, 238, 9],
 		];
 
 		for (const [total, tipo, base, iva] of golden) {
@@ -235,13 +238,13 @@ describe("espejo del papel", () => {
 
 	it("el importe se ve igual que se imprime", () => {
 		for (const [n, esperado] of GOLDEN_EUR) {
-			expect(eur(n), `importe ${n}`).toBe(esperado);
+			expect(eur(deEuros(n)), `importe ${n}`).toBe(esperado);
 		}
 	});
 
 	it("el importe no lleva separador de miles ni espacio duro", () => {
 		// Los dos vicios de `Intl.NumberFormat` en es-ES, que es de donde venía la divergencia.
-		const s = eur(12345.67);
+		const s = eur(deEuros(12345.67));
 
 		expect(s).not.toContain(".");
 		expect(s.codePointAt(s.length - 2)).toBe(0x20); // espacio normal, no U+00A0

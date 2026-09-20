@@ -53,6 +53,8 @@ import {
   type LineaComandaRow as ApiLineaComandaRow,
 } from "../../features/ventaRapida/ventaRapidaAPI";
 import { conAviso } from "../../shared/lib/conAviso";
+import type { Dinero } from "@tpv/contracts";
+import { CERO, deCentimos, redondear } from "../../shared/lib/dinero";
 import {
   cambioDelCobro,
   DENOMS_COBRO,
@@ -81,7 +83,7 @@ type PendingCobroIntent = {
   metodo: "tarjeta" | "efectivo";
   ticketItemIds: string[];
   detalleIds: string[];
-  importeTotal: number;
+  importeTotal: Dinero;
   /**
    * El id del cobro (`Pagos.ID_Pago`). Se genera al encolar y se persiste con el intent, así que un
    * reintento tras un cierre inesperado lleva el mismo: si el cobro ya se guardó, la Main devuelve
@@ -162,7 +164,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
     ? obj.detalleIds.map((x) => String(x ?? "").trim()).filter((s) => s.length > 0)
     : [];
 
-  const importeTotal = Number(obj.importeTotal ?? 0);
+  const importeTotal = deCentimos(Number(obj.importeTotal ?? 0));
   const createdAtMs = Number(obj.createdAtMs ?? Date.now());
   const idPago = String(obj.idPago ?? "").trim() || crypto.randomUUID();
 
@@ -184,7 +186,7 @@ function sanitizePendingCobroIntent(value: unknown): PendingCobroIntent | null {
   if (!idComanda) return null;
   if (metodoRaw !== "tarjeta" && metodoRaw !== "efectivo") return null;
   if (ticketItemIds.length === 0) return null;
-  if (!Number.isFinite(importeTotal) || importeTotal <= 0) return null;
+  if (importeTotal <= 0) return null;
 
   return {
     id,
@@ -349,8 +351,8 @@ export default function VentaRapida() {
   /** Intents parados esperando un destinatario. Mientras estén aquí, el drenado los salta. */
   const esperandoDestinatarioRef = useRef<Set<string>>(new Set());
   const [pideFactura, setPideFactura] = useState<
-    | { clase: "voluntario"; metodo: "tarjeta" | "efectivo"; importe: number }
-    | { clase: "obligatorio"; intentId: string; importe: number }
+    | { clase: "voluntario"; metodo: "tarjeta" | "efectivo"; importe: Dinero }
+    | { clase: "obligatorio"; intentId: string; importe: Dinero }
     | null
   >(null);
   const [errorFactura, setErrorFactura] = useState<string | null>(null);
@@ -520,7 +522,7 @@ export default function VentaRapida() {
           detalleId: idDetalle,
           productoId: String(l.ID_Producto ?? ""),
           nombre: String((l as any).Nombre ?? "Producto"),
-          precio: Number(l.Precio_Unitario || 0) * Number(l.Cantidad || 1),
+          precio: redondear(Number(l.Precio_Unitario || 0) * Number(l.Cantidad || 1)),
           pagado: Number((l as any).Pagado ?? 0) === 1,
           seleccionado: false,
           categoriaNombre: getCategoriaNombreParaProducto(String(l.ID_Producto ?? "")),
@@ -1267,7 +1269,7 @@ export default function VentaRapida() {
   );
 
   const totalPendiente = useMemo(
-    () => sumaImportes(ticket.filter((t) => !t.pagado).map((t) => Number(t.precio))),
+    () => sumaImportes(ticket.filter((t) => !t.pagado).map((t) => t.precio)),
     [ticket],
   );
 
@@ -1279,7 +1281,7 @@ export default function VentaRapida() {
   const totalSeleccionado = useMemo(
     () =>
       sumaImportes(
-        ticket.filter((t) => !t.pagado && seleccionados.has(t.id)).map((t) => Number(t.precio)),
+        ticket.filter((t) => !t.pagado && seleccionados.has(t.id)).map((t) => t.precio),
       ),
     [ticket, seleccionados],
   );
@@ -1344,7 +1346,7 @@ export default function VentaRapida() {
   const addProductoToTicket = useCallback(
     async (p: ProductoDisplay) => {
       const idProducto = p.ID_Producto;
-      const precio = Number(p.Precio_Venta || 0);
+      const precio = deCentimos(Number(p.Precio_Venta || 0));
       const tempId = makeTempTicketId();
       const categoriaNombre =
         getCategoriaNombreParaProducto(idProducto) ||
@@ -1581,7 +1583,7 @@ export default function VentaRapida() {
       // intent, porque una vez cobrado convertir el ticket en factura ya es otra operación (una F3
       // sustitutiva, desde Cuentas).
       if (quiereFactura && !destinatario) {
-        const importe = sumaImportes(seleccionadosItems.map((it) => Number(it.precio)));
+        const importe = sumaImportes(seleccionadosItems.map((it) => it.precio));
         setErrorFactura(null);
         setPideFactura({ clase: "voluntario", metodo: _metodo, importe });
         return;
@@ -1617,7 +1619,7 @@ export default function VentaRapida() {
           return;
         }
 
-        const importeTotal = sumaImportes(seleccionadosItems.map((it) => Number(it.precio)));
+        const importeTotal = sumaImportes(seleccionadosItems.map((it) => it.precio));
 
         const ticketItemIds = seleccionadosItems.map((it) => it.id);
 
@@ -1760,7 +1762,7 @@ export default function VentaRapida() {
 
   const totalEfectivo = useMemo(() => totalRecuento(DENOMS_COBRO, cashCount), [cashCount]);
 
-  const totalACobrar = useMemo(() => (haySeleccion ? totalSeleccionado : 0), [
+  const totalACobrar = useMemo(() => (haySeleccion ? totalSeleccionado : CERO), [
     haySeleccion,
     totalSeleccionado,
   ]);
@@ -2189,7 +2191,7 @@ export default function VentaRapida() {
         open={pideFactura !== null}
         onClose={cancelarFactura}
         onConfirmar={confirmarFactura}
-        importe={pideFactura?.importe ?? 0}
+        importe={pideFactura?.importe ?? CERO}
         limite={limiteSimplif}
         obligatorio={pideFactura?.clase === "obligatorio"}
         error={errorFactura}

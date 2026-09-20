@@ -4,6 +4,7 @@ import type { CategoriaDisplay, ProductoDisplay } from "../types";
 import AddProductoCard from "./AddProductoCard";
 import ProductCard from "./ProductCard";
 import CategoryCard from "./CategoryCard";
+import type { Dinero } from "@tpv/contracts";
 
 type Variant = "search" | "categories" | "products";
 
@@ -22,7 +23,7 @@ type Props = {
   onRemoveProducto: (productoId: string) => void;
   getQty: (productoId: string) => number;
 
-  formatPrice: (n: number) => string;
+  formatPrice: (d: Dinero) => string;
   onOpenProductDetail: (productId: string) => void;
 };
 

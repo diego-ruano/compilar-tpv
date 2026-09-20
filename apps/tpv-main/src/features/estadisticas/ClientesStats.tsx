@@ -4,6 +4,8 @@ import ReactApexChart from "react-apexcharts";
 import type { ApexOptions } from "apexcharts";
 import { APEX_CHART_BASE } from "./apexBase";
 import { useClientesStats } from "./statsQueries";
+import { CERO, deCentimos, eur as formatEur } from "../../shared/lib/dinero";
+import type { Dinero } from "@tpv/contracts";
 
 /* =========================
    Tipos
@@ -18,7 +20,7 @@ export type ClientesStatsResponse = {
     nuevos: number;
     recurrentes: number;
     no_recurrentes: number;
-    ticket_medio_cliente: number;
+    ticket_medio_cliente: Dinero;
 
     // Charts
     nuevos_por_bucket: ChartSeriesI64;
@@ -28,13 +30,6 @@ export type ClientesStatsResponse = {
 /* =========================
    Helpers
 ========================= */
-function formatEur(n: number) {
-    return new Intl.NumberFormat("es-ES", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 2,
-    }).format(Number.isFinite(n) ? n : 0);
-}
 
 function rangeLabel(r: StatsRange) {
     if (r === "hoy") return "Hoy";
@@ -295,7 +290,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
             tooltip: {
                 fillSeriesColor: false,
                 y: {
-                    formatter: (v: number) => formatEur(v),
+                    formatter: (v: number) => formatEur(deCentimos(v)),
                     title: { formatter: () => "Total" },
                 },
             },
@@ -359,7 +354,7 @@ export default function ClientesStats({ range }: { range: StatsRange }) {
 
                 <KPICard
                     label="Ticket medio / cliente"
-                    value={formatEur(data?.ticket_medio_cliente ?? 0)}
+                    value={formatEur(data?.ticket_medio_cliente ?? CERO)}
                 />
             </div>
 

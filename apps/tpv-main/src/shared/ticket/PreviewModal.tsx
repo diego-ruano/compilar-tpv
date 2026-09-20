@@ -2,12 +2,13 @@ import React from "react";
 import { useBusinessSettings } from "../../shared/stores/useBusinessSettings";
 import { useTicketSettings } from "../../shared/stores/useTicketSettings";
 import TicketPaper from "./TicketPaper";
+import type { Dinero } from "@tpv/contracts";
 
 type TicketItemLike = {
 	id: string;
 	productoId: number;
 	nombre: string;
-	precio: number;
+	precio: Dinero;
 	pagado?: boolean;
 };
 

@@ -10,6 +10,7 @@ import { GhostButton, PrimaryButton } from "../ui/Buttons";
 import { PrinterPanel } from "./PrinterPanel";
 import { buildTicketPayload, printerPrintTicket } from "../api/printerApis";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { deCentimos } from "../../../shared/lib/dinero";
 
 type TicketWidthOpt = {
     value: 58 | 80 | 112; // mm (lo que se guarda en Ticket_Settings)
@@ -109,15 +110,15 @@ export function Ticket({
 
     const previewItems = useMemo(
         () => [
-            { id: "1", productoId: 101, nombre: "Café con leche", precio: 1.7 },
-            { id: "2", productoId: 101, nombre: "Café con leche", precio: 1.7 },
+            { id: "1", productoId: 101, nombre: "Café con leche", precio: deCentimos(170) },
+            { id: "2", productoId: 101, nombre: "Café con leche", precio: deCentimos(170) },
             {
                 id: "3",
                 productoId: 205,
                 nombre: "Tostada aceite y tomate",
-                precio: 2.4,
+                precio: deCentimos(240),
             },
-            { id: "4", productoId: 330, nombre: "Agua 0,5L", precio: 1.2 },
+            { id: "4", productoId: 330, nombre: "Agua 0,5L", precio: deCentimos(120) },
         ],
         [],
     );
