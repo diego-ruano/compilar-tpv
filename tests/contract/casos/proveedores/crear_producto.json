@@ -10,7 +10,7 @@
     "id_categoria": "cat-1",
     "id_proveedor": "prov-1",
     "nombre": "Ginebra",
-    "precio_venta": 15,
+    "precio_venta": 1500,
     "stock_actual": 8,
     "stock_minimo": 2,
     "unidad_medida": "botella"

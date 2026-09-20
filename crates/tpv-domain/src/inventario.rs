@@ -1,5 +1,7 @@
 //! Dominio de **inventario**: entidades, validaciones y normalizaciones puras.
 
+use crate::dinero::Dinero;
+
 fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -68,7 +70,7 @@ pub struct ProductoUpsert {
     pub id_categoria: String,
     pub id_proveedor: Option<String>,
     pub nombre: String,
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     pub stock_minimo: Option<f64>,
     pub unidad_medida: Option<String>,
     pub nombre_imagen: Option<String>,
@@ -89,7 +91,7 @@ impl ProductoUpsert {
         id_categoria: String,
         id_proveedor: Option<String>,
         nombre: String,
-        precio_venta: Option<f64>,
+        precio_venta: Option<Dinero>,
         stock_minimo: Option<f64>,
         unidad_medida: Option<String>,
         nombre_imagen: Option<String>,
@@ -136,7 +138,7 @@ pub struct LoteNuevo {
     pub caducidad: Option<String>,
     pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
-    pub coste_unitario: Option<f64>,
+    pub coste_unitario: Option<Dinero>,
     pub id_proveedor: Option<String>,
     pub notas: Option<String>,
 }
@@ -150,7 +152,7 @@ pub struct LoteUpdate {
     pub caducidad: Option<String>,
     pub stock_disponible: f64,
     pub fecha_entrada: Option<String>,
-    pub coste_unitario: Option<f64>,
+    pub coste_unitario: Option<Dinero>,
     pub id_proveedor: Option<String>,
     pub notas: Option<String>,
 }
@@ -164,7 +166,7 @@ impl LoteUpdate {
         caducidad: Option<String>,
         stock_disponible: f64,
         fecha_entrada: Option<String>,
-        coste_unitario: Option<f64>,
+        coste_unitario: Option<Dinero>,
         id_proveedor: Option<String>,
         notas: Option<String>,
     ) -> Result<Self, String> {
@@ -206,7 +208,7 @@ impl LoteNuevo {
         caducidad: Option<String>,
         stock_disponible: f64,
         fecha_entrada: Option<String>,
-        coste_unitario: Option<f64>,
+        coste_unitario: Option<Dinero>,
         id_proveedor: Option<String>,
         notas: Option<String>,
     ) -> Result<Self, String> {
@@ -319,7 +321,7 @@ mod tests {
     }
 
     fn producto_con_iva(nombre: &str, categoria: &str, stock_suelto: Option<f64>, iva: Option<f64>, alergenos: Vec<String>) -> Result<ProductoUpsert, String> {
-        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(2.5), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, iva, alergenos)
+        ProductoUpsert::validar(Some(" p1 ".into()), categoria.into(), Some(" prov1 ".into()), nombre.into(), Some(Dinero::de_euros(2.5)), Some(1.0), Some(" unidad ".into()), Some(" ".into()), None, Some(3.0), stock_suelto, iva, alergenos)
     }
 
     #[test]
@@ -367,7 +369,7 @@ mod tests {
     }
 
     fn lote(cantidad: f64, caducidad: Option<&str>, entrada: Option<&str>) -> Result<LoteNuevo, String> {
-        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, entrada.map(str::to_string), Some(1.25), Some(" prov1 ".into()), Some(" fresco ".into()))
+        LoteNuevo::validar(Some(" l1 ".into()), " p1 ".into(), " L-001 ".into(), caducidad.map(str::to_string), cantidad, entrada.map(str::to_string), Some(Dinero::de_euros(1.25)), Some(" prov1 ".into()), Some(" fresco ".into()))
     }
 
     #[test]

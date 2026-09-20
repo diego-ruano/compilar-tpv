@@ -8,7 +8,9 @@
   ],
   "entrada": {
     "id_producto": "prod-1",
-    "ids_alergenos": ["00000000-0000-7000-8000-000000000201"]
+    "ids_alergenos": [
+      "00000000-0000-7000-8000-000000000201"
+    ]
   },
   "snapshot": {
     "Producto_Alergenos": "SELECT ID_Producto, ID_Alergeno FROM Producto_Alergenos"

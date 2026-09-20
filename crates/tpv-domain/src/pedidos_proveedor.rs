@@ -1,5 +1,7 @@
 //! Dominio de pedidos a proveedores: entidades puras y validaciones.
 
+use crate::dinero::Dinero;
+
 fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -9,7 +11,7 @@ pub struct LineaPedidoNueva {
     pub id_linea: String,
     pub nombre_producto: String,
     pub cantidad: f64,
-    pub precio_unitario: Option<f64>,
+    pub precio_unitario: Option<Dinero>,
     pub unidad: Option<String>,
 }
 
@@ -18,7 +20,7 @@ impl LineaPedidoNueva {
         id_linea: String,
         nombre_producto: String,
         cantidad: f64,
-        precio_unitario: Option<f64>,
+        precio_unitario: Option<Dinero>,
         unidad: Option<String>,
     ) -> Result<Self, String> {
         let nombre = nombre_producto.trim().to_string();
@@ -29,7 +31,7 @@ impl LineaPedidoNueva {
             return Err("cantidad inválida".into());
         }
         if let Some(p) = precio_unitario {
-            if !p.is_finite() || p < 0.0 {
+            if p.es_negativo() {
                 return Err("precio_unitario inválido".into());
             }
         }
@@ -77,11 +79,11 @@ mod tests {
 
     #[test]
     fn linea_valida_normaliza_textos_y_permite_cero() {
-        let l = LineaPedidoNueva::validar(" l1 ".into(), " Tomate ".into(), 0.0, Some(0.0), Some(" kg ".into())).unwrap();
+        let l = LineaPedidoNueva::validar(" l1 ".into(), " Tomate ".into(), 0.0, Some(Dinero::CERO), Some(" kg ".into())).unwrap();
         assert_eq!(l.id_linea, "l1");
         assert_eq!(l.nombre_producto, "Tomate");
         assert_eq!(l.cantidad, 0.0);
-        assert_eq!(l.precio_unitario, Some(0.0));
+        assert_eq!(l.precio_unitario, Some(Dinero::CERO));
         assert_eq!(l.unidad.as_deref(), Some("kg"));
     }
 
@@ -91,7 +93,7 @@ mod tests {
         for cantidad in [-1.0, f64::NAN, f64::INFINITY] {
             assert!(LineaPedidoNueva::validar("l".into(), "x".into(), cantidad, None, None).is_err());
         }
-        for precio in [-0.01, f64::NAN, f64::INFINITY] {
+        for precio in [Dinero::de_centimos(-1)] {
             assert!(LineaPedidoNueva::validar("l".into(), "x".into(), 1.0, Some(precio), None).is_err());
         }
     }

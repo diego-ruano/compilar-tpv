@@ -1,5 +1,7 @@
 //! DTOs del **cierre de caja** (arqueo). CUENTA-06 · CAJA-01.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -7,7 +9,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DenominacionDto {
-    pub valor: f64,
+    pub valor: Dinero,
     #[ts(type = "number")]
     pub unidades: i64,
 }
@@ -25,10 +27,10 @@ pub struct RectificacionDto {
     pub descripcion: String,
     #[ts(optional)]
     pub motivo: Option<String>,
-    pub esperado_antes: f64,
-    pub esperado_despues: f64,
-    pub descuadre_antes: f64,
-    pub descuadre_despues: f64,
+    pub esperado_antes: Dinero,
+    pub esperado_despues: Dinero,
+    pub descuadre_antes: Dinero,
+    pub descuadre_despues: Dinero,
 }
 
 /// Un cierre completo, con su doble recuento. Lo que pinta la ficha del histórico.
@@ -45,13 +47,13 @@ pub struct CierreDto {
     /// Nombre de quien cerró, resuelto al leer (la fila sólo guarda el id).
     #[ts(optional)]
     pub usuario_nombre: Option<String>,
-    pub fondo_inicial: f64,
-    pub ventas_efectivo: f64,
-    pub esperado: f64,
-    pub contado: f64,
-    pub descuadre: f64,
-    pub dejado: f64,
-    pub retirado: f64,
+    pub fondo_inicial: Dinero,
+    pub ventas_efectivo: Dinero,
+    pub esperado: Dinero,
+    pub contado: Dinero,
+    pub descuadre: Dinero,
+    pub dejado: Dinero,
+    pub retirado: Dinero,
     #[ts(optional)]
     pub motivo: Option<String>,
     /// `None` = el cierre sigue en pie (no se ha deshecho).
@@ -65,17 +67,17 @@ pub struct CierreDto {
     pub periodo_desde: Option<String>,
     /// Gastos pagados con dinero del cajón durante el periodo, tal como estaban al cerrar.
     #[serde(default)]
-    pub gastos_caja: f64,
+    pub gastos_caja: Dinero,
     /// Lo que el cierre marca hoy tras corregir apuntes de su periodo. `None` = nunca se ha
     /// rectificado.
     #[ts(optional)]
-    pub rect_ventas_efectivo: Option<f64>,
+    pub rect_ventas_efectivo: Option<Dinero>,
     #[ts(optional)]
-    pub rect_gastos_caja: Option<f64>,
+    pub rect_gastos_caja: Option<Dinero>,
     #[ts(optional)]
-    pub rect_esperado: Option<f64>,
+    pub rect_esperado: Option<Dinero>,
     #[ts(optional)]
-    pub rect_descuadre: Option<f64>,
+    pub rect_descuadre: Option<Dinero>,
     pub contado_denoms: Vec<DenominacionDto>,
     pub dejado_denoms: Vec<DenominacionDto>,
     /// Cada corrección que cambió sus números, de la más antigua a la más reciente.
@@ -91,19 +93,19 @@ pub struct CierreResumenDto {
     pub fecha_hora: String,
     #[ts(optional)]
     pub usuario_nombre: Option<String>,
-    pub esperado: f64,
-    pub contado: f64,
-    pub descuadre: f64,
-    pub retirado: f64,
+    pub esperado: Dinero,
+    pub contado: Dinero,
+    pub descuadre: Dinero,
+    pub retirado: Dinero,
     #[ts(optional)]
     pub motivo: Option<String>,
     #[ts(optional)]
     pub reabierto_en: Option<String>,
     /// CAJA-01: lo que marca hoy si se ha rectificado.
     #[ts(optional)]
-    pub rect_esperado: Option<f64>,
+    pub rect_esperado: Option<Dinero>,
     #[ts(optional)]
-    pub rect_descuadre: Option<f64>,
+    pub rect_descuadre: Option<Dinero>,
 }
 
 /// Lo que la pantalla necesita saber **antes** de que nadie cuente nada.
@@ -117,22 +119,22 @@ pub struct PreparacionCierreDto {
     /// `true` en el primer cierre de la vida del negocio.
     pub es_primer_cierre: bool,
     /// Lo que dejó el cierre anterior. En el primero es 0 y lo declara el usuario.
-    pub fondo_inicial: f64,
-    pub ventas_efectivo: f64,
+    pub fondo_inicial: Dinero,
+    pub ventas_efectivo: Dinero,
     /// Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado.
-    pub gastos_caja: f64,
-    pub esperado: f64,
+    pub gastos_caja: Dinero,
+    pub esperado: Dinero,
     /// Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
     #[ts(type = "number")]
     pub comandas_abiertas: i64,
     /// A partir de cuánto descuadre hay que escribir un motivo.
-    pub umbral_descuadre: f64,
+    pub umbral_descuadre: Dinero,
     /// Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los
     /// cobros activos, como siempre): es una línea informativa. Y es justo el dato que no existía
     /// antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
     #[ts(type = "number")]
     pub anulaciones: i64,
-    pub anulaciones_importe: f64,
+    pub anulaciones_importe: Dinero,
 }
 
 /// Cómo quedaría un cierre ya hecho si se hace un cambio (CAJA-01).
@@ -142,10 +144,10 @@ pub struct ImpactoCierreDto {
     pub id_cierre: String,
     pub fecha_hora: String,
     /// Lo que marca hoy: lo rectificado si lo hay, la foto de esa noche si no.
-    pub esperado_antes: f64,
-    pub esperado_despues: f64,
-    pub descuadre_antes: f64,
-    pub descuadre_despues: f64,
+    pub esperado_antes: Dinero,
+    pub esperado_despues: Dinero,
+    pub descuadre_antes: Dinero,
+    pub descuadre_despues: Dinero,
 }
 
 /// A qué cierres ya hechos afectaría un cambio de caja, para avisar antes de hacerlo.
@@ -165,7 +167,7 @@ pub struct ImpactoCajaDto {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct DenominacionInput {
-    pub valor: f64,
+    pub valor: Dinero,
     #[ts(type = "number")]
     pub unidades: i64,
 }
@@ -177,7 +179,7 @@ pub struct ConfirmarCierreInput {
     /// ignora, para que nadie pueda reescribir el punto de partida a posteriori.
     #[serde(default)]
     #[ts(optional)]
-    pub fondo_inicial: Option<f64>,
+    pub fondo_inicial: Option<Dinero>,
     pub contado: Vec<DenominacionInput>,
     pub dejado: Vec<DenominacionInput>,
     #[serde(default)]
@@ -223,13 +225,13 @@ pub enum CambioCajaInput {
     },
     CrearGasto {
         fecha: String,
-        importe: f64,
+        importe: Dinero,
         pagado_con_caja: bool,
     },
     EditarGasto {
         id_gasto: String,
         fecha: String,
-        importe: f64,
+        importe: Dinero,
         pagado_con_caja: bool,
     },
     BorrarGasto {

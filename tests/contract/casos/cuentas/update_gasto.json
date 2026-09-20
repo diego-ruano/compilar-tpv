@@ -3,15 +3,15 @@
   "comando": "cuentas.update_gasto",
   "seed": [
     "INSERT INTO Proveedores (ID_Proveedor, Nombre_Empresa) VALUES ('prov-1', 'Distribuciones SA');",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja) VALUES ('gasto-1', '2026-01-01', 'Concepto viejo', 10.0, 'Otros', 'prov-1', 1);",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'No se toca', 5.5, 'Otros', NULL);"
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor, Pagado_Con_Caja) VALUES ('gasto-1', '2026-01-01', 'Concepto viejo', 1000, 'Otros', 'prov-1', 1);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'No se toca', 550, 'Otros', NULL);"
   ],
   "entrada": {
     "id_gasto": "gasto-1",
     "fecha": "2026-02-20",
     "tipo_gasto": "Personal",
     "concepto": "Concepto nuevo",
-    "importe": 99.99,
+    "importe": 9999,
     "proveedor_id": null,
     "pagado_con_caja": false
   },

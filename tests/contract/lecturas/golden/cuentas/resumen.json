@@ -2,9 +2,9 @@
   "count_anuladas": 1,
   "count_entradas": 3,
   "count_salidas": 1,
-  "total_anulado": 40.0,
-  "total_efectivo": 15.25,
-  "total_entradas": 35.75,
-  "total_salidas": 150.0,
-  "total_tarjeta": 20.5
+  "total_anulado": 4000,
+  "total_efectivo": 1525,
+  "total_entradas": 3575,
+  "total_salidas": 15000,
+  "total_tarjeta": 2050
 }

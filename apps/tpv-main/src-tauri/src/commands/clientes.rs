@@ -4,6 +4,7 @@
 //! `AppState::clientes_repo` según el modo activo: el comando no sabe contra qué backend
 //! habla, sólo orquesta entrada/salida e invoca el caso de uso.
 
+use tpv_domain::dinero::Dinero;
 use tauri::State;
 
 use tpv_application::use_cases::clientes as uc;
@@ -33,7 +34,7 @@ pub async fn clientes_get_overview(
 pub async fn clientes_recalcular_gasto(
     state: State<'_, AppState>,
     args: ClienteIdArgs,
-) -> Result<Option<f64>, AppErrorDto> {
+) -> Result<Option<Dinero>, AppErrorDto> {
     let repo = state.reconciliacion_repo().await?;
     Ok(uc_reconciliacion::recalcular_gasto_de_cliente(repo.as_ref(), &args.id_cliente).await?)
 }

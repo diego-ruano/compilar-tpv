@@ -1,5 +1,6 @@
 //! Adaptador HTTP del repositorio de venta rápida/barra (dominio `/v1/venta-rapida`).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -132,7 +133,7 @@ impl VentaRapidaRepository for HttpVentaRapidaRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: f64,
+        precio_unitario: Dinero,
     ) -> AppResult<String> {
         let body = json!({
             "id_detalle": uuid::Uuid::now_v7().to_string(),

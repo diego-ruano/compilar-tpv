@@ -5,11 +5,17 @@
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', '2026-05-10 12:00:00', 'Pagada');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 10.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-1', '2026-05-10 11:00:00', 'Tarjeta', 20.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-1', '2026-05-10 12:00:00', 'Efectivo', 30.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4', 'com-1', '2026-05-11 09:00:00', 'Efectivo', 40.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-5', 'com-1', '2026-06-01 09:00:00', 'Efectivo', 50.0, 'total');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-1', '2026-05-10 11:00:00', 'Tarjeta', 2000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-1', '2026-05-10 12:00:00', 'Efectivo', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-4', 'com-1', '2026-05-11 09:00:00', 'Efectivo', 4000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-5', 'com-1', '2026-06-01 09:00:00', 'Efectivo', 5000, 'total');"
   ],
-  "entrada": { "del": "2026-05-01", "al": "2026-05-31", "q": "efectivo", "page": 2, "page_size": 2 }
+  "entrada": {
+    "del": "2026-05-01",
+    "al": "2026-05-31",
+    "q": "efectivo",
+    "page": 2,
+    "page_size": 2
+  }
 }

@@ -1,5 +1,6 @@
 //! Puerto de persistencia de mesas / salón / comandas / cocina.
 
+use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
@@ -30,14 +31,14 @@ pub trait MesasRepository: Send + Sync {
         id_comanda: &str,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<bool>;
-    async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()>;
+    async fn cerrar_comanda(&self, id_comanda: &str, total: Dinero) -> AppResult<()>;
     async fn get_lineas_comanda(&self, id_comanda: &str) -> AppResult<Vec<MesaLineaComandaRow>>;
     async fn add_linea_comanda(
         &self,
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: f64,
+        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>>;
 

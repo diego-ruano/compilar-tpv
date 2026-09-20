@@ -8,46 +8,32 @@
 //! puede registrar lo que alguien declara y enseñar la diferencia. Estas funciones calculan esa
 //! diferencia; decidir qué hacer con ella es de quien lleva el bar.
 
-/// Umbral por defecto (en euros) a partir del cual el descuadre exige un motivo escrito.
+use crate::dinero::Dinero;
+
+/// Umbral por defecto a partir del cual el descuadre exige un motivo escrito.
 ///
-/// 5 € deja pasar el céntimo de redondeo y el error de vuelta sin dar la lata, y obliga a explicar
-/// lo que ya es dinero de verdad. Es configurable por negocio; esto es sólo el arranque.
-pub const UMBRAL_DESCUADRE_POR_DEFECTO: f64 = 5.0;
+/// 5 € deja pasar el error de vuelta sin dar la lata, y obliga a explicar lo que ya es dinero de
+/// verdad. Es configurable por negocio; esto es sólo el arranque.
+pub const UMBRAL_DESCUADRE_POR_DEFECTO: Dinero = Dinero::de_centimos(500);
 
 /// Una moneda o billete contado: su valor facial y cuántos hay.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Denominacion {
-    pub valor: f64,
+    pub valor: Dinero,
     pub unidades: i64,
-}
-
-/// Redondeo a céntimos. Todo importe que salga de este módulo pasa por aquí.
-///
-/// El TPV trabaja el dinero en `f64` (igual que `Importe_Total` o `Total_Comanda`); no se introduce
-/// aquí un tipo de dinero nuevo porque sería el único del repo y la inconsistencia costaría más que
-/// el rigor que aporta. Lo que sí se hace es redondear en cada frontera, que es lo que evita que el
-/// error de coma flotante se acumule y acabe enseñando un descuadre de 0,004 €.
-pub fn a_centimos(v: f64) -> f64 {
-    (v * 100.0).round() / 100.0
-}
-
-/// ¿Son dos importes distintos? Se compara en céntimos: dos sumas en coma flotante que dan lo mismo
-/// no pueden pedir un motivo por una diferencia de 0,0000001 €.
-pub fn centimos_distintos(a: f64, b: f64) -> bool {
-    (a * 100.0).round() as i64 != (b * 100.0).round() as i64
 }
 
 /// Total de un recuento por denominaciones.
 ///
-/// Las unidades negativas se ignoran (no existe "menos tres billetes"), y el resultado se redondea:
-/// sumar 0,01 setenta veces en coma flotante no da 0,70 exacto.
-pub fn total_recuento(denoms: &[Denominacion]) -> f64 {
-    let bruto: f64 = denoms
+/// Las unidades negativas se ignoran: no existe «menos tres billetes». Ya no hace falta redondear
+/// el resultado — sumar 0,01 setenta veces daba 0,70 con cola en coma flotante; con céntimos son
+/// setenta unos.
+pub fn total_recuento(denoms: &[Denominacion]) -> Dinero {
+    denoms
         .iter()
-        .filter(|d| d.unidades > 0 && d.valor > 0.0)
-        .map(|d| d.valor * d.unidades as f64)
-        .sum();
-    a_centimos(bruto)
+        .filter(|d| d.unidades > 0 && d.valor > Dinero::CERO)
+        .map(|d| d.valor.por(d.unidades))
+        .sum()
 }
 
 /// Lo que entró y salió del cajón: la parte del arqueo que sale de los apuntes (CAJA-01).
@@ -57,8 +43,8 @@ pub fn total_recuento(denoms: &[Denominacion]) -> f64 {
 /// a aportar.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct TotalesCaja {
-    pub ventas_efectivo: f64,
-    pub gastos_caja: f64,
+    pub ventas_efectivo: Dinero,
+    pub gastos_caja: Dinero,
 }
 
 impl TotalesCaja {
@@ -69,33 +55,33 @@ impl TotalesCaja {
     /// `Tarjeta` cuenta como efectivo (CUENTA-03), y un cobro anulado no cuenta (CUENTA-07). Si se
     /// separaran, lo que la pantalla enseña antes de confirmar un cambio y la rectificación que se
     /// guarda al hacerlo dirían cifras distintas.
-    pub fn de_cobro(activo: bool, metodo: &str, importe: f64) -> Self {
+    pub fn de_cobro(activo: bool, metodo: &str, importe: Dinero) -> Self {
         let efectivo = activo && metodo != "Tarjeta";
         TotalesCaja {
-            ventas_efectivo: if efectivo { a_centimos(importe) } else { 0.0 },
-            gastos_caja: 0.0,
+            ventas_efectivo: if efectivo { importe } else { Dinero::CERO },
+            gastos_caja: Dinero::CERO,
         }
     }
 
     /// Lo que aporta un gasto: sólo si el dinero salió del cajón.
-    pub fn de_gasto(pagado_con_caja: bool, importe: f64) -> Self {
+    pub fn de_gasto(pagado_con_caja: bool, importe: Dinero) -> Self {
         TotalesCaja {
-            ventas_efectivo: 0.0,
-            gastos_caja: if pagado_con_caja { a_centimos(importe) } else { 0.0 },
+            ventas_efectivo: Dinero::CERO,
+            gastos_caja: if pagado_con_caja { importe } else { Dinero::CERO },
         }
     }
 
     pub fn mas(self, otro: Self) -> Self {
         TotalesCaja {
-            ventas_efectivo: a_centimos(self.ventas_efectivo + otro.ventas_efectivo),
-            gastos_caja: a_centimos(self.gastos_caja + otro.gastos_caja),
+            ventas_efectivo: self.ventas_efectivo + otro.ventas_efectivo,
+            gastos_caja: self.gastos_caja + otro.gastos_caja,
         }
     }
 
     pub fn menos(self, otro: Self) -> Self {
         TotalesCaja {
-            ventas_efectivo: a_centimos(self.ventas_efectivo - otro.ventas_efectivo),
-            gastos_caja: a_centimos(self.gastos_caja - otro.gastos_caja),
+            ventas_efectivo: self.ventas_efectivo - otro.ventas_efectivo,
+            gastos_caja: self.gastos_caja - otro.gastos_caja,
         }
     }
 }
@@ -104,21 +90,21 @@ impl TotalesCaja {
 #[derive(Debug, Clone, PartialEq)]
 pub struct CierreCalculado {
     /// Con cuánto empezó el periodo (lo que dejó el cierre anterior).
-    pub fondo_inicial: f64,
+    pub fondo_inicial: Dinero,
     /// Cobros en efectivo del periodo.
-    pub ventas_efectivo: f64,
+    pub ventas_efectivo: Dinero,
     /// Gastos pagados con dinero del cajón durante el periodo (CAJA-01).
-    pub gastos_caja: f64,
+    pub gastos_caja: Dinero,
     /// Lo que debería haber en el cajón: fondo + ventas en efectivo − gastos pagados con caja.
-    pub esperado: f64,
+    pub esperado: Dinero,
     /// Lo que hay de verdad, según el recuento.
-    pub contado: f64,
+    pub contado: Dinero,
     /// Contado − esperado. Negativo = falta dinero.
-    pub descuadre: f64,
+    pub descuadre: Dinero,
     /// Lo que se deja para el periodo siguiente (será su fondo inicial).
-    pub dejado: f64,
+    pub dejado: Dinero,
     /// Contado − dejado: lo que sale del cajón.
-    pub retirado: f64,
+    pub retirado: Dinero,
 }
 
 /// Calcula el arqueo a partir del fondo heredado, lo que entró y salió del cajón, y los dos
@@ -129,19 +115,13 @@ pub struct CierreCalculado {
 /// ninguno —se había decidido que de esta caja no se paga a proveedores— y el hueco era el
 /// contrario: pagar el hielo con el dinero del cajón salía como que faltaba.
 pub fn calcular(
-    fondo_inicial: f64,
-    ventas_efectivo: f64,
-    gastos_caja: f64,
-    contado: f64,
-    dejado: f64,
+    fondo_inicial: Dinero,
+    ventas_efectivo: Dinero,
+    gastos_caja: Dinero,
+    contado: Dinero,
+    dejado: Dinero,
 ) -> CierreCalculado {
-    let fondo_inicial = a_centimos(fondo_inicial);
-    let ventas_efectivo = a_centimos(ventas_efectivo);
-    let gastos_caja = a_centimos(gastos_caja);
-    let contado = a_centimos(contado);
-    let dejado = a_centimos(dejado);
-
-    let esperado = a_centimos(fondo_inicial + ventas_efectivo - gastos_caja);
+    let esperado = fondo_inicial + ventas_efectivo - gastos_caja;
 
     CierreCalculado {
         fondo_inicial,
@@ -149,9 +129,9 @@ pub fn calcular(
         gastos_caja,
         esperado,
         contado,
-        descuadre: a_centimos(contado - esperado),
+        descuadre: contado - esperado,
         dejado,
-        retirado: a_centimos(contado - dejado),
+        retirado: contado - dejado,
     }
 }
 
@@ -159,9 +139,9 @@ pub fn calcular(
 ///
 /// Se compara el valor **absoluto**: sobrar 40 € es tan raro como que falten, y las dos cosas
 /// merecen una explicación. Un umbral de 0 o negativo se lee como "siempre pide motivo".
-pub fn exige_motivo(descuadre: f64, umbral: f64) -> bool {
-    if umbral <= 0.0 {
-        return descuadre.abs() > 0.0;
+pub fn exige_motivo(descuadre: Dinero, umbral: Dinero) -> bool {
+    if umbral <= Dinero::CERO {
+        return !descuadre.es_cero();
     }
     descuadre.abs() > umbral
 }
@@ -176,12 +156,12 @@ pub fn exige_motivo(descuadre: f64, umbral: f64) -> bool {
 pub fn validar(
     calculo: &CierreCalculado,
     motivo: Option<&str>,
-    umbral: f64,
+    umbral: Dinero,
 ) -> Result<Option<String>, String> {
-    if calculo.contado < 0.0 {
+    if calculo.contado.es_negativo() {
         return Err("El recuento no puede ser negativo".into());
     }
-    if calculo.dejado < 0.0 {
+    if calculo.dejado.es_negativo() {
         return Err("Lo que se deja en el cajón no puede ser negativo".into());
     }
     if calculo.dejado > calculo.contado {
@@ -192,7 +172,8 @@ pub fn validar(
 
     if exige_motivo(calculo.descuadre, umbral) && motivo.is_none() {
         return Err(format!(
-            "El descuadre supera {umbral:.2} €: hace falta explicar por qué"
+            "El descuadre supera {} €: hace falta explicar por qué",
+            umbral.texto_fiscal()
         ));
     }
 
@@ -262,73 +243,81 @@ pub fn momento_de_gasto(fecha: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Euros → `Dinero`. Los supuestos se escriben en euros, que es como se habla de dinero; lo
+    /// que se guarda y se compara son céntimos.
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     fn d(valor: f64, unidades: i64) -> Denominacion {
-        Denominacion { valor, unidades }
+        Denominacion { valor: eur(valor), unidades }
     }
 
     #[test]
     fn el_recuento_suma_valor_por_unidades() {
         let caja = vec![d(50.0, 2), d(20.0, 3), d(0.5, 4)];
-        assert_eq!(total_recuento(&caja), 162.0);
+        assert_eq!(total_recuento(&caja), eur(162.0));
     }
 
     #[test]
     fn el_recuento_ignora_lo_que_no_existe() {
         // Unidades a cero o negativas y valores no positivos no son dinero: no suman ni restan.
         let caja = vec![d(20.0, 0), d(10.0, -3), d(0.0, 99), d(5.0, 2)];
-        assert_eq!(total_recuento(&caja), 10.0);
+        assert_eq!(total_recuento(&caja), eur(10.0));
     }
 
     #[test]
     fn el_recuento_de_calderilla_no_arrastra_error_de_coma_flotante() {
-        // 70 monedas de un céntimo son 0,70 €. En f64 esa suma da 0,7000000000000001 y, sin
-        // redondear, el arqueo enseñaria un descuadre que no existe.
+        // 70 monedas de un céntimo son 0,70 €. En f64 esa suma daba 0,7000000000000001 y, sin
+        // redondear, el arqueo enseñaba un descuadre que no existe. En céntimos son setenta unos y
+        // el problema no puede volver: se deja el test porque lo que se afirma es el resultado, no
+        // la técnica con la que se consigue.
         let caja = vec![d(0.01, 70)];
-        assert_eq!(total_recuento(&caja), 0.7);
+        assert_eq!(total_recuento(&caja), eur(0.7));
     }
 
     #[test]
     fn el_esperado_es_el_fondo_mas_las_ventas_en_efectivo() {
-        let c = calcular(150.0, 320.45, 0.0, 470.45, 150.0);
-        assert_eq!(c.esperado, 470.45);
-        assert_eq!(c.descuadre, 0.0);
-        assert_eq!(c.retirado, 320.45);
+        let c = calcular(eur(150.0), eur(320.45), eur(0.0), eur(470.45), eur(150.0));
+        assert_eq!(c.esperado, eur(470.45));
+        assert_eq!(c.descuadre, Dinero::CERO);
+        assert_eq!(c.retirado, eur(320.45));
     }
 
     #[test]
     fn los_gastos_pagados_con_caja_restan_del_esperado() {
         // CAJA-01: 18 € de hielo pagados con el dinero del cajón. Si no restaran, el recuento
         // cuadrado saldría como que faltan 18 €.
-        let c = calcular(150.0, 320.45, 18.0, 452.45, 150.0);
-        assert_eq!(c.gastos_caja, 18.0);
-        assert_eq!(c.esperado, 452.45);
-        assert_eq!(c.descuadre, 0.0);
+        let c = calcular(eur(150.0), eur(320.45), eur(18.0), eur(452.45), eur(150.0));
+        assert_eq!(c.gastos_caja, eur(18.0));
+        assert_eq!(c.esperado, eur(452.45));
+        assert_eq!(c.descuadre, Dinero::CERO);
     }
 
     #[test]
     fn el_descuadre_es_negativo_cuando_falta_dinero() {
-        let c = calcular(100.0, 200.0, 0.0, 280.0, 100.0);
-        assert_eq!(c.esperado, 300.0);
-        assert_eq!(c.descuadre, -20.0);
+        let c = calcular(eur(100.0), eur(200.0), eur(0.0), eur(280.0), eur(100.0));
+        assert_eq!(c.esperado, eur(300.0));
+        assert_eq!(c.descuadre, eur(-20.0));
     }
 
     #[test]
     fn el_descuadre_es_positivo_cuando_sobra() {
-        let c = calcular(100.0, 200.0, 0.0, 305.5, 100.0);
-        assert_eq!(c.descuadre, 5.5);
+        let c = calcular(eur(100.0), eur(200.0), eur(0.0), eur(305.5), eur(100.0));
+        assert_eq!(c.descuadre, eur(5.5));
     }
 
     #[test]
     fn lo_que_se_deja_es_el_fondo_del_periodo_siguiente() {
         // Es la propiedad que encadena los periodos: el `dejado` de hoy es el `fondo_inicial` de
         // mañana, y por eso el retirado sale de la resta y no se declara aparte.
-        let hoy = calcular(100.0, 500.0, 0.0, 600.0, 120.0);
-        assert_eq!(hoy.retirado, 480.0);
+        let hoy = calcular(eur(100.0), eur(500.0), eur(0.0), eur(600.0), eur(120.0));
+        assert_eq!(hoy.retirado, eur(480.0));
 
-        let manana = calcular(hoy.dejado, 300.0, 0.0, 420.0, 100.0);
-        assert_eq!(manana.fondo_inicial, 120.0);
-        assert_eq!(manana.esperado, 420.0);
-        assert_eq!(manana.descuadre, 0.0);
+        let manana = calcular(hoy.dejado, eur(300.0), eur(0.0), eur(420.0), eur(100.0));
+        assert_eq!(manana.fondo_inicial, eur(120.0));
+        assert_eq!(manana.esperado, eur(420.0));
+        assert_eq!(manana.descuadre, Dinero::CERO);
     }
 
     #[test]
@@ -336,111 +325,94 @@ mod tests {
         // CAJA-01. Lo que encadena los periodos es lo DEJADO, que es dinero contado a mano. Si
         // mañana se descubre que un cobro de hoy fue con tarjeta, cambia lo que hoy debería haber
         // habido, no lo que se contó ni lo que se dejó.
-        let foto = calcular(100.0, 500.0, 0.0, 600.0, 120.0);
-        let rectificado = calcular(foto.fondo_inicial, 480.0, 0.0, foto.contado, foto.dejado);
-        assert_eq!(rectificado.descuadre, 20.0);
+        let foto = calcular(eur(100.0), eur(500.0), eur(0.0), eur(600.0), eur(120.0));
+        let rectificado = calcular(foto.fondo_inicial, eur(480.0), eur(0.0), foto.contado, foto.dejado);
+        assert_eq!(rectificado.descuadre, eur(20.0));
         assert_eq!(rectificado.dejado, foto.dejado);
     }
 
     #[test]
     fn el_umbral_mira_el_valor_absoluto() {
-        assert!(!exige_motivo(-4.99, 5.0));
-        assert!(!exige_motivo(5.0, 5.0)); // justo en el umbral no salta
-        assert!(exige_motivo(-5.01, 5.0));
-        assert!(exige_motivo(40.0, 5.0), "sobrar 40 euros es tan raro como que falten");
+        assert!(!exige_motivo(eur(-4.99), eur(5.0)));
+        assert!(!exige_motivo(eur(5.0), eur(5.0))); // justo en el umbral no salta
+        assert!(exige_motivo(eur(-5.01), eur(5.0)));
+        assert!(exige_motivo(eur(40.0), eur(5.0)), "sobrar 40 euros es tan raro como que falten");
     }
 
     #[test]
     fn con_umbral_cero_cualquier_descuadre_pide_motivo() {
-        assert!(exige_motivo(0.01, 0.0));
-        assert!(!exige_motivo(0.0, 0.0));
+        assert!(exige_motivo(eur(0.01), eur(0.0)));
+        assert!(!exige_motivo(eur(0.0), eur(0.0)));
     }
 
     #[test]
     fn un_descuadre_grande_sin_motivo_no_se_guarda() {
-        let c = calcular(100.0, 200.0, 0.0, 250.0, 100.0);
-        let err = validar(&c, None, 5.0).unwrap_err();
+        let c = calcular(eur(100.0), eur(200.0), eur(0.0), eur(250.0), eur(100.0));
+        let err = validar(&c, None, eur(5.0)).unwrap_err();
         assert!(err.contains("descuadre"), "{err}");
 
         assert_eq!(
-            validar(&c, Some("  se pago un pedido en efectivo  "), 5.0).unwrap(),
+            validar(&c, Some("  se pago un pedido en efectivo  "), eur(5.0)).unwrap(),
             Some("se pago un pedido en efectivo".to_string())
         );
     }
 
     #[test]
     fn un_motivo_en_blanco_no_cuenta_como_motivo() {
-        let c = calcular(100.0, 200.0, 0.0, 250.0, 100.0);
-        assert!(validar(&c, Some("   "), 5.0).is_err());
+        let c = calcular(eur(100.0), eur(200.0), eur(0.0), eur(250.0), eur(100.0));
+        assert!(validar(&c, Some("   "), eur(5.0)).is_err());
     }
 
     #[test]
     fn no_se_puede_dejar_mas_de_lo_contado() {
-        let c = calcular(100.0, 50.0, 0.0, 150.0, 200.0);
-        let err = validar(&c, None, 5.0).unwrap_err();
+        let c = calcular(eur(100.0), eur(50.0), eur(0.0), eur(150.0), eur(200.0));
+        let err = validar(&c, None, eur(5.0)).unwrap_err();
         assert!(err.contains("más de lo que se ha contado"), "{err}");
     }
 
     #[test]
     fn un_cierre_cuadrado_no_necesita_motivo_y_lo_deja_en_none() {
-        let c = calcular(150.0, 100.0, 0.0, 250.0, 150.0);
-        assert_eq!(validar(&c, None, 5.0).unwrap(), None);
-        assert_eq!(validar(&c, Some(""), 5.0).unwrap(), None);
+        let c = calcular(eur(150.0), eur(100.0), eur(0.0), eur(250.0), eur(150.0));
+        assert_eq!(validar(&c, None, eur(5.0)).unwrap(), None);
+        assert_eq!(validar(&c, Some(""), eur(5.0)).unwrap(), None);
     }
 
     #[test]
     fn un_cobro_aporta_lo_mismo_que_cuenta_el_sql_del_periodo() {
-        assert_eq!(TotalesCaja::de_cobro(true, "Efectivo", 12.5).ventas_efectivo, 12.5);
-        assert_eq!(TotalesCaja::de_cobro(true, "Tarjeta", 12.5).ventas_efectivo, 0.0);
+        assert_eq!(TotalesCaja::de_cobro(true, "Efectivo", eur(12.5)).ventas_efectivo, eur(12.5));
+        assert_eq!(TotalesCaja::de_cobro(true, "Tarjeta", eur(12.5)).ventas_efectivo, Dinero::CERO);
         assert_eq!(
-            TotalesCaja::de_cobro(false, "Efectivo", 12.5).ventas_efectivo,
-            0.0,
+            TotalesCaja::de_cobro(false, "Efectivo", eur(12.5)).ventas_efectivo,
+            Dinero::CERO,
             "un cobro anulado no es una venta"
         );
         // Como el SQL: sólo `Tarjeta` exacto va al banco; cualquier otra cosa entra en el cajón,
         // que es el lado seguro (saldría como descuadre en vez de desaparecer).
-        assert_eq!(TotalesCaja::de_cobro(true, "Bizum", 12.5).ventas_efectivo, 12.5);
+        assert_eq!(TotalesCaja::de_cobro(true, "Bizum", eur(12.5)).ventas_efectivo, eur(12.5));
     }
 
     #[test]
     fn un_gasto_solo_aporta_si_salio_del_cajon() {
-        assert_eq!(TotalesCaja::de_gasto(true, 18.0).gastos_caja, 18.0);
-        assert_eq!(TotalesCaja::de_gasto(false, 400.0).gastos_caja, 0.0);
+        assert_eq!(TotalesCaja::de_gasto(true, eur(18.0)).gastos_caja, eur(18.0));
+        assert_eq!(TotalesCaja::de_gasto(false, eur(400.0)).gastos_caja, Dinero::CERO);
     }
 
     #[test]
     fn quitar_y_poner_un_apunte_no_arrastra_error_de_coma_flotante() {
-        let periodo = TotalesCaja { ventas_efectivo: 0.3, gastos_caja: 0.0 };
-        let cobro = TotalesCaja::de_cobro(true, "Efectivo", 0.1);
+        let periodo = TotalesCaja { ventas_efectivo: eur(0.3), gastos_caja: Dinero::CERO };
+        let cobro = TotalesCaja::de_cobro(true, "Efectivo", eur(0.1));
         let sin = periodo.menos(cobro);
-        assert_eq!(sin.ventas_efectivo, 0.2);
+        assert_eq!(sin.ventas_efectivo, eur(0.2));
         assert_eq!(sin.mas(cobro), periodo);
     }
 
     #[test]
-    fn los_importes_se_comparan_en_centimos() {
-        assert!(!centimos_distintos(0.1 + 0.2, 0.3));
-        assert!(centimos_distintos(20.0, 20.01));
-    }
-
-    #[test]
-    fn el_redondeo_a_centimos_es_el_mismo_que_el_de_la_pantalla() {
-        // Tabla repetida en `apps/tpv-main/test/efectivo.test.ts`: la pantalla del cierre enseña el
-        // arqueo antes de confirmar y tiene que redondear igual que lo que se guarda. `f64::round`
-        // aleja la mitad del cero y el `Math.round` de JavaScript no (−12,5 → −12), así que si esto
-        // cambia, allí hay que cambiar `aCentimos`.
-        for (entrada, esperado) in [
-            (0.125, 0.13),
-            (-0.125, -0.13),
-            (0.005, 0.01),
-            (-0.005, -0.01),
-            (1.005, 1.0),
-            (2.675, 2.68),
-            (0.1 + 0.2, 0.3),
-            (-0.004, 0.0),
-        ] {
-            assert_eq!(a_centimos(entrada), esperado, "a_centimos({entrada})");
-        }
+    fn dos_importes_iguales_son_iguales_sin_tolerancia() {
+        // Antes esto necesitaba `centimos_distintos`, porque 0,1 + 0,2 en f64 no era 0,3 y un
+        // cierre podía pedir un motivo por una diferencia de 0,0000001 €. Con céntimos, `==` es la
+        // respuesta y la función sobra.
+        assert_eq!(eur(0.1) + eur(0.2), eur(0.3));
+        assert_ne!(eur(20.0), eur(20.01));
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de proveedores. Local-First (sin outbox/applied).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -11,7 +12,7 @@ use tpv_contracts::proveedores::{CategoriaProveedorDto, ProductoProveedorDto, Pr
 use tpv_domain::proveedores::{ProductoNuevo, ProveedorValidado};
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string};
+use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string, opt_dinero, v_dinero};
 use crate::util::new_id;
 
 pub struct SqliteProveedoresRepository {
@@ -49,8 +50,20 @@ fn s(v: Value) -> String {
 fn f(v: Value) -> f64 {
     v_f64(v).unwrap_or(0.0)
 }
+fn d(v: Value) -> Dinero {
+    v_dinero(v).unwrap_or(Dinero::CERO)
+}
 fn fpos_or_none(v: f64) -> Option<f64> {
     if v == 0.0 {
+        None
+    } else {
+        Some(v)
+    }
+}
+
+/// Lo mismo para un importe: un cero se lee como «sin precio», no como «gratis».
+fn dpos_or_none(v: Dinero) -> Option<Dinero> {
+    if v.es_cero() {
         None
     } else {
         Some(v)
@@ -80,7 +93,7 @@ fn map_producto(row: &Row) -> AppResult<ProductoProveedorDto> {
         id_categoria: norm_opt_string(g(1)?),
         id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
-        precio_venta: fpos_or_none(f(g(4)?)),
+        precio_venta: dpos_or_none(d(g(4)?)),
         stock_actual: Some(f(g(5)?)),
         stock_minimo: fpos_or_none(f(g(6)?)),
         unidad_medida: norm_opt_string(g(7)?),
@@ -314,7 +327,7 @@ impl ProveedoresRepository for SqliteProveedoresRepository {
                     Value::Text(p.id_categoria.clone()),
                     Value::Text(p.id_proveedor.clone()),
                     Value::Text(p.nombre.clone()),
-                    opt_real(p.precio_venta),
+                    opt_dinero(p.precio_venta),
                     opt_real(p.stock_minimo),
                     opt_text(p.unidad_medida.clone()),
                 ],

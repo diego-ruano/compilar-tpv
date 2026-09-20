@@ -28,7 +28,7 @@
       "Apunta_A_Un_Pago": 1,
       "ID_Trabajador": null,
       "ID_Usuario": null,
-      "Importe": 16.0,
+      "Importe": 1600,
       "Metodo_Pago": "TARJETA",
       "Tipo": "COBRO"
     }
@@ -43,7 +43,7 @@
       "ID_Comanda": "comanda-1",
       "ID_Trabajador_Cobrador": null,
       "ID_Usuario_Cobrador": null,
-      "Importe_Total": 16.0,
+      "Importe_Total": 1600,
       "Metodo_Pago": "TARJETA",
       "Tipo": "FRACCIONADO"
     }

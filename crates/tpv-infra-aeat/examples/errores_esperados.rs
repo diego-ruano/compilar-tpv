@@ -29,6 +29,8 @@
 //! remitir. Así lo que se prueba es la reacción de la AEAT a un dato concreto, y no la capacidad de
 //! nuestro propio código para construir algo inválido — que además no puede, porque valida antes.
 
+use tpv_domain::dinero::Dinero;
+
 #[cfg(windows)]
 struct Caso {
     nombre: &'static str,
@@ -193,7 +195,7 @@ fn main() {
                     &g,
                     DatosFactura {
                         lineas: vec![LineaTicket {
-                            total_con_iva: 12.10,
+                            total_con_iva: Dinero::de_euros(12.10),
                             tipo_iva: 10.0,
                             exento: false,
                             causa_exencion: None,

@@ -2,7 +2,7 @@
   "Clientes": [
     {
       "ID_Cliente": "cli-1",
-      "Total_Gastado": 41.0
+      "Total_Gastado": 4100
     }
   ],
   "Comandas": [
@@ -10,13 +10,13 @@
       "Estado": "Abierta",
       "Fecha_Hora_Cierre": null,
       "ID_Comanda": "comanda-1",
-      "Total_Comanda": 12.0
+      "Total_Comanda": 1200
     },
     {
       "Estado": "Abierta",
       "Fecha_Hora_Cierre": null,
       "ID_Comanda": "comanda-otra",
-      "Total_Comanda": 0.0
+      "Total_Comanda": 0
     }
   ],
   "Detalle_Comanda": [
@@ -24,19 +24,19 @@
       "Cantidad": 2.0,
       "ID_Comanda": "comanda-1",
       "ID_Detalle": "det-cobrado-lote",
-      "Precio_Unitario": 3.0
+      "Precio_Unitario": 300
     },
     {
       "Cantidad": 1.0,
       "ID_Comanda": "comanda-1",
       "ID_Detalle": "det-cobrado-suelto",
-      "Precio_Unitario": 3.0
+      "Precio_Unitario": 300
     },
     {
       "Cantidad": 1.0,
       "ID_Comanda": "comanda-1",
       "ID_Detalle": "det-pendiente",
-      "Precio_Unitario": 3.0
+      "Precio_Unitario": 300
     }
   ],
   "Lote_Consumos": [
@@ -67,7 +67,7 @@
     {
       "ID_Pago": "pago-1",
       "ID_Usuario": "user-1",
-      "Importe": 9.0,
+      "Importe": 900,
       "Metodo_Pago": "Efectivo",
       "Motivo": "cobro duplicado",
       "Tipo": "ANULACION"

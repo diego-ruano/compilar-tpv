@@ -2,6 +2,8 @@
 //! ⚠️ Las salidas usan claves PascalCase (`#[serde(rename = ...)]`) y `flatten`,
 //! idénticas al backend antiguo (ts-rs las respeta vía serde-compat).
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -49,7 +51,7 @@ pub struct ProductoBaseDto {
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Precio_Venta")]
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     #[serde(rename = "Stock_Minimo")]
     pub stock_minimo: Option<f64>,
     #[serde(rename = "Unidad_Medida")]
@@ -97,7 +99,7 @@ pub struct ProductoResumenDto {
     #[serde(rename = "Lote")]
     pub lote: Option<String>,
     #[serde(rename = "Precio_Venta")]
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -157,7 +159,7 @@ pub struct LoteDto {
     #[serde(rename = "Stock_Disponible")]
     pub stock_disponible: f64,
     #[serde(rename = "Coste_Unitario")]
-    pub coste_unitario: Option<f64>,
+    pub coste_unitario: Option<Dinero>,
     #[serde(rename = "ID_Proveedor")]
     pub id_proveedor: Option<String>,
     #[serde(rename = "Notas")]
@@ -234,7 +236,7 @@ pub struct UpsertProductoInput {
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub stock_minimo: Option<f64>,
@@ -279,7 +281,7 @@ pub struct CreateLoteInput {
     pub fecha_entrada: Option<String>,
     #[serde(default)]
     #[ts(optional)]
-    pub coste_unitario: Option<f64>,
+    pub coste_unitario: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub id_proveedor: Option<String>,
@@ -303,7 +305,7 @@ pub struct UpdateLoteInput {
     pub fecha_entrada: Option<String>,
     #[serde(default)]
     #[ts(optional)]
-    pub coste_unitario: Option<f64>,
+    pub coste_unitario: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub id_proveedor: Option<String>,

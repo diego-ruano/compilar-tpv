@@ -23,6 +23,8 @@
 //! Aquí se provoca un rechazo de verdad (una `F1` sin destinatario, error 1189 — comprobado en el
 //! banco adversario), se emite la subsanación y se mira si la AEAT la acepta.
 
+use tpv_domain::dinero::Dinero;
+
 fn main() {
     #[cfg(not(windows))]
     eprintln!("Sólo Windows.");
@@ -86,7 +88,7 @@ fn main() {
             for _ in 0..1000 {
                 let g = db.write().await;
                 vfdb::emitir_alta(&g, DatosFactura {
-                    lineas: vec![LineaTicket { total_con_iva: 12.10, tipo_iva: 10.0, exento: false, causa_exencion: None }],
+                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0, exento: false, causa_exencion: None }],
                     ..Default::default()
                 }).await.unwrap();
             }
@@ -131,7 +133,7 @@ fn main() {
             let b = {
                 let g = db2.write().await;
                 vfdb::emitir_alta(&g, DatosFactura {
-                    lineas: vec![LineaTicket { total_con_iva: 12.10, tipo_iva: 10.0, exento: false, causa_exencion: None }],
+                    lineas: vec![LineaTicket { total_con_iva: Dinero::de_euros(12.10), tipo_iva: 10.0, exento: false, causa_exencion: None }],
                     ..Default::default()
                 }).await.unwrap()
             };

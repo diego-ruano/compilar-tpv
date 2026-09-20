@@ -2,6 +2,7 @@
 //! los repositorios. Replican los antiguos helpers `v_*` que estaban duplicados por módulo.
 
 use libsql::Value;
+use tpv_domain::dinero::Dinero;
 
 pub fn v_i64(v: Value) -> Option<i64> {
     match v {
@@ -54,6 +55,35 @@ pub fn opt_text(o: Option<String>) -> Value {
 pub fn opt_real(o: Option<f64>) -> Value {
     match o {
         Some(n) => Value::Real(n),
+        None => Value::Null,
+    }
+}
+
+/// Lee una columna de DINERO. Son `INTEGER` de céntimos (ARQ-01), así que lo normal es el primer
+/// brazo; los otros dos son la misma tolerancia que el resto de helpers, por si un valor llega
+/// desde otro driver o desde el JSON de la replicación.
+///
+/// ⚠️ **Un `Real` se redondea, no se trunca.** `as i64` tira la parte decimal, así que un 1299.9999
+/// —lo que deja un `SUM` de REAL cuando el dato viene de una base antigua— se habría convertido en
+/// 12,99 € en vez de 13,00 €.
+pub fn v_dinero(v: Value) -> Option<Dinero> {
+    match v {
+        Value::Integer(n) => Some(Dinero::de_centimos(n)),
+        Value::Real(n) => Some(Dinero::de_centimos(n.round() as i64)),
+        Value::Text(s) => s.parse::<i64>().ok().map(Dinero::de_centimos),
+        _ => None,
+    }
+}
+
+/// `Dinero` -> `Value` para enlazar como parámetro de escritura.
+pub fn dinero_val(d: Dinero) -> Value {
+    Value::Integer(d.centimos())
+}
+
+/// `Option<Dinero>` -> `Value` (Integer o Null).
+pub fn opt_dinero(o: Option<Dinero>) -> Value {
+    match o {
+        Some(d) => Value::Integer(d.centimos()),
         None => Value::Null,
     }
 }

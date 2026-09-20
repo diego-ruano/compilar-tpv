@@ -1,6 +1,7 @@
 //! Casos de uso de mesas / salón / comandas / cocina. Local-First: validan/normalizan
 //! e invocan el puerto. Las escrituras "OK" devuelven `()` (el comando mapea a "OK").
 
+use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 
 use tpv_contracts::mesas::{
@@ -102,7 +103,7 @@ pub async fn cerrar_comanda(
     if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda inválido"));
     }
-    if !input.total.is_finite() || input.total < 0.0 {
+    if input.total.es_negativo() {
         return Err(AppError::validation("total inválido"));
     }
     repo.cerrar_comanda(&input.id_comanda, input.total).await
@@ -129,7 +130,7 @@ pub async fn add_linea_comanda(
         return Err(AppError::validation("cantidad inválida"));
     }
     // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
-    if !input.precio.is_finite() || input.precio < 0.0 {
+    if input.precio.es_negativo() {
         return Err(AppError::validation("precio inválido (debe ser >= 0)"));
     }
     let id = opt_id(input.id_usuario.or(input.id_trabajador));
@@ -160,11 +161,12 @@ pub async fn cobrar_venta_rapida(
     id_trabajador: Option<&str>,
     input: MesasCobrarVentaRapidaInput,
 ) -> AppResult<String> {
-    let items: Vec<(String, f64)> = input
+    let items: Vec<(String, Dinero)> = input
         .items
         .into_iter()
-        // DB-06: descarta precios no finitos o negativos (nunca escriben Precio_Unitario < 0).
-        .filter(|it| !it.producto_id.trim().is_empty() && it.precio.is_finite() && it.precio >= 0.0)
+        // DB-06: descarta precios negativos (nunca escriben Precio_Unitario < 0). Ya no hace
+        // falta comprobar que sean finitos: un `Dinero` siempre lo es.
+        .filter(|it| !it.producto_id.trim().is_empty() && !it.precio.es_negativo())
         .map(|it| (it.producto_id, it.precio))
         .collect();
 

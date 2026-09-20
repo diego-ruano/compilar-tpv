@@ -3,6 +3,7 @@
 //! Dos consultas que recalculan desde el origen lo que otras columnas guardan ya sumado. Solo
 //! leen: la decisión de qué hacer con un descuadre es de quien lleva el negocio, no del job.
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use tpv_application::ports::reconciliacion::{
 };
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{v_f64, v_string};
+use crate::mapping::{v_f64, v_string, v_dinero, dinero_val};
 
 /// Tope de filas por pasada. Un descuadre masivo (BD corrupta, migración a medias) no debe
 /// convertirse en una notificación de miles de líneas: con las peores ya hay señal suficiente para
@@ -90,7 +91,7 @@ const SQL_CLIENTES: &str = r#"
         SELECT
             c.ID_Cliente               AS id_cliente,
             COALESCE(c.Nombre, '')     AS nombre,
-            ROUND(COALESCE(c.Total_Gastado, 0), 2) AS guardado,
+            COALESCE(c.Total_Gastado, 0) AS guardado,
             ROUND(COALESCE((
                 SELECT SUM(pg.Importe_Total)
                 FROM Pagos pg
@@ -152,12 +153,12 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
         Ok(out)
     }
 
-    async fn clientes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<ClienteDescuadrado>> {
+    async fn clientes_descuadrados(&self, tolerancia: Dinero) -> AppResult<Vec<ClienteDescuadrado>> {
         let r = self.db.read().await;
         let mut rows = r
             .query(
                 SQL_CLIENTES,
-                vec![Value::Real(tolerancia), Value::Integer(MAX_FILAS)],
+                vec![dinero_val(tolerancia), Value::Integer(MAX_FILAS)],
             )
             .await
             .map_err(db_err)?;
@@ -167,14 +168,14 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
             out.push(ClienteDescuadrado {
                 id_cliente: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 nombre: v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
-                guardado: v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
-                calculado: v_f64(row.get_value(3).map_err(db_err)?).unwrap_or(0.0),
+                guardado: v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                calculado: v_dinero(row.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
             });
         }
         Ok(out)
     }
 
-    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<f64>> {
+    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<Dinero>> {
         // Cálculo y escritura bajo el MISMO guard: entre leer los pagos y escribir el total no
         // puede colarse un cobro que dejaría el valor obsoleto nada más nacer.
         let w = self.db.write().await;
@@ -185,7 +186,7 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
                 .await
                 .map_err(db_err)?;
             match rows.next().await.map_err(db_err)? {
-                Some(row) => v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                Some(row) => v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 // Sin fila no hay cliente: no se inventa una.
                 None => return Ok(None),
             }
@@ -195,7 +196,7 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
         // cualquier otra escritura de la Main.
         w.execute(
             "UPDATE Clientes SET Total_Gastado = ?2 WHERE ID_Cliente = ?1;",
-            vec![Value::Text(id_cliente.to_string()), Value::Real(calculado)],
+            vec![Value::Text(id_cliente.to_string()), dinero_val(calculado)],
         )
         .await
         .map_err(db_err)?;
@@ -206,8 +207,22 @@ impl ReconciliacionRepository for SqliteReconciliacionRepository {
 
 #[cfg(test)]
 mod tests {
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn e(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     use super::*;
     use libsql::Connection;
+
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
 
     // Unicidad entre tests en paralelo (mismo patrón que migrations.rs: contador + PID, no reloj).
     /// BD real en un temporal, con el esquema que producen las migraciones.
@@ -241,7 +256,7 @@ mod tests {
     /// casos.
     const SEMILLA_LOTE: &[&str] = &[
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
-        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod', 'cat', 'Cerveza', 2.5);",
+        "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod', 'cat', 'Cerveza', 250);",
         "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Fecha_Entrada, Stock_Disponible)
            VALUES ('lote', 'prod', 'L-1', '2026-01-01 10:00:00', 10);",
         "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
@@ -251,7 +266,7 @@ mod tests {
     /// Un ticket de barra con una línea, para poder colgar de él consumos y pagos.
     const SEMILLA_TICKET: &[&str] = &[
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
-        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det', 'com', 'prod', 3, 2.5);",
+        "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det', 'com', 'prod', 3, 250);",
     ];
 
     #[tokio::test]
@@ -276,7 +291,7 @@ mod tests {
             &[
                 "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 7.5, 'TOTAL');",
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 750, 'TOTAL');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
                 "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago', 3);",
             ],
@@ -330,18 +345,18 @@ mod tests {
                 // El cobro ocurrió: el pago está, pero el gasto del cliente se quedó a 0 (el
                 // incremento es best-effort y el pago commitea igual si falla).
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'EFECTIVO', 25.50, 'TOTAL');",
+                   VALUES ('pago', 'com', '2026-01-02 14:00:00', 'EFECTIVO', 2550, 'TOTAL');",
             ],
         )
         .await;
 
         let repo = SqliteReconciliacionRepository::new(db.clone());
-        let descuadrados = repo.clientes_descuadrados(0.005).await.unwrap();
+        let descuadrados = repo.clientes_descuadrados(eur(0.005)).await.unwrap();
 
         assert_eq!(descuadrados.len(), 1);
         assert_eq!(descuadrados[0].nombre, "Ana");
-        assert_eq!(descuadrados[0].guardado, 0.0);
-        assert_eq!(descuadrados[0].calculado, 25.50);
+        assert_eq!(descuadrados[0].guardado, Dinero::CERO);
+        assert_eq!(descuadrados[0].calculado, eur(25.50));
 
         // Y NO lo arregla: la ficha sigue como estaba hasta que el dueño decida.
         assert_eq!(
@@ -353,13 +368,13 @@ mod tests {
         // La corrección es la acción manual, y esa sí escribe.
         let nuevo = repo.recalcular_gasto("cli").await.unwrap();
 
-        assert_eq!(nuevo, Some(25.50));
+        assert_eq!(nuevo, Some(eur(25.50)));
         assert_eq!(
             escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
-            25.50
+            2550.0
         );
         assert!(
-            repo.clientes_descuadrados(0.005).await.unwrap().is_empty(),
+            repo.clientes_descuadrados(eur(0.005)).await.unwrap().is_empty(),
             "y con eso deja de estar descuadrado"
         );
     }
@@ -389,9 +404,9 @@ mod tests {
         "INSERT INTO Comandas (ID_Comanda, ID_Mesa, ID_Reserva, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'mesa', 'res', 'MESA', '2026-01-02 13:00:00', 'Abierta');",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det', 'com', 'prod', 3, 2.5);",
+           VALUES ('det', 'com', 'prod', 3, 250);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion)
-           VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 7.5, 'TOTAL', 'ANULADO', '2026-01-02 15:00:00', 'u1', 'error de cobro');",
+           VALUES ('pago', 'com', '2026-01-02 14:00:00', 'Efectivo', 750, 'TOTAL', 'ANULADO', '2026-01-02 15:00:00', 'u1', 'error de cobro');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det');",
         // El stock volvió al lote al anular, pero la traza del consumo se conserva.
         "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago', 3);",
@@ -426,7 +441,7 @@ mod tests {
                 "INSERT INTO Movimientos_Stock (ID_Movimiento, ID_Lote, Tipo, Delta, Stock_Resultante, Fecha)
                    VALUES ('mov-2', 'lote-2', 'ALTA', 10, 10, '2026-01-02 16:00:00');",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago-2', 'com', '2026-01-02 17:00:00', 'Efectivo', 7.5, 'TOTAL');",
+                   VALUES ('pago-2', 'com', '2026-01-02 17:00:00', 'Efectivo', 750, 'TOTAL');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2', 'det');",
                 "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
                    VALUES ('det', 'lote-2', 'pago-2', 3);",
@@ -471,7 +486,7 @@ mod tests {
         sembrar(&db, VENTA_ANULADA).await;
 
         let repo = SqliteReconciliacionRepository::new(db);
-        let out = repo.clientes_descuadrados(0.005).await.unwrap();
+        let out = repo.clientes_descuadrados(eur(0.005)).await.unwrap();
 
         assert!(out.is_empty(), "el pago anulado no cuenta como gasto: {out:?}");
     }
@@ -490,15 +505,15 @@ mod tests {
         sembrar(
             &db,
             &["INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                 VALUES ('pago-ok', 'com', '2026-01-03 14:00:00', 'Efectivo', 12.0, 'TOTAL');"],
+                 VALUES ('pago-ok', 'com', '2026-01-03 14:00:00', 'Efectivo', 1200, 'TOTAL');"],
         )
         .await;
 
         let repo = SqliteReconciliacionRepository::new(db.clone());
-        assert_eq!(repo.recalcular_gasto("cli").await.unwrap(), Some(12.0));
+        assert_eq!(repo.recalcular_gasto("cli").await.unwrap(), Some(eur(12.0)));
         assert_eq!(
             escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
-            12.0,
+            1200.0,
             "los 7,50 del cobro anulado no pueden acabar en la ficha del cliente"
         );
     }
@@ -516,7 +531,7 @@ mod tests {
             &[
                 "UPDATE Lotes_Producto SET Stock_Disponible = 7 WHERE ID_Lote = 'lote';",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago2', 'com', '2026-01-02 16:00:00', 'Efectivo', 7.5, 'TOTAL');",
+                   VALUES ('pago2', 'com', '2026-01-02 16:00:00', 'Efectivo', 750, 'TOTAL');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago2', 'det');",
                 "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det', 'lote', 'pago2', 3);",
             ],

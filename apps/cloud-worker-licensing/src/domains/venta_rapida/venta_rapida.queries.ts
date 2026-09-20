@@ -163,8 +163,8 @@ export async function listComandas(
 				c.ID_Comanda AS ID_Comanda,
 				c.Fecha_Hora_Apertura AS Fecha_Hora_Apertura,
 				c.Estado AS Estado,
-				ROUND(${PENDING_EXPR}, 2) AS Total_Pendiente,
-				ROUND(COALESCE(c.Total_Comanda,0), 2) AS Total_Comanda,
+				${PENDING_EXPR} AS Total_Pendiente,
+				COALESCE(c.Total_Comanda,0) AS Total_Comanda,
 				COALESCE((
 					SELECT COUNT(*)
 					FROM Detalle_Comanda dc
@@ -389,7 +389,7 @@ export async function cobrarPlan(
 	const resumenRs = await db.execute({
 		sql: `
 			SELECT
-				IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0) AS importe,
+				IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS importe,
 				COUNT(*) AS num_valid
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1

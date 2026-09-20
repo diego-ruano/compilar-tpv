@@ -1,6 +1,8 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **cuentas** (caja).
 //! Campos snake_case idénticos a los structs antiguos (compat frontend).
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -16,7 +18,7 @@ pub struct EntradaDto {
     pub fecha_hora: String,
     pub cliente: String,
     pub metodo: String,
-    pub importe: f64,
+    pub importe: Dinero,
     /// `ACTIVO` o `ANULADO`.
     pub estado: String,
     #[ts(optional)]
@@ -37,7 +39,7 @@ pub struct LineaTicketDto {
     /// Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
     /// no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
     pub cantidad: f64,
-    pub precio_unitario: f64,
+    pub precio_unitario: Dinero,
     /// Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
     #[ts(optional)]
     pub iva_percent: Option<f64>,
@@ -70,7 +72,7 @@ pub struct SalidaDto {
     pub fecha_hora: String,
     pub tipo_gasto: String,
     pub concepto: String,
-    pub importe: f64,
+    pub importe: Dinero,
     pub proveedor_id: Option<String>,
     /// El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
     #[serde(default)]
@@ -107,10 +109,10 @@ pub struct CuentasRangoArgs {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ResumenCajaDto {
-    pub total_entradas: f64,
-    pub total_salidas: f64,
-    pub total_efectivo: f64,
-    pub total_tarjeta: f64,
+    pub total_entradas: Dinero,
+    pub total_salidas: Dinero,
+    pub total_efectivo: Dinero,
+    pub total_tarjeta: Dinero,
     #[ts(type = "number")]
     pub count_entradas: i64,
     #[ts(type = "number")]
@@ -120,7 +122,7 @@ pub struct ResumenCajaDto {
     /// dato que no existía y que hace visible la sisa (CUENTA-07).
     #[ts(type = "number")]
     pub count_anuladas: i64,
-    pub total_anulado: f64,
+    pub total_anulado: Dinero,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -132,7 +134,7 @@ pub struct CreateGastoInput {
     pub fecha: String,
     pub tipo_gasto: String,
     pub concepto: String,
-    pub importe: f64,
+    pub importe: Dinero,
     #[serde(default)]
     #[ts(optional)]
     pub proveedor_id: Option<String>,
@@ -149,7 +151,7 @@ pub struct UpdateGastoInput {
     pub fecha: String,
     pub tipo_gasto: String,
     pub concepto: String,
-    pub importe: f64,
+    pub importe: Dinero,
     #[serde(default)]
     #[ts(optional)]
     pub proveedor_id: Option<String>,
@@ -171,7 +173,7 @@ pub struct UpdatePagoInput {
     pub id_pago: String,
     pub fecha_hora: String,
     pub metodo: String,
-    pub importe: f64,
+    pub importe: Dinero,
 }
 
 /// Anular un cobro (CUENTA-07). **No lleva `id_usuario`**: quién anula sale de la sesión del

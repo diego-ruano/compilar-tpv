@@ -6,6 +6,8 @@ authors.workspace = true
 description = "Contratos de la frontera UI<->Rust: DTOs serializables que se exportan a TypeScript con ts-rs (packages/contracts/src/generated/bindings.ts)."
 
 [dependencies]
+# Por el tipo `Dinero` (ARQ-01): los DTOs proyectan hacia fuera lo que el dominio define.
+tpv-domain = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }

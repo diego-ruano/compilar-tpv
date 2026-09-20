@@ -10,15 +10,15 @@
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
-    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana Gomez', 120.0);",
-    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-2', 'Beto Ruiz', 40.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 900, 10.0, 5, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 150);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-1', 'Ana Gomez', 12000);",
+    "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli-2', 'Beto Ruiz', 4000);",
     "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales) VALUES ('res-1', 'cli-1', 'mesa-1', date('now','localtime'), '13:00', 'COMIDA', 2);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', 'res-1', datetime('now','localtime','start of day'), 'Pagada');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day'), 'Efectivo', 30.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-viejo', 'com-1', datetime('now','localtime','-30 days'), 'Efectivo', 500.0, 'total');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', datetime('now','localtime','start of day'), 'Efectivo', 3000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-viejo', 'com-1', datetime('now','localtime','-30 days'), 'Efectivo', 50000, 'total');"
   ],
   "entrada": {}
 }

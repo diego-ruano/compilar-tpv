@@ -15,7 +15,7 @@
       "rol": "Camarero",
       "tareas_asignadas": 2,
       "tareas_finalizadas": 1,
-      "ticket_medio_eur": 30.0
+      "ticket_medio_eur": 3000
     }
   ],
   "cocineros": [
@@ -51,7 +51,7 @@
       "Ana Gomez"
     ],
     "values": [
-      60.0
+      6000
     ]
   }
 }

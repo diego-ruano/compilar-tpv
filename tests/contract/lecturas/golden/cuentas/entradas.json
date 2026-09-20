@@ -6,7 +6,7 @@
     "estado": "ACTIVO",
     "fecha_hora": "2026-05-12 20:00",
     "id": "pago-d",
-    "importe": 3.0,
+    "importe": 300,
     "metodo": "Efectivo",
     "motivo_anulacion": null
   },
@@ -17,7 +17,7 @@
     "estado": "ACTIVO",
     "fecha_hora": "2026-05-12 20:00",
     "id": "pago-c",
-    "importe": 7.25,
+    "importe": 725,
     "metodo": "Efectivo",
     "motivo_anulacion": null
   },
@@ -28,7 +28,7 @@
     "estado": "ACTIVO",
     "fecha_hora": "2026-05-11 13:05",
     "id": "pago-b",
-    "importe": 10.0,
+    "importe": 1000,
     "metodo": "Tarjeta",
     "motivo_anulacion": null
   },
@@ -39,7 +39,7 @@
     "estado": "ACTIVO",
     "fecha_hora": "2026-05-10 13:05",
     "id": "pago-a",
-    "importe": 24.5,
+    "importe": 2450,
     "metodo": "Efectivo",
     "motivo_anulacion": null
   },
@@ -50,7 +50,7 @@
     "estado": "ANULADO",
     "fecha_hora": "2026-05-09 10:00",
     "id": "pago-e",
-    "importe": 40.0,
+    "importe": 4000,
     "metodo": "Efectivo",
     "motivo_anulacion": "se lo llevo puesto"
   }

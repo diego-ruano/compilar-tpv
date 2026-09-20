@@ -220,7 +220,7 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 			c.ID_Mesa AS id_mesa,
 			c.ID_Comanda AS id_comanda,
 			(
-				SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
+				SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
 				FROM Detalle_Comanda dc
 				LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
 				WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
@@ -441,7 +441,7 @@ export async function cobrarDetallesPlan(
 	}
 	const totalRs = await db.execute({
 		sql: `
-			SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0) AS total
+			SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS total
 			FROM Detalle_Comanda dc
 			WHERE dc.ID_Comanda = ?1
 				AND dc.ID_Detalle IN (${placeholders})

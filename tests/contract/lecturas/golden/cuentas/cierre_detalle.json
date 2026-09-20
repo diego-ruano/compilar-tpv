@@ -1,35 +1,35 @@
 {
-  "contado": 520.5,
+  "contado": 52050,
   "contado_denoms": [
     {
       "unidades": 41,
-      "valor": 0.5
+      "valor": 50
     },
     {
       "unidades": 5,
-      "valor": 20.0
+      "valor": 2000
     },
     {
       "unidades": 8,
-      "valor": 50.0
+      "valor": 5000
     }
   ],
-  "dejado": 150.0,
+  "dejado": 15000,
   "dejado_denoms": [
     {
       "unidades": 5,
-      "valor": 10.0
+      "valor": 1000
     },
     {
       "unidades": 5,
-      "valor": 20.0
+      "valor": 2000
     }
   ],
-  "descuadre": 0.0,
-  "esperado": 520.5,
+  "descuadre": 0,
+  "esperado": 52050,
   "fecha_hora": "2026-05-10 23:45:00",
-  "fondo_inicial": 100.0,
-  "gastos_caja": 0.0,
+  "fondo_inicial": 10000,
+  "gastos_caja": 0,
   "id_cierre": "cierre-vigente",
   "id_usuario": "u-1",
   "motivo": null,
@@ -41,7 +41,7 @@
   "rect_gastos_caja": null,
   "rect_ventas_efectivo": null,
   "rectificaciones": [],
-  "retirado": 370.5,
+  "retirado": 37050,
   "usuario_nombre": "Ana Gomez",
-  "ventas_efectivo": 420.5
+  "ventas_efectivo": 42050
 }

@@ -18,7 +18,14 @@
       {
         "id": "db-zona-zona-terraza",
         "name": "Salon",
-        "room": { "type": "poly", "points": [10, 20, 30] },
+        "room": {
+          "type": "poly",
+          "points": [
+            10,
+            20,
+            30
+          ]
+        },
         "tables": [
           {
             "id": "db-mesa-mesa-t1",
@@ -47,7 +54,13 @@
       {
         "id": "db-zona-zona-salon",
         "name": "Terraza",
-        "room": { "type": "poly", "points": [40, 50] },
+        "room": {
+          "type": "poly",
+          "points": [
+            40,
+            50
+          ]
+        },
         "tables": [
           {
             "id": "db-mesa-mesa-s1",
@@ -65,7 +78,12 @@
       {
         "id": "nueva-barra",
         "name": "Barra",
-        "room": { "type": "poly", "points": [60] },
+        "room": {
+          "type": "poly",
+          "points": [
+            60
+          ]
+        },
         "tables": [
           {
             "id": "nueva-b1",

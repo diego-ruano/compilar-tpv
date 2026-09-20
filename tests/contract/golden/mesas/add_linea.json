@@ -2,7 +2,7 @@
   "Comandas": [
     {
       "ID_Comanda": "comanda-1",
-      "Total_Comanda": 6.0
+      "Total_Comanda": 600
     }
   ],
   "Detalle_Comanda": [
@@ -12,7 +12,7 @@
       "ID_Producto": "prod-1",
       "IVA_Percent": 21.0,
       "Nombre_Producto": "Cerveza",
-      "Precio_Unitario": 3.0
+      "Precio_Unitario": 300
     }
   ]
 }

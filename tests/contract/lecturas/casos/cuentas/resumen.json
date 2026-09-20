@@ -6,13 +6,13 @@
     "INSERT INTO Zonas (ID_Zona, Nombre_Zona) VALUES ('zona-1', 'Salon');",
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-1', 'MESA', 'mesa-1', '2026-05-10 12:00:00', 'Pagada');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 10.0, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-1', '2026-05-10 11:00:00', 'Tarjeta', 20.5, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-1', '2026-05-11 09:00:00', 'Bizum', 5.25, 'total');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-fuera', 'com-1', '2026-07-01 09:00:00', 'Efectivo', 999.0, 'total');",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-02', 'Compras', 'Cerveza', 150.0);",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-fuera', '2026-07-02', 'Compras', 'Vino', 40.0);",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion) VALUES ('pago-anulado', 'com-1', '2026-05-12 09:00:00', 'Efectivo', 40.0, 'total', 'ANULADO', '2026-05-14 09:00:00', 'user-1', 'x');"
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-1', '2026-05-10 10:00:00', 'Efectivo', 1000, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-1', '2026-05-10 11:00:00', 'Tarjeta', 2050, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-3', 'com-1', '2026-05-11 09:00:00', 'Bizum', 525, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-fuera', 'com-1', '2026-07-01 09:00:00', 'Efectivo', 99900, 'total');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-1', '2026-05-02', 'Compras', 'Cerveza', 15000);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('gasto-fuera', '2026-07-02', 'Compras', 'Vino', 4000);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Estado, Anulado_En, Anulado_Por, Motivo_Anulacion) VALUES ('pago-anulado', 'com-1', '2026-05-12 09:00:00', 'Efectivo', 4000, 'total', 'ANULADO', '2026-05-14 09:00:00', 'user-1', 'x');"
   ],
   "entrada": {
     "del": "2026-05-01",

@@ -12,7 +12,7 @@
       "ID_Proveedor": null,
       "IVA_Percent": 21.0,
       "Nombre": "Rioja",
-      "Precio_Venta": 12.0,
+      "Precio_Venta": 1200,
       "Stock_Minimo": 2.0,
       "Stock_Suelto": null,
       "Unidad_Medida": "botella"

@@ -9,7 +9,7 @@
     "Nombre": "Cerveza",
     "Notas": "muy fria",
     "Pagado": 0,
-    "Precio_Unitario": 3.0
+    "Precio_Unitario": 300
   },
   {
     "Cantidad": 1.0,
@@ -21,7 +21,7 @@
     "Nombre": "Cerveza",
     "Notas": null,
     "Pagado": 1,
-    "Precio_Unitario": 3.0
+    "Precio_Unitario": 300
   },
   {
     "Cantidad": 1.0,
@@ -33,6 +33,6 @@
     "Nombre": "Suelto",
     "Notas": null,
     "Pagado": 0,
-    "Precio_Unitario": 1.0
+    "Precio_Unitario": 100
   }
 ]

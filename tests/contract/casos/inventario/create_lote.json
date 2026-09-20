@@ -3,7 +3,7 @@
   "comando": "inventario.create_lote",
   "seed": [
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-1', 'Bebidas');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 2.0);"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-1', 'cat-1', 'Cerveza', 200);"
   ],
   "entrada": {
     "id_lote": "lote-1",
@@ -12,7 +12,7 @@
     "fecha_entrada": "2026-01-01 00:00:00",
     "caducidad": "2026-06-01",
     "stock_disponible": 10,
-    "coste_unitario": 1.5,
+    "coste_unitario": 150,
     "id_proveedor": null,
     "notas": "alta inicial"
   },

@@ -117,7 +117,7 @@ pub async fn add_linea_comanda(
         ));
     }
     // DB-06: Precio_Unitario nunca negativo (paridad con el worker: precio.min(0)).
-    if !input.precio_unitario.is_finite() || input.precio_unitario < 0.0 {
+    if input.precio_unitario.es_negativo() {
         return Err(AppError::validation(
             "precio_unitario invalid (debe ser >= 0)",
         ));
@@ -183,7 +183,7 @@ pub async fn cobrar_fraccionado(
     if input.id_comanda.trim().is_empty() {
         return Err(AppError::validation("id_comanda invalid"));
     }
-    if !input.importe_total.is_finite() || input.importe_total < 0.0 {
+    if input.importe_total.es_negativo() {
         return Err(AppError::validation("importe_total invalid"));
     }
 
@@ -272,8 +272,16 @@ fn destinatario_de(input: Option<DestinatarioInput>) -> Option<tpv_domain::verif
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tpv_domain::dinero::Dinero;
     use async_trait::async_trait;
     use std::sync::Mutex;
+
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
 
     #[derive(Default)]
     struct FakeRepo { stock: Mutex<Vec<Vec<StockLinea>>>, cobros: Mutex<Vec<CobroFraccionado>> }
@@ -288,7 +296,7 @@ mod tests {
         async fn get_index_rows(&self, _: Vec<String>) -> AppResult<Vec<IndexRow>> { panic!("no usado") }
         async fn get_detalles_ver_ticket(&self, _: &str) -> AppResult<Vec<VerTicketsDetalleRow>> { panic!("no usado") }
         async fn create_comanda_barra(&self, _: Option<String>, _: bool) -> AppResult<String> { panic!("no usado") }
-        async fn add_linea_comanda(&self, _: &str, _: &str, _: f64, _: f64) -> AppResult<String> { panic!("no usado") }
+        async fn add_linea_comanda(&self, _: &str, _: &str, _: f64, _: Dinero) -> AppResult<String> { panic!("no usado") }
         async fn remove_last_unpaid_linea(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn delete_linea_if_unpaid(&self, _: &str, _: &str) -> AppResult<bool> { panic!("no usado") }
         async fn update_nota_detalle(&self, _: &str, _: Option<String>) -> AppResult<bool> { panic!("no usado") }
@@ -357,7 +365,7 @@ mod tests {
         let repo = FakeRepo::default();
         let input = VrCobrarFraccionadoInput {
             id_pago: " 0192F7A4-3B1C-7D2E-8F00-123456789ABC ".into(),
-            id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: 12.5,
+            id_comanda: "comanda-1".into(), metodo: " TARJETA ".into(), importe_total: eur(12.5),
             detalles: vec!["d2".into(), " d1 ".into(), "d2".into(), " ".into()],
             destinatario: None,
         };
@@ -386,7 +394,7 @@ mod tests {
             "id_pago": "0192f7a4-3b1c-7d2e-8f00-123456789abc",
             "id_comanda": "c1",
             "metodo": "Efectivo",
-            "importe_total": 3.0,
+            "importe_total": 300,
             "detalles": ["d1"],
             "id_usuario_cobrador": "el-jefe",
             "id_trabajador_cobrador": "t-del-jefe",
@@ -411,10 +419,12 @@ mod tests {
             destinatario: None,
         };
         let cobrar = |input| cobrar_fraccionado(&repo, "u1", None, input);
-        assert!(cobrar(invalido(f64::INFINITY, vec!["d1".into()])).await.is_err());
-        assert!(cobrar(invalido(1.0, vec![" ".into()])).await.is_err());
+        // Un importe negativo es lo unico malo que puede llegar ya: `Dinero` no admite un
+        // valor que no sea un numero.
+        assert!(cobrar(invalido(eur(-1.0), vec!["d1".into()])).await.is_err());
+        assert!(cobrar(invalido(eur(1.0), vec![" ".into()])).await.is_err());
         // Sin un id válido no hay forma de reconocer un reintento: no se cobra.
-        let sin_id = VrCobrarFraccionadoInput { id_pago: "tmp-1".into(), ..invalido(1.0, vec!["d1".into()]) };
+        let sin_id = VrCobrarFraccionadoInput { id_pago: "tmp-1".into(), ..invalido(eur(1.0), vec!["d1".into()]) };
         assert!(cobrar(sin_id).await.is_err());
         assert!(repo.cobros.lock().unwrap().is_empty());
     }

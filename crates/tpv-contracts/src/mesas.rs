@@ -4,6 +4,8 @@
 //! DTOs de otros módulos (p. ej. `LineaComandaRow` de venta_rapida, `IdCategoriaArgs` de
 //! inventario). Los **nombres de campo** (serde) se conservan idénticos al backend antiguo.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use crate::verifactu::DestinatarioInput;
@@ -91,7 +93,7 @@ pub struct ComandaRow {
     pub id_reserva: Option<String>,
     pub fecha_hora_apertura: String,
     pub fecha_hora_cierre: Option<String>,
-    pub total_comanda: f64,
+    pub total_comanda: Dinero,
     pub estado: String,
 }
 
@@ -109,7 +111,7 @@ pub struct MesaLineaComandaRow {
     #[serde(rename = "Cantidad")]
     pub cantidad: f64,
     #[serde(rename = "Precio_Unitario")]
-    pub precio_unitario: f64,
+    pub precio_unitario: Dinero,
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla). `None` = el general
     /// del negocio. Va al ticket para desglosar por tipo.
     #[serde(rename = "IVA_Percent")]
@@ -135,8 +137,8 @@ pub struct ComandaBarraListItem {
     pub id_comanda: String,
     pub fecha_hora_apertura: String,
     pub estado: String,
-    pub total_pendiente: f64,
-    pub total_comanda: f64,
+    pub total_pendiente: Dinero,
+    pub total_comanda: Dinero,
     #[ts(type = "number")]
     pub pendientes_cocina: i64,
     #[ts(type = "number")]
@@ -171,7 +173,7 @@ pub struct MesaMetaOut {
     pub ocupada: bool,
     pub id_comanda: String,
     pub idComanda: String,
-    pub totalPendiente: f64,
+    pub totalPendiente: Dinero,
     #[ts(type = "number")]
     pub pendientesPago: i64,
     #[ts(type = "number")]
@@ -212,7 +214,7 @@ pub struct ProductoVendibleOut {
     #[serde(rename = "Nombre")]
     pub nombre: String,
     #[serde(rename = "Precio_Venta")]
-    pub precio_venta: f64,
+    pub precio_venta: Dinero,
     #[serde(rename = "Ruta_Imagen")]
     pub ruta_imagen: Option<String>,
 }
@@ -254,7 +256,7 @@ pub struct KitchenRow {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct CobroVRItem {
     pub producto_id: String,
-    pub precio: f64,
+    pub precio: Dinero,
 }
 
 /* =========================================================
@@ -317,7 +319,7 @@ pub struct MesasComandaSetTrabajadorInput {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct MesasCerrarComandaInput {
     pub id_comanda: String,
-    pub total: f64,
+    pub total: Dinero,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -326,7 +328,7 @@ pub struct MesasAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
     pub cantidad: f64,
-    pub precio: f64,
+    pub precio: Dinero,
     #[serde(default)]
     #[ts(optional)]
     pub id_usuario: Option<String>,

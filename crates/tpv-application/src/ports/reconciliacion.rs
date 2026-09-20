@@ -8,6 +8,7 @@
 //!
 //! Solo lo implementa el adaptador SQLite: esto corre en la Main, que es el escritor único.
 
+use tpv_domain::dinero::Dinero;
 use async_trait::async_trait;
 
 use crate::error::AppResult;
@@ -36,13 +37,13 @@ pub struct ClienteDescuadrado {
     pub id_cliente: String,
     pub nombre: String,
     /// Lo que dice la ficha del cliente.
-    pub guardado: f64,
+    pub guardado: Dinero,
     /// Lo que suman sus pagos.
-    pub calculado: f64,
+    pub calculado: Dinero,
 }
 
 impl ClienteDescuadrado {
-    pub fn desviacion(&self) -> f64 {
+    pub fn desviacion(&self) -> Dinero {
         self.guardado - self.calculado
     }
 }
@@ -62,12 +63,12 @@ pub trait ReconciliacionRepository: Send + Sync {
     /// acumulado de un cliente es un dato que el dueño del negocio mira y usa: que la aplicación se
     /// lo cambie por su cuenta, de madrugada y sin decir nada, es peor que enseñarle el descuadre y
     /// dejarle decidir.
-    async fn clientes_descuadrados(&self, tolerancia: f64) -> AppResult<Vec<ClienteDescuadrado>>;
+    async fn clientes_descuadrados(&self, tolerancia: Dinero) -> AppResult<Vec<ClienteDescuadrado>>;
 
     /// Pone el `Total_Gastado` de un cliente en lo que suman sus pagos. Devuelve el valor
     /// resultante, o `None` si el cliente no existe.
     ///
     /// Es la única escritura del puerto y **nunca la dispara el job**: la ejecuta una persona
     /// desde la ficha del cliente, después de ver el descuadre.
-    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<f64>>;
+    async fn recalcular_gasto(&self, id_cliente: &str) -> AppResult<Option<Dinero>>;
 }

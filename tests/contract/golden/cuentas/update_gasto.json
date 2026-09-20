@@ -5,7 +5,7 @@
       "Fecha": "2026-02-20",
       "ID_Gasto": "gasto-1",
       "ID_Proveedor": null,
-      "Importe": 99.99,
+      "Importe": 9999,
       "Pagado_Con_Caja": 0,
       "Tipo_Gasto": "Personal"
     },
@@ -14,7 +14,7 @@
       "Fecha": "2026-01-02",
       "ID_Gasto": "gasto-2",
       "ID_Proveedor": null,
-      "Importe": 5.5,
+      "Importe": 550,
       "Pagado_Con_Caja": 0,
       "Tipo_Gasto": "Otros"
     }

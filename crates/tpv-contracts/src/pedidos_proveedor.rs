@@ -1,5 +1,7 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para pedidos a proveedores.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -9,7 +11,7 @@ pub struct LineaPedidoDto {
     pub id_linea: String,
     pub nombre_producto: String,
     pub cantidad: f64,
-    pub precio_unitario: Option<f64>,
+    pub precio_unitario: Option<Dinero>,
     pub unidad: Option<String>,
 }
 
@@ -58,7 +60,7 @@ pub struct LineaPedidoInput {
     pub cantidad: f64,
     #[serde(default)]
     #[ts(optional)]
-    pub precio_unitario: Option<f64>,
+    pub precio_unitario: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub unidad: Option<String>,

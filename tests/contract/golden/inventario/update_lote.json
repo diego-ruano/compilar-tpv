@@ -3,7 +3,7 @@
     {
       "Caducidad": "2026-09-01",
       "Codigo_Lote": "L1B",
-      "Coste_Unitario": 2.0,
+      "Coste_Unitario": 200,
       "ID_Lote": "lote-1",
       "ID_Producto": "prod-1",
       "Notas": "editado",

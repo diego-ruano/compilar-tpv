@@ -2,8 +2,8 @@
   "descripcion": "Borrado de un gasto: se va sólo el suyo.",
   "comando": "cuentas.delete_gasto",
   "seed": [
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-1', '2026-01-01', 'Se borra', 10.0, 'Otros', NULL);",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'Se queda', 5.5, 'Otros', NULL);"
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-1', '2026-01-01', 'Se borra', 1000, 'Otros', NULL);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, ID_Proveedor) VALUES ('gasto-2', '2026-01-02', 'Se queda', 550, 'Otros', NULL);"
   ],
   "entrada": {
     "id_gasto": "gasto-1"

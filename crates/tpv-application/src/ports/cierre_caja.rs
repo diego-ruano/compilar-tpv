@@ -1,5 +1,6 @@
 //! Puerto de persistencia del **cierre de caja** (arqueo). CUENTA-06 · CAJA-01.
 
+use tpv_domain::dinero::Dinero;
 use async_trait::async_trait;
 
 use tpv_contracts::cierre_caja::{CierreDto, CierreResumenDto};
@@ -21,14 +22,14 @@ pub enum ApunteCaja {
 pub enum ApunteGuardado {
     Cobro {
         fecha_hora: String,
-        importe: f64,
+        importe: Dinero,
         metodo: String,
         activo: bool,
         numero_ticket: Option<String>,
     },
     Gasto {
         fecha: String,
-        importe: f64,
+        importe: Dinero,
         pagado_con_caja: bool,
         concepto: String,
     },
@@ -41,14 +42,14 @@ pub struct CierreNuevo {
     pub id_usuario: Option<String>,
     /// La hora del cierre anterior, o `None` en el primero (CAJA-01).
     pub periodo_desde: Option<String>,
-    pub fondo_inicial: f64,
-    pub ventas_efectivo: f64,
-    pub gastos_caja: f64,
-    pub esperado: f64,
-    pub contado: f64,
-    pub descuadre: f64,
-    pub dejado: f64,
-    pub retirado: f64,
+    pub fondo_inicial: Dinero,
+    pub ventas_efectivo: Dinero,
+    pub gastos_caja: Dinero,
+    pub esperado: Dinero,
+    pub contado: Dinero,
+    pub descuadre: Dinero,
+    pub dejado: Dinero,
+    pub retirado: Dinero,
     pub motivo: Option<String>,
     pub contado_denoms: Vec<Denominacion>,
     pub dejado_denoms: Vec<Denominacion>,
@@ -63,10 +64,10 @@ pub struct RectificacionNueva {
     pub motivo: Option<String>,
     /// Los totales del periodo después del cambio.
     pub totales: TotalesCaja,
-    pub esperado_antes: f64,
-    pub esperado: f64,
-    pub descuadre_antes: f64,
-    pub descuadre: f64,
+    pub esperado_antes: Dinero,
+    pub esperado: Dinero,
+    pub descuadre_antes: Dinero,
+    pub descuadre: Dinero,
 }
 
 #[async_trait]
@@ -86,7 +87,7 @@ pub trait CierreCajaRepository: Send + Sync {
     /// **No entra en el cálculo del arqueo**: el esperado sigue saliendo de los cobros activos, y
     /// sumar desde dos sitios distintos la misma cifra es cómo empiezan a divergir. Es una línea
     /// informativa — y es justamente el dato que no existía antes de CUENTA-07.
-    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, f64)>;
+    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, Dinero)>;
 
     /// Cuántas comandas siguen abiertas. No impide cerrar: sólo se avisa.
     async fn comandas_abiertas(&self) -> AppResult<i64>;

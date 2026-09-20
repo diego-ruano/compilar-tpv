@@ -5,6 +5,7 @@
 //! `delete_comanda_barra_if_safe`) NO tienen endpoint en el dominio `mesas` del worker: la
 //! barra se sirve bajo `venta_rapida`. Aquí devuelven un error explícito.
 
+use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -95,7 +96,7 @@ impl MesasRepository for HttpMesasRepository {
             .await
     }
 
-    async fn cerrar_comanda(&self, id_comanda: &str, total: f64) -> AppResult<()> {
+    async fn cerrar_comanda(&self, id_comanda: &str, total: Dinero) -> AppResult<()> {
         let _: JsonValue = self
             .client
             .put_json(
@@ -117,7 +118,7 @@ impl MesasRepository for HttpMesasRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: f64,
+        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>> {
         let body = json!({

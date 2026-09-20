@@ -3,7 +3,7 @@
     {
       "Caducidad": "2026-06-01",
       "Codigo_Lote": "L1",
-      "Coste_Unitario": 1.5,
+      "Coste_Unitario": 150,
       "Fecha_Entrada": "2026-01-01 00:00:00",
       "ID_Lote": "lote-1",
       "ID_Producto": "prod-1",

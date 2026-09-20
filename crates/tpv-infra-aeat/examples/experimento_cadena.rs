@@ -24,6 +24,8 @@
 //! El error 2007 existe para esto y está en la banda admisible (2000-2999). Lo que se comprueba aquí
 //! es que efectivamente sea eso y no un rechazo.
 
+use tpv_domain::dinero::Dinero;
+
 fn main() {
     #[cfg(not(windows))]
     eprintln!("Sólo Windows.");
@@ -81,7 +83,7 @@ fn main() {
                     &g,
                     DatosFactura {
                         lineas: vec![LineaTicket {
-                            total_con_iva: 12.10,
+                            total_con_iva: Dinero::de_euros(12.10),
                             tipo_iva: 10.0,
                             exento: false,
                             causa_exencion: None,

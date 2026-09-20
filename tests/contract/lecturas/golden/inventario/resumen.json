@@ -4,7 +4,7 @@
       "Caducidad_Proxima": null,
       "Lote": null,
       "Nombre": "Zumo",
-      "Precio_Venta": 2.0,
+      "Precio_Venta": 200,
       "Stock_Actual": 0.0,
       "Unidad_Medida": "ud"
     },
@@ -12,7 +12,7 @@
       "Caducidad_Proxima": "2026-03-01",
       "Lote": "L-A",
       "Nombre": "Agua",
-      "Precio_Venta": 1.5,
+      "Precio_Venta": 150,
       "Stock_Actual": 5.0,
       "Unidad_Medida": "ud"
     }
@@ -22,7 +22,7 @@
       "Caducidad_Proxima": "2026-02-01",
       "Lote": "L-B",
       "Nombre": "Cerveza",
-      "Precio_Venta": 3.0,
+      "Precio_Venta": 300,
       "Stock_Actual": 4.0,
       "Unidad_Medida": "ud"
     },
@@ -30,7 +30,7 @@
       "Caducidad_Proxima": "2026-03-01",
       "Lote": "L-A",
       "Nombre": "Agua",
-      "Precio_Venta": 1.5,
+      "Precio_Venta": 150,
       "Stock_Actual": 5.0,
       "Unidad_Medida": "ud"
     }

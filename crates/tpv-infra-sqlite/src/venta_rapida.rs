@@ -2,6 +2,7 @@
 //! sin Applied_Operations, sin Outbox, sin idempotencia por op_id ni ramas remote_id. El cobro sí es
 //! idempotente, por su `ID_Pago`, que genera la pantalla (ver `cobrar_fraccionado`).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -17,7 +18,7 @@ use tpv_domain::venta_rapida::CobroFraccionado;
 
 use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use crate::util::{new_id, CANAL_BARRA};
 
 pub struct SqliteVentaRapidaRepository {
@@ -42,7 +43,7 @@ fn update_total_comanda_sql() -> &'static str {
     r#"
     UPDATE Comandas
     SET Total_Comanda = (
-      SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+      SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
       FROM Detalle_Comanda
       WHERE ID_Comanda = ?1
     )
@@ -213,7 +214,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 ID_Producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 ID_Categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                Precio_Venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
+                Precio_Venta: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 Stock_Actual: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
                 Stock_Minimo: v_f64(r.get_value(5).map_err(db_err)?).unwrap_or(0.0),
                 Unidad_Medida: v_string(r.get_value(6).map_err(db_err)?),
@@ -260,7 +261,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 ID_Producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 ID_Categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                Precio_Venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
+                Precio_Venta: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 Stock_Actual: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
                 Stock_Minimo: v_f64(r.get_value(5).map_err(db_err)?).unwrap_or(0.0),
                 Unidad_Medida: v_string(r.get_value(6).map_err(db_err)?),
@@ -302,8 +303,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
               c.ID_Comanda,
               c.Fecha_Hora_Apertura,
               c.Estado,
-              ROUND({pending_expr}, 2) AS Total_Pendiente,
-              ROUND(COALESCE(c.Total_Comanda,0), 2) AS Total_Comanda,
+              {pending_expr} AS Total_Pendiente,
+              COALESCE(c.Total_Comanda,0) AS Total_Comanda,
               COALESCE((
                 SELECT COUNT(*)
                 FROM Detalle_Comanda dc
@@ -343,8 +344,8 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 ID_Comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 Fecha_Hora_Apertura: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Estado: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_else(|| "Abierta".into()),
-                Total_Pendiente: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
-                Total_Comanda: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
+                Total_Pendiente: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                Total_Comanda: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 Pendientes_Cocina: v_i64(r.get_value(5).map_err(db_err)?).unwrap_or(0),
                 Pendientes_Pago: v_i64(r.get_value(6).map_err(db_err)?).unwrap_or(0),
             });
@@ -388,7 +389,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 ID_Comanda: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 ID_Producto: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 Cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
-                Precio_Unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
+                Precio_Unitario: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 Notas: v_string(r.get_value(5).map_err(db_err)?),
                 Estado_Cocina: v_string(r.get_value(6).map_err(db_err)?),
                 Pagado: v_i64(r.get_value(7).map_err(db_err)?).unwrap_or(0),
@@ -508,7 +509,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                 ID_Producto: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 Nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_else(|| "Producto".into()),
                 Cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
-                Precio_Unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
+                Precio_Unitario: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 Estado_Cocina: v_string(r.get_value(5).map_err(db_err)?)
                     .unwrap_or_else(|| "PENDIENTE".into()),
                 Pagado: v_i64(r.get_value(6).map_err(db_err)?).unwrap_or(0),
@@ -584,7 +585,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: f64,
+        precio_unitario: Dinero,
     ) -> AppResult<String> {
         let g = self.db.write().await;
         let db = &g;
@@ -623,7 +624,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(id_producto.to_string()),
                     nombre_producto,
                     Value::Real(cantidad),
-                    Value::Real(precio_unitario),
+                    dinero_val(precio_unitario),
                     iva,
                 ],
             )
@@ -839,7 +840,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             let sql = format!(
                 r#"
                 SELECT
-                  IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0) AS Importe,
+                  IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0) AS Importe,
                   COUNT(*) AS NumValid
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
@@ -858,11 +859,11 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
             let mut rows = db.query(&sql, params).await.map_err(db_err)?;
             let (importe_total_db, num_valid) = match rows.next().await.map_err(db_err)? {
                 Some(r) => {
-                    let imp = v_f64(r.get_value(0).map_err(db_err)?).unwrap_or(0.0);
+                    let imp = v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO);
                     let n = v_i64(r.get_value(1).map_err(db_err)?).unwrap_or(0);
                     (imp, n)
                 }
-                None => (0.0, 0),
+                None => (Dinero::CERO, 0),
             };
 
             if num_valid <= 0 {
@@ -933,7 +934,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     Value::Text(id_pago_final.clone()),
                     Value::Text(data.id_comanda.clone()),
                     Value::Text(data.metodo.clone()),
-                    Value::Real(importe_total_db),
+                    dinero_val(importe_total_db),
                     usuario_mov.clone().map(Value::Text).unwrap_or(Value::Null),
                     trabajador_mov.clone().map(Value::Text).unwrap_or(Value::Null),
                     Value::Text(numero_ticket.clone()),
@@ -1131,7 +1132,7 @@ impl VentaRapidaRepository for SqliteVentaRapidaRepository {
                     SET
                       Estado = 'Pagada',
                       Total_Comanda = (
-                        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
                         FROM Detalle_Comanda
                         WHERE ID_Comanda = ?1
                       ),
@@ -1334,15 +1335,15 @@ mod tests_cobro_repetido {
            VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
-           VALUES ('prod', 'cat', 'Cerveza', 3.0, 10);",
+           VALUES ('prod', 'cat', 'Cerveza', 300, 10);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3.0);",
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+           VALUES ('det', 'com', 'prod', 1, 300, 10);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('otra', 'BARRA', '2027-01-15 12:05:00', 'Abierta', 3.0);",
+           VALUES ('otra', 'BARRA', '2027-01-15 12:05:00', 'Abierta', 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('det-otra', 'otra', 'prod', 1, 3.0, 10);",
+           VALUES ('det-otra', 'otra', 'prod', 1, 300, 10);",
     ];
 
     async fn preparar() -> (Arc<Db>, std::path::PathBuf) {
@@ -1367,7 +1368,7 @@ mod tests_cobro_repetido {
                 id_pago: id_pago.into(),
                 id_comanda: comanda.into(),
                 metodo: "Efectivo".into(),
-                importe_total: 0.0,
+                importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
                 detalles: vec![detalle.into()],

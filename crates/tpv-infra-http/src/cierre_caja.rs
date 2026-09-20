@@ -6,6 +6,7 @@
 //! rechazar por su cuenta (ver `soloLaMainEscribeCaja`), porque una regla que sólo vive en el
 //! cliente no es una regla: es una sugerencia.
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -68,7 +69,7 @@ impl CierreCajaRepository for HttpCierreCajaRepository {
         Err(solo_main("Preparar un cierre"))
     }
 
-    async fn anulaciones_desde(&self, _desde: Option<&str>) -> AppResult<(i64, f64)> {
+    async fn anulaciones_desde(&self, _desde: Option<&str>) -> AppResult<(i64, Dinero)> {
         Err(solo_main("Preparar un cierre"))
     }
 

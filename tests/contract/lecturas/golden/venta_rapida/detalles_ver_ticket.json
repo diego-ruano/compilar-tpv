@@ -8,7 +8,7 @@
     "Nombre": "Tortilla de patatas",
     "Notas": "para llevar",
     "Pagado": 0,
-    "Precio_Unitario": 9.0
+    "Precio_Unitario": 900
   },
   {
     "Cantidad": 1.0,
@@ -19,7 +19,7 @@
     "Nombre": "Cerveza",
     "Notas": null,
     "Pagado": 1,
-    "Precio_Unitario": 3.0
+    "Precio_Unitario": 300
   },
   {
     "Cantidad": 1.0,
@@ -30,6 +30,6 @@
     "Nombre": "Retirado",
     "Notas": null,
     "Pagado": 0,
-    "Precio_Unitario": 2.0
+    "Precio_Unitario": 200
   }
 ]

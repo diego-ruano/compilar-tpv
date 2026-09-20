@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de pedidos a proveedores. Local-First (sin outbox).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -12,7 +13,7 @@ use tpv_contracts::pedidos_proveedor::{LineaPedidoDto, PedidoProveedorDto, Pedid
 use tpv_domain::pedidos_proveedor::{LineaPedidoNueva, PedidoProveedorNuevo};
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_string};
+use crate::mapping::{norm_opt_string, opt_dinero, opt_text, v_f64, v_string};
 use crate::util::now_local_datetime;
 
 pub struct SqlitePedidoProveedorRepository {
@@ -43,7 +44,9 @@ fn map_linea(row: &Row) -> AppResult<(String, LineaPedidoDto)> {
         id_linea: s(g(1)?),
         nombre_producto: s(g(2)?),
         cantidad: f(g(3)?),
-        precio_unitario: norm_opt_string(g(4)?).and_then(|v| v.parse::<f64>().ok()),
+        precio_unitario: norm_opt_string(g(4)?)
+            .and_then(|v| v.parse::<i64>().ok())
+            .map(Dinero::de_centimos),
         unidad: norm_opt_string(g(5)?),
     };
     Ok((id_pedido, linea))
@@ -185,7 +188,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                         Value::Text(id.clone()),
                         Value::Text(l.nombre_producto.clone()),
                         Value::Real(l.cantidad),
-                        opt_real(l.precio_unitario),
+                        opt_dinero(l.precio_unitario),
                         opt_text(l.unidad.clone()),
                     ],
                 )
@@ -260,7 +263,7 @@ impl PedidoProveedorRepository for SqlitePedidoProveedorRepository {
                         Value::Text(id.clone()),
                         Value::Text(l.nombre_producto.clone()),
                         Value::Real(l.cantidad),
-                        opt_real(l.precio_unitario),
+                        opt_dinero(l.precio_unitario),
                         opt_text(l.unidad.clone()),
                     ],
                 )

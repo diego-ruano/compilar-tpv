@@ -26,12 +26,13 @@
 //! previsualización y la rectificación hacen la misma cuenta: lo que se enseña al confirmar es lo
 //! que se guarda.
 
+use tpv_domain::dinero::Dinero;
 use tpv_contracts::cierre_caja::{CambioCajaInput, CierreDto, ImpactoCajaDto, ImpactoCierreDto};
 use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, DeleteGastoInput, UpdateGastoInput, UpdatePagoInput,
 };
 use tpv_domain::cierre_caja::{
-    calcular, centimos_distintos, fecha_de_apunte, momento_de_gasto, TotalesCaja,
+    calcular, fecha_de_apunte, momento_de_gasto, TotalesCaja,
 };
 use tpv_domain::cuentas::normalize_metodo;
 
@@ -96,7 +97,7 @@ fn posicion_guardada(a: &ApunteGuardado) -> Option<Posicion> {
 }
 
 /// Lo que el arqueo de un cierre dice HOY: lo rectificado si lo hay, la foto de esa noche si no.
-fn vigente(c: &CierreDto) -> (f64, f64) {
+fn vigente(c: &CierreDto) -> (Dinero, Dinero) {
     (
         c.rect_esperado.unwrap_or(c.esperado),
         c.rect_descuadre.unwrap_or(c.descuadre),
@@ -104,7 +105,7 @@ fn vigente(c: &CierreDto) -> (f64, f64) {
 }
 
 /// Esperado y descuadre de `c` con estos totales. El fondo y el recuento son los de esa noche.
-fn arqueo_con(c: &CierreDto, t: TotalesCaja) -> (f64, f64) {
+fn arqueo_con(c: &CierreDto, t: TotalesCaja) -> (Dinero, Dinero) {
     let k = calcular(
         c.fondo_inicial,
         t.ventas_efectivo,
@@ -279,7 +280,7 @@ fn impacto(afectados: &[Afectado]) -> ImpactoCajaDto {
     }
     let requiere_motivo = cierres
         .iter()
-        .any(|c| centimos_distintos(c.descuadre_antes, c.descuadre_despues));
+        .any(|c| c.descuadre_antes != c.descuadre_despues);
     ImpactoCajaDto {
         cierres,
         requiere_motivo,
@@ -318,7 +319,7 @@ async fn rectificar(
         let totales = totales_con_el_cambio(&a);
         let (esperado, descuadre) = arqueo_con(&a.cierre, totales);
         let (esperado_antes, descuadre_antes) = vigente(&a.cierre);
-        if !centimos_distintos(esperado_antes, esperado) {
+        if esperado_antes == esperado {
             continue;
         }
         let cuando = a.cierre.fecha_hora.clone();
@@ -344,8 +345,8 @@ async fn rectificar(
     Ok(())
 }
 
-fn euros(v: f64) -> String {
-    format!("{v:.2} €").replace('.', ",")
+fn euros(v: Dinero) -> String {
+    format!("{} €", v.texto_fiscal()).replace('.', ",")
 }
 
 fn nombre_de_cobro(numero: Option<&str>) -> String {
@@ -402,7 +403,7 @@ fn describir_edicion_de_gasto(guardado: Option<&ApunteGuardado>, input: &UpdateG
         return format!("Gasto «{concepto}» editado");
     };
     let mut cambios = Vec::new();
-    if centimos_distintos(*importe, input.importe) {
+    if *importe != input.importe {
         cambios.push(format!("{} → {}", euros(*importe), euros(input.importe)));
     }
     if momento_de_gasto(fecha) != momento_de_gasto(&input.fecha) {

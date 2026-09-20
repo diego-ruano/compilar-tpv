@@ -12,6 +12,8 @@ pub mod cierre_caja;
 pub mod clientes;
 pub mod configuracion;
 pub mod cuentas;
+/// El tipo del dinero (ARQ-01): céntimos enteros de punta a punta.
+pub mod dinero;
 pub mod inventario;
 pub mod licensing;
 pub mod login;

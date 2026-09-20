@@ -26,6 +26,28 @@
    - No pasa nada si alguna tabla queda vacia en un lado u otro: es un
      unico esquema para ambos.
 
+   EL DINERO ES UN ENTERO DE CENTIMOS (ARQ-01):
+   - Toda columna de dinero es INTEGER y guarda CENTIMOS. Nunca REAL, nunca euros.
+     Un f64 no representa 0,10 EUR, asi que cada suma arrastraba un error que el
+     codigo tapaba con (x*100).round()/100 repetido en 35 sitios y tres lenguajes
+     -con tres modos de redondeo distintos: Rust aleja del cero, JavaScript lleva
+     la mitad hacia +infinito y ROUND() de SQLite hace lo suyo-. Con enteros, SUM
+     es exacto y ASOCIATIVO: la Main y Turso obtienen el mismo numero sin importar
+     el orden de las filas ni el motor, que es lo que permite dejar los agregados
+     derivados dentro del SQL (Total_Comanda tiene dos escritores, la Main por el
+     outbox y la Handy por el Durable Object, y solo converge si se re-deriva).
+   - Las CANTIDADES siguen siendo REAL a proposito: 0,5 kg es fraccionario de
+     verdad, y fijarle la precision seria una decision de producto que nadie pidio.
+     Lo mismo los tipos de IVA (existe el 7,5 %) y los milimetros del ticket.
+   - CONSECUENCIA AL ESCRIBIR SQL: Cantidad (REAL) * Precio_Unitario (centimos)
+     vuelve a ser un FLOTANTE. Hay que devolverlo a entero antes de sumar:
+       SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER))
+     Sin el CAST(ROUND(...)) se suma en coma flotante otra vez, con el agravante de
+     que parece entero. El ROUND de SQLite y el .round() de Rust rompen el empate
+     igual (alejandose del cero); Math.round de JavaScript NO, y por eso esa cuenta
+     no se hace nunca en TypeScript.
+   - Una columna de dinero nueva: INTEGER, y su DEFAULT en centimos (5 EUR -> 500).
+
    IDENTIFICADORES (UUIDv7):
    - Todas las claves primarias de negocio son TEXT (UUIDv7 generado por el
      cliente: Rust en la Main, repo HTTP del Handy). Las claves foraneas son
@@ -188,7 +210,7 @@ CREATE TABLE IF NOT EXISTS Productos (
   ID_Categoria TEXT NOT NULL,
   ID_Proveedor TEXT,
   Nombre TEXT NOT NULL UNIQUE,
-  Precio_Venta REAL,
+  Precio_Venta INTEGER,
   Stock_Minimo REAL DEFAULT 0,
   Unidad_Medida TEXT,
   Nombre_Imagen TEXT,
@@ -243,7 +265,7 @@ CREATE TABLE IF NOT EXISTS Lotes_Producto (
   Fecha_Entrada DATETIME NOT NULL,
   Caducidad DATE,
   Stock_Disponible REAL NOT NULL DEFAULT 0,
-  Coste_Unitario REAL,
+  Coste_Unitario INTEGER,
   ID_Proveedor TEXT,
   Notas TEXT,
   FOREIGN KEY (ID_Producto) REFERENCES Productos(ID_Producto) ON DELETE CASCADE,
@@ -307,7 +329,7 @@ CREATE TABLE IF NOT EXISTS Lineas_Pedido_Proveedor (
   ID_Pedido TEXT NOT NULL,
   Nombre_Producto TEXT NOT NULL,
   Cantidad REAL NOT NULL DEFAULT 1,
-  Precio_Unitario REAL,
+  Precio_Unitario INTEGER,
   Unidad TEXT,
   FOREIGN KEY (ID_Pedido) REFERENCES Pedidos_Proveedor(ID_Pedido) ON DELETE CASCADE
 );
@@ -374,7 +396,7 @@ CREATE TABLE IF NOT EXISTS Clientes (
   Telefono TEXT,
   Email TEXT,
   Notas TEXT,
-  Total_Gastado REAL NOT NULL DEFAULT 0,
+  Total_Gastado INTEGER NOT NULL DEFAULT 0,
   Created_At TEXT,
   -- FISCAL-02: datos para emitir una factura COMPLETA (F1/F3) a este cliente. Son opcionales: la
   -- inmensa mayoria de los clientes de un bar no piden factura y nunca los tendran.
@@ -452,7 +474,7 @@ CREATE TABLE IF NOT EXISTS Comandas (
   Canal TEXT NOT NULL DEFAULT 'MESA',
   Fecha_Hora_Apertura TEXT NOT NULL,
   Fecha_Hora_Cierre TEXT NULL,
-  Total_Comanda REAL NOT NULL DEFAULT 0,
+  Total_Comanda INTEGER NOT NULL DEFAULT 0,
   Estado TEXT NOT NULL DEFAULT 'Abierta',
   FOREIGN KEY (ID_Mesa) REFERENCES Mesas(ID_Mesa),
   FOREIGN KEY (ID_Reserva) REFERENCES Reservas(ID_Reserva),
@@ -505,7 +527,7 @@ CREATE TABLE IF NOT EXISTS Detalle_Comanda (
   ID_Producto TEXT,
   Nombre_Producto TEXT,
   Cantidad REAL NOT NULL,
-  Precio_Unitario REAL NOT NULL,
+  Precio_Unitario INTEGER NOT NULL,
   IVA_Percent REAL,
   Notas TEXT,
   Estado_Cocina TEXT DEFAULT 'PENDIENTE',
@@ -604,7 +626,7 @@ CREATE TABLE IF NOT EXISTS Cuentas_Gastos (
   ID_Gasto TEXT PRIMARY KEY,
   Fecha DATE NOT NULL,
   Concepto TEXT NOT NULL,
-  Importe REAL NOT NULL,
+  Importe INTEGER NOT NULL,
   Tipo_Gasto TEXT NOT NULL,
   ID_Proveedor TEXT NULL,
   Pagado_Con_Caja INTEGER NOT NULL DEFAULT 0,
@@ -637,13 +659,13 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
   ID_Cierre TEXT PRIMARY KEY,
   Fecha_Hora DATETIME NOT NULL,
   ID_Usuario TEXT,
-  Fondo_Inicial REAL NOT NULL DEFAULT 0,
-  Ventas_Efectivo REAL NOT NULL DEFAULT 0,
-  Esperado REAL NOT NULL DEFAULT 0,
-  Contado REAL NOT NULL DEFAULT 0,
-  Descuadre REAL NOT NULL DEFAULT 0,
-  Dejado REAL NOT NULL DEFAULT 0,
-  Retirado REAL NOT NULL DEFAULT 0,
+  Fondo_Inicial INTEGER NOT NULL DEFAULT 0,
+  Ventas_Efectivo INTEGER NOT NULL DEFAULT 0,
+  Esperado INTEGER NOT NULL DEFAULT 0,
+  Contado INTEGER NOT NULL DEFAULT 0,
+  Descuadre INTEGER NOT NULL DEFAULT 0,
+  Dejado INTEGER NOT NULL DEFAULT 0,
+  Retirado INTEGER NOT NULL DEFAULT 0,
   Motivo TEXT,
   Reabierto_En DATETIME,
   Reabierto_Por TEXT,
@@ -651,12 +673,12 @@ CREATE TABLE IF NOT EXISTS Cierres_Caja (
   -- que dice a que cierre pertenece un apunte que se corrige despues.
   Periodo_Desde DATETIME,
   -- Gastos pagados con dinero del cajon durante el periodo. Restan del esperado.
-  Gastos_Caja REAL NOT NULL DEFAULT 0,
+  Gastos_Caja INTEGER NOT NULL DEFAULT 0,
   -- Lo que el cierre marca HOY tras corregir apuntes de su periodo. NULL = nunca se ha rectificado.
-  Rect_Ventas_Efectivo REAL,
-  Rect_Gastos_Caja REAL,
-  Rect_Esperado REAL,
-  Rect_Descuadre REAL,
+  Rect_Ventas_Efectivo INTEGER,
+  Rect_Gastos_Caja INTEGER,
+  Rect_Esperado INTEGER,
+  Rect_Descuadre INTEGER,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL,
   FOREIGN KEY (Reabierto_Por) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
 );
@@ -676,10 +698,10 @@ CREATE TABLE IF NOT EXISTS Cierre_Rectificaciones (
   ID_Usuario TEXT,
   Descripcion TEXT NOT NULL,
   Motivo TEXT,
-  Esperado_Antes REAL NOT NULL,
-  Esperado_Despues REAL NOT NULL,
-  Descuadre_Antes REAL NOT NULL,
-  Descuadre_Despues REAL NOT NULL,
+  Esperado_Antes INTEGER NOT NULL,
+  Esperado_Despues INTEGER NOT NULL,
+  Descuadre_Antes INTEGER NOT NULL,
+  Descuadre_Despues INTEGER NOT NULL,
   FOREIGN KEY (ID_Cierre) REFERENCES Cierres_Caja(ID_Cierre) ON DELETE CASCADE,
   FOREIGN KEY (ID_Usuario) REFERENCES Usuarios(ID_Usuario) ON DELETE SET NULL
 );
@@ -692,7 +714,7 @@ ON Cierre_Rectificaciones(ID_Cierre, Fecha_Hora);
 CREATE TABLE IF NOT EXISTS Cierre_Denominaciones (
   ID_Cierre TEXT NOT NULL,
   Momento TEXT NOT NULL,
-  Valor REAL NOT NULL,
+  Valor INTEGER NOT NULL,
   Unidades INTEGER NOT NULL,
   PRIMARY KEY (ID_Cierre, Momento, Valor),
   CHECK (Momento IN ('CONTADO','DEJADO')),
@@ -776,7 +798,7 @@ CREATE TABLE IF NOT EXISTS Pagos (
   ID_Comanda TEXT NOT NULL,
   Fecha_Hora DATETIME NOT NULL,
   Metodo_Pago TEXT NOT NULL,
-  Importe_Total REAL NOT NULL,
+  Importe_Total INTEGER NOT NULL,
   Tipo TEXT NOT NULL,
   ID_Usuario_Cobrador TEXT,
   ID_Trabajador_Cobrador TEXT,
@@ -925,7 +947,7 @@ CREATE TABLE IF NOT EXISTS Movimientos_Caja (
   ID_Gasto TEXT,
   ID_Usuario TEXT,
   ID_Trabajador TEXT,
-  Importe REAL NOT NULL DEFAULT 0,
+  Importe INTEGER NOT NULL DEFAULT 0,
   Metodo_Pago TEXT,
   Motivo TEXT,
   FOREIGN KEY (ID_Pago) REFERENCES Pagos(ID_Pago) ON DELETE SET NULL,
@@ -1018,7 +1040,7 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- A partir de cuanto descuadre el cierre de caja exige escribir un motivo (CUENTA-06). 5 euros
   -- deja pasar el centimo de redondeo y el error de vuelta sin dar la lata, y obliga a explicar lo
   -- que ya es dinero de verdad. Cada negocio lo ajusta.
-  Umbral_Descuadre REAL NOT NULL DEFAULT 5,
+  Umbral_Descuadre INTEGER NOT NULL DEFAULT 500,
   -- ── FISCAL-01 (Veri*factu) ──────────────────────────────────────────────────────────────────
   -- Razon_Social NO es Business_Name. "Bar La Plaza" es el rotulo; "Francisco Garcia SL" es quien
   -- factura. El ticket ensena los dos; el registro de facturacion (NombreRazonEmisor y el bloque
@@ -1032,7 +1054,7 @@ CREATE TABLE IF NOT EXISTS Business_Settings (
   -- emitir factura completa (F1). El general del art. 4.1 RD 1619/2012 son 400 EUR, pero la
   -- hosteleria esta en la lista del art. 4.2 y sube a 3.000. La AEAT lo valida en el servicio web
   -- (error 1150). Va aqui y no incrustado porque es un numero que la norma puede mover.
-  Limite_Simplif REAL NOT NULL DEFAULT 3000,
+  Limite_Simplif INTEGER NOT NULL DEFAULT 300000,
   -- 'produccion' | 'pruebas'. Cambia A LA VEZ el endpoint del servicio web y la URL del QR que se
   -- imprime en el papel. Un ticket emitido en pruebas lleva un QR que apunta a prewww2.aeat.es: la
   -- pantalla tiene que gritarlo. Es una decision explicita y visible, y no una variable de entorno,

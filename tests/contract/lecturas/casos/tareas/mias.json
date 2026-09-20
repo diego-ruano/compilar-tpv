@@ -18,5 +18,7 @@
     "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-borrada', 'trab-1', '2026-05-01 10:00:00', 'PENDIENTE');",
     "INSERT INTO Tarea_Asignaciones (ID_Tarea, ID_Trabajador, Asignada_At, Estado) VALUES ('tarea-ajena', 'trab-2', '2026-05-01 10:00:00', 'PENDIENTE');"
   ],
-  "entrada": { "id_trabajador": "trab-1" }
+  "entrada": {
+    "id_trabajador": "trab-1"
+  }
 }

@@ -183,7 +183,7 @@ export type BusinessSettings = { business_name: string, logo_data_url: string | 
 /**
  * A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
  */
-umbral_descuadre: number, 
+umbral_descuadre: Dinero, 
 /**
  * `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
  * («Bar La Plaza») y el otro quien factura («Francisco García SL»). El ticket enseña los dos;
@@ -200,7 +200,7 @@ descripcion_op: string,
  * Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
  * emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
  */
-limite_simplif: number, 
+limite_simplif: Dinero, 
 /**
  * `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
  */
@@ -218,7 +218,7 @@ export type CambioCajaInput = { "tipo": "editar_pago", id_pago: string, fecha_ho
  * es lo que la pantalla enseña antes de confirmar. Ausente = `"ERROR"`, como en
  * `AnularPagoInput`.
  */
-clase?: string, } | { "tipo": "crear_gasto", fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "editar_gasto", id_gasto: string, fecha: string, importe: number, pagado_con_caja: boolean, } | { "tipo": "borrar_gasto", id_gasto: string, };
+clase?: string, } | { "tipo": "crear_gasto", fecha: string, importe: Dinero, pagado_con_caja: boolean, } | { "tipo": "editar_gasto", id_gasto: string, fecha: string, importe: Dinero, pagado_con_caja: boolean, } | { "tipo": "borrar_gasto", id_gasto: string, };
 
 export type CategoriaInvDto = { ID_Categoria: string, Nombre: string, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Vendible: number | null, Pasa_Cocina: number | null, };
 
@@ -228,7 +228,7 @@ export type CategoriaRow = { ID_Categoria: string, Nombre: string, Nombre_Imagen
 
 export type CategoriaVendibleOut = { ID_Categoria: string, Nombre: string, Ruta_Imagen: string | null, Pasa_Cocina: number, };
 
-export type ChartSeriesF64Out = { labels: Array<string>, values: Array<number>, };
+export type ChartSerieDinero = { labels: Array<string>, values: Array<Dinero>, };
 
 export type ChartSeriesI64 = { labels: Array<string>, values: Array<number>, };
 
@@ -242,7 +242,7 @@ export type CierreDto = { id_cierre: string, fecha_hora: string, id_usuario?: st
 /**
  * Nombre de quien cerró, resuelto al leer (la fila sólo guarda el id).
  */
-usuario_nombre?: string, fondo_inicial: number, ventas_efectivo: number, esperado: number, contado: number, descuadre: number, dejado: number, retirado: number, motivo?: string, 
+usuario_nombre?: string, fondo_inicial: Dinero, ventas_efectivo: Dinero, esperado: Dinero, contado: Dinero, descuadre: Dinero, dejado: Dinero, retirado: Dinero, motivo?: string, 
 /**
  * `None` = el cierre sigue en pie (no se ha deshecho).
  */
@@ -255,12 +255,12 @@ periodo_desde?: string,
 /**
  * Gastos pagados con dinero del cajón durante el periodo, tal como estaban al cerrar.
  */
-gastos_caja: number, 
+gastos_caja: Dinero, 
 /**
  * Lo que el cierre marca hoy tras corregir apuntes de su periodo. `None` = nunca se ha
  * rectificado.
  */
-rect_ventas_efectivo?: number, rect_gastos_caja?: number, rect_esperado?: number, rect_descuadre?: number, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, 
+rect_ventas_efectivo?: Dinero, rect_gastos_caja?: Dinero, rect_esperado?: Dinero, rect_descuadre?: Dinero, contado_denoms: Array<DenominacionDto>, dejado_denoms: Array<DenominacionDto>, 
 /**
  * Cada corrección que cambió sus números, de la más antigua a la más reciente.
  */
@@ -273,11 +273,11 @@ export type CierreListarArgs = { limite?: bigint, };
 /**
  * Una fila del histórico. Sin el desglose por denominación, que sólo se pide al abrir la ficha.
  */
-export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: number, contado: number, descuadre: number, retirado: number, motivo?: string, reabierto_en?: string, 
+export type CierreResumenDto = { id_cierre: string, fecha_hora: string, usuario_nombre?: string, esperado: Dinero, contado: Dinero, descuadre: Dinero, retirado: Dinero, motivo?: string, reabierto_en?: string, 
 /**
  * CAJA-01: lo que marca hoy si se ha rectificado.
  */
-rect_esperado?: number, rect_descuadre?: number, };
+rect_esperado?: Dinero, rect_descuadre?: Dinero, };
 
 /**
  * Las claves de una tabla en la nube (SYNC-25).
@@ -302,7 +302,7 @@ export type ClienteIdArgs = { id_cliente: string, };
 /**
  * Fila del overview de clientes (read model con campos calculados).
  */
-export type ClienteOverview = { id_cliente: string, nombre: string, email: string | null, telefono: string | null, ultima_reserva_fecha: string | null, ultima_reserva_hora: string | null, ultima_reserva_num_personas: number | null, ultima_reserva_mesa: string | null, total_gastado_stored: number, total_reservas: number, reservas_pendientes: number, };
+export type ClienteOverview = { id_cliente: string, nombre: string, email: string | null, telefono: string | null, ultima_reserva_fecha: string | null, ultima_reserva_hora: string | null, ultima_reserva_num_personas: number | null, ultima_reserva_mesa: string | null, total_gastado_stored: Dinero, total_reservas: number, reservas_pendientes: number, };
 
 /**
  * Argumentos del overview.
@@ -311,9 +311,9 @@ export type ClientesOverviewArgs = { ranking: string, };
 
 export type ClientesStatsArgs = { range: StatsRange, };
 
-export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: number, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSeriesF64Out, };
+export type ClientesStatsResponse = { nuevos: number, recurrentes: number, no_recurrentes: number, ticket_medio_cliente: Dinero, nuevos_por_bucket: ChartSeriesI64, top_clientes_gasto: ChartSerieDinero, };
 
-export type CobroVRItem = { producto_id: string, precio: number, };
+export type CobroVRItem = { producto_id: string, precio: Dinero, };
 
 /**
  * Un código por correo ya va de camino (recuperar el PIN o confirmar un correo de recuperación).
@@ -334,11 +334,11 @@ reenvio_segundos: number,
  */
 sin_cambios: boolean, };
 
-export type ComandaBarraListItem = { id_comanda: string, fecha_hora_apertura: string, estado: string, total_pendiente: number, total_comanda: number, pendientes_cocina: number, pendientes_pago: number, };
+export type ComandaBarraListItem = { id_comanda: string, fecha_hora_apertura: string, estado: string, total_pendiente: Dinero, total_comanda: Dinero, pendientes_cocina: number, pendientes_pago: number, };
 
-export type ComandaBarraRow = { ID_Comanda: string, Fecha_Hora_Apertura: string, Estado: string, Total_Pendiente: number, Total_Comanda: number, Pendientes_Cocina: number, Pendientes_Pago: number, };
+export type ComandaBarraRow = { ID_Comanda: string, Fecha_Hora_Apertura: string, Estado: string, Total_Pendiente: Dinero, Total_Comanda: Dinero, Pendientes_Cocina: number, Pendientes_Pago: number, };
 
-export type ComandaRow = { id_comanda: string, id_mesa: string, id_trabajador: string | null, id_reserva: string | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: number, estado: string, };
+export type ComandaRow = { id_comanda: string, id_mesa: string, id_trabajador: string | null, id_reserva: string | null, fecha_hora_apertura: string, fecha_hora_cierre: string | null, total_comanda: Dinero, estado: string, };
 
 /**
  * El setup inicial NO lleva PIN actual (REV-06). Ocurre antes del primer login, así que no hay
@@ -363,7 +363,7 @@ export type ConfirmarCierreInput = {
  * Sólo se usa en el primer cierre; en los demás manda el `dejado` del anterior y esto se
  * ignora, para que nadie pueda reescribir el punto de partida a posteriori.
  */
-fondo_inicial?: number, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, };
+fondo_inicial?: Dinero, contado: Array<DenominacionInput>, dejado: Array<DenominacionInput>, motivo?: string, };
 
 /**
  * Código y PIN nuevo van JUNTOS, en un solo comando: si verificar el código y guardar el PIN
@@ -396,13 +396,13 @@ payload?: string, clave_dedupe?: string, expira_en?: string, };
  */
 export type CreateClienteInput = { id_cliente?: string, nombre: string, email?: string, telefono?: string, notas?: string, };
 
-export type CreateGastoInput = { id_gasto?: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, 
+export type CreateGastoInput = { id_gasto?: string, fecha: string, tipo_gasto: string, concepto: string, importe: Dinero, proveedor_id?: string, 
 /**
  * CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
  */
 pagado_con_caja?: boolean, };
 
-export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
+export type CreateLoteInput = { id_lote?: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: Dinero, id_proveedor?: string, notas?: string, };
 
 export type CreateTareaInput = { titulo: string, descripcion?: string, fecha_limite?: string, ids_trabajadores: Array<string>, };
 
@@ -425,9 +425,9 @@ export type DeleteGastoInput = { id_gasto: string, };
 /**
  * Una moneda o billete del recuento.
  */
-export type DenominacionDto = { valor: number, unidades: number, };
+export type DenominacionDto = { valor: Dinero, unidades: number, };
 
-export type DenominacionInput = { valor: number, unidades: number, };
+export type DenominacionInput = { valor: Dinero, unidades: number, };
 
 /**
  * Lo que no cuadra en una tabla.
@@ -464,13 +464,23 @@ export type DeviceIdentity = { deviceId: string, devicePubkeyB64: string, };
 export type DeviceSignB64Args = { payload: string, };
 
 /**
+ * Un importe, en céntimos enteros.
+ *
+ * Cruza la frontera a TypeScript como un `number` **marcado**: un `number` corriente no se puede
+ * asignar a un `Dinero` sin decirlo, y cualquier aritmética sobre él pierde la marca. Eso es lo
+ * que convierte «se me ha olvidado convertir este importe» en un error de compilación en vez de
+ * en un precio de `4750 €` en pantalla.
+ */
+export type Dinero = number & { readonly __centimos: unique symbol };
+
+/**
  * Fila de entradas (cobros). `id` es String (igual que el backend antiguo).
  *
  * Los cobros anulados **salen en esta lista** (CUENTA-07): es el único sitio donde se investiga un
  * descuadre, y ahí esconderlos sería devolver el producto al estado que este cambio arregla. Lo
  * que no hacen es contar en los totales de cabecera (ver `ResumenCajaDto`).
  */
-export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: number, 
+export type EntradaDto = { id: string, fecha_hora: string, cliente: string, metodo: string, importe: Dinero, 
 /**
  * `ACTIVO` o `ANULADO`.
  */
@@ -597,7 +607,7 @@ export type ImpactoCierreDto = { id_cierre: string, fecha_hora: string,
 /**
  * Lo que marca hoy: lo rectificado si lo hay, la foto de esa noche si no.
  */
-esperado_antes: number, esperado_despues: number, descuadre_antes: number, descuadre_despues: number, };
+esperado_antes: Dinero, esperado_despues: Dinero, descuadre_antes: Dinero, descuadre_despues: Dinero, };
 
 export type IndexRow = { ID_Comanda: string, Productos: string | null, NumLineas: number, Unidades: number, };
 
@@ -698,17 +708,17 @@ expires_at_ms: number | null,
  */
 plan: string | null, last_server_time_ms: number | null, last_check_ok_ms: number | null, last_check_attempt_ms: number | null, activated_at_ms: number, };
 
-export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, 
+export type LineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
  */
 IVA_Percent?: number, Notas: string | null, Estado_Cocina: string | null, Pagado: number, Nombre: string, };
 
-export type LineaEmailInput = { nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
+export type LineaEmailInput = { nombre_producto: string, cantidad: number, precio_unitario?: Dinero, unidad?: string, };
 
-export type LineaPedidoDto = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario: number | null, unidad: string | null, };
+export type LineaPedidoDto = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario: Dinero | null, unidad: string | null, };
 
-export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario?: number, unidad?: string, };
+export type LineaPedidoInput = { id_linea: string, nombre_producto: string, cantidad: number, precio_unitario?: Dinero, unidad?: string, };
 
 /**
  * Una línea de un ticket ya cobrado, tal y como hace falta para reimprimirlo.
@@ -718,7 +728,7 @@ export type LineaTicketDto = { nombre: string,
  * Unidades vendidas en esa línea. La copia tiene que decir "2 x 1,30" igual que el original,
  * no "1 x 2,60": el importe cuadraría, pero no sería el mismo papel.
  */
-cantidad: number, precio_unitario: number, 
+cantidad: number, precio_unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió, congelado en la línea. `None` = el del negocio.
  */
@@ -738,7 +748,7 @@ export type LoginOk = { id_usuario: string, id_trabajador: string | null, nombre
 
 export type LoginUserArgs = { id_usuario: string, pin: string, };
 
-export type LoteDto = { ID_Lote: string, ID_Producto: string, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Stock_Disponible: number, Coste_Unitario: number | null, ID_Proveedor: string | null, Notas: string | null, };
+export type LoteDto = { ID_Lote: string, ID_Producto: string, Codigo_Lote: string, Fecha_Entrada: string, Caducidad: string | null, Stock_Disponible: number, Coste_Unitario: Dinero | null, ID_Proveedor: string | null, Notas: string | null, };
 
 /**
  * Marca una notificación como leída por un usuario.
@@ -752,25 +762,25 @@ export type MarcarTodasLeidasInput = { id_usuario: string, };
 
 export type MesaDto = { id_mesa: string, id_zona: string, numero_mesa: string, capacidad: number, };
 
-export type MesaIngresoRow = { mesa: string, zona: string, total: number, };
+export type MesaIngresoRow = { mesa: string, zona: string, total: Dinero, };
 
 /**
  * Línea de comanda de mesa. (`Mesa`-prefijo para no colisionar con la de venta_rapida.)
  */
-export type MesaLineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: number, 
+export type MesaLineaComandaRow = { ID_Detalle: string, ID_Comanda: string, ID_Producto: string, Cantidad: number, Precio_Unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla). `None` = el general
  * del negocio. Va al ticket para desglosar por tipo.
  */
 IVA_Percent?: number, Notas: string | null, Estado_Cocina: string | null, Nombre: string, Pasa_Cocina: number, Pagado: number, };
 
-export type MesaMetaOut = { ocupada: boolean, id_comanda: string, idComanda: string, totalPendiente: number, pendientesPago: number, pendientesCocina: number, estado: string, reserva?: ReservaMesaOut, };
+export type MesaMetaOut = { ocupada: boolean, id_comanda: string, idComanda: string, totalPendiente: Dinero, pendientesPago: number, pendientesCocina: number, estado: string, reserva?: ReservaMesaOut, };
 
 export type MesasAbrirComandaInput = { id_mesa: string, id_trabajador?: string, id_usuario?: string, id_reserva?: string, };
 
-export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio: number, id_usuario?: string, id_trabajador?: string, };
+export type MesasAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio: Dinero, id_usuario?: string, id_trabajador?: string, };
 
-export type MesasCerrarComandaInput = { id_comanda: string, total: number, };
+export type MesasCerrarComandaInput = { id_comanda: string, total: Dinero, };
 
 /**
  * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
@@ -841,7 +851,7 @@ export type MesasSearchProductosArgs = { q?: string, query?: string, texto?: str
 
 export type MesasSetReservaEstadoInput = { id_reserva: string, estado: string, };
 
-export type MesasStatsResponse = { total_mesas: number, ocupadas: number, ticket_medio_por_mesa: number, mesa_top_comandas: MesasTopComandas | null, servicios: ChartSeriesI64, top_mesas_ingresos: Array<MesaIngresoRow>, };
+export type MesasStatsResponse = { total_mesas: number, ocupadas: number, ticket_medio_por_mesa: Dinero, mesa_top_comandas: MesasTopComandas | null, servicios: ChartSeriesI64, top_mesas_ingresos: Array<MesaIngresoRow>, };
 
 export type MesasTopComandas = { mesa: string, zona: string, comandas: number, };
 
@@ -959,11 +969,11 @@ es_primer_cierre: boolean,
 /**
  * Lo que dejó el cierre anterior. En el primero es 0 y lo declara el usuario.
  */
-fondo_inicial: number, ventas_efectivo: number, 
+fondo_inicial: Dinero, ventas_efectivo: Dinero, 
 /**
  * Gastos del periodo pagados con dinero del cajón (CAJA-01). Restan del esperado.
  */
-gastos_caja: number, esperado: number, 
+gastos_caja: Dinero, esperado: Dinero, 
 /**
  * Comandas sin cobrar ahora mismo. No impide cerrar: se avisa y se sigue.
  */
@@ -971,17 +981,17 @@ comandas_abiertas: number,
 /**
  * A partir de cuánto descuadre hay que escribir un motivo.
  */
-umbral_descuadre: number, 
+umbral_descuadre: Dinero, 
 /**
  * Cobros anulados durante este periodo. **No entran en el cálculo** (el esperado sale de los
  * cobros activos, como siempre): es una línea informativa. Y es justo el dato que no existía
  * antes de CUENTA-07 — un descuadre de 40 € junto a "3 anulaciones por 40 €" se explica solo.
  */
-anulaciones: number, anulaciones_importe: number, };
+anulaciones: number, anulaciones_importe: Dinero, };
 
 export type ProductDetailResponse = { producto: ProductoBaseDto | null, alergenos: Array<AlergenoInvDto>, };
 
-export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+export type ProductoBaseDto = { ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: Dinero | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
@@ -992,7 +1002,7 @@ Stock_Suelto: number | null,
  */
 IVA_Percent: number | null, };
 
-export type ProductoDetalleDto = { alergs: Array<AlergenoMiniDto>, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+export type ProductoDetalleDto = { alergs: Array<AlergenoMiniDto>, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: Dinero | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
@@ -1003,7 +1013,7 @@ Stock_Suelto: number | null,
  */
 IVA_Percent: number | null, };
 
-export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: string | null, Lote_Proximo: string | null, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: number | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
+export type ProductoListDto = { Stock_Actual: number | null, Caducidad_Proxima: string | null, Lote_Proximo: string | null, ID_Producto: string, ID_Categoria: string, ID_Proveedor: string | null, Nombre: string, Precio_Venta: Dinero | null, Stock_Minimo: number | null, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, Cantidad_Pedido_Esperada: number | null, 
 /**
  * VR-04: stock "suelto" fuera de lotes. `None` = el producto no lo usa. Puede ser negativo.
  */
@@ -1014,13 +1024,13 @@ Stock_Suelto: number | null,
  */
 IVA_Percent: number | null, };
 
-export type ProductoProveedorDto = { id_producto: string, id_categoria: string | null, id_proveedor: string | null, nombre: string, precio_venta: number | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
+export type ProductoProveedorDto = { id_producto: string, id_categoria: string | null, id_proveedor: string | null, nombre: string, precio_venta: Dinero | null, stock_actual: number | null, stock_minimo: number | null, unidad_medida: string | null, nombre_imagen: string | null, ruta_imagen: string | null, cantidad_pedido_esperada: number | null, ultima_entrada: string | null, caducidad_proxima: string | null, };
 
-export type ProductoResumenDto = { Nombre: string, Stock_Actual: number | null, Unidad_Medida: string | null, Caducidad_Proxima: string | null, Lote: string | null, Precio_Venta: number | null, };
+export type ProductoResumenDto = { Nombre: string, Stock_Actual: number | null, Unidad_Medida: string | null, Caducidad_Proxima: string | null, Lote: string | null, Precio_Venta: Dinero | null, };
 
-export type ProductoRow = { ID_Producto: string, ID_Categoria: string, Nombre: string, Precio_Venta: number, Stock_Actual: number, Stock_Minimo: number, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, };
+export type ProductoRow = { ID_Producto: string, ID_Categoria: string, Nombre: string, Precio_Venta: Dinero, Stock_Actual: number, Stock_Minimo: number, Unidad_Medida: string | null, Nombre_Imagen: string | null, Ruta_Imagen: string | null, };
 
-export type ProductoVendibleOut = { ID_Producto: string, ID_Categoria: string, Nombre: string, Precio_Venta: number, Ruta_Imagen: string | null, };
+export type ProductoVendibleOut = { ID_Producto: string, ID_Categoria: string, Nombre: string, Precio_Venta: Dinero, Ruta_Imagen: string | null, };
 
 export type ProductosStatsArgs = { range: StatsRange, categoria_top_id: string | null, categoria_worst_id: string | null, };
 
@@ -1032,9 +1042,9 @@ export type ProveedorMiniDto = { ID_Proveedor: string, Nombre_Empresa: string, E
 
 export type ProveedorSaveInput = { id_proveedor?: string, nombre_empresa: string, contacto?: string, telefono?: string, email?: string, cif?: string, informacion_adicional?: string, nombre_imagen?: string, ruta_imagen?: string, };
 
-export type ProveedorTop = { nombre: string, total: number, };
+export type ProveedorTop = { nombre: string, total: Dinero, };
 
-export type ProveedoresCreateProductoInput = { id_producto?: string, id_categoria: string, id_proveedor: string, nombre: string, precio_venta?: number, stock_actual?: number, stock_minimo?: number, unidad_medida?: string, };
+export type ProveedoresCreateProductoInput = { id_producto?: string, id_categoria: string, id_proveedor: string, nombre: string, precio_venta?: Dinero, stock_actual?: number, stock_minimo?: number, unidad_medida?: string, };
 
 export type ProveedoresDeleteInput = { id_proveedor: string, };
 
@@ -1044,7 +1054,7 @@ export type ProveedoresSetVinculosInput = { id_proveedor: string, producto_ids: 
 
 export type ProveedoresStatsArgs = { range: StatsRange, };
 
-export type ProveedoresStatsResponse = { total_gasto: number, num_gastos: number, gasto_medio: number, porcentaje_sobre_total_gastos: number, proveedor_top: ProveedorTop | null, gastos_evolucion: ChartSeriesF64Out, gasto_por_proveedor: ChartSeriesF64Out, ultimos_gastos: Array<UltimoGastoProveedor>, };
+export type ProveedoresStatsResponse = { total_gasto: Dinero, num_gastos: number, gasto_medio: Dinero, porcentaje_sobre_total_gastos: number, proveedor_top: ProveedorTop | null, gastos_evolucion: ChartSerieDinero, gasto_por_proveedor: ChartSerieDinero, ultimos_gastos: Array<UltimoGastoProveedor>, };
 
 /**
  * El fichaje NO lleva fecha ni hora: las pone el equipo que ficha — la Main con su reloj, y la
@@ -1081,7 +1091,7 @@ usuario_nombre?: string,
 /**
  * Qué se tocó, en una frase: «Cobro 2026/000045 de 12,50 €: Efectivo → Tarjeta».
  */
-descripcion: string, motivo?: string, esperado_antes: number, esperado_despues: number, descuadre_antes: number, descuadre_despues: number, };
+descripcion: string, motivo?: string, esperado_antes: Dinero, esperado_despues: Dinero, descuadre_antes: Dinero, descuadre_despues: Dinero, };
 
 /**
  * Una fila de `Registros_Facturacion` tal como la enseña el panel fiscal.
@@ -1178,13 +1188,13 @@ aplazado: boolean, };
  * Resumen agregado de caja para un rango (+ búsqueda opcional). Se calcula en SQL sobre TODO el
  * rango, de modo que las cifras de cabecera son correctas aunque la lista esté paginada.
  */
-export type ResumenCajaDto = { total_entradas: number, total_salidas: number, total_efectivo: number, total_tarjeta: number, count_entradas: number, count_salidas: number, 
+export type ResumenCajaDto = { total_entradas: Dinero, total_salidas: Dinero, total_efectivo: Dinero, total_tarjeta: Dinero, count_entradas: number, count_salidas: number, 
 /**
  * Cobros anulados del rango. **No entran en los totales de arriba** y por eso viajan aparte:
  * un cobro anulado no es una venta, pero cuántos hay y por cuánto importe es exactamente el
  * dato que no existía y que hace visible la sisa (CUENTA-07).
  */
-count_anuladas: number, total_anulado: number, };
+count_anuladas: number, total_anulado: Dinero, };
 
 export type RolRow = { ID_Rol: string, Nombre_Rol: string, };
 
@@ -1193,7 +1203,7 @@ export type RoomPoly = { type: string, points: Array<number>, };
 /**
  * Fila de salidas (gastos).
  */
-export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id: string | null, 
+export type SalidaDto = { id: string, fecha_hora: string, tipo_gasto: string, concepto: string, importe: Dinero, proveedor_id: string | null, 
 /**
  * El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
  */
@@ -1362,7 +1372,7 @@ export type TpvServerSignedHeadersArgs = { mode: string, method: string, path: s
  */
 body?: string, };
 
-export type TrabajadorCardStats = { id_trabajador: string, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: number, };
+export type TrabajadorCardStats = { id_trabajador: string, nombre: string, rol: string, tareas_asignadas: number, tareas_finalizadas: number, puntualidad: PuntualidadInfo | null, horas_trabajadas: number, comandas_preparadas?: number, comandas_tomadas?: number, cobros_realizados?: number, ticket_medio_eur?: Dinero, };
 
 /**
  * Alta de trabajador (crea Usuario + Trabajador en local). Local-First.
@@ -1387,26 +1397,26 @@ export type TrabajadorUpdateInput = { id_trabajador: string, id_usuario: string,
 
 export type TrabajadoresStatsArgs = { range: StatsRange, };
 
-export type TrabajadoresStatsResponse = { cocineros: Array<TrabajadorCardStats>, camareros: Array<TrabajadorCardStats>, limpieza: Array<TrabajadorCardStats>, ranking_ventas: ChartSeriesF64Out, };
+export type TrabajadoresStatsResponse = { cocineros: Array<TrabajadorCardStats>, camareros: Array<TrabajadorCardStats>, limpieza: Array<TrabajadorCardStats>, ranking_ventas: ChartSerieDinero, };
 
 export type TurnoRow = { ID_Turno: string, Nombre_Turno: string, };
 
-export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto: string, importe: number, };
+export type UltimoGastoProveedor = { fecha: string, proveedor: string, concepto: string, importe: Dinero, };
 
 /**
  * Entrada para actualizar un cliente (Local-First: sin op_id ni outbox).
  */
 export type UpdateClienteInput = { id_cliente: string, nombre: string, email?: string, telefono?: string, notas?: string, };
 
-export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: number, proveedor_id?: string, 
+export type UpdateGastoInput = { id_gasto: string, fecha: string, tipo_gasto: string, concepto: string, importe: Dinero, proveedor_id?: string, 
 /**
  * CAJA-01: el gasto se pagó con dinero del cajón. Ausente = no.
  */
 pagado_con_caja?: boolean, };
 
-export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: number, id_proveedor?: string, notas?: string, };
+export type UpdateLoteInput = { id_lote: string, id_producto: string, codigo_lote: string, caducidad?: string, stock_disponible: number, fecha_entrada?: string, coste_unitario?: Dinero, id_proveedor?: string, notas?: string, };
 
-export type UpdatePagoInput = { id_pago: string, fecha_hora: string, metodo: string, importe: number, };
+export type UpdatePagoInput = { id_pago: string, fecha_hora: string, metodo: string, importe: Dinero, };
 
 export type UpdateTareaInput = { id_tarea: string, titulo: string, descripcion?: string, fecha_limite?: string, };
 
@@ -1418,7 +1428,7 @@ export type UploadInitialSetupArgs = { id_usuario: string, email: string, pin: s
 
 export type UpsertCategoriaInput = { id_categoria?: string, nombre: string, nombre_imagen: string, ruta_imagen: string, vendible: boolean, pasa_cocina: boolean, };
 
-export type UpsertProductoInput = { id_producto?: string, id_categoria: string, id_proveedor?: string, nombre: string, precio_venta?: number, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, 
+export type UpsertProductoInput = { id_producto?: string, id_categoria: string, id_proveedor?: string, nombre: string, precio_venta?: Dinero, stock_minimo?: number, unidad_medida?: string, nombre_imagen?: string, ruta_imagen?: string, cantidad_pedido_esperada?: number, 
 /**
  * VR-04: stock suelto fuera de lotes (opcional; None = el producto no lo usa).
  */
@@ -1432,7 +1442,7 @@ export type UpsertProductoResult = { id_producto: string, };
 
 export type UserListItem = { id_usuario: string, nombre: string, apellido: string | null, nombre_rol: string, };
 
-export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, Nombre: string, Cantidad: number, Precio_Unitario: number, 
+export type VerTicketsDetalleRow = { ID_Detalle: string, ID_Producto: string, Nombre: string, Cantidad: number, Precio_Unitario: Dinero, 
 /**
  * Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
  */
@@ -1471,7 +1481,7 @@ desde: string,
  */
 hasta_seq: number, };
 
-export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: number, };
+export type VrAddLineaComandaInput = { id_comanda: string, id_producto: string, cantidad: number, precio_unitario: Dinero, };
 
 /**
  * REV-17: quién cobra sale de la **sesión**, nunca de la entrada (SEC-01).
@@ -1491,7 +1501,7 @@ export type VrCobrarFraccionadoInput = {
  * quitarlo de la cola, al volver se reintenta con el mismo id y se devuelve el número del cobro
  * que ya existe, en vez de rechazarlo por no quedar líneas pendientes.
  */
-id_pago: string, id_comanda: string, metodo: string, importe_total: number, detalles: Array<string>, 
+id_pago: string, id_comanda: string, metodo: string, importe_total: Dinero, detalles: Array<string>, 
 /**
  * FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
  *

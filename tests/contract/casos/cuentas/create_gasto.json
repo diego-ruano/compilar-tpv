@@ -9,7 +9,7 @@
     "fecha": "2026-03-14",
     "tipo_gasto": "Suministros",
     "concepto": "Cajas de servilletas",
-    "importe": 42.75,
+    "importe": 4275,
     "proveedor_id": "prov-1",
     "pagado_con_caja": true
   },

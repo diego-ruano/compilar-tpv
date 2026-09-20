@@ -19,6 +19,7 @@
 //! - QR: *Detalle de las especificaciones técnicas del código QR de la factura*, AEAT v0.5.0.
 //! - Validaciones: *Validaciones y errores*, AEAT v1.2.2 + `errores.properties`.
 
+use crate::dinero::Dinero;
 use sha2::{Digest, Sha256};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,10 +41,8 @@ use sha2::{Digest, Sha256};
 ///
 /// El `-0.00` se normaliza a `0.00`: un importe negativo minúsculo no es un importe negativo, y en
 /// un registro fiscal el signo significa algo (una rectificativa por diferencias).
-pub fn fmt_importe(v: f64) -> String {
-    let c = (v * 100.0).round() / 100.0;
-    let c = if c == 0.0 { 0.0 } else { c }; // se lleva por delante el -0.0
-    format!("{c:.2}")
+pub fn fmt_importe(v: Dinero) -> String {
+    v.texto_fiscal()
 }
 
 /// Formatea un tipo impositivo (`TipoImpositivo`, patrón `\d{1,3}(\.\d{0,2})?`).
@@ -413,7 +412,7 @@ pub fn sanear_texto(v: &str, max: usize) -> String {
 /// prestados por restaurantes, bares, cafeterías… así como el suministro de bebidas o comidas para
 /// consumir en el acto»* están en la lista del art. 4.2, que lo sube a 3.000. Es también el número
 /// que valida la AEAT en el servicio web (error 1150, con un margen de +10 €).
-pub const LIMITE_SIMPLIFICADA_HOSTELERIA: f64 = 3000.0;
+pub const LIMITE_SIMPLIFICADA_HOSTELERIA: Dinero = Dinero::de_centimos(300_000);
 
 /// ¿Este importe cabe en una factura simplificada?
 ///
@@ -424,13 +423,13 @@ pub const LIMITE_SIMPLIFICADA_HOSTELERIA: f64 = 3000.0;
 /// Lo que no puede haber es un botón de «dividir el cobro» para bajar del límite: partir el pago de
 /// un mismo cliente es fraccionamiento artificial de una operación. Que el reparto entre clientes
 /// distintos funcione es una consecuencia del modelo, no un atajo que se ofrezca.
-pub fn cabe_en_simplificada(importe: f64, limite: f64) -> bool {
-    let l = if limite > 0.0 {
+pub fn cabe_en_simplificada(importe: Dinero, limite: Dinero) -> bool {
+    let l = if limite > Dinero::CERO {
         limite
     } else {
         LIMITE_SIMPLIFICADA_HOSTELERIA
     };
-    (importe * 100.0).round() / 100.0 <= (l * 100.0).round() / 100.0
+    importe <= l
 }
 
 /// Los datos del cliente cuando pide **factura completa** (`F1`) o cuando el importe obliga a
@@ -510,7 +509,7 @@ pub fn validar_destinatario(d: Destinatario) -> Result<Destinatario, Destinatari
 /// `None` significa que **no se puede emitir**: el importe pasa del límite de la simplificada y no
 /// hay destinatario. No es un fallo del sistema, es un dato que falta — y quien lo tiene es el
 /// cliente que está delante.
-pub fn clave_de_factura(importe: f64, limite: f64, hay_destinatario: bool) -> Option<&'static str> {
+pub fn clave_de_factura(importe: Dinero, limite: Dinero, hay_destinatario: bool) -> Option<&'static str> {
     if hay_destinatario {
         Some("F1")
     } else if cabe_en_simplificada(importe, limite) {
@@ -524,10 +523,10 @@ pub fn clave_de_factura(importe: f64, limite: f64, hay_destinatario: bool) -> Op
 /// debajo no se puede (errores 1138 y 1139). Un bar no llegará nunca; se implementa porque la
 /// validación es simétrica y omitirla sería el único caso en que el registro sale mal por no haber
 /// escrito tres líneas.
-pub const UMBRAL_MACRODATO: f64 = 100_000_000.0;
+pub const UMBRAL_MACRODATO: Dinero = Dinero::de_centimos(10_000_000_000);
 
 /// `Some("S")` si el importe obliga a marcar `Macrodato`; `None` si no debe informarse.
-pub fn macrodato(importe_total: f64) -> Option<&'static str> {
+pub fn macrodato(importe_total: Dinero) -> Option<&'static str> {
     if importe_total.abs() >= UMBRAL_MACRODATO {
         Some("S")
     } else {
@@ -646,6 +645,11 @@ pub fn comprobar_registro_previo(
 #[allow(non_snake_case)]
 mod tests {
     use super::*;
+
+    /// Euros → `Dinero`. Los supuestos se escriben en euros; lo que se compara son céntimos.
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
 
     // ── Los tres vectores oficiales (AEAT v0.1.2 §6) ────────────────────────────────────────────
     //
@@ -767,18 +771,18 @@ mod tests {
 
     #[test]
     fn fmt_importe_siempre_dos_decimales_y_punto() {
-        assert_eq!(fmt_importe(123.1), "123.10");
-        assert_eq!(fmt_importe(123.45), "123.45");
-        assert_eq!(fmt_importe(0.0), "0.00");
-        assert_eq!(fmt_importe(-12.5), "-12.50");
+        assert_eq!(fmt_importe(eur(123.1)), "123.10");
+        assert_eq!(fmt_importe(eur(123.45)), "123.45");
+        assert_eq!(fmt_importe(Dinero::CERO), "0.00");
+        assert_eq!(fmt_importe(eur(-12.5)), "-12.50");
         // El caso que motiva guardar el texto: el f64 no vale como fuente de la cadena.
-        assert_eq!(fmt_importe(0.1 + 0.2), "0.30");
+        assert_eq!(fmt_importe(eur(0.1) + eur(0.2)), "0.30");
     }
 
     #[test]
     fn fmt_importe_normaliza_el_menos_cero() {
         // Un `-0.00 €` en un ticket no significa nada, y en un registro fiscal el signo SÍ.
-        assert_eq!(fmt_importe(-0.001), "0.00");
+        assert_eq!(fmt_importe(eur(-0.001)), "0.00");
     }
 
     #[test]
@@ -952,38 +956,38 @@ mod tests {
 
     #[test]
     fn el_limite_de_la_simplificada_se_mira_sobre_el_cobro() {
-        assert!(cabe_en_simplificada(2999.99, 3000.0));
-        assert!(cabe_en_simplificada(3000.0, 3000.0));
-        assert!(!cabe_en_simplificada(3000.01, 3000.0));
+        assert!(cabe_en_simplificada(eur(2999.99), eur(3000.0)));
+        assert!(cabe_en_simplificada(eur(3000.0), eur(3000.0)));
+        assert!(!cabe_en_simplificada(eur(3000.01), eur(3000.0)));
         // Dos cobros de 2.000 € sobre una comanda de 4.000 € siguen siendo dos F2 correctas.
-        assert!(cabe_en_simplificada(2000.0, 3000.0));
+        assert!(cabe_en_simplificada(eur(2000.0), eur(3000.0)));
     }
 
     #[test]
     fn un_limite_sin_configurar_cae_en_el_de_hosteleria() {
-        assert!(cabe_en_simplificada(2999.0, 0.0));
-        assert!(!cabe_en_simplificada(3001.0, 0.0));
+        assert!(cabe_en_simplificada(eur(2999.0), Dinero::CERO));
+        assert!(!cabe_en_simplificada(eur(3001.0), Dinero::CERO));
     }
 
     #[test]
     fn macrodato_solo_a_partir_de_cien_millones() {
         // Simétrico a propósito: informarlo de menos es el error 1139 e informarlo de más el 1138.
-        assert_eq!(macrodato(99_999_999.99), None);
-        assert_eq!(macrodato(100_000_000.0), Some("S"));
-        assert_eq!(macrodato(-100_000_000.0), Some("S"));
+        assert_eq!(macrodato(eur(99_999_999.99)), None);
+        assert_eq!(macrodato(eur(100_000_000.0)), Some("S"));
+        assert_eq!(macrodato(eur(-100_000_000.0)), Some("S"));
     }
     // ── Factura completa (§2.2 y §9 del plan) ───────────────────────────────────────────────────
 
     #[test]
     fn sin_destinatario_y_dentro_del_limite_es_una_simplificada() {
-        assert_eq!(clave_de_factura(12.10, 3000.0, false), Some("F2"));
-        assert_eq!(clave_de_factura(3000.0, 3000.0, false), Some("F2"));
+        assert_eq!(clave_de_factura(eur(12.10), eur(3000.0), false), Some("F2"));
+        assert_eq!(clave_de_factura(eur(3000.0), eur(3000.0), false), Some("F2"));
     }
 
     #[test]
     fn con_destinatario_es_factura_completa_aunque_el_importe_sea_pequeno() {
         // El cliente puede pedir factura por un café. No hay mínimo.
-        assert_eq!(clave_de_factura(1.20, 3000.0, true), Some("F1"));
+        assert_eq!(clave_de_factura(eur(1.20), eur(3000.0), true), Some("F1"));
     }
 
     #[test]
@@ -991,9 +995,9 @@ mod tests {
         // Es el caso que obliga a parar y preguntar. Emitir una F2 ahí sería emitir una factura
         // inválida que la AEAT rechaza (error 1150), y emitir una F1 sin destinatario es imposible
         // (el bloque Destinatarios es obligatorio en F1, error 1189).
-        assert_eq!(clave_de_factura(3000.01, 3000.0, false), None);
+        assert_eq!(clave_de_factura(eur(3000.01), eur(3000.0), false), None);
         // Con los datos del cliente, la misma venta sí sale.
-        assert_eq!(clave_de_factura(3000.01, 3000.0, true), Some("F1"));
+        assert_eq!(clave_de_factura(eur(3000.01), eur(3000.0), true), Some("F1"));
     }
 
     #[test]

@@ -9,7 +9,7 @@
     "id_categoria": "cat-1",
     "id_proveedor": null,
     "nombre": "Rioja",
-    "precio_venta": 12.0,
+    "precio_venta": 1200,
     "stock_minimo": 2,
     "unidad_medida": "botella",
     "nombre_imagen": null,
@@ -17,7 +17,9 @@
     "cantidad_pedido_esperada": null,
     "stock_suelto": null,
     "iva_percent": 21.0,
-    "ids_alergenos": ["00000000-0000-7000-8000-000000000201"]
+    "ids_alergenos": [
+      "00000000-0000-7000-8000-000000000201"
+    ]
   },
   "snapshot": {
     "Productos": "SELECT ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, Stock_Minimo, Unidad_Medida, Stock_Suelto, IVA_Percent FROM Productos",

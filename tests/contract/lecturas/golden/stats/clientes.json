@@ -6,15 +6,15 @@
     "values": []
   },
   "recurrentes": 1,
-  "ticket_medio_cliente": 30.0,
+  "ticket_medio_cliente": 3000,
   "top_clientes_gasto": {
     "labels": [
       "Ana Gomez #cli-1",
       "Beto Ruiz #cli-2"
     ],
     "values": [
-      120.0,
-      40.0
+      12000,
+      4000
     ]
   }
 }

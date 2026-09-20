@@ -3,14 +3,14 @@
     "ID_Categoria": "cat-barra",
     "ID_Producto": "prod-sin-precio",
     "Nombre": "Agua del grifo",
-    "Precio_Venta": 0.0,
+    "Precio_Venta": 0,
     "Ruta_Imagen": null
   },
   {
     "ID_Categoria": "cat-barra",
     "ID_Producto": "prod-cerveza",
     "Nombre": "Cerveza",
-    "Precio_Venta": 3.0,
+    "Precio_Venta": 300,
     "Ruta_Imagen": null
   }
 ]

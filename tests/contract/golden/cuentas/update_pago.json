@@ -4,7 +4,7 @@
       "Fecha_Hora": "2026-01-05 09:30:00",
       "ID_Comanda": "comanda-1",
       "ID_Pago": "pago-1",
-      "Importe_Total": 10.5,
+      "Importe_Total": 1050,
       "Metodo_Pago": "Tarjeta",
       "Tipo": "total"
     }

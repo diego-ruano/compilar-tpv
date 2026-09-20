@@ -13,7 +13,7 @@
     "caducidad": "2026-09-01",
     "stock_disponible": 8,
     "fecha_entrada": "2026-01-01 00:00:00",
-    "coste_unitario": 2.0,
+    "coste_unitario": 200,
     "id_proveedor": null,
     "notas": "editado"
   },

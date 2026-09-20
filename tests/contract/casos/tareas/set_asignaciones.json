@@ -12,7 +12,9 @@
   ],
   "entrada": {
     "id_tarea": "tarea-1",
-    "ids_trabajadores": ["trab-1"]
+    "ids_trabajadores": [
+      "trab-1"
+    ]
   },
   "snapshot": {
     "Tarea_Asignaciones": "SELECT ID_Tarea, ID_Trabajador, Estado FROM Tarea_Asignaciones"

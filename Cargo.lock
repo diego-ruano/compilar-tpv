@@ -5930,6 +5930,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "tpv-domain",
  "ts-rs",
 ]
 
@@ -5942,8 +5943,10 @@ dependencies = [
  "pbkdf2",
  "rand 0.8.6",
  "serde",
+ "serde_json",
  "sha2",
  "thiserror 1.0.69",
+ "ts-rs",
  "uuid",
 ]
 

@@ -10,7 +10,9 @@
     "titulo": "Limpiar barra",
     "descripcion": "Antes de cerrar",
     "fecha_limite": "2026-02-01",
-    "ids_trabajadores": ["trab-1"]
+    "ids_trabajadores": [
+      "trab-1"
+    ]
   },
   "snapshot": {
     "Tareas": "SELECT Titulo, Descripcion, Fecha_Limite FROM Tareas",

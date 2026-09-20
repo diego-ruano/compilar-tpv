@@ -19,6 +19,12 @@ mod fixtures {
 
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// Payload con TODO apagado salvo lo que interviene en el dinero (líneas, base+IVA y total).
     /// Cada test enciende lo suyo.
     pub fn payload(iva_negocio: f64, items: Vec<PrintTicketLine>) -> PrintTicketPayload {
@@ -72,7 +78,7 @@ mod fixtures {
         PrintTicketLine {
             nombre: "Item".into(),
             cantidad,
-            precio_unitario: precio,
+            precio_unitario: eur(precio),
             iva_percent: iva,
             exento: false,
             causa_exencion: None,
@@ -84,7 +90,7 @@ mod fixtures {
         PrintTicketLine {
             nombre: "Exento".into(),
             cantidad,
-            precio_unitario: precio,
+            precio_unitario: eur(precio),
             iva_percent: None,
             exento: true,
             causa_exencion: Some(causa.into()),
@@ -96,7 +102,7 @@ mod fixtures {
         PrintTicketLine {
             nombre: "Cafe".into(),
             cantidad: 1,
-            precio_unitario: 1.1,
+            precio_unitario: eur(1.1),
             iva_percent: None,
             exento: false,
             causa_exencion: None,
@@ -172,13 +178,24 @@ mod tests_desglose_iva {
     use super::fixtures::*;
     use super::*;
 
-    /// Compara con la tolerancia de un céntimo mal redondeado.
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
+    /// Compara dos TIPOS de IVA, que siguen siendo fraccionarios (existe el 7,5 %).
     fn cerca(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-9
     }
 
+    /// Compara un importe con los euros que se esperan. Ya no necesita tolerancia: son enteros.
+    fn cerca_eur(a: Dinero, euros: f64) -> bool {
+        a == eur(euros)
+    }
+
     /// Los tres números de un tramo sujeto, o pánico si es exento.
-    fn sujeta(t: &TramoIva) -> (f64, f64, f64) {
+    fn sujeta(t: &TramoIva) -> (f64, Dinero, Dinero) {
         match t {
             TramoIva::Sujeta { tipo, base, cuota } => (*tipo, *base, *cuota),
             TramoIva::Exenta { .. } => panic!("se esperaba un tramo sujeto"),
@@ -194,8 +211,8 @@ mod tests_desglose_iva {
         let (tipo, base, iva) = sujeta(&d[0]);
         assert!(cerca(tipo, 10.0));
         // 22 € con IVA al 10% → base 20, IVA 2.
-        assert!(cerca(base, 20.0), "base {base}");
-        assert!(cerca(iva, 2.0), "iva {iva}");
+        assert!(cerca_eur(base, 20.0), "base {base}");
+        assert!(cerca_eur(iva, 2.0), "iva {iva}");
     }
 
     #[test]
@@ -206,7 +223,7 @@ mod tests_desglose_iva {
         assert_eq!(d.len(), 1);
         let (tipo, base, _) = sujeta(&d[0]);
         assert!(cerca(tipo, 21.0));
-        assert!(cerca(base, 10.0), "base {base}");
+        assert!(cerca_eur(base, 10.0), "base {base}");
     }
 
     #[test]
@@ -220,11 +237,11 @@ mod tests_desglose_iva {
         let (t0, b0, c0) = sujeta(&d[0]);
         let (t1, b1, c1) = sujeta(&d[1]);
         assert!(cerca(t0, 10.0) && cerca(t1, 21.0));
-        assert!(cerca(b0, 10.0) && cerca(c0, 1.0));
-        assert!(cerca(b1, 10.0) && cerca(c1, 2.1));
+        assert!(cerca_eur(b0, 10.0) && cerca_eur(c0, 1.0));
+        assert!(cerca_eur(b1, 10.0) && cerca_eur(c1, 2.1));
 
         // Y lo que de verdad importa: base + IVA de todos los tramos == lo cobrado.
-        assert!(cerca(tpv_domain::ticket::importe_total(&d), 23.1));
+        assert!(cerca_eur(tpv_domain::ticket::importe_total(&d), 23.1));
     }
 
     #[test]
@@ -238,7 +255,7 @@ mod tests_desglose_iva {
         assert_eq!(d.len(), 2);
         // Los dos del 21 suman 22 € con IVA.
         let (_, base, cuota) = sujeta(d.iter().find(|t| matches!(t, TramoIva::Sujeta { tipo, .. } if cerca(*tipo, 21.0))).unwrap());
-        assert!(cerca(base + cuota, 22.0));
+        assert!(cerca_eur(base + cuota, 22.0));
     }
 
     #[test]
@@ -254,8 +271,8 @@ mod tests_desglose_iva {
 
         assert_eq!(d.len(), 1);
         let (_, base, iva) = sujeta(&d[0]);
-        assert!(cerca(base, 10.0), "base {base}");
-        assert!(cerca(iva, 0.0), "iva {iva}");
+        assert!(cerca_eur(base, 10.0), "base {base}");
+        assert!(cerca_eur(iva, 0.0), "iva {iva}");
     }
 
     #[test]
@@ -268,7 +285,7 @@ mod tests_desglose_iva {
 
         assert_eq!(d.len(), 2);
         assert!(matches!(d[0], TramoIva::Sujeta { .. }));
-        assert_eq!(d[1], TramoIva::Exenta { causa: "E1".into(), base: 5.0 });
+        assert_eq!(d[1], TramoIva::Exenta { causa: "E1".into(), base: eur(5.0) });
     }
 
     #[test]
@@ -984,25 +1001,31 @@ mod tests_formato {
 
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     #[test]
     fn el_dinero_va_en_formato_espanol_con_dos_decimales_siempre() {
-        assert_eq!(fmt_eur(1.7), "1,70 €");
-        assert_eq!(fmt_eur(0.0), "0,00 €");
-        assert_eq!(fmt_eur(12.0), "12,00 €");
+        assert_eq!(fmt_eur(eur(1.7)), "1,70 €");
+        assert_eq!(fmt_eur(Dinero::CERO), "0,00 €");
+        assert_eq!(fmt_eur(eur(12.0)), "12,00 €");
     }
 
     #[test]
     fn un_importe_negativo_se_ve_como_negativo() {
         // Una devolución o un descuento tiene que leerse como tal, no como un importe normal al
         // que le falta el signo.
-        assert_eq!(fmt_eur(-1.5), "-1,50 €");
+        assert_eq!(fmt_eur(eur(-1.5)), "-1,50 €");
     }
 
     #[test]
     fn los_miles_no_llevan_separador() {
         // A propósito: un punto de miles en una columna estrecha se confunde con el decimal. Este
         // test está para que cambiarlo sea una decisión y no un descuido.
-        assert_eq!(fmt_eur(1234.5), "1234,50 €");
+        assert_eq!(fmt_eur(eur(1234.5)), "1234,50 €");
     }
 
     #[test]
@@ -1432,6 +1455,12 @@ mod tests_secciones {
     use super::fixtures::*;
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// Ticket completo, con todo encendido y relleno.
     fn completo() -> PrintTicketPayload {
         let mut p = base(vec![linea()]);
@@ -1525,7 +1554,7 @@ mod tests_secciones {
             p.items = vec![PrintTicketLine {
                 nombre: "Solomillo de ternera al foie con reduccion de Pedro Ximenez".into(),
                 cantidad: 12,
-                precio_unitario: 24.5,
+                precio_unitario: eur(24.5),
                 iva_percent: None,
                 exento: false,
                 causa_exencion: None,
@@ -1951,6 +1980,12 @@ mod tests_espejo_del_frontend {
 
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// `(importe, como se imprime)`. Gemelo de `GOLDEN_EUR` en el test del frontend.
     const GOLDEN_EUR: &[(f64, &str)] = &[
         (0.0, "0,00 €"),
@@ -1974,7 +2009,7 @@ mod tests_espejo_del_frontend {
     #[test]
     fn el_importe_se_imprime_igual_que_en_la_vista_previa() {
         for (n, esperado) in GOLDEN_EUR {
-            assert_eq!(&fmt_eur(*n), esperado, "importe {n}");
+            assert_eq!(&fmt_eur(eur(*n)), esperado, "importe {n}");
         }
     }
 
@@ -1985,11 +2020,11 @@ mod tests_espejo_del_frontend {
         // puede. `{:.2}` rompe los empates al PAR, y la vista previa (y cualquiera con un lápiz)
         // los rompe hacia arriba.
         assert_eq!(format!("{:.2}", 1.125), "1.12");
-        assert_eq!(fmt_eur(1.125), "1,13 €");
+        assert_eq!(fmt_eur(eur(1.125)), "1,13 €");
 
         // Y el negativo minúsculo, que salía como "menos cero".
         assert_eq!(format!("{:.2}", -0.001), "-0.00");
-        assert_eq!(fmt_eur(-0.001), "0,00 €");
+        assert_eq!(fmt_eur(eur(-0.001)), "0,00 €");
     }
 
     /// `(nombre, importe, columnas, lo que queda del nombre)`. Gemelo de `GOLDEN_RECORTE`.
@@ -2099,21 +2134,27 @@ mod tests_arqueo {
     use super::fixtures::contiene;
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     fn arqueo() -> PrintArqueoPayload {
         PrintArqueoPayload {
             business_name: "Bar Paco".into(),
             fecha_hora: "2026-05-10 23:45:00".into(),
             desde: Some("2026-05-09 23:30:00".into()),
             usuario: Some("Ana Gomez".into()),
-            fondo_inicial: 150.0,
-            ventas_efectivo: 420.5,
-            esperado: 570.5,
-            contado: 550.5,
-            descuadre: -20.0,
-            dejado: 150.0,
-            retirado: 400.5,
+            fondo_inicial: eur(150.0),
+            ventas_efectivo: eur(420.5),
+            esperado: eur(570.5),
+            contado: eur(550.5),
+            descuadre: eur(-20.0),
+            dejado: eur(150.0),
+            retirado: eur(400.5),
             motivo: Some("se pago un pedido en efectivo".into()),
-            contado_denoms: vec![(50.0, 10), (20.0, 2), (0.5, 21)],
+            contado_denoms: vec![(eur(50.0), 10), (eur(20.0), 2), (eur(0.5), 21)],
             paper_width_mm: 80,
             paper_dpi: 203,
             chars_per_line: 42,
@@ -2153,10 +2194,10 @@ mod tests_arqueo {
         let mut p = arqueo();
         assert!(contiene(&build_arqueo(&p), "FALTAN"), "descuadre negativo");
 
-        p.descuadre = 12.5;
+        p.descuadre = eur(12.5);
         assert!(contiene(&build_arqueo(&p), "SOBRAN"), "descuadre positivo");
 
-        p.descuadre = 0.0;
+        p.descuadre = Dinero::CERO;
         let b = build_arqueo(&p);
         assert!(contiene(&b, "CUADRA"));
         assert!(!contiene(&b, "FALTAN") && !contiene(&b, "SOBRAN"));
@@ -2166,17 +2207,17 @@ mod tests_arqueo {
     fn los_gastos_de_caja_salen_restando_solo_si_los_hay() {
         // CAJA-01. Restan del esperado, así que el papel tiene que decir de dónde sale la resta.
         let mut p = arqueo();
-        p.gastos_caja = 18.0;
+        p.gastos_caja = eur(18.0);
         assert!(contiene(&build_arqueo(&p), "Gastos de caja"));
-        p.gastos_caja = 0.0;
+        p.gastos_caja = Dinero::CERO;
         assert!(!contiene(&build_arqueo(&p), "Gastos de caja"));
     }
 
     #[test]
     fn un_cierre_rectificado_dice_lo_de_esa_noche_lo_de_hoy_y_por_que() {
         let mut p = arqueo();
-        p.rect_esperado = Some(550.5);
-        p.rect_descuadre = Some(0.0);
+        p.rect_esperado = Some(eur(550.5));
+        p.rect_descuadre = Some(Dinero::CERO);
         p.rectificaciones = vec![RectificacionArqueo {
             fecha_hora: "2026-05-11 10:00:00".into(),
             descripcion: "Cobro 2026/000045 de 20,00 €: Efectivo → Tarjeta".into(),

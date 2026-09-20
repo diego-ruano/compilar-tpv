@@ -9,6 +9,8 @@
 //! (el cobro de mesa, el de venta rápida, el gasto y la anulación) y una sentencia copiada cuatro
 //! veces es una sentencia que dentro de un año dice cuatro cosas distintas.
 
+use crate::mapping::dinero_val;
+use tpv_domain::dinero::Dinero;
 use libsql::Value;
 
 use tpv_application::error::{AppError, AppResult};
@@ -39,7 +41,7 @@ pub struct MovimientoCaja {
     pub id_trabajador: Option<String>,
     /// **Siempre en positivo**; el signo lo da el `tipo`. Mezclar signos en una columna que
     /// alguien va a sumar es pedir un error.
-    pub importe: f64,
+    pub importe: Dinero,
     pub metodo_pago: Option<String>,
     pub motivo: Option<String>,
 }
@@ -84,7 +86,7 @@ pub async fn registrar<C: Writer>(db: &C, m: MovimientoCaja) -> AppResult<()> {
             texto(m.id_gasto),
             texto(m.id_usuario),
             texto(m.id_trabajador),
-            Value::Real(m.importe.abs()),
+            dinero_val(m.importe.abs()),
             texto(m.metodo_pago),
             texto(m.motivo),
         ],

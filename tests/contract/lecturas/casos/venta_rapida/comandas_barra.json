@@ -6,20 +6,23 @@
     "INSERT INTO Mesas (ID_Mesa, ID_Zona, Numero_Mesa, Capacidad, Ubicacion_X, Ubicacion_Y, Shape, Width, Height) VALUES ('mesa-1', 'zona-1', '7', 4, 0, 0, 'rect', 80, 80);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina) VALUES ('cat-cocina', 'Platos', 1);",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-plato', 'cat-cocina', 'Tortilla', 9.0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-bebida', 'cat-barra', 'Cerveza', 3.0);",
-    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-a-medias', 'BARRA', '2026-05-10 12:00:00', 'Abierta', 12.0);",
-    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-cobrada', 'BARRA', '2026-05-10 11:00:00', 'Pagada', 3.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-plato', 'cat-cocina', 'Tortilla', 900);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-bebida', 'cat-barra', 'Cerveza', 300);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-a-medias', 'BARRA', '2026-05-10 12:00:00', 'Abierta', 1200);",
+    "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda) VALUES ('com-cobrada', 'BARRA', '2026-05-10 11:00:00', 'Pagada', 300);",
     "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado) VALUES ('com-vacia', 'BARRA', '2026-05-10 10:00:00', 'Abierta');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-de-mesa', 'MESA', 'mesa-1', '2026-05-10 09:00:00', 'Abierta');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-a1', 'com-a-medias', 'prod-plato', 1, 9.0, 'PENDIENTE');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-a2', 'com-a-medias', 'prod-bebida', 1, 3.0);",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-c1', 'com-cobrada', 'prod-bebida', 1, 3.0);",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-m1', 'com-de-mesa', 'prod-bebida', 1, 3.0);",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-a-medias', '2026-05-10 12:30:00', 'Efectivo', 3.0, 'parcial');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-a1', 'com-a-medias', 'prod-plato', 1, 900, 'PENDIENTE');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-a2', 'com-a-medias', 'prod-bebida', 1, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-c1', 'com-cobrada', 'prod-bebida', 1, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-m1', 'com-de-mesa', 'prod-bebida', 1, 300);",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-1', 'com-a-medias', '2026-05-10 12:30:00', 'Efectivo', 300, 'parcial');",
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-1', 'det-a2');",
-    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-cobrada', '2026-05-10 11:30:00', 'Efectivo', 3.0, 'total');",
+    "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo) VALUES ('pago-2', 'com-cobrada', '2026-05-10 11:30:00', 'Efectivo', 300, 'total');",
     "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-2', 'det-c1');"
   ],
-  "entrada": { "include_pagadas": false, "limit": 50 }
+  "entrada": {
+    "include_pagadas": false,
+    "limit": 50
+  }
 }

@@ -3,6 +3,7 @@
 //! Corregir un apunte que pertenece a un cierre ya hecho no vive aquí sino en
 //! `rectificacion_caja`: aquí están cerrar, consultar y deshacer.
 
+use tpv_domain::dinero::Dinero;
 use tpv_contracts::cierre_caja::{
     CierreDto, CierreResumenDto, ConfirmarCierreInput, PreparacionCierreDto,
 };
@@ -26,8 +27,8 @@ fn a_denoms(input: &[tpv_contracts::cierre_caja::DenominacionInput]) -> Vec<Deno
         .collect()
 }
 
-fn umbral_o_defecto(umbral_descuadre: f64) -> f64 {
-    if umbral_descuadre > 0.0 {
+fn umbral_o_defecto(umbral_descuadre: Dinero) -> Dinero {
+    if umbral_descuadre > Dinero::CERO {
         umbral_descuadre
     } else {
         UMBRAL_DESCUADRE_POR_DEFECTO
@@ -38,11 +39,11 @@ fn umbral_o_defecto(umbral_descuadre: f64) -> f64 {
 /// periodo, cuánto se espera encontrar y si hay mesas sin cobrar.
 pub async fn preparar(
     repo: &dyn CierreCajaRepository,
-    umbral_descuadre: f64,
+    umbral_descuadre: Dinero,
 ) -> AppResult<PreparacionCierreDto> {
     let ultimo = repo.ultimo_cierre().await?;
     let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
-    let fondo_inicial = ultimo.as_ref().map(|c| c.dejado).unwrap_or(0.0);
+    let fondo_inicial = ultimo.as_ref().map(|c| c.dejado).unwrap_or(Dinero::CERO);
 
     let totales = repo.totales_desde(desde.as_deref()).await?;
     let comandas_abiertas = repo.comandas_abiertas().await?;
@@ -56,8 +57,8 @@ pub async fn preparar(
         fondo_inicial,
         totales.ventas_efectivo,
         totales.gastos_caja,
-        0.0,
-        0.0,
+        Dinero::CERO,
+        Dinero::CERO,
     );
 
     Ok(PreparacionCierreDto {
@@ -94,16 +95,16 @@ pub async fn confirmar(
     id_cierre: String,
     id_usuario: Option<&str>,
     input: ConfirmarCierreInput,
-    umbral_descuadre: f64,
+    umbral_descuadre: Dinero,
 ) -> AppResult<CierreDto> {
     let ultimo = repo.ultimo_cierre().await?;
     let desde = ultimo.as_ref().map(|c| c.fecha_hora.clone());
 
     let fondo_inicial = match &ultimo {
         Some(c) => c.dejado,
-        None => input.fondo_inicial.unwrap_or(0.0),
+        None => input.fondo_inicial.unwrap_or(Dinero::CERO),
     };
-    if fondo_inicial < 0.0 {
+    if fondo_inicial.es_negativo() {
         return Err(AppError::validation("El fondo inicial no puede ser negativo"));
     }
 

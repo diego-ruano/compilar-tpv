@@ -3,6 +3,7 @@
 //! Todo el SQL del antiguo `mesas.rs` se reubica aquí; las creaciones usan autoincrement
 //! local (last_insert_rowid) en lugar de ids forzados desde remoto.
 
+use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -21,7 +22,7 @@ use tpv_contracts::mesas::{
 };
 use tpv_domain::mesas::{AbrirComandaData, CobroDetalles, CobroVentaRapida};
 
-use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use crate::util::{new_id, CANAL_BARRA};
 
 pub struct SqliteMesasRepository {
@@ -60,7 +61,7 @@ fn update_total_comanda_sql() -> &'static str {
     r#"
     UPDATE Comandas
     SET Total_Comanda = (
-      SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+      SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
       FROM Detalle_Comanda
       WHERE ID_Comanda = ?1
     )
@@ -133,6 +134,19 @@ async fn select_one_f64<C: Reader>(conn: &C, sql: &str, args: Vec<Value>) -> App
     Ok(None)
 }
 
+/// Lo mismo para una columna de DINERO (`INTEGER` de centimos).
+async fn select_one_dinero<C: Reader>(
+    conn: &C,
+    sql: &str,
+    args: Vec<Value>,
+) -> AppResult<Option<Dinero>> {
+    let mut rows = conn.query(sql, args).await.map_err(db_err)?;
+    if let Some(row) = rows.next().await.map_err(db_err)? {
+        return Ok(v_dinero(row.get_value(0).map_err(db_err)?));
+    }
+    Ok(None)
+}
+
 /// Ejecuta tolerando columnas/tablas inexistentes (devuelve false en ese caso).
 async fn try_exec<C: Writer>(db: &C, sql: &str, args: Vec<Value>) -> AppResult<bool> {
     match db.execute(sql, args).await {
@@ -189,12 +203,11 @@ async fn resolve_trabajador_id_input<C: Reader>(
 async fn sumar_gasto_cliente_por_comanda<C: Writer>(
     db: &C,
     id_comanda: &str,
-    importe: f64,
+    importe: Dinero,
 ) -> AppResult<()> {
-    if !importe.is_finite() || importe <= 0.0 {
+    if importe <= Dinero::CERO {
         return Ok(());
     }
-    let importe = (importe * 100.0).round() / 100.0;
 
     // El gasto se acredita únicamente vía la reserva explícita de la comanda
     // (Comandas.ID_Reserva → Reservas.ID_Cliente). No hay fallback por reserva
@@ -229,7 +242,7 @@ async fn sumar_gasto_cliente_por_comanda<C: Writer>(
         SET Total_Gastado = COALESCE(Total_Gastado,0) + ?2
         WHERE ID_Cliente = ?1;
         "#,
-        vec![Value::Text(id_cliente), Value::Real(importe)],
+        vec![Value::Text(id_cliente), dinero_val(importe)],
     )
     .await?;
 
@@ -394,7 +407,7 @@ async fn read_comanda_by_id<C: Reader>(db: &C, id_comanda: &str) -> AppResult<Op
         id_reserva: norm_opt_string(r.get_value(3).map_err(db_err)?),
         fecha_hora_apertura: v_string(r.get_value(4).map_err(db_err)?).unwrap_or_default(),
         fecha_hora_cierre: v_string(r.get_value(5).map_err(db_err)?),
-        total_comanda: v_f64(r.get_value(6).map_err(db_err)?).unwrap_or(0.0),
+        total_comanda: v_dinero(r.get_value(6).map_err(db_err)?).unwrap_or(Dinero::CERO),
         estado: v_string(r.get_value(7).map_err(db_err)?).unwrap_or_else(|| "Abierta".into()),
     }))
 }
@@ -1004,7 +1017,7 @@ impl MesasRepository for SqliteMesasRepository {
         Ok(changed > 0)
     }
 
-    async fn cerrar_comanda(&self, id_comanda: &str, _total: f64) -> AppResult<()> {
+    async fn cerrar_comanda(&self, id_comanda: &str, _total: Dinero) -> AppResult<()> {
         let g = self.db.write().await;
         let db = &g;
         // El Total_Comanda se recalcula server-side desde Detalle_Comanda (SUM), ignorando el
@@ -1014,7 +1027,7 @@ impl MesasRepository for SqliteMesasRepository {
             UPDATE Comandas
             SET Estado = 'Pagada',
                 Total_Comanda = (
-                  SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                  SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
                   FROM Detalle_Comanda
                   WHERE ID_Comanda = ?1
                 ),
@@ -1067,7 +1080,7 @@ impl MesasRepository for SqliteMesasRepository {
                 id_comanda: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 id_producto: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
                 cantidad: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(1.0),
-                precio_unitario: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
+                precio_unitario: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 notas: v_string(r.get_value(5).map_err(db_err)?),
                 estado_cocina: v_string(r.get_value(6).map_err(db_err)?),
                 nombre: v_string(r.get_value(7).map_err(db_err)?).unwrap_or_default(),
@@ -1084,7 +1097,7 @@ impl MesasRepository for SqliteMesasRepository {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio: f64,
+        precio: Dinero,
         id_trab_o_usuario: Option<String>,
     ) -> AppResult<Vec<MesaLineaComandaRow>> {
         {
@@ -1145,7 +1158,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Text(id_producto.to_string()),
                     nombre_producto,
                     Value::Real(cantidad),
-                    Value::Real(precio),
+                    dinero_val(precio),
                     estado_cocina,
                     iva,
                 ],
@@ -1205,8 +1218,7 @@ impl MesasRepository for SqliteMesasRepository {
                 _ => get_or_create_comanda_barra_inner(db, id_trabajador_cobrador.clone()).await?,
             };
 
-            let sum = data.items.iter().fold(0.0, |acc, (_p, precio)| acc + *precio);
-            let importe_total = (sum * 100.0).round() / 100.0;
+            let importe_total: Dinero = data.items.iter().map(|(_p, precio)| *precio).sum();
 
             // Líneas cobradas (detalle, producto, cantidad=1) para el descuento de stock FEFO.
             let mut charged: Vec<(String, String, f64)> = Vec::new();
@@ -1253,7 +1265,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(id_comanda.to_string()),
                         Value::Text(producto_id.clone()),
                         nombre_producto,
-                        Value::Real(*precio),
+                        dinero_val(*precio),
                         estado_cocina,
                         iva,
                     ],
@@ -1290,7 +1302,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Text(id_pago.clone()),
                     Value::Text(id_comanda.to_string()),
                     Value::Text(data.metodo.clone()),
-                    Value::Real(importe_total),
+                    dinero_val(importe_total),
                     data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
                     Value::Text(numero_ticket.clone()),
@@ -1320,7 +1332,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(id_pago.clone()),
                         Value::Text(id_comanda.to_string()),
                         Value::Text(data.metodo.clone()),
-                        Value::Real(importe_total),
+                        dinero_val(importe_total),
                         data.id_usuario_cobrador.clone().map(Value::Text).unwrap_or(Value::Null),
                         Value::Text(numero_ticket.clone()),
                     ],
@@ -1452,13 +1464,13 @@ impl MesasRepository for SqliteMesasRepository {
             SELECT
               c.ID_Comanda, c.Fecha_Hora_Apertura, c.Estado,
               (
-                SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
+                SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
                 FROM Detalle_Comanda dc
                 LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                 WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
               ) AS Total_Pendiente,
               (
-                SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
+                SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
                 FROM Detalle_Comanda dc WHERE dc.ID_Comanda = c.ID_Comanda
               ) AS Total_Comanda,
               (
@@ -1508,8 +1520,8 @@ impl MesasRepository for SqliteMesasRepository {
                 id_comanda: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 fecha_hora_apertura: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 estado: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-                total_pendiente: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
-                total_comanda: v_f64(r.get_value(4).map_err(db_err)?).unwrap_or(0.0),
+                total_pendiente: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                total_comanda: v_dinero(r.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 pendientes_cocina: v_i64(r.get_value(5).map_err(db_err)?).unwrap_or(0),
                 pendientes_pago: v_i64(r.get_value(6).map_err(db_err)?).unwrap_or(0),
             });
@@ -1581,7 +1593,7 @@ impl MesasRepository for SqliteMesasRepository {
                 SELECT
                   c.ID_Mesa, c.ID_Comanda,
                   (
-                    SELECT IFNULL(SUM(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)), 0)
+                    SELECT IFNULL(SUM(CAST(ROUND(dc.Precio_Unitario * COALESCE(dc.Cantidad,1)) AS INTEGER)), 0)
                     FROM Detalle_Comanda dc
                     LEFT JOIN v_lineas_cobradas pd ON pd.ID_Detalle = dc.ID_Detalle
                     WHERE dc.ID_Comanda = c.ID_Comanda AND pd.ID_Detalle IS NULL
@@ -1618,11 +1630,11 @@ impl MesasRepository for SqliteMesasRepository {
             if id_mesa.is_empty() || id_comanda.is_empty() {
                 continue;
             }
-            let total_pendiente = v_f64(r.get_value(2).map_err(db_err)?).unwrap_or(0.0);
+            let total_pendiente = v_dinero(r.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO);
             let pendientes_pago = v_i64(r.get_value(3).map_err(db_err)?).unwrap_or(0);
             let pendientes_cocina = v_i64(r.get_value(4).map_err(db_err)?).unwrap_or(0);
 
-            let estado = if pendientes_pago > 0 || total_pendiente > 0.0 {
+            let estado = if pendientes_pago > 0 || total_pendiente > Dinero::CERO {
                 "PENDIENTE".to_string()
             } else {
                 "LIBRE".to_string()
@@ -1745,7 +1757,7 @@ impl MesasRepository for SqliteMesasRepository {
                     ocupada: false,
                     id_comanda: String::new(),
                     idComanda: String::new(),
-                    totalPendiente: 0.0,
+                    totalPendiente: Dinero::CERO,
                     pendientesPago: 0,
                     pendientesCocina: 0,
                     estado: "LIBRE".into(),
@@ -1973,7 +1985,7 @@ impl MesasRepository for SqliteMesasRepository {
 
             let sql_sum = format!(
                 r#"
-                SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0)
+                SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0)
                 FROM Detalle_Comanda dc
                 WHERE dc.ID_Comanda = ?1
                   AND dc.ID_Detalle IN ({})
@@ -1981,10 +1993,9 @@ impl MesasRepository for SqliteMesasRepository {
                 "#,
                 in_sql
             );
-            let total = select_one_f64(db, &sql_sum, count_args.clone())
+            let total = select_one_dinero(db, &sql_sum, count_args.clone())
                 .await?
-                .unwrap_or(0.0);
-            let total = (total * 100.0).round() / 100.0;
+                .unwrap_or(Dinero::CERO);
 
             // Numero correlativo del ticket: se reserva aqui y viaja como literal en el pago,
             // para que una reimpresion saque el mismo papel.
@@ -2009,7 +2020,7 @@ impl MesasRepository for SqliteMesasRepository {
                     Value::Text(id_pago.clone()),
                     Value::Text(data.id_comanda.clone()),
                     Value::Text(data.metodo.clone()),
-                    Value::Real(total),
+                    dinero_val(total),
                     Value::Text(data.tipo.clone()),
                     data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
                     id_trabajador_cobrador.map(Value::Text).unwrap_or(Value::Null),
@@ -2040,7 +2051,7 @@ impl MesasRepository for SqliteMesasRepository {
                         Value::Text(id_pago.clone()),
                         Value::Text(data.id_comanda.clone()),
                         Value::Text(data.metodo.clone()),
-                        Value::Real(total),
+                        dinero_val(total),
                         Value::Text(data.tipo.clone()),
                         data.id_usuario.clone().map(Value::Text).unwrap_or(Value::Null),
                         Value::Text(numero_ticket.clone()),
@@ -2074,7 +2085,7 @@ impl MesasRepository for SqliteMesasRepository {
                 tracing::warn!(
                     target: "tpv::mesas",
                     id_comanda = %data.id_comanda,
-                    importe = total,
+                    importe = total.centimos(),
                     error = %e,
                     "sumar_gasto_cliente_por_comanda falló; pago commiteado sin actualizar Total_Gastado"
                 );
@@ -2158,7 +2169,7 @@ impl MesasRepository for SqliteMesasRepository {
                     SET
                       Estado = 'Pagada',
                       Total_Comanda = (
-                        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
                         FROM Detalle_Comanda WHERE ID_Comanda = ?1
                       ),
                       Fecha_Hora_Cierre = datetime('now','localtime')
@@ -2320,7 +2331,7 @@ async fn productos_query<C: Reader>(
             id_producto: v_string(r.get_value(0).map_err(db_err)?).unwrap_or_default(),
             id_categoria: v_string(r.get_value(1).map_err(db_err)?).unwrap_or_default(),
             nombre: v_string(r.get_value(2).map_err(db_err)?).unwrap_or_default(),
-            precio_venta: v_f64(r.get_value(3).map_err(db_err)?).unwrap_or(0.0),
+            precio_venta: v_dinero(r.get_value(3).map_err(db_err)?).unwrap_or(Dinero::CERO),
             ruta_imagen: v_string(r.get_value(4).map_err(db_err)?),
         });
     }
@@ -2539,10 +2550,10 @@ mod tests_snapshot_de_la_linea {
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
         // Con tipo propio: una botella para llevar.
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent)
-           VALUES ('con', 'cat', 'Vino para llevar', 12.0, 21);",
+           VALUES ('con', 'cat', 'Vino para llevar', 1200, 21);",
         // Sin tipo propio: hereda el del negocio.
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('sin', 'cat', 'Cafe', 1.3);",
+           VALUES ('sin', 'cat', 'Cafe', 130);",
     ];
 
     #[tokio::test]

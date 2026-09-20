@@ -15,5 +15,7 @@
     "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area, Hora_Inicio, Hora_Fin, Notas) VALUES ('def-3', 'trab-2', 2, 1, 'turno-t', 'sala', '16:00', '23:00', 'siempre tardes');",
     "INSERT INTO Horario_Predeterminado (ID_Default, ID_Trabajador, Weekday, Orden, ID_Turno, Area) VALUES ('def-4', 'trab-2', 7, 1, 'turno-m', 'sala');"
   ],
-  "entrada": { "fecha_lunes": "2099-01-05" }
+  "entrada": {
+    "fecha_lunes": "2099-01-05"
+  }
 }

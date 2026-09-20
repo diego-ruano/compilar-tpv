@@ -5,6 +5,8 @@
 //! Como es un módulo puramente de lectura no tiene entidades de dominio: todos los
 //! tipos viven aquí (incluidos los enums de filtro y las series de gráfica compartidas).
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -50,9 +52,9 @@ pub struct ChartSeriesI64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
-pub struct ChartSeriesF64Out {
+pub struct ChartSerieDinero {
     pub labels: Vec<String>,
-    pub values: Vec<f64>,
+    pub values: Vec<Dinero>,
 }
 
 /* =========================================================
@@ -73,7 +75,7 @@ pub struct MesasTopComandas {
 pub struct MesaIngresoRow {
     pub mesa: String,
     pub zona: String,
-    pub total: f64,
+    pub total: Dinero,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -83,7 +85,7 @@ pub struct MesasStatsResponse {
     pub total_mesas: i64,
     #[ts(type = "number")]
     pub ocupadas: i64,
-    pub ticket_medio_por_mesa: f64,
+    pub ticket_medio_por_mesa: Dinero,
     pub mesa_top_comandas: Option<MesasTopComandas>,
     pub servicios: ChartSeriesI64,
     pub top_mesas_ingresos: Vec<MesaIngresoRow>,
@@ -201,7 +203,7 @@ pub struct TrabajadorCardStats {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
-    pub ticket_medio_eur: Option<f64>,
+    pub ticket_medio_eur: Option<Dinero>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -210,7 +212,7 @@ pub struct TrabajadoresStatsResponse {
     pub cocineros: Vec<TrabajadorCardStats>,
     pub camareros: Vec<TrabajadorCardStats>,
     pub limpieza: Vec<TrabajadorCardStats>,
-    pub ranking_ventas: ChartSeriesF64Out,
+    pub ranking_ventas: ChartSerieDinero,
 }
 
 /* =========================================================
@@ -232,10 +234,10 @@ pub struct ClientesStatsResponse {
     pub recurrentes: i64,
     #[ts(type = "number")]
     pub no_recurrentes: i64,
-    pub ticket_medio_cliente: f64,
+    pub ticket_medio_cliente: Dinero,
 
     pub nuevos_por_bucket: ChartSeriesI64,
-    pub top_clientes_gasto: ChartSeriesF64Out,
+    pub top_clientes_gasto: ChartSerieDinero,
 }
 
 /* =========================================================
@@ -252,7 +254,7 @@ pub struct ProveedoresStatsArgs {
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ProveedorTop {
     pub nombre: String,
-    pub total: f64,
+    pub total: Dinero,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -261,22 +263,22 @@ pub struct UltimoGastoProveedor {
     pub fecha: String,
     pub proveedor: String,
     pub concepto: String,
-    pub importe: f64,
+    pub importe: Dinero,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../../packages/contracts/src/generated/bindings.ts")]
 pub struct ProveedoresStatsResponse {
-    pub total_gasto: f64,
+    pub total_gasto: Dinero,
     #[ts(type = "number")]
     pub num_gastos: i64,
-    pub gasto_medio: f64,
+    pub gasto_medio: Dinero,
     pub porcentaje_sobre_total_gastos: f64,
 
     pub proveedor_top: Option<ProveedorTop>,
 
-    pub gastos_evolucion: ChartSeriesF64Out,
-    pub gasto_por_proveedor: ChartSeriesF64Out,
+    pub gastos_evolucion: ChartSerieDinero,
+    pub gasto_por_proveedor: ChartSerieDinero,
 
     pub ultimos_gastos: Vec<UltimoGastoProveedor>,
 }

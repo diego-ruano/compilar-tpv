@@ -7,9 +7,9 @@
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 900, 10.0, 5, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 150);"
   ],
   "entrada": {
     "id_proveedor": "prov-1"

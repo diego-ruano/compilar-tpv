@@ -17,7 +17,7 @@ use tpv_domain::inventario::{
 };
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, opt_real, opt_text, v_f64, v_i64, v_string, v_dinero, opt_dinero};
 use crate::util::new_id;
 
 pub struct SqliteInventarioRepository {
@@ -48,7 +48,7 @@ fn map_producto_base(row: &Row) -> AppResult<ProductoBaseDto> {
         id_categoria: s(g(1)?),
         id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
-        precio_venta: v_f64(g(4)?),
+        precio_venta: v_dinero(g(4)?),
         stock_minimo: v_f64(g(5)?),
         unidad_medida: v_string(g(6)?),
         nombre_imagen: v_string(g(7)?),
@@ -66,7 +66,7 @@ fn map_producto_list(row: &Row) -> AppResult<ProductoListDto> {
         id_categoria: s(g(1)?),
         id_proveedor: norm_opt_string(g(2)?),
         nombre: s(g(3)?),
-        precio_venta: v_f64(g(4)?),
+        precio_venta: v_dinero(g(4)?),
         stock_minimo: v_f64(g(6)?),
         unidad_medida: v_string(g(7)?),
         nombre_imagen: v_string(g(8)?),
@@ -91,7 +91,7 @@ fn map_resumen(row: &Row) -> AppResult<ProductoResumenDto> {
         unidad_medida: v_string(g(2)?),
         caducidad_proxima: v_string(g(3)?),
         lote: v_string(g(4)?),
-        precio_venta: v_f64(g(5)?),
+        precio_venta: v_dinero(g(5)?),
     })
 }
 
@@ -104,7 +104,7 @@ fn map_lote(row: &Row) -> AppResult<LoteDto> {
         fecha_entrada: s(g(3)?),
         caducidad: v_string(g(4)?),
         stock_disponible: fl(g(5)?),
-        coste_unitario: v_f64(g(6)?),
+        coste_unitario: v_dinero(g(6)?),
         id_proveedor: norm_opt_string(g(7)?),
         notas: v_string(g(8)?),
     })
@@ -545,7 +545,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                         None => Value::Null,
                     },
                     Value::Text(p.nombre),
-                    opt_real(p.precio_venta),
+                    opt_dinero(p.precio_venta),
                     opt_real(p.stock_minimo),
                     opt_text(p.unidad_medida),
                     opt_text(p.nombre_imagen),
@@ -606,7 +606,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
                     Value::Real(stock),
-                    opt_real(l.coste_unitario),
+                    opt_dinero(l.coste_unitario),
                     match l.id_proveedor {
                         Some(v) => Value::Text(v),
                         None => Value::Null,
@@ -689,7 +689,7 @@ impl InventarioRepository for SqliteInventarioRepository {
                     opt_text(l.fecha_entrada),
                     opt_text(l.caducidad),
                     Value::Real(l.stock_disponible),
-                    opt_real(l.coste_unitario),
+                    opt_dinero(l.coste_unitario),
                     match l.id_proveedor {
                         Some(v) => Value::Text(v),
                         None => Value::Null,
@@ -817,6 +817,7 @@ mod tests_borrado_de_producto {
     use libsql::Connection;
     use tpv_application::ports::inventario::InventarioRepository;
 
+    use tpv_domain::dinero::Dinero;
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("borrado_producto");
         std::fs::create_dir_all(&dir).unwrap();
@@ -837,9 +838,9 @@ mod tests_borrado_de_producto {
     const CATALOGO: &[&str] = &[
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('vendido', 'cat', 'Cafe', 1.3);",
+           VALUES ('vendido', 'cat', 'Cafe', 130);",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('nuevo', 'cat', 'Te', 1.5);",
+           VALUES ('nuevo', 'cat', 'Te', 150);",
     ];
 
     /// Una venta ya cobrada: la comanda está cerrada y la línea guarda su snapshot.
@@ -847,7 +848,7 @@ mod tests_borrado_de_producto {
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det', 'com', 'vendido', 'Cafe', 1, 1.3);",
+           VALUES ('det', 'com', 'vendido', 'Cafe', 1, 130);",
     ];
 
     /// Una mesa a medias: la comanda sigue abierta.
@@ -855,7 +856,7 @@ mod tests_borrado_de_producto {
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('viva', 'BARRA', '2026-01-02 12:00:00', 'Abierta');",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det-vivo', 'viva', 'vendido', 'Cafe', 1, 1.3);",
+           VALUES ('det-vivo', 'viva', 'vendido', 'Cafe', 1, 130);",
     ];
 
     async fn existe(db: &Arc<Db>, id: &str) -> bool {
@@ -923,7 +924,11 @@ mod tests_borrado_de_producto {
             Some("Cafe"),
             "y el nombre se queda"
         );
-        assert_eq!(crate::mapping::v_f64(fila.get_value(2).unwrap()), Some(1.3));
+        // El precio congelado en la linea: centimos, como en la columna (ARQ-01).
+        assert_eq!(
+            crate::mapping::v_dinero(fila.get_value(2).unwrap()),
+            Some(Dinero::de_centimos(130))
+        );
     }
 
     #[tokio::test]
@@ -1024,7 +1029,7 @@ mod tests_borrado_de_producto {
             &db,
             &[
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 2.6, 'TOTAL');",
+                   VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 260, 'TOTAL');",
                 "INSERT INTO Suelto_Consumos (ID_Detalle, ID_Producto, ID_Pago, Cantidad)
                    VALUES ('det', 'vendido', 'pago', 2);",
             ],

@@ -17,6 +17,7 @@
 //! **control de flujo** entre envíos, así que remitir no puede ser una llamada HTTP dentro del
 //! cobro aunque se quisiera.
 
+use tpv_domain::dinero::Dinero;
 use std::sync::OnceLock;
 
 use libsql::Value;
@@ -28,7 +29,7 @@ use tpv_domain::ticket::{self, LineaTicket, TramoIva};
 use tpv_domain::verifactu as vf;
 
 use crate::db::{Reader, WriteGuard, Writer};
-use crate::mapping::{opt_text, v_f64, v_i64, v_string};
+use crate::mapping::{opt_text, v_f64, v_i64, v_string, v_dinero};
 use crate::util::{new_id, now_ms};
 
 fn db_err(e: impl std::fmt::Display) -> AppError {
@@ -203,7 +204,7 @@ pub(crate) struct DatosObligado {
     pub iva_general: f64,
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada. Configurable porque es
     /// un número que la norma puede mover.
-    pub limite_simplif: f64,
+    pub limite_simplif: Dinero,
 }
 
 /// Lee y **valida** los datos fiscales del obligado.
@@ -238,8 +239,8 @@ pub(crate) async fn datos_obligado<C: Reader>(conn: &C) -> AppResult<DatosObliga
         &v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
     );
     let iva_general = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(10.0);
-    let limite_simplif = v_f64(row.get_value(5).map_err(db_err)?)
-        .filter(|v| *v > 0.0)
+    let limite_simplif = v_dinero(row.get_value(5).map_err(db_err)?)
+        .filter(|v| *v > Dinero::CERO)
         .unwrap_or(vf::LIMITE_SIMPLIFICADA_HOSTELERIA);
 
     if nif.is_empty() || razon_social.trim().is_empty() {
@@ -810,7 +811,7 @@ pub(crate) async fn lineas_de_pago<C: Reader>(
     let mut out = Vec::new();
     while let Some(row) = rows.next().await.map_err(db_err)? {
         out.push(LineaTicket {
-            total_con_iva: v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+            total_con_iva: v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
             tipo_iva: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(iva_general),
             exento: v_i64(row.get_value(2).map_err(db_err)?).unwrap_or(0) == 1,
             causa_exencion: v_string(row.get_value(3).map_err(db_err)?),
@@ -849,7 +850,7 @@ pub async fn emitir_cobro(
     db: &WriteGuard<'_>,
     id_pago: &str,
     numero_reservado: (String, i64),
-    importe_pago: f64,
+    importe_pago: Dinero,
     destinatario: Option<vf::Destinatario>,
 ) -> AppResult<Option<BloqueFiscal>> {
     // MODO-PRUEBA (temporal): el número ya dice si el cobro se hizo en modo prueba —la serie se fija
@@ -890,8 +891,8 @@ pub async fn emitir_cobro(
 
     let mut lineas = lineas_de_pago(db, id_pago, obligado.iva_general).await?;
 
-    let suma: f64 = lineas.iter().map(|l| l.total_con_iva).sum();
-    if lineas.is_empty() || (suma - importe_pago).abs() > 0.005 {
+    let suma: Dinero = lineas.iter().map(|l| l.total_con_iva).sum();
+    if lineas.is_empty() || suma != importe_pago {
         // Dos casos que van juntos porque el remedio es el mismo:
         //   * un cobro que no enlaza líneas (no debería pasar, pero no puede impedir facturar), y
         //   * un cobro PARCIAL de una línea, donde lo cobrado no es la suma de las líneas enteras.
@@ -1079,7 +1080,7 @@ pub async fn emitir_baja_de_pago(
 /// Si no hay desglose guardado (no debería pasar) se devuelve vacío y el registro sale con importe
 /// cero. Es mejor que no salir: lo que no puede quedar es un cobro dado de baja sin su rectificativa.
 fn desglose_negado(desglose_json: Option<&str>) -> Vec<LineaTicket> {
-    tramos_del_desglose(desglose_json, -1.0)
+    tramos_del_desglose(desglose_json, -1)
 }
 
 
@@ -1187,14 +1188,14 @@ pub async fn emitir_sustitutiva(
 /// Las líneas del desglose original, **con su signo**. Gemela de `desglose_negado`, que es la de la
 /// rectificativa; aquí el importe no cambia de signo porque la `F3` no devuelve nada.
 fn desglose_mismo_signo(desglose_json: Option<&str>) -> Vec<LineaTicket> {
-    tramos_del_desglose(desglose_json, 1.0)
+    tramos_del_desglose(desglose_json, 1)
 }
 
 /// Lee `Desglose_Json` y devuelve sus tramos como líneas, multiplicando el importe por `signo`.
 ///
 /// Existe porque la rectificativa y la sustitutiva necesitan lo mismo con el signo contrario, y dos
 /// copias de este parseo se separarían en cuanto alguien añadiera un campo al desglose.
-fn tramos_del_desglose(desglose_json: Option<&str>, signo: f64) -> Vec<LineaTicket> {
+fn tramos_del_desglose(desglose_json: Option<&str>, signo: i64) -> Vec<LineaTicket> {
     let Some(arr) = desglose_json
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
         .and_then(|v| v.as_array().cloned())
@@ -1204,15 +1205,17 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: f64) -> Vec<LineaTick
 
     arr.iter()
         .filter_map(|t| {
-            let base: f64 = t
+            // El desglose guardado lleva el TEXTO fiscal ("123.10"), que es el dato canonico:
+            // se lee a centimos sin pasar por f64.
+            let base = t
                 .get("BaseImponibleOimporteNoSujeto")
                 .and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok())?;
-            let cuota: f64 = t
+                .and_then(Dinero::de_texto_fiscal)?;
+            let cuota = t
                 .get("CuotaRepercutida")
                 .and_then(|v| v.as_str())
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0.0);
+                .and_then(Dinero::de_texto_fiscal)
+                .unwrap_or(Dinero::CERO);
             let exenta = t.get("OperacionExenta").and_then(|v| v.as_str());
             let tipo: f64 = t
                 .get("TipoImpositivo")
@@ -1221,7 +1224,7 @@ fn tramos_del_desglose(desglose_json: Option<&str>, signo: f64) -> Vec<LineaTick
                 .unwrap_or(0.0);
             Some(LineaTicket {
                 // `LineaTicket` trabaja con el total CON IVA, que es base + cuota.
-                total_con_iva: signo * (base + cuota),
+                total_con_iva: (base + cuota).por(signo),
                 tipo_iva: tipo,
                 exento: exenta.is_some(),
                 causa_exencion: exenta.map(str::to_string),
@@ -2046,6 +2049,12 @@ mod tests_subsanacion {
     use crate::db::Db;
     use std::sync::Arc;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("verifactu_subsana");
         std::fs::create_dir_all(&dir).unwrap();
@@ -2070,7 +2079,7 @@ mod tests_subsanacion {
                 &g,
                 DatosFactura {
                     lineas: vec![LineaTicket {
-                        total_con_iva: 12.10,
+                        total_con_iva: eur(12.10),
                         tipo_iva: 10.0,
                         exento: false,
                         causa_exencion: None,
@@ -2217,7 +2226,7 @@ mod tests_subsanacion {
                 &g,
                 DatosFactura {
                     lineas: vec![LineaTicket {
-                        total_con_iva: 12.10,
+                        total_con_iva: eur(12.10),
                         tipo_iva: 10.0,
                         exento: false,
                         causa_exencion: None,
@@ -2274,6 +2283,12 @@ mod tests_modo_prueba {
     use crate::db::Db;
     use std::sync::Arc;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// Sin NIF ni razón social: fuera del modo prueba, un cobro aquí se cortaría.
     async fn db_sin_datos_fiscales() -> Arc<Db> {
         let dir = crate::test_temp::dir_temporal("verifactu_modo_prueba");
@@ -2290,7 +2305,7 @@ mod tests_modo_prueba {
         let numero = reservar_numero_factura(&g).await.unwrap();
         assert!(vf::es_numero_de_prueba(&numero.0), "numera en la serie de prueba: {}", numero.0);
 
-        let bloque = emitir_cobro(&g, "pago-de-prueba", numero, 5.0, None).await.unwrap();
+        let bloque = emitir_cobro(&g, "pago-de-prueba", numero, eur(5.0), None).await.unwrap();
         assert!(bloque.is_none(), "un cobro de prueba no expide factura");
 
         let registros = select_i64(&g, "SELECT COUNT(*) FROM Registros_Facturacion;", vec![])
@@ -2962,6 +2977,13 @@ mod tests_reconciliacion {
 mod tests {
     use super::*;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     #[test]
     fn la_escalera_de_avisos_va_por_la_antiguedad_del_pendiente_mas_viejo() {
         // Sin nada que enviar no hay aviso, aunque el equipo lleve una semana sin internet: estar
@@ -2987,7 +3009,7 @@ mod tests {
         // los campos TipoImpositivo, CuotaRepercutida...". No van a cero: NO VAN.
         let json = desglose_json(&[TramoIva::Exenta {
             causa: "E1".into(),
-            base: 10.0,
+            base: eur(10.0),
         }]);
         assert!(json.contains("\"OperacionExenta\":\"E1\""));
         assert!(!json.contains("TipoImpositivo"), "{json}");
@@ -3001,8 +3023,8 @@ mod tests {
         // ahí el tipo y la cuota son OBLIGATORIOS (error 1208).
         let json = desglose_json(&[TramoIva::Sujeta {
             tipo: 0.0,
-            base: 10.0,
-            cuota: 0.0,
+            base: eur(10.0),
+            cuota: Dinero::CERO,
         }]);
         assert!(json.contains("\"CalificacionOperacion\":\"S1\""));
         assert!(json.contains("\"TipoImpositivo\":\"0\""));
@@ -3015,8 +3037,8 @@ mod tests {
         // Error 1245: si Impuesto está vacío (que es como va: vacío se considera IVA), ClaveRegimen
         // es obligatorio.
         let json = desglose_json(&[
-            TramoIva::Sujeta { tipo: 10.0, base: 10.0, cuota: 1.0 },
-            TramoIva::Exenta { causa: "E1".into(), base: 5.0 },
+            TramoIva::Sujeta { tipo: 10.0, base: eur(10.0), cuota: eur(1.0) },
+            TramoIva::Exenta { causa: "E1".into(), base: eur(5.0) },
         ]);
         assert_eq!(json.matches("\"ClaveRegimen\":\"01\"").count(), 2);
     }

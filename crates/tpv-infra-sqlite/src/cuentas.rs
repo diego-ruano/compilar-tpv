@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de cuentas (caja). Local-First (sin outbox/applied).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use tpv_domain::cuentas::{GastoData, PagoData, ESTADO_ACTIVO, ESTADO_ANULADO};
 
 use crate::caja_movimientos::{self, MovimientoCaja};
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string, v_dinero, dinero_val};
 use crate::util::new_id;
 
 pub struct SqliteCuentasRepository {
@@ -190,7 +191,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             let cliente = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
             let metodo =
                 v_string(row.get_value(3).map_err(db_err)?).unwrap_or_else(|| "Efectivo".into());
-            let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
+            let importe = v_dinero(row.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO);
             let estado = v_string(row.get_value(5).map_err(db_err)?)
                 .unwrap_or_else(|| ESTADO_ACTIVO.to_string());
             out.push(EntradaDto {
@@ -225,7 +226,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             let fecha = v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default();
             let tipo = v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default();
             let concepto = v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default();
-            let importe = v_f64(row.get_value(4).map_err(db_err)?).unwrap_or(0.0);
+            let importe = v_dinero(row.get_value(4).map_err(db_err)?).unwrap_or(Dinero::CERO);
             let prov = norm_opt_string(row.get_value(5).map_err(db_err)?);
             let pagado_con_caja = v_i64(row.get_value(6).map_err(db_err)?).unwrap_or(0) != 0;
             out.push(SalidaDto {
@@ -278,14 +279,14 @@ impl CuentasRepository for SqliteCuentasRepository {
             let mut rows = db.query(e_sql.as_str(), e_params).await.map_err(db_err)?;
             match rows.next().await.map_err(db_err)? {
                 Some(row) => (
-                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
-                    v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
-                    v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
+                    v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                    v_dinero(row.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                    v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
                     v_i64(row.get_value(3).map_err(db_err)?).unwrap_or(0),
                     v_i64(row.get_value(4).map_err(db_err)?).unwrap_or(0),
-                    v_f64(row.get_value(5).map_err(db_err)?).unwrap_or(0.0),
+                    v_dinero(row.get_value(5).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 ),
-                None => (0.0, 0.0, 0.0, 0, 0, 0.0),
+                None => (Dinero::CERO, Dinero::CERO, Dinero::CERO, 0, 0, Dinero::CERO),
             }
         };
 
@@ -299,10 +300,10 @@ impl CuentasRepository for SqliteCuentasRepository {
             let mut rows = db.query(s_sql.as_str(), s_params).await.map_err(db_err)?;
             match rows.next().await.map_err(db_err)? {
                 Some(row) => (
-                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                    v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
                     v_i64(row.get_value(1).map_err(db_err)?).unwrap_or(0),
                 ),
-                None => (0.0, 0),
+                None => (Dinero::CERO, 0),
             }
         };
 
@@ -345,7 +346,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                     Value::Text(id_gasto),
                     Value::Text(g.fecha),
                     Value::Text(g.concepto),
-                    Value::Real(g.importe),
+                    dinero_val(g.importe),
                     Value::Text(g.tipo_gasto),
                     match g.proveedor_id {
                         Some(id) => Value::Text(id),
@@ -390,7 +391,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                     Value::Text(g.fecha),
                     Value::Text(g.tipo_gasto),
                     Value::Text(g.concepto),
-                    Value::Real(g.importe),
+                    dinero_val(g.importe),
                     match g.proveedor_id {
                         Some(id) => Value::Text(id),
                         None => Value::Null,
@@ -418,7 +419,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 .map_err(db_err)?;
             match rows.next().await.map_err(db_err)? {
                 Some(row) => Some((
-                    v_f64(row.get_value(0).map_err(db_err)?).unwrap_or(0.0),
+                    v_dinero(row.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
                     v_string(row.get_value(1).map_err(db_err)?).unwrap_or_default(),
                 )),
                 None => None,
@@ -434,7 +435,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             .map_err(db_err)?;
 
         if affected > 0 {
-            let (importe, concepto) = importe.unwrap_or((0.0, String::new()));
+            let (importe, concepto) = importe.unwrap_or((Dinero::CERO, String::new()));
             caja_movimientos::registrar(
                 &db,
                 MovimientoCaja {
@@ -464,7 +465,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 SET Fecha_Hora = ?2,
                     Metodo_Pago = ?3,
                     Importe_Total = (
-                        SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0)
+                        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0)
                         FROM Pago_Detalles pd
                         JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
                         WHERE pd.ID_Pago = ?1
@@ -574,7 +575,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             lineas.push(LineaTicketDto {
                 nombre: v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
                 cantidad: v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(1.0),
-                precio_unitario: v_f64(row.get_value(2).map_err(db_err)?).unwrap_or(0.0),
+                precio_unitario: v_dinero(row.get_value(2).map_err(db_err)?).unwrap_or(Dinero::CERO),
                 iva_percent: v_f64(row.get_value(3).map_err(db_err)?),
             });
         }
@@ -658,7 +659,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                 match rows.next().await.map_err(db_err)? {
                     Some(row) => (
                         v_string(row.get_value(0).map_err(db_err)?).unwrap_or_default(),
-                        v_f64(row.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                        v_dinero(row.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
                         v_string(row.get_value(2).map_err(db_err)?).unwrap_or_default(),
                         v_string(row.get_value(3).map_err(db_err)?).unwrap_or_default(),
                     ),
@@ -733,8 +734,7 @@ impl CuentasRepository for SqliteCuentasRepository {
             //
             //    Esto SÍ se hace en los dos casos: el cliente ya no ha gastado ese dinero, haya
             //    sido porque la venta no existía o porque se le ha devuelto.
-            let importe = (importe * 100.0).round() / 100.0;
-            if importe > 0.0 && !id_comanda.is_empty() {
+            if importe > Dinero::CERO && !id_comanda.is_empty() {
                 conn.execute(
                     r#"
                     UPDATE Clientes
@@ -746,7 +746,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                         WHERE c.ID_Comanda = ?1
                     );
                     "#,
-                    vec![Value::Text(id_comanda.clone()), Value::Real(importe)],
+                    vec![Value::Text(id_comanda.clone()), dinero_val(importe)],
                 )
                 .await
                 .map_err(db_err)?;
@@ -837,7 +837,7 @@ impl CuentasRepository for SqliteCuentasRepository {
                           )
                           THEN NULL ELSE Fecha_Hora_Cierre END,
                         Total_Comanda = (
-                            SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+                            SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
                             FROM Detalle_Comanda
                             WHERE ID_Comanda = Comandas.ID_Comanda
                         )
@@ -923,6 +923,12 @@ mod tests_anulacion {
     use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
     use tpv_application::ports::mesas::MesasRepository;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// Una venta de mesa con dos líneas: una cobrada (con consumo de lote y de suelto) y otra que
     /// se quedó pendiente. Es el estado desde el que se anula, y el que permite comprobar de una
     /// vez el stock, el gasto del cliente y la reapertura de la comanda.
@@ -941,22 +947,22 @@ mod tests_anulacion {
            VALUES ('mesa', 'zona', '4', 4, 0, 0, 'rect', 10, 10);",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
-           VALUES ('prod', 'cat', 'Cerveza', 3.0, 7);",
+           VALUES ('prod', 'cat', 'Cerveza', 300, 7);",
         "INSERT INTO Lotes_Producto (ID_Lote, ID_Producto, Codigo_Lote, Stock_Disponible, Fecha_Entrada)
            VALUES ('lote', 'prod', 'L-1', 18, '2026-01-01 10:00:00');",
-        "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 50.0);",
+        "INSERT INTO Clientes (ID_Cliente, Nombre, Total_Gastado) VALUES ('cli', 'Ana', 5000);",
         "INSERT INTO Reservas (ID_Reserva, ID_Cliente, ID_Mesa, Dia_YMD, Hora, Turno, Comensales)
            VALUES ('res', 'cli', 'mesa', '2026-01-02', '13:00', 'COMIDA', 2);",
         "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, ID_Reserva, Fecha_Hora_Apertura, Fecha_Hora_Cierre, Estado, Total_Comanda)
-           VALUES ('com', 'MESA', 'mesa', 'res', '2026-01-02 12:00:00', '2026-01-02 13:00:00', 'Pagada', 12.0);",
+           VALUES ('com', 'MESA', 'mesa', 'res', '2026-01-02 12:00:00', '2026-01-02 13:00:00', 'Pagada', 1200);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det-lote', 'com', 'prod', 2, 3.0);",
+           VALUES ('det-lote', 'com', 'prod', 2, 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det-suelto', 'com', 'prod', 1, 3.0);",
+           VALUES ('det-suelto', 'com', 'prod', 1, 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('det-pendiente', 'com', 'prod', 1, 3.0);",
+           VALUES ('det-pendiente', 'com', 'prod', 1, 300);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('pago', 'com', '2026-01-02 13:00:00', 'Efectivo', 9.0, 'PARCIAL');",
+           VALUES ('pago', 'com', '2026-01-02 13:00:00', 'Efectivo', 900, 'PARCIAL');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-lote');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'det-suelto');",
         "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad) VALUES ('det-lote', 'lote', 'pago', 2);",
@@ -1001,7 +1007,7 @@ mod tests_anulacion {
                    VALUES ('lote-viejo', 'prod', 'L-0', 5, '2026-01-01 10:00:00');",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo,
                                     Estado, Anulado_En, Anulado_Por, Motivo_Anulacion, Motivo_Baja)
-                   VALUES ('pago-viejo', 'com', '2026-01-02 12:30:00', 'Efectivo', 6.0, 'PARCIAL',
+                   VALUES ('pago-viejo', 'com', '2026-01-02 12:30:00', 'Efectivo', 600, 'PARCIAL',
                            'ANULADO', '2026-01-02 12:40:00', 'u1', 'mesa equivocada', 'ERROR');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago-viejo', 'det-lote');",
                 "INSERT INTO Lote_Consumos (ID_Detalle, ID_Lote, ID_Pago, Cantidad)
@@ -1136,7 +1142,7 @@ mod tests_anulacion {
         );
         assert_eq!(
             escalar(&db, "SELECT Total_Gastado FROM Clientes WHERE ID_Cliente='cli';").await,
-            41.0,
+            4100.0,
             "y el gasto del cliente también"
         );
         assert_eq!(
@@ -1212,7 +1218,7 @@ mod tests_anulacion {
         );
         assert_eq!(
             escalar(&db, "SELECT Total_Comanda FROM Comandas WHERE ID_Comanda='com';").await,
-            12.0,
+            1200.0,
             "el total no cambia: las líneas siguen en la comanda"
         );
     }
@@ -1265,7 +1271,7 @@ mod tests_anulacion {
         );
         assert_eq!(
             escalar(&db, "SELECT Importe FROM Movimientos_Caja;").await,
-            9.0,
+            900.0,
             "el importe va en positivo; el signo lo da el Tipo"
         );
         assert!(
@@ -1329,7 +1335,7 @@ mod tests_anulacion {
         sembrar(&db, VENTA_DE_MESA).await;
         let r = repo(&db);
 
-        for importe in [12.5, 13.0] {
+        for importe in [eur(12.5), eur(13.0)] {
             r.crear_gasto(
                 Some("g1".into()),
                 GastoData { pagado_con_caja: false,
@@ -1363,7 +1369,7 @@ mod tests_anulacion {
                 fecha: "2026-01-02".into(),
                 tipo_gasto: "Otro".into(),
                 concepto: "Hielo".into(),
-                importe: 12.5,
+                importe: eur(12.5),
                 proveedor_id: None,
             },
             Some("u1"),
@@ -1386,7 +1392,7 @@ mod tests_anulacion {
                 "SELECT Importe FROM Movimientos_Caja WHERE Tipo='GASTO_ANULADO' AND ID_Gasto='g1';"
             )
             .await,
-            12.5,
+            1250.0,
             "el importe se lee ANTES de borrar la fila: después ya no hay de dónde sacarlo"
         );
     }
@@ -1440,15 +1446,15 @@ mod tests_lineas_devueltas {
            VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('prod', 'cat', 'Cafe', 1.2);",
+           VALUES ('prod', 'cat', 'Cafe', 120);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada', 2.4);",
+           VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada', 240);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('d1', 'com', 'prod', 1, 1.2);",
+           VALUES ('d1', 'com', 'prod', 1, 120);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario)
-           VALUES ('d2', 'com', 'prod', 1, 1.2);",
+           VALUES ('d2', 'com', 'prod', 1, 120);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 2.4, 'TOTAL');",
+           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'Efectivo', 240, 'TOTAL');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd1');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd2');",
     ];
@@ -1540,6 +1546,12 @@ mod tests_arqueo_ciego {
     use tpv_application::ports::cierre_caja::CierreCajaRepository;
     use tpv_application::ports::cuentas::{AnularPagoArgs, CuentasRepository};
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     const DOS_COBROS_EN_EFECTIVO: &[&str] = &[
         // El rol Administrador lo siembran ya las migraciones; aquí sólo hace falta el usuario que
         // firma la anulación (`Anulado_Por` es una FK y el CHECK lo exige).
@@ -1548,9 +1560,9 @@ mod tests_arqueo_ciego {
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('p1', 'com', '2026-01-02 12:30:00', 'Efectivo', 20.0, 'TOTAL');",
+           VALUES ('p1', 'com', '2026-01-02 12:30:00', 'Efectivo', 2000, 'TOTAL');",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('p2', 'com', '2026-01-02 13:30:00', 'Efectivo', 30.0, 'TOTAL');",
+           VALUES ('p2', 'com', '2026-01-02 13:30:00', 'Efectivo', 3000, 'TOTAL');",
     ];
 
     #[tokio::test]
@@ -1559,7 +1571,7 @@ mod tests_arqueo_ciego {
         sembrar(&db, DOS_COBROS_EN_EFECTIVO).await;
         let caja = SqliteCierreCajaRepository::new(db.clone());
 
-        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, 50.0);
+        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, eur(50.0));
 
         SqliteCuentasRepository::new(db.clone())
             .anular_pago(AnularPagoArgs {
@@ -1575,14 +1587,14 @@ mod tests_arqueo_ciego {
 
         assert_eq!(
             caja.totales_desde(None).await.unwrap().ventas_efectivo,
-            20.0,
+            eur(20.0),
             "el cobro anulado deja de ser una venta…"
         );
         // …y por eso los 30 € que faltan del cajón ya no tienen quien los tape: el esperado baja a
         // 20, el recuento dirá 20 si el dinero está y 20 menos lo que falte si no. Antes de
         // CUENTA-07 el pago desaparecía y el descuadre salía exactamente cero.
         let (n, importe) = caja.anulaciones_desde(None).await.unwrap();
-        assert_eq!((n, importe), (1, 30.0), "y queda contado, que es el aviso");
+        assert_eq!((n, importe), (1, eur(30.0)), "y queda contado, que es el aviso");
     }
 
     #[tokio::test]
@@ -1627,11 +1639,11 @@ mod tests_arqueo_ciego {
         .unwrap();
 
         let res = r.resumen(None, None, None).await.unwrap();
-        assert_eq!(res.total_entradas, 20.0);
-        assert_eq!(res.total_efectivo, 20.0);
+        assert_eq!(res.total_entradas, eur(20.0));
+        assert_eq!(res.total_efectivo, eur(20.0));
         assert_eq!(res.count_entradas, 1);
         assert_eq!(res.count_anuladas, 1);
-        assert_eq!(res.total_anulado, 30.0);
+        assert_eq!(res.total_anulado, eur(30.0));
 
         let filas = r.entradas(Default::default()).await.unwrap();
         assert_eq!(filas.len(), 2, "en la lista salen los dos: aquí se investiga");
@@ -1655,21 +1667,27 @@ mod tests_reimpresion {
     use super::*;
     use tpv_application::ports::cuentas::CuentasRepository;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     /// Una venta de barra: dos cafés y una tostada, cobradas de una vez.
     const VENTA_BARRA: &[&str] = &[
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bar');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent)
-           VALUES ('p1', 'cat', 'Cafe con leche', 1.3, 10);",
+           VALUES ('p1', 'cat', 'Cafe con leche', 130, 10);",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent)
-           VALUES ('p2', 'cat', 'Tostada', 2.5, 10);",
+           VALUES ('p2', 'cat', 'Tostada', 250, 10);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-01-02 12:00:00', 'Pagada');",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('d1', 'com', 'p1', 'Cafe con leche', 2, 1.3, 10);",
+           VALUES ('d1', 'com', 'p1', 'Cafe con leche', 2, 130, 10);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Nombre_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('d2', 'com', 'p2', 'Tostada', 1, 2.5, 21);",
+           VALUES ('d2', 'com', 'p2', 'Tostada', 1, 250, 21);",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
-           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 5.1, 'TOTAL', 'T-000007');",
+           VALUES ('pago', 'com', '2026-01-02 12:30:00', 'EFECTIVO', 510, 'TOTAL', 'T-000007');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd1');",
         "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago', 'd2');",
     ];
@@ -1741,7 +1759,7 @@ mod tests_reimpresion {
         assert_eq!(t.lineas.len(), 2);
         assert_eq!(t.lineas[0].nombre, "Cafe con leche");
         assert_eq!(t.lineas[0].cantidad, 2.0);
-        assert!((t.lineas[0].precio_unitario - 1.3).abs() < 1e-9);
+        assert_eq!(t.lineas[0].precio_unitario, eur(1.3));
     }
 
     #[tokio::test]
@@ -1768,7 +1786,7 @@ mod tests_reimpresion {
             &[
                 "DELETE FROM Pago_Detalles WHERE ID_Pago = 'pago' AND ID_Detalle = 'd2';",
                 "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo, Numero_Ticket)
-                   VALUES ('pago2', 'com', '2026-01-02 12:31:00', 'TARJETA', 2.5, 'PARCIAL', 'T-000008');",
+                   VALUES ('pago2', 'com', '2026-01-02 12:31:00', 'TARJETA', 250, 'PARCIAL', 'T-000008');",
                 "INSERT INTO Pago_Detalles (ID_Pago, ID_Detalle) VALUES ('pago2', 'd2');",
             ],
         )
@@ -1804,7 +1822,7 @@ mod tests_reimpresion {
         assert_eq!(t.lineas.len(), 2, "no puede perderse ninguna línea del cobro");
         assert_eq!(t.lineas[0].nombre, "Cafe con leche");
         assert_eq!(t.lineas[0].cantidad, 2.0);
-        assert!((t.lineas[0].precio_unitario - 1.3).abs() < 1e-9);
+        assert_eq!(t.lineas[0].precio_unitario, eur(1.3));
         assert_eq!(t.lineas[0].iva_percent, Some(10.0));
     }
 
@@ -1863,11 +1881,11 @@ mod tests_factura_completa {
            VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Banquetes');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('prod', 'cat', 'Menu de boda', 3500.0);",
+           VALUES ('prod', 'cat', 'Menu de boda', 350000);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3500.0);",
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 350000);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('det', 'com', 'prod', 1, 3500.0, 10);",
+           VALUES ('det', 'com', 'prod', 1, 350000, 10);",
     ];
 
     /// Un ticket normal, por debajo del límite.
@@ -1878,11 +1896,11 @@ mod tests_factura_completa {
            VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-           VALUES ('prod', 'cat', 'Cerveza', 3.0);",
+           VALUES ('prod', 'cat', 'Cerveza', 300);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 3.0);",
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+           VALUES ('det', 'com', 'prod', 1, 300, 10);",
     ];
 
     async fn texto(db: &Arc<Db>, sql: &str) -> Option<String> {
@@ -1903,7 +1921,7 @@ mod tests_factura_completa {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
-                importe_total: 0.0,
+                importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
                 detalles: vec!["det".into()],
@@ -2031,13 +2049,13 @@ mod tests_factura_completa {
                 "UPDATE Business_Settings SET CIF = 'B12345674', Razon_Social = 'Bar SL' WHERE ID = 1;",
                 "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Banquetes');",
                 "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta)
-                   VALUES ('prod', 'cat', 'Menu', 2000.0);",
+                   VALUES ('prod', 'cat', 'Menu', 200000);",
                 "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-                   VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 4000.0);",
+                   VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Abierta', 400000);",
                 "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-                   VALUES ('d1', 'com', 'prod', 1, 2000.0, 10);",
+                   VALUES ('d1', 'com', 'prod', 1, 200000, 10);",
                 "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-                   VALUES ('d2', 'com', 'prod', 1, 2000.0, 10);",
+                   VALUES ('d2', 'com', 'prod', 1, 200000, 10);",
             ],
         )
         .await;
@@ -2049,7 +2067,7 @@ mod tests_factura_completa {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
-                importe_total: 0.0,
+                importe_total: Dinero::CERO,
                 id_usuario_cobrador: None,
                 id_trabajador_cobrador: None,
                 detalles: vec![det.into()],
@@ -2290,11 +2308,11 @@ mod tests_anular_vs_devolver {
            VALUES ('u1', '00000000-0000-7000-8000-000000000001', 'jefe@bar.example', 'x', 'Marta');",
         "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat', 'Bebidas');",
         "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, Stock_Suelto)
-           VALUES ('prod', 'cat', 'Cerveza', 3.0, 10);",
+           VALUES ('prod', 'cat', 'Cerveza', 300, 10);",
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado, Total_Comanda)
-           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Pagada', 3.0);",
+           VALUES ('com', 'BARRA', '2027-01-15 12:00:00', 'Pagada', 300);",
         "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, IVA_Percent)
-           VALUES ('det', 'com', 'prod', 1, 3.0, 10);",
+           VALUES ('det', 'com', 'prod', 1, 300, 10);",
     ];
 
     /// Cobra por el camino real (para que se emita el registro fiscal) y devuelve el `ID_Pago`.
@@ -2305,7 +2323,7 @@ mod tests_anular_vs_devolver {
                 id_pago: crate::util::new_id(),
                 id_comanda: "com".into(),
                 metodo: "Efectivo".into(),
-                importe_total: 0.0,
+                importe_total: Dinero::CERO,
                 id_usuario_cobrador: Some("u1".into()),
                 id_trabajador_cobrador: None,
                 detalles: vec!["det".into()],

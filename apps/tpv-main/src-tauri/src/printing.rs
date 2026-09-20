@@ -11,6 +11,7 @@
 //! Además construye el ticket en **ESC/POS** (`build_ticket`) replicando la personalización del
 //! front (`PreviewModal`): qué elementos se muestran, ancho de papel, IVA, líneas, total, footer.
 
+use tpv_domain::dinero::Dinero;
 use serde::{Deserialize, Serialize};
 use tpv_domain::ticket::{LineaTicket, TramoIva};
 
@@ -26,7 +27,7 @@ pub struct PrinterInfo {
 pub struct PrintTicketLine {
     pub nombre: String,
     pub cantidad: u32,
-    pub precio_unitario: f64,
+    pub precio_unitario: Dinero,
     /// Tipo de IVA con el que se vendió esta línea. `None` = el general del negocio.
     /// Viene congelado de `Detalle_Comanda`, no del producto: una reimpresión tiene que enseñar
     /// el tipo del día de la venta.
@@ -261,10 +262,8 @@ pub struct GeometriaTicket {
 ///
 /// Sin separador de miles a propósito: en una columna de 32 caracteres, un punto de millar se
 /// confunde con el decimal.
-fn fmt_eur(n: f64) -> String {
-    let c = a_centimos(n);
-    let c = if c == 0.0 { 0.0 } else { c }; // se lleva por delante el -0.0
-    format!("{:.2} €", c).replace('.', ",")
+fn fmt_eur(n: Dinero) -> String {
+    format!("{} €", n.texto_fiscal()).replace('.', ",")
 }
 
 /// Línea de dos columnas: `left` a la izquierda, `right` pegado a la derecha dentro de `cols`.
@@ -448,10 +447,6 @@ fn sep(out: &mut Vec<u8>, cols: usize) {
 /// Redondea a céntimos. Todo lo que se imprime pasa por aquí antes de compararse con otra cifra:
 /// dos importes que "casi" cuadran en coma flotante cuadran o no cuadran **en el papel**, que es
 /// donde lo mira el cliente.
-fn a_centimos(n: f64) -> f64 {
-    (n * 100.0).round() / 100.0
-}
-
 /// Reparte el ticket por tipo de IVA: devuelve `(tipo, base, iva)` por cada tipo presente,
 /// ordenado por tipo. Las tres cifras vienen ya redondeadas a céntimos.
 ///
@@ -474,7 +469,7 @@ fn desglose_iva(p: &PrintTicketPayload) -> Vec<TramoIva> {
         .items
         .iter()
         .map(|it| LineaTicket {
-            total_con_iva: it.precio_unitario * it.cantidad as f64,
+            total_con_iva: it.precio_unitario.por(it.cantidad as i64),
             tipo_iva: it.iva_percent.unwrap_or(p.iva_percent),
             exento: it.exento,
             causa_exencion: it.causa_exencion.clone(),
@@ -824,7 +819,11 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
     sep(&mut out, cols);
 
     // Total siempre se calcula de los items, aunque las líneas estén ocultas.
-    let total: f64 = p.items.iter().map(|it| it.precio_unitario * it.cantidad as f64).sum();
+    let total: Dinero = p
+        .items
+        .iter()
+        .map(|it| it.precio_unitario.por(it.cantidad as i64))
+        .sum();
 
     if !p.show_line_items {
         esc_align(&mut out, 1);
@@ -836,7 +835,7 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         esc_align(&mut out, 0);
     } else {
         for it in &p.items {
-            let line_total = it.precio_unitario * it.cantidad as f64;
+            let line_total = it.precio_unitario.por(it.cantidad as i64);
             text_line(&mut out, &line_two(&it.nombre, &fmt_eur(line_total), cols));
             text_line(
                 &mut out,
@@ -853,10 +852,10 @@ pub fn build_ticket(p: &PrintTicketPayload, logo: Option<&[u8]>) -> Vec<u8> {
         match tramos.as_slice() {
             // Sin líneas: el ticket sigue enseñando su base y su IVA a cero, como toda la vida.
             [] => {
-                text_line(&mut out, &line_two("BASE", &fmt_eur(0.0), cols));
+                text_line(&mut out, &line_two("BASE", &fmt_eur(Dinero::CERO), cols));
                 text_line(
                     &mut out,
-                    &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(0.0), cols),
+                    &line_two(&format!("IVA ({}%)", fmt_pct(p.iva_percent)), &fmt_eur(Dinero::CERO), cols),
                 );
             }
             // Un solo tipo sujeto (el caso de un bar normal): se imprime como toda la vida, sin
@@ -989,34 +988,34 @@ pub struct PrintArqueoPayload {
     #[serde(default)]
     pub usuario: Option<String>,
     #[serde(default)]
-    pub fondo_inicial: f64,
+    pub fondo_inicial: Dinero,
     #[serde(default)]
-    pub ventas_efectivo: f64,
+    pub ventas_efectivo: Dinero,
     #[serde(default)]
-    pub esperado: f64,
+    pub esperado: Dinero,
     #[serde(default)]
-    pub contado: f64,
+    pub contado: Dinero,
     #[serde(default)]
-    pub descuadre: f64,
+    pub descuadre: Dinero,
     #[serde(default)]
-    pub dejado: f64,
+    pub dejado: Dinero,
     #[serde(default)]
-    pub retirado: f64,
+    pub retirado: Dinero,
     #[serde(default)]
     pub motivo: Option<String>,
     /// Gastos pagados con dinero del cajón (CAJA-01). Restan del esperado.
     #[serde(default)]
-    pub gastos_caja: f64,
+    pub gastos_caja: Dinero,
     /// Lo que el cierre marca hoy, si se corrigió un apunte de su periodo (CAJA-01).
     #[serde(default)]
-    pub rect_esperado: Option<f64>,
+    pub rect_esperado: Option<Dinero>,
     #[serde(default)]
-    pub rect_descuadre: Option<f64>,
+    pub rect_descuadre: Option<Dinero>,
     #[serde(default)]
     pub rectificaciones: Vec<RectificacionArqueo>,
     /// `(valor, unidades)` de lo contado, para el desglose.
     #[serde(default)]
-    pub contado_denoms: Vec<(f64, i64)>,
+    pub contado_denoms: Vec<(Dinero, i64)>,
     // ── Formato del papel: los mismos ajustes que el ticket ──
     #[serde(default = "def_paper_width")]
     pub paper_width_mm: u32,
@@ -1096,7 +1095,7 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
     text_line(&mut out, &line_two("Cobrado en efectivo", &fmt_eur(p.ventas_efectivo), cols));
     // Sólo si los hay: una línea a cero en todos los arqueos de un bar que no paga nada con caja
     // sería ruido en el papel que se lee buscando un descuadre.
-    if a_centimos(p.gastos_caja) != 0.0 {
+    if !p.gastos_caja.es_cero() {
         text_line(&mut out, &line_two("Gastos de caja", &format!("-{}", fmt_eur(p.gastos_caja)), cols));
     }
     esc_bold(&mut out, true);
@@ -1141,7 +1140,7 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
     text_line(&mut out, &line_two("Se retira", &fmt_eur(p.retirado), cols));
 
     // El desglose por denominación es lo que convierte "faltan 50" en "falta un billete de 50".
-    let denoms: Vec<&(f64, i64)> = p.contado_denoms.iter().filter(|(_, u)| *u > 0).collect();
+    let denoms: Vec<&(Dinero, i64)> = p.contado_denoms.iter().filter(|(_, u)| *u > 0).collect();
     if !denoms.is_empty() {
         sep(&mut out, cols);
         text_line(&mut out, "Recuento");
@@ -1149,7 +1148,7 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
             let izq = format!("  {} x {}", unidades, fmt_eur(*valor));
             text_line(
                 &mut out,
-                &line_two(&izq, &fmt_eur(a_centimos(valor * *unidades as f64)), cols),
+                &line_two(&izq, &fmt_eur(valor.por(*unidades)), cols),
             );
         }
     }
@@ -1161,10 +1160,10 @@ pub fn build_arqueo(p: &PrintArqueoPayload) -> Vec<u8> {
 }
 
 /// El descuadre en palabras: un número con signo se lee mal a las dos de la mañana.
-fn etiqueta_descuadre(descuadre: f64) -> String {
-    if a_centimos(descuadre) == 0.0 {
+fn etiqueta_descuadre(descuadre: Dinero) -> String {
+    if descuadre.es_cero() {
         "CUADRA".to_string()
-    } else if descuadre < 0.0 {
+    } else if descuadre.es_negativo() {
         format!("FALTAN {}", fmt_eur(-descuadre))
     } else {
         format!("SOBRAN {}", fmt_eur(descuadre))

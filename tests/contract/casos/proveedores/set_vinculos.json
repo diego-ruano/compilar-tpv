@@ -9,7 +9,9 @@
   ],
   "entrada": {
     "id_proveedor": "prov-1",
-    "producto_ids": ["prod-2"]
+    "producto_ids": [
+      "prod-2"
+    ]
   },
   "snapshot": {
     "Productos": "SELECT ID_Producto, ID_Proveedor FROM Productos"

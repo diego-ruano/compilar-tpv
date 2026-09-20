@@ -6,7 +6,7 @@
     "estado": "ACTIVO",
     "fecha_hora": "2026-05-10 10:00",
     "id": "pago-1",
-    "importe": 10.0,
+    "importe": 1000,
     "metodo": "Efectivo",
     "motivo_anulacion": null
   }

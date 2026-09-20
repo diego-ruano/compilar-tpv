@@ -3,7 +3,7 @@
     {
       "Estado": "Pagada",
       "ID_Comanda": "comanda-1",
-      "Total_Comanda": 6.0
+      "Total_Comanda": 600
     }
   ],
   "Lote_Consumos": [
@@ -25,7 +25,7 @@
       "Apunta_A_Un_Pago": 1,
       "ID_Trabajador": null,
       "ID_Usuario": null,
-      "Importe": 6.0,
+      "Importe": 600,
       "Metodo_Pago": "TARJETA",
       "Tipo": "COBRO"
     }
@@ -40,7 +40,7 @@
       "ID_Comanda": "comanda-1",
       "ID_Trabajador_Cobrador": null,
       "ID_Usuario_Cobrador": null,
-      "Importe_Total": 6.0,
+      "Importe_Total": 600,
       "Metodo_Pago": "TARJETA",
       "Tipo": "TOTAL"
     }

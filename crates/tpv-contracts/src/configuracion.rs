@@ -1,5 +1,7 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **configuración**.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use ts_rs::TS;
@@ -15,7 +17,7 @@ pub struct BusinessSettings {
     pub mensaje_footer: String,
     pub iva_percent: f64,
     /// A partir de cuánto descuadre el cierre de caja pide un motivo escrito (CUENTA-06).
-    pub umbral_descuadre: f64,
+    pub umbral_descuadre: Dinero,
 
     // ── Datos fiscales (FISCAL-01, Veri*factu) ──────────────────────────────────────────────────
     /// `NombreRazon` del obligado a expedir la factura. **No es `business_name`**: uno es el rótulo
@@ -28,7 +30,7 @@ pub struct BusinessSettings {
     pub descripcion_op: String,
     /// Límite (IVA incluido) por encima del cual ya no cabe una simplificada (`F2`) y hay que
     /// emitir factura completa. 3.000 € en hostelería (art. 4.2 RD 1619/2012).
-    pub limite_simplif: f64,
+    pub limite_simplif: Dinero,
     /// `"produccion"` | `"pruebas"`. Cambia a la vez el endpoint del servicio web y la URL del QR.
     pub verifactu_entorno: String,
 }

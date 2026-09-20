@@ -167,7 +167,7 @@ export function updatePago(idPago: string, input: UpdatePagoInput): BuiltCommand
 					SET Fecha_Hora = ?2,
 					    Metodo_Pago = ?3,
 					    Importe_Total = (
-					      SELECT IFNULL(SUM(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)), 0)
+					      SELECT IFNULL(SUM(CAST(ROUND(COALESCE(dc.Cantidad,1) * COALESCE(dc.Precio_Unitario,0)) AS INTEGER)), 0)
 					      FROM Pago_Detalles pd
 					      JOIN Detalle_Comanda dc ON dc.ID_Detalle = pd.ID_Detalle
 					      WHERE pd.ID_Pago = ?1
@@ -254,7 +254,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 			sql: `
 				UPDATE Clientes
 				SET Total_Gastado = MAX(0, COALESCE(Total_Gastado,0) - (
-				    SELECT ROUND(IFNULL(p.Importe_Total,0), 2) FROM Pagos p WHERE p.ID_Pago = ?1
+				    SELECT IFNULL(p.Importe_Total,0) FROM Pagos p WHERE p.ID_Pago = ?1
 				))
 				WHERE ID_Cliente = (
 				    SELECT r.ID_Cliente
@@ -277,7 +277,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				  ID_Movimiento, Fecha_Hora, Tipo, ID_Pago, ID_Usuario, Importe, Metodo_Pago, Motivo
 				)
 				SELECT ?2, datetime('now','localtime'), ?5, p.ID_Pago, ?3,
-				       ABS(ROUND(IFNULL(p.Importe_Total,0), 2)), NULLIF(COALESCE(p.Metodo_Pago,''),''), ?4
+				       ABS(IFNULL(p.Importe_Total,0)), NULLIF(COALESCE(p.Metodo_Pago,''),''), ?4
 				FROM Pagos p
 				WHERE p.ID_Pago = ?1 AND COALESCE(p.Estado,'ACTIVO') = 'ACTIVO'
 				  AND NOT EXISTS (
@@ -340,7 +340,7 @@ export function anularPago(idPago: string, input: AnularPagoInput): BuiltCommand
 				      )
 				      THEN NULL ELSE Fecha_Hora_Cierre END,
 				    Total_Comanda = (
-				        SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+				        SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
 				        FROM Detalle_Comanda WHERE ID_Comanda = Comandas.ID_Comanda
 				    )
 				WHERE ID_Comanda = (SELECT ID_Comanda FROM Pagos WHERE ID_Pago = ?1);

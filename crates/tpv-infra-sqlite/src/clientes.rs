@@ -3,6 +3,7 @@
 //! Local-First puro: las escrituras son INSERT/UPDATE directos contra la BD local.
 //! NO hay outbox ni Applied_Operations (eso era de la antigua sincronización dual).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use tpv_contracts::clientes::{ClienteForm, ClienteOverview};
 use tpv_domain::clientes::{Cliente, ClienteRanking, NuevoCliente};
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, opt_text, v_f64, v_i64, v_string};
+use crate::mapping::{norm_opt_string, opt_text, v_dinero, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteClientesRepository {
@@ -144,7 +145,7 @@ impl ClientesRepository for SqliteClientesRepository {
                 ultima_reserva_num_personas: v_i64(ur_num),
                 ultima_reserva_mesa: norm_opt_string(ur_mesa),
 
-                total_gastado_stored: v_f64(tg_st).unwrap_or(0.0),
+                total_gastado_stored: v_dinero(tg_st).unwrap_or(Dinero::CERO),
 
                 total_reservas: v_i64(total_res).unwrap_or(0),
                 reservas_pendientes: v_i64(pend).unwrap_or(0),

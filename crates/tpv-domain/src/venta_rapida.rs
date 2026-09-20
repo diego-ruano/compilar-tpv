@@ -1,5 +1,7 @@
 //! Dominio de **venta rápida** (barra): validaciones y value objects puros.
 
+use crate::dinero::Dinero;
+
 /// Normaliza el método de pago: sólo "Tarjeta" o "Efectivo".
 pub fn normalize_metodo(input: &str) -> String {
     if input.trim().eq_ignore_ascii_case("tarjeta") {
@@ -40,7 +42,7 @@ pub struct CobroFraccionado {
     pub id_pago: String,
     pub id_comanda: String,
     pub metodo: String,
-    pub importe_total: f64,
+    pub importe_total: Dinero,
     pub id_usuario_cobrador: Option<String>,
     pub id_trabajador_cobrador: Option<String>,
     /// IDs de detalle a cobrar (no vacíos, ordenados y deduplicados).

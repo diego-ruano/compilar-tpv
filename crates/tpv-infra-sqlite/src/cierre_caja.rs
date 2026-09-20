@@ -4,6 +4,7 @@
 //! cualquier otro (ver la regla del escritor único en CLAUDE.md §9). Las rectificaciones también:
 //! la Handy tiene que ver en un cierre lo mismo que la Main.
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,7 +20,7 @@ use tpv_contracts::cierre_caja::{
 use tpv_domain::cierre_caja::{TotalesCaja, HORA_DE_UN_GASTO};
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{norm_opt_string, v_f64, v_i64, v_string};
+use crate::mapping::{dinero_val, norm_opt_string, v_dinero, v_i64, v_string};
 use crate::util::new_id;
 
 pub struct SqliteCierreCajaRepository {
@@ -85,22 +86,22 @@ fn map_cierre(row: &Row) -> AppResult<CierreDto> {
         fecha_hora: v_string(g(1)?).unwrap_or_default(),
         id_usuario: norm_opt_string(g(2)?),
         usuario_nombre: norm_opt_string(g(3)?),
-        fondo_inicial: v_f64(g(4)?).unwrap_or(0.0),
-        ventas_efectivo: v_f64(g(5)?).unwrap_or(0.0),
-        esperado: v_f64(g(6)?).unwrap_or(0.0),
-        contado: v_f64(g(7)?).unwrap_or(0.0),
-        descuadre: v_f64(g(8)?).unwrap_or(0.0),
-        dejado: v_f64(g(9)?).unwrap_or(0.0),
-        retirado: v_f64(g(10)?).unwrap_or(0.0),
+        fondo_inicial: v_dinero(g(4)?).unwrap_or(Dinero::CERO),
+        ventas_efectivo: v_dinero(g(5)?).unwrap_or(Dinero::CERO),
+        esperado: v_dinero(g(6)?).unwrap_or(Dinero::CERO),
+        contado: v_dinero(g(7)?).unwrap_or(Dinero::CERO),
+        descuadre: v_dinero(g(8)?).unwrap_or(Dinero::CERO),
+        dejado: v_dinero(g(9)?).unwrap_or(Dinero::CERO),
+        retirado: v_dinero(g(10)?).unwrap_or(Dinero::CERO),
         motivo: norm_opt_string(g(11)?),
         reabierto_en: norm_opt_string(g(12)?),
         reabierto_por: norm_opt_string(g(13)?),
         periodo_desde: norm_opt_string(g(14)?),
-        gastos_caja: v_f64(g(15)?).unwrap_or(0.0),
-        rect_ventas_efectivo: v_f64(g(16)?),
-        rect_gastos_caja: v_f64(g(17)?),
-        rect_esperado: v_f64(g(18)?),
-        rect_descuadre: v_f64(g(19)?),
+        gastos_caja: v_dinero(g(15)?).unwrap_or(Dinero::CERO),
+        rect_ventas_efectivo: v_dinero(g(16)?),
+        rect_gastos_caja: v_dinero(g(17)?),
+        rect_esperado: v_dinero(g(18)?),
+        rect_descuadre: v_dinero(g(19)?),
         contado_denoms: vec![],
         dejado_denoms: vec![],
         rectificaciones: vec![],
@@ -233,8 +234,8 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             .map_err(db_err)?;
         Ok(match rows.next().await.map_err(db_err)? {
             Some(r) => TotalesCaja {
-                ventas_efectivo: v_f64(r.get_value(0).map_err(db_err)?).unwrap_or(0.0),
-                gastos_caja: v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                ventas_efectivo: v_dinero(r.get_value(0).map_err(db_err)?).unwrap_or(Dinero::CERO),
+                gastos_caja: v_dinero(r.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
             },
             None => TotalesCaja::default(),
         })
@@ -252,12 +253,12 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
     /// porque para explicar un descuadre son lo mismo: dinero que salió del cajón sin venta que lo
     /// respalde en el arqueo. La diferencia entre ellas es fiscal y se ve en el historial de caja,
     /// donde sí llevan tipos distintos.
-    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, f64)> {
+    async fn anulaciones_desde(&self, desde: Option<&str>) -> AppResult<(i64, Dinero)> {
         let db = self.db.read().await;
         let (sql, params) = match desde {
             Some(d) => (
                 r#"
-                SELECT COUNT(*), ROUND(COALESCE(SUM(Importe_Total),0),2)
+                SELECT COUNT(*), COALESCE(SUM(Importe_Total),0)
                 FROM Pagos
                 WHERE COALESCE(Estado,'ACTIVO') = 'ANULADO'
                   AND Anulado_En IS NOT NULL
@@ -267,7 +268,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             ),
             None => (
                 r#"
-                SELECT COUNT(*), ROUND(COALESCE(SUM(Importe_Total),0),2)
+                SELECT COUNT(*), COALESCE(SUM(Importe_Total),0)
                 FROM Pagos
                 WHERE COALESCE(Estado,'ACTIVO') = 'ANULADO';
                 "#,
@@ -278,9 +279,9 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         Ok(match rows.next().await.map_err(db_err)? {
             Some(r) => (
                 v_i64(r.get_value(0).map_err(db_err)?).unwrap_or(0),
-                v_f64(r.get_value(1).map_err(db_err)?).unwrap_or(0.0),
+                v_dinero(r.get_value(1).map_err(db_err)?).unwrap_or(Dinero::CERO),
             ),
-            None => (0, 0.0),
+            None => (0, Dinero::CERO),
         })
     }
 
@@ -310,14 +311,14 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 Value::Text(c.id_cierre.clone()),
                 texto_o_nulo(c.id_usuario.as_deref()),
                 texto_o_nulo(c.periodo_desde.as_deref()),
-                Value::Real(c.fondo_inicial),
-                Value::Real(c.ventas_efectivo),
-                Value::Real(c.gastos_caja),
-                Value::Real(c.esperado),
-                Value::Real(c.contado),
-                Value::Real(c.descuadre),
-                Value::Real(c.dejado),
-                Value::Real(c.retirado),
+                dinero_val(c.fondo_inicial),
+                dinero_val(c.ventas_efectivo),
+                dinero_val(c.gastos_caja),
+                dinero_val(c.esperado),
+                dinero_val(c.contado),
+                dinero_val(c.descuadre),
+                dinero_val(c.dejado),
+                dinero_val(c.retirado),
                 texto_o_nulo(c.motivo.as_deref()),
             ],
         )
@@ -325,7 +326,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         .map_err(db_err)?;
 
         for (momento, denoms) in [("CONTADO", &c.contado_denoms), ("DEJADO", &c.dejado_denoms)] {
-            for d in denoms.iter().filter(|d| d.unidades > 0 && d.valor > 0.0) {
+            for d in denoms.iter().filter(|d| d.unidades > 0 && d.valor > Dinero::CERO) {
                 db.execute(
                     r#"
                     INSERT INTO Cierre_Denominaciones (ID_Cierre, Momento, Valor, Unidades)
@@ -336,7 +337,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                     vec![
                         Value::Text(c.id_cierre.clone()),
                         Value::Text(momento.to_string()),
-                        Value::Real(d.valor),
+                        dinero_val(d.valor),
                         Value::Integer(d.unidades),
                     ],
                 )
@@ -382,14 +383,14 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 id_cierre: v_string(g(0)?).unwrap_or_default(),
                 fecha_hora: v_string(g(1)?).unwrap_or_default(),
                 usuario_nombre: norm_opt_string(g(2)?),
-                esperado: v_f64(g(3)?).unwrap_or(0.0),
-                contado: v_f64(g(4)?).unwrap_or(0.0),
-                descuadre: v_f64(g(5)?).unwrap_or(0.0),
-                retirado: v_f64(g(6)?).unwrap_or(0.0),
+                esperado: v_dinero(g(3)?).unwrap_or(Dinero::CERO),
+                contado: v_dinero(g(4)?).unwrap_or(Dinero::CERO),
+                descuadre: v_dinero(g(5)?).unwrap_or(Dinero::CERO),
+                retirado: v_dinero(g(6)?).unwrap_or(Dinero::CERO),
                 motivo: norm_opt_string(g(7)?),
                 reabierto_en: norm_opt_string(g(8)?),
-                rect_esperado: v_f64(g(9)?),
-                rect_descuadre: v_f64(g(10)?),
+                rect_esperado: v_dinero(g(9)?),
+                rect_descuadre: v_dinero(g(10)?),
             });
         }
         Ok(out)
@@ -433,7 +434,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             let g = |i: i32| d.get_value(i).map_err(db_err);
             let momento = v_string(g(0)?).unwrap_or_default();
             let item = DenominacionDto {
-                valor: v_f64(g(1)?).unwrap_or(0.0),
+                valor: v_dinero(g(1)?).unwrap_or(Dinero::CERO),
                 unidades: v_i64(g(2)?).unwrap_or(0),
             };
             if momento == "DEJADO" {
@@ -476,10 +477,10 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 usuario_nombre: norm_opt_string(g(2)?),
                 descripcion: v_string(g(3)?).unwrap_or_default(),
                 motivo: norm_opt_string(g(4)?),
-                esperado_antes: v_f64(g(5)?).unwrap_or(0.0),
-                esperado_despues: v_f64(g(6)?).unwrap_or(0.0),
-                descuadre_antes: v_f64(g(7)?).unwrap_or(0.0),
-                descuadre_despues: v_f64(g(8)?).unwrap_or(0.0),
+                esperado_antes: v_dinero(g(5)?).unwrap_or(Dinero::CERO),
+                esperado_despues: v_dinero(g(6)?).unwrap_or(Dinero::CERO),
+                descuadre_antes: v_dinero(g(7)?).unwrap_or(Dinero::CERO),
+                descuadre_despues: v_dinero(g(8)?).unwrap_or(Dinero::CERO),
             });
         }
 
@@ -565,7 +566,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
         Ok(Some(match tipo {
             ApunteCaja::Pago => ApunteGuardado::Cobro {
                 fecha_hora: v_string(g(0)?).unwrap_or_default(),
-                importe: v_f64(g(1)?).unwrap_or(0.0),
+                importe: v_dinero(g(1)?).unwrap_or(Dinero::CERO),
                 metodo: v_string(g(2)?).unwrap_or_default(),
                 // Igual que el SQL de `totales`: activo es exactamente 'ACTIVO'.
                 activo: v_string(g(3)?).as_deref() == Some("ACTIVO"),
@@ -573,7 +574,7 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
             },
             ApunteCaja::Gasto => ApunteGuardado::Gasto {
                 fecha: v_string(g(0)?).unwrap_or_default(),
-                importe: v_f64(g(1)?).unwrap_or(0.0),
+                importe: v_dinero(g(1)?).unwrap_or(Dinero::CERO),
                 pagado_con_caja: v_i64(g(2)?).unwrap_or(0) != 0,
                 concepto: v_string(g(3)?).unwrap_or_default(),
             },
@@ -602,10 +603,10 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                 "#,
                 vec![
                     Value::Text(r.id_cierre.clone()),
-                    Value::Real(r.totales.ventas_efectivo),
-                    Value::Real(r.totales.gastos_caja),
-                    Value::Real(r.esperado),
-                    Value::Real(r.descuadre),
+                    dinero_val(r.totales.ventas_efectivo),
+                    dinero_val(r.totales.gastos_caja),
+                    dinero_val(r.esperado),
+                    dinero_val(r.descuadre),
                 ],
             )
             .await
@@ -624,10 +625,10 @@ impl CierreCajaRepository for SqliteCierreCajaRepository {
                     texto_o_nulo(r.id_usuario.as_deref()),
                     Value::Text(r.descripcion.clone()),
                     texto_o_nulo(r.motivo.as_deref()),
-                    Value::Real(r.esperado_antes),
-                    Value::Real(r.esperado),
-                    Value::Real(r.descuadre_antes),
-                    Value::Real(r.descuadre),
+                    dinero_val(r.esperado_antes),
+                    dinero_val(r.esperado),
+                    dinero_val(r.descuadre_antes),
+                    dinero_val(r.descuadre),
                 ],
             )
             .await
@@ -665,6 +666,13 @@ mod tests {
     use tpv_contracts::errors::ErrorCode;
     use tpv_domain::cierre_caja::momento_de_gasto;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     async fn db_temporal() -> (Arc<Db>, std::path::PathBuf) {
         let dir = crate::test_temp::dir_temporal("cierre_caja");
         std::fs::create_dir_all(&dir).unwrap();
@@ -697,14 +705,14 @@ mod tests {
     const CIERRE_CUADRADO: &str = "INSERT INTO Cierres_Caja (ID_Cierre, Fecha_Hora, ID_Usuario,
         Periodo_Desde, Fondo_Inicial, Ventas_Efectivo, Gastos_Caja, Esperado, Contado, Descuadre,
         Dejado, Retirado)
-        VALUES ('c1', '2026-05-10 23:00:00', 'u1', '2026-05-09 23:00:00', 0, 20, 0, 20, 20, 0, 0, 20);";
+        VALUES ('c1', '2026-05-10 23:00:00', 'u1', '2026-05-09 23:00:00', 0, 2000, 0, 2000, 2000, 0, 0, 2000);";
 
     /// El cobro de ese cierre: 20 € en efectivo a las 21:30.
     const COBRO: &[&str] = &[
         "INSERT INTO Comandas (ID_Comanda, Canal, Fecha_Hora_Apertura, Estado)
            VALUES ('com', 'BARRA', '2026-05-10 21:00:00', 'Pagada');",
         "INSERT INTO Pagos (ID_Pago, ID_Comanda, Fecha_Hora, Metodo_Pago, Importe_Total, Tipo)
-           VALUES ('p1', 'com', '2026-05-10 21:30:00', 'Efectivo', 20.0, 'TOTAL');",
+           VALUES ('p1', 'com', '2026-05-10 21:30:00', 'Efectivo', 2000, 'TOTAL');",
     ];
 
     fn gasto(fecha: &str, importe: f64, pagado_con_caja: Option<bool>) -> CreateGastoInput {
@@ -713,7 +721,7 @@ mod tests {
             fecha: fecha.into(),
             tipo_gasto: "Suministros".into(),
             concepto: "Hielo".into(),
-            importe,
+            importe: eur(importe),
             proveedor_id: None,
             pagado_con_caja,
         }
@@ -747,7 +755,7 @@ mod tests {
         let caja = SqliteCierreCajaRepository::new(db.clone());
         let t = caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap();
 
-        assert_eq!(t.ventas_efectivo, -20.0, "el dinero sale del periodo abierto");
+        assert_eq!(t.ventas_efectivo, eur(-20.0), "el dinero sale del periodo abierto");
     }
 
     #[tokio::test]
@@ -762,10 +770,10 @@ mod tests {
 
         let caja = SqliteCierreCajaRepository::new(db.clone());
         // Sin cierre anterior, y con uno anterior a la venta: en los dos casos el neto es cero.
-        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, 0.0);
+        assert_eq!(caja.totales_desde(None).await.unwrap().ventas_efectivo, Dinero::CERO);
         assert_eq!(
             caja.totales_desde(Some("2026-05-09 23:00:00")).await.unwrap().ventas_efectivo,
-            0.0
+            Dinero::CERO
         );
     }
 
@@ -789,7 +797,7 @@ mod tests {
         let caja = SqliteCierreCajaRepository::new(db.clone());
         let t = caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap();
 
-        assert_eq!(t.ventas_efectivo, 0.0);
+        assert_eq!(t.ventas_efectivo, Dinero::CERO);
     }
 
     #[tokio::test]
@@ -806,7 +814,7 @@ mod tests {
         let caja = SqliteCierreCajaRepository::new(db.clone());
         assert_eq!(
             caja.totales_desde(Some("2026-05-10 23:00:00")).await.unwrap().ventas_efectivo,
-            0.0
+            Dinero::CERO
         );
     }
 
@@ -853,8 +861,8 @@ mod tests {
             .unwrap();
 
             assert_eq!(impacto.cierres.len(), 1, "tiene que tocar el cierre de esa noche");
-            assert_eq!(impacto.cierres[0].esperado_despues, 0.0);
-            assert_eq!(impacto.cierres[0].descuadre_despues, 20.0);
+            assert_eq!(impacto.cierres[0].esperado_despues, Dinero::CERO);
+            assert_eq!(impacto.cierres[0].descuadre_despues, eur(20.0));
         }
     }
 
@@ -865,13 +873,13 @@ mod tests {
         sembrar(
             &db,
             &["INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Concepto, Importe, Tipo_Gasto, Pagado_Con_Caja)
-                 VALUES ('g1', '2026-05-10', 'Hielo', 18, 'Suministros', 1),
-                        ('g2', '2026-05-10', 'Barril', 400, 'Proveedor', 0);"],
+                 VALUES ('g1', '2026-05-10', 'Hielo', 1800, 'Suministros', 1),
+                        ('g2', '2026-05-10', 'Barril', 40000, 'Proveedor', 0);"],
         )
         .await;
 
         let t = SqliteCierreCajaRepository::new(db.clone()).totales_desde(None).await.unwrap();
-        assert_eq!(t, TotalesCaja { ventas_efectivo: 20.0, gastos_caja: 18.0 });
+        assert_eq!(t, TotalesCaja { ventas_efectivo: eur(20.0), gastos_caja: eur(18.0) });
     }
 
     #[tokio::test]
@@ -918,9 +926,9 @@ mod tests {
         let imp = rect::previsualizar(&repo, &a_tarjeta).await.unwrap();
         assert_eq!(imp.cierres.len(), 1);
         let c = &imp.cierres[0];
-        assert_eq!((c.esperado_antes, c.descuadre_antes), (20.0, 0.0));
+        assert_eq!((c.esperado_antes, c.descuadre_antes), (eur(20.0), Dinero::CERO));
         // Esa noche el cajón debería haber tenido 0 € y había 20: sobran 20.
-        assert_eq!((c.esperado_despues, c.descuadre_despues), (0.0, 20.0));
+        assert_eq!((c.esperado_despues, c.descuadre_despues), (Dinero::CERO, eur(20.0)));
         assert!(imp.requiere_motivo);
 
         // Llevárselo al periodo abierto también descuadra el cierre del que sale.
@@ -931,7 +939,7 @@ mod tests {
         };
         let imp = rect::previsualizar(&repo, &a_hoy).await.unwrap();
         assert_eq!(imp.cierres.len(), 1);
-        assert_eq!(imp.cierres[0].descuadre_despues, 20.0);
+        assert_eq!(imp.cierres[0].descuadre_despues, eur(20.0));
 
         // Y previsualizar no toca nada.
         assert!(repo.detalle("c1").await.unwrap().unwrap().rect_esperado.is_none());
@@ -958,21 +966,21 @@ mod tests {
 
         let c = cierres.detalle("c1").await.unwrap().unwrap();
         // La foto de esa noche no se toca…
-        assert_eq!((c.esperado, c.descuadre), (20.0, 0.0));
+        assert_eq!((c.esperado, c.descuadre), (eur(20.0), Dinero::CERO));
         // …y al lado queda lo que marca hoy.
-        assert_eq!(c.rect_gastos_caja, Some(5.0));
-        assert_eq!(c.rect_esperado, Some(15.0));
-        assert_eq!(c.rect_descuadre, Some(5.0));
+        assert_eq!(c.rect_gastos_caja, Some(eur(5.0)));
+        assert_eq!(c.rect_esperado, Some(eur(15.0)));
+        assert_eq!(c.rect_descuadre, Some(eur(5.0)));
 
         assert_eq!(c.rectificaciones.len(), 1);
         let r = &c.rectificaciones[0];
-        assert_eq!((r.descuadre_antes, r.descuadre_despues), (0.0, 5.0));
+        assert_eq!((r.descuadre_antes, r.descuadre_despues), (Dinero::CERO, eur(5.0)));
         assert_eq!(r.motivo.as_deref(), Some("el hielo de la tarde"));
         assert_eq!(r.usuario_nombre.as_deref(), Some("Marta"));
         assert!(r.descripcion.contains("Hielo"), "{}", r.descripcion);
 
         let lista = cierres.listar(10).await.unwrap();
-        assert_eq!(lista[0].rect_descuadre, Some(5.0));
+        assert_eq!(lista[0].rect_descuadre, Some(eur(5.0)));
     }
 
     #[tokio::test]
@@ -1021,9 +1029,9 @@ mod tests {
             .unwrap();
 
         let c = cierres.detalle("c1").await.unwrap().unwrap();
-        assert_eq!(c.rect_ventas_efectivo, Some(20.0));
-        assert_eq!(c.rect_esperado, Some(15.0));
-        assert_eq!(c.rect_descuadre, Some(5.0));
+        assert_eq!(c.rect_ventas_efectivo, Some(eur(20.0)));
+        assert_eq!(c.rect_esperado, Some(eur(15.0)));
+        assert_eq!(c.rect_descuadre, Some(eur(5.0)));
     }
 
     #[tokio::test]
@@ -1040,12 +1048,12 @@ mod tests {
         }
 
         let c = cierres.detalle("c1").await.unwrap().unwrap();
-        assert_eq!(c.rect_gastos_caja, Some(8.0));
-        assert_eq!(c.rect_esperado, Some(12.0));
+        assert_eq!(c.rect_gastos_caja, Some(eur(8.0)));
+        assert_eq!(c.rect_esperado, Some(eur(12.0)));
         assert_eq!(c.rectificaciones.len(), 2);
         // Cada fila dice de dónde partía ella, no la foto de esa noche.
-        assert_eq!(c.rectificaciones[1].descuadre_antes, 5.0);
-        assert_eq!(c.rectificaciones[1].descuadre_despues, 8.0);
+        assert_eq!(c.rectificaciones[1].descuadre_antes, eur(5.0));
+        assert_eq!(c.rectificaciones[1].descuadre_despues, eur(8.0));
     }
 
     #[tokio::test]

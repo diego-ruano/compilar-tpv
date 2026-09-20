@@ -10,7 +10,7 @@
     "Notas": "sin cebolla",
     "Pagado": 0,
     "Pasa_Cocina": 1,
-    "Precio_Unitario": 9.0
+    "Precio_Unitario": 900
   },
   {
     "Cantidad": 1.0,
@@ -23,7 +23,7 @@
     "Notas": null,
     "Pagado": 1,
     "Pasa_Cocina": 0,
-    "Precio_Unitario": 3.0
+    "Precio_Unitario": 300
   },
   {
     "Cantidad": 1.0,
@@ -36,6 +36,6 @@
     "Notas": null,
     "Pagado": 0,
     "Pasa_Cocina": 0,
-    "Precio_Unitario": 5.0
+    "Precio_Unitario": 500
   }
 ]

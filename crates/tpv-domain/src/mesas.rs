@@ -1,5 +1,7 @@
 //! Dominio de **mesas / salón / comandas / cocina**: validaciones y value objects puros.
 
+use crate::dinero::Dinero;
+
 /// Texto obligatorio: recorta y exige no vacío.
 pub fn requerido(input: &str, field: &str) -> Result<String, String> {
     let out = input.trim().to_string();
@@ -47,7 +49,7 @@ pub struct AbrirComandaData {
 #[derive(Debug, Clone)]
 pub struct CobroVentaRapida {
     pub metodo: String,
-    pub items: Vec<(String, f64)>, // (producto_id, precio)
+    pub items: Vec<(String, Dinero)>, // (producto_id, precio)
     pub id_usuario_cobrador: Option<String>,
     pub id_trabajador_cobrador: Option<String>,
     pub id_comanda: Option<String>,

@@ -3,6 +3,8 @@
 //! con `#[allow(non_snake_case)]`). Local-First: los args de entrada NO llevan
 //! op_id/outbox/remote_id.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 use crate::verifactu::DestinatarioInput;
@@ -30,7 +32,7 @@ pub struct ProductoRow {
     pub ID_Producto: String,
     pub ID_Categoria: String,
     pub Nombre: String,
-    pub Precio_Venta: f64,
+    pub Precio_Venta: Dinero,
     pub Stock_Actual: f64,
     pub Stock_Minimo: f64,
     pub Unidad_Medida: Option<String>,
@@ -45,8 +47,8 @@ pub struct ComandaBarraRow {
     pub ID_Comanda: String,
     pub Fecha_Hora_Apertura: String,
     pub Estado: String,
-    pub Total_Pendiente: f64,
-    pub Total_Comanda: f64,
+    pub Total_Pendiente: Dinero,
+    pub Total_Comanda: Dinero,
     #[ts(type = "number")]
     pub Pendientes_Cocina: i64,
     #[ts(type = "number")]
@@ -61,7 +63,7 @@ pub struct LineaComandaRow {
     pub ID_Comanda: String,
     pub ID_Producto: String,
     pub Cantidad: f64,
-    pub Precio_Unitario: f64,
+    pub Precio_Unitario: Dinero,
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
     #[ts(optional)]
     pub IVA_Percent: Option<f64>,
@@ -80,7 +82,7 @@ pub struct VerTicketsDetalleRow {
     pub ID_Producto: String,
     pub Nombre: String,
     pub Cantidad: f64,
-    pub Precio_Unitario: f64,
+    pub Precio_Unitario: Dinero,
     /// Tipo de IVA con el que se vendió la línea (congelado al añadirla); `None` = el del negocio.
     #[ts(optional)]
     pub IVA_Percent: Option<f64>,
@@ -158,7 +160,7 @@ pub struct VrAddLineaComandaInput {
     pub id_comanda: String,
     pub id_producto: String,
     pub cantidad: f64,
-    pub precio_unitario: f64,
+    pub precio_unitario: Dinero,
 }
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -210,7 +212,7 @@ pub struct VrCobrarFraccionadoInput {
     pub id_pago: String,
     pub id_comanda: String,
     pub metodo: String,
-    pub importe_total: f64,
+    pub importe_total: Dinero,
     pub detalles: Vec<String>,
     /// FISCAL-02: si viene, se emite **factura completa** (`F1`) en vez de un ticket.
     ///

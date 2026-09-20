@@ -1,6 +1,8 @@
 //! Contratos (DTOs) de la frontera UI<->Rust para **proveedores**.
 //! Campos snake_case idénticos a los structs antiguos (compat frontend).
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -34,7 +36,7 @@ pub struct ProductoProveedorDto {
     pub id_categoria: Option<String>,
     pub id_proveedor: Option<String>,
     pub nombre: String,
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     pub stock_actual: Option<f64>,
     pub stock_minimo: Option<f64>,
     pub unidad_medida: Option<String>,
@@ -107,7 +109,7 @@ pub struct ProveedoresCreateProductoInput {
     pub nombre: String,
     #[serde(default)]
     #[ts(optional)]
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub stock_actual: Option<f64>,

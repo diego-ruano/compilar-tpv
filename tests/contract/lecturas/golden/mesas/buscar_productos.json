@@ -3,7 +3,7 @@
     "ID_Categoria": "cat-cocina",
     "ID_Producto": "prod-croquetas",
     "Nombre": "Croquetas",
-    "Precio_Venta": 7.5,
+    "Precio_Venta": 750,
     "Ruta_Imagen": null
   }
 ]

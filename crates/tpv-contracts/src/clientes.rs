@@ -5,6 +5,8 @@
 //! cambios. Los IDs `i64` se anotan `#[ts(type = "number")]` (los ID de SQLite caben en
 //! number) para mantener compatibilidad con el frontend (que usa `number`, no `bigint`).
 
+use tpv_domain::dinero::Dinero;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -23,7 +25,7 @@ pub struct ClienteOverview {
     pub ultima_reserva_num_personas: Option<i64>,
     pub ultima_reserva_mesa: Option<String>,
 
-    pub total_gastado_stored: f64,
+    pub total_gastado_stored: Dinero,
 
     #[ts(type = "number")]
     pub total_reservas: i64,

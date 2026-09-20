@@ -94,7 +94,7 @@ export async function mesas(
 	// sin filtro extra. Mismo modelo que Main/Rust (STAT-01/02/06).
 	const ingresos = await one(
 		db,
-		`SELECT ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS total, COUNT(DISTINCT c.ID_Mesa) AS ocupadas
+		`SELECT COALESCE(SUM(p.Importe_Total),0) AS total, COUNT(DISTINCT c.ID_Mesa) AS ocupadas
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -124,7 +124,7 @@ export async function mesas(
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const topRs = await db.execute(
-		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, ROUND(SUM(p.Importe_Total),2) AS total
+		`SELECT m.Numero_Mesa AS mesa, z.Nombre_Zona AS zona, SUM(p.Importe_Total) AS total
 		 FROM Pagos p
 		 JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
 		 JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -546,8 +546,8 @@ export async function trabajadores(
 		)
 		SELECT
 			id_trabajador AS id,
-			ROUND(COALESCE(SUM(total),0),2) AS ventas_total,
-			ROUND(COALESCE(AVG(total),0),2) AS ticket_medio
+			COALESCE(SUM(total),0) AS ventas_total,
+			CAST(ROUND(COALESCE(AVG(total),0)) AS INTEGER) AS ticket_medio
 		FROM comanda_tot
 		GROUP BY id_trabajador;
 	`);
@@ -774,7 +774,7 @@ export async function clientes(
 			(SELECT COUNT(*) FROM cust_range cr
 			 JOIN firsts f ON f.id_cliente = cr.id_cliente, rng
 			 WHERE f.first_paid >= rng.start_dt AND f.first_paid < rng.end_dt) AS no_recurrentes,
-			ROUND(COALESCE((SELECT SUM(total) FROM tot_range),0),2) AS ventas_total,
+			COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
 			(SELECT COUNT(*) FROM cust_range) AS clientes_rango;`,
 	);
 	const clientesRango = num(rec.clientes_rango);
@@ -784,7 +784,7 @@ export async function clientes(
 	const topRs = await db.execute(
 		`SELECT
 			(${nombre} || ' #' || CAST(ID_Cliente AS TEXT)) AS label,
-			ROUND(COALESCE(Total_Gastado,0),2) AS value
+			COALESCE(Total_Gastado,0) AS value
 		 FROM Clientes
 		 ORDER BY COALESCE(Total_Gastado,0) DESC, label ASC
 		 LIMIT 10;`,
@@ -843,39 +843,39 @@ export async function proveedores(
 	// El denominador del porcentaje: TODO el gasto del rango, con proveedor o sin el.
 	const totalTodos = await one(
 		db,
-		`SELECT ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+		`SELECT COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
 		 FROM Cuentas_Gastos cg
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end};`,
 	);
 	const total = await one(
 		db,
-		`SELECT ROUND(COALESCE(SUM(cg.Importe),0),2) AS total, COUNT(*) AS n
+		`SELECT COALESCE(SUM(cg.Importe),0) AS total, COUNT(*) AS n
 		 FROM Cuentas_Gastos cg
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter};`,
 	);
 	const top = await one(
 		db,
-		`SELECT ${nombreProveedor} AS nombre, ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+		`SELECT ${nombreProveedor} AS nombre, COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
 		 FROM Cuentas_Gastos cg
 		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
 		 GROUP BY nombre ORDER BY total DESC, nombre ASC LIMIT 1;`,
 	);
 	const evoRs = await db.execute(
-		`SELECT ${b} AS label, ROUND(SUM(cg.Importe),2) AS value
+		`SELECT ${b} AS label, SUM(cg.Importe) AS value
 		 FROM Cuentas_Gastos cg
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
 		 GROUP BY label ORDER BY label ASC;`,
 	);
 	const barRs = await db.execute(
-		`SELECT ${nombreProveedor} AS label, ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS value
+		`SELECT ${nombreProveedor} AS label, COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS value
 		 FROM Cuentas_Gastos cg
 		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}
 		 GROUP BY label ORDER BY value DESC, label ASC LIMIT 12;`,
 	);
 	const lastRs = await db.execute(
-		`SELECT strftime('%Y-%m-%d', ${dt}) AS fecha, ${nombreProveedor} AS proveedor, COALESCE(cg.Concepto,'') AS concepto, ROUND(COALESCE(cg.Importe,0),2) AS importe
+		`SELECT strftime('%Y-%m-%d', ${dt}) AS fecha, ${nombreProveedor} AS proveedor, COALESCE(cg.Concepto,'') AS concepto, COALESCE(cg.Importe,0) AS importe
 		 FROM Cuentas_Gastos cg
 		 LEFT JOIN Proveedores p ON p.ID_Proveedor = cg.ID_Proveedor
 		 WHERE cg.Fecha IS NOT NULL AND ${dt} >= ${start} AND ${dt} < ${end} ${filter}

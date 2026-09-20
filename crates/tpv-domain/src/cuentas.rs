@@ -1,5 +1,7 @@
 //! Dominio de **cuentas** (caja): validaciones y value objects.
 
+use crate::dinero::Dinero;
+
 pub fn requerido(input: &str, field: &str) -> Result<String, String> {
     let out = input.trim().to_string();
     if out.is_empty() {
@@ -18,7 +20,7 @@ pub struct GastoData {
     pub fecha: String,
     pub tipo_gasto: String,
     pub concepto: String,
-    pub importe: f64,
+    pub importe: Dinero,
     pub proveedor_id: Option<String>,
     /// El dinero salió del cajón (CAJA-01). Sólo estos gastos restan del esperado del arqueo.
     pub pagado_con_caja: bool,
@@ -29,7 +31,7 @@ pub struct GastoData {
 pub struct PagoData {
     pub fecha_hora: String,
     pub metodo: String,
-    pub importe: f64,
+    pub importe: Dinero,
 }
 
 /// Estado de un cobro. Vive en `Pagos.Estado`; un cobro anulado **no se borra** (CUENTA-07).

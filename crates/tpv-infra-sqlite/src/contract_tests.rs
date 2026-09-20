@@ -26,6 +26,7 @@
 //! es la convencion del harness, no un descuido, y renombrarlos rompe esa correspondencia.
 #![allow(non_snake_case)]
 
+use tpv_domain::dinero::Dinero;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -229,10 +230,15 @@ fn gasto_del_caso(e: &Json) -> GastoData {
         fecha: s(&e["fecha"]),
         tipo_gasto: s(&e["tipo_gasto"]),
         concepto: s(&e["concepto"]),
-        importe: e["importe"].as_f64().unwrap_or(0.0),
+        importe: dinero(&e["importe"]).unwrap_or(Dinero::CERO),
         proveedor_id: opt_str(&e["proveedor_id"]),
         pagado_con_caja: e["pagado_con_caja"].as_bool().unwrap_or(false),
     }
+}
+
+/// Un importe del fichero de caso. Viene en CENTIMOS enteros, como en la BD (ARQ-01).
+fn dinero(v: &Json) -> Option<Dinero> {
+    v.as_i64().map(Dinero::de_centimos)
 }
 
 fn s(v: &Json) -> String {
@@ -340,7 +346,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_comanda: e["id_comanda"].as_str().unwrap().to_string(),
                 metodo: e["metodo"].as_str().unwrap().to_string(),
                 // El importe lo recalcula el comando desde la BD (se ignora el de entrada).
-                importe_total: 0.0,
+                importe_total: Dinero::CERO,
                 id_usuario_cobrador: None,
                 id_trabajador_cobrador: None,
                 detalles: strings(&e["detalles"]),
@@ -447,7 +453,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 caducidad: opt_str(&e["caducidad"]),
                 stock_disponible: e["stock_disponible"].as_f64().unwrap(),
                 fecha_entrada: opt_str(&e["fecha_entrada"]),
-                coste_unitario: e["coste_unitario"].as_f64(),
+                coste_unitario: dinero(&e["coste_unitario"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
                 notas: opt_str(&e["notas"]),
             })
@@ -474,7 +480,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_categoria: s(&e["id_categoria"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
                 nombre: s(&e["nombre"]),
-                precio_venta: e["precio_venta"].as_f64(),
+                precio_venta: dinero(&e["precio_venta"]),
                 stock_minimo: e["stock_minimo"].as_f64(),
                 unidad_medida: opt_str(&e["unidad_medida"]),
                 nombre_imagen: opt_str(&e["nombre_imagen"]),
@@ -506,7 +512,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 caducidad: opt_str(&e["caducidad"]),
                 stock_disponible: e["stock_disponible"].as_f64().unwrap(),
                 fecha_entrada: opt_str(&e["fecha_entrada"]),
-                coste_unitario: e["coste_unitario"].as_f64(),
+                coste_unitario: dinero(&e["coste_unitario"]),
                 id_proveedor: opt_str(&e["id_proveedor"]),
                 notas: opt_str(&e["notas"]),
             })
@@ -568,7 +574,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 id_categoria: s(&e["id_categoria"]),
                 id_proveedor: s(&e["id_proveedor"]),
                 nombre: s(&e["nombre"]),
-                precio_venta: e["precio_venta"].as_f64(),
+                precio_venta: dinero(&e["precio_venta"]),
                 stock_actual: e["stock_actual"].as_f64(),
                 stock_minimo: e["stock_minimo"].as_f64(),
                 unidad_medida: opt_str(&e["unidad_medida"]),
@@ -611,7 +617,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 &s(&e["id_comanda"]),
                 &s(&e["id_producto"]),
                 e["cantidad"].as_f64().unwrap(),
-                e["precio_unitario"].as_f64().unwrap(),
+                dinero(&e["precio_unitario"]).unwrap(),
             )
             .await
             .expect("add linea");
@@ -697,7 +703,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                     // El importe del formulario se IGNORA a propósito (CUENTA-02): el comando lo
                     // recalcula desde las líneas cobradas. Se manda un valor absurdo para que, si
                     // algún día dejara de ignorarse, el golden lo cante.
-                    importe: -1.0,
+                    importe: Dinero::de_centimos(-100),
                 },
             )
             .await
@@ -776,7 +782,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
         }
         "mesas.cerrar_comanda" => {
             let repo = SqliteMesasRepository::new(db.clone());
-            repo.cerrar_comanda(&s(&e["id_comanda"]), e["total"].as_f64().unwrap())
+            repo.cerrar_comanda(&s(&e["id_comanda"]), dinero(&e["total"]).unwrap())
                 .await
                 .expect("cerrar comanda");
         }
@@ -786,7 +792,7 @@ async fn aplicar_comando(db: &Arc<Db>, caso: &Json) {
                 &s(&e["id_comanda"]),
                 &s(&e["id_producto"]),
                 e["cantidad"].as_f64().unwrap(),
-                e["precio"].as_f64().unwrap(),
+                dinero(&e["precio"]).unwrap(),
                 None,
             )
             .await

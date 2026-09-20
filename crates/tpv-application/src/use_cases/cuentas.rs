@@ -3,6 +3,7 @@
 //! Nota de compatibilidad: importes/ids inválidos devuelven `Ok(false)` (no error),
 //! igual que el backend antiguo; los campos de texto vacíos sí son error de validación.
 
+use tpv_domain::dinero::Dinero;
 use tpv_contracts::cuentas::{
     AnularPagoInput, CreateGastoInput, CuentasRangoArgs, DeleteGastoInput, EntradaDto,
     ResumenCajaDto, SalidaDto, TicketReimpresionDto, UpdateGastoInput, UpdatePagoInput,
@@ -65,7 +66,7 @@ pub async fn create_gasto(
     let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
     let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
 
-    if !input.importe.is_finite() || input.importe <= 0.0 {
+    if input.importe <= Dinero::CERO {
         return Ok(false);
     }
 
@@ -93,7 +94,7 @@ pub async fn update_gasto(
     let tipo_gasto = requerido(&input.tipo_gasto, "tipo_gasto").map_err(AppError::validation)?;
     let concepto = requerido(&input.concepto, "concepto").map_err(AppError::validation)?;
 
-    if input.id_gasto.trim().is_empty() || !input.importe.is_finite() || input.importe <= 0.0 {
+    if input.id_gasto.trim().is_empty() || input.importe <= Dinero::CERO {
         return Ok(false);
     }
 

@@ -3,6 +3,8 @@
 //! Ya NO hay configuración SMTP (DB-04): todo el correo se envía por el worker, así que aquí solo
 //! viven los DTOs de la petición de envío.
 
+use tpv_domain::dinero::Dinero;
+
 use serde::Deserialize;
 use ts_rs::TS;
 
@@ -13,7 +15,7 @@ pub struct LineaEmailInput {
     pub cantidad: f64,
     #[serde(default)]
     #[ts(optional)]
-    pub precio_unitario: Option<f64>,
+    pub precio_unitario: Option<Dinero>,
     #[serde(default)]
     #[ts(optional)]
     pub unidad: Option<String>,

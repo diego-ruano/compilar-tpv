@@ -1,5 +1,6 @@
 //! Puerto de persistencia de venta rápida (barra).
 
+use tpv_domain::dinero::Dinero;
 use async_trait::async_trait;
 
 use tpv_contracts::venta_rapida::{
@@ -41,7 +42,7 @@ pub trait VentaRapidaRepository: Send + Sync {
         id_comanda: &str,
         id_producto: &str,
         cantidad: f64,
-        precio_unitario: f64,
+        precio_unitario: Dinero,
     ) -> AppResult<String>;
     /// Elimina la última línea no pagada de ese producto en la comanda.
     async fn remove_last_unpaid_linea(

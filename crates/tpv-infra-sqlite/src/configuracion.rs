@@ -1,5 +1,6 @@
 //! Adaptador SQLite del repositorio de configuración. Local-First (sin outbox/applied).
 
+use tpv_domain::dinero::Dinero;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use tpv_domain::configuracion::{
 };
 
 use crate::db::{Db, Reader, Writer};
-use crate::mapping::{v_f64, v_i64, v_string};
+use crate::mapping::{v_f64, v_i64, v_string, v_dinero, dinero_val};
 
 /// `DescripcionOperacion` cuando nadie la ha configurado.
 ///
@@ -83,6 +84,19 @@ fn patch_f64(patch: &JsonValue, key: &str) -> Option<f64> {
         _ => None,
     }
 }
+/// Un importe que llega en el patch de configuracion. Viene en CENTIMOS enteros, igual que
+/// cruza el resto de la frontera (ARQ-01); el `as_f64` de respaldo cubre un cliente que todavia
+/// mande un decimal, que se redondea al centimo mas cercano en vez de truncarse.
+fn patch_dinero(patch: &JsonValue, key: &str) -> Option<Dinero> {
+    match patch_get(patch, key)? {
+        JsonValue::Number(n) => n
+            .as_i64()
+            .or_else(|| n.as_f64().map(|f| f.round() as i64))
+            .map(Dinero::de_centimos),
+        JsonValue::String(s) => s.parse::<i64>().ok().map(Dinero::de_centimos),
+        _ => None,
+    }
+}
 fn patch_i64(patch: &JsonValue, key: &str) -> Option<i64> {
     match patch_get(patch, key)? {
         JsonValue::Number(n) => n.as_i64(),
@@ -138,15 +152,15 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             cif: v_string(g(4)?).unwrap_or_default(),
             mensaje_footer: v_string(g(5)?).unwrap_or_else(|| "¡Gracias por su visita!".to_string()),
             iva_percent: v_f64(g(6)?).unwrap_or(10.0),
-            umbral_descuadre: v_f64(g(7)?).unwrap_or(
+            umbral_descuadre: v_dinero(g(7)?).unwrap_or(
                 tpv_domain::cierre_caja::UMBRAL_DESCUADRE_POR_DEFECTO,
             ),
             razon_social: v_string(g(8)?).unwrap_or_default(),
             descripcion_op: v_string(g(9)?)
                 .filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| DESCRIPCION_OP_POR_DEFECTO.to_string()),
-            limite_simplif: v_f64(g(10)?)
-                .filter(|v| *v > 0.0)
+            limite_simplif: v_dinero(g(10)?)
+                .filter(|v| *v > Dinero::CERO)
                 .unwrap_or(tpv_domain::verifactu::LIMITE_SIMPLIFICADA_HOSTELERIA),
             verifactu_entorno: v_string(g(11)?).unwrap_or_else(|| "produccion".to_string()),
         })
@@ -293,9 +307,9 @@ impl ConfiguracionRepository for SqliteConfiguracionRepository {
             }
         }
         if patch_has(patch, "limite_simplif") {
-            if let Some(v) = patch_f64(patch, "limite_simplif") {
+            if let Some(v) = patch_dinero(patch, "limite_simplif") {
                 sets.push("Limite_Simplif = ?");
-                args.push(Value::Real(if v > 0.0 {
+                args.push(dinero_val(if v > Dinero::CERO {
                     v
                 } else {
                     tpv_domain::verifactu::LIMITE_SIMPLIFICADA_HOSTELERIA

@@ -10,18 +10,18 @@
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent, Ruta_Imagen) VALUES ('prod-tortilla', 'cat-cocina', 'Tortilla de patatas', 9.0, 10.0, '/img/tortilla.png');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-croquetas', 'cat-cocina', 'Croquetas', 7.5);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-cerveza', 'cat-barra', 'Cerveza', 3.0, 21.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent, Ruta_Imagen) VALUES ('prod-tortilla', 'cat-cocina', 'Tortilla de patatas', 900, 10.0, '/img/tortilla.png');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-croquetas', 'cat-cocina', 'Croquetas', 750);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta, IVA_Percent) VALUES ('prod-cerveza', 'cat-barra', 'Cerveza', 300, 21.0);",
     "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre) VALUES ('prod-sin-precio', 'cat-barra', 'Agua del grifo');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-harina', 'cat-no-vendible', 'Harina', 0.0);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-harina', 'cat-no-vendible', 'Harina', 0);",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-tarde', 'MESA', 'mesa-2', '2099-01-01 21:30:00', 'Abierta');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-pronto', 'MESA', 'mesa-1', '2099-01-01 13:00:00', 'Abierta');",
     "INSERT INTO Comandas (ID_Comanda, Canal, ID_Mesa, Fecha_Hora_Apertura, Estado) VALUES ('com-toda-lista', 'MESA', 'mesa-3', '2099-01-01 14:00:00', 'Abierta');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina) VALUES ('det-a', 'com-pronto', 'prod-tortilla', 2, 9.0, 'sin cebolla', 'PENDIENTE');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b', 'com-pronto', 'prod-cerveza', 1, 3.0);",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-c', 'com-tarde', 'prod-croquetas', 1, 7.5, 'EN_PREPARACION');",
-    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-d', 'com-toda-lista', 'prod-tortilla', 1, 9.0, 'PREPARADO');"
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Notas, Estado_Cocina) VALUES ('det-a', 'com-pronto', 'prod-tortilla', 2, 900, 'sin cebolla', 'PENDIENTE');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario) VALUES ('det-b', 'com-pronto', 'prod-cerveza', 1, 300);",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-c', 'com-tarde', 'prod-croquetas', 1, 750, 'EN_PREPARACION');",
+    "INSERT INTO Detalle_Comanda (ID_Detalle, ID_Comanda, ID_Producto, Cantidad, Precio_Unitario, Estado_Cocina) VALUES ('det-d', 'com-toda-lista', 'prod-tortilla', 1, 900, 'PREPARADO');"
   ],
   "entrada": {}
 }

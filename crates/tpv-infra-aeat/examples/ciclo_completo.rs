@@ -24,6 +24,8 @@
 //! No toca la base del TPV instalado, no toca producción salvo que se le pida a gritos, y no saca
 //! ningún dato del certificado: sólo usa su huella.
 
+use tpv_domain::dinero::Dinero;
+
 fn main() {
     #[cfg(not(windows))]
     {
@@ -98,7 +100,7 @@ fn main() {
                     &g,
                     DatosFactura {
                         lineas: vec![LineaTicket {
-                            total_con_iva: 11.0 * f64::from(i),
+                            total_con_iva: Dinero::de_euros(11.0 * f64::from(i)),
                             tipo_iva: 10.0,
                             exento: false,
                             causa_exencion: None,

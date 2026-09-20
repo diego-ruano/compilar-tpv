@@ -4,6 +4,7 @@
 //! (`*_impl`) devuelven `Result<T, String>` para poder portarse sin cambios; el `impl`
 //! del puerto los envuelve mapeando el error a `AppError::Repository`.
 
+use tpv_domain::dinero::Dinero;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,7 +16,7 @@ use crate::db::{Db, Reader};
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::stats::StatsRepository;
 use tpv_contracts::stats::{
-    ChartSeriesF64Out, ChartSeriesI64, ClientesStatsArgs, ClientesStatsResponse, MesaIngresoRow,
+    ChartSerieDinero, ChartSeriesI64, ClientesStatsArgs, ClientesStatsResponse, MesaIngresoRow,
     MesasStatsResponse, MesasTopComandas, ProductosStatsArgs, ProductosStatsResponse,
     ProveedorTop, ProveedoresStatsArgs, ProveedoresStatsResponse, PuntualidadInfo,
     ReservasMesasTurno, ReservasStatsArgs, ReservasStatsResponse, StatsCategoriaRow, StatsRange,
@@ -23,7 +24,7 @@ use tpv_contracts::stats::{
     UltimoGastoProveedor,
 };
 
-use crate::mapping::{v_f64, v_i64, v_string};
+use crate::mapping::{v_f64, v_i64, v_string, v_dinero};
 
 /// STAT-03: horas que se imputan a una jornada **auto-cerrada** por olvido de fichar la salida
 /// (TRAB-01 la marca `Cerrado_Automatico=1` con `Hora_Salida` NULL). Sin esto, esas jornadas
@@ -187,7 +188,7 @@ impl SqliteStatsRepository {
             r#"
             SELECT
               COUNT(DISTINCT c.ID_Mesa) AS ocupadas,
-              ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS ingresos
+              COALESCE(SUM(p.Importe_Total),0) AS ingresos
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -199,19 +200,19 @@ impl SqliteStatsRepository {
         );
 
         let mut rows_occ = db.query(&sql_occ_ing, ()).await.map_err(|e| e.to_string())?;
-        let (ocupadas, total_ingresos): (i64, f64) =
+        let (ocupadas, total_ingresos): (i64, Dinero) =
             match rows_occ.next().await.map_err(|e| e.to_string())? {
                 Some(r) => (
                     v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0),
-                    v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                    v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO),
                 ),
-                None => (0, 0.0),
+                None => (0, Dinero::CERO),
             };
 
-        let ticket_medio_por_mesa: f64 = if ocupadas > 0 {
-            (total_ingresos / (ocupadas as f64) * 100.0).round() / 100.0
+        let ticket_medio_por_mesa: Dinero = if ocupadas > 0 {
+            total_ingresos.escala(1.0 / ocupadas as f64)
         } else {
-            0.0
+            Dinero::CERO
         };
 
         let sql_top = format!(
@@ -281,7 +282,7 @@ impl SqliteStatsRepository {
             SELECT
               m.Numero_Mesa,
               z.Nombre_Zona,
-              ROUND(COALESCE(SUM(p.Importe_Total),0),2) AS total
+              COALESCE(SUM(p.Importe_Total),0) AS total
             FROM Pagos p
             JOIN Comandas c ON c.ID_Comanda = p.ID_Comanda
             JOIN Mesas m ON m.ID_Mesa = c.ID_Mesa
@@ -306,7 +307,7 @@ impl SqliteStatsRepository {
             top_mesas_ingresos.push(MesaIngresoRow {
                 mesa: v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default(),
                 zona: v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_default(),
-                total: v_f64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                total: v_dinero(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO),
             });
         }
 
@@ -876,7 +877,7 @@ impl SqliteStatsRepository {
                 cocineros: vec![],
                 camareros: vec![],
                 limpieza: vec![],
-                ranking_ventas: ChartSeriesF64Out {
+                ranking_ventas: ChartSerieDinero {
                     labels: vec![],
                     values: vec![],
                 },
@@ -890,8 +891,8 @@ impl SqliteStatsRepository {
 
         let mut cam_comandas_tomadas: HashMap<String, i64> = HashMap::new();
         let mut cam_cobros: HashMap<String, i64> = HashMap::new();
-        let mut cam_ticket_medio: HashMap<String, f64> = HashMap::new();
-        let mut cam_ventas_total: HashMap<String, f64> = HashMap::new();
+        let mut cam_ticket_medio: HashMap<String, Dinero> = HashMap::new();
+        let mut cam_ventas_total: HashMap<String, Dinero> = HashMap::new();
 
         let mut puntualidad_map: HashMap<String, PuntualidadInfo> = HashMap::new();
         let mut horas_map: HashMap<String, f64> = HashMap::new();
@@ -1054,8 +1055,8 @@ impl SqliteStatsRepository {
             )
             SELECT
               id_trabajador,
-              ROUND(COALESCE(SUM(total),0),2) AS ventas_total,
-              ROUND(COALESCE(AVG(total),0),2) AS ticket_medio
+              COALESCE(SUM(total),0) AS ventas_total,
+              CAST(ROUND(COALESCE(AVG(total),0)) AS INTEGER) AS ticket_medio
             FROM comanda_tot
             GROUP BY id_trabajador;
             "#,
@@ -1067,8 +1068,8 @@ impl SqliteStatsRepository {
 
         while let Ok(Some(r)) = rows_s.next().await {
             let id_trab = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
-            let ventas = v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0);
-            let ticket = v_f64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0.0);
+            let ventas = v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
+            let ticket = v_dinero(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
 
             if !id_trab.is_empty() {
                 cam_ventas_total.insert(id_trab.clone(), ventas);
@@ -1254,7 +1255,7 @@ impl SqliteStatsRepository {
             } else if w.rol == "Camarero" {
                 let comandas = *cam_comandas_tomadas.get(&w.id_trabajador).unwrap_or(&0);
                 let cobros = *cam_cobros.get(&w.id_trabajador).unwrap_or(&0);
-                let ticket = *cam_ticket_medio.get(&w.id_trabajador).unwrap_or(&0.0);
+                let ticket = *cam_ticket_medio.get(&w.id_trabajador).unwrap_or(&Dinero::CERO);
 
                 camareros.push(TrabajadorCardStats {
                     id_trabajador: w.id_trabajador.clone(),
@@ -1286,21 +1287,21 @@ impl SqliteStatsRepository {
             }
         }
 
-        let mut ranking_pairs: Vec<(String, f64)> = Vec::new();
+        let mut ranking_pairs: Vec<(String, Dinero)> = Vec::new();
 
         for w in base.iter() {
             if w.rol != "Camarero" {
                 continue;
             }
 
-            let ventas = *cam_ventas_total.get(&w.id_trabajador).unwrap_or(&0.0);
+            let ventas = *cam_ventas_total.get(&w.id_trabajador).unwrap_or(&Dinero::CERO);
             ranking_pairs.push((w.nombre.clone(), ventas));
         }
 
         ranking_pairs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut rank_labels: Vec<String> = Vec::new();
-        let mut rank_values: Vec<f64> = Vec::new();
+        let mut rank_values: Vec<Dinero> = Vec::new();
 
         for (n, v) in ranking_pairs.into_iter() {
             rank_labels.push(n);
@@ -1311,7 +1312,7 @@ impl SqliteStatsRepository {
             cocineros,
             camareros,
             limpieza,
-            ranking_ventas: ChartSeriesF64Out {
+            ranking_ventas: ChartSerieDinero {
                 labels: rank_labels,
                 values: rank_values,
             },
@@ -1385,7 +1386,7 @@ impl SqliteStatsRepository {
 
         let mut recurrentes: i64 = 0;
         let mut no_recurrentes: i64 = 0;
-        let ticket_medio_cliente: f64;
+        let ticket_medio_cliente: Dinero;
 
         {
             let sql_rec = format!(
@@ -1435,7 +1436,7 @@ impl SqliteStatsRepository {
                    WHERE f.first_paid >= rng.start_dt
                      AND f.first_paid <  rng.end_dt
                   ) AS no_recurrentes,
-                  ROUND(COALESCE((SELECT SUM(total) FROM tot_range),0),2) AS ventas_total,
+                  COALESCE((SELECT SUM(total) FROM tot_range),0) AS ventas_total,
                   (SELECT COUNT(*) FROM cust_range) AS clientes_rango
                 ;
                 "#,
@@ -1445,25 +1446,27 @@ impl SqliteStatsRepository {
 
             let mut rows_r = db.query(&sql_rec, ()).await.map_err(|e| e.to_string())?;
 
-            let mut ventas_total: f64 = 0.0;
+            let mut ventas_total: Dinero = Dinero::CERO;
             let mut clientes_rango: i64 = 0;
 
             if let Some(r) = rows_r.next().await.map_err(|e| e.to_string())? {
                 recurrentes = v_i64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0);
                 no_recurrentes = v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0);
-                ventas_total = v_f64(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(0.0);
+                ventas_total = v_dinero(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
                 clientes_rango = v_i64(r.get_value(3).map_err(|e| e.to_string())?).unwrap_or(0);
             }
 
+            // Un promedio de importes sigue siendo fraccionario, asi que se reparte con
+            // `escala` y vuelve a centimo entero de una sola vez.
             ticket_medio_cliente = if clientes_rango > 0 {
-                (ventas_total / (clientes_rango as f64) * 100.0).round() / 100.0
+                ventas_total.escala(1.0 / clientes_rango as f64)
             } else {
-                0.0
+                Dinero::CERO
             };
         }
 
         let mut top_labels: Vec<String> = vec![];
-        let mut top_values: Vec<f64> = vec![];
+        let mut top_values: Vec<Dinero> = vec![];
 
         {
             let name_expr =
@@ -1473,7 +1476,7 @@ impl SqliteStatsRepository {
                 r#"
                 SELECT
                   ({name_expr} || ' #' || CAST(ID_Cliente AS TEXT)) AS nombre,
-                  ROUND(COALESCE(Total_Gastado,0),2) AS total
+                  COALESCE(Total_Gastado,0) AS total
                 FROM Clientes
                 ORDER BY COALESCE(Total_Gastado,0) DESC, nombre ASC
                 LIMIT 10;
@@ -1485,10 +1488,10 @@ impl SqliteStatsRepository {
 
             while let Ok(Some(r)) = rows_t.next().await {
                 let name = v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default();
-                let total = v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0);
+                let total = v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
 
                 top_labels.push(name);
-                top_values.push((total * 100.0).round() / 100.0);
+                top_values.push(total);
             }
         }
 
@@ -1501,7 +1504,7 @@ impl SqliteStatsRepository {
                 labels: evo_labels,
                 values: evo_values,
             },
-            top_clientes_gasto: ChartSeriesF64Out {
+            top_clientes_gasto: ChartSerieDinero {
                 labels: top_labels,
                 values: top_values,
             },
@@ -1528,7 +1531,7 @@ impl SqliteStatsRepository {
         let sql_total_all = format!(
             r#"
             WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
-            SELECT ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+            SELECT COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
             FROM Cuentas_Gastos cg, rng
             WHERE cg.Fecha IS NOT NULL
               AND {dt} >= rng.start_dt
@@ -1543,16 +1546,16 @@ impl SqliteStatsRepository {
             .query(&sql_total_all, ())
             .await
             .map_err(|e| e.to_string())?;
-        let total_all: f64 = match rows_all.next().await.map_err(|e| e.to_string())? {
-            Some(r) => v_f64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0.0),
-            None => 0.0,
+        let total_all: Dinero = match rows_all.next().await.map_err(|e| e.to_string())? {
+            Some(r) => v_dinero(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO),
+            None => Dinero::CERO,
         };
 
         let sql_total = format!(
             r#"
             WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
             SELECT
-              ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total,
+              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total,
               COUNT(*) AS n
             FROM Cuentas_Gastos cg, rng
             WHERE cg.Fecha IS NOT NULL
@@ -1569,20 +1572,23 @@ impl SqliteStatsRepository {
         let mut rows_t = db.query(&sql_total, ()).await.map_err(|e| e.to_string())?;
         let (total_gasto, num_gastos) = match rows_t.next().await.map_err(|e| e.to_string())? {
             Some(r) => (
-                v_f64(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                v_dinero(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO),
                 v_i64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0),
             ),
-            None => (0.0, 0),
+            None => (Dinero::CERO, 0),
         };
 
         let gasto_medio = if num_gastos > 0 {
-            ((total_gasto / (num_gastos as f64)) * 100.0).round() / 100.0
+            total_gasto.escala(1.0 / num_gastos as f64)
         } else {
-            0.0
+            Dinero::CERO
         };
 
-        let porcentaje_sobre_total_gastos = if total_all.abs() > 0.000001 {
-            ((total_gasto / total_all) * 100.0 * 100.0).round() / 100.0
+        // Un PORCENTAJE no es dinero: es la razon entre dos importes, y se calcula sobre sus
+        // centimos para no perder precision dividiendo euros.
+        let porcentaje_sobre_total_gastos = if !total_all.es_cero() {
+            ((total_gasto.centimos() as f64 / total_all.centimos() as f64) * 100.0 * 100.0).round()
+                / 100.0
         } else {
             0.0
         };
@@ -1602,7 +1608,7 @@ impl SqliteStatsRepository {
             WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
             SELECT
               {name_expr} AS proveedor,
-              ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
             FROM Cuentas_Gastos cg
             {join_prov}
             , rng
@@ -1628,7 +1634,7 @@ impl SqliteStatsRepository {
                 Some(r) => Some(ProveedorTop {
                     nombre: v_string(r.get_value(0).map_err(|e| e.to_string())?)
                         .unwrap_or_default(),
-                    total: v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0),
+                    total: v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO),
                 }),
                 None => None,
             };
@@ -1638,7 +1644,7 @@ impl SqliteStatsRepository {
             WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
             SELECT
               {bucket} AS b,
-              ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
             FROM Cuentas_Gastos cg, rng
             WHERE cg.Fecha IS NOT NULL
               AND {dt} >= rng.start_dt
@@ -1657,15 +1663,13 @@ impl SqliteStatsRepository {
         let mut rows_e = db.query(&sql_evo, ()).await.map_err(|e| e.to_string())?;
 
         let mut evo_labels: Vec<String> = vec![];
-        let mut evo_values: Vec<f64> = vec![];
+        let mut evo_values: Vec<Dinero> = vec![];
 
         while let Ok(Some(r)) = rows_e.next().await {
             evo_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
-            evo_values.push(
-                (v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0) * 100.0).round()
-                    / 100.0,
-            );
+            evo_values
+                .push(v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO));
         }
 
         let sql_bar = format!(
@@ -1673,7 +1677,7 @@ impl SqliteStatsRepository {
             WITH rng AS (SELECT {start} AS start_dt, {end} AS end_dt)
             SELECT
               {name_expr} AS proveedor,
-              ROUND(COALESCE(SUM(COALESCE(cg.Importe,0)),0),2) AS total
+              COALESCE(SUM(COALESCE(cg.Importe,0)),0) AS total
             FROM Cuentas_Gastos cg
             {join_prov}
             , rng
@@ -1696,15 +1700,13 @@ impl SqliteStatsRepository {
         let mut rows_b = db.query(&sql_bar, ()).await.map_err(|e| e.to_string())?;
 
         let mut bar_labels: Vec<String> = vec![];
-        let mut bar_values: Vec<f64> = vec![];
+        let mut bar_values: Vec<Dinero> = vec![];
 
         while let Ok(Some(r)) = rows_b.next().await {
             bar_labels
                 .push(v_string(r.get_value(0).map_err(|e| e.to_string())?).unwrap_or_default());
-            bar_values.push(
-                (v_f64(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(0.0) * 100.0).round()
-                    / 100.0,
-            );
+            bar_values
+                .push(v_dinero(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO));
         }
 
         let concepto_expr = "COALESCE(cg.Concepto,'')";
@@ -1716,7 +1718,7 @@ impl SqliteStatsRepository {
               strftime('%Y-%m-%d', {dt}) AS fecha,
               {name_expr} AS proveedor,
               {concepto_expr} AS concepto,
-              ROUND(COALESCE(cg.Importe,0),2) AS importe
+              COALESCE(cg.Importe,0) AS importe
             FROM Cuentas_Gastos cg
             {join_prov}
             , rng
@@ -1744,27 +1746,27 @@ impl SqliteStatsRepository {
             let proveedor =
                 v_string(r.get_value(1).map_err(|e| e.to_string())?).unwrap_or_else(|| "—".into());
             let concepto = v_string(r.get_value(2).map_err(|e| e.to_string())?).unwrap_or_default();
-            let importe = v_f64(r.get_value(3).map_err(|e| e.to_string())?).unwrap_or(0.0);
+            let importe = v_dinero(r.get_value(3).map_err(|e| e.to_string())?).unwrap_or(Dinero::CERO);
 
             ultimos_gastos.push(UltimoGastoProveedor {
                 fecha,
                 proveedor,
                 concepto,
-                importe: (importe * 100.0).round() / 100.0,
+                importe,
             });
         }
 
         Ok(ProveedoresStatsResponse {
-            total_gasto: (total_gasto * 100.0).round() / 100.0,
+            total_gasto,
             num_gastos,
             gasto_medio,
             porcentaje_sobre_total_gastos,
             proveedor_top,
-            gastos_evolucion: ChartSeriesF64Out {
+            gastos_evolucion: ChartSerieDinero {
                 labels: evo_labels,
                 values: evo_values,
             },
-            gasto_por_proveedor: ChartSeriesF64Out {
+            gasto_por_proveedor: ChartSerieDinero {
                 labels: bar_labels,
                 values: bar_values,
             },

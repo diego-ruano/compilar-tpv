@@ -15,14 +15,21 @@
 //! aplicación se lo cambie de madrugada y sin decir nada es peor que enseñarle el descuadre. Quien
 //! decide qué hacer con cada uno es él.
 
+use tpv_domain::dinero::Dinero;
 use tpv_domain::notificaciones::{Destino, NuevaNotificacion, Severidad, ADMIN_ROL_ID};
 
 use crate::error::AppResult;
 use crate::ports::notificaciones::Notifier;
 use crate::ports::reconciliacion::{ClienteDescuadrado, LoteDescuadrado, ReconciliacionRepository};
 
-/// Medio céntimo: por debajo de eso es ruido de coma flotante, no un descuadre.
-pub const TOLERANCIA_DINERO: f64 = 0.005;
+/// Cero, y ya no puede ser otra cosa (ARQ-01).
+///
+/// Valía medio céntimo porque el dinero era `f64` y había que absorber el ruido de sumar muchos
+/// REAL: por debajo de eso, una diferencia no era un descuadre sino la representación. Con céntimos
+/// enteros no hay ruido que absorber, así que cualquier diferencia es real y se informa. Se deja
+/// como constante —y el puerto sigue recibiéndola— para que el SQL no tenga el umbral escrito
+/// dentro y quien lea esto sepa por qué vale cero.
+pub const TOLERANCIA_DINERO: Dinero = Dinero::CERO;
 
 /// Milésima de unidad. El stock admite decimales (0,5 kg), así que la tolerancia es más fina que
 /// la del dinero pero sigue absorbiendo el error de representación de sumar muchos REAL.
@@ -96,7 +103,7 @@ pub async fn ejecutar(
 pub async fn recalcular_gasto_de_cliente(
     repo: &dyn ReconciliacionRepository,
     id_cliente: &str,
-) -> AppResult<Option<f64>> {
+) -> AppResult<Option<Dinero>> {
     let id = id_cliente.trim();
     if id.is_empty() {
         return Err(crate::error::AppError::validation("Falta el cliente"));
@@ -139,7 +146,7 @@ fn cuerpo_stock(lotes: &[LoteDescuadrado]) -> String {
             "{} ({}): {}{:.3} — guardado {:.3}, calculado {:.3}",
             l.producto,
             l.codigo_lote,
-            signo(l.desviacion()),
+            signo_cantidad(l.desviacion()),
             l.desviacion(),
             l.guardado,
             l.calculado
@@ -165,7 +172,16 @@ fn cuerpo_gasto(clientes: &[ClienteDescuadrado]) -> String {
     )
 }
 
-fn signo(d: f64) -> &'static str {
+fn signo(d: Dinero) -> &'static str {
+    if d > Dinero::CERO {
+        "+"
+    } else {
+        ""
+    }
+}
+
+/// Lo mismo para una desviación de STOCK, que sigue siendo fraccionaria (0,5 kg) y por tanto f64.
+fn signo_cantidad(d: f64) -> &'static str {
     if d > 0.0 {
         "+"
     } else {
@@ -187,6 +203,13 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
+    /// Euros -> `Dinero`. Los supuestos se escriben en euros; lo que
+    /// se compara son centimos.
+    #[allow(dead_code)]
+    fn eur(euros: f64) -> Dinero {
+        Dinero::de_euros(euros)
+    }
+
     #[derive(Default)]
     struct RepoFalso {
         lotes: Vec<LoteDescuadrado>,
@@ -200,12 +223,12 @@ mod tests {
         async fn lotes_descuadrados(&self, _t: f64) -> AppResult<Vec<LoteDescuadrado>> {
             Ok(self.lotes.clone())
         }
-        async fn clientes_descuadrados(&self, _t: f64) -> AppResult<Vec<ClienteDescuadrado>> {
+        async fn clientes_descuadrados(&self, _t: Dinero) -> AppResult<Vec<ClienteDescuadrado>> {
             Ok(self.clientes.clone())
         }
-        async fn recalcular_gasto(&self, _id: &str) -> AppResult<Option<f64>> {
+        async fn recalcular_gasto(&self, _id: &str) -> AppResult<Option<Dinero>> {
             *self.recalculos.lock().unwrap() += 1;
-            Ok(Some(0.0))
+            Ok(Some(Dinero::CERO))
         }
     }
 
@@ -238,6 +261,7 @@ mod tests {
     }
 
     fn cliente(nombre: &str, guardado: f64, calculado: f64) -> ClienteDescuadrado {
+        let (guardado, calculado) = (eur(guardado), eur(calculado));
         ClienteDescuadrado {
             id_cliente: nombre.to_string(),
             nombre: nombre.to_string(),

@@ -4,6 +4,7 @@
 //! (`PLAN_CIERRE_CAJA.md` §8). Y quién cierra o reabre sale de la **sesión**, no de la entrada:
 //! `ConfirmarCierreInput` y `CierreIdInput` ya no llevan `id_usuario`.
 
+use tpv_domain::dinero::Dinero;
 use tauri::State;
 
 use tpv_application::use_cases::cierre_caja as uc;
@@ -17,7 +18,7 @@ use crate::{AppState, ADMIN};
 
 /// El umbral configurado del negocio. Si no se puede leer (Handy sin red, BD a medio arrancar) se
 /// cae al valor por defecto en vez de fallar: el arqueo no puede depender de un ajuste cosmético.
-async fn umbral(state: &State<'_, AppState>) -> f64 {
+async fn umbral(state: &State<'_, AppState>) -> Dinero {
     match state.configuracion_repo().await {
         Ok(repo) => {
             match tpv_application::use_cases::configuracion::get_business(repo.as_ref()).await {

@@ -1,5 +1,7 @@
 //! Dominio de **proveedores**: entidades y validaciones puras.
 
+use crate::dinero::Dinero;
+
 fn limpia(o: Option<String>) -> Option<String> {
     o.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
@@ -56,7 +58,7 @@ pub struct ProductoNuevo {
     pub id_categoria: String,
     pub id_proveedor: String,
     pub nombre: String,
-    pub precio_venta: Option<f64>,
+    pub precio_venta: Option<Dinero>,
     pub stock_actual: Option<f64>,
     pub stock_minimo: Option<f64>,
     pub unidad_medida: Option<String>,
@@ -71,6 +73,17 @@ fn check_no_negativo(v: Option<f64>, campo: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Lo mismo para un importe. No comprueba que sea finito porque un `Dinero` siempre lo es: lo que
+/// no era un número se quedó en la puerta, al construirlo.
+fn check_dinero_no_negativo(v: Option<Dinero>, campo: &str) -> Result<(), String> {
+    if let Some(n) = v {
+        if n.es_negativo() {
+            return Err(format!("{campo} inválido"));
+        }
+    }
+    Ok(())
+}
+
 impl ProductoNuevo {
     #[allow(clippy::too_many_arguments)]
     pub fn validar(
@@ -78,7 +91,7 @@ impl ProductoNuevo {
         id_categoria: String,
         id_proveedor: String,
         nombre: String,
-        precio_venta: Option<f64>,
+        precio_venta: Option<Dinero>,
         stock_actual: Option<f64>,
         stock_minimo: Option<f64>,
         unidad_medida: Option<String>,
@@ -96,7 +109,7 @@ impl ProductoNuevo {
             return Err("ID_Proveedor inválido".into());
         }
         check_no_negativo(stock_actual, "Stock_Actual")?;
-        check_no_negativo(precio_venta, "Precio_Venta")?;
+        check_dinero_no_negativo(precio_venta, "Precio_Venta")?;
         check_no_negativo(stock_minimo, "Stock_Minimo")?;
 
         Ok(ProductoNuevo {
@@ -149,8 +162,11 @@ mod tests {
 
     #[test]
     fn producto_rechaza_numeros_negativos_o_no_finitos() {
+        // El precio es `Dinero`, asi que lo unico malo que puede llegar es un negativo: lo que no
+        // era un numero se queda en la puerta al construirlo. El stock sigue siendo f64 y por eso
+        // conserva los casos de NaN e infinito.
+        assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), Some(Dinero::de_centimos(-100)), None, None, None).is_err());
         for valor in [-1.0, f64::NAN, f64::INFINITY] {
-            assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), Some(valor), None, None, None).is_err());
             assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), None, Some(valor), None, None).is_err());
             assert!(ProductoNuevo::validar(None, "c".into(), "p".into(), "x".into(), None, None, Some(valor), None).is_err());
         }
@@ -158,7 +174,7 @@ mod tests {
 
     #[test]
     fn producto_valido_admite_ceros_y_normaliza() {
-        let p = ProductoNuevo::validar(Some(" x1 ".into()), " c1 ".into(), " p1 ".into(), " Harina ".into(), Some(0.0), Some(0.0), Some(0.0), Some(" kg ".into())).unwrap();
+        let p = ProductoNuevo::validar(Some(" x1 ".into()), " c1 ".into(), " p1 ".into(), " Harina ".into(), Some(Dinero::CERO), Some(0.0), Some(0.0), Some(" kg ".into())).unwrap();
         assert_eq!(p.id.as_deref(), Some("x1"));
         assert_eq!(p.id_categoria, "c1");
         assert_eq!(p.id_proveedor, "p1");

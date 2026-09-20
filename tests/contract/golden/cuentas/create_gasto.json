@@ -5,7 +5,7 @@
       "Fecha": "2026-03-14",
       "ID_Gasto": "gasto-nuevo-1",
       "ID_Proveedor": "prov-1",
-      "Importe": 42.75,
+      "Importe": 4275,
       "Pagado_Con_Caja": 1,
       "Tipo_Gasto": "Suministros"
     }
@@ -14,7 +14,7 @@
     {
       "ID_Gasto": "gasto-nuevo-1",
       "ID_Usuario": null,
-      "Importe": 42.75,
+      "Importe": 4275,
       "Motivo": "Cajas de servilletas",
       "Tipo": "GASTO"
     }

@@ -7,12 +7,12 @@
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Pasa_Cocina, Ruta_Imagen) VALUES ('cat-cocina', 'Platos', 1, '/img/platos.png');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre) VALUES ('cat-barra', 'Bebidas');",
     "INSERT INTO Categorias_Producto (ID_Categoria, Nombre, Vendible) VALUES ('cat-no-vendible', 'Materia prima', 0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 9.0, 10.0, 5, 'ud');",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 3.0);",
-    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 1.5);",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-1', date('now','localtime'), 'Compras', 'Barriles', 150.0, 'prov-1');",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('g-2', date('now','localtime'), 'Suministros', 'Luz', 90.0);",
-    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-viejo', date('now','localtime','-30 days'), 'Compras', 'Carne', 400.0, 'prov-2');"
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta, IVA_Percent, Stock_Minimo, Unidad_Medida) VALUES ('prod-tortilla', 'cat-cocina', 'prov-2', 'Tortilla de patatas', 900, 10.0, 5, 'ud');",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, ID_Proveedor, Nombre, Precio_Venta) VALUES ('prod-cerveza', 'cat-barra', 'prov-1', 'Cerveza', 300);",
+    "INSERT INTO Productos (ID_Producto, ID_Categoria, Nombre, Precio_Venta) VALUES ('prod-sin-prov', 'cat-barra', 'Agua', 150);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-1', date('now','localtime'), 'Compras', 'Barriles', 15000, 'prov-1');",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe) VALUES ('g-2', date('now','localtime'), 'Suministros', 'Luz', 9000);",
+    "INSERT INTO Cuentas_Gastos (ID_Gasto, Fecha, Tipo_Gasto, Concepto, Importe, ID_Proveedor) VALUES ('g-viejo', date('now','localtime','-30 days'), 'Compras', 'Carne', 40000, 'prov-2');"
   ],
   "entrada": {},
   "omitir": [

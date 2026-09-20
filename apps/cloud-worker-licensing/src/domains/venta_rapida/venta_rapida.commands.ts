@@ -31,7 +31,7 @@ export const CANAL_BARRA = "BARRA";
 const UPDATE_TOTAL = `
 	UPDATE Comandas
 	SET Total_Comanda = (
-		SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+		SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
 		FROM Detalle_Comanda
 		WHERE ID_Comanda = ?1
 	)
@@ -408,7 +408,7 @@ export function cobrarFraccionado(
 			SET
 				Estado = 'Pagada',
 				Total_Comanda = (
-					SELECT IFNULL(SUM(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)), 0)
+					SELECT IFNULL(SUM(CAST(ROUND(COALESCE(Cantidad,1) * COALESCE(Precio_Unitario,0)) AS INTEGER)), 0)
 					FROM Detalle_Comanda
 					WHERE ID_Comanda = ?1
 				),
