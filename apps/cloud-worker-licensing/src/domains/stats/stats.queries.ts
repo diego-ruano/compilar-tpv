@@ -1,6 +1,7 @@
 // src/domains/stats/stats.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { CERO, deLaBase, entre } from "../../lib/dinero";
 
 import type {
 	ClientesStatsResponse,
@@ -141,7 +142,9 @@ export async function mesas(
 	return {
 		total_mesas: num(total.n),
 		ocupadas,
-		ticket_medio_por_mesa: ocupadas > 0 ? Math.round((num(ingresos.total) / ocupadas) * 100) / 100 : 0,
+		// Un promedio de importes sigue siendo fraccionario: vuelve a centimo entero con la MISMA
+		// regla que la Main (`Dinero::entre`), o las dos pantallas ensenan cifras distintas.
+		ticket_medio_por_mesa: ocupadas > 0 ? entre(deLaBase(ingresos.total), ocupadas) : CERO,
 		mesa_top_comandas: top.mesa
 			? { mesa: String(top.mesa), zona: String(top.zona ?? ""), comandas: num(top.comandas) }
 			: null,
@@ -152,7 +155,7 @@ export async function mesas(
 		top_mesas_ingresos: topMesas.map((r) => ({
 			mesa: String(r.mesa ?? ""),
 			zona: String(r.zona ?? ""),
-			total: num(r.total),
+			total: deLaBase(r.total),
 		})),
 	};
 }
@@ -709,7 +712,7 @@ export async function clientes(
 			nuevos: 0,
 			recurrentes: 0,
 			no_recurrentes: 0,
-			ticket_medio_cliente: 0,
+			ticket_medio_cliente: CERO,
 			nuevos_por_bucket: { labels: [], values: [] },
 			top_clientes_gasto: { labels: [], values: [] },
 		};
@@ -797,16 +800,14 @@ export async function clientes(
 		recurrentes: num(rec.recurrentes),
 		no_recurrentes: num(rec.no_recurrentes),
 		ticket_medio_cliente:
-			clientesRango > 0
-				? Math.round((num(rec.ventas_total) / clientesRango) * 100) / 100
-				: 0,
+			clientesRango > 0 ? entre(deLaBase(rec.ventas_total), clientesRango) : CERO,
 		nuevos_por_bucket: {
 			labels: evo.map((r) => String(r.label ?? "")),
 			values: evo.map((r) => num(r.value)),
 		},
 		top_clientes_gasto: {
 			labels: top.map((r) => String(r.label ?? "")),
-			values: top.map((r) => num(r.value)),
+			values: top.map((r) => deLaBase(r.value)),
 		},
 	};
 }
@@ -817,9 +818,9 @@ export async function proveedores(
 ): Promise<ProveedoresStatsResponse> {
 	if (!(await tableExists(db, "Cuentas_Gastos"))) {
 		return {
-			total_gasto: 0,
+			total_gasto: CERO,
 			num_gastos: 0,
-			gasto_medio: 0,
+			gasto_medio: CERO,
 			porcentaje_sobre_total_gastos: 0,
 			proveedor_top: null,
 			gastos_evolucion: { labels: [], values: [] },
@@ -885,21 +886,29 @@ export async function proveedores(
 	const bar = rows(barRs);
 	const last = rows(lastRs);
 	return {
-		total_gasto: num(total.total),
+		total_gasto: deLaBase(total.total),
 		num_gastos: num(total.n),
-		gasto_medio: num(total.n) > 0 ? Math.round((num(total.total) / num(total.n)) * 100) / 100 : 0,
+		gasto_medio: num(total.n) > 0 ? entre(deLaBase(total.total), num(total.n)) : CERO,
 		porcentaje_sobre_total_gastos:
 			Math.abs(num(totalTodos.total)) > 0.000001
 				? Math.round((num(total.total) / num(totalTodos.total)) * 100 * 100) / 100
 				: 0,
-		proveedor_top: top.nombre ? { nombre: String(top.nombre), total: num(top.total) } : null,
-		gastos_evolucion: { labels: evo.map((r) => String(r.label ?? "")), values: evo.map((r) => num(r.value)) },
-		gasto_por_proveedor: { labels: bar.map((r) => String(r.label ?? "")), values: bar.map((r) => num(r.value)) },
+		proveedor_top: top.nombre
+			? { nombre: String(top.nombre), total: deLaBase(top.total) }
+			: null,
+		gastos_evolucion: {
+			labels: evo.map((r) => String(r.label ?? "")),
+			values: evo.map((r) => deLaBase(r.value)),
+		},
+		gasto_por_proveedor: {
+			labels: bar.map((r) => String(r.label ?? "")),
+			values: bar.map((r) => deLaBase(r.value)),
+		},
 		ultimos_gastos: last.map((r) => ({
 			fecha: String(r.fecha ?? ""),
 			proveedor: String(r.proveedor ?? ""),
 			concepto: String(r.concepto ?? ""),
-			importe: num(r.importe),
+			importe: deLaBase(r.importe),
 		})),
 	};
 }

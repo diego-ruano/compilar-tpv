@@ -22,6 +22,8 @@
 // Cada envío deja traza en `email_sends` (control-plane), que es de donde sale el recuento.
 
 import { Hono } from "hono";
+import type { Dinero } from "@tpv/contracts";
+import { enEuros, zDineroOpcional } from "../../lib/dinero";
 import { z } from "zod";
 
 import type { Env } from "../../env";
@@ -38,7 +40,7 @@ emailRoutes.use("*", tenantAuth);
 const lineaSchema = z.object({
 	nombre_producto: z.string().max(200),
 	cantidad: z.number(),
-	precio_unitario: z.number().nullable().optional(),
+	precio_unitario: zDineroOpcional,
 	unidad: z.string().max(50).nullable().optional(),
 });
 
@@ -195,7 +197,7 @@ async function registrarEnvio(
 type Linea = {
 	nombre_producto: string;
 	cantidad: number;
-	precio_unitario?: number | null;
+	precio_unitario?: Dinero | null;
 	unidad?: string | null;
 };
 
@@ -207,7 +209,7 @@ function buildText(proveedor: string, notas: string | null, lineas: Linea[]): st
 		s += "Producto                   Cantidad   Precio     Unidad\n";
 		s += "------------------------------------------------------\n";
 		for (const l of lineas) {
-			const precio = l.precio_unitario != null ? `${l.precio_unitario.toFixed(2)} €` : "-";
+			const precio = l.precio_unitario != null ? enEuros(l.precio_unitario) : "-";
 			const unidad = l.unidad ?? "-";
 			s += `${l.nombre_producto.padEnd(26).slice(0, 26)} ${String(l.cantidad).padEnd(10)} ${precio.padEnd(10)} ${unidad}\n`;
 		}
@@ -221,7 +223,7 @@ function buildText(proveedor: string, notas: string | null, lineas: Linea[]): st
 function buildHtml(proveedor: string, notas: string | null, lineas: Linea[]): string {
 	const rows = lineas
 		.map((l) => {
-			const precio = l.precio_unitario != null ? `${l.precio_unitario.toFixed(2)} €` : "—";
+			const precio = l.precio_unitario != null ? enEuros(l.precio_unitario) : "—";
 			const unidad = l.unidad ?? "—";
 			return `<tr>
         <td style="padding:6px 12px;border-bottom:1px solid #e5e7eb">${esc(l.nombre_producto)}</td>

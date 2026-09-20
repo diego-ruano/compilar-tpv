@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.schemas.ts
 
 import { z } from "zod";
+import { zDineroNoNegativo } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -120,7 +121,7 @@ export const addLineaSchema = z
 		id_comanda: idField("id_comanda"),
 		id_producto: idField("id_producto"),
 		cantidad: z.coerce.number().positive(),
-		precio: z.coerce.number().min(0),
+		precio: zDineroNoNegativo,
 		id_usuario: z.any().optional().nullable(),
 		id_trabajador: z.any().optional().nullable(),
 	})

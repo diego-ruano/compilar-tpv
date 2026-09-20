@@ -249,6 +249,84 @@ impl<'a> Sum<&'a Dinero> for Dinero {
 mod tests {
     use super::*;
 
+    /// La tabla que comparten las TRES implementaciones del dinero.
+    ///
+    /// Si esto cambia, el worker y la webview se ponen rojos hasta igualarse: es lo unico que
+    /// impide que las tres deriven, porque no pueden compartir codigo.
+    fn casos() -> serde_json::Value {
+        serde_json::from_str(include_str!("dinero_casos.json"))
+            .expect("dinero_casos.json no es JSON valido")
+    }
+
+    fn n(v: &serde_json::Value) -> f64 {
+        v.as_f64().expect("un caso tiene que ser un numero")
+    }
+
+    fn c(v: &serde_json::Value) -> i64 {
+        v.as_i64().expect("los centimos son enteros")
+    }
+
+    #[test]
+    fn de_euros_cuadra_con_la_tabla_compartida() {
+        for caso in casos()["de_euros"].as_array().expect("falta «de_euros»") {
+            let (euros, centimos) = (n(&caso[0]), c(&caso[1]));
+            assert_eq!(
+                Dinero::de_euros(euros),
+                Dinero::de_centimos(centimos),
+                "de_euros({euros})"
+            );
+        }
+    }
+
+    #[test]
+    fn el_texto_fiscal_cuadra_con_la_tabla_compartida() {
+        for caso in casos()["texto_fiscal"].as_array().expect("falta «texto_fiscal»") {
+            let (centimos, texto) = (c(&caso[0]), caso[1].as_str().unwrap());
+            assert_eq!(
+                Dinero::de_centimos(centimos).texto_fiscal(),
+                texto,
+                "texto_fiscal({centimos})"
+            );
+        }
+    }
+
+    #[test]
+    fn dividir_cuadra_con_la_tabla_compartida() {
+        for caso in casos()["entre"].as_array().expect("falta «entre»") {
+            let (cent, divisor, esperado) = (c(&caso[0]), n(&caso[1]), c(&caso[2]));
+            assert_eq!(
+                Dinero::de_centimos(cent).entre(divisor),
+                Dinero::de_centimos(esperado),
+                "{cent} entre {divisor}"
+            );
+        }
+    }
+
+    #[test]
+    fn escalar_cuadra_con_la_tabla_compartida() {
+        for caso in casos()["escalar"].as_array().expect("falta «escalar»") {
+            let (cent, factor, esperado) = (c(&caso[0]), n(&caso[1]), c(&caso[2]));
+            assert_eq!(
+                Dinero::de_centimos(cent).escala(factor),
+                Dinero::de_centimos(esperado),
+                "{cent} por {factor}"
+            );
+        }
+    }
+
+    #[test]
+    fn sumar_cuadra_con_la_tabla_compartida() {
+        for caso in casos()["sumar"].as_array().expect("falta «sumar»") {
+            let suma: Dinero = caso[0]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| Dinero::de_centimos(c(v)))
+                .sum();
+            assert_eq!(suma, Dinero::de_centimos(c(&caso[1])), "{:?}", caso[0]);
+        }
+    }
+
     #[test]
     fn sumar_es_exacto_donde_el_flotante_no_lo_era() {
         // 0,10 + 0,20 en f64 daba 0,30000000000000004 y había que redondear para compararlo.

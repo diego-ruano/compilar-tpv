@@ -1,6 +1,7 @@
 // src/domains/configuracion/configuracion.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { deLaBase } from "../../lib/dinero";
 
 import type { BusinessSettings, ContactSettings, TicketSettings } from "@tpv/contracts";
 
@@ -75,13 +76,14 @@ export async function getBusiness(db: Client): Promise<BusinessSettings> {
 		mensaje_footer: String(r.mensaje_footer ?? "¡Gracias por su visita!"),
 		iva_percent: Number(r.iva_percent ?? 10),
 		// CUENTA-06: a partir de cuanto descuadre el cierre de caja pide un motivo escrito.
-		umbral_descuadre: Number(r.umbral_descuadre ?? 5),
+		// El defecto va en centimos, como la columna: 5 EUR son 500.
+		umbral_descuadre: deLaBase(r.umbral_descuadre ?? 500),
 		// FISCAL-01. La Handy los LEE (los enseña en la pantalla de configuración, en solo lectura)
 		// pero no los toca: quien emite es la Main. `razon_social` puede venir vacía mientras nadie
 		// haya completado el formulario fiscal, y eso es justo lo que la pantalla tiene que decir.
 		razon_social: String(r.razon_social ?? ""),
 		descripcion_op: String(r.descripcion_op ?? "Servicios de hosteleria y restauracion"),
-		limite_simplif: Number(r.limite_simplif ?? 3000),
+		limite_simplif: deLaBase(r.limite_simplif ?? 300_000),
 		verifactu_entorno: r.verifactu_entorno === "pruebas" ? "pruebas" : "produccion",
 	};
 }

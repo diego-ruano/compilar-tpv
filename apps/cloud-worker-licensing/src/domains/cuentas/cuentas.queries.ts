@@ -1,6 +1,7 @@
 // src/domains/cuentas/cuentas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { deLaBase } from "../../lib/dinero";
 
 import type {
 	CierreDto,
@@ -205,14 +206,14 @@ export async function resumen(
 	const s = rows(sRs)[0] ?? {};
 
 	return {
-		total_entradas: Number(e.te ?? 0),
-		total_salidas: Number(s.ts ?? 0),
-		total_efectivo: Number(e.ef ?? 0),
-		total_tarjeta: Number(e.ta ?? 0),
+		total_entradas: deLaBase(e.te),
+		total_salidas: deLaBase(s.ts),
+		total_efectivo: deLaBase(e.ef),
+		total_tarjeta: deLaBase(e.ta),
 		count_entradas: Number(e.ce ?? 0),
 		count_salidas: Number(s.cs ?? 0),
 		count_anuladas: Number(e.ca ?? 0),
-		total_anulado: Number(e.tan ?? 0),
+		total_anulado: deLaBase(e.tan),
 	};
 }
 

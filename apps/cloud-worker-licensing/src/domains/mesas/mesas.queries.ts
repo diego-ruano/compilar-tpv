@@ -1,6 +1,7 @@
 // src/domains/mesas/mesas.queries.ts
 
 import type { Client } from "@libsql/client/web";
+import { deLaBase } from "../../lib/dinero";
 
 import type {
 	CategoriaVendibleOut,
@@ -249,7 +250,7 @@ export async function mesasMetaAll(db: Client): Promise<Record<string, MesaMetaO
 	for (const r of rows(rs)) {
 		const idMesa = String(r.id_mesa ?? "");
 		const idComanda = String(r.id_comanda ?? "");
-		const totalPendiente = Number(r.total_pendiente ?? 0);
+		const totalPendiente = deLaBase(r.total_pendiente);
 		const pendientesPago = Number(r.pendientes_pago ?? 0);
 		const meta: MesaMetaOut = {
 			ocupada: true,
@@ -451,7 +452,8 @@ export async function cobrarDetallesPlan(
 		`,
 		args,
 	});
-	const total = Math.round(Number(rows(totalRs)[0]?.total ?? 0) * 100) / 100;
+	// Ya es un entero de centimos: no hay nada que redondear (ARQ-01).
+	const total = deLaBase(rows(totalRs)[0]?.total);
 
 	// MESA-01: consumo FEFO best-effort de las lineas cobradas. Se resuelven las
 	// asignaciones a lotes aqui (lado autoritativo) y el command builder las emite

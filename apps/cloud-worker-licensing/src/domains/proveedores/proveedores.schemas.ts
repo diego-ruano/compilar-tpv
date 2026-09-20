@@ -1,6 +1,7 @@
 // src/domains/proveedores/proveedores.schemas.ts
 
 import { z } from "zod";
+import { zDineroOpcional } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -47,7 +48,7 @@ export const createProductoSchema = z.object({
 	id_categoria: idStr,
 	id_proveedor: idStr,
 	nombre: z.string().trim().min(1, "nombre required"),
-	precio_venta: optNum,
+	precio_venta: zDineroOpcional,
 	stock_actual: optNum,
 	stock_minimo: optNum,
 	unidad_medida: optStr,

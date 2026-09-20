@@ -6,6 +6,7 @@
 // ids, default de stock) la hace el constructor de comandos.
 
 import { z } from "zod";
+import { zDineroOpcional } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -40,7 +41,7 @@ export const upsertProductoSchema = z.object({
 	id_categoria: idStr,
 	id_proveedor: idStr.nullish(),
 	nombre: z.string().trim().min(1, "nombre required"),
-	precio_venta: optNum,
+	precio_venta: zDineroOpcional,
 	stock_minimo: optNum,
 	unidad_medida: optStr,
 	nombre_imagen: optStr,
@@ -62,7 +63,7 @@ export const createLoteSchema = z.object({
 	caducidad: optStr,
 	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
-	coste_unitario: optNum,
+	coste_unitario: zDineroOpcional,
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });
@@ -74,7 +75,7 @@ export const updateLoteSchema = z.object({
 	caducidad: optStr,
 	stock_disponible: z.number().finite().min(0, "Cantidad inválida"),
 	fecha_entrada: optStr,
-	coste_unitario: optNum,
+	coste_unitario: zDineroOpcional,
 	id_proveedor: idStr.nullish(),
 	notas: optStr,
 });

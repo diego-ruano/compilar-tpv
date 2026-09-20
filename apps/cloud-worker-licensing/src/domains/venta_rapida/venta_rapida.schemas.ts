@@ -1,6 +1,7 @@
 // src/domains/venta_rapida/venta_rapida.schemas.ts
 
 import { z } from "zod";
+import { zDineroNoNegativo } from "../../lib/dinero";
 
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
@@ -98,7 +99,7 @@ export const addLineaSchema = z.object({
 	id_comanda: idField("id_comanda"),
 	id_producto: idField("id_producto"),
 	cantidad: positiveNumber("cantidad"),
-	precio_unitario: z.coerce.number().min(0, "precio_unitario invalido"),
+	precio_unitario: zDineroNoNegativo,
 });
 
 export const removeLastLineaSchema = z.object({
@@ -122,7 +123,7 @@ export const cobrarFraccionadoSchema = z
 	.object({
 		id_comanda: idField("id_comanda"),
 		metodo: z.any(),
-		importe_total: z.coerce.number().min(0),
+		importe_total: zDineroNoNegativo,
 		id_usuario_cobrador: z.any().optional().nullable(),
 		id_trabajador_cobrador: z.any().optional().nullable(),
 		detalles: z.any(),

@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 
+import { zDineroNoNegativo } from "../../lib/dinero";
 import type { Assert, SameKeys } from "../../lib/typeGuards";
 import type {
 	AnularPagoInput as ContractAnularPagoInput,
@@ -11,7 +12,8 @@ import type {
 } from "@tpv/contracts";
 
 const idStr = z.string().trim().min(1);
-const money = z.number().finite().min(0);
+/** Un importe de la API: centimos enteros y no negativo (ARQ-01). */
+const money = zDineroNoNegativo;
 
 function clean(v: unknown): string {
 	return String(v ?? "").trim();
