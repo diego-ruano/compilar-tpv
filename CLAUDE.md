@@ -441,6 +441,49 @@ la lógica/SQL vive en `crates/*`.
   prohibición está aplicada también en `.claude/settings.json` (`includeCoAuthoredBy: false` +
   `attribution.commit/pr: ""`).
 - Comentarios y nombres de dominio en **español** (coherente con el código existente).
+- **EL DINERO ES UN ENTERO DE CÉNTIMOS, de la base a la pantalla (ARQ-01).** Un `f64` no
+  representa `0,10 €`, así que cada suma arrastraba un error que el código tapaba con
+  `(x*100).round()/100` repetido en 35 sitios y **tres lenguajes** — con tres modos de redondeo
+  conviviendo: Rust aleja la mitad del cero, JavaScript la lleva hacia +∞ y `ROUND()` de SQLite
+  hace lo suyo. Con enteros, `SUM` en SQLite es exacto y **asociativo**: la Main y Turso obtienen
+  el mismo número sin importar el orden de las filas ni el motor. Reglas al tocar dinero:
+  - **Hay un tipo por lenguaje y ninguno es un número suelto**: `tpv_domain::dinero::Dinero`
+    (`i64` de céntimos), y sus dos espejos `apps/cloud-worker-licensing/src/lib/dinero.ts` y
+    `apps/tpv-main/src/shared/lib/dinero.ts`. Cruza a TypeScript **marcado**
+    (`number & { readonly __centimos: unique symbol }`), así que un `number` crudo no se le puede
+    asignar y la aritmética pierde la marca: el sitio que se olvide **no compila**.
+  - **Al tocar la aritmética NO se escriben tres funciones: se añade un caso a
+    [`crates/tpv-domain/src/dinero_casos.json`](crates/tpv-domain/src/dinero_casos.json)**, la
+    tabla que leen los tests de las tres. Si una cambia de criterio, las otras dos se ponen rojas
+    hasta igualarse. Es el mismo patrón que `scrub_casos.json` (§8), y existe porque las tres ya
+    divergieron: `ticketMath.ts` redondeaba con `Math.round` y `printing.rs` con `f64::round`, así
+    que la vista previa del ticket y el papel discrepaban en medio céntimo negativo.
+  - ⚠️ **La marca NO caza los errores de unidad por sí sola.** Un `Dinero` sigue siendo un
+    `number`, así que pasárselo a un formateador que espere euros compila y pinta «4750 €». Lo que
+    cierra ese hueco es que **el formateador recibe `Dinero`**: mientras todo el dinero pase por
+    él, la unidad no se puede equivocar. Hacen falta las dos mitades.
+  - **Un formateador por salida, y sólo uno.** El de pantalla (`shared/lib/dinero.ts::eur`, con
+    separador de miles) y el del **papel** (`shared/ticket/ticketMath.ts`, sin él: en 32 columnas
+    un punto de millar se confunde con el decimal). Eran **once** copias y no eran iguales —cuatro
+    protegían contra un valor no finito y siete no—, así que el mismo importe corrupto salía
+    «0,00 €» en Estadísticas y «NaN €» en las tres pantallas de venta.
+  - **Las CANTIDADES siguen en `REAL` a propósito** (0,5 kg es fraccionario de verdad), y los
+    tipos de IVA también (existe el 7,5 %). **Consecuencia al escribir SQL:** `Cantidad` × un
+    precio en céntimos vuelve a ser un **flotante**, así que hay que devolverlo a entero antes de
+    sumar — `SUM(CAST(ROUND(Cantidad * Precio_Unitario) AS INTEGER))`. Sin el `CAST(ROUND(...))`
+    se suma en coma flotante otra vez, con el agravante de que **parece** entero.
+  - **Nunca un `ROUND(x, 2)` sobre dinero**: además de sobrar, `ROUND` devuelve un `REAL` en
+    SQLite y convertiría en flotante justo lo que acabamos de hacer entero.
+  - **Dividir no es multiplicar por el recíproco.** `Dinero::entre(d)` divide; `escala(1.0/d)`
+    pierde un bit y cambia el céntimo (la base de 0,91 € al 4 % sale 87 por ese camino y 88
+    dividiendo, que es lo que imprime el papel). Lo caza la tabla de golden del ticket.
+  - **Los agregados derivados se QUEDAN en el SQL**, y céntimos es lo que los hace seguros.
+    `Total_Comanda` tiene dos escritores —la Main por el outbox y la Handy por el Durable Object—
+    y sólo converge si se re-deriva del estado; sustituirlo por un literal calculado en Rust sería
+    una pérdida de actualización silenciosa.
+  - **Un importe que llega por la API viene en céntimos ENTEROS** (`zDinero` en el worker). Un
+    `12.5` en el cuerpo de una petición no es «doce euros con medio»: es un cliente hablando en la
+    unidad equivocada, y lo correcto es rechazarlo en la puerta, no redondearlo por su cuenta.
 - **PII del personal cifrada (TRAB-03).** `DNI`, `IBAN` y `Numero_Seguridad_Social` se guardan
   cifrados (AES-256-GCM **determinista**, para que el `UNIQUE` del esquema siga detectando
   duplicados). El cifrado ocurre en `tpv-infra-sqlite::trabajadores` **antes** de construir la
