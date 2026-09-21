@@ -1,9 +1,6 @@
 import type { Client } from "@libsql/client/web";
 
-import {
-	handyTokenTtlSeconds,
-	signToken,
-} from "../../../../domains/licensing/licensing.helpers";
+import { firmarSesion, handyTokenTtlSeconds } from "../../../../lib/sesion";
 import { exigirClaveSiEsDeOtroNegocio } from "../../../licenseStore";
 import { json, serverError } from "../../../utils/response";
 import { avisarSolicitudALaMain } from "./pairClaim";
@@ -176,7 +173,7 @@ export async function handlePairFetchToken(
 
 		// El mismo emisor que usa `/v1/license/refresh` para reemitirlo cuando caduque: si cada uno
 		// firmara el suyo, un token renovado podría no ser el mismo token con otra fecha.
-		const token = await signToken(
+		const token = await firmarSesion(
 			env,
 			{ tenantId, deviceId, licHash },
 			{ rol: "handy", ttlSegundos: ttlSeconds },

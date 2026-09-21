@@ -1,9 +1,5 @@
 import { b64ToBytes } from "./base64";
 
-export function secretKey(str: string) {
-	return new TextEncoder().encode(str);
-}
-
 /**
  * Comparación de dos hex en tiempo constante. Un `===` normal sale del bucle en cuanto
  * encuentra el primer byte distinto, y ese tiempo revela cuántos acertaste: repitiendo, se

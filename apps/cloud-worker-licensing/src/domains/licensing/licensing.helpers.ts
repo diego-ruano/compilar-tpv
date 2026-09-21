@@ -1,13 +1,15 @@
 // src/domains/licensing/licensing.helpers.ts
 //
-// Helpers del dominio de licencias: sesión (JWT), device-proof, estado derivado de la licencia,
-// **firma ed25519 del estado** (el control central del gate, §5.1 del plan), OTP de cambio de
+// Helpers del dominio de licencias: device-proof, estado derivado de la licencia, **firma
+// ed25519 del estado** (el control central del gate, §5.1 del plan), OTP de cambio de
 // dispositivo y provisión de la BD del tenant.
+//
+// El JWT de sesión ya no vive aquí: es una primitiva que usa el worker entero y no algo del
+// dominio de licencias, así que se fue a `lib/sesion.ts` (ARQ-02).
 //
 // Reutiliza las utilidades compartidas del worker (base64, crypto, credenciales del tenant) en
 // vez de mantener copias propias.
 
-import { SignJWT, jwtVerify, decodeJwt } from "jose";
 import * as ed from "@noble/ed25519";
 import { createClient, type Client } from "@libsql/client/web";
 
@@ -22,7 +24,8 @@ import {
 } from "../../server/licenseStore";
 import { sha256Hex } from "../../server/crypto";
 import { b64ToBytes, bytesToB64 } from "../../server/utils/base64";
-import { sha256HexBytes, sha256HexStr, secretKey } from "../../server/utils/crypto";
+import { sha256HexBytes, sha256HexStr } from "../../server/utils/crypto";
+import { leerBearer } from "../../lib/sesion";
 import { runTenantMigrations } from "../../server/tenantMigrations";
 import {
 	getTenantDbRow,
@@ -63,89 +66,6 @@ export function toBool01(v: any, fallback = false): boolean {
 		if (s === "false" || s === "0") return false;
 	}
 	return fallback;
-}
-
-// ---------------- JWT de sesión (HS256) ----------------
-
-/** Vida del token de sesión de la Main. Nunca se llega a ella: `/status` lo renueva cada 6 h. */
-export const MAIN_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
-
-/**
- * Vida del token de la Handy, que se emite al emparejar (`pairFetchToken`) y se reemite en
- * `/refresh`. Los dos sitios preguntan aquí: un TTL escrito dos veces se separa, y la mitad que
- * se quedara corta caducaría tokens que la otra da por buenos.
- *
- * El suelo de una hora es contra un valor mal puesto en la configuración del worker: un TTL de
- * segundos dejaría a las Handy renovando en bucle.
- */
-export function handyTokenTtlSeconds(env: Env): number {
-	const raw = Number((env as any)?.HANDY_TOKEN_TTL_SECONDS ?? 0);
-	if (Number.isFinite(raw) && raw >= 3600) return Math.floor(raw);
-
-	return MAIN_TOKEN_TTL_SECONDS;
-}
-
-/**
- * Emite un token de sesión. Es el ÚNICO sitio donde se firma uno: antes el del emparejamiento se
- * construía a mano (su propio HS256, su propio base64url) y el de la licencia con `jose`, así que
- * eran dos formas de decir lo mismo que podían separarse sin que nada fallara.
- *
- * `rol` va en el payload por fidelidad con el token que ya emitía el emparejamiento, pero **nadie
- * lo lee**: el rol de un dispositivo sale siempre de su fila en `devices` (ver `tenant.ts`), porque
- * un claim del token no puede otorgar privilegios que la BD central no reconozca.
- */
-export async function signToken(
-	env: Env,
-	claims: { tenantId: string; deviceId: string; licHash: string },
-	opciones: { rol?: "tpv" | "handy"; ttlSegundos?: number } = {},
-): Promise<string> {
-	const ttl = opciones.ttlSegundos ?? MAIN_TOKEN_TTL_SECONDS;
-	const payload = opciones.rol ? { ...claims, role: opciones.rol } : { ...claims };
-
-	return await new SignJWT(payload)
-		.setProtectedHeader({ alg: "HS256", typ: "JWT" })
-		.setIssuedAt()
-		.setExpirationTime(Math.floor(Date.now() / 1000) + ttl)
-		.sign(secretKey(env.LICENSE_JWT_SECRET));
-}
-
-export async function verifyToken(
-	env: Env,
-	token: string,
-): Promise<{ tenantId: string; deviceId: string; licHash: string }> {
-	const { payload } = await jwtVerify(token, secretKey(env.LICENSE_JWT_SECRET), {
-		algorithms: ["HS256"],
-	});
-
-	const tenantId = String(payload.tenantId || "");
-	const deviceId = String(payload.deviceId || "");
-	const licHash = String(payload.licHash || "");
-
-	if (!tenantId || !deviceId || !licHash) throw new Error("Invalid token claims");
-	return { tenantId, deviceId, licHash };
-}
-
-/**
- * Lee los claims de un token **sin verificar la caducidad**. Solo para `/refresh`: el token
- * caducado sigue diciendo quién dice ser, y a ese "quién" se le exige a continuación un
- * device-proof firmado con la clave privada del dispositivo. Es lo que evita que un reloj
- * desajustado o un token vencido borren la licencia del cliente (bug #4).
- *
- * NO usar para autorizar nada sin comprobar después el device-proof.
- */
-export function decodeTokenClaims(
-	token: string,
-): { tenantId: string; deviceId: string; licHash: string } | null {
-	try {
-		const payload = decodeJwt(token);
-		const tenantId = String(payload.tenantId || "");
-		const deviceId = String(payload.deviceId || "");
-		const licHash = String(payload.licHash || "");
-		if (!tenantId || !deviceId || !licHash) return null;
-		return { tenantId, deviceId, licHash };
-	} catch {
-		return null;
-	}
 }
 
 // ---------------- Estado derivado de la licencia ----------------
@@ -360,10 +280,8 @@ async function comprobarFirma(
 	const pubB64 = await obtenerClave();
 	if (!pubB64) return { ok: false, error: "device_pubkey_not_registered" };
 
-	const auth = request.headers.get("authorization") || "";
-	const m = auth.match(/^Bearer\s+(.+)$/i);
-	if (!m) return { ok: false, error: "missing_token" };
-	const token = m[1];
+	const token = leerBearer(request);
+	if (!token) return { ok: false, error: "missing_token" };
 
 	const tokenHash = await sha256HexStr(token);
 

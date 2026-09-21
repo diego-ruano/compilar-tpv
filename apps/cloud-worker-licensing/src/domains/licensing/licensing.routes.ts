@@ -49,22 +49,26 @@ import {
 	assertEnv,
 	buildSignedAssertion,
 	computeLicenseState,
-	decodeTokenClaims,
 	emailHint,
 	generateOtpCode,
 	GRACE_DAYS,
-	handyTokenTtlSeconds,
 	OTP_MAX_ATTEMPTS,
 	OTP_TTL_MS,
 	otpHash,
 	provisionTenantDatabase,
-	signToken,
 	stateAllowsUse,
 	toBool01,
 	readmitirMain,
 	verifyDeviceProof,
-	verifyToken,
 } from "./licensing.helpers";
+import {
+	type ClaimsSesion,
+	firmarSesion,
+	handyTokenTtlSeconds,
+	leerBearer,
+	leerClaimsSinVerificar,
+	verificarSesion,
+} from "../../lib/sesion";
 
 type Ctx = { Bindings: Env };
 
@@ -205,7 +209,7 @@ licenseRoutes.post("/activate", async (c) => {
 				deviceId,
 				// El token lleva el hash de la licencia que SIGUE viva, no el de la clave gastada:
 				// es con lo que `/status` la reconoce a partir de ahora.
-				token: await signToken(env, {
+				token: await firmarSesion(env, {
 					tenantId,
 					deviceId,
 					licHash: actual.license_key_hash,
@@ -342,7 +346,7 @@ licenseRoutes.post("/activate", async (c) => {
 		c.executionCtx.waitUntil(sendDeviceChangedNoticeEmail(env, { to: lic.customer_email }));
 	}
 
-	const token = await signToken(env, { tenantId, deviceId, licHash });
+	const token = await firmarSesion(env, { tenantId, deviceId, licHash });
 
 	// TRAB-03: la clave con la que la Main cifra DNI/IBAN/nº SS. Se entrega en cada
 	// activación (no sólo en la primera) porque es justo lo que necesita un equipo nuevo
@@ -439,13 +443,12 @@ licenseRoutes.get("/status", async (c) => {
 	]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const auth = c.req.header("authorization") || "";
-	const m = auth.match(/^Bearer\s+(.+)$/i);
-	if (!m) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
+	const bearer = leerBearer(c.req.raw);
+	if (!bearer) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
 
-	let claims: { tenantId: string; deviceId: string; licHash: string };
+	let claims: ClaimsSesion;
 	try {
-		claims = await verifyToken(env, m[1]);
+		claims = await verificarSesion(env, bearer);
 	} catch {
 		// Token caducado o inválido. El cliente NO debe borrar la licencia por esto: debe
 		// intentar /refresh (device-proof). Se lo decimos explícitamente en el código de error.
@@ -500,7 +503,7 @@ licenseRoutes.get("/status", async (c) => {
 	// licencia ha dejado de valer, así que callarla lo dejaría sin saberlo. Lo que se le niega es
 	// el token nuevo, no la respuesta.
 	const estadoActual = computeLicenseState(lic, claims.deviceId, now);
-	const token = stateAllowsUse(estadoActual) ? await signToken(env, claims) : undefined;
+	const token = stateAllowsUse(estadoActual) ? await firmarSesion(env, claims) : undefined;
 
 	return c.json({
 		ok: true,
@@ -530,11 +533,10 @@ licenseRoutes.post("/refresh", async (c) => {
 	const miss = assertEnv(env, ["LICENSE_JWT_SECRET", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
 	if (miss) return c.json({ ok: false, error: miss } satisfies ApiError, 500);
 
-	const auth = c.req.header("authorization") || "";
-	const m = auth.match(/^Bearer\s+(.+)$/i);
-	if (!m) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
+	const bearer = leerBearer(c.req.raw);
+	if (!bearer) return c.json({ ok: false, error: "missing_token" } satisfies ApiError, 401);
 
-	const claims = decodeTokenClaims(m[1]);
+	const claims = leerClaimsSinVerificar(bearer);
 	if (!claims) return c.json({ ok: false, error: "invalid_token" } satisfies ApiError, 401);
 
 	const db = getDb(env);
@@ -583,7 +585,7 @@ licenseRoutes.post("/refresh", async (c) => {
 		// funcionar y había que volver a vincularla a mano. Aquí se reemite con la misma llave que
 		// autentica todo lo demás —la firma de su clave privada, que ya se ha comprobado arriba—,
 		// que es lo que hace que un token caducado no sea un callejón sin salida.
-		const token = await signToken(env, claims, {
+		const token = await firmarSesion(env, claims, {
 			rol: "handy",
 			ttlSegundos: handyTokenTtlSeconds(env),
 		});
@@ -595,6 +597,6 @@ licenseRoutes.post("/refresh", async (c) => {
 		return c.json({ ok: false, error: "device_replaced" } satisfies ApiError, 403);
 	}
 
-	const token = await signToken(env, claims);
+	const token = await firmarSesion(env, claims);
 	return c.json({ ok: true, token });
 });

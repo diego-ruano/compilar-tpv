@@ -38,7 +38,7 @@ vi.mock("../src/lib/tenantClient", () => ({
 
 const { loginRoutes } = await import("../src/domains/login/login.routes");
 const { licenseRoutes } = await import("../src/domains/licensing/licensing.routes");
-const { signToken } = await import("../src/domains/licensing/licensing.helpers");
+const { firmarSesion } = await import("../src/lib/sesion");
 const { olvidarLicenciasCacheadas } = await import("../src/lib/licenciaEnUso");
 
 const ENV = {
@@ -110,7 +110,7 @@ async function pedir(
 	ruta: string,
 	seed: Uint8Array,
 ): Promise<Response> {
-	const token = await signToken(ENV as any, {
+	const token = await firmarSesion(ENV as any, {
 		tenantId: TENANT,
 		deviceId: MAIN,
 		licHash: LIC_HASH,

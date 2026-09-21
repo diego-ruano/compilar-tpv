@@ -1,17 +1,13 @@
 // src/server/middleware/auth.ts
 import type { Client } from "@libsql/client/web";
 
-import { verifyJwtHs256 } from "./jwtHs256";
 import { cargarDevice, estaRevocado } from "../../lib/deviceAuth";
+import { leerBearer, verificarSesion, type ClaimsSesion } from "../../lib/sesion";
 import { b64ToBytes } from "../utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../utils/crypto";
 import { ed25519Verify, nobleForceU8 } from "../utils/nobleEd25519";
 
-export type AuthClaims = {
-	tenantId: string;
-	deviceId: string;
-	licHash: string;
-};
+export type AuthClaims = ClaimsSesion;
 
 // Cache de pubkeys de dispositivos (scope de isolate de CF Worker).
 // La pubkey no cambia tras el pairing, así que 60 s de TTL es suficiente para
@@ -25,25 +21,15 @@ function deviceCacheKey(tenantId: string, deviceId: string): string {
 	return `${tenantId}:${deviceId}`;
 }
 
-function readBearer(req: Request): string {
-	const h = req.headers.get("authorization") || "";
-	const m = h.match(/^Bearer\s+(.+)$/i);
-	if (!m) throw new Error("missing_token");
-	return m[1];
-}
-
+/**
+ * El token y lo que afirma. Devuelve también el token porque el device-proof lo cubre con su
+ * hash: quien autentica y quien comprueba la firma tienen que ver exactamente la misma cadena.
+ */
 export async function verifyJwt(env: any, req: Request): Promise<{ token: string; claims: AuthClaims }> {
-	const token = readBearer(req);
+	const token = leerBearer(req);
+	if (!token) throw new Error("missing_token");
 
-	const payload = await verifyJwtHs256(token, String(env.LICENSE_JWT_SECRET || ""));
-
-	const tenantId = String((payload as any).tenantId || "");
-	const deviceId = String((payload as any).deviceId || "");
-	const licHash = String((payload as any).licHash || "");
-
-	if (!tenantId || !deviceId || !licHash) throw new Error("invalid_token_claims");
-
-	return { token, claims: { tenantId, deviceId, licHash } };
+	return { token, claims: await verificarSesion(env, token) };
 }
 
 /**

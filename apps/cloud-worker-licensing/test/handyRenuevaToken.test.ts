@@ -20,8 +20,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
-import { handyTokenTtlSeconds, signToken } from "../src/domains/licensing/licensing.helpers";
-import { verifyJwtHs256 } from "../src/server/middleware/jwtHs256";
+import { firmarSesion, handyTokenTtlSeconds, verificarSesion } from "../src/lib/sesion";
 import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
@@ -91,7 +90,7 @@ async function escenario<T>(
  * autentica de verdad es la firma de la clave privada del equipo.
  */
 async function renovar(deviceId: string, seed: Uint8Array): Promise<Response> {
-	const token = await signToken(ENV as any, { tenantId: TENANT, deviceId, licHash: LIC_HASH });
+	const token = await firmarSesion(ENV as any, { tenantId: TENANT, deviceId, licHash: LIC_HASH });
 	const ts = Date.now();
 	const mensaje = [ts, "POST", "/refresh", await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
 	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
@@ -159,36 +158,34 @@ describe("una Handy renueva su token", () => {
 });
 
 describe("el token de sesión: quien lo firma y quien lo verifica", () => {
-	// No son la misma pieza: se firma con `jose` (`signToken`) y se verifica con un HS256 escrito a
-	// mano (`jwtHs256.ts`, el que usa `tenantAuth` para dejar entrar a la Handy). El token del
-	// emparejamiento se firmaba antes también a mano, y al unificarlo —para que renovarlo devuelva
-	// el MISMO token con otra fecha— esa pareja pasa a sostener el acceso de todas las Handy. Si se
-	// separan, una Handy recién vinculada no entra: conviene que lo diga un test y no un cliente.
+	// Son la MISMA pieza (`lib/sesion.ts`, ARQ-02). Lo fueron dos: se firmaba con `jose` y se
+	// verificaba con un HS256 escrito a mano, el que `tenantAuth` usaba para dejar entrar a la
+	// Handy. Unificado el emisor —para que renovar el token devuelva el MISMO token con otra
+	// fecha—, esa pareja sostenía el acceso de todas las Handy y sólo la ataba este test.
 	it("lo que firma el worker lo acepta el worker, con rol y sin él", async () => {
 		const claims = { tenantId: TENANT, deviceId: LA_HANDY, licHash: LIC_HASH };
 
-		const deLaMain = await verifyJwtHs256(
-			await signToken(ENV as any, claims),
-			ENV.LICENSE_JWT_SECRET,
-		);
-		expect(deLaMain).toMatchObject(claims);
-		expect(deLaMain.role).toBeUndefined();
+		expect(await verificarSesion(ENV as any, await firmarSesion(ENV as any, claims))).toEqual(claims);
 
-		const deLaHandy = await verifyJwtHs256(
-			await signToken(ENV as any, claims, { rol: "handy", ttlSegundos: 3600 }),
-			ENV.LICENSE_JWT_SECRET,
-		);
-		expect(deLaHandy).toMatchObject({ ...claims, role: "handy" });
-		expect(Number(deLaHandy.exp) - Number(deLaHandy.iat)).toBe(3600);
+		const conRol = await firmarSesion(ENV as any, claims, { rol: "handy", ttlSegundos: 3600 });
+		expect(await verificarSesion(ENV as any, conRol)).toEqual(claims);
+
+		// El `rol` viaja en el payload por fidelidad con el token que emitía el emparejamiento,
+		// pero el verificador NO lo devuelve: autorizar por un claim del token daría privilegios
+		// que la BD central no ha concedido. Se mira el payload crudo, no lo que sale del gate.
+		const payload = decodeJwt(conRol);
+		expect(payload.role).toBe("handy");
+		expect(Number(payload.exp) - Number(payload.iat)).toBe(3600);
+		expect(decodeJwt(await firmarSesion(ENV as any, claims)).role).toBeUndefined();
 	});
 
 	it("un token caducado lo rechaza como tal: es el muro que la renovación evita", async () => {
-		const token = await signToken(
+		const token = await firmarSesion(
 			ENV as any,
 			{ tenantId: TENANT, deviceId: LA_HANDY, licHash: LIC_HASH },
 			{ rol: "handy", ttlSegundos: -10 },
 		);
-		await expect(verifyJwtHs256(token, ENV.LICENSE_JWT_SECRET)).rejects.toThrow("jwt_expired");
+		await expect(verificarSesion(ENV as any, token)).rejects.toThrow("jwt_expired");
 	});
 
 	it("el TTL de la Handy sale de la configuración, con un suelo contra un valor absurdo", () => {

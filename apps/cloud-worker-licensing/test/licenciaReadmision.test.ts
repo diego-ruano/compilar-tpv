@@ -18,7 +18,7 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
 import { licenseRoutes } from "../src/domains/licensing/licensing.routes";
-import { signToken } from "../src/domains/licensing/licensing.helpers";
+import { firmarSesion } from "../src/lib/sesion";
 import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 import { sha256HexBytes, sha256HexStr } from "../src/server/utils/crypto";
@@ -86,7 +86,7 @@ async function escenario<T>(
 
 /** Una petición como la que firma el cliente Rust (`sign_device_proof`). */
 async function pedir(metodo: "GET" | "POST", ruta: string, seed: Uint8Array): Promise<Response> {
-	const token = await signToken(ENV as any, { tenantId: BAR_A, deviceId: EQUIPO, licHash: LIC_HASH });
+	const token = await firmarSesion(ENV as any, { tenantId: BAR_A, deviceId: EQUIPO, licHash: LIC_HASH });
 	const ts = Date.now();
 	const mensaje = [ts, metodo, ruta, await sha256HexStr(token), await sha256HexBytes(new Uint8Array())].join("\n");
 	const firma = bytesToB64(await ed.signAsync(new TextEncoder().encode(mensaje), seed));
