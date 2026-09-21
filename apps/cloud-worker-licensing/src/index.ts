@@ -33,7 +33,7 @@ import {
 
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { purgarBaseCentral } from "./server/purga";
-import { pairingRoutes } from "./routes/pairing";
+import { pairingRoutes } from "./domains/pairing/pairing.routes";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { configuracionRoutes } from "./domains/configuracion/configuracion.routes";
 import { cuentasRoutes } from "./domains/cuentas/cuentas.routes";
@@ -51,8 +51,7 @@ import { tareasRoutes } from "./domains/tareas/tareas.routes";
 import { trabajadoresRoutes } from "./domains/trabajadores/trabajadores.routes";
 import { ventaRapidaRoutes } from "./domains/venta_rapida/venta_rapida.routes";
 import { updatesRoutes } from "./domains/updates/updates.routes";
-import { handleRevokeDevice } from "./server/endpoints/rest/pairing/revokeDevice";
-import { handleListDevices } from "./server/endpoints/rest/pairing/listDevices";
+import { dispositivosRoutes } from "./domains/pairing/dispositivos.routes";
 import { emailRoutes } from "./domains/email/email.routes";
 import { licenseRoutes } from "./domains/licensing/licensing.routes";
 import { adminRoutes } from "./domains/admin/admin.routes";
@@ -193,13 +192,7 @@ app.route("/v1/admin", adminRoutes);
 app.route("/v1/update", updatesRoutes);
 
 // ---------------- Gestión de dispositivos ----------------
-app.post("/v1/device/list", (c) =>
-	handleListDevices(c.req.raw, c.env, getDb(c.env)),
-);
-
-app.post("/v1/device/revoke", (c) =>
-	handleRevokeDevice(c.req.raw, c.env, getDb(c.env), c.env.TenantHub),
-);
+app.route("/v1/device", dispositivosRoutes);
 
 // Traduce los errores con status (p. ej. HubError del DO: main_offline,
 // idempotency_*) a JSON; el resto cae a un 500 con detalle.

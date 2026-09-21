@@ -13,25 +13,41 @@
 //   · La Handy puede cancelar, y la solicitud deja de estar en la lista de la Main.
 //   · El filtro exterior (Cloudflare) sigue declarado, deja pasar lo normal y no sustituye a nada.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { Hono } from "hono";
 import * as ed from "@noble/ed25519";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
-import { handlePairFetchToken } from "../src/server/endpoints/rest/pairing/pairFetchToken";
-import { handlePairCancel } from "../src/server/endpoints/rest/pairing/pairCancel";
-import { rechazarSolicitud } from "../src/server/endpoints/rest/pairing/pairReject";
+
+/**
+ * La base del test, para el único caso que entra por la RUTA (el filtro exterior). El resto llama
+ * a las funciones de decisión, que reciben el cliente y no lo buscan.
+ */
+let dbDePruebas: any = null;
+
+vi.mock("../src/server/db", async (importOriginal) => {
+	const original = await importOriginal<typeof import("../src/server/db")>();
+	return { ...original, getDb: () => dbDePruebas };
+});
+
+const { entregarToken, reclamarCodigo, soltarCodigo } = await import("../src/domains/pairing/pairing.handy");
+const { rechazarSolicitud } = await import("../src/domains/pairing/pairing.main");
+const { cancelSchema, claimSchema, fetchTokenSchema } = await import("../src/domains/pairing/pairing.schemas");
+const { pairingRoutes } = await import("../src/domains/pairing/pairing.routes");
+
+/** El worker con el subrouter montado donde de verdad vive, para probar las rutas enteras. */
+const elWorker = new Hono().route("/v1/pair", pairingRoutes);
 import {
 	OLVIDO_MS,
 	PETICIONES_POR_MINUTO,
 	esperaTrasFallos,
 	pasaElFiltroExterior,
 	textoDeEspera,
-} from "../src/server/endpoints/rest/pairing/pairing.intentos";
+} from "../src/domains/pairing/pairing.intentos";
 import configuracionDelWorker from "../wrangler.json";
-import { mensajeFirmado, type AccionFirmada } from "../src/server/endpoints/rest/pairing/pairing.firma";
+import { mensajeFirmado, type AccionFirmada } from "../src/domains/pairing/pairing.firma";
 import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
 import { bytesToB64 } from "../src/server/utils/base64";
 
@@ -104,29 +120,30 @@ class Mundo {
 	) {}
 
 	async reclamar(d: Dispositivo, codigo: string, ahora: number, ip = "10.0.0.1") {
-		const res = await handlePairClaim(
-			peticion("claim", { pairCode: codigo, pairSecret: "", deviceId: d.id, devicePubKey: d.pub, deviceName: "" }, ip),
-			ENV,
+		const res = await reclamarCodigo(
 			this.db,
+			ENV,
+			claimSchema.parse({ pairCode: codigo, pairSecret: "", deviceId: d.id, devicePubKey: d.pub, deviceName: "" }),
+			ip,
 			ahora,
 		);
-		return { status: res.status, body: (await res.json()) as any };
+		return { status: res.status, body: res.cuerpo as any };
 	}
 
 	async recoger(d: Dispositivo, codigo: string, nonceB64: string, ahora: number, accion: AccionFirmada = "PAIR_FETCH") {
-		const res = await handlePairFetchToken(
-			peticion("fetch-token", {
+		const res = await entregarToken(
+			this.db,
+			ENV,
+			fetchTokenSchema.parse({
 				pairCode: codigo,
 				deviceId: d.id,
 				nonceB64,
 				ts: ahora,
 				sigB64: await firmar(d, accion, ahora, codigo, nonceB64),
 			}),
-			ENV,
-			this.db,
 			ahora,
 		);
-		return { status: res.status, body: (await res.json()) as any };
+		return { status: res.status, body: res.cuerpo as any };
 	}
 
 	async cancelar(d: Dispositivo, codigo: string, nonceB64: string, ahora: number, accion: AccionFirmada = "PAIR_CANCEL") {
@@ -137,8 +154,8 @@ class Mundo {
 			ts: ahora,
 			sigB64: await firmar(d, accion, ahora, codigo, nonceB64),
 		};
-		const res = await handlePairCancel(peticion("cancel", cuerpo), ENV, this.db, ahora);
-		return { status: res.status, body: (await res.json()) as any, cuerpo };
+		const res = await soltarCodigo(this.db, ENV, cancelSchema.parse(cuerpo), ahora);
+		return { status: res.status, body: res.cuerpo as any, cuerpo };
 	}
 
 	/** Lo que hace `pairApprove` después de autenticar a la Main: marcar el código, nada más. */
@@ -248,9 +265,19 @@ describe("la espera por fallos", () => {
 	});
 
 	it("una petición mal formada no cuenta como fallo: es un cliente roto, no alguien probando", async () => {
+		// Por la RUTA: desde ARQ-03 quien rechaza el formato es el validador del cuerpo, delante
+		// del handler, y lo que se fija aquí es que ese 400 no gasta ningún intento.
 		const a = await dispositivo("handy-a", 1);
 		await conPlanoDeControl("mal-formada", async (m) => {
-			for (let i = 0; i < 5; i++) expect((await m.reclamar(a, "12", T0)).status).toBe(400);
+			dbDePruebas = m.db;
+			for (let i = 0; i < 5; i++) {
+				const r = await elWorker.fetch(
+					peticion("claim", { pairCode: "12", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" }),
+					ENV,
+				);
+				expect(r.status).toBe(400);
+				expect(((await r.json()) as any).error).toBe("invalid_pair_code");
+			}
 			expect((await m.reclamar(a, CODIGO, T0)).status).toBe(200);
 		});
 	});
@@ -499,16 +526,16 @@ describe("cancelar en la Handy", () => {
 			expect(primera.body.liberado).toBe(true);
 
 			// Soltado el código ya no hay reclamante: la repetición ni llega a mirar la firma.
-			const repetida = await handlePairCancel(peticion("cancel", primera.cuerpo), ENV, m.db, T0 + MIN);
+			const repetida = await soltarCodigo(m.db, ENV, cancelSchema.parse(primera.cuerpo), T0 + MIN);
 			expect(repetida.status).toBe(403);
 
 			// Y con el claim todavía en pie (aprobado), es el reto gastado lo que la para.
 			const otra = await m.reclamar(a, CODIGO, T0 + MIN);
 			m.aprobar(CODIGO, a, T0 + MIN);
 			const cancelacion = await m.cancelar(a, CODIGO, otra.body.nonceB64, T0 + MIN);
-			const otraVez = await handlePairCancel(peticion("cancel", cancelacion.cuerpo), ENV, m.db, T0 + MIN);
+			const otraVez = await soltarCodigo(m.db, ENV, cancelSchema.parse(cancelacion.cuerpo), T0 + MIN);
 			expect(otraVez.status).toBe(409);
-			expect(((await otraVez.json()) as any).error).toBe("challenge_used");
+			expect(otraVez.cuerpo.error).toBe("challenge_used");
 		});
 	});
 
@@ -587,12 +614,13 @@ describe("el filtro exterior del claim", () => {
 		// siempre. Es la prueba de que es una capa delante y no un reemplazo.
 		const a = await dispositivo("handy-a", 1);
 		const { cortado, pasado } = await conPlanoDeControl("filtro", async (m) => {
+			// Por la RUTA y no por la función: desde ARQ-03 el filtro es un middleware que va
+			// delante del validador del cuerpo, y lo que se prueba es justo ese orden.
+			dbDePruebas = m.db;
 			const peticionDe = (env: any) =>
-				handlePairClaim(
+				elWorker.fetch(
 					peticion("claim", { pairCode: "000001", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" }, "7.7.7.7"),
 					env,
-					m.db,
-					T0,
 				);
 
 			const lleno = { ...ENV, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: false }) } };

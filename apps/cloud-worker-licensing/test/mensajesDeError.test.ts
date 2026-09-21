@@ -22,7 +22,8 @@ import {
 	completarCuerpoDeError,
 } from "../src/lib/errorCodes";
 import { completarErrores } from "../src/middleware/completarErrores";
-import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
+import { cuerpoConIdentificador } from "../src/lib/validacion";
+import { claimSchema } from "../src/domains/pairing/pairing.schemas";
 
 describe("completar el cuerpo de un error", () => {
 	it("añade el código del catálogo y la frase del identificador", () => {
@@ -96,6 +97,11 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 		/badRequest\(\s*\w+,\s*"([^"]+)"/g,
 		/fallo\(\s*\d+,\s*"([^"]+)"/g,
 		/new Error\("([^"]+)"\)/g,
+		// ARQ-03: los del emparejamiento viven ahora en su schema zod (`message:`) y en el veto de
+		// rol, que es un middleware con el identificador como argumento — ya no en un `if` del handler.
+		/\bmessage:\s*"([^"]+)"/g,
+		/textoObligatorio\(\s*"([^"]+)"/g,
+		/soloLaMain\(\s*"([^"]+)"/g,
 	];
 	// Un identificador de máquina; las frases («Lote no encontrado») ya se leen bien tal cual.
 	const IDENTIFICADOR = /^[A-Za-z][A-Za-z0-9_]*$/;
@@ -133,7 +139,7 @@ describe("ningún identificador del worker se queda sin clasificar", () => {
 	it("las listas no guardan identificadores que ya no emite nadie", () => {
 		const vistos = identificadores();
 		const sobran = [...Object.keys(MENSAJES), ...SIN_MENSAJE_PROPIO].filter((id) => !vistos.has(id));
-		expect(sobran).toEqual([]);
+		expect(sobran, "identificadores en las listas que ya no emite nadie").toEqual([]);
 	});
 
 	it("una frase es una frase: ni vacía ni otro identificador", () => {
@@ -149,22 +155,21 @@ describe("en la frontera HTTP", () => {
 		const fuente: string = (await import("../src/index.ts?raw")).default;
 		const middleware = fuente.indexOf('app.use("*", completarErrores)');
 		expect(middleware, "index.ts no registra completarErrores").toBeGreaterThan(-1);
-		for (const primeraRuta of ["app.options(", "app.get(", "app.post(", "app.route(", "app.onError("]) {
+		for (const primeraRuta of ["app.options(", "app.get(", "app.route(", "app.onError("]) {
+			expect(fuente.indexOf(primeraRuta), `index.ts no usa ${primeraRuta}`).toBeGreaterThan(-1);
 			expect(middleware, primeraRuta).toBeLessThan(fuente.indexOf(primeraRuta));
 		}
 	});
 
-	it("un handler que contesta a mano, sin code ni message, sale completo", async () => {
-		// El claim de verdad, que valida el formato antes de tocar la base: si la tocara, este
-		// doble lo diría.
-		const baseQueNoSeToca = {
-			execute: () => {
-				throw new Error("el claim no debería llegar a la base con un código mal formado");
-			},
-		} as any;
+	it("un rechazo del validador, sin code ni message, sale completo", async () => {
+		// El schema del claim de verdad: rechaza el formato antes de que el handler llegue a
+		// existir, y lo hace con el identificador (no con un `validation_error` a secas), que es
+		// lo que permite que la Handy enseñe una frase que se entiende.
 		const app = new Hono();
 		app.use("*", completarErrores);
-		app.post("/claim", (c) => handlePairClaim(c.req.raw, {}, baseQueNoSeToca));
+		app.post("/claim", cuerpoConIdentificador(claimSchema), () => {
+			throw new Error("el claim no debería llegar al handler con un código mal formado");
+		});
 
 		const res = await app.request("/claim", {
 			method: "POST",

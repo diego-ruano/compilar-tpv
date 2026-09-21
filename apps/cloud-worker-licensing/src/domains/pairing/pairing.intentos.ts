@@ -1,4 +1,4 @@
-// src/server/endpoints/rest/pairing/pairing.intentos.ts
+// src/domains/pairing/pairing.intentos.ts
 //
 // Cuánto hay que esperar para volver a intentar una vinculación después de fallar.
 //
@@ -23,7 +23,7 @@
 
 import type { Client } from "@libsql/client/web";
 
-import { exec } from "../../../db";
+import { exec } from "../../server/db";
 
 export const FALLOS_POR_TRAMO = 3;
 /** Pasado este tiempo sin fallar, la cuenta vuelve a empezar. */

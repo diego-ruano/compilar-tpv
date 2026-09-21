@@ -1,4 +1,4 @@
-// src/server/endpoints/rest/pairing/pairing.firma.ts
+// src/domains/pairing/pairing.firma.ts
 //
 // La prueba de que quien habla es el dispositivo que reclamó el código.
 //
@@ -9,8 +9,8 @@
 
 import type { Client } from "@libsql/client/web";
 
-import { b64ToBytes } from "../../../utils/base64";
-import { ed25519Verify, nobleForceU8 } from "../../../utils/nobleEd25519";
+import { b64ToBytes } from "../../server/utils/base64";
+import { ed25519Verify, nobleForceU8 } from "../../server/utils/nobleEd25519";
 
 export type AccionFirmada = "PAIR_FETCH" | "PAIR_CANCEL";
 

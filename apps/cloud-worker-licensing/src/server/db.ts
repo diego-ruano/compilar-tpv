@@ -60,6 +60,17 @@ export async function exec(db: Sql, sql: string, args: any[] = []) {
 	return await db.execute({ sql, args });
 }
 
+/**
+ * Filas que tocó una escritura. Estaba copiado en SEIS ficheros de pairing, y los dos nombres son
+ * a propósito: el driver HTTP de libsql devuelve `rowsAffected` y el nativo `rows_affected`.
+ *
+ * Es lo que distingue «no había nada que cambiar» de «se cambió», que en este dominio es la
+ * diferencia entre una carrera perdida y una operación buena.
+ */
+export function rowsAffected(result: any): number {
+	return Number(result?.rowsAffected ?? result?.rows_affected ?? 0);
+}
+
 export async function execMany(db: Client, statements: { sql: string; args?: any[] }[]) {
 	// libsql HTTP no garantiza transacciones multi-statement igual que sqlite local,
 	// pero esto reduce round-trips.

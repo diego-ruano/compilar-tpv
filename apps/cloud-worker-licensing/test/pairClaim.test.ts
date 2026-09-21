@@ -19,7 +19,8 @@ import { describe, it, expect } from "vitest";
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
 import { prepararPlanoDeControl } from "./helpers/planoDeControl";
-import { handlePairClaim } from "../src/server/endpoints/rest/pairing/pairClaim";
+import { reclamarCodigo } from "../src/domains/pairing/pairing.handy";
+import { claimSchema } from "../src/domains/pairing/pairing.schemas";
 import { bytesToB64 } from "../src/server/utils/base64";
 
 const CODIGO = "123456";
@@ -28,12 +29,12 @@ const DEVICE_B = "device-b";
 const PUB_A = bytesToB64(new Uint8Array(32).fill(1));
 const PUB_B = bytesToB64(new Uint8Array(32).fill(2));
 
-function peticion(cuerpo: Record<string, unknown>, ip: string): Request {
-	return new Request("https://api.test/v1/pair/claim", {
-		method: "POST",
-		headers: { "content-type": "application/json", "CF-Connecting-IP": ip },
-		body: JSON.stringify(cuerpo),
-	});
+/**
+ * El cuerpo tal como lo deja el validador de la ruta (`pairing.schemas.ts`). Se pasa por el
+ * schema de verdad y no a mano: así lo que prueba el test es lo que recibe la función.
+ */
+function entrada(cuerpo: Record<string, unknown>) {
+	return claimSchema.parse(cuerpo);
 }
 
 type Resultado = {
@@ -73,20 +74,19 @@ async function reclamar(
 		const salida: Resultado[] = [];
 
 		for (const [i, c] of claims.entries()) {
-			const res = await handlePairClaim(
-				peticion(
-					{
-						pairCode: CODIGO,
-						pairSecret: c.pairSecret ?? "",
-						deviceId: c.deviceId,
-						devicePubKey: c.devicePubKey,
-						deviceName: "",
-					},
-					// Una IP por claim: el throttle por IP es otra barrera y no es la que se prueba aquí.
-					`10.0.0.${i + 1}`,
-				),
-				{ PAIR_PEPPER: "pepper-de-pruebas" },
+			const res = await reclamarCodigo(
 				db,
+				{ PAIR_PEPPER: "pepper-de-pruebas" },
+				entrada({
+					pairCode: CODIGO,
+					pairSecret: c.pairSecret ?? "",
+					deviceId: c.deviceId,
+					devicePubKey: c.devicePubKey,
+					deviceName: "",
+				}),
+				// Una IP por claim: el throttle por IP es otra barrera y no es la que se prueba aquí.
+				`10.0.0.${i + 1}`,
+				Date.now(),
 			);
 
 			const fila =
@@ -96,7 +96,7 @@ async function reclamar(
 
 			salida.push({
 				status: res.status,
-				body: await res.json(),
+				body: res.cuerpo,
 				fila: fila
 					? {
 							claimed_by_device_id: fila.claimed_by_device_id ?? null,
