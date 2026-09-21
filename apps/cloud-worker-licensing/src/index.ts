@@ -31,6 +31,7 @@ import {
 } from "./server/utils/response";
 
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
+import { purgarBaseCentral } from "./server/purga";
 import { pairingRoutes } from "./routes/pairing";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { configuracionRoutes } from "./domains/configuracion/configuracion.routes";
@@ -244,14 +245,15 @@ app.onError((err, c) => {
 });
 
 /**
- * REV-13 · Lo único que este worker hace por su cuenta: avisar de las licencias que caducan.
+ * Lo que este worker hace por su cuenta, una vez al día: avisar de las licencias que caducan
+ * (REV-13) y recoger la basura de la base central (`server/purga.ts`).
  *
  * Va aquí y no en una ruta porque nadie lo va a llamar: el cliente no sabe que su licencia se
- * acaba hasta que deja de funcionar. El cron está en `wrangler.json` (`triggers.crons`), una vez
- * al día, y el cuerpo es idempotente — un día perdido se recupera solo al siguiente.
+ * acaba hasta que deja de funcionar. El cron está en `wrangler.json` (`triggers.crons`), y los dos
+ * cuerpos son idempotentes — un día perdido se recupera solo al siguiente.
  *
- * Los errores se tragan a propósito: si esto revienta, Cloudflare lo reintenta y mientras tanto no
- * puede afectar a nada más, porque no hay nada más en este handler.
+ * Cada tarea va en su propio `try` y ninguna propaga: son independientes, y la purga —que es
+ * mantenimiento— no puede llevarse por delante un aviso que alguien está esperando para renovar.
  */
 async function programado(env: Env): Promise<void> {
 	try {
@@ -262,6 +264,16 @@ async function programado(env: Env): Promise<void> {
 		);
 	} catch (err) {
 		console.error("[cron] avisos de caducidad falló:", (err as any)?.message || err);
+	}
+
+	try {
+		const r = await purgarBaseCentral(getDb(env));
+		console.log(
+			`[cron] purga: ${r.fallosDeEmparejamiento} fallos de emparejamiento, ` +
+				`${r.trazasDeCorreo} trazas de correo`,
+		);
+	} catch (err) {
+		console.error("[cron] purga falló:", (err as any)?.message || err);
 	}
 }
 
