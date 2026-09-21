@@ -537,10 +537,12 @@ la lógica/SQL vive en `crates/*`.
   - **`cuerpoConIdentificador` es sólo para el emparejamiento**, donde el identificador del fallo
     es contrato con una Handy que no tiene sesión ni pantalla donde mirar. El resto usa `cuerpo`,
     que rechaza con `validation_error` y los `issues` de zod.
-  - **Permitir de más es una decisión, no un olvido.** Los cuerpos de `sync` e `images` coercen y
-    recortan (`since ?? 0`, `tablas.slice(0, 60)`) en vez de validar: están en el camino de la
-    recuperación, donde fallar hacia «sigue trabajando» es la regla. Si los conviertes en schemas,
-    que sean totales (`.catch()`, `.default()`), no estrictos.
+  - **Permitir de más es una decisión, no un olvido.** Cuatro cuerpos de `sync` —`/changes`,
+    `/historico`, `/verificar-claves` y `/salud`— coercen y recortan (`since ?? 0`,
+    `tablas.slice(0, 60)`) en vez de validar: están en el camino de la recuperación, donde fallar
+    hacia «sigue trabajando» es la regla. Son los únicos que quedan sin migrar (ARQ-06 en
+    `docs/analisis/REVISION_2026-09-17.md`, con su prerrequisito); al convertirlos en schemas, que
+    sean **totales** (`.catch()`, `.default()`), no estrictos.
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a **`AppErrorDto { code, message }`**
   en la frontera Tauri (ARCH-02/05). El `code` sale del catálogo cerrado `ErrorCode`
   (`crates/tpv-contracts/src/errors.rs`, exportado a TS por ts-rs y consumido también por el worker),
