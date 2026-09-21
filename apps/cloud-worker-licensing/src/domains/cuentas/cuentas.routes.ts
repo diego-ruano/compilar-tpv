@@ -1,10 +1,8 @@
 // src/domains/cuentas/cuentas.routes.ts
 
 import { Hono } from "hono";
-import { z } from "zod";
 
 import type { Env } from "../../env";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import {
 	soloLaMainEscribeCaja,
@@ -16,46 +14,14 @@ import * as cmd from "./cuentas.commands";
 import * as q from "./cuentas.queries";
 import * as S from "./cuentas.schemas";
 import { badRequest } from "../../server/utils/response";
+import { cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const cuentasRoutes = new Hono<Ctx>();
 
 cuentasRoutes.use("*", tenantAuth);
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<S extends z.ZodTypeAny>(
-	c: any,
-	schema: S,
-): Promise<{ ok: true; data: z.infer<S> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
 
 cuentasRoutes.get("/entradas", async (c) => {
 	const p = S.listadoSchema.parse({
@@ -100,56 +66,42 @@ cuentasRoutes.get("/resumen", async (c) => {
 	);
 });
 
-cuentasRoutes.post("/gastos", async (c) => {
-	const veto = await soloLaMainEscribeCaja(c);
-	if (veto) return veto;
-	const p = await parseBody(c, S.createGastoSchema);
-	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.createGasto(p.data));
+cuentasRoutes.post("/gastos", soloLaMainEscribeCaja, cuerpo(S.createGastoSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const id = await apply(c, cmd.createGasto(datos));
 	return c.json({ ok: true, id_gasto: id });
 });
 
-cuentasRoutes.put("/gastos/:id", async (c) => {
-	const veto = await soloLaMainEscribeCaja(c);
-	if (veto) return veto;
+cuentasRoutes.put("/gastos/:id", soloLaMainEscribeCaja, cuerpo(S.updateGastoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_gasto invalido");
-	const p = await parseBody(c, S.updateGastoSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.updateGasto(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.updateGasto(id, datos));
 	return c.json({ ok: true });
 });
 
-cuentasRoutes.delete("/gastos/:id", async (c) => {
-	const veto = await soloLaMainEscribeCaja(c);
-	if (veto) return veto;
+cuentasRoutes.delete("/gastos/:id", soloLaMainEscribeCaja, async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_gasto invalido");
 	await apply(c, cmd.deleteGasto(id));
 	return c.json({ ok: true });
 });
 
-cuentasRoutes.put("/pagos/:id", async (c) => {
-	const veto = await soloLaMainEscribeCaja(c);
-	if (veto) return veto;
+cuentasRoutes.put("/pagos/:id", soloLaMainEscribeCaja, cuerpo(S.updatePagoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_pago invalido");
-	const p = await parseBody(c, S.updatePagoSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.updatePago(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.updatePago(id, datos));
 	return c.json({ ok: true });
 });
 
 // POST y no DELETE: anular ya no borra nada (CUENTA-07). Marca el cobro, deja quién y por qué, y
 // devuelve sus líneas a la comanda. Un `DELETE` diría lo contrario de lo que hace.
-cuentasRoutes.post("/pagos/:id/anular", async (c) => {
-	const veto = await soloLaMainEscribeCaja(c);
-	if (veto) return veto;
+cuentasRoutes.post("/pagos/:id/anular", soloLaMainEscribeCaja, cuerpo(S.anularPagoSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_pago invalido");
-	const p = await parseBody(c, S.anularPagoSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.anularPago(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.anularPago(id, datos));
 	return c.json({ ok: true });
 });
 

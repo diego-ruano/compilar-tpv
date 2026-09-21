@@ -8,6 +8,7 @@ import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 
 import * as q from "./stats.queries";
 import { rangeSchema, turnoSchema } from "./stats.schemas";
+import { parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -17,11 +18,6 @@ statsRoutes.use("*", tenantAuth);
 
 function parseRange(raw: string | undefined) {
 	return rangeSchema.parse(raw || "hoy");
-}
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
 }
 
 statsRoutes.get("/mesas", async (c) => {

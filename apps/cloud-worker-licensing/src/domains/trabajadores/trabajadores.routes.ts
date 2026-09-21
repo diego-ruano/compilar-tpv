@@ -1,10 +1,8 @@
 // src/domains/trabajadores/trabajadores.routes.ts
 
 import { Hono } from "hono";
-import { z } from "zod";
 
 import type { Env } from "../../env";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 
@@ -12,47 +10,14 @@ import * as cmd from "./trabajadores.commands";
 import * as q from "./trabajadores.queries";
 import * as S from "./trabajadores.schemas";
 import { badRequest } from "../../server/utils/response";
+import { consulta, cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const trabajadoresRoutes = new Hono<Ctx>();
 
 trabajadoresRoutes.use("*", tenantAuth);
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<S extends z.ZodTypeAny>(
-	c: any,
-	schema: S,
-): Promise<{ ok: true; data: z.infer<S> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
 
 trabajadoresRoutes.get("/roles", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.roles(db))),
@@ -68,14 +33,10 @@ trabajadoresRoutes.get("/by-usuario/:id", async (c) => {
 	return c.json(await tenantQuery(c, (db) => q.idByUsuario(db, id)));
 });
 
-trabajadoresRoutes.get("/horarios/semana", async (c) => {
-	const parsed = S.fechaLunesSchema.safeParse({
-		fecha_lunes: c.req.query("fecha_lunes"),
-	});
-	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
+trabajadoresRoutes.get("/horarios/semana", consulta(S.fechaLunesSchema), async (c) => {
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.asignacionesSemana(db, parsed.data.fecha_lunes),
+			q.asignacionesSemana(db, c.req.valid("query").fecha_lunes),
 		),
 	);
 });
@@ -90,28 +51,25 @@ trabajadoresRoutes.get("/:id", async (c) => {
 	return c.json(await tenantQuery(c, (db) => q.detail(db, id)));
 });
 
-trabajadoresRoutes.post("/", async (c) => {
-	const p = await parseBody(c, S.trabajadorCreateSchema);
-	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.createTrabajador(p.data));
+trabajadoresRoutes.post("/", cuerpo(S.trabajadorCreateSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const id = await apply(c, cmd.createTrabajador(datos));
 	return c.json({ ok: true, id_trabajador: id });
 });
 
-trabajadoresRoutes.put("/:id", async (c) => {
+trabajadoresRoutes.put("/:id", cuerpo(S.trabajadorUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_trabajador invalido");
-	const p = await parseBody(c, S.trabajadorUpdateSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.updateTrabajador(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.updateTrabajador(id, datos));
 	return c.json({ ok: true });
 });
 
-trabajadoresRoutes.post("/horarios/asignaciones", async (c) => {
-	const p = await parseBody(c, S.asignacionCreateSchema);
-	if (!p.ok) return p.res;
+trabajadoresRoutes.post("/horarios/asignaciones", cuerpo(S.asignacionCreateSchema), async (c) => {
+	const datos = c.req.valid("json");
 	// TRAB-04: bloquear el mismo turno para el mismo trabajador y día (aunque cambie el área).
 	const dup = await tenantQuery(c, (db) =>
-		q.existeAsignacionTurno(db, p.data.id_trabajador, p.data.fecha, p.data.id_turno),
+		q.existeAsignacionTurno(db, datos.id_trabajador, datos.fecha, datos.id_turno),
 	);
 	if (dup) {
 		return c.json(
@@ -119,16 +77,15 @@ trabajadoresRoutes.post("/horarios/asignaciones", async (c) => {
 			409,
 		);
 	}
-	const id = await apply(c, cmd.createAsignacion(p.data));
+	const id = await apply(c, cmd.createAsignacion(datos));
 	return c.json({ ok: true, id_asignacion: id });
 });
 
-trabajadoresRoutes.put("/horarios/asignaciones/:id", async (c) => {
+trabajadoresRoutes.put("/horarios/asignaciones/:id", cuerpo(S.asignacionUpdateSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_asignacion invalido");
-	const p = await parseBody(c, S.asignacionUpdateSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.updateAsignacion(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.updateAsignacion(id, datos));
 	return c.json({ ok: true });
 });
 
@@ -139,27 +96,25 @@ trabajadoresRoutes.delete("/horarios/asignaciones/:id", async (c) => {
 	return c.json({ ok: true });
 });
 
-trabajadoresRoutes.post("/horarios/copy-semana", async (c) => {
-	const p = await parseBody(c, S.copySemanaSchema);
-	if (!p.ok) return p.res;
+trabajadoresRoutes.post("/horarios/copy-semana", cuerpo(S.copySemanaSchema), async (c) => {
+	const datos = c.req.valid("json");
 	// TRAB-08: las filas origen se leen antes de construir el comando, para que cada copia lleve su
 	// ID ya resuelto en la sentencia que se replica.
 	const filas = await tenantQuery(c, (db) =>
-		q.filasSemana(db, p.data.from_monday),
+		q.filasSemana(db, datos.from_monday),
 	);
-	const data = await apply(c, cmd.copySemana(p.data, filas));
+	const data = await apply(c, cmd.copySemana(datos, filas));
 	return c.json({ ok: true, inserted: data });
 });
 
-trabajadoresRoutes.post("/horarios/predeterminado-desde-semana", async (c) => {
-	const p = await parseBody(c, S.fechaLunesSchema);
-	if (!p.ok) return p.res;
+trabajadoresRoutes.post("/horarios/predeterminado-desde-semana", cuerpo(S.fechaLunesSchema), async (c) => {
+	const datos = c.req.valid("json");
 	const items = await tenantQuery(c, (db) =>
-		q.predeterminadoDesdeSemanaItems(db, p.data.fecha_lunes),
+		q.predeterminadoDesdeSemanaItems(db, datos.fecha_lunes),
 	);
 	const ok = await apply(
 		c,
-		cmd.setPredeterminadoDesdeSemana(p.data.fecha_lunes, items),
+		cmd.setPredeterminadoDesdeSemana(datos.fecha_lunes, items),
 	);
 	return c.json({ ok: Boolean(ok) });
 });

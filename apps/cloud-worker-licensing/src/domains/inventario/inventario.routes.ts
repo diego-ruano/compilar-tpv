@@ -9,17 +9,18 @@
 //   broadcast del cambio. Requieren que haya una Main conectada (si no, main_offline).
 
 import { Hono } from "hono";
-import { z } from "zod";
 
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { tenantQuery } from "../../lib/tenantClient";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
+import { applyViaHub } from "../../lib/hub";
 
 import * as q from "./inventario.queries";
 import * as cmd from "./inventario.commands";
 import * as S from "./inventario.schemas";
 import { badRequest } from "../../server/utils/response";
+import { cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -29,42 +30,7 @@ inventarioRoutes.use("*", tenantAuth);
 
 // ───────────────── helpers ─────────────────
 
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<S extends z.ZodTypeAny>(
-	c: any,
-	schema: S,
-): Promise<{ ok: true; data: z.infer<S> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
 // Aplica una escritura por el DO. Exige Op_Id (idempotencia).
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
-
 // ───────────────── LECTURAS ─────────────────
 
 inventarioRoutes.get("/categorias", async (c) =>
@@ -118,17 +84,15 @@ inventarioRoutes.get("/productos/:id", async (c) => {
 
 // ───────────────── ESCRITURAS ─────────────────
 
-inventarioRoutes.post("/categorias", async (c) => {
-	const p = await parseBody(c, S.upsertCategoriaSchema);
-	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.createCategoria(p.data));
+inventarioRoutes.post("/categorias", cuerpo(S.upsertCategoriaSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const id = await apply(c, cmd.createCategoria(datos));
 	return c.json({ id_categoria: id });
 });
 
-inventarioRoutes.post("/productos", async (c) => {
-	const p = await parseBody(c, S.upsertProductoSchema);
-	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.upsertProducto(p.data));
+inventarioRoutes.post("/productos", cuerpo(S.upsertProductoSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const id = await apply(c, cmd.upsertProducto(datos));
 	return c.json({ id_producto: id });
 });
 
@@ -149,42 +113,38 @@ inventarioRoutes.delete("/productos/:id", async (c) => {
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.put("/productos/:id/alergenos", async (c) => {
+inventarioRoutes.put("/productos/:id/alergenos", cuerpo(S.setAlergenosSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_producto inválido");
-	const p = await parseBody(c, S.setAlergenosSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.setAlergenosProducto(id, p.data));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.setAlergenosProducto(id, datos));
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.post("/lotes", async (c) => {
-	const p = await parseBody(c, S.createLoteSchema);
-	if (!p.ok) return p.res;
-	const id = await apply(c, cmd.createLote(p.data));
+inventarioRoutes.post("/lotes", cuerpo(S.createLoteSchema), async (c) => {
+	const datos = c.req.valid("json");
+	const id = await apply(c, cmd.createLote(datos));
 	return c.json({ id_lote: id });
 });
 
-inventarioRoutes.put("/lotes/:id", async (c) => {
+inventarioRoutes.put("/lotes/:id", cuerpo(S.updateLoteSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_lote inválido");
-	const p = await parseBody(c, S.updateLoteSchema);
-	if (!p.ok) return p.res;
+	const datos = c.req.valid("json");
 	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
 	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
-	await apply(c, cmd.updateLote(id, { ...p.data, id_lote: id }, info.stock_disponible));
+	await apply(c, cmd.updateLote(id, { ...datos, id_lote: id }, info.stock_disponible));
 	return c.json({ ok: true });
 });
 
-inventarioRoutes.patch("/lotes/:id", async (c) => {
+inventarioRoutes.patch("/lotes/:id", cuerpo(S.ajusteLoteSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_lote inválido");
-	const p = await parseBody(c, S.ajusteLoteSchema);
-	if (!p.ok) return p.res;
+	const datos = c.req.valid("json");
 	// El disponible previo es el delta del movimiento de auditoría (INV-01b).
 	const info = await tenantQuery(c, (db) => q.getLoteStock(db, id));
 	if (!info) return c.json({ error: "Lote no encontrado" }, 404);
-	await apply(c, cmd.ajustarLote(id, p.data, info.stock_disponible));
+	await apply(c, cmd.ajustarLote(id, datos, info.stock_disponible));
 	return c.json({ ok: true });
 });

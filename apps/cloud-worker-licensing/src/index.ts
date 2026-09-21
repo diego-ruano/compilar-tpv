@@ -17,6 +17,7 @@
 //   - /v1/admin/licenses/*      → alta manual (token admin)
 
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import * as Sentry from "@sentry/cloudflare";
 
 import type { Env } from "./env";
@@ -212,6 +213,12 @@ app.onError((err, c) => {
 		`[onError] ${c.req.method} ${new URL(c.req.url).pathname} → ${(err as any)?.name || "Error"}: ` +
 		`${(err as any)?.message || err}\n${(err as any)?.stack || ""}`,
 	);
+	// El validador del cuerpo (`lib/validacion.ts`) lanza esto cuando el JSON viene roto, con una
+	// frase en inglés dentro. Sin esta rama, esa frase viajaría en `error`, que es donde el cliente
+	// espera un identificador de máquina: se contesta con el `validation_error` de siempre.
+	if (err instanceof HTTPException && err.status === 400) {
+		return c.json({ ok: false, code: "validation", error: "validation_error" }, 400);
+	}
 	const status = (err as any)?.status;
 	if (typeof status === "number") {
 		return c.json(

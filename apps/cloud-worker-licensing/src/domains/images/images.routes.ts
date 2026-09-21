@@ -19,9 +19,11 @@
 //                           cacheada en el edge (REV-20; ver la nota del handler sobre el alcance).
 
 import { Hono } from "hono";
+import { z } from "zod";
 
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { cuerpoConIdentificador } from "../../lib/validacion";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -126,25 +128,31 @@ imagesRoutes.put("/*", tenantAuth, async (c) => {
 // crearon en otra Handy (cuya fila ya le llegó por sync, pero cuyo binario solo vive en R2).
 // Es un POST firmado (no el GET público): el tenant sale del token, no del path, así la Main
 // no necesita conocer su propio tenant. El `rel_path` viaja en el cuerpo.
-imagesRoutes.post("/download", tenantAuth, async (c) => {
-	const body = await c.req.json().catch(() => null);
-	const relPath = String(body?.rel_path ?? "").trim();
-	if (!REL_PATH_RE.test(relPath)) {
-		return c.json({ error: "bad_image_path" }, 400);
-	}
+imagesRoutes.post(
+	"/download",
+	tenantAuth,
+	cuerpoConIdentificador(
+		z.object({
+			rel_path: z
+				.string({ message: "bad_image_path" })
+				.trim()
+				.regex(REL_PATH_RE, { message: "bad_image_path" }),
+		}),
+	),
+	async (c) => {
+		const key = `${c.get("tenantId")}/${c.req.valid("json").rel_path}`;
+		const obj = await c.env.IMAGES.get(key);
+		if (!obj) {
+			// 404: el binario aún no se ha subido (la subida va por otro canal). La Main reintenta.
+			return c.json({ error: "not_found" }, 404);
+		}
 
-	const key = `${c.get("tenantId")}/${relPath}`;
-	const obj = await c.env.IMAGES.get(key);
-	if (!obj) {
-		// 404: el binario aún no se ha subido (la subida va por otro canal). La Main reintenta.
-		return c.json({ error: "not_found" }, 404);
-	}
-
-	const headers = new Headers();
-	headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
-	if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
-	return new Response(obj.body, { headers });
-});
+		const headers = new Headers();
+		headers.set("Content-Type", obj.httpMetadata?.contentType || "image/jpeg");
+		if (obj.httpEtag) headers.set("ETag", obj.httpEtag);
+		return new Response(obj.body, { headers });
+	},
+);
 
 /**
  * URL pública de una imagen: la clave con la que el GET de arriba la guardó en el caché del edge.

@@ -30,6 +30,7 @@ import type { Env } from "../../env";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb, type Sql } from "../../server/db";
+import { cuerpo } from "../../lib/validacion";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -59,14 +60,8 @@ const enviarPedidoSchema = z
 		path: ["lineas"],
 	});
 
-emailRoutes.post("/enviar-pedido", async (c) => {
-	const body = await c.req.json().catch(() => null);
-	const parsed = enviarPedidoSchema.safeParse(body);
-	if (!parsed.success) {
-		return c.json({ error: "validation_error", issues: parsed.error.issues }, 400);
-	}
-
-	const { email_destino, nombre_proveedor, notas, lineas } = parsed.data;
+emailRoutes.post("/enviar-pedido", cuerpo(enviarPedidoSchema), async (c) => {
+	const { email_destino, nombre_proveedor, notas, lineas } = c.req.valid("json");
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
 

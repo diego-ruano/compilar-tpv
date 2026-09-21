@@ -29,6 +29,7 @@ function retenerEnvio(c: { executionCtx: ExecutionContext }, p: Promise<unknown>
 	}
 }
 import { forbidden, unauthorized } from "../server/utils/response";
+import { wireToCode } from "../lib/errorCodes";
 import { vetoDeLicencia } from "../lib/licenciaEnUso";
 
 export type TenantVars = {
@@ -56,23 +57,34 @@ export async function rolDelDispositivo(
 }
 
 /**
+ * «Esto sólo lo hace la Main»: el middleware que lo hace cumplir.
+ *
+ * El identificador y el status los pone quien lo usa porque cada familia de rutas ya devolvía el
+ * suyo y eso es contrato con los clientes instalados: `cobro_solo_en_main` y `caja_solo_en_main`
+ * con 403, `forbidden_not_tpv` y `forbidden_not_main` con 401 en el emparejamiento.
+ *
+ * Es un MIDDLEWARE y no una comprobación dentro del handler: tiene que decidir ANTES de que se lea
+ * y valide el cuerpo, que también es middleware. Lo vigila `test/anularSoloMain.test.ts`.
+ */
+export function soloLaMain(error: string, status: 401 | 403): MiddlewareHandler<any> {
+	return async (c, next) => {
+		const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
+		// El `code` sale del catálogo (ARCH-05) como en `unauthorized`/`forbidden`, pero sin pasar
+		// por ellos: sólo hace falta el identificador y el status, no la `Request`.
+		if (rol !== "tpv") return c.json({ ok: false, code: wireToCode(error, status), error }, status);
+		await next();
+	};
+}
+
+/**
  * Cobrar es cosa de la Main y solo de la Main.
  *
  * Una Handy no tiene impresora ni cajón, así que cerrar una mesa desde ella dejaría al cliente sin
  * ticket y el dinero sin registrar en el cajón. Es una decisión de producto, y quien la hace
  * cumplir es el servidor: dejarla solo en la interfaz significa que cualquiera con el token de un
  * Handy podría cobrar igualmente.
- *
- * Devuelve la respuesta de rechazo, o `null` si puede seguir.
  */
-export async function soloLaMainCobra(c: any): Promise<Response | null> {
-	const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (rol === "tpv") return null;
-	return c.json(
-		{ ok: false, code: "external", error: "cobro_solo_en_main" },
-		403,
-	);
-}
+export const soloLaMainCobra = soloLaMain("cobro_solo_en_main", 403);
 
 /**
  * La caja se MIRA desde una Handy, pero no se toca (CUENTA-06).
@@ -83,17 +95,8 @@ export async function soloLaMainCobra(c: any): Promise<Response | null> {
  *
  * Como con el cobro, quien lo hace cumplir es el servidor. Esconder el botón en la interfaz deja la
  * puerta abierta a cualquiera con el token de un Handy.
- *
- * Devuelve la respuesta de rechazo, o `null` si puede seguir.
  */
-export async function soloLaMainEscribeCaja(c: any): Promise<Response | null> {
-	const rol = await rolDelDispositivo(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (rol === "tpv") return null;
-	return c.json(
-		{ ok: false, code: "external", error: "caja_solo_en_main" },
-		403,
-	);
-}
+export const soloLaMainEscribeCaja = soloLaMain("caja_solo_en_main", 403);
 
 export const tenantAuth: MiddlewareHandler<{
 	Bindings: Env;

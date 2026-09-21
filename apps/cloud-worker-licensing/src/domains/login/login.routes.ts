@@ -1,10 +1,8 @@
 // src/domains/login/login.routes.ts
 
 import { Hono } from "hono";
-import { z } from "zod";
 
 import type { Env } from "../../env";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
@@ -22,46 +20,14 @@ import {
 	usarCorreoDeLaCompra,
 } from "./correoRecuperacion";
 import { badRequest } from "../../server/utils/response";
+import { cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const loginRoutes = new Hono<Ctx>();
 
 loginRoutes.use("*", tenantAuth);
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<S extends z.ZodTypeAny>(
-	c: any,
-	schema: S,
-): Promise<{ ok: true; data: z.infer<S> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
 
 // Verifica el PIN; si es incorrecto (o el hash esta mal formado) devuelve un 401 con el
 // mensaje, en vez de dejar que el throw caiga al onError como 500 internal_error.
@@ -82,30 +48,29 @@ loginRoutes.get("/users", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.listLoginUsers(db))),
 );
 
-loginRoutes.post("/login", async (c) => {
-	const p = await parseBody(c, S.loginUserSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/login", cuerpo(S.loginUserSchema), async (c) => {
+	const datos = c.req.valid("json");
 	// LOGIN-01: bloqueo por intentos fallidos (anti brute-force).
 	const secs = await tenantQuery(c, (db) =>
-		q.throttleSecondsLeft(db, p.data.id_usuario),
+		q.throttleSecondsLeft(db, datos.id_usuario),
 	);
 	if (secs > 0) {
 		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
 	}
 	const record = await tenantQuery(c, (db) =>
-		q.getLoginRecord(db, p.data.id_usuario),
+		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
+	const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
 	if (badPin) {
 		await tenantQuery(c, (db) =>
-			q.throttleFail(db, p.data.id_usuario),
+			q.throttleFail(db, datos.id_usuario),
 		);
 		return badPin;
 	}
-	await tenantQuery(c, (db) => q.throttleReset(db, p.data.id_usuario));
+	await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 	const ok = await tenantQuery(c, (db) =>
-		q.loginOk(db, p.data.id_usuario),
+		q.loginOk(db, datos.id_usuario),
 	);
 	return c.json(ok);
 });
@@ -116,10 +81,9 @@ loginRoutes.get("/:id/punch-status", async (c) => {
 	return c.json(await tenantQuery(c, (db) => q.punchStatus(db, id)));
 });
 
-loginRoutes.post("/turno-partido", async (c) => {
-	const p = await parseBody(c, S.setTurnoPartidoSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.setTurnoPartido(p.data));
+loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) => {
+	const datos = c.req.valid("json");
+	await apply(c, cmd.setTurnoPartido(datos));
 	return c.json({ ok: true });
 });
 
@@ -144,19 +108,18 @@ loginRoutes.post("/turno-partido", async (c) => {
 // Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
 // no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con
 // las credenciales reales del admin para que el login de la Handy funcione.
-loginRoutes.post("/sync-initial-setup", async (c) => {
-	const p = await parseBody(c, S.syncInitialSetupSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/sync-initial-setup", cuerpo(S.syncInitialSetupSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
 	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
 
-	const passwordHash = await hashPin(p.data.pin);
+	const passwordHash = await hashPin(datos.pin);
 
 	await tenantQuery(c, (db) =>
 		q.applyInitialSetupDirect(db, {
-			idUsuario: p.data.id_usuario,
-			email: p.data.email,
+			idUsuario: datos.id_usuario,
+			email: datos.email,
 			passwordHash,
 		}),
 	);
@@ -194,9 +157,8 @@ function diferirEn(c: any): (p: Promise<unknown>) => void {
 	};
 }
 
-loginRoutes.post("/recuperar-pin/solicitar", async (c) => {
-	const p = await parseBody(c, S.solicitarCodigoPinSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/recuperar-pin/solicitar", cuerpo(S.solicitarCodigoPinSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
@@ -207,15 +169,14 @@ loginRoutes.post("/recuperar-pin/solicitar", async (c) => {
 		tenantId: c.get("tenantId"),
 		deviceId: c.get("deviceId"),
 		licHash: c.get("licHash"),
-		idUsuario: p.data.id_usuario,
+		idUsuario: datos.id_usuario,
 		ahora: Date.now(),
 	});
 	return c.json(r.body, r.status);
 });
 
-loginRoutes.post("/recuperar-pin/verificar", async (c) => {
-	const p = await parseBody(c, S.verificarCodigoPinSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/recuperar-pin/verificar", cuerpo(S.verificarCodigoPinSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
@@ -229,8 +190,8 @@ loginRoutes.post("/recuperar-pin/verificar", async (c) => {
 			tenantId: c.get("tenantId"),
 			deviceId: c.get("deviceId"),
 			licHash: c.get("licHash"),
-			idUsuario: p.data.id_usuario,
-			codigo: p.data.codigo,
+			idUsuario: datos.id_usuario,
+			codigo: datos.codigo,
 			ahora: Date.now(),
 		},
 		(promesa) => {
@@ -269,22 +230,20 @@ loginRoutes.post("/correo-recuperacion/estado", async (c) => {
 	return c.json(r.body, r.status);
 });
 
-loginRoutes.post("/correo-recuperacion/solicitar", async (c) => {
-	const p = await parseBody(c, S.solicitarCambioCorreoSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/correo-recuperacion/solicitar", cuerpo(S.solicitarCambioCorreoSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
 
 	const db = getDb(c.env);
 
-	const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: p.data.correo });
+	const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: datos.correo });
 	return c.json(r.body, r.status);
 });
 
-loginRoutes.post("/correo-recuperacion/confirmar", async (c) => {
-	const p = await parseBody(c, S.confirmarCambioCorreoSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/correo-recuperacion/confirmar", cuerpo(S.confirmarCambioCorreoSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const noMain = await soloLaMain(c);
 	if (noMain) return noMain;
@@ -294,7 +253,7 @@ loginRoutes.post("/correo-recuperacion/confirmar", async (c) => {
 	const r = await confirmarCambioCorreo(
 		db,
 		c.env,
-		{ ...contextoCorreo(c), codigo: p.data.codigo },
+		{ ...contextoCorreo(c), codigo: datos.codigo },
 		diferirEn(c),
 	);
 	return c.json(r.body, r.status);
@@ -310,28 +269,27 @@ loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", async (c) => {
 	return c.json(r.body, r.status);
 });
 
-loginRoutes.post("/punch", async (c) => {
-	const p = await parseBody(c, S.punchSchema);
-	if (!p.ok) return p.res;
+loginRoutes.post("/punch", cuerpo(S.punchSchema), async (c) => {
+	const datos = c.req.valid("json");
 	// LOGIN-01: el fichaje también verifica PIN → mismo throttle anti brute-force.
 	const secs = await tenantQuery(c, (db) =>
-		q.throttleSecondsLeft(db, p.data.id_usuario),
+		q.throttleSecondsLeft(db, datos.id_usuario),
 	);
 	if (secs > 0) {
 		return c.json({ error: `Demasiados intentos fallidos. Prueba de nuevo en ${secs} s.` }, 429);
 	}
 	const record = await tenantQuery(c, (db) =>
-		q.getLoginRecord(db, p.data.id_usuario),
+		q.getLoginRecord(db, datos.id_usuario),
 	);
 	if (!record) return c.json({ error: "Usuario no encontrado" }, 404);
-	const badPin = await ensurePin(c, p.data.pin, String(record.password_hash));
+	const badPin = await ensurePin(c, datos.pin, String(record.password_hash));
 	if (badPin) {
 		await tenantQuery(c, (db) =>
-			q.throttleFail(db, p.data.id_usuario),
+			q.throttleFail(db, datos.id_usuario),
 		);
 		return badPin;
 	}
-	await tenantQuery(c, (db) => q.throttleReset(db, p.data.id_usuario));
+	await tenantQuery(c, (db) => q.throttleReset(db, datos.id_usuario));
 
 	// La fecha del fichaje. Sale de una consulta (`date('now','localtime')`) que `tenantQuery`
 	// resuelve con la hora local de quien ficha (REV-03), que es la MISMA con la que el Durable
@@ -344,25 +302,25 @@ loginRoutes.post("/punch", async (c) => {
 	// reloj del equipo que ficha, el mismo que en la Main escribe el fichaje, y llega con su
 	// guardia de deriva.
 	const fecha = await tenantQuery(c, async (db) => {
-		const status = await q.punchStatus(db, p.data.id_usuario);
+		const status = await q.punchStatus(db, datos.id_usuario);
 		return status.fecha;
 	});
 
-	if (p.data.tipo === "entrada") {
+	if (datos.tipo === "entrada") {
 		const parte = await tenantQuery(c, (db) =>
-			q.nextPunchPart(db, p.data.id_usuario, fecha),
+			q.nextPunchPart(db, datos.id_usuario, fecha),
 		);
 		await apply(
 			c,
 			cmd.punchEntrada({
-				id_usuario: p.data.id_usuario,
+				id_usuario: datos.id_usuario,
 				fecha,
 				parte,
 			}),
 		);
 	} else {
 		const open = await tenantQuery(c, (db) =>
-			q.getOpenPunch(db, p.data.id_usuario, fecha),
+			q.getOpenPunch(db, datos.id_usuario, fecha),
 		);
 		if (!open) {
 			return c.json({ error: "No hay fichaje abierto para cerrar (primero ficha entrada)." }, 409);
@@ -370,7 +328,7 @@ loginRoutes.post("/punch", async (c) => {
 		await apply(
 			c,
 			cmd.punchSalida({
-				id_usuario: p.data.id_usuario,
+				id_usuario: datos.id_usuario,
 				id_fichaje: String(open.id_fichaje),
 			}),
 		);
@@ -378,7 +336,7 @@ loginRoutes.post("/punch", async (c) => {
 
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.punchStatusForDate(db, p.data.id_usuario, fecha),
+			q.punchStatusForDate(db, datos.id_usuario, fecha),
 		),
 	);
 });

@@ -12,13 +12,14 @@
 //   - Se ESPERA la ingesta de Axiom: si falla, 5xx para que el dispositivo conserve el lote y
 //     reintente ("no perder ninguno"). La latencia no importa: el envío va en un hilo de fondo.
 
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import type { SpoolEvent } from "@tpv/contracts";
 import type { Env } from "../../env";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { ingestToAxiom } from "../../observability/axiom";
+import { cuerpo } from "../../lib/validacion";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
@@ -70,25 +71,26 @@ export const telemetryRoutes = new Hono<Ctx>();
 
 telemetryRoutes.use("*", tenantAuth);
 
-telemetryRoutes.post("/", async (c) => {
-	// Guardarraíl de tamaño antes de leer el cuerpo entero.
-	const contentLength = Number(c.req.header("content-length") || "0");
-	if (contentLength > MAX_BODY_BYTES) {
+/**
+ * Guardarraíl de tamaño. Va como middleware y DELANTE del validador a propósito: si fuera parte
+ * del handler, el cuerpo ya se habría leído y parseado entero antes de mirarlo.
+ */
+const noPasarseDeTamano: MiddlewareHandler<Ctx> = async (c, next) => {
+	if (Number(c.req.header("content-length") || "0") > MAX_BODY_BYTES) {
 		return c.json({ error: "payload_too_large" }, 413);
 	}
+	await next();
+};
 
-	const body = await c.req.json().catch(() => null);
-	const parsed = batchSchema.safeParse(body);
-	if (!parsed.success) {
-		return c.json({ error: "validation_error", issues: parsed.error.issues }, 400);
-	}
+telemetryRoutes.post("/", noPasarseDeTamano, cuerpo(batchSchema), async (c) => {
+	const { events } = c.req.valid("json");
 
 	const tenantId = c.get("tenantId");
 	const deviceId = c.get("deviceId");
 	const ingestedAtMs = Date.now();
 
 	// Enriquecemos con la identidad AUTENTICADA (no la que diga el cliente) + metadatos de servidor.
-	const enriched = parsed.data.events.map((e) => ({
+	const enriched = events.map((e) => ({
 		...e,
 		_time: e.ts, // Axiom usa `_time` como timestamp del evento.
 		tenant_id: tenantId, // fijado por el servidor (seguridad)

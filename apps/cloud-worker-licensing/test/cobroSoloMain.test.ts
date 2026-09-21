@@ -41,6 +41,19 @@ function contexto() {
 	};
 }
 
+/**
+ * Ejecuta el veto —que es un middleware— y devuelve su respuesta de rechazo, o `null` si dejó
+ * pasar. Es middleware y no una función dentro del handler porque tiene que decidir antes de que
+ * se lea y valide el cuerpo (ver `middleware/tenant.ts`).
+ */
+async function ejecutarVeto(mw: any, ctx: any): Promise<any> {
+	let paso = false;
+	const r = await mw(ctx, async () => {
+		paso = true;
+	});
+	return paso ? null : r;
+}
+
 beforeEach(() => {
 	consultas.length = 0;
 	rolEnLaBd = "handy";
@@ -49,7 +62,7 @@ beforeEach(() => {
 describe("cobrar desde una Handy", () => {
 	it("se rechaza con un código que la app sabe traducir", async () => {
 		const { ctx } = contexto();
-		const veto = (await soloLaMainCobra(ctx)) as any;
+		const veto = (await ejecutarVeto(soloLaMainCobra, ctx)) as any;
 
 		expect(veto).not.toBeNull();
 		expect(veto.status).toBe(403);
@@ -61,7 +74,7 @@ describe("cobrar desde una Handy", () => {
 		rolEnLaBd = null;
 		const { ctx } = contexto();
 
-		expect(await soloLaMainCobra(ctx)).not.toBeNull();
+		expect(await ejecutarVeto(soloLaMainCobra, ctx)).not.toBeNull();
 	});
 
 	it("un rol inventado no cuela", async () => {
@@ -69,7 +82,7 @@ describe("cobrar desde una Handy", () => {
 		for (const rol of ["main", "TPV_MAIN", "admin", "", "tpv2"]) {
 			rolEnLaBd = rol;
 			const { ctx } = contexto();
-			expect(await soloLaMainCobra(ctx), rol).not.toBeNull();
+			expect(await ejecutarVeto(soloLaMainCobra, ctx), rol).not.toBeNull();
 		}
 	});
 });
@@ -79,7 +92,7 @@ describe("cobrar desde la Main", () => {
 		rolEnLaBd = "tpv";
 		const { ctx } = contexto();
 
-		expect(await soloLaMainCobra(ctx)).toBeNull();
+		expect(await ejecutarVeto(soloLaMainCobra, ctx)).toBeNull();
 	});
 
 	it("el rol se lee sin distinguir mayúsculas", async () => {
@@ -88,7 +101,7 @@ describe("cobrar desde la Main", () => {
 		rolEnLaBd = "TPV";
 		const { ctx } = contexto();
 
-		expect(await soloLaMainCobra(ctx)).toBeNull();
+		expect(await ejecutarVeto(soloLaMainCobra, ctx)).toBeNull();
 	});
 });
 

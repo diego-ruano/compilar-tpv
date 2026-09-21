@@ -73,10 +73,15 @@ export const listComandasSchema = z.object({
 	limit: z.coerce.number().int().min(1).max(200).optional().default(60),
 });
 
-export const searchProductosSchema = z.object({
-	query: z.string().transform((s) => s.trim()),
-	limit: z.coerce.number().int().min(1).max(200).optional().default(60),
-});
+// El alias `q` lo declara el schema y no la ruta: antes la lista de nombres que acepta esta
+// búsqueda estaba escrita dos veces, aquí y en el `safeParse` del router.
+export const searchProductosSchema = z
+	.object({
+		query: z.string().optional(),
+		q: z.string().optional(),
+		limit: z.coerce.number().int().min(1).max(200).optional().default(60),
+	})
+	.transform((v) => ({ query: String(v.query ?? v.q ?? "").trim(), limit: v.limit }));
 
 export const idsSchema = z
 	.object({ ids: z.any() })

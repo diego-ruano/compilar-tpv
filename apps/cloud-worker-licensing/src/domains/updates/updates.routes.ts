@@ -15,12 +15,13 @@
 // Los binarios (instalador + .sig) se hospedan donde quieras (R2, etc.); aquí solo guardamos su
 // URL y la firma. La fuente de versiones es la tabla `app_releases` de la Turso central.
 
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
 import { getDb } from "../../server/db";
 import { checkAdminToken } from "../../middleware/requireAdmin";
+import { cuerpo } from "../../lib/validacion";
 
 export const updatesRoutes = new Hono<{ Bindings: Env }>();
 
@@ -28,17 +29,18 @@ export const updatesRoutes = new Hono<{ Bindings: Env }>();
 // configurado, la publicación queda DESHABILITADA (fail-safe: nadie puede publicar por accidente).
 // La comparación es *timing-safe* (ver middleware/requireAdmin.ts): antes era un `!==`, que filtra
 // por tiempo cuántos caracteres del token acertaste.
-async function checkAdmin(c: { req: { header: (n: string) => string | undefined }; env: Env }): Promise<
-	{ ok: true } | { ok: false; status: 401 | 503; error: string }
-> {
+//
+// Es un MIDDLEWARE y no una comprobación dentro del handler porque el validador del cuerpo
+// también es middleware: al revés, quien no tiene el token se llevaría un 400 describiéndole el
+// schema antes de llegar al 401.
+const soloConTokenDeRelease: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
 	const fail = await checkAdminToken(c.req.header("authorization"), c.env.RELEASE_ADMIN_TOKEN);
-	if (!fail) return { ok: true };
-	return {
-		ok: false,
-		status: fail.status,
-		error: fail.status === 503 ? "publish_disabled" : fail.error,
-	};
-}
+	if (fail) {
+		const error = fail.status === 503 ? "publish_disabled" : fail.error;
+		return c.json({ error }, fail.status);
+	}
+	await next();
+};
 
 /* ── Feed que consume el updater de Tauri ──────────────────────────────────── */
 
@@ -154,20 +156,13 @@ const publishSchema = z.object({
 	channel: z.string().optional(), // por defecto "stable"
 });
 
-updatesRoutes.post("/publish", async (c) => {
-	const auth = await checkAdmin(c);
-	if (!auth.ok) return c.json({ error: auth.error }, auth.status);
+updatesRoutes.post("/publish", soloConTokenDeRelease, cuerpo(publishSchema), async (c) => {
+	const datos = c.req.valid("json");
 
-	const body = await c.req.json().catch(() => null);
-	const parsed = publishSchema.safeParse(body);
-	if (!parsed.success) {
-		return c.json({ error: "validation_error", issues: parsed.error.issues }, 400);
-	}
-
-	const target = parsed.data.target || "windows";
-	const arch = parsed.data.arch || "x86_64";
-	const channel = parsed.data.channel || "stable";
-	const pubDate = parsed.data.pub_date || new Date().toISOString();
+	const target = datos.target || "windows";
+	const arch = datos.arch || "x86_64";
+	const channel = datos.channel || "stable";
+	const pubDate = datos.pub_date || new Date().toISOString();
 
 	const db = getDb(c.env);
 
@@ -178,18 +173,18 @@ updatesRoutes.post("/publish", async (c) => {
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, unixepoch()*1000)
 		`,
 		args: [
-			parsed.data.version,
+			datos.version,
 			target,
 			arch,
 			channel,
-			parsed.data.notes ?? null,
+			datos.notes ?? null,
 			pubDate,
-			parsed.data.signature,
-			parsed.data.url,
+			datos.signature,
+			datos.url,
 		],
 	});
 
-	return c.json({ ok: true, version: parsed.data.version, target, arch, channel });
+	return c.json({ ok: true, version: datos.version, target, arch, channel });
 });
 
 /* ── Rollback: desactivar una release (admin) ──────────────────────────────── */
@@ -201,31 +196,24 @@ const deactivateSchema = z.object({
 	channel: z.string().optional(),
 });
 
-updatesRoutes.post("/deactivate", async (c) => {
-	const auth = await checkAdmin(c);
-	if (!auth.ok) return c.json({ error: auth.error }, auth.status);
+updatesRoutes.post("/deactivate", soloConTokenDeRelease, cuerpo(deactivateSchema), async (c) => {
+	const datos = c.req.valid("json");
 
-	const body = await c.req.json().catch(() => null);
-	const parsed = deactivateSchema.safeParse(body);
-	if (!parsed.success) {
-		return c.json({ error: "validation_error", issues: parsed.error.issues }, 400);
-	}
-
-	const target = parsed.data.target || "windows";
-	const channel = parsed.data.channel || "stable";
+	const target = datos.target || "windows";
+	const channel = datos.channel || "stable";
 
 	const db = getDb(c.env);
 
 	// Sin `arch` se desactiva la versión en TODOS los arch, que es lo que quiere un rollback: si
 	// una versión está mal, lo está en todas partes. Indicándolo se acota a uno.
-	const arch = parsed.data.arch;
+	const arch = datos.arch;
 	await db.execute({
 		sql: `
 			UPDATE app_releases SET is_active = 0
 			WHERE version = ? AND target = ? AND channel = ? AND (?4 IS NULL OR arch = ?4)
 		`,
-		args: [parsed.data.version, target, channel, arch ?? null],
+		args: [datos.version, target, channel, arch ?? null],
 	});
 
-	return c.json({ ok: true, deactivated: parsed.data.version, target, arch: arch ?? "todos", channel });
+	return c.json({ ok: true, deactivated: datos.version, target, arch: arch ?? "todos", channel });
 });

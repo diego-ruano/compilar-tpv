@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
+import { HubError } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { soloLaMainCobra, tenantAuth, type TenantVars } from "../../middleware/tenant";
 
@@ -15,47 +15,14 @@ import * as q from "./venta_rapida.queries";
 import * as mesasQ from "../mesas/mesas.queries";
 import * as S from "./venta_rapida.schemas";
 import { badRequest } from "../../server/utils/response";
+import { consulta, cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const ventaRapidaRoutes = new Hono<Ctx>();
 
 ventaRapidaRoutes.use("*", tenantAuth);
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<S extends z.ZodTypeAny>(
-	c: any,
-	schema: S,
-): Promise<{ ok: true; data: z.infer<S> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
 
 function conflictStock(plan: any): never {
 	throw new HubError(
@@ -70,16 +37,10 @@ ventaRapidaRoutes.get("/categorias", async (c) =>
 	c.json(await tenantQuery(c, (db) => q.categorias(db))),
 );
 
-ventaRapidaRoutes.get("/productos/search", async (c) => {
-	const parsed = S.searchProductosSchema.safeParse({
-		query: c.req.query("query") ?? c.req.query("q") ?? "",
-		limit: c.req.query("limit"),
-	});
-	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
+ventaRapidaRoutes.get("/productos/search", consulta(S.searchProductosSchema), async (c) => {
+	const { query, limit } = c.req.valid("query");
 	return c.json(
-		await tenantQuery(c, (db) =>
-			q.searchProductos(db, parsed.data.query, parsed.data.limit),
-		),
+		await tenantQuery(c, (db) => q.searchProductos(db, query, limit)),
 	);
 });
 
@@ -93,20 +54,10 @@ ventaRapidaRoutes.get("/productos/:idCategoria", async (c) => {
 	);
 });
 
-ventaRapidaRoutes.get("/comandas", async (c) => {
-	const parsed = S.listComandasSchema.safeParse({
-		include_pagadas: c.req.query("include_pagadas") ?? false,
-		limit: c.req.query("limit"),
-	});
-	if (!parsed.success) return badRequest(c, "validation_error", parsed.error);
+ventaRapidaRoutes.get("/comandas", consulta(S.listComandasSchema), async (c) => {
+	const { include_pagadas, limit } = c.req.valid("query");
 	return c.json(
-		await tenantQuery(c, (db) =>
-			q.listComandas(
-				db,
-				parsed.data.include_pagadas,
-				parsed.data.limit,
-			),
-		),
+		await tenantQuery(c, (db) => q.listComandas(db, include_pagadas, limit)),
 	);
 });
 
@@ -126,21 +77,19 @@ ventaRapidaRoutes.get("/comandas/:id/ticket-detalles", async (c) => {
 	);
 });
 
-ventaRapidaRoutes.post("/index-rows", async (c) => {
-	const p = await parseBody(c, S.idsSchema);
-	if (!p.ok) return p.res;
+ventaRapidaRoutes.post("/index-rows", cuerpo(S.idsSchema), async (c) => {
+	const datos = c.req.valid("json");
 	return c.json(
 		await tenantQuery(c, (db) =>
-			q.indexRows(db, p.data.ids),
+			q.indexRows(db, datos.ids),
 		),
 	);
 });
 
-ventaRapidaRoutes.post("/comandas/barra", async (c) => {
-	const p = await parseBody(c, S.createComandaBarraSchema);
-	if (!p.ok) return p.res;
+ventaRapidaRoutes.post("/comandas/barra", cuerpo(S.createComandaBarraSchema), async (c) => {
+	const datos = c.req.valid("json");
 
-	if (p.data.get_or_create) {
+	if (datos.get_or_create) {
 		const existing = await tenantQuery(c, (db) =>
 			q.openBarraComanda(db),
 		);
@@ -148,77 +97,68 @@ ventaRapidaRoutes.post("/comandas/barra", async (c) => {
 	}
 
 	const idTrab = await tenantQuery(c, (db) =>
-		q.resolveTrabajadorId(db, p.data.id_trabajador),
+		q.resolveTrabajadorId(db, datos.id_trabajador),
 	);
-	const id = await apply(c, cmd.createComandaBarra(p.data, idTrab));
+	const id = await apply(c, cmd.createComandaBarra(datos, idTrab));
 	return c.json({ ok: true, id_comanda: id });
 });
 
-ventaRapidaRoutes.post("/lineas", async (c) => {
-	const p = await parseBody(c, S.addLineaSchema);
-	if (!p.ok) return p.res;
+ventaRapidaRoutes.post("/lineas", cuerpo(S.addLineaSchema), async (c) => {
+	const entrada = c.req.valid("json");
 	// El tipo de IVA se resuelve aquí y viaja como literal: dentro del INSERT sería una
 	// subconsulta que la Main reevaluaría en otro estado.
 	const datos = await tenantQuery(c, (db) =>
-		mesasQ.datosDeLinea(db, p.data.id_producto),
+		mesasQ.datosDeLinea(db, entrada.id_producto),
 	);
-	const id = await apply(c, cmd.addLinea(p.data, datos.ivaPercent, datos.nombre));
+	const id = await apply(c, cmd.addLinea(entrada, datos.ivaPercent, datos.nombre));
 	return c.json({ ok: true, id_detalle: id });
 });
 
-ventaRapidaRoutes.post("/lineas/remove-last-unpaid", async (c) => {
-	const p = await parseBody(c, S.removeLastLineaSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.removeLastUnpaidLinea(p.data));
+ventaRapidaRoutes.post("/lineas/remove-last-unpaid", cuerpo(S.removeLastLineaSchema), async (c) => {
+	const datos = c.req.valid("json");
+	await apply(c, cmd.removeLastUnpaidLinea(datos));
 	return c.json({ ok: true });
 });
 
-ventaRapidaRoutes.post("/lineas/delete-if-unpaid", async (c) => {
-	const p = await parseBody(c, S.deleteLineaSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.deleteLineaIfUnpaid(p.data));
+ventaRapidaRoutes.post("/lineas/delete-if-unpaid", cuerpo(S.deleteLineaSchema), async (c) => {
+	const datos = c.req.valid("json");
+	await apply(c, cmd.deleteLineaIfUnpaid(datos));
 	return c.json({ ok: true });
 });
 
-ventaRapidaRoutes.put("/lineas/nota", async (c) => {
-	const p = await parseBody(c, S.updateNotaSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.updateNotaDetalle(p.data));
+ventaRapidaRoutes.put("/lineas/nota", cuerpo(S.updateNotaSchema), async (c) => {
+	const datos = c.req.valid("json");
+	await apply(c, cmd.updateNotaDetalle(datos));
 	return c.json({ ok: true });
 });
 
-ventaRapidaRoutes.post("/cobrar-fraccionado", async (c) => {
-	const veto = await soloLaMainCobra(c);
-	if (veto) return veto;
-	const p = await parseBody(c, S.cobrarFraccionadoSchema);
-	if (!p.ok) return p.res;
+ventaRapidaRoutes.post("/cobrar-fraccionado", soloLaMainCobra, cuerpo(S.cobrarFraccionadoSchema), async (c) => {
+	const datos = c.req.valid("json");
 	const plan = await tenantQuery(c, (db) =>
-		q.cobrarPlan(db, p.data),
+		q.cobrarPlan(db, datos),
 	);
 	if (!plan.ok) conflictStock(plan);
-	await apply(c, cmd.cobrarFraccionado(p.data, plan));
+	await apply(c, cmd.cobrarFraccionado(datos, plan));
 	return c.json({ ok: true, id_pago: plan.id_pago });
 });
 
-ventaRapidaRoutes.post("/restar-stock", async (c) => {
-	const p = await parseBody(c, S.restarStockSchema);
-	if (!p.ok) return p.res;
-	if (!p.data.lineas.length) return c.json({ ok: true });
+ventaRapidaRoutes.post("/restar-stock", cuerpo(S.restarStockSchema), async (c) => {
+	const datos = c.req.valid("json");
+	if (!datos.lineas.length) return c.json({ ok: true });
 	const plan = await tenantQuery(c, (db) =>
-		q.restarStockPlan(db, p.data),
+		q.restarStockPlan(db, datos),
 	);
 	if (!plan.ok) conflictStock(plan);
-	await apply(c, cmd.restarStock(p.data, plan));
+	await apply(c, cmd.restarStock(datos, plan));
 	return c.json({ ok: true });
 });
 
-ventaRapidaRoutes.post("/comandas/delete-if-safe", async (c) => {
-	const p = await parseBody(c, z.object({ id_comanda: z.coerce.string().trim().min(1) }));
-	if (!p.ok) return p.res;
+ventaRapidaRoutes.post("/comandas/delete-if-safe", cuerpo(z.object({ id_comanda: z.coerce.string().trim().min(1) })), async (c) => {
+	const datos = c.req.valid("json");
 	const hasPaid = await tenantQuery(c, (db) =>
-		q.hasPaidLines(db, p.data.id_comanda),
+		q.hasPaidLines(db, datos.id_comanda),
 	);
 	if (hasPaid) throw new HubError("comanda_has_paid_lines", 409);
-	await apply(c, cmd.deleteComandaIfSafe(p.data.id_comanda));
+	await apply(c, cmd.deleteComandaIfSafe(datos.id_comanda));
 	return c.json({ ok: true });
 });

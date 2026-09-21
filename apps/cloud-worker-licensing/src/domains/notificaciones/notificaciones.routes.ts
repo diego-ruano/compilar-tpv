@@ -4,10 +4,8 @@
 // Lecturas directas a Turso; escrituras por TenantHub (idempotencia + broadcast por WebSocket).
 
 import { Hono } from "hono";
-import { z } from "zod";
 
 import type { Env } from "../../env";
-import { applyViaHub, HubError, type ApplyCommand } from "../../lib/hub";
 import { tenantQuery } from "../../lib/tenantClient";
 import { tenantAuth, type TenantVars } from "../../middleware/tenant";
 
@@ -15,47 +13,14 @@ import * as cmd from "./notificaciones.commands";
 import * as q from "./notificaciones.queries";
 import * as S from "./notificaciones.schemas";
 import { badRequest } from "../../server/utils/response";
+import { cuerpo } from "../../lib/validacion";
+import { apply, parseId } from "../../lib/rutas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const notificacionesRoutes = new Hono<Ctx>();
 
 notificacionesRoutes.use("*", tenantAuth);
-
-function parseId(raw: string | undefined): string | null {
-	const t = (raw ?? "").trim();
-	return t.length ? t : null;
-}
-
-async function parseBody<Sch extends z.ZodTypeAny>(
-	c: any,
-	schema: Sch,
-): Promise<{ ok: true; data: z.infer<Sch> } | { ok: false; res: Response }> {
-	const body = await c.req.json().catch(() => null);
-	const parsed = schema.safeParse(body);
-	if (!parsed.success) {
-		return { ok: false, res: badRequest(c, "validation_error", parsed.error) };
-	}
-	return { ok: true, data: parsed.data };
-}
-
-async function apply(
-	c: any,
-	built: { commandName: string; command: ApplyCommand; cloudPayload: any },
-): Promise<any> {
-	const opId = (c.req.header("X-Idempotency-Key") || "").trim();
-	if (!opId) throw new HubError("missing_op_id", 400);
-
-	return applyViaHub(c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		clientNow: c.req.header("X-Client-Now") || undefined,
-		opId,
-		commandName: built.commandName,
-		command: built.command,
-		cloudPayload: built.cloudPayload,
-	});
-}
 
 // Lecturas
 
@@ -87,40 +52,37 @@ notificacionesRoutes.get("/count", async (c) => {
 
 // Escrituras
 
-notificacionesRoutes.post("/", async (c) => {
-	const p = await parseBody(c, S.crearNotificacionSchema);
-	if (!p.ok) return p.res;
+notificacionesRoutes.post("/", cuerpo(S.crearNotificacionSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	// Idempotencia por clave de dedupe: si ya hay una activa con esa clave, devolvemos su id sin
 	// crear otra (espejo de la emisión Local-First del repo SQLite).
-	if (p.data.clave_dedupe) {
+	if (datos.clave_dedupe) {
 		const existing = await tenantQuery(c, (db) =>
-			q.idActivaPorClave(db, p.data.clave_dedupe as string),
+			q.idActivaPorClave(db, datos.clave_dedupe as string),
 		);
 		if (existing) return c.json({ ok: true, id_notificacion: existing });
 	}
 
-	const id = await apply(c, cmd.crear(p.data));
+	const id = await apply(c, cmd.crear(datos));
 	return c.json({ ok: true, id_notificacion: id });
 });
 
-notificacionesRoutes.post("/leer-todas", async (c) => {
-	const p = await parseBody(c, S.marcarTodasSchema);
-	if (!p.ok) return p.res;
+notificacionesRoutes.post("/leer-todas", cuerpo(S.marcarTodasSchema), async (c) => {
+	const datos = c.req.valid("json");
 
 	const ids = await tenantQuery(c, (db) =>
-		q.idsNoLeidas(db, p.data.id_usuario),
+		q.idsNoLeidas(db, datos.id_usuario),
 	);
 	if (ids.length === 0) return c.json({ ok: true, marcadas: 0 });
 
-	await apply(c, cmd.marcarLeidasBatch(ids, p.data.id_usuario));
+	await apply(c, cmd.marcarLeidasBatch(ids, datos.id_usuario));
 	return c.json({ ok: true, marcadas: ids.length });
 });
 
-notificacionesRoutes.post("/resolver", async (c) => {
-	const p = await parseBody(c, S.resolverSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.resolverPorClave(p.data.clave_dedupe));
+notificacionesRoutes.post("/resolver", cuerpo(S.resolverSchema), async (c) => {
+	const datos = c.req.valid("json");
+	await apply(c, cmd.resolverPorClave(datos.clave_dedupe));
 	return c.json({ ok: true });
 });
 
@@ -145,11 +107,10 @@ notificacionesRoutes.delete("/:id", async (c) => {
 	return c.json({ ok: true });
 });
 
-notificacionesRoutes.post("/:id/leer", async (c) => {
+notificacionesRoutes.post("/:id/leer", cuerpo(S.marcarLeidaSchema), async (c) => {
 	const id = parseId(c.req.param("id"));
 	if (id == null) return badRequest(c, "id_notificacion invalido");
-	const p = await parseBody(c, S.marcarLeidaSchema);
-	if (!p.ok) return p.res;
-	await apply(c, cmd.marcarLeida(id, p.data.id_usuario));
+	const datos = c.req.valid("json");
+	await apply(c, cmd.marcarLeida(id, datos.id_usuario));
 	return c.json({ ok: true });
 });

@@ -18,8 +18,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 
 import type { Env } from "../../env";
-import { cerrarSocketsDelDispositivo } from "../../lib/hub";
 import { requireAdmin } from "../../middleware/requireAdmin";
+import { cerrarSocketsDelDispositivo } from "../../lib/hub";
 import { getDb } from "../../server/db";
 import { aesGcmDecrypt } from "../../server/crypto";
 import {
@@ -35,6 +35,7 @@ import {
 } from "../../server/licenseStore";
 import { sendLicenseKeyEmail } from "../licensing/licenseEmails";
 import { assertEnv } from "../licensing/licensing.helpers";
+import { cuerpo } from "../../lib/validacion";
 
 export const adminRoutes = new Hono<{ Bindings: Env }>();
 
@@ -53,17 +54,12 @@ const issueSchema = z.object({
 	sendKey: z.boolean().optional(),
 });
 
-adminRoutes.post("/licenses", async (c) => {
+adminRoutes.post("/licenses", cuerpo(issueSchema), async (c) => {
 	const env = c.env;
 	const miss = assertEnv(env, ["LICENSE_STORE_KEY", "TURSO_DATABASE_URL", "TURSO_AUTH_TOKEN"]);
 	if (miss) return c.json({ ok: false, error: miss }, 500);
 
-	const parsed = issueSchema.safeParse(await c.req.json().catch(() => null));
-	if (!parsed.success) {
-		return c.json({ ok: false, error: "validation_error", issues: parsed.error.issues }, 400);
-	}
-
-	const { termMonths, email, name, sendKey } = parsed.data;
+	const { termMonths, email, name, sendKey } = c.req.valid("json");
 	const db = getDb(env);
 
 	const { license, keyPlain } = await issueLicense(db, {
@@ -233,26 +229,21 @@ adminRoutes.post("/licenses/:id/unrevoke", async (c) => {
 });
 
 const extendSchema = z.object({
-	months: z.union([z.literal(1), z.literal(3), z.literal(12)]),
+	months: z.union([z.literal(1), z.literal(3), z.literal(12)], {
+		message: `months debe ser ${TERMS.join(" | ")}`,
+	}),
 });
 
-adminRoutes.post("/licenses/:id/extend", async (c) => {
+adminRoutes.post("/licenses/:id/extend", cuerpo(extendSchema), async (c) => {
 	const db = getDb(c.env);
 	const licenseId = c.req.param("id");
-
-	const parsed = extendSchema.safeParse(await c.req.json().catch(() => null));
-	if (!parsed.success) {
-		return c.json(
-			{ ok: false, error: "validation_error", details: `months debe ser ${TERMS.join(" | ")}` },
-			400,
-		);
-	}
+	const { months } = c.req.valid("json");
 
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	const expiresAtMs = await extendLicense(db, licenseId, parsed.data.months);
-	await auditAdmin(db, "extend", licenseId, { months: parsed.data.months, expiresAtMs });
+	const expiresAtMs = await extendLicense(db, licenseId, months);
+	await auditAdmin(db, "extend", licenseId, { months, expiresAtMs });
 
 	return c.json({
 		ok: true,
@@ -277,29 +268,22 @@ const shortenSchema = z.object({
 	months: z.number().int().positive().max(120),
 });
 
-adminRoutes.post("/licenses/:id/shorten", async (c) => {
+adminRoutes.post("/licenses/:id/shorten", cuerpo(shortenSchema), async (c) => {
 	const db = getDb(c.env);
 	const licenseId = c.req.param("id");
-
-	const parsed = shortenSchema.safeParse(await c.req.json().catch(() => null));
-	if (!parsed.success) {
-		return c.json(
-			{ ok: false, error: "validation_error", details: "months debe ser un entero de 1 a 120" },
-			400,
-		);
-	}
+	const { months } = c.req.valid("json");
 
 	const lic = await getLicenseById(db, licenseId);
 	if (!lic) return c.json({ ok: false, error: "license_not_found" }, 404);
 
-	const expiresAtMs = await shortenLicense(db, licenseId, parsed.data.months);
+	const expiresAtMs = await shortenLicense(db, licenseId, months);
 	if (expiresAtMs === null) {
 		// Sin `expires_at_ms` no hay nada que acortar: la licencia no se ha activado todavía, así
 		// que su reloj ni siquiera ha arrancado.
 		return c.json({ ok: false, error: "license_not_activated" }, 409);
 	}
 
-	await auditAdmin(db, "shorten", licenseId, { months: parsed.data.months, expiresAtMs });
+	await auditAdmin(db, "shorten", licenseId, { months, expiresAtMs });
 
 	return c.json({
 		ok: true,

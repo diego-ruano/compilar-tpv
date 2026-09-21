@@ -30,13 +30,26 @@ function contexto() {
 	};
 }
 
+/**
+ * Ejecuta el veto —que es un middleware— y devuelve su respuesta de rechazo, o `null` si dejó
+ * pasar. Es middleware y no una función dentro del handler porque tiene que decidir antes de que
+ * se lea y valide el cuerpo (ver `middleware/tenant.ts`).
+ */
+async function ejecutarVeto(mw: any, ctx: any): Promise<any> {
+	let paso = false;
+	const r = await mw(ctx, async () => {
+		paso = true;
+	});
+	return paso ? null : r;
+}
+
 beforeEach(() => {
 	rolEnLaBd = "handy";
 });
 
 describe("anular un cobro desde una Handy", () => {
 	it("se rechaza con un código que la app sabe traducir", async () => {
-		const veto = (await soloLaMainEscribeCaja(contexto())) as any;
+		const veto = (await ejecutarVeto(soloLaMainEscribeCaja, contexto())) as any;
 
 		expect(veto).not.toBeNull();
 		expect(veto.status).toBe(403);
@@ -45,13 +58,13 @@ describe("anular un cobro desde una Handy", () => {
 
 	it("un dispositivo revocado o desconocido tampoco anula", async () => {
 		rolEnLaBd = null;
-		expect(await soloLaMainEscribeCaja(contexto())).not.toBeNull();
+		expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto())).not.toBeNull();
 	});
 
 	it("un rol inventado no cuela", async () => {
 		for (const rol of ["main", "TPV_MAIN", "admin", "", "tpv2"]) {
 			rolEnLaBd = rol;
-			expect(await soloLaMainEscribeCaja(contexto()), rol).not.toBeNull();
+			expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto()), rol).not.toBeNull();
 		}
 	});
 });
@@ -59,7 +72,7 @@ describe("anular un cobro desde una Handy", () => {
 describe("anular desde la Main", () => {
 	it("pasa", async () => {
 		rolEnLaBd = "tpv";
-		expect(await soloLaMainEscribeCaja(contexto())).toBeNull();
+		expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto())).toBeNull();
 	});
 });
 
@@ -75,7 +88,7 @@ describe("la ruta de anular", () => {
 		const inicio = fuente.indexOf('cuentasRoutes.post("/pagos/:id/anular"');
 		expect(inicio, "la ruta de anular no existe").toBeGreaterThan(-1);
 		const bloque = fuente.slice(inicio);
-		expect(bloque.indexOf("soloLaMainEscribeCaja")).toBeLessThan(bloque.indexOf("parseBody"));
+		expect(bloque.indexOf("soloLaMainEscribeCaja")).toBeLessThan(bloque.indexOf("cuerpo("));
 		expect(bloque.indexOf("soloLaMainEscribeCaja")).toBeLessThan(bloque.indexOf("cmd.anularPago"));
 	});
 });
