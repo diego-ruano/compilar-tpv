@@ -7,7 +7,9 @@
 > `crates/tpv-infra-sqlite/src/db.rs` (`WriteGuard`, `capture_write`, `write_op`,
 > `rewrite_now_literals`), `crates/tpv-infra-sqlite/src/sync.rs` (`SqliteSyncRepository`),
 > `apps/tpv-main/src/shared/lib/useMainSocket.ts`, `useHandySocket.ts`,
-> `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts`,
+> `apps/cloud-worker-licensing/src/durableObjects/tenantHub.ts` (y sus módulos de ARQ-04:
+> `.cola.ts` la cola de entrada, `.mensajes.ts` lo que llega por WS, `.rutas.ts` lo que llega por
+> HTTP, `.identidad.ts` el handshake, `.lote.ts` el aplanado a sentencias),
 > `apps/cloud-worker-licensing/src/lib/hub.ts`,
 > `apps/cloud-worker-licensing/src/domains/sync/sync.routes.ts`.
 

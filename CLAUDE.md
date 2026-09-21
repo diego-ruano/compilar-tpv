@@ -689,10 +689,10 @@ no sólo en dev.
 | Contraste con la nube | `sync.routes.ts::/verificar` + `sync.rs::contrastar_con_la_nube` + job `verificar_nube` | SYNC-24: comprueba a diario que las dos bases dicen lo mismo, repara e informa a Axiom |
 | Determinismo temporal | `db.rs::rewrite_now_literals` + `durableObjects/tenantHub.tiempo.ts` | CFG-04: toda forma de «ahora» se fija a literal antes de ejecutar (la Main ejecuta en local la misma sentencia que sube) o de aplicar (el DO, con la hora del emisor). Con tests (`test/tenantHubTiempo.test.ts`) |
 | WS Main | `shared/lib/socketMain.ts` (lo arranca el hook `useMainSocket.ts`) | Drena outbox (o lo **vuelca** si hay atraso, SYNC-18), aplica cambios remotos, hace catch-up al reconectar. **Única fuente del estado de conexión** (`useEstadoSync`). Vive fuera de React para probarlo con un socket y un reloj falsos (`test/socketMain.test.ts`); el hook sólo le avisa de que vuelve la red, del foco y del `pulso` |
-| Cola del DO | `durableObjects/tenantHub.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante |
+| Cola del DO | `durableObjects/tenantHub.cola.ts` (`_Cola_Entrada`) | SYNC-18: guarda el atraso volcado por la Main y lo aplica por `alarm`, en lotes, sin el cliente delante. Son **funciones libres** y no una clase: ver la regla de hibernación abajo |
 | WS Handy | `shared/lib/socketHandy.ts` (lo arranca el hook `useHandySocket.ts`) | Solo recibe `change` y dispara refetch (sin BD local), y vigila la presencia de la Main. Fuera de React como el de la Main (`test/socketHandy.test.ts`); lo que comparten —esperas, latido con vigía, firma del saludo— está en `socketComun.ts` |
 | Comandos Rust | `commands/sync.rs` + `use_cases/sync.rs` + `infra-sqlite/src/sync.rs` | Interfaz Tauri para marcar outbox y aplicar cambios remotos |
-| Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast. **Usa la WebSocket Hibernation API** (ver regla abajo) |
+| Motor DO | `durableObjects/tenantHub.ts` | Aplica escrituras idempotente, guarda `Sync_Changes`, hace broadcast. **Usa la WebSocket Hibernation API** (ver regla abajo). ARQ-04: la clase es la concha del DO; lo que llega por WS está en `tenantHub.mensajes.ts`, lo que llega por HTTP en `tenantHub.rutas.ts`, el handshake en `tenantHub.identidad.ts` y la cola en `tenantHub.cola.ts` |
 | Escrituras Handy | `lib/hub.ts` → `/internal/apply` | Cada dominio construye un comando y lo aplica vía DO |
 | Constructores de comandos | `domains/*/*.commands.ts` | Construyen la transacción SQL replicable con UUIDs deterministas |
 | Catch-up | `domains/sync/sync.routes.ts` | La Main pide lo perdido desde su `Last_Seq` al autenticarse |
@@ -1050,12 +1050,24 @@ no sólo en dev.
 - **Hibernación del DO (SYNC-16):** `TenantHub` usa la **WebSocket Hibernation API**: el DO se evacúa
   de memoria (deja de facturar duración) mientras las conexiones están ociosas —sin cerrarlas— y
   despierta al llegar un mensaje. El latido `{"type":"ping"}` lo contesta el **auto-response** en el
-  edge sin despertarlo. **Consecuencia al tocar `tenantHub.ts`: prohibido guardar estado de sesión en
-  campos de la instancia** (al despertar está vacía): va en el *attachment* de cada socket
-  (`ws.serializeAttachment`, re-serializar tras cada cambio) y el censo se saca de
+  edge sin despertarlo. **Consecuencia al tocar CUALQUIER `tenantHub*.ts`: prohibido guardar estado
+  de sesión en campos de la instancia** (al despertar está vacía): va en el *attachment* de cada
+  socket (`ws.serializeAttachment`, re-serializar tras cada cambio) y el censo se saca de
   `state.getWebSockets()`. Tampoco puede haber `setInterval`/`alarm` periódicos: mantendrían el DO
   despierto. Detalle completo y reglas en
   [docs/analisis/transversal/sync-tenanthub.md](docs/analisis/transversal/sync-tenanthub.md) §SYNC-16.
+  - ⚠️ **En los módulos de ARQ-04 el error cambia de forma, y la forma nueva es PEOR.** Son
+    funciones libres, así que ahí no hay campos de instancia donde equivocarse; lo que hay es la
+    tentación de una variable de módulo, y una variable de módulo en Workers no es por DO: es por
+    **isolate**, que es compartido entre instancias de la misma clase — o sea, **entre tenants
+    distintos**. Un campo de instancia pierde el dato al hibernar; una variable de módulo le sirve
+    a un negocio lo que guardó otro. Lo que haya que recordar entre invocaciones va al SQL del DO
+    (así vive `_Cola_Estado`, y por eso el módulo de la cola lo dice en su cabecera).
+  - **Los cachés que sí existen se quedan donde están, por lo mismo.** `tenantDb`, su `tenantId` y
+    `lastSeenPushedAtMs` son campos de instancia a propósito: pierden el dato al hibernar y eso no
+    cuesta nada (una resolución o un UPDATE de más), mientras que subirlos a módulo repartiría la
+    conexión de un tenant entre otros. No es un candidato a «sacar a un módulo» pendiente: es una
+    decisión.
 
 ### Perder la BD local: aprovisionamiento y bootstrap
 
