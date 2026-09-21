@@ -133,8 +133,10 @@ Durante la auditoría se confirmó explícitamente que **no** existen estos prob
   `crates/tpv-infra-sqlite/*`); los valores de usuario van siempre parametrizados.
 - **Sin XSS.** El frontend no usa `dangerouslySetInnerHTML`, `innerHTML`, `eval` ni `new Function`. El
   HTML de los correos escapa el contenido (`esc()`).
-- **JWT sin confusión de algoritmo.** `jose` verifica con `algorithms: ["HS256"]`; el verificador
-  propio (`jwtHs256.ts`) usa HMAC siempre → no hay `alg:none` ni confusión HS/RS.
+- **JWT sin confusión de algoritmo.** Se verifica con `jose` y `algorithms: ["HS256"]` → no hay
+  `alg:none` ni confusión HS/RS. (En el momento de la auditoría había además un verificador propio,
+  `jwtHs256.ts`, que ignoraba la cabecera y calculaba HMAC siempre, así que tampoco la tenía; ARQ-02
+  lo retiró y hoy firmar y verificar son la misma pieza, `lib/sesion.ts`.)
 - **Criptografía correcta.** Firma ed25519 del estado de licencia con **clave pública pineada** en el
   binario (resistente a MITM/DNS/CA falsa). Comparaciones **timing-safe** en tokens admin, OTP y firmas.
   PBKDF2-SHA256 para PINs (tope 100k del runtime de CF). CSPRNG (`crypto.getRandomValues`) para códigos,
