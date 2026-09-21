@@ -164,9 +164,12 @@ export async function handlePairFetchToken(
 			return serverError(req, "no_active_license_for_tenant");
 		}
 
+		// El mismo identificador que produce `assertEnv` y que lanza `lib/sesion.ts`: una
+		// condición, un nombre. El guard se queda porque llega antes que el de `firmarSesion`, y
+		// sin él esto saldría como `internal_error` con la causa enterrada en `details`.
 		const jwtSecret = String(env.LICENSE_JWT_SECRET || "");
 		if (!jwtSecret) {
-			return serverError(req, "missing_LICENSE_JWT_SECRET");
+			return serverError(req, "missing_env_LICENSE_JWT_SECRET");
 		}
 
 		const ttlSeconds = handyTokenTtlSeconds(env);

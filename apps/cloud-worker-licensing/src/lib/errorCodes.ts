@@ -286,7 +286,6 @@ export const SIN_MENSAJE_PROPIO: ReadonlySet<string> = new Set([
 	"invalid_transaction_step",
 	"jwt_not_active",
 	"malformed_signature",
-	"missing_LICENSE_JWT_SECRET",
 	"missing_apply_fields",
 	"missing_challenge",
 	"missing_client_now",
