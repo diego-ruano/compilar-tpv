@@ -9,6 +9,8 @@ import {
 	isTursoAuthError,
 } from "./tenantHub.errores";
 import type { ContextoDeCola } from "./tenantHub.cola";
+import type { ContextoDeMensajes } from "./tenantHub.mensajes";
+import { despachar } from "./tenantHub.mensajes";
 import {
 	apartadasPendientes,
 	asegurarCola,
@@ -49,6 +51,7 @@ import {
 	readCloudPayloadJson,
 	readEnvelopeMetadata,
 	readRequestPayloadJson,
+	safeJsonParse,
 	sha256Hex,
 	stableStringify,
 	stringifyJsonValue,
@@ -83,14 +86,6 @@ const CHECKPOINT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // una Main cuenta para el
 const PURGE_SEQ_MARGIN = 1000; // holgura de Seq por debajo del suelo (cubre solape catch-up/live)
 const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de menos de 7 días
 const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintento nunca llega tan tarde
-
-function safeJsonParse(s: string): any | null {
-	try {
-		return JSON.parse(s);
-	} catch {
-		return null;
-	}
-}
 
 function isWebSocketUpgrade(req: Request): boolean {
 	const h = req.headers.get("Upgrade") || "";
@@ -1222,414 +1217,44 @@ export class TenantHub {
 	// instancia es NUEVA (campos vacíos, sin closures), así que el runtime invoca estos métodos y
 	// todo el contexto de la sesión se recupera del attachment del socket.
 
+	/**
+	 * ARQ-04: las ramas viven en `tenantHub.mensajes.ts`. Aquí sólo se ata el contexto; el ORDEN
+	 * --y con él el gate de autenticación-- lo guarda `despachar`.
+	 */
 	async webSocketMessage(ws: WebSocket, message: ArrayBuffer | string): Promise<void> {
-		const a = this.att(ws);
-		if (!a) {
-			// Socket sin attachment: no sabemos ni quién es. No debería ocurrir.
-			this.send(ws, { type: "error", error: "no_session" });
-			return;
-		}
-		const { tenantId, deviceId } = a;
-
-		const data = typeof message === "string" ? message : "";
-		const msg = safeJsonParse(data) as AnyMsg | null;
-
-		if (!msg || typeof msg.type !== "string") {
-			this.send(ws, { type: "error", error: "bad_json" });
-			return;
-		}
-
-		// El latido normal lo contesta el auto-response SIN despertar al DO (constructor), así que
-		// aquí sólo caen pings con otra serialización. Se responde igual por compatibilidad.
-		if (msg.type === "ping") {
-			this.send(ws, { type: "pong", ts: nowMs() });
-			return;
-		}
-
-		if (msg.type === "helloSigned") {
-			// SYNC-07: challenge de un SOLO uso. Se consume AQUÍ, de forma síncrona y antes de
-			// cualquier `await`, para que dos helloSigned seguidos no puedan reutilizar el nonce.
-			const challenge = a.challenge;
-			this.setAtt(ws, { ...a, challenge: null });
-
-			this.state.waitUntil(
-				(async () => {
-					try {
-						const { roleFinal, pubkeyB64 } = await this.verifyHelloSigned({
-							tenantId,
-							deviceId,
-							msg,
-							challenge,
-							pubkeyB64Hint: a.pubkeyB64,
-						});
-
-						// Persistimos el resultado de la autenticación en el attachment: es lo que
-						// leerán los futuros mensajes, broadcasts y el cierre (incluso tras hibernar).
-						this.setAtt(ws, {
-							...a,
-							role: roleFinal,
-							authed: true,
-							pubkeyB64,
-							challenge: null,
-							recovering: roleFinal === "tpv" && Boolean(msg.recovering),
-						});
-
-						this.send(ws, {
-							type: "hello_ok",
-							role: roleFinal,
-							authed: true,
-						});
-
-						this.broadcast(
-							{
-								type: "presence",
-								action: "auth",
-								deviceId,
-								role: roleFinal,
-								authed: true,
-							},
-							deviceId,
-						);
-
-						// Freeze por presencia de Main: informamos a este
-						// dispositivo de si hay Main conectada (una Handy recién
-						// autenticada necesita saberlo para bloquear/desbloquear su
-						// UI). Y si quien se autentica ES la Main, avisamos a las
-						// Handy de que ya pueden operar.
-						this.send(ws, {
-							type: "main_status",
-							online: this.isMainConnected(),
-							// SYNC-18: una Handy que entra a mitad de un volcado tiene que bloquear
-							// igual que si no hubiera Main; con `online` a secas no se enteraría.
-							volcando: this.cuantasEnCola() > 0 || this.isMainRecovering(),
-						});
-
-						if (roleFinal === "tpv") {
-							// REV-04: lo que la nube apartó mientras esta Main no estaba (o estaba y no
-							// escuchaba: esto es también el reintento del aviso que no se acusó). Va
-							// antes del catch-up a propósito —la Main pone su copia en cuarentena y
-							// encola la reparación por estado— y se repite en cada conexión hasta que
-							// alguien lo acuse.
-							const apartadas = this.apartadasPendientes();
-							if (apartadas.length) {
-								this.send(ws, { type: "cola_apartada", ops: apartadas });
-							}
-
-							this.broadcast({ type: "main_online", deviceId }, deviceId);
-							if (msg.recovering) {
-								this.broadcastAuthed(
-									{ type: "main_volcando", volcando: true },
-									deviceId,
-								);
-							}
-							this.emitSyncEvent("main_online", { device_id: deviceId });
-						}
-					} catch (e: any) {
-						const err = String(e?.message || e);
-						this.send(ws, {
-							type: "error",
-							error: "hello_failed",
-							details: err,
-						});
-						try {
-							ws.close(4003, "auth_failed");
-						} catch { }
-					}
-				})(),
-			);
-			return;
-		}
-
-		if (!a.authed) {
-			this.send(ws, { type: "error", error: "not_authenticated" });
-			return;
-		}
-
-		// Actividad real del dispositivo (ya no hay pings que la reflejen): refrescamos `last_seen`
-		// de forma throttleada y fire-and-forget.
-		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId));
-
-		if (msg.type === "recovery_ready") {
-			if (a.role !== "tpv") {
-				this.send(ws, { type: "error", error: "forbidden_not_tpv" });
-				return;
-			}
-			this.setAtt(ws, { ...a, recovering: false });
-			this.broadcastAuthed({
-				type: "main_volcando",
-				volcando: this.cuantasEnCola() > 0 || this.isMainRecovering(),
-			});
-			this.send(ws, { type: "recovery_ready_ack" });
-			return;
-		}
-
-		// REV-04: la Main confirma que ya ha anotado las apartadas. Es lo que convierte `_Cola_Muerta`
-		// en una bandeja de salida en vez de un archivo que no lee nadie: entregada la carta, se tira.
-		// Sólo la Main puede acusar, porque sólo ella puede reparar (tiene la fila; la Handy no).
-		if (msg.type === "cola_apartada_ack") {
-			if (a.role !== "tpv") {
-				this.send(ws, { type: "error", error: "forbidden_not_tpv" });
-				return;
-			}
-			const opIds = Array.isArray(msg.opIds)
-				? (msg.opIds as unknown[]).map((v) => String(v)).filter(Boolean)
-				: [];
-			const olvidadas = this.olvidarApartadas(opIds);
-			if (olvidadas) {
-				this.emitSyncEvent("cola_apartada_acusada", {
-					device_id: a.deviceId,
-					n: olvidadas,
-				});
-			}
-			this.send(ws, { type: "cola_apartada_ack_ok", n: olvidadas });
-			return;
-		}
-
-		// Escritura de la Main por WS: se aplica al MISMO motor idempotente que
-		// las escrituras REST de la Handy (commit en Turso + broadcast del cambio
-		// al resto). La Main no se bloquea esperando; recibe un `apply_ack`
-		// asíncrono solo para reconciliar/revertir si algo falla.
-		// SYNC-18: volcado del atraso. La Main manda por trozos lo que lleva acumulado, el DO lo
-		// guarda en su cola y confirma sin tocar Turso — de ahí que sea inmediato y que la Main
-		// pueda desconectarse justo después. El trabajo lo hace luego el `alarm`.
-		if (msg.type === "bulk_apply") {
-			const m = msg as BulkApplyMsg;
-
-			if (a.role !== "tpv") {
-				this.send(ws, { type: "bulk_ack", ok: false, error: "forbidden_not_tpv" });
-				return;
-			}
-
-			const entrada = Array.isArray(m.ops) ? m.ops : [];
-			const clientNowLote = String(getFirstOwnValue(m, ["client_now", "clientNow"]) || "");
-			const ops: OpParaAplicar[] = [];
-
-			for (const item of entrada) {
-				const inner = item?.command;
-				const cmdType = String(inner?.type || "").trim();
-				const opId = String(item?.opId ?? item?.op_id ?? "").trim();
-				const commandName = String(
-					item?.commandName ?? item?.command_name ?? "",
-				).trim();
-				if (!cmdType || !opId || !commandName) {
-					this.send(ws, { type: "bulk_ack", ok: false, error: "missing_apply_fields" });
-					return;
-				}
-
-				const cmd = { type: inner!.type, payload: inner!.payload } as InternalApplyCommand;
-				const fallback = buildInternalPayloadForHash(cmd);
-				ops.push({
-					opId,
-					commandName,
-					cmd,
-					deviceId,
-					requestPayloadJson: readRequestPayloadJson(item, fallback),
-					cloudPayloadJson: readCloudPayloadJson({
-						body: item,
-						opId,
-						commandName,
-						fallbackPayloadForHash: fallback,
-					}),
-					// El reloj puede venir por operación o una vez para todo el trozo.
-					clientNow:
-						String(getFirstOwnValue(item, ["client_now", "clientNow"]) || "") ||
-						clientNowLote,
-				});
-			}
-
-			try {
-				const aceptadas = this.encolar(tenantId, ops);
-				this.send(ws, { type: "bulk_ack", ok: true, opIds: aceptadas });
-			} catch (e: any) {
-				this.send(ws, {
-					type: "bulk_ack",
-					ok: false,
-					error: String(e?.message || e).slice(0, 300),
-				});
-			}
-			return;
-		}
-
-		if (msg.type === "apply") {
-			const m = msg as ApplyMsg;
-
-			// Autorización por rol: solo la Main (`tpv`) puede ejecutar SQL crudo
-			// por WS. El rol viene del helloSigned (BD central), nunca de la
-			// cabecera x-role del cliente. Las escrituras de la Handy van por
-			// REST → comandos de dominio acotados (hub.ts → /internal/apply).
-			if (a.role !== "tpv") {
-				this.send(ws, {
-					type: "apply_ack",
-					opId: String(m.opId ?? m.op_id ?? "").trim(),
-					ok: false,
-					error: "forbidden_not_tpv",
-				});
-				return;
-			}
-
-			const inner = m.command;
-			const cmdType = String(inner?.type || "").trim();
-			const opId = String(m.opId ?? m.op_id ?? "").trim();
-			const commandName = String(m.commandName ?? m.command_name ?? "").trim();
-
-			if (!cmdType || !opId || !commandName) {
-				this.send(ws, {
-					type: "apply_ack",
-					opId,
-					ok: false,
-					error: "missing_apply_fields",
-				});
-				return;
-			}
-
-			const cmd = {
-				type: inner!.type,
-				payload: inner!.payload,
-			} as InternalApplyCommand;
-
-			const fallback = buildInternalPayloadForHash(cmd);
-			const requestPayloadJson = readRequestPayloadJson(m, fallback);
-			const cloudPayloadJson = readCloudPayloadJson({
-				body: m,
-				opId,
-				commandName,
-				fallbackPayloadForHash: fallback,
-			});
-			// La Main ya manda sus sentencias con el tiempo resuelto a literal; aun así
-			// honramos un X-Client-Now si viniera (no hace daño: el rewrite es no-op).
-			const clientNow = String(
-				getFirstOwnValue(m, ["client_now", "clientNow"]) || "",
-			);
-
-			// SYNC-18: si hay cola, esta operación va DETRÁS de ella. El outbox de la Main está
-			// ordenado y sus operaciones se apoyan unas en otras (una línea necesita su comanda),
-			// así que colarse por delante del atraso sería aplicar el futuro antes que el pasado.
-			// Se responde igual de rápido, pero diciendo que quedó encolada.
-			if (this.cuantasEnCola() > 0) {
-				try {
-					this.encolar(tenantId, [
-						{
-							opId,
-							commandName,
-							cmd,
-							deviceId,
-							requestPayloadJson,
-							cloudPayloadJson,
-							clientNow,
-						},
-					]);
-					this.send(ws, { type: "apply_ack", opId, ok: true, encolada: true });
-				} catch (e: any) {
-					this.send(ws, {
-						type: "apply_ack",
-						opId,
-						ok: false,
-						error: String(e?.message || e).slice(0, 300),
-					});
-				}
-				return;
-			}
-
-			this.state.waitUntil(
-				(async () => {
-					try {
-						const { result, seq } = await this.applyInternalCommandIdempotent({
-							tenantId,
-							cmd,
-							opId,
-							commandName,
-							deviceId,
-							requestPayloadJson,
-							cloudPayloadJson,
-							clientNow,
-							allowWhileRecovering: true,
-						});
-						this.send(ws, {
-							type: "apply_ack",
-							opId,
-							ok: true,
-							result,
-							// `seq` que la nube asignó a la op: la Main asciende su anti-eco con él.
-							seq,
-						});
-					} catch (e: any) {
-						// SYNC-20: el ack dice de qué clase es el fallo. Quien tiene la excepción
-						// delante es este DO; el cliente no puede deducirlo del texto sin acabar
-						// comparando mensajes de libsql, que cambian de redacción entre versiones.
-						// Sin esto, el drenado trataba todo como transitorio y una sentencia que el
-						// esquema del tenant no admite paraba la cola entera para siempre.
-						//
-						// REV-11: y `transitorio` es la otra mitad. Sin él, una caída de Turso —que
-						// no dice nada de la operación— le gastaba uno de sus veinte intentos, y
-						// cuatro baches bastaban para apartar una venta perfectamente buena. Son
-						// tres estados y no dos: definitivo (apartar ya), pasajero (no cuenta) y
-						// desconocido (cuenta, y acabará apartándose si no deja de fallar).
-						this.send(ws, {
-							type: "apply_ack",
-							opId,
-							ok: false,
-							error: String(e?.message || e),
-							permanente: esRechazoPermanente(e),
-							transitorio: esFalloPasajero(e),
-						});
-					}
-				})(),
-			);
-			return;
-		}
-
-		if (msg.type === "event") {
-			// El rol para autorizar viene del helloSigned (BD central); la
-			// cabecera x-role del cliente jamás decide permisos.
-			const role = a.role ?? "unknown";
-			const name = String(msg.name || "");
-
-			if (!isEventAllowed(role, name)) {
-				this.send(ws, {
-					type: "error",
-					error: "forbidden_event",
-					name,
-				});
-				return;
-			}
-
-			if (name === "tenantDb.ping") {
-				this.state.waitUntil(
-					(async () => {
-						try {
-							await this.withTenantDbRetry(tenantId, async (db) => {
-								await db.execute({ sql: "SELECT 1", args: [] });
-							});
-							this.send(ws, { type: "event_ack", name, ok: true });
-						} catch (e: any) {
-							this.send(ws, {
-								type: "event_ack",
-								name,
-								ok: false,
-								error: String(e?.message || e),
-							});
-						}
-					})(),
-				);
-				return;
-			}
-
-			this.broadcast(
-				{
-					type: "event",
-					from: deviceId,
-					role,
-					name,
-					payload: msg.payload ?? null,
-					ts: nowMs(),
-				},
-				deviceId,
-			);
-			return;
-		}
-
-		this.send(ws, { type: "error", error: "unknown_type" });
+		return despachar(this.ctxMensajes(), ws, message);
 	}
+
+	/**
+	 * ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Es lo mismo que en
+	 * `ctxCola`, y por lo mismo: varios tests sustituyen un método de la instancia --la
+	 * verificación de la firma, si hay Main conectada-- y con la referencia atada aquí esa
+	 * sustitución dejaría de verse.
+	 */
+	private ctxMensajes(): ContextoDeMensajes {
+		return {
+			att: (ws) => this.att(ws),
+			setAtt: (ws, att) => this.setAtt(ws, att),
+			send: (ws, obj) => this.send(ws, obj),
+			broadcast: (obj, except) => this.broadcast(obj, except),
+			broadcastAuthed: (obj, except) => this.broadcastAuthed(obj, except),
+			emitSyncEvent: (name, fields) => this.emitSyncEvent(name, fields),
+			waitUntil: (p) => this.state.waitUntil(p),
+			touchLastSeen: (tenantId, deviceId, force) =>
+				this.touchLastSeen(tenantId, deviceId, force),
+			verifyHelloSigned: (params) => this.verifyHelloSigned(params),
+			isMainConnected: (except) => this.isMainConnected(except),
+			isMainRecovering: () => this.isMainRecovering(),
+			cuantasEnCola: () => this.cuantasEnCola(),
+			encolar: (tenantId, ops) => this.encolar(tenantId, ops),
+			apartadasPendientes: () => this.apartadasPendientes(),
+			olvidarApartadas: (opIds) => this.olvidarApartadas(opIds),
+			applyInternalCommandIdempotent: (params) =>
+				this.applyInternalCommandIdempotent(params),
+			withTenantDbRetry: (tenantId, run) => this.withTenantDbRetry(tenantId, run),
+		};
+	}
+
 
 	/**
 	 * Contabilidad de una sesión que se va: presencia + freeze. Se invoca desde `webSocketClose`

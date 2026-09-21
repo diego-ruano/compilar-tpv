@@ -17,6 +17,15 @@ import { bytesToB64 } from "../server/utils/base64";
 import { toPlainValue } from "./tenantHub.sentencias";
 import type { InternalApplyCommand } from "./tenantHub.types";
 
+/** Su pareja tolerante: para lo que llega de fuera y cuyo fallo NO es una excepción. */
+export function safeJsonParse(s: string): any | null {
+	try {
+		return JSON.parse(s);
+	} catch {
+		return null;
+	}
+}
+
 export function parseJsonStrict(s: string, fieldName: string): any {
 	try {
 		return JSON.parse(s);
