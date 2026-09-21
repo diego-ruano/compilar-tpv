@@ -16,6 +16,8 @@ import { clienteSobre } from "./helpers/clienteSql";
 import { crearEsquemaTenant } from "./helpers/esquemaTenant";
 import { enElHub } from "./helpers/hub";
 
+import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
+
 import { createCliente, updateCliente } from "../src/domains/clientes/clientes.commands";
 import { punchEntrada, punchSalida, setTurnoPartido } from "../src/domains/login/login.commands";
 import {
@@ -361,7 +363,7 @@ function multiconjuntoIgual(got: any[], want: any[]): string | null {
 export const SQL_NO_DETERMINISTA = /\brandomblob\s*\(|\brandom\s*\(/i;
 
 function aplicar(hub: any, sql: any, built: any): void {
-	const batch = hub.buildApplyBatch(built.command);
+	const batch = buildApplyBatch(built.command);
 	for (const st of batch.replicated) {
 		expect(
 			SQL_NO_DETERMINISTA.test(st.sql),

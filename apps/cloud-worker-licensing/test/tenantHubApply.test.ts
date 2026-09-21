@@ -10,12 +10,12 @@
 //                   Main las aplique contra su SQLite local
 //   · los pasos `value` se evalúan en JS, sin ir a la base de datos
 //
-// Es `private`, así que se llama a través de la instancia real del DO. Eso obliga a levantar
-// el Durable Object, pero prueba exactamente el código que corre en producción.
+// ARQ-04: vive fuera de la clase (`tenantHub.lote.ts`) porque no toca nada del Durable Object,
+// así que se llama directamente. Antes era `private` y había que levantar un DO para probarlo.
 
 import { describe, it, expect } from "vitest";
 
-import { enElHub } from "./helpers/hub";
+import { buildApplyBatch } from "../src/durableObjects/tenantHub.lote";
 
 import type { InternalApplyCommand } from "../src/durableObjects/tenantHub.types";
 
@@ -27,18 +27,7 @@ type Batch = {
 };
 
 async function build(cmd: InternalApplyCommand): Promise<Batch> {
-	// El error se captura DENTRO del DO: dejarlo escapar lo contabiliza como fallo no
-	// gestionado aunque el test lo espere.
-	const res: any = await enElHub("tenant-apply-test", (hub) => {
-		try {
-			return { ok: true, out: hub.buildApplyBatch(cmd) };
-		} catch (e: any) {
-			return { ok: false, error: String(e?.message ?? e) };
-		}
-	});
-
-	if (!res.ok) throw new Error(res.error);
-	return res.out;
+	return buildApplyBatch(cmd) as Batch;
 }
 
 async function buildFalla(cmd: InternalApplyCommand): Promise<string> {
