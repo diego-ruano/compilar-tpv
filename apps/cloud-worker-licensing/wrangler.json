@@ -27,6 +27,16 @@
 			]
 		}
 	],
+	"ratelimits": [
+		{
+			"name": "LIMITADOR_CLAIM",
+			"namespace_id": "1",
+			"simple": {
+				"limit": 20,
+				"period": 60
+			}
+		}
+	],
 	"durable_objects": {
 		"bindings": [
 			{

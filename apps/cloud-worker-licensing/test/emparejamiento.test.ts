@@ -11,6 +11,7 @@
 //   · Un dispositivo aprobado puede volver a reclamar su código y recoger el token.
 //   · La Main puede rechazar, y la Handy se entera en la siguiente consulta.
 //   · La Handy puede cancelar, y la solicitud deja de estar en la lista de la Main.
+//   · El filtro exterior (Cloudflare) sigue declarado, deja pasar lo normal y no sustituye a nada.
 
 import { describe, expect, it } from "vitest";
 import * as ed from "@noble/ed25519";
@@ -24,9 +25,12 @@ import { handlePairCancel } from "../src/server/endpoints/rest/pairing/pairCance
 import { rechazarSolicitud } from "../src/server/endpoints/rest/pairing/pairReject";
 import {
 	OLVIDO_MS,
+	PETICIONES_POR_MINUTO,
 	esperaTrasFallos,
+	pasaElFiltroExterior,
 	textoDeEspera,
 } from "../src/server/endpoints/rest/pairing/pairing.intentos";
+import configuracionDelWorker from "../wrangler.json";
 import { mensajeFirmado, type AccionFirmada } from "../src/server/endpoints/rest/pairing/pairing.firma";
 import { ensureEd25519Sha512 } from "../src/server/utils/nobleEd25519";
 import { bytesToB64 } from "../src/server/utils/base64";
@@ -534,5 +538,72 @@ describe("cancelar en la Handy", () => {
 			const otraVez = await m.reclamar(a, CODIGO, T0 + 2 * MIN);
 			expect((await m.recoger(a, CODIGO, otraVez.body.nonceB64, T0 + 2 * MIN)).status).toBe(200);
 		});
+	});
+});
+
+describe("el filtro exterior del claim", () => {
+	// No es un control de seguridad (cuenta por centro de datos): es lo que evita que un barrido
+	// pague una lectura de Turso por intento. Su valor vive en `wrangler.json`, así que lo único
+	// que se puede comprobar aquí es que sigue ahí y que dice lo mismo que el código.
+	it("sigue declarado en wrangler.json, con el número que dice el código", () => {
+		const limitadores = (configuracionDelWorker as any).ratelimits ?? [];
+		const claim = limitadores.find((l: any) => l.name === "LIMITADOR_CLAIM");
+
+		expect(claim, "sin este binding el filtro se abre y nada lo dice").toBeTruthy();
+		expect(claim.simple.limit).toBe(PETICIONES_POR_MINUTO);
+		// El binding sólo admite 10 o 60. Si alguien pone otra cosa, el despliegue falla.
+		expect(claim.simple.period).toBe(60);
+	});
+
+	it("sin binding se deja pasar, porque detrás hay un control exacto", async () => {
+		expect(await pasaElFiltroExterior({}, "10.0.0.1")).toBe(true);
+	});
+
+	it("un binding que revienta tampoco cierra la puerta", async () => {
+		const roto = {
+			LIMITADOR_CLAIM: {
+				limit: () => Promise.reject(new Error("edge caído")),
+			} as any,
+		};
+		expect(await pasaElFiltroExterior(roto, "10.0.0.1")).toBe(true);
+	});
+
+	it("corta cuando el limitador lo dice, y con la IP como clave", async () => {
+		const vistas: string[] = [];
+		const lleno = {
+			LIMITADOR_CLAIM: {
+				limit: ({ key }: { key: string }) => {
+					vistas.push(key);
+					return Promise.resolve({ success: false });
+				},
+			} as any,
+		};
+		expect(await pasaElFiltroExterior(lleno, "9.9.9.9")).toBe(false);
+		expect(vistas).toEqual(["9.9.9.9"]);
+	});
+
+	it("un claim normal no lo nota: el freno exacto sigue siendo el que contesta", async () => {
+		// Con el limitador lleno la respuesta es 429 SIN mirar la tabla; con él abierto, el 404 de
+		// siempre. Es la prueba de que es una capa delante y no un reemplazo.
+		const a = await dispositivo("handy-a", 1);
+		const { cortado, pasado } = await conPlanoDeControl("filtro", async (m) => {
+			const peticionDe = (env: any) =>
+				handlePairClaim(
+					peticion("claim", { pairCode: "000001", pairSecret: "", deviceId: a.id, devicePubKey: a.pub, deviceName: "" }, "7.7.7.7"),
+					env,
+					m.db,
+					T0,
+				);
+
+			const lleno = { ...ENV, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: false }) } };
+			const abierto = { ...ENV, LIMITADOR_CLAIM: { limit: () => Promise.resolve({ success: true }) } };
+
+			const r1 = await peticionDe(lleno);
+			const r2 = await peticionDe(abierto);
+			return { cortado: r1.status, pasado: r2.status };
+		});
+
+		expect(cortado).toBe(429);
+		expect(pasado).toBe(404);
 	});
 });

@@ -5,7 +5,13 @@ import { json, serverError } from "../../../utils/response";
 import { sha256HexStr } from "../../../utils/crypto";
 import { b64ToBytes, bytesToB64 } from "../../../utils/base64";
 import { sanitizeB64 } from "./pairing.firma";
-import { anotarFallo, olvidarFallos, segundosDeEspera, textoDeEspera } from "./pairing.intentos";
+import {
+	anotarFallo,
+	olvidarFallos,
+	pasaElFiltroExterior,
+	segundosDeEspera,
+	textoDeEspera,
+} from "./pairing.intentos";
 
 async function readJsonSafe<T>(req: Request, fallback: T): Promise<T> {
 	try {
@@ -35,6 +41,24 @@ export function ipDeLaPeticion(req: Request): string {
 	return String(req.headers.get("CF-Connecting-IP") || req.headers.get("x-forwarded-for") || "unknown")
 		.split(",")[0]
 		.trim();
+}
+
+/**
+ * La puerta del filtro exterior (`pairing.intentos.ts::pasaElFiltroExterior`).
+ *
+ * Tiene su propio texto porque aquí no ha fallado nadie: sobran peticiones. Y da un plazo fijo
+ * porque el binding de Cloudflare no sabe decir cuánto queda — sólo sí o no.
+ */
+function demasiadasPeticiones(req: Request): Response {
+	return json(
+		{
+			ok: false,
+			error: "too_many_attempts",
+			message: "Demasiadas peticiones desde esta red. Vuelve a intentarlo dentro de 1 minuto.",
+		},
+		429,
+		req,
+	);
 }
 
 function demasiadosIntentos(req: Request, segundos: number): Response {
@@ -139,6 +163,13 @@ export async function handlePairClaim(
 	ahoraMs: number = Date.now(),
 ): Promise<Response> {
 	try {
+		// El filtro exterior va ANTES de todo, incluido leer el cuerpo: lo que se quiere es soltar
+		// el lastre cuanto antes, y para esto sólo hace falta la IP. Un cliente roto que mande
+		// basura a 20 por minuto también sobra, aunque hoy sus 400 no cuenten como intento.
+		if (!(await pasaElFiltroExterior(env, ipDeLaPeticion(req)))) {
+			return demasiadasPeticiones(req);
+		}
+
 		const body = await readJsonSafe(req, {
 			pairCode: "",
 			pairSecret: "",

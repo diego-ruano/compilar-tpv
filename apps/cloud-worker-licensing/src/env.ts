@@ -58,6 +58,12 @@ export interface Env {
 	PAIR_PEPPER?: string;
 	HANDY_TOKEN_TTL_SECONDS?: string | number;
 
+	// Filtro exterior del claim de emparejamiento (`pairing.intentos.ts`). Declarado en
+	// `wrangler.json` (`ratelimits`), no es un recurso que haya que crear en Cloudflare.
+	// OPCIONAL a propósito: sin él la espera escalonada sigue funcionando igual, sólo se pagan
+	// las lecturas de Turso que este filtro ahorra.
+	LIMITADOR_CLAIM?: RateLimit;
+
 	// Durable Object (WebSocket hub por tenant)
 	TenantHub: DurableObjectNamespace;
 

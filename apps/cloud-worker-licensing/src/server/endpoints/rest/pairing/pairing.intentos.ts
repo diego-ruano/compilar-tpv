@@ -17,6 +17,9 @@
 //
 // Es aparte del tope por código (8 intentos sobre el mismo código, `pairClaim.ts`), que protege un
 // código concreto contra muchas IPs a la vez.
+//
+// Y delante de todo eso va el FILTRO EXTERIOR de abajo, que es otra cosa: no es un control de
+// seguridad, es un cortafuegos de coste.
 
 import type { Client } from "@libsql/client/web";
 
@@ -75,4 +78,53 @@ export async function anotarFallo(db: Client, ip: string, ahoraMs: number): Prom
 
 export async function olvidarFallos(db: Client, ip: string): Promise<void> {
 	await exec(db, `DELETE FROM pair_claim_fallos WHERE ip = ?;`, [ip]);
+}
+
+/**
+ * Cuántas peticiones por minuto y por IP se dejan pasar al freno de arriba.
+ *
+ * Generoso a propósito: `claim` se llama UNA vez por emparejamiento (la espera de la aprobación
+ * pregunta por `fetch-token`, no por aquí), así que ni un bar vinculando todas sus Handy a la vez
+ * se acerca a esto. Quien lo alcanza no está tecleando.
+ */
+export const PETICIONES_POR_MINUTO = 20;
+
+/**
+ * El filtro exterior: ¿puede esta IP seguir, o se le cierra la puerta antes de tocar Turso?
+ *
+ * Lo de arriba es exacto y cuesta una lectura de la base central en CADA intento, también en los
+ * diez mil de un barrido. Esto lo evita con el Rate Limiting binding de Cloudflare, que se resuelve
+ * en el edge y no es un recurso que haya que crear: se declara en `wrangler.json` (`ratelimits`).
+ *
+ * Tres cosas que hay que saber antes de tocarlo, porque las tres son consecuencia de cómo es ese
+ * binding y no decisiones nuestras:
+ *
+ *   · **No sustituye al freno de arriba, y no puede.** Su ventana sólo admite 10 o 60 segundos, así
+ *     que no sabe expresar los tramos de 30 s / 5 min / 30 min; y devuelve un booleano pelado, así
+ *     que no puede decir cuánto queda —que es lo que hoy se le dice a quien se equivoca al
+ *     teclear—. Es una capa delante, no un reemplazo.
+ *   · **Cuenta por centro de datos** («there is a unique limit per Cloudflare location»), y la
+ *     propia documentación lo llama permisivo y eventualmente consistente. Un barrido que rote
+ *     salida multiplica su cupo por el número de colos, y por eso el control de verdad sigue siendo
+ *     la tabla: esto sólo recorta el volumen.
+ *   · **Si el binding no está, se deja pasar.** Es lo contrario de la regla habitual de fallar
+ *     cerrado, y aquí es lo correcto: detrás hay un control exacto que no depende de esto, así que
+ *     fallar abierto devuelve el sistema a como se comportaba antes de existir este filtro —se
+ *     pagan unas lecturas— mientras que fallar cerrado dejaría sin vincular ninguna Handy por una
+ *     línea de configuración. Que siga declarado —y con el mismo número que
+ *     `PETICIONES_POR_MINUTO`— lo vigila `emparejamiento.test.ts` leyendo `wrangler.json`, porque
+ *     si desapareciera no habría ningún síntoma.
+ */
+export async function pasaElFiltroExterior(env: { LIMITADOR_CLAIM?: RateLimit }, ip: string): Promise<boolean> {
+	const limitador = env?.LIMITADOR_CLAIM;
+	if (!limitador) return true;
+
+	try {
+		const { success } = await limitador.limit({ key: ip });
+		return success;
+	} catch (e: any) {
+		// Mismo motivo que la ausencia del binding: detrás hay un control exacto.
+		console.error("[pairing] el filtro exterior falló, se deja pasar:", String(e?.message || e));
+		return true;
+	}
 }
