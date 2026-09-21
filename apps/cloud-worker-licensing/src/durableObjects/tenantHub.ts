@@ -1,16 +1,9 @@
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
-import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 import { ingestToAxiom } from "../observability/axiom";
-import {
-	esFalloPasajero,
-	esRechazoPermanente,
-	isTursoAuthError,
-} from "./tenantHub.errores";
+
 import type { ContextoDeCola } from "./tenantHub.cola";
-import type { ContextoDeMensajes } from "./tenantHub.mensajes";
-import { despachar } from "./tenantHub.mensajes";
 import {
 	apartadasPendientes,
 	asegurarCola,
@@ -21,41 +14,25 @@ import {
 	olvidarApartadas,
 	sacarDeLaCola,
 } from "./tenantHub.cola";
-import { buildApplyBatch } from "./tenantHub.lote";
 import {
-	isEventAllowed,
-	issueChallenge,
-	loadDeviceFromCentral,
-	roleNormalize,
-	verifyHelloSigned,
-} from "./tenantHub.identidad";
-
-import type {
-	AnyMsg,
-	ApplyMsg,
-	BulkApplyMsg,
-	EventMsg,
-	HelloSignedMsg,
-	InternalApplyCommand,
-	OpParaAplicar,
-	ResolvedStmt,
-	Role,
-	WsAttachment,
-} from "./tenantHub.types";
-
-import {
-	buildCommandEnvelope,
-	buildInternalPayloadForHash,
-	getFirstOwnValue,
-	parseJsonStrict,
-	readCloudPayloadJson,
-	readEnvelopeMetadata,
-	readRequestPayloadJson,
 	safeJsonParse,
 	sha256Hex,
 	stableStringify,
 	stringifyJsonValue,
 } from "./tenantHub.envelope";
+import { isTursoAuthError } from "./tenantHub.errores";
+import { loadDeviceFromCentral, verifyHelloSigned } from "./tenantHub.identidad";
+import { buildApplyBatch } from "./tenantHub.lote";
+import type { ContextoDeMensajes } from "./tenantHub.mensajes";
+import { despachar } from "./tenantHub.mensajes";
+import type { ContextoDeRutas } from "./tenantHub.rutas";
+import {
+	abrirWebSocket,
+	aplicar,
+	avisoDePairing,
+	esUpgradeDeWebSocket,
+	revocar,
+} from "./tenantHub.rutas";
 import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
 import {
 	commandHasNowLiteral,
@@ -65,6 +42,15 @@ import {
 	rewriteCmdNowLiterals,
 	serverNowFixed,
 } from "./tenantHub.tiempo";
+
+import type {
+	HelloSignedMsg,
+	InternalApplyCommand,
+	OpParaAplicar,
+	ResolvedStmt,
+	Role,
+	WsAttachment,
+} from "./tenantHub.types";
 
 
 // Caché en memoria (por instancia de DO) de las credenciales de la DB del
@@ -86,21 +72,6 @@ const CHECKPOINT_ACTIVE_MS = 7 * 24 * 60 * 60 * 1000; // una Main cuenta para el
 const PURGE_SEQ_MARGIN = 1000; // holgura de Seq por debajo del suelo (cubre solape catch-up/live)
 const SYNC_CHANGES_TTL_MS = 7 * 24 * 60 * 60 * 1000; // no borrar cambios de menos de 7 días
 const APPLIED_OPS_TTL_MS = 7 * 24 * 60 * 60 * 1000; // idempotencia: un reintento nunca llega tan tarde
-
-function isWebSocketUpgrade(req: Request): boolean {
-	const h = req.headers.get("Upgrade") || "";
-	return h.toLowerCase() === "websocket";
-}
-
-function jsonResponse(data: any, status = 200): Response {
-	return new Response(JSON.stringify(data), {
-		status,
-		headers: {
-			"content-type": "application/json; charset=utf-8",
-			"cache-control": "no-store",
-		},
-	});
-}
 
 
 export class TenantHub {
@@ -970,247 +941,51 @@ export class TenantHub {
 		});
 	}
 
+	/**
+	 * ARQ-04: las rutas viven en `tenantHub.rutas.ts`. Aquí queda el reparto, que es lo que sí es
+	 * de la clase: un `fetch` es un punto de entrada del runtime.
+	 */
 	async fetch(request: Request): Promise<Response> {
 		const url = new URL(request.url);
+		const ctx = this.ctxRutas();
 
-		if (url.pathname === "/internal/revoke" && request.method === "POST") {
-			const raw = await request.text();
-
-			// FABLE-F: mismo HMAC que `/internal/apply`. El DO no es direccionable desde
-			// Internet, pero cerrar sockets por `deviceId` sin autenticar era una asimetría
-			// que sólo se sostenía por esa suposición.
-			try {
-				await verifyInternalWorkerRequest(
-					request,
-					String(this.env.LICENSE_JWT_SECRET || ""),
-					raw,
-				);
-			} catch (e: any) {
-				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
-			}
-
-			const body = safeJsonParse(raw) || {};
-			const deviceId = String(body.deviceId || "").trim();
-
-			// SYNC-16: no hay estado que limpiar a mano (el attachment muere con el socket). Pero el
-			// cierre lo inicia el SERVIDOR, y Cloudflare no garantiza que eso dispare
-			// `webSocketClose`, así que hacemos la contabilidad de presencia/freeze explícitamente:
-			// revocar la Main debe congelar las Handy igual que si se hubiera caído.
-			if (deviceId) {
-				for (const ws of this.liveSocketsFor(deviceId)) {
-					const a = this.att(ws);
-					try {
-						ws.close(4001, "revoked");
-					} catch { }
-					if (a) this.sessionGone(ws, a);
-				}
-			}
-
-			return new Response("OK", { status: 200 });
-		}
-
-		// Un Handy acaba de reclamar un código de emparejamiento y espera que alguien le abra
-		// la puerta desde la Main. En vez de que el panel de la Main pregunte cada pocos
-		// segundos "¿hay alguien esperando?", se lo empujamos por su WebSocket.
-		//
-		// El aviso va VACÍO a propósito: es un "vuelve a mirar", no el dato. La solicitud —con
-		// su huella y su clave pública, que es justo lo que el operario compara antes de
-		// aprobar— la sigue leyendo la Main por REST firmado. Así este mensaje no puede
-		// convertirse en una vía para colar información en la pantalla de aprobación.
-		if (url.pathname === "/internal/pair-request" && request.method === "POST") {
-			const raw = await request.text();
-
-			try {
-				await verifyInternalWorkerRequest(
-					request,
-					String(this.env.LICENSE_JWT_SECRET || ""),
-					raw,
-				);
-			} catch (e: any) {
-				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
-			}
-
-			this.broadcastRol("tpv", { type: "pair_request" });
-
-			return new Response("OK", { status: 200 });
-		}
-
-		if (url.pathname === "/internal/apply" && request.method === "POST") {
-			const raw = await request.text();
-
-			// Sólo el worker `tpv-api` legítimo (que conoce LICENSE_JWT_SECRET) puede
-			// aplicar SQL en el tenant. Sin esto, cualquiera que alcanzase el DO con los
-			// headers correctos podría escribir comandos arbitrarios.
-			try {
-				await verifyInternalWorkerRequest(
-					request,
-					String(this.env.LICENSE_JWT_SECRET || ""),
-					raw,
-				);
-			} catch (e: any) {
-				return jsonResponse({ ok: false, error: String(e?.message || e) }, 401);
-			}
-
-			const tenantId = String(request.headers.get("x-tenant-id") || "").trim();
-			if (!tenantId) {
-				return jsonResponse({ ok: false, error: "missing_tenant_id" }, 400);
-			}
-
-			const body = safeJsonParse(raw) || {};
-			const type = String(body?.type || "").trim();
-
-			if (!type) {
-				return jsonResponse({ ok: false, error: "missing_command_type" }, 400);
-			}
-
-			const { opId, commandName, deviceId } = readEnvelopeMetadata(
-				body,
-				request,
-			);
-
-			if (!opId) {
-				return jsonResponse({ ok: false, error: "missing_op_id" }, 400);
-			}
-
-			if (!commandName) {
-				return jsonResponse({ ok: false, error: "missing_command_name" }, 400);
-			}
-
-			const cmd = {
-				type: body.type,
-				payload: body.payload,
-			} as InternalApplyCommand;
-
-			const clientNow = String(
-				request.headers.get("x-client-now") ||
-				getFirstOwnValue(body, ["client_now", "clientNow"]) ||
-				"",
-			);
-
-			const fallbackPayloadForHash = buildInternalPayloadForHash(cmd);
-			const requestPayloadJson = readRequestPayloadJson(
-				body,
-				fallbackPayloadForHash,
-			);
-			const cloudPayloadJson = readCloudPayloadJson({
-				body,
-				opId,
-				commandName,
-				fallbackPayloadForHash,
-			});
-
-			try {
-				const { result } = await this.applyInternalCommandIdempotent({
-					tenantId,
-					cmd,
-					opId,
-					commandName,
-					deviceId,
-					requestPayloadJson,
-					cloudPayloadJson,
-					clientNow,
-				});
-
-				return jsonResponse({ ok: true, data: result }, 200);
-			} catch (e: any) {
-				const msg = String(e?.message || e);
-
-				const status =
-					msg === "idempotency_payload_mismatch"
-						? 409
-						: msg === "idempotency_command_mismatch"
-							? 409
-							: msg === "idempotency_operation_processing"
-								? 409
-								: 400;
-
-				return jsonResponse(
-					{
-						ok: false,
-						error: msg,
-					},
-					status,
-				);
-			}
+		if (request.method === "POST") {
+			if (url.pathname === "/internal/revoke") return revocar(ctx, request);
+			if (url.pathname === "/internal/pair-request") return avisoDePairing(ctx, request);
+			if (url.pathname === "/internal/apply") return aplicar(ctx, request);
 		}
 
 		if (url.pathname !== "/ws") {
 			return new Response("Not found", { status: 404 });
 		}
 
-		if (!isWebSocketUpgrade(request)) {
+		if (!esUpgradeDeWebSocket(request)) {
 			return new Response("Expected WebSocket", { status: 426 });
 		}
 
-		const tenantId = request.headers.get("x-tenant-id") || "";
-		const deviceId = request.headers.get("x-device-id") || "";
-		const roleHeader = roleNormalize(request.headers.get("x-role") || "unknown");
-		const pubkeyHint =
-			(request.headers.get("x-device-pubkey-b64") || "").trim() || null;
-
-		if (!tenantId || !deviceId) {
-			return new Response("missing identity", { status: 400 });
-		}
-
-		const pair = new WebSocketPair();
-		const client = pair[0];
-		const server = pair[1];
-
-		// SYNC-16: `acceptWebSocket` (en vez de `server.accept()`) entrega el socket al runtime, que
-		// puede entonces evacuar el DO de memoria mientras la conexión está ociosa SIN cerrarla. La
-		// etiqueta `deviceId` sustituye al antiguo `Map<deviceId, WebSocket>` → `getWebSockets(id)`.
-		this.state.acceptWebSocket(server, [deviceId]);
-
-		const ch = issueChallenge();
-
-		// Todo el estado de la sesión va adosado al socket: sobrevive a la hibernación.
-		this.setAtt(server, {
-			tenantId,
-			deviceId,
-			role: roleHeader,
-			authed: false,
-			pubkeyB64: pubkeyHint,
-			challenge: ch,
-			recovering: false,
-		});
-
-		// Reconexión con el mismo deviceId: se echa la sesión anterior. Se cierra DESPUÉS de aceptar
-		// la nueva para que su `webSocketClose` vea que ya hay un socket vivo y no dispare el freeze.
-		for (const prev of this.liveSocketsFor(deviceId, server)) {
-			try {
-				prev.close(4000, "replaced");
-			} catch { }
-		}
-
-		this.state.waitUntil(this.touchLastSeen(tenantId, deviceId, true));
-
-		this.send(server, {
-			type: "connected",
-			tenantId,
-			deviceId,
-			role: roleHeader,
-			auth: "required",
-		});
-
-		this.send(server, {
-			type: "challenge",
-			nonceB64: ch.nonceB64,
-			expiresAtMs: ch.expiresAtMs,
-		});
-
-		this.broadcast(
-			{
-				type: "presence",
-				action: "join",
-				deviceId,
-				role: roleHeader,
-				authed: false,
-			},
-			deviceId,
-		);
-
-		return new Response(null, { status: 101, webSocket: client });
+		return abrirWebSocket(ctx, request);
 	}
+
+	/** ⚠️ Envoltorios que leen `this.X` AL LLAMAR, nunca `.bind(this)`. Ver `ctxCola`. */
+	private ctxRutas(): ContextoDeRutas {
+		return {
+			secretoInterno: String(this.env.LICENSE_JWT_SECRET || ""),
+			att: (ws) => this.att(ws),
+			setAtt: (ws, att) => this.setAtt(ws, att),
+			send: (ws, obj) => this.send(ws, obj),
+			broadcast: (obj, except) => this.broadcast(obj, except),
+			broadcastRol: (rol, obj) => this.broadcastRol(rol, obj),
+			liveSocketsFor: (deviceId, except) => this.liveSocketsFor(deviceId, except),
+			sessionGone: (ws, a) => this.sessionGone(ws, a),
+			aceptarWebSocket: (ws, tags) => this.state.acceptWebSocket(ws, tags),
+			waitUntil: (p) => this.state.waitUntil(p),
+			touchLastSeen: (tenantId, deviceId, force) =>
+				this.touchLastSeen(tenantId, deviceId, force),
+			applyInternalCommandIdempotent: (params) =>
+				this.applyInternalCommandIdempotent(params),
+		};
+	}
+
 
 	// ---- SYNC-16: handlers de la Hibernation API --------------------------------------------
 	// Sustituyen a los antiguos `server.addEventListener(...)`. Al despertar de la hibernación la
