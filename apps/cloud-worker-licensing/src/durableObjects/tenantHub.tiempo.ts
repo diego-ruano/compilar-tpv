@@ -28,6 +28,15 @@ import type { InternalApplyCommand } from "./tenantHub.types";
 
 const CLIENT_NOW_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
 
+/**
+ * El reloj de pared del DO. Vive aquí, con el resto del tiempo, porque lo usan varios módulos del
+ * hub y dos definiciones del mismo `Date.now()` son dos sitios donde algún día alguien mockeará
+ * uno y no el otro.
+ */
+export function nowMs(): number {
+	return Date.now();
+}
+
 export function serverNowFixed(): string {
 	return new Date().toISOString().slice(0, 19).replace("T", " ");
 }

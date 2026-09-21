@@ -10,14 +10,19 @@
 // declararse "tpv" para escribir, aprovechar una firma emitida para otro dispositivo del
 // mismo negocio, o estirar la ventana de tiempo.
 //
-// `loadDeviceFromCentral` (que va a la BD central) se sustituye en la instancia para poder
-// controlar qué dice el registro del dispositivo. Todo lo demás es el código real.
+// Qué dice de este dispositivo la base central se le pasa como argumento (`cargarDispositivo`).
+// Todo lo demás es el código real.
+//
+// ARQ-04: las reglas viven fuera de la clase (`tenantHub.identidad.ts`), así que esto ya no
+// levanta un Durable Object ni parchea un método de la instancia para sustituir ese SELECT.
 
 import { describe, it, expect, beforeAll } from "vitest";
 
-import { enElHub } from "./helpers/hub";
-
 import { bytesToB64 } from "../src/server/utils/base64";
+import {
+	issueChallenge,
+	verifyHelloSigned,
+} from "../src/durableObjects/tenantHub.identidad";
 import type { HelloSignedMsg, Role } from "../src/durableObjects/tenantHub.types";
 
 const TENANT = "tenant-1";
@@ -78,29 +83,14 @@ async function verificar(params: {
 	tenantId?: string;
 	deviceId?: string;
 }) {
-	// El error se captura DENTRO del Durable Object: si se deja escapar, el runtime lo
-	// contabiliza como fallo no gestionado aunque el test lo espere, y la suite acaba en rojo
-	// con todos los casos en verde.
-	const res: any = await enElHub("tenant-hello-test", async (hub) => {
-		hub.loadDeviceFromCentral = async () => params.central;
-		try {
-			return {
-				ok: true,
-				out: await hub.verifyHelloSigned({
-					tenantId: params.tenantId ?? TENANT,
-					deviceId: params.deviceId ?? DEVICE,
-					msg: params.msg,
-					challenge: params.challenge,
-					pubkeyB64Hint: params.pubkeyB64Hint ?? null,
-				}),
-			};
-		} catch (e: any) {
-			return { ok: false, error: String(e?.message ?? e) };
-		}
+	return verifyHelloSigned({
+		tenantId: params.tenantId ?? TENANT,
+		deviceId: params.deviceId ?? DEVICE,
+		msg: params.msg,
+		challenge: params.challenge,
+		pubkeyB64Hint: params.pubkeyB64Hint ?? null,
+		cargarDispositivo: async () => params.central,
 	});
-
-	if (!res.ok) throw new Error(res.error);
-	return res.out;
 }
 
 async function verificarFalla(params: Parameters<typeof verificar>[0]): Promise<string> {
@@ -426,7 +416,7 @@ describe("verifyHelloSigned · estado del dispositivo", () => {
 
 describe("issueChallenge", () => {
 	async function emitir() {
-		return enElHub("tenant-hello-test", (hub) => hub.issueChallenge());
+		return issueChallenge();
 	}
 
 	it("emite un nonce de 32 bytes", async () => {

@@ -1,13 +1,17 @@
 import type { Client } from "@libsql/client/web";
 import { createDbClient } from "../server/db/clients";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
-import { b64ToBytes, bytesToB64 } from "../server/utils/base64";
-import { ed25519Verify, nobleForceU8 } from "../server/utils/nobleEd25519";
-import { estaRevocado } from "../lib/deviceAuth";
 import { verifyInternalWorkerRequest } from "../lib/internalAuth";
 import { ingestToAxiom } from "../observability/axiom";
 import { esFalloPasajero, esRechazoPermanente } from "./tenantHub.errores";
 import { buildApplyBatch } from "./tenantHub.lote";
+import {
+	isEventAllowed,
+	issueChallenge,
+	loadDeviceFromCentral,
+	roleNormalize,
+	verifyHelloSigned,
+} from "./tenantHub.identidad";
 
 import type {
 	AnyMsg,
@@ -38,6 +42,7 @@ import { isUniqueOpIdViolation } from "./tenantHub.sentencias";
 import {
 	commandHasNowLiteral,
 	horaSinFijar,
+	nowMs,
 	parseClientNow,
 	rewriteCmdNowLiterals,
 	serverNowFixed,
@@ -93,38 +98,9 @@ function safeJsonParse(s: string): any | null {
 	}
 }
 
-function nowMs() {
-	return Date.now();
-}
-
 function isWebSocketUpgrade(req: Request): boolean {
 	const h = req.headers.get("Upgrade") || "";
 	return h.toLowerCase() === "websocket";
-}
-
-function roleNormalize(r: any): Role {
-	const s = String(r || "").toLowerCase();
-	if (s === "tpv") return "tpv";
-	if (s === "handy") return "handy";
-	return "unknown";
-}
-
-function isEventAllowed(role: Role, name: string): boolean {
-	const n = String(name || "");
-	if (!n) return false;
-
-	if (role === "tpv") return true;
-
-	if (role === "handy") {
-		return (
-			n.startsWith("handy.") ||
-			n.startsWith("mesa.") ||
-			n.startsWith("ticket.") ||
-			n.startsWith("order.")
-		);
-	}
-
-	return false;
 }
 
 function jsonResponse(data: any, status = 200): Response {
@@ -323,31 +299,6 @@ export class TenantHub {
 		this.clearTenantDbCache();
 		const rotatedDb = await this.resolveTenantDbClient(tenantId, true);
 		return await run(rotatedDb);
-	}
-
-	private async loadDeviceFromCentral(
-		tenantId: string,
-		deviceId: string,
-	): Promise<{ role: Role; pubkeyB64: string | null; revoked: boolean }> {
-		const dbCentral = this.getCentralDb();
-		const r = await dbCentral.execute({
-			sql: `
-				SELECT role, device_pubkey_b64, revoked_at_ms
-				FROM devices
-				WHERE tenant_id=? AND device_id=?
-				LIMIT 1
-			`,
-			args: [tenantId, deviceId],
-		});
-
-		const row = r.rows?.[0] as any | undefined;
-		if (!row) return { role: "unknown", pubkeyB64: null, revoked: true };
-
-		const role = roleNormalize(row.role);
-		const pubkeyB64 = String(row.device_pubkey_b64 || "").trim() || null;
-		const revoked = estaRevocado(row);
-
-		return { role, pubkeyB64, revoked };
 	}
 
 	private async touchLastSeen(tenantId: string, deviceId: string, force = false) {
@@ -1393,21 +1344,13 @@ export class TenantHub {
 		);
 	}
 
-	// SYNC-16: ya no se guarda en un Map del DO; el llamante lo adosa al socket (attachment) para
-	// que sobreviva a la hibernación.
-	private issueChallenge(): { nonceB64: string; expiresAtMs: number } {
-		const nonce = new Uint8Array(32);
-		crypto.getRandomValues(nonce);
-		const nonceB64 = bytesToB64(nonce);
-
-		const expiresAtMs = nowMs() + 60_000;
-
-		return { nonceB64, expiresAtMs };
-	}
-
-	// SYNC-16: el challenge y la pista de pubkey llegan desde el attachment del socket (el llamante
-	// ya ha consumido el challenge antes de invocarnos) y devolvemos la pubkey confirmada para que
-	// el llamante la persista de vuelta en el attachment.
+	/**
+	 * ARQ-04: las reglas del handshake viven en `tenantHub.identidad.ts`; aquí sólo se les ata la
+	 * base central, que es lo único que la clase aporta. Sigue siendo un método porque es la
+	 * costura por la que un test sustituye la verificación de la firma cuando lo que prueba es
+	 * otra cosa (`volcadoWs.test.ts`): sin ella habría que firmar de verdad para comprobar un
+	 * mensaje de estado.
+	 */
 	private async verifyHelloSigned(params: {
 		tenantId: string;
 		deviceId: string;
@@ -1415,43 +1358,11 @@ export class TenantHub {
 		challenge: { nonceB64: string; expiresAtMs: number } | null;
 		pubkeyB64Hint?: string | null;
 	}): Promise<{ roleFinal: Role; pubkeyB64: string }> {
-		const { tenantId, deviceId, msg, challenge: ch, pubkeyB64Hint } = params;
-
-		if (!ch) throw new Error("missing_challenge");
-		if (msg.nonceB64 !== ch.nonceB64) throw new Error("challenge_mismatch");
-		if (nowMs() > ch.expiresAtMs) throw new Error("challenge_expired");
-
-		const MAX_SKEW_MS = 2 * 60 * 1000;
-		if (!Number.isFinite(msg.ts)) throw new Error("bad_ts");
-		if (Math.abs(nowMs() - msg.ts) > MAX_SKEW_MS) {
-			throw new Error("ts_out_of_range");
-		}
-
-		let pubkeyB64 = (pubkeyB64Hint || "").trim();
-
-		const centralInfo = await this.loadDeviceFromCentral(tenantId, deviceId);
-		if (centralInfo.revoked) throw new Error("device_revoked");
-		if (centralInfo.pubkeyB64) pubkeyB64 = centralInfo.pubkeyB64;
-
-		// El rol lo dicta EXCLUSIVAMENTE la BD central (activación → 'tpv',
-		// pairing → 'handy'). La cabecera x-role es del cliente y no puede
-		// otorgar privilegios: si la fila no trae un rol válido, el dispositivo
-		// queda "unknown" (sin permisos de apply ni de eventos).
-		const roleFinal: Role = centralInfo.role;
-
-		if (!pubkeyB64) throw new Error("device_pubkey_not_registered");
-
-		const payload = new TextEncoder().encode(
-			`${msg.ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${msg.nonceB64}`,
-		);
-
-		const pub = nobleForceU8(b64ToBytes(pubkeyB64));
-		const sig = nobleForceU8(b64ToBytes(msg.sigB64));
-
-		const ok = await ed25519Verify(sig, payload, pub);
-		if (!ok) throw new Error("bad_ws_signature");
-
-		return { roleFinal, pubkeyB64 };
+		return verifyHelloSigned({
+			...params,
+			cargarDispositivo: (tenantId, deviceId) =>
+				loadDeviceFromCentral(this.getCentralDb(), tenantId, deviceId),
+		});
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -1645,7 +1556,7 @@ export class TenantHub {
 		// etiqueta `deviceId` sustituye al antiguo `Map<deviceId, WebSocket>` → `getWebSockets(id)`.
 		this.state.acceptWebSocket(server, [deviceId]);
 
-		const ch = this.issueChallenge();
+		const ch = issueChallenge();
 
 		// Todo el estado de la sesión va adosado al socket: sobrevive a la hibernación.
 		this.setAtt(server, {
