@@ -156,7 +156,7 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
 - Los dos Cloudflare Workers se **fusionaron en uno solo**: `apps/cloud-worker-licensing/` (nombre
   desplegado `tpv-api`; la carpeta conserva el nombre `cloud-worker-licensing`). El antiguo
   `cloud-worker-api` (`tpv-server`) se **eliminó**.
-- `tpv-api` sirve: API Hono (`src/index.ts` → enrutador + subenrutadores en `src/routes/` y
+- `tpv-api` sirve: API Hono (`src/index.ts` → enrutador + un subenrutador por dominio en
   `src/domains/`), el DO **TenantHub** (`src/durableObjects/`), **pairing** (`/v1/pair/*`), revoke,
   WS (`/ws`) y las **licencias**: activación y estado (`/v1/license/*`), compra por Stripe
   (`/v1/stripe/*`) y alta manual (`/v1/admin/*`). Diseño en
@@ -522,7 +522,25 @@ la lógica/SQL vive en `crates/*`.
   drift-guard (`Assert<SameKeys<z.infer<typeof xSchema>, XInput>>`, ver `src/lib/typeGuards.ts`). Si
   añades un campo al zod, añádelo también al DTO de Rust (o al revés): el guard compara las claves en
   **las dos direcciones** y el worker no compila hasta que coincidan. Los tipos de los valores ya los
-  cubre el paso de `p.data` al command builder, así que entre ambos el contrato queda cerrado.
+  cubre el paso de `c.req.valid("json")` al command builder, así que entre ambos el contrato queda
+  cerrado.
+- **Una ruta del worker NO lee su propio cuerpo (ARQ-03).** Lo valida `lib/validacion.ts` —
+  `cuerpo(schema)` para lo de negocio, `consulta(schema)` para la cadena de consulta— y el handler
+  lo recoge ya tipado en `c.req.valid("json")`. Eran doce `parseBody` copiados más una docena de
+  `safeParse` sueltos. Tres reglas al añadir una ruta:
+  - **Todo lo que decida ANTES de leer el cuerpo tiene que ser middleware y ir delante**, porque el
+    validador lo es: el veto de rol (`soloLaMain(...)`), un tope de
+    tamaño, un token de administración, el filtro por IP del emparejamiento. Si se queda dentro del
+    handler, se ejecuta *después* de haber leído y parseado el cuerpo entero — y quien no tenía
+    permiso se lleva un 400 que le describe el schema en vez de su 401. Lo vigila
+    `test/anularSoloMain.test.ts` para el caso del que salió la regla.
+  - **`cuerpoConIdentificador` es sólo para el emparejamiento**, donde el identificador del fallo
+    es contrato con una Handy que no tiene sesión ni pantalla donde mirar. El resto usa `cuerpo`,
+    que rechaza con `validation_error` y los `issues` de zod.
+  - **Permitir de más es una decisión, no un olvido.** Los cuerpos de `sync` e `images` coercen y
+    recortan (`since ?? 0`, `tablas.slice(0, 60)`) en vez de validar: están en el camino de la
+    recuperación, donde fallar hacia «sigue trabajando» es la regla. Si los conviertes en schemas,
+    que sean totales (`.catch()`, `.default()`), no estrictos.
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a **`AppErrorDto { code, message }`**
   en la frontera Tauri (ARCH-02/05). El `code` sale del catálogo cerrado `ErrorCode`
   (`crates/tpv-contracts/src/errors.rs`, exportado a TS por ts-rs y consumido también por el worker),
@@ -777,6 +795,13 @@ no sólo en dev.
     - **Y `/status` ya no reparte token si la licencia no deja trabajar.** Contesta igual —es por
       donde el cliente se entera—, pero sin credencial nueva: renovarla indefinidamente a un equipo
       anulado era lo que hacía eterno el problema anterior.
+    - **«TODAS» quiere decir «todas las que pasan por `tenantAuth`», y por eso no puede haber
+      ninguna autenticada que no pase por él (ARQ-03).** El emparejamiento y `/v1/device/*` se
+      autenticaban por su cuenta (`buildTenantContext`, que hace el JWT y el device-proof pero no
+      llama a `vetoDeLicencia`), así que se quedaron fuera de este arreglo sin que nada lo dijera:
+      con la licencia anulada, una Main seguía emitiendo códigos de vinculación, aprobando Handys y
+      revocándolos. Ya no existe ese segundo camino; si alguien añade uno, esta regla vuelve a ser
+      mentira.
     - **La comprobación se cachea 60 s por isolate.** Sin eso serían dos consultas más al
       control-plane en cada petición. El retraso no importa porque anular ya empuja: `revoke` le
       pide al TenantHub que cierre el socket del equipo en el acto (ver abajo).
@@ -957,7 +982,7 @@ no sólo en dev.
     con una columna numérica. Un panel que siempre grita es un panel apagado.
   - **El informe va a Axiom, no al usuario.** Un descuadre no lo puede atender quien está delante
     del TPV. Él sólo ve la consecuencia, en Conectividad.
-- **Emparejar una Handy** (`routes/pairing.ts` en el worker, `app/arranque/emparejamiento.ts` en la
+- **Emparejar una Handy** (`domains/pairing/` en el worker, `app/arranque/emparejamiento.ts` en la
   Handy, Configuración → Vincular Handy en la Main). La Handy reclama un código de 6 cifras, la Main
   lo aprueba o lo rechaza, y la Handy recoge su token firmando con su clave. Reglas al tocarlo:
   - **El reto vive lo que el código, y la Handy espera lo que dice la nube** (`caducaEnMs`, en
@@ -1005,7 +1030,8 @@ no sólo en dev.
     30 min, y se olvidan al emparejar bien o tras un día sin fallar. Por IP y no por dispositivo
     porque el `deviceId` lo elige quien llama; el precio es que las Handy de un bar comparten la
     cuenta. La espera se mira antes de leer el código, o un intento bloqueado seguiría diciendo si
-    existe. Una petición mal formada no cuenta: es un cliente roto, no alguien probando códigos.
+    existe. Una petición mal formada no cuenta: es un cliente roto, no alguien probando códigos —
+    la rechaza el validador del cuerpo, que va detrás del filtro exterior y delante de todo lo demás.
   - **Las rutas anónimas nuevas hay que eximirlas también en el proxy** (`PAIRING_SIN_SESION` en
     `commands/pairing.rs`): el resto de `/v1/pair/…` exige Administrador, y sin esa exención la
     Handy, que no tiene sesión, no podría llamarla.
