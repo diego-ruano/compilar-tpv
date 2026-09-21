@@ -208,21 +208,26 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 	});
 
 	it("aplica primero y borra después: si el DO muere entre medias no se pierde nada", async () => {
-		// Se simula la muerte haciendo que el borrado no ocurra; al volver a drenar, el filtro por
-		// `Op_Id` reconoce lo ya aplicado y limpia la cola sin repetir el trabajo.
+		// La muerte se simula donde de verdad puede ocurrir: la escritura en Turso entra, pero el
+		// DO no llega a enterarse de cuáles fueron, así que no borra nada de la cola. Al volver a
+		// drenar, el filtro por `Op_Id` reconoce lo ya aplicado y limpia la cola sin repetir el
+		// trabajo. Al revés --borrar y luego aplicar-- ese hueco perdería las dos operaciones.
 		await enElHub("cola-crash", async (hub: any) => {
 			const { sql } = prepararHub(hub);
 
 			hub.encolar(TENANT, [opLinea(1), opLinea(2)]);
 
-			const borradoReal = hub.sacarDeLaCola.bind(hub);
-			hub.sacarDeLaCola = () => {}; // el DO "muere" justo antes de limpiar
+			const aplicarDeVerdad = hub.applyBatchIdempotent.bind(hub);
+			hub.applyBatchIdempotent = async (db: any, ops: any[]) => {
+				await aplicarDeVerdad(db, ops);
+				return { aplicadas: [], yaEstaban: [] };
+			};
 			await hub.drenarCola();
 
 			expect(lineas(sql)).toEqual(["det-1", "det-2"]);
 			expect(enCola(sql)).toEqual(["op-1", "op-2"]); // siguen ahí
 
-			hub.sacarDeLaCola = borradoReal;
+			hub.applyBatchIdempotent = aplicarDeVerdad;
 			await hub.drenarCola();
 
 			expect(enCola(sql)).toEqual([]);
@@ -236,7 +241,10 @@ describe("SYNC-18 · cola de entrada del DO", () => {
 		await enElHub("cola-alarma", async (hub: any) => {
 			prepararHub(hub);
 
-			hub.drenarCola = async () => {
+			// Revienta por donde revienta de verdad --la base del tenant-- en vez de sustituir al
+			// propio drenado, que es lo que se está probando.
+			hub.encolar(TENANT, [opLinea(1)]);
+			hub.withTenantDbRetry = async () => {
 				throw new Error("turso caido");
 			};
 			await hub.state.storage.deleteAlarm();

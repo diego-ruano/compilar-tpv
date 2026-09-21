@@ -100,3 +100,22 @@ export function esFalloPasajero(error: unknown): boolean {
 	if (!texto) return false;
 	return TRANSITORIOS.some((f) => texto.includes(f));
 }
+
+/**
+ * ¿Es un rechazo de CREDENCIALES de la base del tenant?
+ *
+ * Otra pregunta distinta de las de arriba: aquéllas miran la sentencia, ésta mira el token. Un 401
+ * de Turso no se arregla reintentando ni se arregla apartando la operación --se arregla pidiendo
+ * otro token--, así que quien lo ve tiene que dejarlo SALIR hasta `withTenantDbRetry`, que es quien
+ * rota. Capturarlo por el camino convierte un token caducado en cincuenta operaciones sanas
+ * apartadas (REV-04).
+ */
+export function isTursoAuthError(err: unknown): boolean {
+	const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
+
+	return (
+		msg.includes("server returned http status 401") ||
+		msg.includes("http status 401") ||
+		msg.includes("unauthorized")
+	);
+}
