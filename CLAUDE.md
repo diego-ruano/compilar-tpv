@@ -288,6 +288,34 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   guardado ya lo rechazó la base— ni cuando al token le quedan menos de 12 h, porque entonces seguir
   con él sólo cambia un error claro ahora por un 401 opaco dentro de un rato.
 
+- **Que el worker esté vivo lo dice alguien de FUERA, y `/health` tiene que tocar la base
+  (PROD-01).** Sentry y Axiom son telemetría desde dentro: dependen de que el código se ejecute y
+  consiga emitir. Si el worker no despliega, la cuenta se suspende o el DNS se rompe, no hay error
+  que mandar — y un panel vacío se ve idéntico a «no ha pasado nada». Por eso hay una sonda externa
+  (Better Stack) contra `tpv-api.altarialights.workers.dev/health`, que es **el hostname que usan
+  los clientes** (`CLOUD_API_BASE`): vigilar otro nombre es vigilar otra cosa. Reglas al tocarlo:
+  - ⚠️ **`/health` no puede volver a ser un `{ ok: true }` que no comprueba nada.** Así estaba, y
+    sólo demostraba que el isolate arranca: un worker con las credenciales de Turso muertas —o sea
+    todas las Handy tiradas y la replicación de todos los negocios detenida— contestaba ese 200
+    igual de sano y el monitor se quedaba **verde durante la avería entera**. Toca la base central
+    (`server/salud.ts`), que es la dependencia por la que pasa todo. Lo vigila `test/salud.test.ts`,
+    porque es una regresión que no produce ningún síntoma: al revés, apaga el único que había.
+  - **El veredicto va en el código de estado (200/503), no en una palabra del cuerpo.** Leer el
+    cuerpo es de pago en la monitorización, y el endpoint es nuestro: no hay razón para no decirlo
+    por donde sabe leer cualquier sonda. Y el cuerpo **no cuenta por qué** falla — lo lee cualquiera
+    y el error de libsql lleva dentro la URL de la base.
+  - **La base de tenant no se toca**, ni se añade nada que crezca con el uso: el endpoint es público
+    y sin autenticar, así que el caché de 30 s por isolate es lo que impide que sea un generador
+    gratuito de consultas contra el control-plane.
+  - **El cron diario se vigila con un latido, no con una sonda.** Ninguna petición HTTP puede ver
+    que el `scheduled` lleva meses sin dispararse: el worker contesta igual de bien, y lo que se
+    pierde en silencio son los avisos de caducidad de licencia. Se manda **al final y fuera de los
+    `try`**, aunque una de las dos tareas haya fallado: responde a «¿se ejecuta el cron?», y las dos
+    son idempotentes y se recuperan al día siguiente — atarlo a su éxito convertiría una caída
+    pasajera de Turso en un aviso de «cron muerto», y una falsa alarma enseña a ignorar la buena.
+  - **Y no propaga nunca.** Que la monitorización esté caída no puede impedir avisar a un cliente de
+    que le vence la licencia.
+
 ---
 
 ## 5. Decisiones tomadas (acordadas con el responsable)

@@ -110,4 +110,11 @@ export interface Env {
 	// los datos a US East 1). El nuestro es `eu-central-1.aws.edge.axiom.co`. Se ve en
 	// Axiom → Settings → General → Edge deployment.
 	AXIOM_DOMAIN?: string;
+
+	// Better Stack (PROD-01). URL del heartbeat que pulsa el cron diario al terminar. Si falta, no
+	// se late y no pasa nada más: esto se puede desplegar antes de crear el heartbeat.
+	// Es un SECRETO y no una var de `wrangler.json` —ese fichero está en git— porque quien tenga
+	// esta URL puede silenciar la alarma. Configura con:
+	//   wrangler secret put BETTERSTACK_HEARTBEAT_URL
+	BETTERSTACK_HEARTBEAT_URL?: string;
 }

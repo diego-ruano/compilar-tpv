@@ -23,6 +23,7 @@ import * as Sentry from "@sentry/cloudflare";
 import type { Env } from "./env";
 import { sentryOptions } from "./observability/sentry";
 import { getDb } from "./server/db";
+import { comprobarSalud } from "./server/salud";
 import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
 import {
 	json,
@@ -33,6 +34,7 @@ import {
 
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { purgarBaseCentral } from "./server/purga";
+import { latir } from "./observability/latido";
 import { pairingRoutes } from "./domains/pairing/pairing.routes";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { configuracionRoutes } from "./domains/configuracion/configuracion.routes";
@@ -82,9 +84,18 @@ app.options("*", (c) =>
 );
 
 // ---------------- Health ----------------
-app.get("/health", (c) =>
-	json({ ok: true, service: "tpv-api", ts: Date.now() }, 200, c.req.raw),
-);
+//
+// PROD-01 · Lo que sondea la monitorizacion externa. Toca la base central a proposito: un
+// `{ ok: true }` que no comprueba nada deja el monitor en verde durante la averia entera, que es
+// justo el silencio que esto existe para romper. El porque largo, en `server/salud.ts`.
+app.get("/health", async (c) => {
+	const salud = await comprobarSalud(() => getDb(c.env));
+	return json(
+		{ ok: salud.ok, service: "tpv-api", db: salud.db, ts: Date.now() },
+		salud.ok ? 200 : 503,
+		c.req.raw,
+	);
+});
 
 // ---------------- WebSocket → TenantHub ----------------
 app.get("/ws", async (c) => {
@@ -275,6 +286,13 @@ async function programado(env: Env): Promise<void> {
 	} catch (err) {
 		console.error("[cron] purga falló:", (err as any)?.message || err);
 	}
+
+	// El latido va AQUÍ, fuera de los dos `try` y sin condicionarlo a que hayan ido bien: responde a
+	// «¿se está ejecutando el cron?», no a «¿funcionó todo?». Las dos tareas son idempotentes y se
+	// recuperan solas al día siguiente, así que atar el latido a su éxito convertiría una caída
+	// pasajera de Turso en un aviso de «cron muerto» — y una falsa alarma enseña a ignorar la buena.
+	// Lo que sí falló ya lo cuentan el log y Sentry.
+	await latir(env);
 }
 
 // El wrapper de Sentry captura las excepciones no controladas del worker (requiere el flag
