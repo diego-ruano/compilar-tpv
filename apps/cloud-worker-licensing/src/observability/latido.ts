@@ -20,7 +20,16 @@ export async function latir(env: { BETTERSTACK_HEARTBEAT_URL?: string }): Promis
 	if (!url) return;
 
 	try {
-		await fetch(url, { method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS) });
+		const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(TIMEOUT_MS) });
+		if (!res.ok) {
+			// Una URL mal escrita pero bien formada contesta 404, y `fetch` no lanza nada: el
+			// latido «sale» y no llega a ninguna parte. Se acaba notando —el heartbeat no se pone
+			// verde y la monitorización avisa al día siguiente—, pero entonces la causa hay que
+			// adivinarla. Esta línea la convierte en un vistazo al log.
+			//
+			// No se registra la URL: es el secreto con el que se silencia la alarma.
+			console.error(`[cron] el latido salió con ${res.status}: ¿es esa la URL del heartbeat?`);
+		}
 	} catch (err) {
 		// No propaga NUNCA, y es la misma regla que ya siguen las dos tareas del cron: que la
 		// monitorización esté caída no puede impedir avisar a un cliente de que le vence la

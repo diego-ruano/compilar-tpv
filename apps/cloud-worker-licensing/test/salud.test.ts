@@ -128,6 +128,19 @@ describe("el latido del cron", () => {
 		expect(llamadas).toEqual(["https://uptime.betterstack.com/api/v1/heartbeat/xxx"]);
 	});
 
+	it("una URL mal escrita contesta 404 y eso se anota: `fetch` no lanza nada", async () => {
+		vi.stubGlobal("fetch", async () => new Response("not found", { status: 404 }));
+		const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		await latir({ BETTERSTACK_HEARTBEAT_URL: "https://uptime.betterstack.com/api/v1/heartbeat/mal" });
+
+		const dicho = log.mock.calls.map((c) => c.join(" ")).join(" | ");
+		expect(dicho).toContain("404");
+		// La URL es el secreto con el que se silencia la alarma: no se registra.
+		expect(dicho).not.toContain("heartbeat/mal");
+		log.mockRestore();
+	});
+
 	it("si la monitorización está caída, NO se lleva por delante al cron", async () => {
 		vi.stubGlobal("fetch", async () => {
 			throw new Error("network unreachable");
