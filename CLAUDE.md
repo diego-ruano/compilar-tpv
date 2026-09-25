@@ -561,16 +561,22 @@ la lógica/SQL vive en `crates/*`.
     tamaño, un token de administración, el filtro por IP del emparejamiento. Si se queda dentro del
     handler, se ejecuta *después* de haber leído y parseado el cuerpo entero — y quien no tenía
     permiso se lleva un 400 que le describe el schema en vez de su 401. Lo vigila
-    `test/anularSoloMain.test.ts` para el caso del que salió la regla.
+    `test/anularSoloMain.test.ts` para el caso del que salió la regla, y
+    `test/vetoAntesDelCuerpo.test.ts` para todos los demás. Ese barrido existe porque la regla ya
+    se rompió dos veces: la segunda fueron **cinco rutas de `login`** que se quedaron con el veto
+    dentro del handler cuando `sync` migró a schemas, y no las vio nadie porque el único guard
+    miraba una sola ruta. Se enuncia estructural para poder leerla del fuente: **un `*.routes.ts`
+    no resuelve roles** — nada de `isTpvDevice`/`tieneRol`/`rolDelDispositivo` en un router; eso es
+    trabajo del middleware, y hacerlo a mano es casi siempre hacerlo tarde.
   - **`cuerpoConIdentificador` es sólo para el emparejamiento**, donde el identificador del fallo
     es contrato con una Handy que no tiene sesión ni pantalla donde mirar. El resto usa `cuerpo`,
     que rechaza con `validation_error` y los `issues` de zod.
-  - **Permitir de más es una decisión, no un olvido.** Cuatro cuerpos de `sync` —`/changes`,
-    `/historico`, `/verificar-claves` y `/salud`— coercen y recortan (`since ?? 0`,
-    `tablas.slice(0, 60)`) en vez de validar: están en el camino de la recuperación, donde fallar
-    hacia «sigue trabajando» es la regla. Son los únicos que quedan sin migrar (ARQ-06 en
-    `docs/analisis/REVISION_2026-09-17.md`, con su prerrequisito); al convertirlos en schemas, que
-    sean **totales** (`.catch()`, `.default()`), no estrictos.
+  - **Permitir de más es una decisión, no un olvido.** Los cuatro cuerpos permisivos de `sync`
+    (`/changes`, `/historico`, `/verificar-claves` y `/salud`) usan schemas totales en
+    `sync.schemas.ts` y `cuerpoTolerante`: coercen, recortan y convierten un cuerpo ausente o JSON
+    roto en los defaults de siempre porque están en el camino de la recuperación, donde fallar hacia
+    «sigue trabajando» es la regla. No se sustituyen por `cuerpo(...)`, que convertiría esos casos
+    en un 400 antes de que el schema pudiera aplicar sus defaults (ARQ-06).
 - Errores de caso de uso: `tpv_application::error::AppError` → se mapea a **`AppErrorDto { code, message }`**
   en la frontera Tauri (ARCH-02/05). El `code` sale del catálogo cerrado `ErrorCode`
   (`crates/tpv-contracts/src/errors.rs`, exportado a TS por ts-rs y consumido también por el worker),
