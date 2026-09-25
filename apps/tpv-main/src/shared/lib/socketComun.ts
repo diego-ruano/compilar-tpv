@@ -13,6 +13,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { toAppError } from "@tpv/client";
 
 import { cloudPost } from "./cloudApi";
+import { horaParaFirmar } from "./horaParaFirmar";
 
 // SYNC-09: backoff exponencial con tope + jitter. Empieza en 3 s y sube hasta 30 s ante cortes
 // prolongados (worker caído/sin red), en vez de martillear cada 3 s. Se reinicia al autenticarse.
@@ -94,16 +95,22 @@ export async function leerIdDispositivo(): Promise<string> {
 	}
 }
 
-/** Firma el saludo del socket con la clave del dispositivo, para contestar al `challenge` del hub. */
+/**
+ * Firma el saludo del socket con la clave del dispositivo, para contestar al `challenge` del hub.
+ *
+ * La hora la pone esta función y no quien llama (PROD-04): tiene que ser la de la nube, porque el hub
+ * rechaza un saludo con más de 2 minutos de desfase (`ts_out_of_range`). La trae la respuesta del
+ * ticket, que siempre llega antes que el `challenge`.
+ */
 export async function firmarHello(
-	ts: number,
 	tenantId: string,
 	deviceId: string,
 	nonceB64: string,
-): Promise<string> {
+): Promise<{ ts: number; sigB64: string }> {
+	const ts = await horaParaFirmar((comando) => invoke(comando));
 	const payload = `${ts}\nWS_HELLO\n${tenantId}\n${deviceId}\n${nonceB64}`;
 	const r = (await invoke<any>("device_sign_b64", { args: { payload } })) as any;
-	return String(r?.sigB64 ?? r?.sig_b64 ?? "");
+	return { ts, sigB64: String(r?.sigB64 ?? r?.sig_b64 ?? "") };
 }
 
 /** Resultado de pedir el ticket: hay que distinguir "no hay red" de "el worker dice que no". */

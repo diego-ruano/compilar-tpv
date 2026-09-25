@@ -10,6 +10,8 @@
 
 import { esError } from "@tpv/client";
 
+import { horaParaFirmar } from "../../shared/lib/horaParaFirmar";
+
 /** Cada cuánto se pregunta si la Main ya ha aprobado. */
 export const ESPERA_ENTRE_CONSULTAS_MS = 1500;
 /**
@@ -108,7 +110,9 @@ async function firmar(
 	nonceB64: string,
 	deviceId: string,
 ): Promise<{ ts: number; sigB64: string }> {
-	const ts = Date.now();
+	// PROD-04: la hora de la nube, que Rust ya tiene de la respuesta al `claim`. Con la del equipo,
+	// una Handy con el reloj desfasado más de 2 minutos no conseguiría vincularse nunca.
+	const ts = await horaParaFirmar(invoke);
 	const payload = `${ts}\n${accion}\n${pairCode}\n${nonceB64}\n${deviceId}`;
 	const r = (await invoke("device_sign_b64", { args: { payload } })) as any;
 	const sigB64 = String(r.sigB64 ?? r.sig_b64 ?? r.signature ?? "").trim();

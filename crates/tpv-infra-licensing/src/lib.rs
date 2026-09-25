@@ -12,6 +12,7 @@
 
 pub mod device;
 pub mod field_crypto;
+pub mod reloj;
 mod secret_store;
 
 /// Reexport para que el `JNI_OnLoad` del cdylib de la app pueda inicializar la `JavaVM` del proceso,
@@ -25,9 +26,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, SigningKey, Verifier, VerifyingKey};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, Method, Response};
+use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -67,14 +68,6 @@ pub const CLOUD_API_BASE: &str = "https://tpv-api.altarialights.workers.dev";
 pub const LICENSE_SIGNING_PUBLIC_KEY_B64: &str = "WKG8YsOKSGSDhzauiqeMih0zCwNhwYRVQOE4Ywcvm1I=";
 
 const HTTP_TIMEOUT_SECS: u64 = 20;
-
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_millis() as i64,
-        Err(_) => 0,
-    }
-}
 
 fn ext(e: impl std::fmt::Display) -> AppError {
     AppError::external(e.to_string())
@@ -147,6 +140,52 @@ fn http_client() -> AppResult<Client> {
 
 fn api_url(path: &str) -> String {
     format!("{}{}", CLOUD_API_BASE.trim_end_matches('/'), path)
+}
+
+/// Lo que vuelve de una petición device-proof sin cuerpo, con la hora que llevaba firmada el
+/// intento que contestó: la aserción de `/status` va ligada a ella (`client_ts`).
+struct Respondida {
+    http: u16,
+    texto: String,
+    ts: i64,
+}
+
+/// Petición device-proof SIN cuerpo (`/v1/license/status` y `/v1/license/refresh`, de la Main y de
+/// la Handy), firmada con la hora de la nube y repetida UNA vez si la nube la rechaza por la hora
+/// (PROD-04, ver [`reloj`]). El rechazo trae ya la hora buena, así que la repetición entra.
+async fn peticion_con_prueba(
+    metodo: Method,
+    path: &str,
+    token: &str,
+    sk: &SigningKey,
+) -> Result<Respondida, String> {
+    let client = http_client().map_err(|e| e.to_string())?;
+    let mut repetida = false;
+
+    loop {
+        let ts = reloj::ahora_ms();
+        // Sin cuerpo: se firma la cadena vacía.
+        let sig = sign_device_proof(sk, ts, metodo.as_str(), path, token, b"")?;
+
+        let resp = reloj::enviar(
+            client
+                .request(metodo.clone(), api_url(path))
+                .bearer_auth(token)
+                .header("X-Device-Ts", ts.to_string())
+                .header("X-Device-Sig", sig),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let http = resp.status().as_u16();
+        let texto = resp.text().await.unwrap_or_default();
+
+        if !repetida && reloj::es_rechazo_por_reloj(http, &texto) {
+            repetida = true;
+            continue;
+        }
+        return Ok(Respondida { http, texto, ts });
+    }
 }
 
 /* ===== Tipos de la API de licencias (internos del adaptador) ===== */
@@ -381,37 +420,22 @@ impl LicensingAdapter {
 
         // Un fallo local (keyring, firma, cliente HTTP) es indistinguible de no tener red para el
         // gate: en ambos casos no sabemos qué dice el servidor → `Inalcanzable` (gracia offline).
-        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
-        let ts = now_ms();
-
         let (sk, _) =
             get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
-        // GET sin cuerpo → se firma la cadena vacía.
-        let sig = sign_device_proof(&sk, ts, "GET", PATH, token, b"")
-            .map_err(|_| FalloConsulta::Inalcanzable)?;
-
-        let resp = client
-            .get(api_url(PATH))
-            .bearer_auth(token)
-            .header("X-Device-Ts", ts.to_string())
-            .header("X-Device-Sig", sig)
-            .send()
+        let r = peticion_con_prueba(Method::GET, PATH, token, &sk)
             .await
             .map_err(|_| FalloConsulta::Inalcanzable)?;
 
-        let http = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-
-        if !(200..300).contains(&http) {
-            let code = ApiErr::parse(&text).map(|e| e.error).unwrap_or_default();
-            return Err(clasificar_error(http, &code));
+        if !(200..300).contains(&r.http) {
+            let code = ApiErr::parse(&r.texto).map(|e| e.error).unwrap_or_default();
+            return Err(clasificar_error(r.http, &code));
         }
 
-        let ok: StatusOk = serde_json::from_str(&text).map_err(|e| FalloConsulta::Ilegible {
-            detalle: format!("invalid_json: {e} | body={text}"),
+        let ok: StatusOk = serde_json::from_str(&r.texto).map_err(|e| FalloConsulta::Ilegible {
+            detalle: format!("invalid_json: {e} | body={}", r.texto),
         })?;
 
-        Ok((ok, ts))
+        Ok((ok, r.ts))
     }
 
     /// POST `/v1/license/refresh` (device-proof). Reemite el token de sesión cuando el viejo ha
@@ -423,33 +447,18 @@ impl LicensingAdapter {
     ) -> Result<String, FalloConsulta> {
         const PATH: &str = "/v1/license/refresh";
 
-        let client = http_client().map_err(|_| FalloConsulta::Inalcanzable)?;
-        let ts = now_ms();
-
         let (sk, _) =
             get_or_create_device_keypair(device_id).map_err(|_| FalloConsulta::Inalcanzable)?;
-        // `/v1/license/refresh` se manda sin cuerpo: se firma la cadena vacía.
-        let sig = sign_device_proof(&sk, ts, "POST", PATH, token, b"")
-            .map_err(|_| FalloConsulta::Inalcanzable)?;
-
-        let resp = client
-            .post(api_url(PATH))
-            .bearer_auth(token)
-            .header("X-Device-Ts", ts.to_string())
-            .header("X-Device-Sig", sig)
-            .send()
+        let r = peticion_con_prueba(Method::POST, PATH, token, &sk)
             .await
             .map_err(|_| FalloConsulta::Inalcanzable)?;
 
-        let http = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-
-        if !(200..300).contains(&http) {
-            let code = ApiErr::parse(&text).map(|e| e.error).unwrap_or_default();
-            return Err(clasificar_error(http, &code));
+        if !(200..300).contains(&r.http) {
+            let code = ApiErr::parse(&r.texto).map(|e| e.error).unwrap_or_default();
+            return Err(clasificar_error(r.http, &code));
         }
 
-        serde_json::from_str::<RefreshOk>(&text)
+        serde_json::from_str::<RefreshOk>(&r.texto)
             .map(|r| r.token)
             .map_err(|_| FalloConsulta::Inalcanzable)
     }
@@ -505,13 +514,16 @@ impl LicensingService for LicensingAdapter {
             },
         };
 
-        let resp = http_client()?
-            .post(api_url("/v1/license/activate"))
-            .header(CONTENT_TYPE, "application/json")
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
+        // Sin firma, pero su respuesta es la primera hora de la nube que ve un equipo recién
+        // estrenado: el primer `/status` ya sale con ella (PROD-04).
+        let resp = reloj::enviar(
+            http_client()?
+                .post(api_url("/v1/license/activate"))
+                .header(CONTENT_TYPE, "application/json")
+                .json(&req),
+        )
+        .await
+        .map_err(|e| ext(format!("No se pudo conectar con el servidor de licencias: {e}")))?;
 
         let http = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
@@ -615,8 +627,6 @@ impl LicensingService for LicensingAdapter {
         &self,
         state: &LicenseLocalState,
     ) -> Result<EstadoVerificado, FalloConsulta> {
-        let ahora = now_ms();
-
         // El token vive en el keyring. Si no está, no podemos consultar: se trata como offline
         // (gracia) en vez de tirar la licencia por un problema puntual de acceso al keyring.
         let token = get_license_token().map_err(|_| FalloConsulta::Inalcanzable)?;
@@ -634,7 +644,7 @@ impl LicensingService for LicensingAdapter {
                 }
                 let nuevo = self.refrescar_token(&token, &state.device_id).await?;
                 let (ok, ts) = self.get_status(&nuevo, &state.device_id).await?;
-                let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+                let assertion = verificar_assertion(ok.assertion, ts, reloj::ahora_ms())?;
                 // Persistir el token efectivo (el que renovó /status, o el del refresh si no).
                 self.persistir_token(ok.token.as_deref(), &nuevo);
                 return Ok(EstadoVerificado {
@@ -644,7 +654,10 @@ impl LicensingService for LicensingAdapter {
             }
         };
 
-        let assertion = verificar_assertion(ok.assertion, ts, ahora)?;
+        // PROD-04: la caducidad de la aserción la pone la nube con SU reloj, así que se compara con
+        // la hora de la nube. Con la del equipo, uno adelantado más de cinco minutos daría por
+        // caducada una aserción recién firmada, justo cuando la petición ya había entrado.
+        let assertion = verificar_assertion(ok.assertion, ts, reloj::ahora_ms())?;
         // El worker renueva el token en cada /status: se guarda en el keyring (fin del muro de 30d).
         self.persistir_token(ok.token.as_deref(), &token);
         Ok(EstadoVerificado {
@@ -701,7 +714,8 @@ impl PairingAdapter {
             ));
         };
 
-        let ts = now_ms();
+        // PROD-04: la hora de la nube, no la del equipo (ver `reloj`).
+        let ts = reloj::ahora_ms();
         let sig = sign_device_proof(&sk, ts, &method.to_uppercase(), path, token.trim(), body)
             .map_err(ext)?;
 
@@ -755,13 +769,16 @@ impl PairingAdapter {
             );
         }
 
-        let resp = client
-            .post(api_url(path))
-            .headers(headers)
-            .body(body_str.to_string())
-            .send()
-            .await
-            .map_err(AppError::sin_conexion)?;
+        // También las anónimas del emparejamiento: la respuesta al `claim` es lo que le da a la
+        // Handy la hora con la que firmará después la recogida del token.
+        let resp = reloj::enviar(
+            client
+                .post(api_url(path))
+                .headers(headers)
+                .body(body_str.to_string()),
+        )
+        .await
+        .map_err(AppError::sin_conexion)?;
 
         let status = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
@@ -798,27 +815,16 @@ impl PairingAdapter {
         let device_id = get_or_create_device_id().map_err(ext)?;
         let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
 
-        let ts = now_ms();
-        // Se manda sin cuerpo: se firma la cadena vacía (igual que el `/refresh` de la Main).
-        let sig = sign_device_proof(&sk, ts, "POST", PATH, token.trim(), b"").map_err(ext)?;
-
-        let resp = http_client()?
-            .post(api_url(PATH))
-            .bearer_auth(token.trim())
-            .header("X-Device-Ts", ts.to_string())
-            .header("X-Device-Sig", sig)
-            .send()
+        // Mismo camino que el `/refresh` de la Main: sin cuerpo y con la hora de la nube.
+        let r = peticion_con_prueba(Method::POST, PATH, token.trim(), &sk)
             .await
             .map_err(AppError::sin_conexion)?;
 
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-
-        if !(200..300).contains(&status) {
-            return Err(AppError::from_api_body(status, &text));
+        if !(200..300).contains(&r.http) {
+            return Err(AppError::from_api_body(r.http, &r.texto));
         }
 
-        let nuevo = serde_json::from_str::<RefreshOk>(&text)
+        let nuevo = serde_json::from_str::<RefreshOk>(&r.texto)
             .map_err(|e| ext(format!("bad_refresh_response:{e}")))?;
 
         device::handy_set_token(nuevo.token.trim(), &tenant_id).map_err(ext)
@@ -831,8 +837,9 @@ impl PairingAdapter {
     /// Recibe los ingredientes y no una petición ya montada porque hay que **firmarla otra vez**:
     /// la firma cubre el token, y el token es justo lo que ha cambiado.
     ///
-    /// Devuelve la `Response` sin leer, que es lo que separa a estos tres del POST de JSON: la
-    /// descarga de una imagen quiere los bytes, no el texto.
+    /// Devuelve el estado y los bytes del cuerpo, que es lo que separa a estos tres del POST de
+    /// JSON: la descarga de una imagen quiere los bytes, no el texto. Van ya leídos porque saber si
+    /// un 401 fue por la hora (PROD-04) exige leer el cuerpo, y uno leído no se puede devolver.
     async fn enviar_firmado(
         &self,
         mode: &str,
@@ -840,16 +847,23 @@ impl PairingAdapter {
         path: &str,
         cuerpo: &[u8],
         content_type: Option<&str>,
-    ) -> AppResult<Response> {
-        let resp = self
+    ) -> AppResult<(u16, Vec<u8>)> {
+        let (mut status, mut bytes) = self
             .una_peticion_firmada(mode, metodo.clone(), path, cuerpo, content_type)
             .await?;
 
-        if resp.status().as_u16() != 401 || mode != "handy" {
-            return Ok(resp);
+        // PROD-04: igual que en el POST de JSON.
+        if reloj::es_rechazo_por_reloj(status, &String::from_utf8_lossy(&bytes)) {
+            (status, bytes) = self
+                .una_peticion_firmada(mode, metodo.clone(), path, cuerpo, content_type)
+                .await?;
+        }
+
+        if status != 401 || mode != "handy" {
+            return Ok((status, bytes));
         }
         if !self.renovar_si_el_token_ha_caducado().await {
-            return Ok(resp);
+            return Ok((status, bytes));
         }
 
         self.una_peticion_firmada(mode, metodo, path, cuerpo, content_type)
@@ -864,7 +878,7 @@ impl PairingAdapter {
         path: &str,
         cuerpo: &[u8],
         content_type: Option<&str>,
-    ) -> AppResult<Response> {
+    ) -> AppResult<(u16, Vec<u8>)> {
         let signed = self.signed_headers_inner(mode, metodo.as_str(), path, cuerpo)?;
 
         let mut rb = http_client()?
@@ -883,7 +897,13 @@ impl PairingAdapter {
             rb = rb.body(cuerpo.to_vec());
         }
 
-        rb.send().await.map_err(AppError::sin_conexion)
+        let resp = reloj::enviar(rb).await.map_err(AppError::sin_conexion)?;
+        let status = resp.status().as_u16();
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| ext(format!("respuesta_ilegible:{e}")))?;
+        Ok((status, bytes.to_vec()))
     }
 
     /// Renueva el token de la Handy **sólo si el que llevamos ya no vale por fecha**, y dice si
@@ -917,6 +937,10 @@ impl PairingService for PairingAdapter {
         let (sk, _pub_b64) = get_or_create_device_keypair(&device_id).map_err(ext)?;
         let sig_b64 = sign_payload_b64(&sk, payload).map_err(ext)?;
         Ok(SigB64 { sig_b64 })
+    }
+
+    fn hora_para_firmar(&self) -> i64 {
+        reloj::ahora_ms()
     }
 
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()> {
@@ -962,6 +986,14 @@ impl PairingService for PairingAdapter {
             serde_json::to_string(&body).map_err(|e| ext(format!("bad_json_body:{e}")))?;
 
         let (mut status, mut text) = self.enviar_post(mode, path, &body_str).await?;
+
+        // PROD-04. Rechazada por la hora de la firma: el rechazo ya ha traído la hora de la nube,
+        // así que se firma otra vez y se repite UNA. Sólo si la firma la pone Rust: en las anónimas
+        // del emparejamiento la hora va firmada dentro del cuerpo, y repetir el mismo cuerpo daría
+        // el mismo rechazo (esas ya salen con la hora buena: la toman del `claim`).
+        if (mode == "tpv" || mode == "handy") && reloj::es_rechazo_por_reloj(status, &text) {
+            (status, text) = self.enviar_post(mode, path, &body_str).await?;
+        }
 
         // REV-02. Un 401 en una Handy con el token caducado es la credencial, no la petición: se
         // renueva y se repite UNA vez. Quien decide es la fecha del propio token
@@ -1015,31 +1047,28 @@ impl PairingService for PairingAdapter {
         // worker del token: aislamiento por tenant garantizado. NO usa idempotency-key: es una
         // escritura directa a R2 (no pasa por el hub), y subir dos veces el mismo fichero al mismo
         // path deja exactamente lo mismo — por eso repetirlo tras renovar el token es inocuo.
-        let resp = self
+        let (status, cuerpo) = self
             .enviar_firmado(mode, Method::PUT, path, &bytes, Some(content_type))
             .await?;
 
-        let status = resp.status().as_u16();
         if (200..300).contains(&status) {
             return Ok(());
         }
-        let text = resp.text().await.unwrap_or_default();
-        Err(AppError::from_api_body(status, &text))
+        Err(AppError::from_api_body(status, &String::from_utf8_lossy(&cuerpo)))
     }
 
     async fn delete_image(&self, mode: &str, path: &str) -> AppResult<()> {
-        let resp = self
+        let (status, cuerpo) = self
             .enviar_firmado(mode, Method::DELETE, path, b"", None)
             .await?;
 
-        let status = resp.status().as_u16();
         if (200..300).contains(&status) {
             return Ok(());
         }
-        let text = resp.text().await.unwrap_or_default();
         Err(AppError::external(format!(
             "image_delete_http_{}: {}",
-            status, text
+            status,
+            String::from_utf8_lossy(&cuerpo)
         )))
     }
 
@@ -1051,7 +1080,7 @@ impl PairingService for PairingAdapter {
         let body_str = serde_json::to_string(&serde_json::json!({ "rel_path": rel_path }))
             .map_err(|e| ext(format!("bad_json_body:{e}")))?;
 
-        let resp = self
+        let (status, bytes) = self
             .enviar_firmado(
                 mode,
                 Method::POST,
@@ -1061,23 +1090,18 @@ impl PairingService for PairingAdapter {
             )
             .await?;
 
-        let status = resp.status().as_u16();
         if status == 404 {
             return Ok(None);
         }
         if !(200..300).contains(&status) {
-            let text = resp.text().await.unwrap_or_default();
             return Err(AppError::external(format!(
                 "image_download_http_{}: {}",
-                status, text
+                status,
+                String::from_utf8_lossy(&bytes)
             )));
         }
 
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| ext(format!("image_download_body_failed:{e}")))?;
-        Ok(Some(bytes.to_vec()))
+        Ok(Some(bytes))
     }
 }
 

@@ -171,8 +171,12 @@ const MARGEN_CADUCIDAD_SEGS: i64 = 60;
 ///
 /// Un token que no se puede leer cuenta como caducado: si no sabemos ni qué llevamos, renovarlo es
 /// lo único que puede arreglarlo, y quien decide de verdad es la nube al recibir la firma.
+///
+/// PROD-04: el `exp` lo pone la nube con su reloj, así que se compara con la hora de la nube. Con la
+/// del equipo, uno atrasado seguiría creyendo vigente un token que la nube ya rechaza, y no lo
+/// renovaría nunca.
 pub fn token_caducado(token: &str) -> bool {
-    let ahora = chrono::Utc::now().timestamp();
+    let ahora = crate::reloj::ahora_ms() / 1000;
     match exp_del_token(token) {
         Some(exp) => exp <= ahora + MARGEN_CADUCIDAD_SEGS,
         None => true,

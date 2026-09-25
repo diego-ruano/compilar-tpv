@@ -31,6 +31,8 @@ function crearBackend() {
 		auth: { token: "jwt", tenantId: "t1" } as { token: string; tenantId: string } | null,
 		deviceId: "h1",
 		ticket: (): unknown => ({ ticket: "tk" }),
+		/** PROD-04: la hora de la nube que da Rust para firmar; `null` = no contesta. */
+		horaNube: null as number | null,
 		llamadas: [] as { cmd: string; args: any }[],
 	};
 	h.invoke.mockImplementation(async (cmd: string, args: any = {}) => {
@@ -42,6 +44,8 @@ function crearBackend() {
 				return { deviceId: b.deviceId };
 			case "device_sign_b64":
 				return { sigB64: `firma:${args.args.payload}` };
+			case "device_hora_para_firmar":
+				return b.horaNube;
 			case "tpv_server_post_json":
 				if (args.args.path === "/v1/ws/ticket") return b.ticket();
 				throw new Error(`ruta inesperada ${args.args.path}`);
@@ -210,11 +214,13 @@ describe("conexión", () => {
 	});
 
 	it("contesta al challenge con la firma del dispositivo y del tenant emparejado", async () => {
-		crearBackend();
+		const b = crearBackend();
+		// PROD-04: con el reloj del equipo adelantado, la firma lleva la hora de la nube.
+		const ts = Date.now() - 5 * 60_000;
+		b.horaNube = ts;
 		await montar();
 		const s = ultimo();
 		s.abrir();
-		const ts = Date.now();
 		await s.recibir({ type: "challenge", nonceB64: "bm9uY2U=" });
 		await asentar();
 		expect(s.enviados).toEqual([

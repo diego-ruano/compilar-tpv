@@ -849,8 +849,7 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 
 			if (msg.type === "challenge") {
 				try {
-					const ts = Date.now();
-					const sigB64 = await firmarHello(ts, lic.tenantId, deviceId, String(msg.nonceB64 ?? ""));
+					const { ts, sigB64 } = await firmarHello(lic.tenantId, deviceId, String(msg.nonceB64 ?? ""));
 					if (!cancelled && socket.readyState === WebSocket.OPEN) {
 						socket.send(
 							JSON.stringify({

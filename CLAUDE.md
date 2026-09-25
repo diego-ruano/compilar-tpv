@@ -866,9 +866,33 @@ no sólo en dev.
     motivo y nada lo decía. Es el único fallo de esa lista que puede resolver quien está delante.
     `FalloConsulta::RelojDesfasado` da el **mismo veredicto** que `Inalcanzable` —la licencia es
     buena y el TPV tiene que seguir vendiendo— pero su propio motivo (`clock_skew_detected`), que es
-    lo que cambia la notificación y el texto de la pantalla de bloqueo. Sigue pendiente el aviso
-    *proactivo* comparando con `serverTime` (PROD-04); esto sólo arregla el diagnóstico cuando ya
-    está fallando.
+    lo que cambia la notificación y el texto de la pantalla de bloqueo. Desde PROD-04 (abajo) es la
+    red de seguridad: con las firmas en la hora de la nube, ese rechazo ya no debería llegar.
+  - **Se firma con la hora de la NUBE, no con la del equipo (PROD-04).** Avisar del desfase no
+    servía de nada —el dueño de un bar no sabe qué es y llama—, así que el TPV deja de depender de
+    su reloj para hablar con el worker. Cada respuesta del worker trae la cabecera `Date`, también
+    los rechazos; con ella `tpv-infra-licensing/src/reloj.rs` estima cuánto se desvía el equipo, y
+    todas las firmas llevan el reloj del sistema más ese desfase. Reglas al tocarlo:
+    - **Todo lo que hable con el worker se manda con `reloj::enviar`**, no con `.send()`: una
+      respuesta que no se anota es una medida que se tira. Y todo lo que firme con hora la saca de
+      `reloj::ahora_ms()`. El frontend no firma con `Date.now()`: pregunta a Rust
+      (`device_hora_para_firmar`, `shared/lib/horaParaFirmar.ts`) para el saludo del WebSocket y el
+      emparejamiento.
+    - **Un rechazo por la hora se repite UNA vez** (`reloj::es_rechazo_por_reloj`), ya con la hora
+      que trajo ese mismo rechazo. Es seguro en una escritura: la hora se comprueba en la
+      autenticación, antes de tocar nada, y la clave de idempotencia es la misma. En las anónimas del
+      emparejamiento no se repite en Rust —la hora va firmada dentro del cuerpo—; esas salen ya
+      bien porque la respuesta al `claim` llega antes.
+    - **También las fechas que pone la nube se comparan con su hora**: la caducidad de una aserción
+      de licencia y el `exp` de un token (`token_caducado`). Con la del equipo, uno atrasado no
+      renovaría nunca un token que la nube ya rechaza.
+    - ⚠️ **La hora del NEGOCIO sigue siendo la del equipo**: ventas, fichajes, caja, registros
+      Veri\*factu y la `x-client-now` (CFG-04). Corregirla de golpe podría fechar una factura antes
+      que la anterior, que es lo que el art. 7.i) anota como anomalía. Está apuntado aparte
+      (RELOJ-01 en el backlog) y no se mezcla con esto.
+    - El desfase vive en memoria: al arrancar vale 0 y la primera respuesta lo fija. Se descarta una
+      medida si la ida y vuelta pasa de 10 s (el error es la mitad) o si el reloj salta a mitad de
+      petición.
   - **Palanca de emergencia sin UI:** `connectivity: "auto" | "off"` en `device_config.json`
     (comandos `get/set_connection_mode`). Sirve para una red patológica o un cliente que no quiera
     nube. La captura del outbox NO depende de ella: al volver a `auto` se drena lo acumulado.

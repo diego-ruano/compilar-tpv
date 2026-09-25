@@ -77,6 +77,8 @@ function crearBackend() {
 		aplicados: [] as string[][],
 		aplicar: (ids: string[]): string[] => ids,
 		ticket: (): unknown => ({ ticket: "tk" }),
+		/** PROD-04: la hora de la nube que da Rust para firmar; `null` = no contesta. */
+		horaNube: null as number | null,
 		cambios: (since: number): unknown => ({ items: [], nextSince: since, highWater: 0 }),
 		imagenes: "vacio",
 		salud: { outbox_pending: 0, last_seq: 0, quarantined: 0, failing: 0, subida_fallando: 0, subida_en_cuarentena: 0 },
@@ -91,6 +93,8 @@ function crearBackend() {
 				return { deviceId: b.deviceId };
 			case "device_sign_b64":
 				return { sigB64: `firma:${args.args.payload}` };
+			case "device_hora_para_firmar":
+				return b.horaNube;
 			case "tpv_server_post_json": {
 				const { path, body } = args.args;
 				if (path === "/v1/ws/ticket") return b.ticket();
@@ -320,11 +324,14 @@ describe("conexión", () => {
 	});
 
 	it("contesta al challenge con la firma del dispositivo, y sólo hello_ok la da por conectada", async () => {
-		crearBackend();
+		const b = crearBackend();
+		// PROD-04: el equipo va tres minutos atrasado. El hub rechaza más de dos: la firma tiene que
+		// llevar la hora de la nube que da Rust, no la de este reloj.
+		const ts = Date.now() + 3 * 60_000;
+		b.horaNube = ts;
 		await montar();
 		const s = ultimo();
 		s.abrir();
-		const ts = Date.now();
 		await s.recibir({ type: "challenge", nonceB64: "bm9uY2U=" });
 		await asentar();
 		expect(s.enviados).toContainEqual({

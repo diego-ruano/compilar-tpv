@@ -44,6 +44,10 @@ pub fn device_sign_b64(svc: &dyn PairingService, args: DeviceSignB64Args) -> App
     svc.device_sign_b64(&payload)
 }
 
+pub fn hora_para_firmar(svc: &dyn PairingService) -> i64 {
+    svc.hora_para_firmar()
+}
+
 pub fn handy_set_token(svc: &dyn PairingService, args: HandySetTokenArgs) -> AppResult<()> {
     let token = requerido(&args.token, "token")?;
     let tenant_id = requerido(&args.tenant_id, "tenant_id")?;

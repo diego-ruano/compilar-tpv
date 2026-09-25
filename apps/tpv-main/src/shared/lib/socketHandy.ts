@@ -232,8 +232,7 @@ export function iniciarSocketHandy(modo: ModeStateValue): SocketHandy | null {
 
 				if (msg.type === "challenge") {
 					try {
-						const ts = Date.now();
-						const sigB64 = await firmarHello(ts, auth.tenantId, deviceId, String(msg.nonceB64 ?? ""));
+						const { ts, sigB64 } = await firmarHello(auth.tenantId, deviceId, String(msg.nonceB64 ?? ""));
 						if (!cancelled && socket.readyState === WebSocket.OPEN) {
 							socket.send(
 								JSON.stringify({

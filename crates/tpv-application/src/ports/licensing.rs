@@ -71,6 +71,10 @@ pub trait LicensingService: Send + Sync {
 pub trait PairingService: Send + Sync {
     fn device_identity(&self) -> AppResult<DeviceIdentity>;
     fn device_sign_b64(&self, payload: &str) -> AppResult<SigB64>;
+    /// PROD-04: la hora (ms) con la que hay que firmar lo que se manda a la nube: la del equipo
+    /// corregida con la que trae cada respuesta del worker. Para lo que firma el frontend (el saludo
+    /// del WebSocket, el emparejamiento); lo que firma Rust ya la usa por su cuenta.
+    fn hora_para_firmar(&self) -> i64;
     fn handy_set_token(&self, token: &str, tenant_id: &str) -> AppResult<()>;
     fn handy_clear_token(&self) -> AppResult<()>;
     fn handy_get_tenant(&self) -> AppResult<Option<String>>;

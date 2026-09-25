@@ -27,7 +27,7 @@ use uuid::Uuid;
 use tpv_application::error::{AppError, AppResult};
 use tpv_application::ports::licensing::PairingService;
 use tpv_contracts::licensing::ApiSignedHeaders;
-use tpv_infra_licensing::PairingAdapter;
+use tpv_infra_licensing::{reloj, PairingAdapter};
 
 /// Host del worker unificado `tpv-api`. La constante vive en `tpv-infra-licensing` (la crate
 /// que también firma las peticiones); aquí solo se reexporta para no duplicar el literal.
@@ -197,6 +197,17 @@ impl CloudClient {
             .una_vez(method.clone(), path, cuerpo, idempotencia, query)
             .await?;
 
+        // PROD-04: rechazada por la hora de la firma. El rechazo ya ha traído la hora de la nube
+        // (`tpv_infra_licensing::reloj`), así que se firma otra vez y se repite UNA. Es seguro en
+        // una escritura por lo mismo que el reintento de abajo: la hora se comprueba en la
+        // autenticación, antes de tocar nada, y la clave de idempotencia es la misma.
+        let (status, text) = if reloj::es_rechazo_por_reloj(status, &text) {
+            self.una_vez(method.clone(), path, cuerpo, idempotencia, query)
+                .await?
+        } else {
+            (status, text)
+        };
+
         let (status, text) = if status == 401
             && self.pairing.renovar_si_el_token_ha_caducado().await
         {
@@ -242,7 +253,7 @@ impl CloudClient {
                 .body(cuerpo.to_vec());
         }
 
-        let resp = rb.send().await.map_err(AppError::sin_conexion)?;
+        let resp = reloj::enviar(rb).await.map_err(AppError::sin_conexion)?;
         let status = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
 

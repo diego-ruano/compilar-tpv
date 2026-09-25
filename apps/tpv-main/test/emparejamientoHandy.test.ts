@@ -36,6 +36,8 @@ function crearDobles() {
 			/** Se ejecuta justo antes de contestar a una consulta: sirve para cancelar «mientras vuelve». */
 		antesDeContestar: null as null | (() => void),
 		tokenGuardado: null as unknown,
+		/** PROD-04: la hora de la nube que da Rust para firmar; `null` = no contesta. */
+		horaNube: null as number | null,
 		pendiente: null as unknown,
 		vivo: true,
 	};
@@ -43,6 +45,7 @@ function crearDobles() {
 		invoke: (async (comando: string, args?: Record<string, any>) => {
 			if (comando === "device_get_identity") return estado.identidad;
 			if (comando === "device_sign_b64") return { sigB64: `firma:${args?.args.payload}` };
+			if (comando === "device_hora_para_firmar") return estado.horaNube;
 			if (comando === "handy_set_token") {
 				estado.tokenGuardado = args?.args;
 				return null;
@@ -125,6 +128,25 @@ describe("emparejar un Handy", () => {
 			ts: consulta.ts,
 			sigB64: `firma:${consulta.ts}\nPAIR_FETCH\n123456\nbm9uY2U=\nh1`,
 		});
+	});
+
+	// PROD-04: una Handy con el reloj desfasado más de 2 minutos no se vinculaba nunca, porque la
+	// nube rechaza la firma (`timestamp_out_of_range`). La hora sale de Rust, que la tiene del claim.
+	it("la hora de la firma es la de la nube, no la del equipo", async () => {
+		const { estado, deps } = crearDobles();
+		estado.pendientesAntesDeAprobar = 0;
+		estado.horaNube = Date.now() + 10 * 60_000;
+		const resultado = arrancar(deps);
+		await vi.advanceTimersByTimeAsync(ESPERA_ENTRE_CONSULTAS_MS);
+		await resultado;
+
+		const [consulta] = estado.consultas as { ts: number; sigB64: string }[];
+		expect(consulta.ts).toBe(estado.horaNube);
+		expect(consulta.sigB64).toBe(`firma:${estado.horaNube}
+PAIR_FETCH
+123456
+bm9uY2U=
+h1`);
 	});
 
 	it("pregunta cada 1,5 s, no antes", async () => {

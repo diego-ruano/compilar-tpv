@@ -2285,6 +2285,7 @@ pub fn run() {
             commands::pairing::handy_get_ws_auth,
             commands::pairing::device_get_identity,
             commands::pairing::device_sign_b64,
+            commands::pairing::device_hora_para_firmar,
             commands::pairing::tpv_server_post_json,
             commands::pairing::pair_create,
             commands::pairing::config_upload_initial_setup,
