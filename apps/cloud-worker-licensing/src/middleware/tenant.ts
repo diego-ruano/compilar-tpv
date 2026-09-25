@@ -11,7 +11,7 @@ import type { MiddlewareHandler } from "hono";
 
 import type { Env } from "../env";
 import { getDb } from "../server/db";
-import { SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
+import { normalizarRol, SQL_DEVICE_ACTIVO } from "../lib/deviceAuth";
 import { verifyJwt, verifyDeviceProofOrThrow } from "../server/middleware/auth";
 import { reportarRechazoDeDispositivo } from "../observability/axiom";
 
@@ -53,7 +53,7 @@ export async function rolDelDispositivo(
 		sql: `SELECT role FROM devices WHERE tenant_id=? AND device_id=? AND ${SQL_DEVICE_ACTIVO} LIMIT 1;`,
 		args: [tenantId, deviceId],
 	});
-	return String((r.rows?.[0] as any)?.role || "").toLowerCase();
+	return normalizarRol((r.rows?.[0] as any)?.role);
 }
 
 /**

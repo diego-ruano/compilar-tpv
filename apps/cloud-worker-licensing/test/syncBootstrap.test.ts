@@ -29,17 +29,16 @@ vi.mock("../src/lib/tenantClient", async (original) => ({
 	tenantQuery: async (_c: any, fn: any) => fn(clienteActual),
 }));
 
-vi.mock("../src/lib/deviceAuth", async (original) => ({
-	...(await (original as any)()),
-	isTpvDevice: async () => esTpv,
-}));
-
 // El router monta `tenantAuth` él mismo; aquí se sustituye por el mínimo que necesita el handler.
 vi.mock("../src/middleware/tenant", async (original) => ({
 	...(await (original as any)()),
 	tenantAuth: async (c: any, next: any) => {
 		c.set("tenantId", "t1");
 		c.set("deviceId", "d1");
+		await next();
+	},
+	soloLaMain: () => async (c: any, next: any) => {
+		if (!esTpv) return c.json({ ok: false, code: "external", error: "forbidden_not_tpv" }, 403);
 		await next();
 	},
 }));

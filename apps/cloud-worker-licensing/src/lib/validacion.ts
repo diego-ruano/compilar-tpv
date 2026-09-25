@@ -21,6 +21,7 @@
 
 import { zValidator } from "@hono/zod-validator";
 import type { Context } from "hono";
+import type { MiddlewareHandler } from "hono";
 import { z } from "zod";
 
 import { badRequest } from "../server/utils/response";
@@ -61,6 +62,40 @@ function revisar(
  */
 export function cuerpo<T extends z.ZodType>(schema: T) {
 	return zValidator("json", schema, (r, c) => revisar(r as Resultado, c, () => "validation_error"));
+}
+
+type EntradaJson<T extends z.ZodType> = {
+	in: { json: z.input<T> };
+	out: { json: z.output<T> };
+};
+
+/**
+ * Variante fail-open para los informes y rutas de recuperación de `sync` (ARQ-06).
+ *
+ * `zValidator` rechaza el JSON roto antes de ejecutar el schema y no lee un cuerpo sin cabecera
+ * JSON. Estas rutas históricamente convierten cualquiera de esos casos en `{}` y siguen con sus
+ * defaults: dejar de hacerlo podría atascar una recuperación por un dato auxiliar mal formado.
+ * El resultado sí queda registrado como JSON validado, para que el handler no vuelva a leerlo.
+ */
+export function cuerpoTolerante<T extends z.ZodType>(
+	schema: T,
+): MiddlewareHandler<any, string, EntradaJson<T>> {
+	return async (c, next) => {
+		let valor: unknown = {};
+		try {
+			valor = await c.req.json();
+		} catch {
+			// Fail-open deliberado: cuerpo ausente o JSON roto equivale a no mandar campos.
+		}
+
+		const resultado = await schema.safeParseAsync(valor);
+		if (!resultado.success) {
+			return badRequest(c, "validation_error", resultado.error);
+		}
+
+		c.req.addValidatedData("json", resultado.data as Record<string, unknown>);
+		await next();
+	};
 }
 
 /**

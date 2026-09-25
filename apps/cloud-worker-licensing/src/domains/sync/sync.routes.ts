@@ -10,10 +10,10 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
+import { cuerpoTolerante } from "../../lib/validacion";
 import { reportarSaludDeSync as emitirSalud } from "../../observability/axiom";
-import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 import { getTenantDbRow } from "../../server/db/tenantDb";
 import { provisionTenantDatabase } from "../licensing/licensing.helpers";
@@ -25,12 +25,19 @@ import {
 	sentenciaConteo,
 	sentenciaVolcado,
 } from "./bootstrap.ventana";
+import {
+	changesSchema,
+	historicoSchema,
+	saludSyncSchema,
+	verificarClavesSchema,
+} from "./sync.schemas";
 
 type Ctx = { Bindings: Env; Variables: TenantVars };
 
 export const syncRoutes = new Hono<Ctx>();
 
-syncRoutes.use("*", tenantAuth);
+// ARQ-06: autenticación y rol se resuelven antes de que el validador lea el cuerpo.
+syncRoutes.use("*", tenantAuth, soloLaMain("forbidden_not_tpv", 403));
 
 function rows(rs: any): any[] {
 	const cols: string[] = rs?.columns ?? [];
@@ -54,13 +61,8 @@ function safeJsonParse(s: string): any {
 
 // POST /v1/sync/changes  { since?: number, limit?: number }
 // Devuelve las operaciones con Seq > since en orden ascendente.
-syncRoutes.post("/changes", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
-	const body = await c.req.json().catch(() => ({}));
-	const since = Math.max(0, Number((body as any)?.since ?? 0) || 0);
-	const limit = Math.min(Math.max(1, Number((body as any)?.limit ?? 500) || 500), 1000);
+syncRoutes.post("/changes", cuerpoTolerante(changesSchema), async (c) => {
+	const { since, limit } = c.req.valid("json");
 
 	const snapshot = await tenantQuery(c, async (db) => {
 		// Items y high-water en la misma transacción de lectura. La recuperación sólo desbloquea
@@ -145,9 +147,6 @@ syncRoutes.post("/changes", async (c) => {
 const BOOTSTRAP_MAX_FILAS = 300_000;
 
 syncRoutes.post("/bootstrap", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
 	const clientNow = c.req.header("x-client-now");
 
 	const resultado = await tenantQuery(c, async (db) => {
@@ -278,24 +277,11 @@ syncRoutes.post("/bootstrap", async (c) => {
 // Se re-descarga la ventana que ya trajo la fase 1. Es coste acotado y conocido, y a cambio
 // desaparece toda la familia de casos especiales de "empezar por donde lo dejó la otra fase".
 
-/** Tope de filas por página. Lo impone el servidor: el cliente pide, no manda. */
-const HISTORICO_MAX_FILAS = 2_000;
-const HISTORICO_FILAS_DEFECTO = 1_000;
-
 /** Alias del `rowid` en el `SELECT`. Con dos guiones bajos no colisiona con ninguna columna real. */
 const COL_CURSOR = "__rowid";
 
-syncRoutes.post("/historico", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
-	const body = await c.req.json().catch(() => ({}));
-	const tabla = String((body as any)?.tabla ?? "");
-	const cursor = Math.max(0, Number((body as any)?.cursor ?? 0) || 0);
-	const limite = Math.min(
-		Math.max(1, Number((body as any)?.limite ?? HISTORICO_FILAS_DEFECTO) || HISTORICO_FILAS_DEFECTO),
-		HISTORICO_MAX_FILAS,
-	);
+syncRoutes.post("/historico", cuerpoTolerante(historicoSchema), async (c) => {
+	const { tabla, cursor, limite } = c.req.valid("json");
 
 	// Lista blanca cerrada, no saneado: el nombre de tabla se interpola en el SQL (no se puede
 	// enlazar con `?`), y el conjunto de tablas que la fase 2 rellena está decidido de antemano.
@@ -350,9 +336,6 @@ syncRoutes.post("/historico", async (c) => {
 // es explícita desde la UI y jamás se usa como fallback de un timeout, un 500 o una migración rota.
 syncRoutes.post("/initialize-empty", async (c) => {
 	const tenantId = c.get("tenantId");
-	const okTpv = await isTpvDevice(c.env, tenantId, c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
 	const central = getDb(c.env);
 	const existing = await getTenantDbRow(central, tenantId);
 	if (existing?.turso_url && existing?.turso_auth_token_enc && existing?.turso_db_name) {
@@ -390,9 +373,6 @@ syncRoutes.post("/initialize-empty", async (c) => {
  * está vendiendo.
  */
 syncRoutes.post("/verificar", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
 	const clientNow = c.req.header("x-client-now");
 
 	const resultado = await tenantQuery(c, async (db) => {
@@ -584,32 +564,11 @@ export async function leerClaves(
 	return { tablas: salida };
 }
 
-syncRoutes.post("/verificar-claves", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+syncRoutes.post("/verificar-claves", cuerpoTolerante(verificarClavesSchema), async (c) => {
+	const { tablas } = c.req.valid("json");
+	if (!tablas.length) return c.json({ tablas: [] });
 
-	const cuerpo = await c.req.json().catch(() => ({}) as any);
-	const pedidas: { nombre: string; claves: string[] }[] = Array.isArray(cuerpo?.tablas)
-		? cuerpo.tablas.slice(0, 60)
-		: [];
-
-	// Nombre e identificadores se interpolan en el SQL (no se pueden enlazar con `?`), así que se
-	// filtran igual que en el bootstrap: sólo lo que puede ser un identificador nuestro.
-	const aceptable = (n: unknown) =>
-		typeof n === "string" && /^[A-Za-z0-9_]{1,64}$/.test(n) && !n.startsWith("_");
-
-	const validas = pedidas.filter(
-		(t) =>
-			aceptable(t?.nombre) &&
-			esTablaDeNegocio(t.nombre) &&
-			Array.isArray(t?.claves) &&
-			t.claves.length > 0 &&
-			t.claves.length <= 4 &&
-			t.claves.every(aceptable),
-	);
-	if (!validas.length) return c.json({ tablas: [] });
-
-	const resultado = await tenantQuery(c, (db) => leerClaves(db, validas, TOPE_CLAVES));
+	const resultado = await tenantQuery(c, (db) => leerClaves(db, tablas, TOPE_CLAVES));
 
 	return c.json(resultado);
 });
@@ -625,13 +584,8 @@ syncRoutes.post("/verificar-claves", async (c) => {
  * Es **best-effort por diseño**: si esto falla, el TPV sigue exactamente igual. Nada de lo que
  * rodea a la observabilidad puede afectar a vender ni a replicar.
  */
-syncRoutes.post("/salud", async (c) => {
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
-
-	const cuerpo = await c.req.json().catch(() => ({}) as any);
-	const descuadres = Array.isArray(cuerpo?.descuadres) ? cuerpo.descuadres.slice(0, 50) : [];
-
+syncRoutes.post("/salud", cuerpoTolerante(saludSyncSchema), async (c) => {
+	const datos = c.req.valid("json");
 	// `waitUntil`: sin él, el runtime cancela la entrega en cuanto se responde el `{ok:true}`.
 	c.executionCtx.waitUntil(
 		emitirSalud(c.env, {
@@ -639,15 +593,10 @@ syncRoutes.post("/salud", async (c) => {
 			device_id: c.get("deviceId"),
 			// Se recorta lo que llega: es un informe, no un canal de datos. Sin esto, un bug del
 			// cliente podría mandar filas enteras de negocio a un dataset de observabilidad.
-			descuadres: descuadres.map((d: any) => ({
-				tabla: String(d?.tabla ?? "").slice(0, 64),
-				faltan: Number(d?.faltan ?? 0),
-				sobran: Number(d?.sobran ?? 0),
-				distintas: Number(d?.distintas ?? 0),
-			})),
-			apartadas: Number(cuerpo?.apartadas ?? 0),
-			reparadas: Number(cuerpo?.reparadas ?? 0),
-			ventana_omitida: Boolean(cuerpo?.ventana_omitida),
+			descuadres: datos.descuadres,
+			apartadas: datos.apartadas,
+			reparadas: datos.reparadas,
+			ventana_omitida: datos.ventana_omitida,
 		}),
 	);
 

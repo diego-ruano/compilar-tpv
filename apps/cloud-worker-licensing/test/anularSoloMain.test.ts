@@ -71,8 +71,10 @@ describe("anular un cobro desde una Handy", () => {
 
 describe("anular desde la Main", () => {
 	it("pasa", async () => {
-		rolEnLaBd = "tpv";
-		expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto())).toBeNull();
+		for (const rol of ["tpv", " TPV "]) {
+			rolEnLaBd = rol;
+			expect(await ejecutarVeto(soloLaMainEscribeCaja, contexto()), rol).toBeNull();
+		}
 	});
 });
 
