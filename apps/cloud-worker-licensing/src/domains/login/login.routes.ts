@@ -3,9 +3,8 @@
 import { Hono } from "hono";
 
 import type { Env } from "../../env";
-import { isTpvDevice } from "../../lib/deviceAuth";
 import { tenantQuery } from "../../lib/tenantClient";
-import { tenantAuth, type TenantVars } from "../../middleware/tenant";
+import { soloLaMain, tenantAuth, type TenantVars } from "../../middleware/tenant";
 import { getDb } from "../../server/db";
 
 import * as cmd from "./login.commands";
@@ -108,42 +107,37 @@ loginRoutes.post("/turno-partido", cuerpo(S.setTurnoPartidoSchema), async (c) =>
 // Subida del setup inicial Main -> nube. Escritura DIRECTA en Turso (sin hub), porque la Main
 // no está conectada por WebSocket; el hub la rechazaría con `main_offline`. Deja la nube con
 // las credenciales reales del admin para que el login de la Handy funcione.
-loginRoutes.post("/sync-initial-setup", cuerpo(S.syncInitialSetupSchema), async (c) => {
-	const datos = c.req.valid("json");
+loginRoutes.post(
+	"/sync-initial-setup",
+	soloLaMain("forbidden_not_tpv", 403),
+	cuerpo(S.syncInitialSetupSchema),
+	async (c) => {
+		const datos = c.req.valid("json");
 
-	const okTpv = await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"));
-	if (!okTpv) return c.json({ error: "forbidden_not_tpv" }, 403);
+		const passwordHash = await hashPin(datos.pin);
 
-	const passwordHash = await hashPin(datos.pin);
+		await tenantQuery(c, (db) =>
+			q.applyInitialSetupDirect(db, {
+				idUsuario: datos.id_usuario,
+				email: datos.email,
+				passwordHash,
+			}),
+		);
 
-	await tenantQuery(c, (db) =>
-		q.applyInitialSetupDirect(db, {
-			idUsuario: datos.id_usuario,
-			email: datos.email,
-			passwordHash,
-		}),
-	);
-
-	return c.json({ ok: true });
-});
+		return c.json({ ok: true });
+	},
+);
 
 // ── Recuperar el PIN de un administrador (LOGIN-07) ─────────────────────────────────────────
 // Sólo desde la Main: el PIN que se recupera vive en su base local, y que la petición vaya firmada
 // con la clave de ESE equipo es la mitad de la prueba (la otra mitad es el buzón). La lógica y sus
 // porqués están en `recuperarPin.ts`.
 
-async function soloLaMain(c: any): Promise<Response | null> {
-	if (await isTpvDevice(c.env, c.get("tenantId"), c.get("deviceId"))) return null;
-	return c.json(
-		{
-			ok: false,
-			code: "validation",
-			error: "recuperacion_solo_en_main",
-			message: "Esto se hace desde el TPV principal.",
-		},
-		403,
-	);
-}
+// Es el MIDDLEWARE compartido y no una comprobacion dentro del handler: tiene que decidir antes de
+// que `cuerpo(...)` --que tambien es middleware-- lea y valide el cuerpo, o una Handy se llevaria un
+// 400 describiendole el schema en vez de su 403 (ARQ-06). El `message` ya no se escribe aqui: sale
+// de `MENSAJES` por `completarErrores`, que es donde viven las frases.
+const soloLaMainRecupera = soloLaMain("recuperacion_solo_en_main", 403);
 
 /** Para los avisos por correo, que no pueden retener la respuesta. */
 function diferirEn(c: any): (p: Promise<unknown>) => void {
@@ -157,54 +151,58 @@ function diferirEn(c: any): (p: Promise<unknown>) => void {
 	};
 }
 
-loginRoutes.post("/recuperar-pin/solicitar", cuerpo(S.solicitarCodigoPinSchema), async (c) => {
-	const datos = c.req.valid("json");
+loginRoutes.post(
+	"/recuperar-pin/solicitar",
+	soloLaMainRecupera,
+	cuerpo(S.solicitarCodigoPinSchema),
+	async (c) => {
+		const datos = c.req.valid("json");
 
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
+		const db = getDb(c.env);
 
-	const db = getDb(c.env);
-
-	const r = await solicitarCodigoPin(db, c.env, {
-		tenantId: c.get("tenantId"),
-		deviceId: c.get("deviceId"),
-		licHash: c.get("licHash"),
-		idUsuario: datos.id_usuario,
-		ahora: Date.now(),
-	});
-	return c.json(r.body, r.status);
-});
-
-loginRoutes.post("/recuperar-pin/verificar", cuerpo(S.verificarCodigoPinSchema), async (c) => {
-	const datos = c.req.valid("json");
-
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
-
-	const db = getDb(c.env);
-
-	const r = await verificarCodigoPin(
-		db,
-		c.env,
-		{
+		const r = await solicitarCodigoPin(db, c.env, {
 			tenantId: c.get("tenantId"),
 			deviceId: c.get("deviceId"),
 			licHash: c.get("licHash"),
 			idUsuario: datos.id_usuario,
-			codigo: datos.codigo,
 			ahora: Date.now(),
-		},
-		(promesa) => {
-			// Sin `executionCtx` (tests) lanza: perder el aviso no puede tumbar la respuesta.
-			try {
-				c.executionCtx.waitUntil(promesa);
-			} catch {
-				void promesa;
-			}
-		},
-	);
-	return c.json(r.body, r.status);
-});
+		});
+		return c.json(r.body, r.status);
+	},
+);
+
+loginRoutes.post(
+	"/recuperar-pin/verificar",
+	soloLaMainRecupera,
+	cuerpo(S.verificarCodigoPinSchema),
+	async (c) => {
+		const datos = c.req.valid("json");
+
+		const db = getDb(c.env);
+
+		const r = await verificarCodigoPin(
+			db,
+			c.env,
+			{
+				tenantId: c.get("tenantId"),
+				deviceId: c.get("deviceId"),
+				licHash: c.get("licHash"),
+				idUsuario: datos.id_usuario,
+				codigo: datos.codigo,
+				ahora: Date.now(),
+			},
+			(promesa) => {
+				// Sin `executionCtx` (tests) lanza: perder el aviso no puede tumbar la respuesta.
+				try {
+					c.executionCtx.waitUntil(promesa);
+				} catch {
+					void promesa;
+				}
+			},
+		);
+		return c.json(r.body, r.status);
+	},
+);
 
 // ── Correo de recuperación (LOGIN-08) ───────────────────────────────────────────────────────
 // A dónde llegan los códigos de recuperar el PIN. Que quien lo cambia sea administrador lo exige la
@@ -220,49 +218,47 @@ function contextoCorreo(c: any) {
 	};
 }
 
-loginRoutes.post("/correo-recuperacion/estado", async (c) => {
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
-
+loginRoutes.post("/correo-recuperacion/estado", soloLaMainRecupera, async (c) => {
 	const db = getDb(c.env);
 
 	const r = await estadoCorreoRecuperacion(db, contextoCorreo(c));
 	return c.json(r.body, r.status);
 });
 
-loginRoutes.post("/correo-recuperacion/solicitar", cuerpo(S.solicitarCambioCorreoSchema), async (c) => {
-	const datos = c.req.valid("json");
+loginRoutes.post(
+	"/correo-recuperacion/solicitar",
+	soloLaMainRecupera,
+	cuerpo(S.solicitarCambioCorreoSchema),
+	async (c) => {
+		const datos = c.req.valid("json");
 
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
+		const db = getDb(c.env);
 
-	const db = getDb(c.env);
+		const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: datos.correo });
+		return c.json(r.body, r.status);
+	},
+);
 
-	const r = await solicitarCambioCorreo(db, c.env, { ...contextoCorreo(c), correo: datos.correo });
-	return c.json(r.body, r.status);
-});
+loginRoutes.post(
+	"/correo-recuperacion/confirmar",
+	soloLaMainRecupera,
+	cuerpo(S.confirmarCambioCorreoSchema),
+	async (c) => {
+		const datos = c.req.valid("json");
 
-loginRoutes.post("/correo-recuperacion/confirmar", cuerpo(S.confirmarCambioCorreoSchema), async (c) => {
-	const datos = c.req.valid("json");
+		const db = getDb(c.env);
 
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
+		const r = await confirmarCambioCorreo(
+			db,
+			c.env,
+			{ ...contextoCorreo(c), codigo: datos.codigo },
+			diferirEn(c),
+		);
+		return c.json(r.body, r.status);
+	},
+);
 
-	const db = getDb(c.env);
-
-	const r = await confirmarCambioCorreo(
-		db,
-		c.env,
-		{ ...contextoCorreo(c), codigo: datos.codigo },
-		diferirEn(c),
-	);
-	return c.json(r.body, r.status);
-});
-
-loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", async (c) => {
-	const noMain = await soloLaMain(c);
-	if (noMain) return noMain;
-
+loginRoutes.post("/correo-recuperacion/usar-el-de-la-compra", soloLaMainRecupera, async (c) => {
 	const db = getDb(c.env);
 
 	const r = await usarCorreoDeLaCompra(db, c.env, contextoCorreo(c), diferirEn(c));
