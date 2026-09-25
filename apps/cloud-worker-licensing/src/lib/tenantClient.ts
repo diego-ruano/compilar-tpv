@@ -32,6 +32,7 @@ import type { Env } from "../env";
 import { getDb } from "../server/db";
 import { resolveTenantDbCredentials, ensureTenantMigrated } from "../server/db/tenantDb";
 import { parseClientNow, rewriteNowInSql } from "../durableObjects/tenantHub.tiempo";
+import { isTursoAuthError } from "./tursoAuthError";
 
 type Cached = { client: Client; expiresAtMs: number };
 
@@ -66,11 +67,6 @@ async function getTenantClient(env: Env, tenantId: string): Promise<Client> {
 	await ensureTenantMigrated(client, tenantId);
 
 	return client;
-}
-
-function isAuthError(e: unknown): boolean {
-	const m = String((e as any)?.message ?? e ?? "").toLowerCase();
-	return m.includes("401") || m.includes("unauthorized");
 }
 
 /**
@@ -161,7 +157,7 @@ export async function tenantQuery<T>(
 		const db = await getTenantClient(env, tenantId);
 		return await fn(conLaHora(db));
 	} catch (e) {
-		if (!isAuthError(e)) throw e;
+		if (!isTursoAuthError(e)) throw e;
 		cache.delete(tenantId);
 		const fresh = await build(env, tenantId, true);
 		// Si el 401 vino del guard de migración, su entrada ya se invalidó al fallar: hay que

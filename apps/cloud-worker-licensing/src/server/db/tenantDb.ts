@@ -15,6 +15,7 @@
 
 import type { Client } from "@libsql/client/web";
 
+import { HubError } from "../../lib/errorHttp";
 import { b64ToBytes, bytesToB64 } from "../utils/base64";
 import { aesGcmDecryptFromB64 } from "../utils/crypto";
 import { runTenantMigrations } from "../tenantMigrations";
@@ -212,7 +213,7 @@ export async function resolveTenantDbCredentials(
 	const row = await getTenantDbRow(dbCentral, tenantId);
 
 	if (!row?.turso_db_name || !row?.turso_url || !row?.turso_auth_token_enc) {
-		throw new Error("tenant_db_not_provisioned");
+		throw new HubError("tenant_db_not_provisioned", 404);
 	}
 
 	const dbName = String(row.turso_db_name);
@@ -289,7 +290,9 @@ export async function resolveTenantDbCredentials(
 			);
 		}
 		const updated = await getTenantDbRow(dbCentral, tenantId);
-		if (!updated?.turso_auth_token_enc) throw new Error("tenant_db_not_provisioned");
+		if (!updated?.turso_auth_token_enc) {
+			throw new HubError("tenant_db_not_provisioned", 404);
+		}
 		const token = await aesGcmDecryptFromB64(
 			env.LICENSE_STORE_KEY,
 			String(updated.turso_auth_token_enc),

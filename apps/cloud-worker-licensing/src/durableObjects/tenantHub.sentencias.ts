@@ -107,6 +107,22 @@ export function evalValueStep(sql: string, args: SqlScalar[]): SqlScalar {
 // ¿El error de un batch es una violación de UNIQUE(Op_Id) en Applied_Operations?
 // Es la señal de que la op ya estaba aplicada (reintento idempotente): el gate sin
 // ON CONFLICT viola la constraint y hace rollback de TODO el batch automáticamente.
+//
+// ⚠️ **Esto NO es un `includes` pendiente de arreglar: es el precio del diseño** (ARQ-07). Se
+// escribe porque la forma de romperlo es que a alguien le parezca obvio darle un código propio.
+//
+//   · **El gate no lleva `ON CONFLICT` a propósito.** Que la violación reviente es lo que hace el
+//     `ROLLBACK` del batch entero, y en una sola operación atómica. Sacándolo fuera del batch con
+//     `ON CONFLICT(Op_Id) DO NOTHING` + `rowsAffected`, un batch que fallara DESPUÉS dejaría la fila
+//     del gate puesta: el siguiente reintento recibiría «ya aplicada» y la operación se perdería
+//     para siempre. Eso es peor que lo que arreglaría.
+//   · **El texto lo pone SQLite, no libsql.** La regla de §9 («los mensajes de libsql cambian de
+//     redacción entre versiones») apunta a la capa de transporte, no a esta constante del motor.
+//   · **Un falso NEGATIVO no corrompe**: convierte un reintento idempotente en una operación
+//     apartada, que es ruidosa (cuarentena + Sentry). El falso POSITIVO sí sería grave --dar por
+//     aplicada una operación que no lo está-- y por eso lo único que hay que vigilar es que ninguna
+//     tabla de NEGOCIO pueda producir esta misma señal: lo hace `test/opIdSchemaGuard.test.ts`,
+//     que recorre el esquema y falla si aparece un UNIQUE sobre una columna llamada `Op_Id`.
 export function isUniqueOpIdViolation(e: any): boolean {
 	const m = String(e?.message ?? e ?? "").toLowerCase();
 	return m.includes("unique constraint failed") && m.includes("op_id");

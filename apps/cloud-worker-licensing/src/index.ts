@@ -25,6 +25,7 @@ import { sentryOptions } from "./observability/sentry";
 import { getDb } from "./server/db";
 import { comprobarSalud } from "./server/salud";
 import { cargarDevice, estaRevocado } from "./lib/deviceAuth";
+import { cuerpoDeErrorConStatus } from "./lib/errorHttp";
 import {
 	json,
 	unauthorized,
@@ -225,31 +226,10 @@ app.onError((err, c) => {
 	}
 	const status = (err as any)?.status;
 	if (typeof status === "number") {
-		return c.json(
-			{ error: (err as any)?.code || err.message || "error" },
-			status as any,
-		);
+		// ARQ-07: el error ya llega clasificado; no se vuelve a deducir mirando su prosa.
+		return c.json(cuerpoDeErrorConStatus(err), status as any);
 	}
 	const message = String((err as any)?.message || err);
-	// Fallos de infraestructura por los que la pantalla de recuperación ofrece una acción distinta.
-	// Se clasifican aquí, en la frontera HTTP, para no duplicar catches en cada ruta que usa Turso.
-	if (message.includes("tenant_db_not_provisioned")) {
-		return c.json(
-			{ ok: false, code: "tenant_db_not_provisioned", error: "tenant_db_not_provisioned" },
-			404,
-		);
-	}
-	if (message.includes("migration_altered")) {
-		return c.json(
-			{
-				ok: false,
-				code: "tenant_migration_altered",
-				error: "migration_altered",
-				details: { message },
-			},
-			500,
-		);
-	}
 	return serverError(c.req.raw, "internal_error", {
 		message,
 	});

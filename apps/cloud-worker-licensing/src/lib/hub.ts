@@ -8,7 +8,10 @@
 // rechaza la escritura con `main_offline` si no hay una Main conectada.
 
 import type { Env } from "../env";
+import { HubError } from "./errorHttp";
 import { signInternalWorkerRequest } from "./internalAuth";
+
+export { HubError } from "./errorHttp";
 
 export type ApplyCommand = {
 	type: "tenantDb.exec" | "tenantDb.transaction";
@@ -25,13 +28,6 @@ export type ApplyParams = {
 	/** Hora local del dispositivo emisor (`YYYY-MM-DD HH:MM:SS`) para resolver `datetime('now')`. */
 	clientNow?: string;
 };
-
-/** Error con código y status HTTP, para que el router lo traduzca a JSON. */
-export class HubError extends Error {
-	constructor(public code: string, public status: number) {
-		super(code);
-	}
-}
 
 /**
  * Tablas cuya escritura es EXCLUSIVA de la Main (FISCAL-01). No es una regla de producto como

@@ -24,6 +24,7 @@
 
 import type { Client } from "@libsql/client";
 
+import { HubError } from "../lib/errorHttp";
 import m0001 from "../../../../packages/database/migrations/0001_inicial.sql";
 
 const MIGRATIONS: { name: string; sql: string }[] = [
@@ -87,10 +88,10 @@ export async function runTenantMigrations(client: Client): Promise<void> {
 		const prev = applied.get(mig.name);
 		if (prev !== undefined) {
 			if (prev !== hash) {
-				throw new Error(
+				const message =
 					`migration_altered: '${mig.name}' fue modificada tras aplicarse (hash distinto). ` +
-						`Nunca edites una migración ya publicada: crea una nueva.`,
-				);
+					`Nunca edites una migración ya publicada: crea una nueva.`;
+				throw new HubError("migration_altered", 500, { message });
 			}
 			continue;
 		}

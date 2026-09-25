@@ -110,12 +110,6 @@ export function esFalloPasajero(error: unknown): boolean {
  * rota. Capturarlo por el camino convierte un token caducado en cincuenta operaciones sanas
  * apartadas (REV-04).
  */
-export function isTursoAuthError(err: unknown): boolean {
-	const msg = String((err as any)?.message ?? err ?? "").toLowerCase();
-
-	return (
-		msg.includes("server returned http status 401") ||
-		msg.includes("http status 401") ||
-		msg.includes("unauthorized")
-	);
-}
+// ARQ-07: una sola clasificación para REST y Durable Object; se reexporta para no dispersar
+// imports de la lógica propia del DO.
+export { isTursoAuthError } from "../lib/tursoAuthError";

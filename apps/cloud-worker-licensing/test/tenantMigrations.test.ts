@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 
 import { clienteSobre } from "./helpers/clienteSql";
 import { enElHub } from "./helpers/hub";
+import { HubError } from "../src/lib/errorHttp";
 import { runTenantMigrations } from "../src/server/tenantMigrations";
 
 /**
@@ -43,6 +44,31 @@ function clienteConMigraciones(sql: any) {
 }
 
 describe("migraciones del tenant", () => {
+	it("clasifica estructuradamente una migración publicada que fue modificada", async () => {
+		await enElHub("migracion-alterada", async (hub: any) => {
+			const sql = hub.state.storage.sql;
+			sql.exec(
+				"CREATE TABLE _migrations (name TEXT PRIMARY KEY, hash TEXT NOT NULL, applied_at INTEGER NOT NULL);",
+			);
+			sql.exec(
+				"INSERT INTO _migrations (name, hash, applied_at) VALUES ('0001_inicial.sql', 'hash-incorrecto', 1);",
+			);
+
+			let capturado: unknown;
+			try {
+				await runTenantMigrations(clienteConMigraciones(sql));
+			} catch (error) {
+				capturado = error;
+			}
+			expect(capturado).toBeInstanceOf(HubError);
+			expect(capturado).toMatchObject({
+				code: "migration_altered",
+				status: 500,
+				details: { message: expect.stringContaining("0001_inicial.sql") },
+			});
+		});
+	});
+
 	it("un tenant recién aprovisionado ya tiene lo que lee el catch-up", async () => {
 		await enElHub("migraciones-tenant-nuevo", async (hub: any) => {
 			const sql = hub.state.storage.sql;
