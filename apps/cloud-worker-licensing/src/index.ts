@@ -35,7 +35,8 @@ import {
 
 import { avisarDeCaducidades } from "./domains/licensing/avisosDeCaducidad";
 import { purgarBaseCentral } from "./server/purga";
-import { latir } from "./observability/latido";
+import { copiarBaseCentral } from "./server/copiaBaseCentral";
+import { latir, latirA } from "./observability/latido";
 import { pairingRoutes } from "./domains/pairing/pairing.routes";
 import { clientesRoutes } from "./domains/clientes/clientes.routes";
 import { configuracionRoutes } from "./domains/configuracion/configuracion.routes";
@@ -237,7 +238,8 @@ app.onError((err, c) => {
 
 /**
  * Lo que este worker hace por su cuenta, una vez al día: avisar de las licencias que caducan
- * (REV-13) y recoger la basura de la base central (`server/purga.ts`).
+ * (REV-13), recoger la basura de la base central (`server/purga.ts`) y copiarla a R2
+ * (`server/copiaBaseCentral.ts`, PROD-02).
  *
  * Va aquí y no en una ruta porque nadie lo va a llamar: el cliente no sabe que su licencia se
  * acaba hasta que deja de funcionar. El cron está en `wrangler.json` (`triggers.crons`), y los dos
@@ -267,7 +269,21 @@ async function programado(env: Env): Promise<void> {
 		console.error("[cron] purga falló:", (err as any)?.message || err);
 	}
 
-	// El latido va AQUÍ, fuera de los dos `try` y sin condicionarlo a que hayan ido bien: responde a
+	// PROD-02 · La copia va DESPUÉS de la purga, para no guardar lo que se acaba de tirar. Su latido
+	// es el único que se condiciona al éxito, y es lo contrario de lo que se hace con el de abajo por
+	// la misma razón: cada latido responde a una pregunta, y la de éste es «¿hay una copia de hoy?».
+	try {
+		const r = await copiarBaseCentral(getDb(env), env.COPIAS);
+		console.log(
+			`[cron] copia de la base central: ${r.clave}, ${r.tablas} tablas, ${r.filas} filas, ` +
+				`${r.bytes} bytes`,
+		);
+		await latirA(env.BETTERSTACK_HEARTBEAT_COPIAS_URL, "el latido de la copia");
+	} catch (err) {
+		console.error("[cron] copia de la base central falló:", (err as any)?.message || err);
+	}
+
+	// El latido va AQUÍ, fuera de los `try` y sin condicionarlo a que hayan ido bien: responde a
 	// «¿se está ejecutando el cron?», no a «¿funcionó todo?». Las dos tareas son idempotentes y se
 	// recuperan solas al día siguiente, así que atar el latido a su éxito convertiría una caída
 	// pasajera de Turso en un aviso de «cron muerto» — y una falsa alarma enseña a ignorar la buena.

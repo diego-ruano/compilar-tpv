@@ -73,6 +73,11 @@ export interface Env {
 	// (PUT/DELETE) van firmadas (JWT + device-proof) y derivan el token.
 	IMAGES: R2Bucket;
 
+	// PROD-02 · Bucket PRIVADO de las copias diarias de la base central (`server/copiaBaseCentral.ts`).
+	// No puede ser el de imágenes: aquél es público por `r2.dev`, y esto lleva correos de clientes y
+	// las DEK cifradas. Cuánto duran las copias lo fija su regla de ciclo de vida, en Cloudflare.
+	COPIAS: R2Bucket;
+
 	// Cloudflare Email Service: binding de envío de correo (send_email en wrangler.json).
 	// No lleva claves: el binding autentica solo. El dominio del remitente debe estar dado de
 	// alta en Email Sending (SPF+DKIM) — ver `wrangler email sending enable <dominio>`.
@@ -117,4 +122,9 @@ export interface Env {
 	// esta URL puede silenciar la alarma. Configura con:
 	//   wrangler secret put BETTERSTACK_HEARTBEAT_URL
 	BETTERSTACK_HEARTBEAT_URL?: string;
+	// PROD-02 · El heartbeat de la copia de la base central. Distinto del anterior a propósito: aquél
+	// late aunque las tareas fallen («¿se ejecuta el cron?») y éste SÓLO si la copia se subió bien
+	// («¿hay una copia de hoy?»). Con uno solo, el cron seguiría en verde con las copias rotas.
+	//   wrangler secret put BETTERSTACK_HEARTBEAT_COPIAS_URL
+	BETTERSTACK_HEARTBEAT_COPIAS_URL?: string;
 }

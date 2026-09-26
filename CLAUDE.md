@@ -316,6 +316,31 @@ tpv-completa/                  # raíz del monorepo (git init aquí)
   - **Y no propaga nunca.** Que la monitorización esté caída no puede impedir avisar a un cliente de
     que le vence la licencia.
 
+- **La base central se copia cada día a R2, además del PITR de Turso (PROD-02).** Es la base que no
+  se puede perder: si el worker contesta `license_not_found`, el TPV **borra su licencia local**
+  (`tpv-infra-licensing::clasificar_error`), así que perder `licenses` o `devices` desactiva a todos
+  los equipos en su siguiente comprobación. El PITR de Turso llega a 24 h en el plan Free, no
+  recupera una base borrada y es el mismo proveedor; la copia del cron (`server/copiaBaseCentral.ts`)
+  cubre esos tres casos. Reglas al tocarlo:
+  - **Sólo lee**, dentro de **una** transacción de lectura (las tablas se apuntan entre sí), y sale
+    en el formato de `sqlite3 .dump`, para restaurarla sin nuestro código.
+  - **El bucket es `tpv-copias-control`, privado.** Nunca `tpv-images`: es público por `r2.dev`, y
+    esto lleva correos de clientes y las DEK cifradas.
+  - **Su latido (`BETTERSTACK_HEARTBEAT_COPIAS_URL`) sólo suena si la copia se subió**, al revés que
+    el del cron. Cada uno responde a una pregunta: «¿se ejecuta el cron?» y «¿hay copia de hoy?».
+  - **La retención la pone el ciclo de vida del bucket (35 días), y tiene que quedar por debajo de
+    los 90 de `RETENCION_ENVIOS_MS`**, o los correos que la purga olvida seguirían en las copias.
+  - **Sin `LICENSE_STORE_KEY` la copia no devuelve las DEK ni los tokens de Turso**, que van
+    cifrados con ella. Un secreto de wrangler no se puede volver a leer: tiene que estar guardado
+    fuera de Cloudflare, o esto es una copia a medias.
+  - ⚠️ **Restaurar cambia de base**, porque ni el PITR ni `--from-dump` escriben sobre una que ya
+    existe: `turso db create <nueva> --from-db tpvcontrol --timestamp <RFC3339>` (PITR) o
+    `--from-dump copia.sql` (la de R2, descomprimida), un token nuevo para ella
+    (`TURSO_AUTH_TOKEN`), su URL en `TURSO_DATABASE_URL` de `wrangler.json` y desplegar. Y hacerlo
+    **deprisa**: mientras el worker apunte a una base sin esas filas, cada TPV que compruebe su
+    licencia la borra. Una restauración a un punto anterior pierde las licencias activadas
+    después, y ésas hay que rehacerlas a mano.
+
 ---
 
 ## 5. Decisiones tomadas (acordadas con el responsable)

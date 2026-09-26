@@ -60,6 +60,10 @@
 			"bucket_name": "tpv-images",
 			"binding": "tpv_images",
 			"remote": true
+		},
+		{
+			"binding": "COPIAS",
+			"bucket_name": "tpv-copias-control"
 		}
 	],
 	"triggers": {

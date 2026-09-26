@@ -1,6 +1,6 @@
 // src/observability/latido.ts
 //
-// El latido del cron diario (PROD-01).
+// Los latidos del cron diario (PROD-01, PROD-02).
 //
 // Un monitor HTTP no puede ver esto: el worker contesta 200 igual de bien aunque su `scheduled`
 // lleve meses sin dispararse —un despliegue que se dejó el trigger por el camino, o Cloudflare que
@@ -8,13 +8,23 @@
 // licencia; y eso no lo echa de menos nadie hasta que un cliente se queda sin programa sin haber
 // recibido ninguno. Un latido invierte la pregunta: la monitorización avisa cuando DEJA de llegar.
 //
-// La URL es un SECRETO (`wrangler secret put BETTERSTACK_HEARTBEAT_URL`) y no una variable de
-// `wrangler.json`: ese fichero está en git, y quien tenga esta URL puede silenciar la alarma.
+// Hay dos, y responden a preguntas distintas: `latir` a «¿se ejecuta el cron?» y el de la copia de
+// la base central a «¿hay una copia de hoy?» (ver `index.ts::programado`).
+//
+// Las URL son SECRETOS (`wrangler secret put …`) y no variables de `wrangler.json`: ese fichero está
+// en git, y quien tenga una de estas URL puede silenciar su alarma.
 
 const TIMEOUT_MS = 10_000;
 
 export async function latir(env: { BETTERSTACK_HEARTBEAT_URL?: string }): Promise<void> {
-	const url = String(env.BETTERSTACK_HEARTBEAT_URL || "").trim();
+	await latirA(env.BETTERSTACK_HEARTBEAT_URL, "el latido");
+}
+
+/**
+ * Pulsa la URL de un heartbeat. `que` sólo sirve para que el log diga cuál de los dos falló.
+ */
+export async function latirA(urlConfigurada: string | undefined, que: string): Promise<void> {
+	const url = String(urlConfigurada || "").trim();
 	// Sin secreto configurado, no-op silencioso: esto se puede desplegar antes de crear el
 	// heartbeat, igual que pasa con el DSN de Sentry.
 	if (!url) return;
@@ -28,12 +38,12 @@ export async function latir(env: { BETTERSTACK_HEARTBEAT_URL?: string }): Promis
 			// adivinarla. Esta línea la convierte en un vistazo al log.
 			//
 			// No se registra la URL: es el secreto con el que se silencia la alarma.
-			console.error(`[cron] el latido salió con ${res.status}: ¿es esa la URL del heartbeat?`);
+			console.error(`[cron] ${que} salió con ${res.status}: ¿es esa la URL del heartbeat?`);
 		}
 	} catch (err) {
-		// No propaga NUNCA, y es la misma regla que ya siguen las dos tareas del cron: que la
+		// No propaga NUNCA, y es la misma regla que ya siguen las tareas del cron: que la
 		// monitorización esté caída no puede impedir avisar a un cliente de que le vence la
 		// licencia. El latido es lo accesorio de este cron, no su trabajo.
-		console.error("[cron] el latido no salió:", (err as any)?.message || err);
+		console.error(`[cron] ${que} no salió:`, (err as any)?.message || err);
 	}
 }
