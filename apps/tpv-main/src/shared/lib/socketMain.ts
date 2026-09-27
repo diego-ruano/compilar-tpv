@@ -26,7 +26,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import type { AplicacionSync, LicenseLocalState, OutboxFallo } from "@tpv/contracts";
+import type { AplicacionSync, InterruptorApagado, LicenseLocalState, OutboxFallo } from "@tpv/contracts";
 import { toAppError } from "@tpv/client";
 
 import { useEstadoSync, type PreferenciaSync } from "../stores/useEstadoSync";
@@ -589,7 +589,11 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			console.warn("sync_outbox_pending falló:", e);
 		}
 
-		if (atraso > UMBRAL_VOLCADO) {
+		if (atraso > UMBRAL_VOLCADO && (await volcadoApagado())) {
+			// PROD-06: soporte ha apagado el volcado desde la nube. Se sube por el camino en vivo,
+			// que es más lento pero es el de siempre: no se para nada, sólo se cambia de vía.
+			console.warn("[outbox] volcado apagado desde la nube: se sube de una en una");
+		} else if (atraso > UMBRAL_VOLCADO) {
 			console.log("[outbox] atraso grande: se vuelca a la cola de la nube");
 			// HIG-04: `volcarOutbox` no captura sus `invoke`, y a esta función se llega con `void`.
 			// El drenado de una en una se protege a sí mismo; el volcado se quedaba a medias sin
@@ -603,6 +607,20 @@ export function iniciarSocketMain(entrada: EntradaSocketMain): SocketMain | null
 			return;
 		}
 		await drainOutbox(socket);
+	}
+
+	/**
+	 * PROD-06: ¿ha apagado la nube el volcado del atraso? Si no se puede saber, no: el interruptor
+	 * es un freno de mano y lo que no se sabe está encendido, que es como funcionaba antes.
+	 */
+	async function volcadoApagado(): Promise<boolean> {
+		try {
+			const apagados = await invoke<InterruptorApagado[] | null>("interruptores_apagados");
+			return Array.isArray(apagados) && apagados.some((a) => a.interruptor === "volcado_atraso");
+		} catch (e) {
+			console.warn("interruptores_apagados falló:", e);
+			return false;
+		}
 	}
 
 	async function catchUpThenLive(strict = false): Promise<number> {

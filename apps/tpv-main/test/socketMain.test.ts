@@ -83,6 +83,8 @@ function crearBackend() {
 		imagenes: "vacio",
 		salud: { outbox_pending: 0, last_seq: 0, quarantined: 0, failing: 0, subida_fallando: 0, subida_en_cuarentena: 0 },
 		llamadas: [] as { cmd: string; args: any }[],
+		/** PROD-06: lo que la nube tiene apagado; una función que lanza = el comando falla. */
+		apagados: (): unknown => [],
 	};
 	h.invoke.mockImplementation(async (cmd: string, args: any = {}) => {
 		b.llamadas.push({ cmd, args });
@@ -136,6 +138,8 @@ function crearBackend() {
 				return b.imagenes;
 			case "sync_health":
 				return b.salud;
+			case "interruptores_apagados":
+				return b.apagados();
 			default:
 				return null;
 		}
@@ -773,6 +777,41 @@ describe("subida: de la Main a la nube", () => {
 		expect(s.enviados.filter((m) => m.type === "bulk_apply").map((m) => m.ops.length)).toEqual([200, 50]);
 		expect(s.applies()).toEqual([]);
 		expect(b.encoladas.size).toBe(250);
+	});
+
+	it("con el volcado apagado desde la nube sube de una en una aunque haya atraso (PROD-06)", async () => {
+		const b = crearBackend();
+		b.outbox = Array.from({ length: 250 }, (_, i) => op(i + 1));
+		b.apagados = () => [{ interruptor: "volcado_atraso", motivo: "Turso saturado", hasta_ms: Date.now() + 3_600_000 }];
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+		expect(s.tipos()).not.toContain("bulk_apply");
+		expect(b.encoladas.size).toBe(0);
+		// No se para nada: sólo cambia de vía.
+		expect(b.enviadas.length).toBeGreaterThan(0);
+	});
+
+	it("otro interruptor apagado no afecta al volcado (PROD-06)", async () => {
+		const b = crearBackend();
+		b.outbox = Array.from({ length: 250 }, (_, i) => op(i + 1));
+		b.apagados = () => [{ interruptor: "reparacion_nube", motivo: "x", hasta_ms: Date.now() + 3_600_000 }];
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+		expect(s.enviados.filter((m) => m.type === "bulk_apply").map((m) => m.ops.length)).toEqual([200, 50]);
+	});
+
+	it("si no se puede saber qué está apagado, vuelca como siempre (PROD-06)", async () => {
+		const b = crearBackend();
+		b.outbox = Array.from({ length: 250 }, (_, i) => op(i + 1));
+		b.apagados = () => {
+			throw new Error("comando no disponible");
+		};
+		await montar();
+		const s = ultimo();
+		await conectar(s);
+		expect(s.enviados.filter((m) => m.type === "bulk_apply").map((m) => m.ops.length)).toEqual([200, 50]);
 	});
 
 	it("con justo 100 pendientes todavía sube de una en una", async () => {

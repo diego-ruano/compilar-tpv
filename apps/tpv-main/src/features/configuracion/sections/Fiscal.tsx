@@ -48,6 +48,7 @@ import {
 } from "../api/verifactuApis";
 import type { EstadoFiscal } from "@tpv/contracts";
 import { conAviso } from "../../../shared/lib/conAviso";
+import { AvisoInterruptores } from "./AvisoInterruptores";
 
 /** `AAAA-MM-DD` de hoy en hora local (`toISOString` da UTC y en España adelanta el día por la noche). */
 function hoyISO(): string {
@@ -420,6 +421,9 @@ export function Fiscal({
                     </div>
                 ) : null}
             </Panel>
+
+            {/* PROD-06: si soporte ha pausado el envío, esto es lo que explica que la cola crezca. */}
+            <AvisoInterruptores solo={["verifactu_remitir"]} />
 
             {/* ── Estado del envío ───────────────────────────────────────────────────────── */}
             <Panel

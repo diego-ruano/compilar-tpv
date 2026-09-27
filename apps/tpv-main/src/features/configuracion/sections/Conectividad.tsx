@@ -19,6 +19,7 @@ import {
 } from "../../../shared/stores/useEstadoSync";
 import { useMode } from "../../../shared/stores/useMode";
 import { useBackfillHistorico } from "../../../shared/lib/backfillQueries";
+import { AvisoInterruptores } from "./AvisoInterruptores";
 
 /**
  * SYNC-17: cómo se cuenta cada estado. Ya no hay nada que elegir aquí —la Main se conecta sola—,
@@ -277,6 +278,9 @@ const JOB_ETIQUETA: Record<string, string> = {
 	cifrado_pii: "Cifrado de los datos del personal",
 	caja_sin_cerrar: "Aviso de caja sin cerrar",
 	backfill_historico: "Descarga del histórico pendiente",
+	interruptores: "Pausas de emergencia de soporte",
+	verificar_nube: "Contraste con la nube",
+	verifactu_remitir: "Envío de facturas a la AEAT",
 };
 
 function cadaTexto(secs: number): string {
@@ -590,6 +594,9 @@ export function Conectividad({ darkMode }: { darkMode: boolean }) {
 		<div className="flex flex-col gap-4">
 			{/* SYNC-17: estado real de la conexión (antes aquí vivía el selector offline/online). */}
 			{deviceMode === "tpv" && <EstadoConexion darkMode={darkMode} />}
+
+			{/* PROD-06: lo que soporte ha pausado desde la nube. Sólo se pinta si hay algo. */}
+			{deviceMode === "tpv" && <AvisoInterruptores />}
 
 			{/* SYNC-14: salud de la sincronización. Se muestra siempre en la Main: la cola de subida
 			    importa sobre todo cuando NO hay conexión, que es justo cuando antes se ocultaba. */}
